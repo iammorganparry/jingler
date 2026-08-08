@@ -4424,7 +4424,7 @@ const clearPluginConfiguration = (pluginId: string) =>
         (cause) =>
           new PluginError({
             pluginId,
-            reason: `The plugin was removed, but its ordinary settings could not be cleared: ${cause.reason}`,
+            reason: `The plugin remains installed because its ordinary settings could not be cleared: ${cause.reason}`,
             cause,
           }),
       ),
@@ -4434,9 +4434,44 @@ const clearPluginConfiguration = (pluginId: string) =>
       mapPluginSecretStoreError(
         pluginId,
         (cause) =>
-          `The plugin was removed, but its encrypted settings could not be cleared: ${cause.message}`,
+          `The plugin remains installed because its encrypted settings could not be cleared: ${cause.message}`,
       ),
     );
+  });
+
+export const uninstallPlugin = (pluginId: string) =>
+  Effect.gen(function* () {
+    // Validate the target without mutating it. Cleanup must not revoke a
+    // bundled plugin's credentials only to have the registry refuse deletion.
+    const paths = yield* AppPaths;
+    const pluginDir = yield* PluginRegistry.dirFor(pluginId);
+    if (dirname(resolve(pluginDir)) !== resolve(paths.pluginsDir)) {
+      return yield* Effect.fail(
+        new PluginError({
+          pluginId,
+          reason:
+            "That plugin ships with Jingler and cannot be uninstalled. Disable it instead.",
+        }),
+      );
+    }
+    // Stop it BEFORE touching credentials or its directory. A host half whose
+    // `deactivate` touches its own files should still find them there.
+    yield* deactivateQuietly(pluginId);
+    yield* PluginAuth.revokeAll(pluginId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PluginError({
+            pluginId,
+            reason: `The plugin remains installed because its authorization grants could not be revoked: ${cause.reason}`,
+            cause,
+          }),
+      ),
+    );
+    yield* clearPluginConfiguration(pluginId);
+    // Directory removal is deliberately last. If credential cleanup fails,
+    // the plugin stays visible in Settings so the operator can retry rather
+    // than leaving secrets orphaned behind an uninstalled plugin id.
+    yield* PluginRegistry.uninstall(pluginId);
   });
 
 const pluginHostOperation = <A>(
@@ -5537,16 +5572,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
    * gesture there is, and the one they would most expect to stick.
    */
   "Plugins.uninstall": ({ pluginId }) =>
-    Effect.gen(function* () {
-      // Stop it BEFORE deleting its directory. A host half whose `deactivate`
-      // touches its own files should find them there, and an uninstall that
-      // leaves code running against a directory that no longer exists is a
-      // stranger failure than one that stops it first.
-      yield* deactivateQuietly(pluginId);
-      yield* PluginRegistry.uninstall(pluginId);
-      yield* PluginAuth.revokeAll(pluginId);
-      yield* clearPluginConfiguration(pluginId);
-    }),
+    uninstallPlugin(pluginId),
 
   "Plugins.installFromFolder": ({ sourcePath }) =>
     PluginRegistry.installFromFolder(sourcePath),

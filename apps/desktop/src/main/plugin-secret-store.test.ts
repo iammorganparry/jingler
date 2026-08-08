@@ -1,5 +1,6 @@
-import { readFile } from "node:fs/promises"
+import { readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { FileSystem } from "@effect/platform"
 import { PluginSecretStore } from "@jingler/cli-adapters"
 import { withTempRoot } from "@jingler/cli-adapters/test-support"
 import { Effect, Layer } from "effect"
@@ -67,6 +68,47 @@ describe("file-backed PluginSecretStore", () => {
 
     expect(exit._tag).toBe("Failure")
     expect(String(exit)).toContain("OS encryption is unavailable")
+  })
+
+  it("preserves the encrypted document when atomic replacement fails", async () => {
+    const identity: PluginSecretCodec = {
+      available: () => true,
+      encrypt: (value) => Buffer.from(value),
+      decrypt: (value) => Buffer.from(value).toString("utf8")
+    }
+    const { root, layer } = setup(identity)
+    const file = join(root.root, "plugin-secrets.enc")
+
+    await Effect.runPromise(
+      Effect.flatMap(PluginSecretStore, (store) =>
+        store.set("linear", "linear.api-key", "original-secret")
+      ).pipe(Effect.provide(layer))
+    )
+    const original = await readFile(file)
+
+    const failingFileSystem = Layer.effect(
+      FileSystem.FileSystem,
+      Effect.map(FileSystem.FileSystem, (fs) => ({
+        ...fs,
+        rename: (_from: string, to: string) =>
+          fs.rename(join(root.root, "missing-temporary-file"), to)
+      }))
+    ).pipe(Layer.provide(root.layer))
+    const failingStore = Layer.effect(
+      PluginSecretStore,
+      makeFilePluginSecretStore(identity)
+    ).pipe(Layer.provide(Layer.mergeAll(root.layer, failingFileSystem)))
+
+    const exit = await Effect.runPromiseExit(
+      Effect.flatMap(PluginSecretStore, (store) =>
+        store.set("linear", "linear.api-key", "replacement-secret")
+      ).pipe(Effect.provide(failingStore))
+    )
+
+    expect(exit._tag).toBe("Failure")
+    expect(String(exit)).toContain("Could not persist encrypted plugin settings")
+    await expect(readFile(file)).resolves.toEqual(original)
+    expect((await readdir(root.root)).filter((entry) => entry.endsWith(".tmp"))).toEqual([])
   })
 
   it("clears only the uninstalled plugin's namespace", async () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import type {
   Chat,
   ChatRole,
@@ -250,6 +251,39 @@ export const taskSlug = (input: string): string =>
     // Truncation can land mid-word and leave a trailing dash; trim again so the
     // slug never ends in one.
     .replace(/-+$/g, "") || "session"
+
+/** Keep the opaque issue identity intact when a human-readable slug collides. */
+const disambiguateIssueSlug = (
+  slug: string,
+  issue: Pick<IssueReference, "providerId" | "id">
+): string => {
+  const suffix = createHash("sha256")
+    .update(issue.providerId)
+    .update("\0")
+    .update(issue.id)
+    .digest("hex")
+    .slice(0, 12)
+  const prefix = slug.slice(0, MAX_SLUG - suffix.length - 1).replace(/-+$/g, "")
+  return `${prefix || "issue"}-${suffix}`
+}
+
+const sessionBelongsToRepository = (
+  session: Session,
+  repository: { readonly path: string; readonly name: string }
+): boolean =>
+  session.repoPath === undefined
+    ? session.repo === repository.name
+    : session.repoPath === repository.path
+
+const sessionLinksIssue = (
+  session: Session,
+  repository: { readonly path: string; readonly name: string },
+  issue: Pick<IssueReference, "providerId" | "id">
+): boolean => {
+  if (!sessionBelongsToRepository(session, repository)) return false
+  const linked = issueReferenceOf(session)
+  return linked?.providerId === issue.providerId && linked.id === issue.id
+}
 
 /**
  * Publish-readiness for the live branch, including persisted sessions created
@@ -796,17 +830,31 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         Effect.gen(function* () {
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
-          const slug = taskSlug(
+          const baseSlug = taskSlug(
             `${input.issue.providerId}-${input.issue.identifier}-${input.issue.title}`
           )
-          // Guard: one session per issue worktree (the slug is deterministic).
-          const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
           const prior = yield* readAll()
-          if (prior.some((s) => s.worktreePath === worktreePath)) {
+          const repository = { path: input.repoPath, name: input.repoName }
+          if (
+            prior.some((session) =>
+              sessionLinksIssue(session, repository, input.issue)
+            )
+          ) {
             return yield* Effect.fail(
               new GitError({ message: "A session already exists for this issue." })
             )
           }
+          const baseWorktreePath = yield* GitService.worktreePathFor(
+            input.repoName,
+            baseSlug
+          )
+          const slug = prior.some(
+            (session) =>
+              sessionBelongsToRepository(session, repository) &&
+              session.worktreePath === baseWorktreePath
+          )
+            ? disambiguateIssueSlug(baseSlug, input.issue)
+            : baseSlug
           const worktree = yield* GitService.createDetachedWorktree({
             repoPath: input.repoPath,
             repoName: input.repoName,

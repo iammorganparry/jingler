@@ -1723,6 +1723,79 @@ describe("SessionStore", () => {
     expect(failureOf(twice)?._tag).toBe("GitError")
   })
 
+  it("createFromIssue identifies a duplicate after its title and identifier change", async () => {
+    const renamed = issueInput({
+      issue: {
+        ...issueInput().issue,
+        identifier: "#9128",
+        title: "Refund retries fail after token expiry"
+      }
+    })
+    const twice = await runExit(
+      Effect.gen(function* () {
+        yield* SessionStore.createFromIssue(issueInput())
+        return yield* SessionStore.createFromIssue(renamed)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(failureOf(twice)?._tag).toBe("GitError")
+    expect(String(failureOf(twice))).toContain("already exists for this issue")
+  })
+
+  it("createFromIssue scopes stable issue identity to its repository", async () => {
+    const otherRepoPath = initGitRepo(join(repos.dir, "other-app"))
+    const result = await runExit(
+      Effect.gen(function* () {
+        const first = yield* SessionStore.createFromIssue(issueInput())
+        const second = yield* SessionStore.createFromIssue(
+          issueInput({ repoPath: otherRepoPath, repoName: "other-app" })
+        )
+        return { first, second }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value.first.linkedIssue?.id).toBe(result.value.second.linkedIssue?.id)
+    expect(result.value.first.repoPath).toBe(repoPath)
+    expect(result.value.second.repoPath).toBe(otherRepoPath)
+  })
+
+  it("createFromIssue keeps different issues whose display slugs collide", async () => {
+    const firstInput = issueInput({
+      issue: {
+        ...issueInput().issue,
+        providerId: "linear",
+        id: "opaque-issue-a",
+        identifier: "ENG/123",
+        title: "Retry failed payments"
+      }
+    })
+    const secondInput = issueInput({
+      issue: {
+        ...firstInput.issue,
+        id: "opaque-issue-b",
+        identifier: "ENG-123"
+      }
+    })
+    const result = await runExit(
+      Effect.gen(function* () {
+        const first = yield* SessionStore.createFromIssue(firstInput)
+        const second = yield* SessionStore.createFromIssue(secondInput)
+        return { first, second }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value.first.worktreePath).not.toBe(result.value.second.worktreePath)
+    expect(existsSync(result.value.first.worktreePath!)).toBe(true)
+    expect(existsSync(result.value.second.worktreePath!)).toBe(true)
+  })
+
   it("setIssue links then unlinks; clearInitialPrompt drops the one-shot prompt", async () => {
     const result = await runExit(
       Effect.gen(function* () {

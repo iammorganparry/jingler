@@ -22,6 +22,11 @@ import {
   ModelsService,
   OrchestrationService,
   PlanStore,
+  PluginAuth,
+  PluginHost,
+  PluginRegistry,
+  PluginSecretStore,
+  PluginSecretStoreUnavailable,
   ReviewService,
   ReviewStore,
   SessionStore,
@@ -110,6 +115,7 @@ import {
   sessionDiff,
   skillsList,
   transcriptHasGitHubFeedback,
+  uninstallPlugin,
   githubAckEvent,
   watchOrchestrationWorkers,
   workerSessionSpecForAssignment,
@@ -360,6 +366,35 @@ describe("RPC handlers", () => {
       chooseDirectory: () => Effect.succeed(chosen),
       saveFile: () => Effect.succeed(saveDestination),
     });
+
+  it("keeps a plugin installed when credential cleanup fails", async () => {
+    const pluginDir = join(root, "plugins", "linear");
+    mkdirSync(pluginDir, { recursive: true });
+    const failingSecrets = Layer.succeed(PluginSecretStore, {
+      get: () => Effect.succeed(null),
+      set: () => Effect.void,
+      clear: () => Effect.void,
+      status: () => Effect.succeed(false),
+      clearPlugin: () =>
+        Effect.fail(
+          new PluginSecretStoreUnavailable({ message: "simulated persistence failure" }),
+        ),
+    });
+
+    const exit = await Effect.runPromiseExit(
+      uninstallPlugin("linear").pipe(
+        Effect.provide(PluginRegistry.Default),
+        Effect.provide(PluginAuth.Default),
+        Effect.provide(PluginHost.Default),
+        Effect.provide(failingSecrets),
+        Effect.provide(base),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("plugin remains installed");
+    expect(existsSync(pluginDir)).toBe(true);
+  });
 
   it("keeps a new session direct, defaulting to auto where the harness supports it", () => {
     expect(sessionCreationDefaults("codex", null, null)).toMatchObject({

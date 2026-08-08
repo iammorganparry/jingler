@@ -84,7 +84,10 @@ export const makeFilePluginSecretStore = (
         yield* fs.makeDirectory(paths.root, { recursive: true }).pipe(
           Effect.mapError(() => unavailable("Could not create the plugin settings directory."))
         )
-        yield* fs.writeFile(file, bytes).pipe(
+        const temporary = `${file}.tmp`
+        yield* fs.writeFile(temporary, bytes).pipe(
+          Effect.andThen(fs.rename(temporary, file)),
+          Effect.tapError(() => fs.remove(temporary).pipe(Effect.ignore)),
           Effect.mapError(() => unavailable("Could not persist encrypted plugin settings."))
         )
       })
