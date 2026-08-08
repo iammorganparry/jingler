@@ -74,12 +74,8 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
   useEffect(() => {
     if (activated.current) return
     activated.current = true
-    // `useFileBrowser` starts a fresh actor in `tree.loading`. Re-entering that
-    // state here cancelled the first full-repository scan and immediately ran
-    // the same expensive request twice. Existing actors are refreshed when the
-    // Files tab is reopened; new actors are allowed to finish their first load.
-    if (!browser.treeLoading) browser.refreshTree()
-  }, [browser.refreshTree, browser.treeLoading])
+    browser.activate()
+  }, [browser.activate])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

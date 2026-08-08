@@ -1507,11 +1507,18 @@ export interface SessionActivity {
   readonly startedAt?: number
 }
 
+/** A full-path mutation signal used by the Files workspace's opt-in follow mode. */
+export interface AgentFileActivity {
+  readonly eventId: string
+  readonly path: string
+  readonly phase: "editing" | "completed"
+}
+
 /** Where the conversation machine is — the renderer maps its state onto this. */
 export type ActivityPhase = "running" | "settling" | "idle"
 
 const READ_TOOLS = new Set(["Read", "Grep", "Glob", "NotebookRead", "LS"])
-const EDIT_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"])
+const EDIT_TOOLS = new Set(["Edit", "Write", "Update", "NotebookEdit", "MultiEdit"])
 const WEB_TOOLS = new Set(["WebFetch", "WebSearch"])
 const SUBAGENT_TOOLS = new Set(["Task", "Agent"])
 
@@ -1554,6 +1561,45 @@ const runningTool = (messages: ReadonlyArray<Message>): ToolCall | null => {
     }
   }
   return null
+}
+
+/** The last tool card in transcript order, regardless of whether it settled. */
+const latestTool = (messages: ReadonlyArray<Message>): ToolCall | null => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const parts = messages[i]!.parts
+    for (let j = parts.length - 1; j >= 0; j -= 1) {
+      const part = parts[j]!
+      if (part._tag === "Tool") return part.tool
+    }
+  }
+  return null
+}
+
+/**
+ * Derive the mutation target that an opt-in file browser may follow.
+ *
+ * Unlike SessionActivity this deliberately keeps the complete tool target:
+ * basename-only status labels are ambiguous in repositories with repeated file
+ * names. Failed mutations and non-file tools are not navigation instructions.
+ */
+export const agentFileActivityOf = (
+  messages: ReadonlyArray<Message>
+): AgentFileActivity | null => {
+  const tool = latestTool(messages)
+  if (
+    tool === null ||
+    !EDIT_TOOLS.has(tool.name) ||
+    tool.target === null ||
+    tool.target.trim() === "" ||
+    tool.status === "error"
+  ) {
+    return null
+  }
+  return {
+    eventId: tool.id,
+    path: tool.target,
+    phase: tool.status === "running" ? "editing" : "completed"
+  }
 }
 
 /** A pending approval gate on the last turn, if the agent is blocked on one. */

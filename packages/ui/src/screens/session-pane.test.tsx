@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useEffect, useState } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Boxes } from "lucide-react"
 import type { Session } from "@jingler/core"
 import { SessionPane } from "./session-pane.js"
@@ -12,6 +12,7 @@ import {
 } from "../app/tab-contributions.js"
 import { testSession as session } from "../test-support.js"
 
+beforeEach(() => localStorage.clear())
 afterEach(cleanup)
 
 /** The built-ins with inert bodies — these tests are about which tabs, not what's in them. */
@@ -432,6 +433,44 @@ describe("SessionPane", () => {
     expect(screen.getByText("files for a")).toBeTruthy()
   })
 
+  it("opens Files beside chat with the default two-thirds workspace", async () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        x: 0,
+        y: 0,
+        top: 0,
+        right: 1_200,
+        bottom: 800,
+        left: 0,
+        width: 1_200,
+        height: 800,
+        toJSON: () => ({})
+      })
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={(s) => <div>transcript for {s.id}</div>}
+        renderFiles={(s) => <div>files for {s.id}</div>}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+
+    expect(screen.getByTestId("session-auxiliary-chat").textContent).toContain(
+      "transcript for a"
+    )
+    expect(screen.getByTestId("session-auxiliary-panel").textContent).toContain(
+      "files for a"
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("session-auxiliary-panel").getAttribute("style")).toContain(
+        "66.66666666666666%"
+      )
+    })
+    rect.mockRestore()
+  })
+
   it("opens every auxiliary view beside chat when the pane is wide", () => {
     render(
       <SessionPane
@@ -462,7 +501,54 @@ describe("SessionPane", () => {
     }
   })
 
-  it("gives an auxiliary view the full pane below the responsive breakpoint", async () => {
+  it("persists a resized Files workspace ratio", async () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        x: 0,
+        y: 0,
+        top: 0,
+        right: 1_200,
+        bottom: 800,
+        left: 0,
+        width: 1_200,
+        height: 800,
+        toJSON: () => ({})
+      })
+    const first = render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={() => <div>transcript</div>}
+        renderFiles={() => <div>files</div>}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+    const divider = screen.getByRole("separator", { name: "Resize Files" })
+    fireEvent.pointerDown(divider, { clientX: 800 })
+    fireEvent.pointerMove(window, { clientX: 680 })
+    fireEvent.pointerUp(window)
+
+    const persisted = Number(localStorage.getItem("sb.split.session-auxiliary.ratio"))
+    expect(persisted).toBeCloseTo(0.7667, 3)
+    first.unmount()
+
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={() => <div>transcript</div>}
+        renderFiles={() => <div>files</div>}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+    await waitFor(() => {
+      expect(screen.getByTestId("session-auxiliary-panel").getAttribute("style")).toContain(
+        `${persisted * 100}%`
+      )
+    })
+    rect.mockRestore()
+  })
+
+  it("gives Files the full pane below the responsive breakpoint", async () => {
     const rect = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockReturnValue({

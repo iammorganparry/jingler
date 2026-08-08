@@ -413,6 +413,85 @@ describe("fileBrowserMachine", () => {
     expect(list).toHaveBeenCalledTimes(2)
   })
 
+  it("queues one repository refresh when the Files view activates during initial loading", async () => {
+    let resolveInitial:
+      ((entries: ReadonlyArray<{ path: string; status: "clean" }>) => void) | undefined
+    const list = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<ReadonlyArray<{ path: string; status: "clean" }>>((resolve) => {
+            resolveInitial = resolve
+          })
+      )
+      .mockResolvedValueOnce([{ path: "src/created.ts", status: "clean" as const }])
+    const { actor } = start({ list })
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+    actor.send({ type: "VIEW_ACTIVATED" })
+    expect(list).toHaveBeenCalledTimes(1)
+
+    resolveInitial?.([])
+    await waitFor(actor, () => list.mock.calls.length === 2)
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/created.ts", status: "clean" }
+    ])
+  })
+
+  it("refreshes a settled repository on later Files activations without clearing visible entries", async () => {
+    let resolveRefresh:
+      ((entries: ReadonlyArray<{ path: string; status: "modified" }>) => void) | undefined
+    const originalEntries = [{ path: "src/app.ts", status: "clean" as const }]
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce(originalEntries)
+      .mockImplementationOnce(
+        () =>
+          new Promise<ReadonlyArray<{ path: string; status: "modified" }>>((resolve) => {
+            resolveRefresh = resolve
+          })
+      )
+    const { actor } = start({ list })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+
+    expect(actor.getSnapshot().matches({ tree: "loading" })).toBe(true)
+    expect(actor.getSnapshot().context.entries).toEqual(originalEntries)
+
+    resolveRefresh?.([{ path: "src/app.ts", status: "modified" }])
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/app.ts", status: "modified" }
+    ])
+  })
+
+  it("surfaces a queued refresh failure and recovers on a later Files activation", async () => {
+    const list = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("worktree not ready"))
+      .mockRejectedValueOnce(new Error("worktree still not ready"))
+      .mockResolvedValueOnce([{ path: "src/recovered.ts", status: "clean" as const }])
+    const { actor } = start({ list })
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "error" }))
+
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(actor.getSnapshot().context.treeError).toBe("Couldn't refresh repository files.")
+    actor.send({ type: "VIEW_ACTIVATED" })
+    expect(actor.getSnapshot().matches({ tree: "loading" })).toBe(true)
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/recovered.ts", status: "clean" }
+    ])
+    expect(actor.getSnapshot().context.treeError).toBeNull()
+  })
+
   it("restarts a repository refresh requested while one is already loading", async () => {
     let resolveFirst:
       ((entries: ReadonlyArray<{ path: string; status: "clean" }>) => void) | undefined

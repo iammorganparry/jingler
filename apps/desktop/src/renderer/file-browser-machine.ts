@@ -49,6 +49,7 @@ export interface FileBrowserContext {
   readonly sessionId: string
   readonly entries: ReadonlyArray<AssetFileEntry>
   readonly treeError: string | null
+  readonly treeRefreshQueued: boolean
   readonly patch: string | null
   readonly patchError: string | null
   readonly openPaths: ReadonlyArray<string>
@@ -61,6 +62,7 @@ export interface FileBrowserContext {
 }
 
 export type FileBrowserEvent =
+  | { readonly type: "VIEW_ACTIVATED" }
   | { readonly type: "OPEN"; readonly path: string }
   | { readonly type: "CLOSE"; readonly path: string }
   | { readonly type: "EDIT"; readonly text: string }
@@ -318,6 +320,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       sessionId: input.sessionId,
       entries: [],
       treeError: null,
+      treeRefreshQueued: false,
       patch: null,
       patchError: null,
       openPaths: [],
@@ -334,32 +337,71 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         states: {
           loading: {
             on: {
-              REFRESH_TREE: { target: "loading", reenter: true },
-              RETRY_TREE: { target: "loading", reenter: true }
+              VIEW_ACTIVATED: {
+                actions: assign({ treeRefreshQueued: true })
+              },
+              REFRESH_TREE: {
+                target: "loading",
+                reenter: true,
+                actions: assign({ treeRefreshQueued: false })
+              },
+              RETRY_TREE: {
+                target: "loading",
+                reenter: true,
+                actions: assign({ treeRefreshQueued: false })
+              }
             },
             invoke: {
               src: "listFiles",
               input: ({ context }) => ({ sessionId: context.sessionId }),
-              onDone: {
-                target: "ready",
-                actions: assign({
-                  entries: ({ event }) => event.output,
-                  treeError: null
-                })
-              },
-              onError: {
-                target: "error",
-                actions: assign({
-                  treeError: () => "Couldn't refresh repository files."
-                })
-              }
+              onDone: [
+                {
+                  guard: ({ context }) => context.treeRefreshQueued,
+                  target: "loading",
+                  reenter: true,
+                  actions: assign({
+                    entries: ({ event }) => event.output,
+                    treeError: null,
+                    treeRefreshQueued: false
+                  })
+                },
+                {
+                  target: "ready",
+                  actions: assign({
+                    entries: ({ event }) => event.output,
+                    treeError: null
+                  })
+                }
+              ],
+              onError: [
+                {
+                  guard: ({ context }) => context.treeRefreshQueued,
+                  target: "loading",
+                  reenter: true,
+                  actions: assign({ treeRefreshQueued: false })
+                },
+                {
+                  target: "error",
+                  actions: assign({
+                    treeError: () => "Couldn't refresh repository files."
+                  })
+                }
+              ]
             }
           },
           ready: {
-            on: { REFRESH_TREE: "loading", RETRY_TREE: "loading" }
+            on: {
+              VIEW_ACTIVATED: "loading",
+              REFRESH_TREE: "loading",
+              RETRY_TREE: "loading"
+            }
           },
           error: {
-            on: { REFRESH_TREE: "loading", RETRY_TREE: "loading" }
+            on: {
+              VIEW_ACTIVATED: "loading",
+              REFRESH_TREE: "loading",
+              RETRY_TREE: "loading"
+            }
           }
         }
       },

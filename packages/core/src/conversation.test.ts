@@ -10,6 +10,7 @@ import {
   StreamEvent,
   Subagent,
   activityOf,
+  agentFileActivityOf,
   displayStatusOf,
   REVIEWER_AGENT_ID,
   addPlanComment,
@@ -1071,6 +1072,28 @@ describe("activityOf", () => {
       { kind: "reading", verb: "Reading", target: "conversation.ts" }
     )
     expect(activityOf([turn(tool("Edit", "src/auth/session.ts"))], "running")?.kind).toBe("editing")
+  })
+
+  it("derives full-path file activity for edit and write tools", () => {
+    expect(
+      agentFileActivityOf([turn(tool("Edit", "packages/core/src/conversation.ts"))])
+    ).toEqual({
+      eventId: "t_Edit",
+      path: "packages/core/src/conversation.ts",
+      phase: "editing"
+    })
+    expect(
+      agentFileActivityOf([turn(tool("Write", "src/new-file.ts", "success"))])
+    ).toEqual({
+      eventId: "t_Write",
+      path: "src/new-file.ts",
+      phase: "completed"
+    })
+  })
+
+  it("ignores non-mutation tools when deriving agent file activity", () => {
+    expect(agentFileActivityOf([turn(tool("Read", "src/a.ts"))])).toBeNull()
+    expect(agentFileActivityOf([turn(tool("Bash", "pnpm test"))])).toBeNull()
   })
 
   it("names sub-agent spawns as delegating", () => {
