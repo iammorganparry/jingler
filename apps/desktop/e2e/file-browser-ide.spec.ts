@@ -213,6 +213,19 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
+  // Prove the initial repository scan has settled before creating this file.
+  // The scripted agent then reports the mutation only after the file exists,
+  // matching a real harness and making the follow-triggered refresh deterministic.
+  const treeSearch = window.locator(
+    '[data-jingler-pierre-file-tree] [data-file-tree-search-input]'
+  )
+  await treeSearch.fill("src/config.ts")
+  await expect(
+    window.locator('[role="treeitem"][data-item-path="src/config.ts"]')
+  ).toBeVisible()
+  await treeSearch.fill("")
+  writeFileSync(join(repoPath, "src", "created.ts"), "export const created = true\n")
+
   const composer = window.getByPlaceholder("Message Codex…")
   await composer.fill("[[codex-edit-preview]] Update and create the configuration files.")
   await composer.press("Enter")
@@ -220,7 +233,6 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(window.getByRole("textbox", { name: "src/config.ts" })).toBeVisible({
     timeout: 20_000
   })
-  writeFileSync(join(repoPath, "src", "created.ts"), "export const created = true\n")
   await expect(window.getByRole("textbox", { name: "src/created.ts" })).toBeVisible({
     timeout: 20_000
   })

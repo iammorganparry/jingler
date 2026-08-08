@@ -28,7 +28,7 @@
 import type { ActorRefFrom, SnapshotFrom } from "xstate"
 import { createActor } from "xstate"
 import { useSyncExternalStore } from "react"
-import type { ActivityPhase, Session, SessionActivity } from "@jingler/core"
+import type { ActivityPhase, AgentFileActivity, Session, SessionActivity } from "@jingler/core"
 import { activityOf, agentFileActivityOf, latestPlan } from "@jingler/core"
 import { conversationMachine } from "./conversation-machine.js"
 import { setSessionActivity } from "./session-activity.js"
@@ -69,6 +69,12 @@ const sharedPlanBodies = new Map<string, string>()
  * subscription closure, because the observation is now made in the flush.
  */
 const notifyBaselines = new Map<string, NotifiableState>()
+/**
+ * File completions are interaction edges, not human-speed status furniture.
+ * Keep the newest edge alongside the trailing snapshot so ToolEnd + Done inside
+ * one publish window cannot collapse directly to idle and lose the follow event.
+ */
+const pendingFileActivities = new Map<string, AgentFileActivity>()
 const registryKey = (sessionId: string, chatId: string): string =>
   `${sessionId}:${chatId}`
 
@@ -80,6 +86,21 @@ const phaseOf = (snap: ConversationSnapshot): ActivityPhase => {
   // agent is still thinking, but nor is the session idle and ready.
   if (snap.matches("stopping") || snap.matches("refreshingDiff")) return "settling"
   return "idle"
+}
+
+const agentFileActivityFor = (snap: ConversationSnapshot): AgentFileActivity | null => {
+  const phase = phaseOf(snap)
+  const fileActivities = [
+    agentFileActivityOf(snap.context.messages, phase),
+    ...snap.context.subagents.map((subagent) =>
+      agentFileActivityOf([subagent.message], phase)
+    )
+  ].filter((candidate) => candidate !== null)
+  return (
+    fileActivities.findLast((candidate) => candidate.phase === "editing") ??
+    fileActivities.at(-1) ??
+    null
+  )
 }
 
 /**
@@ -180,18 +201,17 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
 
   broadcastSharedPlan(key, snap)
   publishChatActivity(session.id, chatId, activity)
-  const phase = phaseOf(snap)
-  const fileActivities = [
-    agentFileActivityOf(snap.context.messages, phase),
-    ...snap.context.subagents.map((subagent) =>
-      agentFileActivityOf([subagent.message], phase)
-    )
-  ].filter((candidate) => candidate !== null)
-  const activeFile =
-    fileActivities.findLast((candidate) => candidate.phase === "editing") ??
-    fileActivities.at(-1) ??
-    null
+  const currentFile = agentFileActivityFor(snap)
+  const pendingFile = pendingFileActivities.get(key) ?? null
+  pendingFileActivities.delete(key)
+  // A completed mutation may be followed by Done before the trailing publisher
+  // runs. Deliver that edge once, then enqueue the same idle snapshot so the
+  // external store clears on the next window and cannot replay stale activity.
+  const preservedCompletion =
+    currentFile === null && pendingFile?.phase === "completed" ? pendingFile : null
+  const activeFile = currentFile ?? preservedCompletion
   publishAgentFileActivity(session.id, chatId, activeFile)
+  if (preservedCompletion !== null) publishes.push(key, snap)
   recomputeSession(session.id, snap)
   // Fire-and-forget, and deliberately last: a notification that fails must never
   // take the status stores down with it. Main decides whether this actually
@@ -232,6 +252,7 @@ const forget = (key: string): void => {
   registry.delete(key)
   snapshots.delete(key)
   notifyBaselines.delete(key)
+  pendingFileActivities.delete(key)
   publishes.cancel(key)
 }
 
@@ -319,6 +340,8 @@ export const getConversationActor = (
   // streamed delta, which on a long session is most of what the renderer did.
   actor.subscribe((snap) => {
     snapshots.set(key, snap)
+    const fileActivity = agentFileActivityFor(snap)
+    if (fileActivity !== null) pendingFileActivities.set(key, fileActivity)
     publishes.push(key, snap)
   })
   actor.start()
