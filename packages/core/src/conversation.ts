@@ -1521,6 +1521,8 @@ export interface AgentFileActivity {
   readonly eventId: string
   readonly path: string
   readonly phase: "editing" | "completed"
+  /** The mutation tool's compact unified hunk, used to reveal its exact lines. */
+  readonly preview: string | null
 }
 
 /** Where the conversation machine is — the renderer maps its state onto this. */
@@ -1612,7 +1614,8 @@ export const agentFileActivityOf = (
   return {
     eventId: tool.id,
     path: tool.target,
-    phase: tool.status === "running" ? "editing" : "completed"
+    phase: tool.status === "running" ? "editing" : "completed",
+    preview: tool.preview
   }
 }
 

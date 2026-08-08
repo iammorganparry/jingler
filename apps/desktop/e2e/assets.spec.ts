@@ -94,9 +94,33 @@ const showTree = async (window: Page): Promise<void> => {
   await expect(tree(window)).toBeVisible()
 }
 const selectTreePath = async (window: Page, path: string): Promise<void> => {
-  const search = tree(window).locator("[data-file-tree-search-input]")
-  await search.fill(path)
-  await search.press("Enter")
+  const host = tree(window)
+  const target = host.locator(`[role="treeitem"][data-item-path="${path}"]`)
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    if ((await target.count()) > 0 && (await target.isVisible())) {
+      await target.click()
+      if ((await target.getAttribute("aria-selected")) !== "true") {
+        await target.focus()
+        await target.press("Enter")
+      }
+      await expect(target).toHaveAttribute("aria-selected", "true")
+      return
+    }
+    const collapsed = host.locator('[role="treeitem"][aria-expanded="false"]')
+    const count = await collapsed.count()
+    let expanded = false
+    for (let index = 0; index < count; index += 1) {
+      const candidate = collapsed.nth(index)
+      const candidatePath = await candidate.getAttribute("data-item-path")
+      if (candidatePath !== null && path.startsWith(candidatePath)) {
+        await candidate.click()
+        expanded = true
+        break
+      }
+    }
+    if (!expanded) break
+  }
+  throw new Error(`Could not reveal repository path ${path}`)
 }
 
 test("routes every transcript file gesture to Files and keeps Browser separate", async ({

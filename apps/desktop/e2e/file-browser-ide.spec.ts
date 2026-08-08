@@ -61,9 +61,101 @@ const selectTreePath = async (window: Page, path: string): Promise<void> => {
     await toggle.click()
   }
   await expect(tree).toBeVisible()
-  const search = tree.locator("[data-file-tree-search-input]")
-  await search.fill(path)
-  await search.press("Enter")
+  const target = tree.locator(`[role="treeitem"][data-item-path="${path}"]`)
+  const segments = path.split("/")
+  const ancestorPaths = segments
+    .slice(0, -1)
+    .map((_, index) => segments.slice(0, index + 1).join("/"))
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if ((await target.count()) > 0 && (await target.isVisible())) {
+      await target.click()
+      if ((await target.getAttribute("aria-selected")) !== "true") {
+        await target.focus()
+        await target.press("Enter")
+      }
+      await expect(target).toHaveAttribute("aria-selected", "true")
+      return
+    }
+    let expandedAncestor = false
+    for (const ancestorPath of ancestorPaths) {
+      const ancestor = tree.locator(
+        `[role="treeitem"][data-item-path="${ancestorPath}/"]`
+      )
+      if (
+        (await ancestor.count()) > 0 &&
+        (await ancestor.isVisible()) &&
+        (await ancestor.getAttribute("aria-expanded")) !== "true"
+      ) {
+        await ancestor.focus()
+        await ancestor.press("ArrowRight")
+        expandedAncestor = true
+        break
+      }
+    }
+    if (expandedAncestor) continue
+    const unrelatedExpanded = tree.locator('[role="treeitem"][aria-expanded="true"]')
+    const expandedCount = await unrelatedExpanded.count()
+    let collapsedUnrelated = false
+    for (let index = 0; index < expandedCount; index += 1) {
+      const candidate = unrelatedExpanded.nth(index)
+      const candidatePath = await candidate.getAttribute("data-item-path")
+      if (candidatePath !== null && !path.startsWith(candidatePath)) {
+        await candidate.click()
+        collapsedUnrelated = true
+        break
+      }
+    }
+    if (collapsedUnrelated) continue
+    const collapsed = tree.locator('[role="treeitem"][aria-expanded="false"]')
+    const count = await collapsed.count()
+    let expanded = false
+    for (let index = 0; index < count; index += 1) {
+      const candidate = collapsed.nth(index)
+      const candidatePath = await candidate.getAttribute("data-item-path")
+      if (candidatePath !== null && path.startsWith(candidatePath)) {
+        await candidate.click()
+        expanded = true
+        break
+      }
+    }
+    if (!expanded) {
+      const advanced = await tree.evaluate((node) => {
+        const ancestors: HTMLElement[] = []
+        let ancestor = node.parentElement
+        while (ancestor !== null) {
+          ancestors.push(ancestor)
+          ancestor = ancestor.parentElement
+        }
+        const elements = [node, ...node.querySelectorAll<HTMLElement>("*"), ...ancestors]
+        const scroller = elements.find((element) => {
+          const style = getComputedStyle(element)
+          return (
+            element.scrollHeight > element.clientHeight + 1 &&
+            (style.overflowY === "auto" || style.overflowY === "scroll")
+          )
+        })
+        if (scroller === undefined) return false
+        const previous = scroller.scrollTop
+        scroller.scrollTop = Math.min(
+          scroller.scrollHeight - scroller.clientHeight,
+          previous + Math.max(1, Math.floor(scroller.clientHeight * 0.8))
+        )
+        scroller.dispatchEvent(new Event("scroll", { bubbles: true }))
+        return scroller.scrollTop > previous
+      })
+      if (!advanced) break
+      await window.waitForTimeout(25)
+    }
+  }
+  const mountedPaths = await tree.locator('[role="treeitem"]').evaluateAll((items) =>
+    items.map((item) => ({
+      expanded: item.getAttribute("aria-expanded"),
+      path: item.getAttribute("data-item-path")
+    }))
+  )
+  throw new Error(
+    `Could not reveal repository path ${path}; mounted=${JSON.stringify(mountedPaths)}`
+  )
 }
 
 const selectFirstTwoLines = async (window: Page): Promise<void> => {
@@ -163,7 +255,7 @@ test("opens the session repository beside chat and edits a file through Pierre",
   )
 })
 
-test("shows a previously existing large worktree before repository search", async ({
+test("shows a previously existing large worktree without a repository search bar", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -181,7 +273,7 @@ test("shows a previously existing large worktree before repository search", asyn
   await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
   })
-  await expect(tree.locator('[data-file-tree-search-input]')).toHaveValue("")
+  await expect(tree.locator('[data-file-tree-search-input]')).toHaveCount(0)
 
   await selectTreePath(window, "scripts/generate-brand-icons.py")
   const editor = window.getByRole("region", {
@@ -353,14 +445,11 @@ test("follows the selected chat agent through edited and newly created files", a
   // Prove the initial repository scan has settled before creating this file.
   // The scripted agent then reports the mutation only after the file exists,
   // matching a real harness and making the follow-triggered refresh deterministic.
-  const treeSearch = window.locator(
-    '[data-jingler-pierre-file-tree] [data-file-tree-search-input]'
-  )
-  await treeSearch.fill("src/config.ts")
   await expect(
-    window.locator('[role="treeitem"][data-item-path="src/config.ts"]')
+    window.locator(
+      '[data-jingler-pierre-file-tree][aria-label="Repository files"] [role="treeitem"]'
+    ).first()
   ).toBeVisible()
-  await treeSearch.fill("")
   writeFileSync(join(repoPath, "src", "created.ts"), "export const created = true\n")
 
   const composer = window.getByPlaceholder("Message Codex…")
@@ -370,7 +459,7 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(window.getByRole("textbox", { name: "src/config.ts" })).toBeVisible({
     timeout: 20_000
   })
-  await expect(window.getByRole("textbox", { name: "src/created.ts" })).toBeVisible({
+  await expect(window.getByRole("region", { name: "src/created.ts changes" })).toBeVisible({
     timeout: 20_000
   })
   await expect(
@@ -416,4 +505,56 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
       .getByRole("button", { name: "src/delegated.ts", exact: true })
   ).toHaveAttribute("aria-current", "page")
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
+})
+
+test("reveals the followed mutation diff and sends selected feedback with context", async ({
+  launchApp
+}) => {
+  const { window, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedRepository,
+    sessions: ({ repoPath }) => [session(repoPath), otherSession(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  const composerFollow = window
+    .getByTestId("composer")
+    .getByRole("button", { name: "Follow agent", exact: true })
+  await composerFollow.click()
+  writeFileSync(
+    join(repoPath, "src", "config.ts"),
+    "export const mode = 'modern'\nexport const retries = 2\nexport const timeout = 1_000\n"
+  )
+
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("[[follow-diff-preview]] Update the configuration mode.")
+  await composer.press("Enter")
+
+  const followed = window.locator('[data-follow-agent-change="follow-diff-1"]')
+  await expect(followed).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole("region", { name: "src/config.ts changes" })).toBeVisible()
+  await expect(followed.getByText("export const mode = 'modern'", { exact: true })).toBeVisible()
+  await expect(followed.locator("[data-jingler-pierre-code-view-footer]")).toBeAttached()
+
+  const addToChat = followed.getByRole("button", { name: "Add to chat" })
+  await expect(addToChat).toBeVisible()
+  await addToChat.click()
+  await expect(
+    window.getByRole("button", { name: "Remove src/config.ts:L1", exact: true })
+  ).toBeVisible()
+
+  await filesTab(window).click()
+  await expect(followed).toBeVisible()
+  const comment = followed.getByPlaceholder("Ask the agent to fix this…")
+  await comment.fill("[[expect-code-context]] Keep the new mode but document it.")
+  await followed.getByRole("button", { name: "Send to agent" }).click()
+
+  await sessionRow(window, "Other file browser session").click()
+  await sessionRow(window, "File browser IDE").click()
+  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+  await expect(followed).toBeVisible()
+  await expect(window.getByText("Received selected diff context.", { exact: true })).toBeVisible({
+    timeout: 20_000
+  })
 })

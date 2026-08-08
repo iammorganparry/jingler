@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react"
+import { cleanup, render, waitFor } from "@testing-library/react"
 import { jinglerDark, toTokens } from "@jingler/themes"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { prepareJinglerFileTreeInput } from "../components/pierre-file-tree.js"
@@ -41,7 +41,7 @@ describe("AssetFileTree", () => {
     expect(new Set(prepared.paths).size).toBe(prepared.paths.length)
   })
 
-  it("keeps a bounded mounted window and keyboard-searches a large repository", async () => {
+  it("keeps a bounded mounted window without a sidebar search control", async () => {
     const entries = [
       ...Array.from({ length: 2_000 }, (_, index) => ({
         path: `file-${String(index).padStart(4, "0")}.ts`,
@@ -76,21 +76,7 @@ describe("AssetFileTree", () => {
       expect(mounted.length).toBeLessThan(200)
     })
 
-    const focused = host.shadowRoot!.querySelector<HTMLElement>('[tabindex="0"]')!
-    fireEvent.keyDown(focused, { key: "t" })
-    const search = await waitFor(() => {
-      const element = host.shadowRoot!.querySelector<HTMLInputElement>(
-        "[data-file-tree-search-input]"
-      )
-      expect(element).toBeTruthy()
-      return element!
-    })
-    fireEvent.input(search, { target: { value: "target.md" } })
-    await waitFor(() => expect(search.value).toBe("target.md"))
-    fireEvent.keyDown(search, { key: "Enter" })
-    await waitFor(() =>
-      expect(onSelectPath).toHaveBeenCalledWith("target.md")
-    )
+    expect(host.shadowRoot!.querySelector("[data-file-tree-search-input]")).toBeNull()
   })
 
   it("hydrates an initially empty tree with a large asynchronous repository", async () => {
@@ -138,26 +124,7 @@ describe("AssetFileTree", () => {
     await waitFor(() => {
       expect(host.shadowRoot!.querySelectorAll('[role="treeitem"]').length).toBeGreaterThan(0)
     })
-    const focused = await waitFor(() => {
-      const element = host.shadowRoot!.querySelector<HTMLElement>('[tabindex="0"]')
-      expect(element).toBeTruthy()
-      return element!
-    })
-    fireEvent.keyDown(focused, { key: "a" })
-    const search = await waitFor(() => {
-      const element = host.shadowRoot!.querySelector<HTMLInputElement>(
-        "[data-file-tree-search-input]"
-      )
-      expect(element).toBeTruthy()
-      return element!
-    })
-    fireEvent.input(search, { target: { value: "account-dossier.tsx" } })
-    fireEvent.keyDown(search, { key: "Enter" })
-
-    await waitFor(() =>
-      expect(onSelectPath).toHaveBeenCalledWith(
-        "apps/web/src/features/signals/account-dossier.tsx"
-      )
-    )
+    expect(host.shadowRoot!.querySelector("[data-file-tree-search-input]")).toBeNull()
+    expect(onSelectPath).not.toHaveBeenCalled()
   })
 })

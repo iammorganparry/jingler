@@ -149,13 +149,12 @@ test("keeps a large repository and source file windowed while navigating the per
   expect(mountedTreeItems).toBeGreaterThan(0)
   expect(mountedTreeItems).toBeLessThan(REPOSITORY_FILES)
 
-  const firstMountedTreeItem = treeItems.first()
-  await firstMountedTreeItem.focus()
-  await firstMountedTreeItem.press("f")
-  const search = tree.locator("[data-file-tree-search-input]")
-  await expect(search).toBeVisible()
-  await search.fill("file-1199.ts")
-  await search.press("Enter")
+  await expect(tree.locator("[data-file-tree-search-input]")).toHaveCount(0)
+  const lastGenerated = tree.locator(
+    '[role="treeitem"][data-item-path="generated/file-1199.ts"]'
+  )
+  await expect(lastGenerated).toBeVisible()
+  await lastGenerated.click()
 
   await expect(window.getByRole("textbox", { name: "generated/file-1199.ts" })).toBeVisible({
     timeout: 15_000

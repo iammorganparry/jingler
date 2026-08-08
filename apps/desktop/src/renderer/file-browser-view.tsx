@@ -28,10 +28,15 @@ import {
   normalizeAgentFileTarget,
   useAgentFileActivity
 } from "./agent-file-activity.js"
+import {
+  agentFollowDiffSelection,
+  captureDiffCodeReference
+} from "./file-diff-context.js"
 
 export interface FileBrowserViewProps {
   readonly session: Session
   readonly onSendReference?: (reference: CodeReference) => void
+  readonly onSendComment?: (body: string, reference: CodeReference) => void
 }
 
 export interface FileBrowserQuickOpenProps {
@@ -65,13 +70,22 @@ export function FileBrowserQuickOpen({
 }
 
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
-export function FileBrowserView({ session, onSendReference }: FileBrowserViewProps) {
+export function FileBrowserView({
+  session,
+  onSendReference,
+  onSendComment
+}: FileBrowserViewProps) {
   const browser = useFileBrowser(session.id, session.worktreePath)
   const agentFileActivity = useAgentFileActivity(session.id, session.activeChatId)
   const rootRef = useRef<HTMLDivElement>(null)
+  const selectionPathRef = useRef(browser.selectedPath)
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
 
-  useEffect(() => setSelection(null), [browser.selectedPath, browser.payload])
+  useEffect(() => {
+    if (selectionPathRef.current === browser.selectedPath) return
+    selectionPathRef.current = browser.selectedPath
+    setSelection(null)
+  }, [browser.selectedPath])
 
   // The actor survives tab switches. Refresh on every Files activation so an
   // empty/error result captured before a worktree finished appearing cannot
@@ -118,6 +132,7 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
     browser.followAgentTarget(
       normalizedAgentTarget,
       agentFileActivity.eventId,
+      agentFileActivity.preview,
       agentFileActivity.phase === "completed"
     )
   }, [
@@ -198,6 +213,8 @@ export function FileBrowserView({ session, onSendReference }: FileBrowserViewPro
             nativeAvailable={nativeAvailable}
             selection={selection}
             onSelectionChange={setSelection}
+            onSendReference={onSendReference}
+            onSendComment={onSendComment}
             canSendSelection={canSendSelection}
             onSendSelection={sendSelectionToChat}
           />
@@ -213,6 +230,8 @@ function FileCanvas({
   nativeAvailable,
   selection,
   onSelectionChange,
+  onSendReference,
+  onSendComment,
   canSendSelection,
   onSendSelection
 }: {
@@ -221,6 +240,10 @@ function FileCanvas({
   readonly nativeAvailable: boolean
   readonly selection: JinglerLineSelection | null
   readonly onSelectionChange: (selection: JinglerLineSelection | null) => void
+  readonly onSendReference: ((reference: CodeReference) => void) | undefined
+  readonly onSendComment:
+    | ((body: string, reference: CodeReference) => void)
+    | undefined
   readonly canSendSelection: boolean
   readonly onSendSelection: () => void
 }) {
@@ -237,30 +260,105 @@ function FileCanvas({
       return null
     }
   }, [browser.patch, browser.selectedPath])
+  const followedSelection = useMemo(() => {
+    if (
+      !browser.followEnabled ||
+      !browser.agentTargetCompleted ||
+      browser.patch === null ||
+      browser.agentTargetPath === null ||
+      browser.selectedPath !== browser.agentTargetPath
+    ) {
+      return null
+    }
+    return agentFollowDiffSelection(
+      browser.patch,
+      browser.agentTargetPath,
+      browser.agentTargetPreview
+    )
+  }, [
+    browser.agentTargetCompleted,
+    browser.agentTargetPath,
+    browser.agentTargetPreview,
+    browser.followEnabled,
+    browser.patch,
+    browser.selectedPath
+  ])
+  useEffect(() => {
+    if (followedSelection !== null) onSelectionChange(followedSelection)
+  }, [browser.payload, followedSelection, onSelectionChange])
+
+  const referenceForDiffSelection = useCallback(
+    (next: JinglerLineSelection): CodeReference | null =>
+      browser.patch === null ? null : captureDiffCodeReference(browser.patch, next),
+    [browser.patch]
+  )
+  const addDiffSelectionToChat = useCallback(
+    (next: JinglerLineSelection) => {
+      const reference = referenceForDiffSelection(next)
+      if (reference !== null) onSendReference?.(reference)
+    },
+    [onSendReference, referenceForDiffSelection]
+  )
+  const commentOnDiffSelection = useCallback(
+    (next: JinglerLineSelection, body: string) => {
+      const reference = referenceForDiffSelection(next)
+      if (reference !== null) onSendComment?.(body, reference)
+    },
+    [onSendComment, referenceForDiffSelection]
+  )
   if (browser.selectedPath === null) {
     return <AssetCanvas selectedPath={null} />
   }
   if (browser.viewMode === "diff") {
     if (fileDiff !== null) {
       return (
-        <div className="flex h-full min-h-0 flex-col bg-canvas">
+        <div
+          key={browser.agentTargetCompleted ? browser.agentTargetEventId : undefined}
+          className={[
+            "flex h-full min-h-0 flex-col bg-canvas",
+            followedSelection === null ? "" : "animate-slide-in"
+          ].join(" ")}
+          data-follow-agent-change={
+            followedSelection === null ? undefined : (browser.agentTargetEventId ?? undefined)
+          }
+        >
           <FileModeBar path={browser.selectedPath} mode="diff" browser={browser} />
-          <SelectionContextMenu enabled={canSendSelection} onSelect={onSendSelection}>
-            <div className="min-h-0 flex-1">
-              <DiffView
-                fileDiff={fileDiff}
-                label={`${browser.selectedPath} changes`}
-                className="h-full min-h-0"
-                selection={selection}
-                onSelectionChange={onSelectionChange}
-                options={{
-                  diffStyle: "unified",
-                  stickyHeader: false,
-                  disableFileHeader: true
-                }}
-              />
-            </div>
-          </SelectionContextMenu>
+          <div className="min-h-0 flex-1">
+            <DiffView
+              fileDiff={fileDiff}
+              label={`${browser.selectedPath} changes`}
+              className="h-full min-h-0"
+              selection={selection}
+              onSelectionChange={onSelectionChange}
+              actions={
+                onSendReference === undefined && onSendComment === undefined
+                  ? undefined
+                  : {
+                      onAddToChat: addDiffSelectionToChat,
+                      onComment: commentOnDiffSelection
+                    }
+              }
+              scrollRequest={
+                followedSelection === null || browser.agentTargetEventId === null
+                  ? undefined
+                  : {
+                      path: browser.selectedPath,
+                      range: followedSelection,
+                      revision: [...`${browser.agentTargetEventId}:completed`].reduce(
+                        (value, character) =>
+                          ((value * 31 + character.charCodeAt(0)) >>> 0),
+                        0
+                      ),
+                      behavior: "smooth"
+                    }
+              }
+              options={{
+                diffStyle: "unified",
+                stickyHeader: false,
+                disableFileHeader: true
+              }}
+            />
+          </div>
         </div>
       )
     }

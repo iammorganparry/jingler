@@ -42,7 +42,8 @@ export const publishAgentFileActivity = (
   if (
     previous?.eventId === activity.eventId &&
     previous.path === activity.path &&
-    previous.phase === activity.phase
+    previous.phase === activity.phase &&
+    previous.preview === activity.preview
   ) {
     return
   }

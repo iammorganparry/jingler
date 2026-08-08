@@ -83,6 +83,9 @@ export interface FileBrowserController {
   readonly dirty: boolean
   readonly followEnabled: boolean
   readonly agentTargetPath: string | null
+  readonly agentTargetEventId: string | null
+  readonly agentTargetPreview: string | null
+  readonly agentTargetCompleted: boolean
   readonly activate: () => void
   readonly open: (path: string) => void
   readonly close: (path: string) => void
@@ -97,7 +100,12 @@ export interface FileBrowserController {
   readonly showDiff: () => void
   readonly enableFollow: () => void
   readonly disableFollow: () => void
-  readonly followAgentTarget: (path: string, eventId: string, completed: boolean) => void
+  readonly followAgentTarget: (
+    path: string,
+    eventId: string,
+    preview: string | null,
+    completed: boolean
+  ) => void
 }
 
 export function useFileBrowser(
@@ -128,8 +136,8 @@ export function useFileBrowser(
   const enableFollow = useCallback(() => actor.send({ type: "ENABLE_FOLLOW" }), [actor])
   const disableFollow = useCallback(() => actor.send({ type: "DISABLE_FOLLOW" }), [actor])
   const followAgentTarget = useCallback(
-    (path: string, eventId: string, completed: boolean) =>
-      actor.send({ type: "AGENT_TARGET", path, eventId, completed }),
+    (path: string, eventId: string, preview: string | null, completed: boolean) =>
+      actor.send({ type: "AGENT_TARGET", path, eventId, preview, completed }),
     [actor]
   )
 
@@ -179,6 +187,9 @@ export function useFileBrowser(
     dirty,
     followEnabled: snapshot.matches({ follow: "enabled" }),
     agentTargetPath: snapshot.context.agentTargetPath,
+    agentTargetEventId: snapshot.context.agentTargetEventId,
+    agentTargetPreview: snapshot.context.agentTargetPreview,
+    agentTargetCompleted: snapshot.context.agentTargetCompleted,
     activate,
     open,
     close,

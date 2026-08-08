@@ -78,6 +78,7 @@ import {
   stopPlanDocument,
 } from "./plan-document-registry.js";
 import { addDraftCodeReference, clearDraft } from "./draft-store.js";
+import { serializeCodeReferences } from "./code-reference.js";
 import { clearViewedPaths } from "./viewed-store.js";
 import {
   disposeFileBrowserActor,
@@ -1468,6 +1469,13 @@ function AuthedApp({
             onSendReference={(reference) => {
               addDraftCodeReference(session.activeChatId, reference);
               ctx.onSelectConversation();
+            }}
+            onSendComment={(body, reference) => {
+              getConversationActor(session, session.activeChatId).send({
+                type: "SEND",
+                text: body,
+                agentContext: serializeCodeReferences([reference]),
+              });
             }}
           />
         )}

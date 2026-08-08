@@ -357,6 +357,55 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.openPaths).toEqual(["src/other.ts"])
   })
 
+  it("reloads the selected file and diff when the followed mutation completes", async () => {
+    const diff = vi
+      .fn()
+      .mockResolvedValueOnce("before patch")
+      .mockResolvedValueOnce("completed patch")
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(payload("before", "sha256:before"))
+      .mockResolvedValueOnce(payload("after", "sha256:after"))
+    const { actor } = start({ diff, read })
+    await waitFor(actor, (snapshot) => snapshot.matches({ changes: "ready" }))
+
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({
+      type: "AGENT_TARGET",
+      path: "src/app.ts",
+      eventId: "edit-current",
+      preview: "-before\n+after",
+      completed: false
+    })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    expect(actor.getSnapshot().context.viewMode).toBe("edit")
+
+    actor.send({
+      type: "AGENT_TARGET",
+      path: "src/app.ts",
+      eventId: "edit-current",
+      preview: "-before\n+after",
+      completed: true
+    })
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ document: { ready: "clean" } }) &&
+        snapshot.matches({ changes: "ready" }) &&
+        snapshot.context.patch === "completed patch"
+    )
+
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(diff).toHaveBeenCalledTimes(2)
+    expect(actor.getSnapshot().context).toMatchObject({
+      viewMode: "diff",
+      agentTargetEventId: "edit-current",
+      agentTargetPreview: "-before\n+after",
+      agentTargetCompleted: true
+    })
+    expect(actor.getSnapshot().matches({ follow: "enabled" })).toBe(true)
+  })
+
   it("refreshes the tree and follows a newly created agent file", async () => {
     const list = vi
       .fn()

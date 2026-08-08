@@ -1450,6 +1450,40 @@ export const scriptedRun =
         return
       }
 
+      // One completed mutation for the Files workspace's focused-diff E2E. The
+      // fixture changes the real file first; this stream supplies the same tool
+      // identity and compact hunk a live harness publishes.
+      if (spec.prompt.includes("[[follow-diff-preview]]")) {
+        yield* emit({
+          _tag: "ToolStart",
+          id: "follow-diff-1",
+          name: "Edit",
+          target: "src/config.ts"
+        })
+        yield* pause
+        yield* emit({
+          _tag: "ToolEnd",
+          id: "follow-diff-1",
+          status: "success",
+          meta: null,
+          diff: { added: 1, removed: 1 },
+          preview: "-export const mode = 'legacy'\n+export const mode = 'modern'"
+        })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return
+      }
+
+      if (spec.prompt.includes("[[expect-code-context]]")) {
+        yield* emit({
+          _tag: "Assistant",
+          text: spec.prompt.includes("<repository-code-references>")
+            ? "Received selected diff context."
+            : "Selected diff context was missing."
+        })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return
+      }
+
       // A nested sub-agent mutation for the Files workspace's opt-in follow
       // coverage. The child is deliberately two levels below the main agent so
       // the Electron test proves follow observes descendants, rather than only

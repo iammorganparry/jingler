@@ -130,7 +130,7 @@ describe("PierreEditor", () => {
     expect(props.items[0]).toMatchObject({ id: item.id, edit: true })
     expect(props.options?.layout).toEqual({
       paddingTop: 8,
-      paddingBottom: 0,
+      paddingBottom: 64,
       gap: 8
     })
     expect(

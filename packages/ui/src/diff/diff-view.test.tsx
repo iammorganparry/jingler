@@ -214,6 +214,23 @@ describe("DiffView Pierre selection", () => {
     expect(scrollOwners).toHaveLength(1)
     expect(scrollOwners[0]?.classList.contains("h-full")).toBe(true)
     expect(scrollOwners[0]?.classList.contains("min-h-0")).toBe(true)
+    expect(
+      scrollOwners[0]?.querySelector("[data-jingler-pierre-code-view-footer]")
+    ).not.toBeNull()
+  })
+
+  it("offers add-to-chat and comment actions without exposing revert controls", async () => {
+    const actions: DiffActions = {
+      onAddToChat: vi.fn(),
+      onComment: vi.fn()
+    }
+    render(<DiffView patch={patch} fill={false} actions={actions} />)
+
+    select(await gutter(2, "change-addition"))
+    fireEvent.click(await screen.findByRole("button", { name: "Add to chat" }))
+    expect(actions.onAddToChat).toHaveBeenCalledOnce()
+    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull()
+    expect(screen.queryByRole("toolbar", { name: "File diff actions" })).toBeNull()
   })
 
   it("updates live content without remounting the viewer and clears stale selection", async () => {

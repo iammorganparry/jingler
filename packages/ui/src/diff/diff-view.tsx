@@ -4,7 +4,7 @@ import type {
   FileDiffMetadata
 } from "@pierre/diffs"
 import { jinglerDark, toTokens } from "@jingler/themes"
-import { Undo2, X } from "lucide-react"
+import { MessageSquarePlus, Undo2, X } from "lucide-react"
 import {
   useCallback,
   useEffect,
@@ -34,6 +34,7 @@ import {
   PierreCodeView,
   PierreFileDiffView,
   PierreProvider,
+  type PierreCodeViewProps,
   type PierreRenderOptions
 } from "./pierre-provider.js"
 import type { JinglerLineSelection } from "./pierre-selection.js"
@@ -48,11 +49,13 @@ const FALLBACK_TOKENS = toTokens(jinglerDark)
 /** Optional interactions for a live worktree diff (the Changes rail). */
 export interface DiffActions {
   /** Revert the uncommitted changes in Pierre's side-aware inclusive range. */
-  onRevertLines: (selection: JinglerLineSelection) => void
+  onRevertLines?: (selection: JinglerLineSelection) => void
   /** Revert all uncommitted changes to a file. */
-  onRevertFile: (path: string) => void
+  onRevertFile?: (path: string) => void
+  /** Attach a selected range to the active chat's next message. */
+  onAddToChat?: (selection: JinglerLineSelection) => void
   /** Send a comment about Pierre's side-aware inclusive range to the agent. */
-  onComment: (selection: JinglerLineSelection, body: string) => void
+  onComment?: (selection: JinglerLineSelection, body: string) => void
 }
 
 export interface DiffViewProps {
@@ -75,6 +78,8 @@ export interface DiffViewProps {
   selection?: JinglerLineSelection | null
   /** Enables line selection without enabling review annotations or actions. */
   onSelectionChange?: (selection: JinglerLineSelection | null) => void
+  /** Navigate a virtualized diff to an exact caller-owned range. */
+  scrollRequest?: PierreCodeViewProps["scrollRequest"]
 }
 
 const inputFileDiffs = ({
@@ -118,14 +123,22 @@ const selectionIdentity = (selection: JinglerLineSelection): string =>
   ].join(":")
 
 const selectedActionsPayload = (
-  selection: JinglerLineSelection
+  selection: JinglerLineSelection,
+  actions: DiffActions
 ): PierreSelectedRangeActionsAnnotation => ({
   id: `diff-actions:${selectionIdentity(selection)}`,
   kind: "selected-range-actions",
   selection,
   actions: [
-    { id: "revert", label: "Revert", intent: "danger" },
-    { id: "comment", label: "Send to agent", intent: "primary" }
+    ...(actions.onRevertLines === undefined
+      ? []
+      : [{ id: "revert", label: "Revert", intent: "danger" as const }]),
+    ...(actions.onAddToChat === undefined
+      ? []
+      : [{ id: "add-to-chat", label: "Add to chat", intent: "default" as const }]),
+    ...(actions.onComment === undefined
+      ? []
+      : [{ id: "comment", label: "Send to agent", intent: "primary" as const }])
   ]
 })
 
@@ -144,7 +157,8 @@ export function DiffView({
   options,
   actions,
   selection,
-  onSelectionChange
+  onSelectionChange,
+  scrollRequest
 }: DiffViewProps) {
   const theme = useThemeSyntax()
   const tokens = useOptionalThemeTokens()
@@ -177,6 +191,7 @@ export function DiffView({
         actions={actions}
         selection={selection}
         onSelectionChange={onSelectionChange}
+        scrollRequest={scrollRequest}
       />
     </PierreProvider>
   )
@@ -198,7 +213,8 @@ function useDiffSelectionState() {
 
 function usePierreDiffModel(
   fileDiffs: readonly FileDiffMetadata[],
-  selection: JinglerLineSelection | null
+  selection: JinglerLineSelection | null,
+  actions: DiffActions | undefined
 ) {
   const activeSelection = useMemo(
     () =>
@@ -208,8 +224,11 @@ function usePierreDiffModel(
     [fileDiffs, selection]
   )
   const payload = useMemo(
-    () => activeSelection === null ? null : selectedActionsPayload(activeSelection),
-    [activeSelection]
+    () =>
+      activeSelection === null || actions === undefined
+        ? null
+        : selectedActionsPayload(activeSelection, actions),
+    [actions, activeSelection]
   )
   const annotation = useMemo(
     () => payload === null ? null : createPierreDiffAnnotation(payload),
@@ -249,7 +268,7 @@ function useSelectedRangeRenderer(
       const comment = () => {
         const trimmed = body.trim()
         if (trimmed.length === 0) return
-        actions.onComment(candidate.selection, trimmed)
+        actions.onComment?.(candidate.selection, trimmed)
         clear()
       }
       return (
@@ -259,7 +278,11 @@ function useSelectedRangeRenderer(
           onBodyChange={setBody}
           onCancel={clear}
           onRevert={() => {
-            actions.onRevertLines(candidate.selection)
+            actions.onRevertLines?.(candidate.selection)
+            clear()
+          }}
+          onAddToChat={() => {
+            actions.onAddToChat?.(candidate.selection)
             clear()
           }}
           onComment={comment}
@@ -279,7 +302,8 @@ function DiffViewContent({
   options,
   actions,
   selection,
-  onSelectionChange
+  onSelectionChange,
+  scrollRequest
 }: {
   readonly revision: number
   readonly fileDiffs: readonly FileDiffMetadata[]
@@ -290,6 +314,7 @@ function DiffViewContent({
   readonly actions: DiffActions | undefined
   readonly selection: JinglerLineSelection | null | undefined
   readonly onSelectionChange: ((selection: JinglerLineSelection | null) => void) | undefined
+  readonly scrollRequest: PierreCodeViewProps["scrollRequest"]
 }) {
   const state = useDiffSelectionState()
   useEffect(() => state.clear(), [revision, state.clear])
@@ -302,9 +327,10 @@ function DiffViewContent({
       onSelectionChange?.(null)
     }
   }, [fileDiffs, onSelectionChange, selection])
-  const activeSelection = actions === undefined ? (selection ?? null) : state.selection
+  const activeSelection =
+    actions === undefined ? (selection ?? null) : (state.selection ?? selection ?? null)
   const handleSelectionChange = actions === undefined ? onSelectionChange : state.onSelectionChange
-  const model = usePierreDiffModel(fileDiffs, activeSelection)
+  const model = usePierreDiffModel(fileDiffs, activeSelection, actions)
   const renderAnnotation = useSelectedRangeRenderer(actions, state.body, state.setBody, state.clear)
   return (
     <div
@@ -329,6 +355,7 @@ function DiffViewContent({
         onSelectionChange={handleSelectionChange}
         renderAnnotation={actions === undefined ? undefined : renderAnnotation}
         options={options}
+        scrollRequest={scrollRequest}
       />
     </div>
   )
@@ -343,7 +370,7 @@ function FileDiffActions({
   readonly actions: DiffActions | undefined
   readonly onActionComplete: () => void
 }) {
-  if (actions === undefined || fileDiffs.length === 0) return null
+  if (actions?.onRevertFile === undefined || fileDiffs.length === 0) return null
   return (
     <div
       role="toolbar"
@@ -356,7 +383,7 @@ function FileDiffActions({
           type="button"
           aria-label={`Revert ${candidate.name}`}
           onClick={() => {
-            actions.onRevertFile(candidate.name)
+            actions.onRevertFile?.(candidate.name)
             onActionComplete()
           }}
           className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] text-red opacity-80 hover:bg-red/10"
@@ -378,7 +405,8 @@ function PierreDiffRenderer({
   selection,
   onSelectionChange,
   renderAnnotation,
-  options
+  options,
+  scrollRequest
 }: {
   readonly label: string
   readonly fill: boolean
@@ -389,6 +417,7 @@ function PierreDiffRenderer({
   readonly onSelectionChange: ((selection: JinglerLineSelection | null) => void) | undefined
   readonly renderAnnotation: ((payload: PierreAnnotationPayload) => ReactNode) | undefined
   readonly options: PierreRenderOptions
+  readonly scrollRequest: PierreCodeViewProps["scrollRequest"]
 }) {
   if (fileDiffs.length === 0) {
     return (
@@ -400,7 +429,7 @@ function PierreDiffRenderer({
     )
   }
   const className = cn("min-h-0 min-w-0 flex-1", !fill && "h-auto")
-  if (fileDiffs.length === 1) {
+  if (fileDiffs.length === 1 && scrollRequest === undefined) {
     return (
       <PierreFileDiffView
         label={label}
@@ -424,6 +453,7 @@ function PierreDiffRenderer({
       onSelectionChange={onSelectionChange}
       renderAnnotation={renderAnnotation}
       options={options}
+      scrollRequest={scrollRequest}
     />
   )
 }
@@ -434,6 +464,7 @@ function SelectedRangeActions({
   onBodyChange,
   onCancel,
   onRevert,
+  onAddToChat,
   onComment
 }: {
   readonly payload: PierreSelectedRangeActionsAnnotation
@@ -441,6 +472,7 @@ function SelectedRangeActions({
   readonly onBodyChange: (body: string) => void
   readonly onCancel: () => void
   readonly onRevert: () => void
+  readonly onAddToChat: () => void
   readonly onComment: () => void
 }) {
   const { selection } = payload
@@ -477,26 +509,31 @@ function SelectedRangeActions({
         className="w-full resize-none rounded-md border border-line bg-sunken px-2 py-1.5 font-sans text-[12px] text-text-body outline-none placeholder:text-dim focus-visible:border-blue"
       />
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Button
-          variant="danger"
-          size="sm"
-          className="gap-1.5"
-          onClick={onRevert}
-        >
-          <Undo2 size={12} />
-          Revert
-        </Button>
+        {payload.actions.some((action) => action.id === "revert") ? (
+          <Button variant="danger" size="sm" className="gap-1.5" onClick={onRevert}>
+            <Undo2 size={12} />
+            Revert
+          </Button>
+        ) : null}
+        {payload.actions.some((action) => action.id === "add-to-chat") ? (
+          <Button variant="secondary" size="sm" className="gap-1.5" onClick={onAddToChat}>
+            <MessageSquarePlus size={12} />
+            Add to chat
+          </Button>
+        ) : null}
         <div className="flex-1" />
-        <Button
-          size="sm"
-          aria-label="Send to agent"
-          className="gap-1.5"
-          disabled={body.trim().length === 0}
-          onClick={onComment}
-        >
-          <ClaudeGlyph />
-          Send to agent
-        </Button>
+        {payload.actions.some((action) => action.id === "comment") ? (
+          <Button
+            size="sm"
+            aria-label="Send to agent"
+            className="gap-1.5"
+            disabled={body.trim().length === 0}
+            onClick={onComment}
+          >
+            <ClaudeGlyph />
+            Send to agent
+          </Button>
+        ) : null}
       </div>
     </PierreAnnotationRegion>
   )

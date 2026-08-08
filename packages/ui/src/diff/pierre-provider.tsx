@@ -244,14 +244,16 @@ const baseOptions = (
 
 const CODE_VIEW_LAYOUT = {
   paddingTop: 8,
-  paddingBottom: 0,
+  // Keep the final source row above the viewport boundary even when Pierre's
+  // custom footer is outside the editor's internal scroll measurement.
+  paddingBottom: 64,
   gap: 8
 } as const
 
 const renderCodeViewFooter = () => (
   <div
     aria-hidden="true"
-    className="h-16"
+    className="h-16 bg-editor"
     data-jingler-pierre-code-view-footer
   />
 )
@@ -395,6 +397,7 @@ export function PierreFileDiffView({
           contentClassName="min-h-full"
         >
           {primitive}
+          {renderCodeViewFooter()}
         </PierreVirtualizerPrimitive>
       ) : primitive}
     </section>
@@ -409,6 +412,7 @@ export interface PierreCodeViewProps extends PierreAccessibleViewProps {
   readonly scrollRequest?: {
     readonly path: string
     readonly revision: number
+    readonly range?: JinglerLineSelection
     readonly behavior?: "instant" | "smooth" | "smooth-auto"
   } | null
   /** Reports the last item header above the CodeView viewport. */
@@ -652,14 +656,26 @@ function PierreCodeViewContent({
     if (item === undefined) return
     const view = viewRef.current
     if (view === null) return
-    view.scrollTo({
-      type: "item",
-      id: item.id,
-      align: "start",
-      ...(scrollRequest.behavior === undefined
-        ? {}
-        : { behavior: scrollRequest.behavior })
-    })
+    view.scrollTo(
+      scrollRequest.range === undefined
+        ? {
+            type: "item",
+            id: item.id,
+            align: "start",
+            ...(scrollRequest.behavior === undefined
+              ? {}
+              : { behavior: scrollRequest.behavior })
+          }
+        : {
+            type: "range",
+            id: item.id,
+            range: toPierreSelectedLineRange(scrollRequest.range),
+            align: "center",
+            ...(scrollRequest.behavior === undefined
+              ? {}
+              : { behavior: scrollRequest.behavior })
+          }
+    )
     lastScrollRevision.current = scrollRequest.revision
   }, [items, scrollRequest])
 

@@ -25,7 +25,7 @@ export function AssetFileTree({
       gitStatus={entries}
       selectedPaths={selectedPaths}
       focusedPath={selectedPath ?? undefined}
-      searchable
+      searchable={false}
       initialExpansion={1}
       flattenEmptyDirectories
       density="compact"

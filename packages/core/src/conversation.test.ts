@@ -1092,14 +1092,16 @@ describe("activityOf", () => {
     ).toEqual({
       eventId: "t_Edit",
       path: "packages/core/src/conversation.ts",
-      phase: "editing"
+      phase: "editing",
+      preview: null
     })
     expect(
       agentFileActivityOf([turn(tool("Write", "src/new-file.ts", "success"))], "settling")
     ).toEqual({
       eventId: "t_Write",
       path: "src/new-file.ts",
-      phase: "completed"
+      phase: "completed",
+      preview: null
     })
     expect(
       agentFileActivityOf(
@@ -1109,11 +1111,17 @@ describe("activityOf", () => {
     ).toEqual({
       eventId: "t_Update",
       path: "src/updated-file.ts",
-      phase: "completed"
+      phase: "completed",
+      preview: null
     })
     expect(
       agentFileActivityOf([turn(tool("MultiEdit", "src/multi.ts"))], "running")
-    ).toEqual({ eventId: "t_MultiEdit", path: "src/multi.ts", phase: "editing" })
+    ).toEqual({
+      eventId: "t_MultiEdit",
+      path: "src/multi.ts",
+      phase: "editing",
+      preview: null
+    })
   })
 
   it("keeps following a running edit when a later parallel read starts", () => {
@@ -1125,7 +1133,8 @@ describe("activityOf", () => {
     ).toEqual({
       eventId: "t_Edit",
       path: "src/active.ts",
-      phase: "editing"
+      phase: "editing",
+      preview: null
     })
   })
 

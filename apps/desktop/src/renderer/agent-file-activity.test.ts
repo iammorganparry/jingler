@@ -21,18 +21,21 @@ describe("agent file activity", () => {
     publishAgentFileActivity("s1", "c1", {
       eventId: "edit-1",
       path: "src/a.ts",
-      phase: "editing"
+      phase: "editing",
+      preview: null
     })
     const editingSequence = getAgentFileActivity("s1", "c1")?.sequence
     publishAgentFileActivity("s1", "c1", {
       eventId: "edit-1",
       path: "src/a.ts",
-      phase: "editing"
+      phase: "editing",
+      preview: null
     })
     publishAgentFileActivity("s1", "c1", {
       eventId: "edit-1",
       path: "src/a.ts",
-      phase: "completed"
+      phase: "completed",
+      preview: "+const next = true"
     })
 
     expect(listener).toHaveBeenCalledTimes(2)
@@ -48,12 +51,14 @@ describe("agent file activity", () => {
     publishAgentFileActivity("s1", "foreground", {
       eventId: "one",
       path: "src/foreground.ts",
-      phase: "editing"
+      phase: "editing",
+      preview: null
     })
     publishAgentFileActivity("s1", "background", {
       eventId: "two",
       path: "src/background.ts",
-      phase: "editing"
+      phase: "editing",
+      preview: null
     })
 
     expect(getAgentFileActivity("s1", "foreground")?.path).toBe("src/foreground.ts")
@@ -64,12 +69,14 @@ describe("agent file activity", () => {
     publishAgentFileActivity("s1", "c1", {
       eventId: "one",
       path: "src/a.ts",
-      phase: "editing"
+      phase: "editing",
+      preview: null
     })
     publishAgentFileActivity("s1", "c2", {
       eventId: "two",
       path: "src/b.ts",
-      phase: "editing"
+      phase: "editing",
+      preview: null
     })
     clearAgentFileActivityChat("s1", "c1")
     expect(getAgentFileActivity("s1", "c1")).toBeNull()
