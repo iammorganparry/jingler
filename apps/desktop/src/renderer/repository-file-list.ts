@@ -1,10 +1,16 @@
-import type { AssetFileEntry } from "@jingler/core"
+import type { AssetFileEntry, Session } from "@jingler/core"
 
 const ASSET_LIST_TIMEOUT_MS = 5_000
 
 export interface RepositoryFileApis {
   readonly assetList: (sessionId: string) => Promise<ReadonlyArray<AssetFileEntry>>
-  readonly workspaceFiles: (worktreePath: string) => Promise<ReadonlyArray<string>>
+  readonly sessionsGet: (
+    sessionId: string
+  ) => Promise<Pick<Session, "worktreePath" | "environmentId">>
+  readonly workspaceFiles: (
+    worktreePath: string,
+    environmentId?: string
+  ) => Promise<ReadonlyArray<string>>
 }
 
 /**
@@ -21,6 +27,7 @@ export const listRepositoryFiles = async (
   timeoutMs = ASSET_LIST_TIMEOUT_MS
 ): Promise<ReadonlyArray<AssetFileEntry>> => {
   let timer: ReturnType<typeof setTimeout> | undefined
+  let assetListError: unknown
   try {
     const entries = await Promise.race([
       apis.assetList(sessionId),
@@ -31,14 +38,25 @@ export const listRepositoryFiles = async (
         )
       })
     ])
-    if (entries.length > 0 || worktreePath === undefined) return entries
+    if (entries.length > 0) return entries
   } catch (error) {
-    if (worktreePath === undefined) throw error
+    assetListError = error
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
 
-  if (worktreePath === undefined) return []
-  const paths = await apis.workspaceFiles(worktreePath)
+  // A session actor can be created while its worktree is still being prepared,
+  // then outlive the Session object that supplied its initial input. Resolve the
+  // current record before falling back so an early undefined path cannot leave
+  // that persistent actor permanently empty.
+  const session = await apis.sessionsGet(sessionId).catch(() => null)
+  const currentWorktreePath = session?.worktreePath ?? worktreePath
+  if (currentWorktreePath === undefined) {
+    if (assetListError !== undefined) throw assetListError
+    return []
+  }
+  const paths = session?.environmentId
+    ? await apis.workspaceFiles(currentWorktreePath, session.environmentId)
+    : await apis.workspaceFiles(currentWorktreePath)
   return paths.map((path) => ({ path, status: "clean" as const }))
 }

@@ -75,6 +75,7 @@ export interface FileBrowserContext {
 
 export type FileBrowserEvent =
   | { readonly type: "VIEW_ACTIVATED" }
+  | { readonly type: "SYNC_WORKTREE"; readonly worktreePath: string }
   | { readonly type: "OPEN"; readonly path: string }
   | { readonly type: "CLOSE"; readonly path: string }
   | { readonly type: "EDIT"; readonly text: string }
@@ -219,6 +220,11 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       )
     },
     actions: {
+      syncWorktree: assign(({ event }) =>
+        event.type === "SYNC_WORKTREE"
+          ? { worktreePath: event.worktreePath }
+          : {}
+      ),
       selectPath: assign(({ context, event }) =>
         event.type === "OPEN"
           ? {
@@ -342,6 +348,9 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       )
     },
     guards: {
+      worktreeChanged: ({ context, event }) =>
+        event.type === "SYNC_WORKTREE" &&
+        context.worktreePath !== event.worktreePath,
       hasEditablePayload: ({ context }) =>
         context.payload !== null && isTextPayload(context.payload),
       editMatchesLoaded: ({ context, event }) =>
@@ -409,6 +418,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       agentTargetPath: null,
       pendingAgentTarget: null
     }),
+    on: {
+      SYNC_WORKTREE: {
+        guard: "worktreeChanged",
+        actions: ["syncWorktree", raise({ type: "REFRESH_TREE" })]
+      }
+    },
     states: {
       follow: {
         initial: "disabled",

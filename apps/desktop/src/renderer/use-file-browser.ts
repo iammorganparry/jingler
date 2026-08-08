@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import { createActor, type ActorRefFrom } from "xstate"
 import type { AssetPayload } from "@jingler/core"
@@ -109,6 +109,10 @@ export function useFileBrowser(
     [sessionId, worktreePath]
   )
   const snapshot = useSelector(actor, (state) => state)
+  useEffect(() => {
+    if (worktreePath === undefined) return
+    actor.send({ type: "SYNC_WORKTREE", worktreePath })
+  }, [actor, worktreePath])
   const activate = useCallback(() => actor.send({ type: "VIEW_ACTIVATED" }), [actor])
   const open = useCallback((path: string) => actor.send({ type: "OPEN", path }), [actor])
   const close = useCallback((path: string) => actor.send({ type: "CLOSE", path }), [actor])

@@ -77,6 +77,25 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.entries).toEqual([{ path: "src/app.ts", status: "clean" }])
   })
 
+  it("reloads an actor created before its session worktree becomes available", async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ path: "src/recovered.ts", status: "clean" as const }])
+    const { actor } = start({ list })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "SYNC_WORKTREE", worktreePath: "/late-worktree" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ tree: "ready" }) && snapshot.context.entries.length > 0
+    )
+
+    expect(list).toHaveBeenLastCalledWith("session-a", "/late-worktree")
+    expect(actor.getSnapshot().context.entries).toEqual([
+      { path: "src/recovered.ts", status: "clean" }
+    ])
+  })
+
   it("adds a successfully opened agent-created path to a stale initial tree", async () => {
     const created = {
       ...markdownPayload("# Created", "sha256:created"),
