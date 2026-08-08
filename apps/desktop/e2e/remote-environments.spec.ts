@@ -75,6 +75,8 @@ test("pairs clive.local through SSH without a remote Jingler login", async ({ la
   const sshArgv = readFileSync(join(app.home, "ssh-invocations.jsonl"), "utf8")
   expect(sshArgv).toContain("BatchMode=yes")
   expect(sshArgv).toContain("clive.local")
+  expect(sshArgv).not.toContain("jingler-e2e@clive.local")
+  expect(sshArgv).not.toContain('"-p"')
 })
 
 test("selects a paired environment from the composer and reflects it in the sidebar", async ({ launchApp }) => {

@@ -27,8 +27,6 @@ export interface EnvironmentDialogProps {
     pendingDeviceId: string
     pairingCode: string
     host: string
-    username: string
-    port: string
   }
   hosts: ReadonlyArray<SshHost>
   environment?: Environment | null
@@ -165,30 +163,11 @@ export function EnvironmentDialog(props: EnvironmentDialogProps) {
                       placeholder="clive.local"
                     />
                   </label>
-                  <div className="grid grid-cols-[1fr_120px] gap-3">
-                    <label className="grid gap-1.5 text-[11px] font-medium text-text">
-                      <span>Username</span>
-                      <input
-                        aria-label="Username"
-                        className={inputClass}
-                        value={props.values.username}
-                        onChange={(event) =>
-                          props.onEdit("username", event.currentTarget.value)
-                        }
-                      />
-                    </label>
-                    <label className="grid gap-1.5 text-[11px] font-medium text-text">
-                      <span>Port</span>
-                      <input
-                        aria-label="Port"
-                        className={inputClass}
-                        value={props.values.port}
-                        onChange={(event) =>
-                          props.onEdit("port", event.currentTarget.value)
-                        }
-                      />
-                    </label>
-                  </div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Uses this alias exactly as your terminal does, including
+                    User, HostName, Port, identity files, proxy jumps, and SSH
+                    agent settings from ~/.ssh/config.
+                  </p>
                   <section className="overflow-hidden rounded-lg border border-line">
                     <header className="flex items-center justify-between border-b border-hairline px-3 py-2">
                       <div>

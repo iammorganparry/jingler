@@ -791,8 +791,9 @@ export const connectorStartOauth = (
 
 /**
  * `Sessions.diff` handler. Resolves the session's worktree and returns its
- * unified working diff (empty when there's no worktree or the tree is clean, or
- * on any git failure — the Changes rail treats that as "no changes yet").
+ * unified working diff (empty when there's no worktree or the tree is clean).
+ * Git failures stay in the typed error channel so the renderer cannot mistake
+ * a broken worktree for a clean one.
  * Exported for tests.
  */
 export const sessionDiff = (id: string) =>
@@ -801,9 +802,7 @@ export const sessionDiff = (id: string) =>
       Effect.orElseSucceed(() => null),
     );
     if (!session?.worktreePath) return "";
-    return yield* WorkspaceService.diff(session.worktreePath).pipe(
-      Effect.orElseSucceed(() => ""),
-    );
+    return yield* WorkspaceService.diff(session.worktreePath);
   });
 
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
@@ -3565,14 +3564,18 @@ export const githubPublishRouted = (sessionId: string) =>
         "Github.createPr",
         {},
         { execute: () => Effect.succeed(githubPublish(sessionId)) },
-        {
-          execute: () => Effect.succeed(Stream.concat(
-            Stream.make({
-              step: "inspecting",
-              completed: [],
-              updatedAt: new Date().toISOString(),
-            } satisfies PublishCheckpoint),
-            Stream.unwrap(Effect.gen(function* () {
+        { execute: () => Effect.succeed(Stream.unwrapScoped(
+            Effect.gen(function* () {
+              const mailbox = yield* Mailbox.make<PublishCheckpoint>();
+              let latest: PublishCheckpoint | undefined = session.publish;
+              const emit = (checkpoint: PublishCheckpoint) =>
+                SessionStore.setPublishCheckpoint(session.id, checkpoint).pipe(
+                  Effect.tap(() => Effect.sync(() => {
+                    latest = checkpoint;
+                    mailbox.unsafeOffer(checkpoint);
+                  })),
+                );
+
               const remoteResult = <A, I>(
                 operation: string,
                 payload: unknown,
@@ -3597,74 +3600,116 @@ export const githubPublishRouted = (sessionId: string) =>
                 }),
               );
 
-              const prepared = yield* remoteResult(
-                "Github.preparePublish",
-                {},
-                RemotePublishPreparedSchema,
+              yield* Effect.forkScoped(
+                Effect.gen(function* () {
+                  yield* emit({
+                    step: "inspecting",
+                    completed: [],
+                    updatedAt: new Date().toISOString(),
+                  });
+                  const prepared = yield* remoteResult(
+                    "Github.preparePublish",
+                    {},
+                    RemotePublishPreparedSchema,
+                  );
+                  const preparedFields = {
+                    metadata: {
+                      commitMessage: prepared.commitMessage,
+                      prTitle: prepared.prTitle,
+                      prBody: prepared.prBody,
+                    },
+                    branch: prepared.branch,
+                    commitSha: prepared.commitSha,
+                  };
+                  const throughCommit = [
+                    "inspecting",
+                    "verifying-branch",
+                    "generating-metadata",
+                    "staging",
+                    "committing",
+                  ] as const;
+                  yield* emit({
+                    step: "pushing",
+                    completed: throughCommit,
+                    ...preparedFields,
+                    updatedAt: new Date().toISOString(),
+                  });
+                  yield* emit({
+                    step: "resolving-pr",
+                    completed: [...throughCommit, "pushing"],
+                    ...preparedFields,
+                    updatedAt: new Date().toISOString(),
+                  });
+                  const existing = prepared.existingPrNumber ?? (
+                    yield* GitHubApi.prForBranchBySlug(prepared.githubSlug, prepared.branch)
+                  );
+                  const prStep = existing === null ? "creating-pr" : "updating-pr";
+                  yield* emit({
+                    step: prStep,
+                    completed: [...throughCommit, "pushing", "resolving-pr"],
+                    ...preparedFields,
+                    updatedAt: new Date().toISOString(),
+                  });
+                  const prNumber = existing ?? (
+                    yield* GitHubApi.prCreateBySlug(prepared.githubSlug, prepared.branch, {
+                      title: prepared.prTitle,
+                      body: prepared.prBody,
+                      base: prepared.baseBranch,
+                      draft: false,
+                    })
+                  );
+                  if (existing !== null) {
+                    yield* GitHubApi.prUpdateBySlug(prepared.githubSlug, existing, {
+                      title: prepared.prTitle,
+                      body: prepared.prBody,
+                    });
+                  }
+                  yield* emit({
+                    step: "linking",
+                    completed: [...throughCommit, "pushing", "resolving-pr", prStep],
+                    ...preparedFields,
+                    prNumber,
+                    updatedAt: new Date().toISOString(),
+                  });
+                  yield* remoteResult(
+                    "Github.completePublish",
+                    { prNumber },
+                    SessionSchema,
+                  );
+                  yield* SessionStore.setPrNumber(session.id, prNumber);
+                  yield* emit({
+                    step: "complete",
+                    completed: [
+                      ...throughCommit,
+                      "pushing",
+                      "resolving-pr",
+                      prStep,
+                      "linking",
+                      "complete",
+                    ],
+                    ...preparedFields,
+                    prNumber,
+                    updatedAt: new Date().toISOString(),
+                  });
+                }).pipe(
+                  Effect.catchAll((error) => {
+                    const failure = publishFailure(
+                      "message" in error && typeof error.message === "string"
+                        ? error.message
+                        : "Remote publishing failed.",
+                      latest,
+                    );
+                    return SessionStore.setPublishCheckpoint(session.id, failure).pipe(
+                      Effect.catchAll(() => Effect.void),
+                      Effect.andThen(Effect.sync(() => mailbox.unsafeOffer(failure))),
+                    );
+                  }),
+                  Effect.ensuring(mailbox.end),
+                ),
               );
-              const existing = prepared.existingPrNumber ?? (
-                yield* GitHubApi.prForBranchBySlug(prepared.githubSlug, prepared.branch)
-              );
-              const prNumber = existing ?? (
-                yield* GitHubApi.prCreateBySlug(prepared.githubSlug, prepared.branch, {
-                  title: prepared.prTitle,
-                  body: prepared.prBody,
-                  base: prepared.baseBranch,
-                  draft: false,
-                })
-              );
-              if (existing !== null) {
-                yield* GitHubApi.prUpdateBySlug(prepared.githubSlug, existing, {
-                  title: prepared.prTitle,
-                  body: prepared.prBody,
-                });
-              }
-              yield* remoteResult(
-                "Github.completePublish",
-                { prNumber },
-                SessionSchema,
-              );
-              yield* SessionStore.setPrNumber(session.id, prNumber);
-              const now = new Date().toISOString();
-              return Stream.fromIterable<PublishCheckpoint>([
-                {
-                  step: "pushing",
-                  completed: ["inspecting", "verifying-branch", "generating-metadata", "staging", "committing"],
-                  metadata: {
-                    commitMessage: prepared.commitMessage,
-                    prTitle: prepared.prTitle,
-                    prBody: prepared.prBody,
-                  },
-                  branch: prepared.branch,
-                  commitSha: prepared.commitSha,
-                  updatedAt: now,
-                },
-                {
-                  step: "complete",
-                  completed: ["inspecting", "verifying-branch", "generating-metadata", "staging", "committing", "pushing", "resolving-pr", existing === null ? "creating-pr" : "updating-pr", "linking", "complete"],
-                  metadata: {
-                    commitMessage: prepared.commitMessage,
-                    prTitle: prepared.prTitle,
-                    prBody: prepared.prBody,
-                  },
-                  branch: prepared.branch,
-                  commitSha: prepared.commitSha,
-                  prNumber,
-                  updatedAt: now,
-                },
-              ]);
-            }).pipe(
-              Effect.catchAll((error) => Effect.succeed(Stream.make({
-                step: "failed" as const,
-                completed: [],
-                error: "message" in error && typeof error.message === "string"
-                  ? error.message
-                  : "Remote publishing failed.",
-                updatedAt: new Date().toISOString(),
-              }))),
-            ))
-          ))
-        },
+              return Mailbox.toStream(mailbox);
+            }),
+          )) },
       );
     }).pipe(
       Effect.catchAll((error) => Effect.succeed(Stream.make({
@@ -4379,20 +4424,20 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
               hasMore: page.hasMore,
               ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
             };
-          })
+          }),
         },
         {
           execute: () => remote.request(session, "Sessions.transcriptPage", {
-            chatId,
-            before,
-            limit,
-          }).pipe(
+              chatId,
+              before,
+              limit,
+            }).pipe(
             Effect.flatMap(Schema.decodeUnknown(Schema.Struct({
               messages: Schema.Array(MessageSchema),
               hasMore: Schema.Boolean,
               cursor: Schema.optional(Schema.String),
             }))),
-          )
+          ),
         },
       );
     }).pipe(
@@ -4434,7 +4479,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         {
           execute: () => remote.request(session, "Sessions.diff", {}).pipe(
             Effect.flatMap(Schema.decodeUnknown(Schema.String)),
-          )
+          ),
         },
       );
     }).pipe(
@@ -4496,7 +4541,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                     ),
                   ),
                 );
-            })
+            }),
           },
           {
             execute: () => Effect.succeed(
@@ -4531,7 +4576,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                   message: error.message
                 }))
               )
-            )
+            ),
           }
         );
       }).pipe(
@@ -4736,7 +4781,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                 Schema.Struct({ status: Schema.Literal("deferred", "unsupported") })
               )
             )(value))
-          )
+          ),
         },
       );
     }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not steer the agent", cause }))),

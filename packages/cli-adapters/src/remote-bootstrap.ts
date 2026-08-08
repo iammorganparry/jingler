@@ -254,8 +254,8 @@ const executeBootstrap = (
           message: "SSH username is invalid"
         })
       }
-      const port = input.port ?? 22
-      if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+      const port = input.port
+      if (port !== undefined && (!Number.isSafeInteger(port) || port < 1 || port > 65_535)) {
         throw new SshBootstrapError({
           kind: "invalid-host",
           message: "SSH port is invalid"
@@ -264,7 +264,15 @@ const executeBootstrap = (
       const destination = input.username ? `${input.username}@${input.host}` : input.host
       const result = await runner.run(
         input.sshBinary ?? "ssh",
-        ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", String(port), destination, remoteAgentCommand],
+        [
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "ConnectTimeout=10",
+          ...(port === undefined ? [] : ["-p", String(port)]),
+          destination,
+          remoteAgentCommand
+        ],
         { shell: false }
       )
       if (result.exitCode !== 0) {
@@ -273,7 +281,7 @@ const executeBootstrap = (
         throw new SshBootstrapError({
           kind: authentication ? "authentication" : incompatible ? "incompatible" : "connection",
           message: authentication
-            ? "SSH authentication failed"
+            ? "SSH authentication failed. Verify this host alias works in Terminal and sets User in ~/.ssh/config."
             : incompatible
               ? "The remote Jingler device agent is missing or incompatible"
               : "Could not start the remote Jingler device agent"
@@ -357,8 +365,8 @@ export const installAndBootstrapRemoteDevice = (
         })
       )
     }
-    const port = input.port ?? 22
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    const port = input.port
+    if (port !== undefined && (!Number.isSafeInteger(port) || port < 1 || port > 65_535)) {
       return yield* Effect.fail(
         new SshBootstrapError({
           kind: "invalid-host",
@@ -376,8 +384,7 @@ export const installAndBootstrapRemoteDevice = (
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=10",
-            "-P",
-            String(port),
+            ...(port === undefined ? [] : ["-P", String(port)]),
             input.agentBundlePath,
             `${destination}:.jingler-device-upload.mjs`
           ],
@@ -411,7 +418,7 @@ export const installAndBootstrapRemoteDevice = (
       {
         host: input.host,
         ...(input.username === undefined ? {} : { username: input.username }),
-        port,
+        ...(port === undefined ? {} : { port }),
         ...(input.sshBinary === undefined ? {} : { sshBinary: input.sshBinary })
       },
       `${INSTALL_AGENT} && ${loginShellCommand(
@@ -443,8 +450,8 @@ export const activateRemoteDevice = (
         })
       )
     }
-    const port = input.port ?? 22
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    const port = input.port
+    if (port !== undefined && (!Number.isSafeInteger(port) || port < 1 || port > 65_535)) {
       return yield* Effect.fail(
         new SshBootstrapError({
           kind: "invalid-host",
@@ -479,7 +486,15 @@ export const activateRemoteDevice = (
       try: () =>
         runner.run(
           input.sshBinary ?? "ssh",
-          ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", String(port), destination, remoteCommand],
+          [
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            ...(port === undefined ? [] : ["-p", String(port)]),
+            destination,
+            remoteCommand
+          ],
           { shell: false }
         ),
       catch: (cause) =>
