@@ -39,6 +39,13 @@ interface MockCodeViewProps {
       readonly endSide: "additions" | "deletions"
     }
   } | null) => void
+  readonly options?: {
+    readonly layout?: {
+      readonly paddingTop: number
+      readonly paddingBottom: number
+      readonly gap: number
+    }
+  }
 }
 
 const pierre = vi.hoisted<{
@@ -116,6 +123,11 @@ describe("PierreEditor", () => {
     expect(props).toBeDefined()
     if (props === undefined) return
     expect(props.items[0]).toMatchObject({ id: item.id, edit: true })
+    expect(props.options?.layout).toEqual({
+      paddingTop: 8,
+      paddingBottom: 48,
+      gap: 8
+    })
     expect(props.selectedLines).toEqual({
       id: item.id,
       range: { start: 2, end: 4, side: "additions", endSide: "additions" }

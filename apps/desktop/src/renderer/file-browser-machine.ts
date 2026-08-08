@@ -115,6 +115,12 @@ const withOpenedPath = (
         a.path.localeCompare(b.path)
       )
 
+const refreshedEntries = (
+  current: ReadonlyArray<AssetFileEntry>,
+  next: ReadonlyArray<AssetFileEntry>
+): ReadonlyArray<AssetFileEntry> =>
+  next.length === 0 && current.length > 0 ? current : next
+
 const appendOpenPath = (paths: ReadonlyArray<string>, path: string): ReadonlyArray<string> =>
   paths.includes(path) ? paths : [...paths, path]
 
@@ -481,7 +487,8 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                   reenter: true,
                   actions: [
                     assign({
-                      entries: ({ event }) => event.output,
+                      entries: ({ context, event }) =>
+                        refreshedEntries(context.entries, event.output),
                       treeError: null,
                       treeRefreshQueued: false
                     }),
@@ -492,7 +499,8 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                   target: "ready",
                   actions: [
                     assign({
-                      entries: ({ event }) => event.output,
+                      entries: ({ context, event }) =>
+                        refreshedEntries(context.entries, event.output),
                       treeError: null,
                       treeRefreshQueued: false
                     }),

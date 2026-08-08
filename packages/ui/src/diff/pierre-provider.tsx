@@ -242,6 +242,12 @@ const baseOptions = (
   }
 }
 
+const CODE_VIEW_LAYOUT = {
+  paddingTop: 8,
+  paddingBottom: 48,
+  gap: 8
+} as const
+
 export interface PierreFileViewProps
   extends PierreAccessibleViewProps,
     PierreSelectionProps {
@@ -688,6 +694,7 @@ function PierreCodeViewContent({
         className="jingler-pierre-primitive jingler-pierre-code-view"
         options={{
           ...baseOptions(renderer.theme, options),
+          layout: CODE_VIEW_LAYOUT,
           diffStyle: options?.diffStyle ?? "unified",
           expandUnchanged: options?.expandUnchanged,
           collapsedContextThreshold: options?.collapsedContextThreshold,

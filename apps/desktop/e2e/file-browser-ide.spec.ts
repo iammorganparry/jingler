@@ -164,14 +164,50 @@ test("shows a previously existing large worktree before repository search", asyn
   })
 
   await expect(appShell(window)).toBeVisible()
+  await window.setViewportSize({ width: 1320, height: 860 })
   await filesTab(window).click()
   const tree = window.locator(
     '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
   )
+  await expect.poll(async () => (await tree.boundingBox())?.height ?? 0).toBeGreaterThan(400)
   await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
   })
   await expect(tree.locator('[data-file-tree-search-input]')).toHaveValue("")
+
+  await selectTreePath(window, "scripts/generate-brand-icons.py")
+  const editor = window.getByRole("region", {
+    name: "scripts/generate-brand-icons.py editor"
+  })
+  await expect(editor).toBeVisible()
+  const editorSurface = editor.locator(".jingler-pierre-code-view")
+  await expect.poll(async () => editorSurface.evaluate((node) => {
+    return getComputedStyle(node).backgroundColor
+  })).not.toBe("rgba(0, 0, 0, 0)")
+  await expect.poll(async () => {
+    const editorBox = await editor.boundingBox()
+    const canvasBox = await window.getByTestId("asset-content-canvas").boundingBox()
+    return Math.abs((editorBox?.height ?? 0) - (canvasBox?.height ?? 0))
+  }).toBeLessThan(1)
+
+  await editorSurface.evaluate((node) => {
+    node.scrollTop = node.scrollHeight
+    node.dispatchEvent(new Event("scroll", { bubbles: true }))
+  })
+  const finalLine = editorSurface.locator('[data-column-number="146"]')
+  await expect(finalLine).toBeVisible()
+  await expect.poll(async () => {
+    const editorBox = await editorSurface.boundingBox()
+    const lineBox = await finalLine.boundingBox()
+    if (editorBox === null || lineBox === null) return Number.POSITIVE_INFINITY
+    return lineBox.y + lineBox.height - (editorBox.y + editorBox.height)
+  }).toBeLessThanOrEqual(0)
+
+  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+  await filesTab(window).click()
+  await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
+    timeout: 20_000
+  })
 })
 
 test("shows a previously existing large worktree while its agent is running", async ({

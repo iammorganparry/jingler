@@ -669,6 +669,20 @@ describe("fileBrowserMachine", () => {
     ])
   })
 
+  it("retains the last successful repository when a later Files activation returns empty", async () => {
+    const existing = [{ path: "src/app.ts", status: "clean" as const }]
+    const list = vi.fn().mockResolvedValueOnce(existing).mockResolvedValueOnce([])
+    const { actor } = start({ list })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "VIEW_ACTIVATED" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ tree: "ready" }) && list.mock.calls.length === 2
+    )
+
+    expect(actor.getSnapshot().context.entries).toEqual(existing)
+  })
+
   it("surfaces a queued refresh failure and recovers on a later Files activation", async () => {
     const list = vi
       .fn()
