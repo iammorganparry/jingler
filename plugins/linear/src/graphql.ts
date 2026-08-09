@@ -1,5 +1,6 @@
 const DEFAULT_LINEAR_API_URL = "https://api.linear.app/graphql"
 const RATE_LIMIT_CODE = "RATELIMITED"
+const LOOPBACK_HTTP_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
 
 const hostEnvironment = (): Readonly<Record<string, string | undefined>> => {
   const hostProcess = Reflect.get(globalThis, "process") as
@@ -38,6 +39,9 @@ export const linearApiUrl = (
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new Error("The configured Linear API endpoint must use HTTP or HTTPS.")
   }
+  if (url.protocol === "http:" && !LOOPBACK_HTTP_HOSTS.has(url.hostname)) {
+    throw new Error("The configured Linear API endpoint must use HTTPS unless it targets loopback.")
+  }
   return url.toString()
 }
 
@@ -59,9 +63,10 @@ export const linearGraphql = async <Data extends object>(
   options: LinearGraphqlOptions
 ): Promise<Data> => {
   const request = options.request ?? fetch
+  const endpoint = linearApiUrl(options.endpoint)
   let response: Response
   try {
-    response = await request(options.endpoint ?? linearApiUrl(), {
+    response = await request(endpoint, {
       method: "POST",
       headers: {
         authorization: options.apiKey,

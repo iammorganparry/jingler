@@ -85,11 +85,38 @@ describe("linearGraphql status errors", () => {
 })
 
 describe("linearApiUrl", () => {
-  it("uses a host-only endpoint override and validates its protocol", () => {
+  it("allows HTTPS endpoints and HTTP only on loopback", () => {
     expect(linearApiUrl(undefined)).toBe("https://api.linear.app/graphql")
+    expect(linearApiUrl("https://linear-proxy.example/graphql")).toBe(
+      "https://linear-proxy.example/graphql"
+    )
     expect(linearApiUrl("http://127.0.0.1:43123/graphql")).toBe(
       "http://127.0.0.1:43123/graphql"
     )
+    expect(linearApiUrl("http://localhost:43123/graphql")).toBe(
+      "http://localhost:43123/graphql"
+    )
+    expect(linearApiUrl("http://[::1]:43123/graphql")).toBe(
+      "http://[::1]:43123/graphql"
+    )
+    expect(() => linearApiUrl("http://linear-proxy.example/graphql")).toThrow(
+      "must use HTTPS unless it targets loopback"
+    )
     expect(() => linearApiUrl("file:///tmp/graphql")).toThrow("HTTP or HTTPS")
+  })
+
+  it("validates explicit request endpoints before sending the API key", async () => {
+    const request = vi.fn(async () => json({ data: { viewer: { id: "viewer-1" } } }))
+
+    await expect(
+      linearGraphql({
+        apiKey: "lin_api_secret",
+        query: "query Viewer { viewer { id } }",
+        endpoint: "http://linear-proxy.example/graphql",
+        request
+      })
+    )
+      .rejects.toThrow("must use HTTPS unless it targets loopback")
+    expect(request).not.toHaveBeenCalled()
   })
 })
