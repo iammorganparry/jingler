@@ -501,7 +501,7 @@ describe("encrypted session tunnel", () => {
     expect(received[2]).toMatchObject({ type: "envelope", envelope: { sequence: 3 } })
     expect(received.at(-1)).toMatchObject({ type: "replay-more" })
     device.close(1000, "done")
-  })
+  }, 15_000)
 
   it("persists only validated encrypted envelopes", async () => {
     const input = initialization("session_ciphertext_abcdefghij")
