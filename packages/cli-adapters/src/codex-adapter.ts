@@ -575,15 +575,8 @@ export const runCodexSdk = (
               followUp = formatQuestionAnswers(asked.questions, answers)
               continue
             }
-            // Capture a plan emission when native plan mode is active, or in auto
-            // orchestration before the first plan is approved. `mode` decides:
-            // "submit" enters the approval gate, "draft" mirrors into Plan Review.
             const capturing: boolean =
-              reply !== null &&
-              (planning ||
-                (spec.orchestrationRoutes !== undefined &&
-                  spec.orchestrationPlanApproved !== true)) &&
-              planRound < MAX_PLAN_ROUNDS
+              reply !== null && planning && planRound < MAX_PLAN_ROUNDS
             const capture: PlanCapture | null =
               capturing && reply !== null ? capturePlanEmission(reply) : null
             if (capture?._tag === "reformat" && !planReformatAsked) {
@@ -618,7 +611,7 @@ export const runCodexSdk = (
               // Reject: `followUp` stays null, so the turn ends here.
               continue
             }
-            // A "draft" emission in auto orchestration mirrors into Plan Review,
+            // A "draft" emission in enhanced plan mode mirrors into Plan Review,
             // then falls through to emit as ordinary chat (the visible preview stays).
             if (
               capture?._tag === "emission" &&

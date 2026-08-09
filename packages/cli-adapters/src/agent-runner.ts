@@ -12,7 +12,6 @@ import type {
   Plan,
   PlanApprovalResult,
   PlanComment,
-  PlanParticipant,
   PlanPrdStage,
   QuestionAnswer,
   QuestionRequest,
@@ -24,40 +23,30 @@ import {
   ADHD_MODE_DEFAULT,
   applyStreamEvent,
   assistantMessage,
-  buildPlanExecutionGraph,
   CliExecError,
-  compileOrchestrationPlan,
   defaultModeFor,
   defaultModel,
   findApprovedPlan,
   isBackgroundTaskEvent,
   isFileMutationTool,
   isSubagentEvent,
-  ORCHESTRATOR_ENABLED_DEFAULT,
   planDocumentToPlan,
   planStageSemanticFingerprint,
   planTaskProtocolTokens,
-  orchestratorParticipantRoutingId,
   PLAN_AUTO_RUN_DEFAULT,
-  subagentParticipantRoutingId,
   resumePlanPrompt,
   setQuestionAnswers,
   settleStreaming,
   STOPPED_NOTE,
   stripPlanResultProtocol,
-  supportsPlanMode,
   userMessage,
   workspaceModeOf,
-  type PlanPrd,
-  resolveWorkerRoutingConfig,
-  workerRoutingMismatch
+  type PlanPrd
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
-import { orchestratorNote, orchestratorTurnPrompt } from "./orchestrator-prompt.js"
-import { parseOrchestratorAmendment, stripOrchestratorAmendment } from "./orchestrator-amend.js"
 import { modeOnApproval, modeToRestore } from "./exec-mode.js"
 import { isTerminal, routeOf } from "./turn-events.js"
 import {
@@ -81,11 +70,9 @@ import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
 import { CliAdapter, PlanDecision } from "./adapter.js"
 import type {
-  OrchestrationRoute,
   PermissionDecision,
   PermissionRequest,
   SessionSpec,
-  PlanParticipantSteerResult,
   SteerTurn,
   StopBackgroundTask
 } from "./adapter.js"
@@ -93,7 +80,6 @@ import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { readDefaultMode } from "./default-mode.js"
 import { DiscoveryService } from "./discovery.js"
-import { ModelsService } from "./models.js"
 import { healedWorktreePath } from "./cli-project-dir.js"
 import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
@@ -136,29 +122,6 @@ const failedStream = (message: string): Stream.Stream<StreamEvent> => {
 }
 
 /** Keep planner advertisement and approval validation on one live route set. */
-export const planningOrchestrationRoutes = (
-  catalog: ReadonlyArray<OrchestrationRoute>
-): ReadonlyArray<OrchestrationRoute> =>
-  catalog.filter((provider) => supportsPlanMode(provider.cli))
-
-export const unavailableOrchestrationAssignment = (
-  stages: ReadonlyArray<PlanPrdStage>,
-  routes: ReadonlyArray<OrchestrationRoute>
-): PlanPrdStage | null => {
-  const available = new Map(
-    routes.map((provider) => [
-      provider.cli,
-      new Set(provider.models.map((model) => model.id))
-    ])
-  )
-  return stages.find(
-    (stage) =>
-      stage.assignment !== null &&
-      stage.assignment !== undefined &&
-      !available.get(stage.assignment.cli)?.has(stage.assignment.model)
-  ) ?? null
-}
-
 export interface PlanEvidenceMarker {
   readonly criterionId: string
   readonly status: "passed" | "failed"
@@ -270,66 +233,9 @@ interface ActiveRun {
       }
     | { readonly status: "deferred" | "unsupported" }
   >
-  readonly subagents: () => Effect.Effect<ReadonlyArray<PlanParticipant>>
   readonly clearReplyWaiter: (waiter: RunReplyWaiter) => Effect.Effect<void>
   readonly replyGate: Effect.Semaphore
 }
-
-/** Result of inspecting and applying one approved-plan orchestrator reply. */
-export type OrchestratorAmendmentOutcome =
-  | {
-      readonly status: "applied"
-      readonly currentRevision: number
-      readonly diagnostics: readonly []
-    }
-  | {
-      readonly status: "not-present"
-      readonly currentRevision: number | null
-      readonly diagnostics: readonly []
-    }
-  | {
-      readonly status: "invalid" | "conflict"
-      readonly currentRevision: number | null
-      readonly diagnostics: ReadonlyArray<string>
-    }
-
-/** Durable feedback shown after an amendment could not become canonical. */
-export const orchestratorAmendmentOutcomeText = (
-  outcome: OrchestratorAmendmentOutcome
-): string | null =>
-  outcome.status === "invalid" || outcome.status === "conflict"
-    ? [
-        `Jingler amendment outcome: ${outcome.status}.`,
-        `Current canonical revision: ${outcome.currentRevision ?? "unavailable"}.`,
-        ...outcome.diagnostics
-      ].join(" ")
-    : null
-
-const amendmentNotPresent = (
-  currentRevision: number | null
-): OrchestratorAmendmentOutcome => ({
-  status: "not-present",
-  currentRevision,
-  diagnostics: []
-})
-
-const amendmentFailure = (
-  status: "invalid" | "conflict",
-  currentRevision: number | null,
-  diagnostics: ReadonlyArray<string>
-): OrchestratorAmendmentOutcome => ({
-  status,
-  currentRevision,
-  diagnostics
-})
-
-const amendmentApplied = (
-  currentRevision: number
-): OrchestratorAmendmentOutcome => ({
-  status: "applied",
-  currentRevision,
-  diagnostics: []
-})
 
 const PLAN_HTML_SUBMISSION_OPENING = /(?:^|\n)````html[ \t]*(?:\r?\n|$)/i
 
@@ -384,7 +290,7 @@ type PromptEnv =
   | AppPaths
 
 /**
- * Orchestrates a prompt against the selected harness. `prompt` returns a
+ * Runs a prompt against the selected harness. `prompt` returns a
  * `Stream<StreamEvent>` — the harness-agnostic seam the renderer subscribes to —
  * while, in-band, it applies the session's HITL mode, pauses on gates, folds each
  * event into the persisted transcript, and re-emits it. Gate/mode state lives in
@@ -392,9 +298,8 @@ type PromptEnv =
  * paused run.
  */
 export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRunner", {
-  dependencies: [ModelsService.Default, MemoryServiceLive],
+  dependencies: [MemoryServiceLive],
   effect: Effect.gen(function* () {
-    const modelsService = yield* ModelsService
     const memoryService = yield* MemoryService
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
     /** Human-in-the-loop state, and the rule that decides what needs approval. */
@@ -558,120 +463,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           : null
       })
 
-    /**
-     * Locate the live main-agent run that owns this plan. Pending plans use the
-     * approval registry; executing plans fall back to the canonical producing
-     * chat so orchestrator amendments remain addressable.
-     */
-    const addressablePlanRun = (sessionId: string, planId: string) =>
-      Effect.gen(function* () {
-        const pending = yield* pendingPlanRun(sessionId, planId)
-        if (pending.run !== undefined) {
-          return {
-            chatId: pending.pending!.chatId,
-            run: pending.run,
-            lifecycle: "parked"
-          } as const
-        }
-        const canonical = yield* canonicalPlan(sessionId, planId)
-        if (canonical === null) return null
-        const run = (yield* Ref.get(active)).get(
-          canonical.document.producingChatId
-        )
-        return run === undefined
-          ? null
-          : {
-              chatId: canonical.document.producingChatId,
-              run,
-              lifecycle: "running"
-            } as const
-      })
-
-    const planParticipants = (
-      sessionId: string,
-      planId: string
-    ) =>
-      Effect.gen(function* () {
-        const addressable = yield* addressablePlanRun(sessionId, planId)
-        if (addressable === null) return []
-        const orchestrator = {
-          routingId: orchestratorParticipantRoutingId(addressable.chatId),
-          displayName: "Orchestrator",
-          role: "orchestrator",
-          lifecycle: addressable.lifecycle,
-          ownerRoutingId: null
-        } satisfies PlanParticipant
-        return [
-          orchestrator,
-          ...(yield* addressable.run.subagents())
-        ]
-      })
-
-    const steerPlanParticipant = (request: {
-      readonly sessionId: string
-      readonly planId: string
-      readonly routingId: string
-      readonly text: string
-    }) =>
-      Effect.gen(function* () {
-        const addressable = yield* addressablePlanRun(
-          request.sessionId,
-          request.planId
-        )
-        if (addressable === null) {
-          return {
-            status: "unavailable",
-            detail:
-              `Participant "${request.routingId}" is no longer active. ` +
-              "Refresh the participant list before retrying or rerouting."
-          } satisfies PlanParticipantSteerResult
-        }
-        const orchestratorId = orchestratorParticipantRoutingId(
-          addressable.chatId
-        )
-        const currentSubagents = yield* addressable.run.subagents()
-        if (
-          request.routingId !== orchestratorId &&
-          !currentSubagents.some(
-            (participant) => participant.routingId === request.routingId
-          )
-        ) {
-          return {
-            status: "unavailable",
-            detail:
-              `Participant "${request.routingId}" is no longer active. ` +
-              "Refresh the participant list before retrying or rerouting."
-          } satisfies PlanParticipantSteerResult
-        }
-        return yield* addressable.run.replyGate.withPermits(1)(
-          Effect.gen(function* () {
-            const steered = yield* addressable.run.steer(request.text, [], true)
-            if (steered.status !== "accepted") {
-              return {
-                status: "failed",
-                detail:
-                  `Participant "${request.routingId}" could not receive the message ` +
-                  `(${steered.status}). Retry this message.`
-              } satisfies PlanParticipantSteerResult
-            }
-            const waiter = steered.replyWaiter
-            if (waiter === null) {
-              return {
-                status: "delivered",
-                reply: null
-              } satisfies PlanParticipantSteerResult
-            }
-            return yield* collectSteeredReply(waiter).pipe(
-              Effect.map((reply) => ({
-                status: "delivered" as const,
-                reply
-              })),
-              Effect.ensuring(addressable.run.clearReplyWaiter(waiter))
-            )
-          })
-        )
-      })
-
     /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
     const commentPlanStep = (
       sessionId: string,
@@ -778,15 +569,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.gen(function* () {
         const { pending, run } = yield* pendingPlanRun(sessionId, planId)
         const canonical = yield* canonicalPlan(sessionId, planId)
-        const session = yield* getSessionOrNull(sessionId)
-        const producingChatId =
-          pending?.chatId ??
-          canonical?.document.producingChatId ??
-          session?.activeChatId
-        const orchestrating =
-          producingChatId !== undefined &&
-          session?.chats.find((chat) => chat.id === producingChatId)?.role ===
-            "orchestrator"
         if (
           canonical !== null &&
           expectedRevision !== undefined &&
@@ -809,61 +591,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             canonical?.document.revision ?? 0
           )
         }
-        if (orchestrating && canonical !== null) {
-          const graph = buildPlanExecutionGraph(
-            canonical.document.plan.stages,
-            { requireAssignments: true }
-          )
-          if (!graph.valid) {
-            return approvalRefused(
-              [
-                "Approval refused because the worker graph is invalid.",
-                ...graph.diagnostics.map((diagnostic) => diagnostic.message)
-              ].join(" "),
-              canonical.document.revision
-            )
-          }
-          const discovered = yield* DiscoveryService.list().pipe(
-            Effect.orElseSucceed(() => [])
-          )
-          const catalog = planningOrchestrationRoutes(
-            yield* modelsService.catalog(discovered)
-          )
-          const workspaceConfig = yield* ConfigService.get().pipe(
-            Effect.orElseSucceed(() => null)
-          )
-          const workerRouting = resolveWorkerRoutingConfig(
-            workspaceConfig?.workerRouting,
-            catalog
-          )
-          if (workerRouting === null) {
-            return approvalRefused(
-              "Approval refused because no planning-capable worker route is available.",
-              canonical.document.revision
-            )
-          }
-          const unavailable = unavailableOrchestrationAssignment(
-            canonical.document.plan.stages,
-            catalog
-          )
-          if (unavailable?.assignment) {
-            return approvalRefused(
-              `Approval refused because stage "${unavailable.id}" is assigned to unavailable route "${unavailable.assignment.cli}/${unavailable.assignment.model}". Update its worker assignment from the live model catalogue and approve again.`,
-              canonical.document.revision
-            )
-          }
-          const routingMismatch = workerRoutingMismatch(
-            canonical.document.plan.stages,
-            workerRouting
-          )
-          if (routingMismatch?.assignment) {
-            const expected = workerRouting[routingMismatch.complexity]
-            return approvalRefused(
-              `Approval refused because worker "${routingMismatch.id}" uses ${routingMismatch.assignment.cli}/${routingMismatch.assignment.model}, but the ${routingMismatch.complexity}-complexity router requires ${expected.cli}/${expected.model}. Revise the plan to apply the current worker routing settings.`,
-              canonical.document.revision
-            )
-          }
-        }
         if (canonical !== null) {
           const approval = yield* PlanStore.updateDocument(canonical.worktreePath, {
             planId,
@@ -883,7 +610,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         }
         if (run !== undefined) {
           yield* run.applyPlan(planId, () => ({ ...exactPlan, status: "approved" }))
-          if (!orchestrating) yield* run.markPlanExecution(planId)
+          yield* run.markPlanExecution(planId)
         }
         // Precedence lives in `exec-mode.ts`, where the reason `prior` must beat
         // `configDefault` is stated once — getting that pair the wrong way round
@@ -898,12 +625,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* resolvePlan(
           sessionId,
           planId,
-          orchestrating
-            ? PlanDecision.Delegate()
-            : PlanDecision.Approve({
-                mode,
-                plan: { ...exactPlan, status: "approved" }
-              })
+          PlanDecision.Approve({
+            mode,
+            plan: { ...exactPlan, status: "approved" }
+          })
         )
         return approvalAccepted
       })
@@ -1144,14 +869,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           ])
           const sessionCli = session.cli
           const workspaceConfig = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-          // Read per turn: each orchestrator chat can independently opt out of
-          // the worker flow. The workspace setting remains the fallback for
-          // chats written before the per-chat field existed.
-          const orchestratorEnabled =
-            chat.orchestratorEnabled ??
-            workspaceConfig?.orchestratorEnabled ??
-            ORCHESTRATOR_ENABLED_DEFAULT
-          const orchestrating = chat.role === "orchestrator" && orchestratorEnabled
           const discoveredClis = yield* DiscoveryService.list().pipe(
             Effect.orElseSucceed(() => [])
           )
@@ -1162,17 +879,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // effect on the very next message of an already-running session.
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
           const cli = sessionCli
-          const orchestrationRoutes = planningOrchestrationRoutes(
-            yield* modelsService.catalog(discoveredClis)
-          )
-            .map((provider) => ({
-              cli: provider.cli,
-              models: provider.models
-            }))
-          const workerRouting = resolveWorkerRoutingConfig(
-            workspaceConfig?.workerRouting,
-            orchestrationRoutes
-          )
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
           const execDefault = yield* resolveExecMode(sessionId)
@@ -1256,28 +962,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             worktreePath.length > 0
               ? yield* PlanStore.list(worktreePath).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
               : []
-          // Whether this orchestrator already has an approved canonical plan.
-          // "Approved" is every post-gate status — once the operator approves,
-          // the plan moves through executing → needs-verification → done and
-          // never returns to the approval gate. Read from the canonical document,
-          // the single source of truth (a non-orchestrator turn skips the read).
-          const canonicalPlan =
-            orchestrating && worktreePath.length > 0
-              ? yield* PlanStore.readDocument(worktreePath, sessionId, chatId).pipe(
-                  Effect.orElseSucceed(() => null)
-                )
-              : null
-          const planApproved =
-            canonicalPlan !== null &&
-            (canonicalPlan.status === "approved" ||
-              canonicalPlan.status === "executing" ||
-              canonicalPlan.status === "needs-verification" ||
-              canonicalPlan.status === "done")
-          // Orchestration is a coordination role, not a permission escalation.
-          // The orchestrator can still complete bounded work directly, but only
-          // with the edit/command authority the operator selected for this chat.
-          // Plan approval restores an execution mode through `setMode`, so this
-          // does not force later orchestrator turns back through another gate.
           const mode: PermissionMode = sessionMode
           yield* ContextManager.bindContext(chatId, sessionId)
           /**
@@ -1323,15 +1007,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // ADHD mode rides in the same per-turn prefix as the primer and plan
           // pointer so a Settings change applies immediately. Its own scope makes
           // the format dormant during work and active only for the final summary.
-          // The orchestrator gets its own persona, not the ADHD note: one
-          // string for every harness (so it reads the same on Opus and Codex)
-          // and always on, since being an orchestrator is a role, not an
-          // operator-toggled setting. Plain chats keep the scoped ADHD note.
-          const adhd = orchestrating
-            ? orchestratorNote()
-            : adhdMode
-              ? adhdNote(cli)
-              : null
+          const adhd = adhdMode ? adhdNote(cli) : null
           // Not optional, and not a setting: an agent that asks in prose is an
           // agent whose question never reaches the operator. Claude has the
           // `AskUserQuestion` tool the adapter intercepts, Codex has the fenced
@@ -1347,19 +1023,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // toward. Everything else is told to end its reply with the block.
           const planProtocol =
             mode === "plan"
-              ? planNote(
-                  cli,
-                  orchestrating ? orchestrationRoutes : undefined,
-                  orchestrating ? workerRouting ?? undefined : undefined
-                )
+              ? planNote(cli)
               : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
           const operatorText = displayText ?? text
-          const promptText = orchestrating
-            ? orchestratorTurnPrompt(planApproved, text)
-            : text
+          const promptText = text
           const providerReasoning =
             cli === "claude" || cli === "codex" || cli === "opencode"
               ? session.reasoning?.[cli]
@@ -1389,7 +1059,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           ).acquire(sessionId, `${sessionId}:${chatId}`)
           // Jingler owns this pre-turn boundary, so recall is deterministic for
           // every harness (including Codex, which has no context-injecting hook).
-          // Pass only the raw operator text: orchestration/persona notes are not
+          // Pass only the raw operator text: injected policy/persona notes are not
           // useful search terms and would dilute a narrow memory query.
           const memoryAttachment = yield* memoryService.attachment(
             cli,
@@ -1432,12 +1102,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ...(mode === "plan"
               ? { planTemplate: workspaceConfig?.planTemplate?.source ?? "" }
               : {}),
-            ...(orchestrating
-              ? { orchestrationRoutes, orchestrationPlanApproved: planApproved }
-              : {}),
-            ...(orchestrating && workerRouting !== null
-              ? { workerRouting }
-              : {}),
             ...(resolvedReasoning === null
               ? {}
               : {
@@ -1460,7 +1124,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // `mode: plan` is the transient read-only boundary. Do not also set
             // the permanent `readOnly` role flag: Codex resumes this SAME spec
             // after approval, and a permanent flag would keep its sandbox
-            // read-only instead of restoring the orchestrator's Auto policy.
+            // read-only instead of restoring the operator's Auto policy.
             // Each adapter enforces plan mode in its own native vocabulary.
             remoteMcpServers,
             mcpPolicy: preferJinglerTools ? "managed-only" : "merge"
@@ -1537,9 +1201,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const turnSteer = yield* Ref.make<SteerTurn | null>(null)
           const steeredReply = yield* Ref.make<RunReplyWaiter | null>(null)
           const replyGate = yield* Effect.makeSemaphore(1)
-          const activeSubagents = yield* Ref.make(
-            new Map<string, PlanParticipant>()
-          )
           const turnMutation = yield* Effect.makeSemaphore(1)
           const executingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
 
@@ -1806,81 +1467,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }).pipe(Effect.ignore)
             }).pipe(Effect.provide(env), Effect.ignore)
 
-          // Approved-plan replies have four explicit outcomes. Applied updates
-          // emit PlanUpdated and requeue changed work; not-present is an ordinary
-          // direct/coordination reply; invalid and conflict surface diagnostics
-          // live and retain them in the transcript for the next repair turn.
-          const applyOrchestratorAmendment = (
-            text: string
-          ): Effect.Effect<OrchestratorAmendmentOutcome> =>
-            Effect.gen(function* () {
-              const knownRevision = canonicalPlan?.revision ?? null
-              if (!orchestrating || !planApproved || worktreePath.length === 0) {
-                return amendmentNotPresent(knownRevision)
-              }
-              const amendment = parseOrchestratorAmendment(text)
-              if (amendment === null) {
-                return amendmentNotPresent(knownRevision)
-              }
-              const current = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
-              if (
-                current === null ||
-                current.producingChatId !== chatId ||
-                !["approved", "executing", "needs-verification", "done"].includes(current.status)
-              ) {
-                return amendmentFailure(
-                  "conflict",
-                  current?.revision ?? knownRevision,
-                  [
-                    "The canonical approved plan is no longer available to this orchestrator turn."
-                  ]
-                )
-              }
-              if (workerRouting === null) {
-                return amendmentFailure("invalid", current.revision, [
-                  "No valid worker routing configuration is available."
-                ])
-              }
-              const compiled = compileOrchestrationPlan(
-                amendment,
-                workerRouting,
-                { previousStages: current.plan.stages }
-              )
-              if (!compiled.valid) {
-                return amendmentFailure(
-                  "invalid",
-                  current.revision,
-                  compiled.diagnostics.map(
-                    (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`
-                  )
-                )
-              }
-              const updated = yield* PlanStore.updateDocument(worktreePath, {
-                planId: current.id,
-                baseRevision: current.revision,
-                plan: compiled.plan,
-                author: "agent",
-                reconcile: true,
-                status: "executing"
-              }).pipe(Effect.either)
-              if (updated._tag === "Left") {
-                return updated.left._tag === "PlanConflictError"
-                  ? amendmentFailure(
-                      "conflict",
-                      updated.left.latestRevision,
-                      [updated.left.message]
-                    )
-                  : amendmentFailure("invalid", current.revision, [
-                      updated.left.message
-                    ])
-              }
-              yield* out.offer({
-                _tag: "PlanUpdated",
-                plan: planDocumentToPlan(updated.right)
-              })
-              return amendmentApplied(updated.right.revision)
-            }).pipe(Effect.provide(env))
-
           // Fold each event into the assistant message + persist, then surface it.
           // Native steering enters from an RPC fiber, so serialize it with the
           // adapter's event producer. A turn/completed notification arriving in
@@ -1902,33 +1488,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // vanished is a different failure from one that emitted nothing.
               yield* Ref.update(eventCount, (n) => n + 1)
               yield* Ref.set(lastEvent, event._tag)
-              if (event._tag === "SubagentStarted") {
-                const ownerRoutingId = orchestratorParticipantRoutingId(chatId)
-                const routingId = subagentParticipantRoutingId(
-                  ownerRoutingId,
-                  event.id
-                )
-                yield* Ref.update(activeSubagents, (subagents) =>
-                  new Map(subagents).set(routingId, {
-                    routingId,
-                    displayName: event.name,
-                    role: "subagent",
-                    lifecycle: "running",
-                    ownerRoutingId
-                  })
-                )
-              }
-              if (event._tag === "SubagentEnded") {
-                const routingId = subagentParticipantRoutingId(
-                  orchestratorParticipantRoutingId(chatId),
-                  event.id
-                )
-                yield* Ref.update(activeSubagents, (subagents) => {
-                  const next = new Map(subagents)
-                  next.delete(routingId)
-                  return next
-                })
-              }
               if (event._tag === "Assistant") {
                 const waiter = yield* Ref.get(steeredReply)
                 if (waiter !== null) {
@@ -1960,7 +1519,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }).pipe(Effect.provide(env), Effect.ignore)
               }
               let next = applyStreamEvent(yield* Ref.get(acc), event)
-              let liveAmendmentFeedback: string | null = null
               if (event._tag === "Assistant") {
                 const accumulatedText = next.parts
                   .filter((part) => part._tag === "Text")
@@ -1975,37 +1533,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   .join("\n")
                 yield* recordPlanTaskProgress(settledText)
                 yield* recordPlanEvidence(settledText)
-                // An approved-plan orchestrator turn may carry a plan amendment.
-                // Apply it (reconciled, no re-approval) and, if it landed, scrub
-                // the raw ````html block from the reply the operator reads.
-                const amendmentOutcome = yield* applyOrchestratorAmendment(
-                  settledText
-                )
-                if (amendmentOutcome.status === "applied") {
-                  next = {
-                    ...next,
-                    parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
-                      if (part._tag !== "Text") return [part]
-                      const stripped = stripOrchestratorAmendment(part.text)
-                      return stripped.length === 0 ? [] : [{ ...part, text: stripped }]
-                    })
-                  }
-                } else {
-                  const feedback = orchestratorAmendmentOutcomeText(
-                    amendmentOutcome
-                  )
-                  if (feedback !== null) {
-                    liveAmendmentFeedback = feedback
-                    const feedbackPart: ContentPart = {
-                      _tag: "Text",
-                      text: feedback
-                    }
-                    next = {
-                      ...next,
-                      parts: [...next.parts, feedbackPart]
-                    }
-                  }
-                }
               }
               if (
                 (event._tag === "Done" || event._tag === "Failed") &&
@@ -2081,15 +1608,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
               }
-              // Amendment diagnostics are part of the canonical assistant
-              // message, so live consumers must receive the same appended text
-              // before the terminal event makes them stop reading the stream.
-              if (liveAmendmentFeedback !== null) {
-                yield* out.offer({
-                  _tag: "Assistant",
-                  text: liveAmendmentFeedback
-                })
-              }
               yield* out.offer(event)
               // After the tool card lands, reconcile plan progress off a successful edit.
               if (event._tag === "ToolEnd" && event.status === "success") {
@@ -2138,7 +1656,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // Re-read the live mode each call so an in-run change (e.g. a plan
               // approval restoring the exec mode) takes effect on this same turn.
               const liveMode = (yield* Ref.get(modes)).get(chatId) ?? mode
-              if (verdict(liveMode, allow, req, planAutoRun, orchestrating) === "allow") {
+              if (verdict(liveMode, allow, req, planAutoRun, false) === "allow") {
                 return "allow" as const
               }
               const gn = yield* nextId
@@ -2182,29 +1700,25 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           ): Effect.Effect<PlanDecision> =>
             Effect.gen(function* () {
               let basePlanId: string | undefined
-              let previousStages: ReadonlyArray<PlanPrdStage> = []
+              let automaticAmendment = false
               if (worktreePath.length > 0) {
                 const current = yield* PlanStore.readDocument(
                   worktreePath,
                   sessionId,
                   chatId
                 ).pipe(Effect.provide(env))
+                automaticAmendment =
+                  current !== null &&
+                  current.producingChatId === chatId &&
+                  ["approved", "executing", "needs-verification", "done"].includes(current.status)
                 basePlanId =
                   current !== null &&
                   current.producingChatId === chatId &&
-                  current.status !== "done" &&
                   current.status !== "rejected"
                     ? current.id
                     : undefined
-                if (basePlanId !== undefined && current !== null) {
-                  previousStages = current.plan.stages
-                }
               }
-              const compiled =
-                orchestrating && workerRouting !== null
-                  ? compileOrchestrationPlan(plan, workerRouting, { previousStages })
-                  : null
-              const proposedPlan = compiled?.valid === true ? compiled.plan : plan
+              const proposedPlan = plan
               const approvalPlanId = basePlanId ?? randomUUID()
               const revisingCanonicalPlan = basePlanId !== undefined
               // The Plan-shaped card emitted to the transcript; replaced by the
@@ -2219,6 +1733,52 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 updatedAt: new Date().toISOString(),
                 updatedBy: "agent"
               })
+              // Once the operator has approved this agent's canonical plan, a
+              // complete re-emission is an amendment, not a second proposal.
+              // Reconcile it immediately and keep execution with the producing
+              // agent; the first approval is the only approval gate.
+              if (automaticAmendment && basePlanId !== undefined && worktreePath.length > 0) {
+                const promotion = yield* PlanStore.promote(
+                  sessionId,
+                  worktreePath,
+                  chatId,
+                  proposedPlan,
+                  { id: approvalPlanId, basePlanId, status: "executing" }
+                ).pipe(Effect.provide(env), Effect.either)
+                if (promotion._tag === "Left") {
+                  yield* emit({ _tag: "Failed", message: promotion.left.message })
+                  return PlanDecision.Reject()
+                }
+                canonicalPlan = promotion.right.plan
+                if (submittedBlock !== undefined) {
+                  yield* turnMutation.withPermits(1)(
+                    Effect.gen(function* () {
+                      const current = yield* Ref.get(acc)
+                      const next = {
+                        ...current,
+                        parts: current.parts.flatMap((part): ReadonlyArray<ContentPart> => {
+                          if (part._tag !== "Text") return [part]
+                          const text = stripPlanJsonBlock(part.text, submittedBlock)
+                          return text.length === 0 ? [] : [{ ...part, text }]
+                        })
+                      }
+                      yield* Ref.set(acc, next)
+                      yield* TranscriptStore.patchLast(chatId, () => next).pipe(
+                        Effect.provide(env),
+                        Effect.ignore
+                      )
+                    })
+                  )
+                }
+                yield* emit({ _tag: "PlanUpdated", plan: canonicalPlan })
+                return PlanDecision.Approve({
+                  mode: modeOnApproval({
+                    prior: mode === "plan" ? undefined : mode,
+                    configDefault: execDefault
+                  }),
+                  plan: canonicalPlan
+                })
+              }
               // Register the approval waiter BEFORE PlanStore makes the proposal
               // visible to file watchers. The announce effect then promotes and
               // publishes the exact canonical projection while the gate is live.
@@ -2291,7 +1851,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // all it takes — `Plan.watch` streams the canonical doc to the
           // renderer. Never downgrade a real plan the operator already owns: only
           // fill an empty slot, or refresh an existing AGENT draft (amend, so the
-          // revision advances as the orchestrator iterates). A user-authored draft
+          // revision advances as the selected agent iterates). A user-authored draft
           // is the operator actively editing — an agent draft must not reconcile
           // over it and silently discard their content. Best-effort — a plan write
           // must never fail the turn.
@@ -2392,10 +1952,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               applyPlan,
               markPlanExecution: (planId) => Ref.set(executingPlanId, planId),
               steer,
-              subagents: () =>
-                Ref.get(activeSubagents).pipe(
-                  Effect.map((subagents) => [...subagents.values()])
-                ),
               clearReplyWaiter: (waiter) =>
                 Ref.update(steeredReply, (current) =>
                   current === waiter ? null : current
@@ -2837,8 +2393,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       answerQuestion,
       setMode,
       steer,
-      planParticipants,
-      steerPlanParticipant,
       stop,
       commentPlanStep,
       revisePlan,

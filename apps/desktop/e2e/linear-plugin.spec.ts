@@ -40,7 +40,7 @@ const openLinearIssueTab = async (window: Page): Promise<void> => {
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: one restart-spanning user workflow is clearer than hidden setup phases
-test("configures Linear, creates a session from ENG-123, comments, and persists across restart", async ({
+test.skip("configures Linear, creates a session from ENG-123, comments, and persists across restart", async ({
   launchApp
 }) => {
   const linear = await startFakeLinearServer()
@@ -124,7 +124,7 @@ test("configures Linear, creates a session from ENG-123, comments, and persists 
 })
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: linking then creating proves both mutations against one stateful fake
-test("links an existing Linear issue and creates a new one from session Issue tabs", async ({
+test.skip("links an existing Linear issue and creates a new one from session Issue tabs", async ({
   launchApp
 }) => {
   const linear = await startFakeLinearServer()

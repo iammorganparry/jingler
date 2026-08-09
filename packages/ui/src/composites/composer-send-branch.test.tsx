@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react"
+import type { HarnessCapability } from "@jingler/core"
 import { afterEach, describe, expect, it } from "vitest"
 import { Composer } from "./composer.js"
 
@@ -17,6 +18,29 @@ afterEach(cleanup)
 /** Bars the glyph is filling, i.e. rungs on the provider's reasoning ladder. */
 const filledBars = (chip: HTMLElement) =>
   [...chip.querySelectorAll("rect")].filter((r) => r.getAttribute("opacity") === "1").length
+
+const capabilities: ReadonlyArray<HarnessCapability> = [
+  {
+    cli: "claude",
+    label: "Claude Code",
+    modes: [{ id: "accept-edits", label: "Accept edits", kind: "execute" }],
+    models: [{
+      id: "opus",
+      label: "Opus",
+      reasoning: ["low", "medium", "high", "max"].map((id) => ({ id: id as "low" | "medium" | "high" | "max", label: id }))
+    }]
+  },
+  {
+    cli: "codex",
+    label: "Codex",
+    modes: [{ id: "accept-edits", label: "Workspace write", kind: "execute" }],
+    models: [{
+      id: "sol",
+      label: "Sol",
+      reasoning: ["minimal", "low", "medium", "high", "xhigh"].map((id) => ({ id: id as "minimal" | "low" | "medium" | "high" | "xhigh", label: id }))
+    }]
+  }
+]
 
 describe("Composer send row", () => {
   it("puts the branch on the lower row, after send and to the right of the repo", () => {
@@ -41,14 +65,14 @@ describe("Composer send row", () => {
   })
 
   it("fills one bar per rung of the harness's own reasoning ladder", () => {
-    // Claude's ladder is low · medium · high · xhigh · max, so "high" is 3 of 5.
-    const { rerender } = render(<Composer cli="claude" reasoningEffort="high" />)
+    // Claude's native ladder makes "high" the third of four strengths.
+    const { rerender } = render(<Composer cli="claude" model="opus" capabilities={capabilities} reasoningEffort="high" />)
     const chip = () => screen.getByRole("button", { name: "Thinking strength" })
     expect(filledBars(chip())).toBe(3)
 
     // Codex leads with "minimal", so the same word sits a rung higher there —
     // the glyph follows the list the operator is picking from, not a fixed scale.
-    rerender(<Composer cli="codex" reasoningEffort="high" />)
+    rerender(<Composer cli="codex" model="sol" capabilities={capabilities} reasoningEffort="high" />)
     expect(filledBars(chip())).toBe(4)
   })
 

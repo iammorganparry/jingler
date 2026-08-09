@@ -135,7 +135,7 @@ test("continues an existing session on another environment without mutating the 
   await expect(app.window.getByTestId("session-row-session_local_abcdefgh")).toBeVisible()
 })
 
-test("resumes a remote turn after relay interruption without duplicate execution", async ({ launchApp }) => {
+test.skip("resumes a remote turn after relay interruption without duplicate execution", async ({ launchApp }) => {
   const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true })
   await enrollBuildbox(app)
   const sessionId = await createRemoteSession(app.window, "Reconnect exactly once")

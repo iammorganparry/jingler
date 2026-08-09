@@ -111,6 +111,24 @@ export const showSessions = async (
 export const appShell = (window: Page) =>
   window.getByRole("button", { name: "Search sessions and actions" })
 
+/** Create a normal workspace through the current project-scoped composer. */
+export const createWorkspace = async (
+  window: Page,
+  title: string,
+  checkout: "worktree" | "direct" = "worktree"
+): Promise<void> => {
+  await window.getByTestId("new-workspace").click()
+  await expect(window.getByRole("heading", { name: "New workspace" })).toBeVisible()
+  if (checkout === "direct") {
+    await window.getByRole("combobox", { name: "Checkout" }).click()
+    await window.getByRole("option", { name: "Local checkout" }).click()
+  }
+  await window.getByRole("textbox", { name: "Workspace name" }).fill(title)
+  const create = window.getByRole("button", { name: "Create workspace" })
+  await expect(create).toBeEnabled()
+  await create.click()
+}
+
 /**
  * The SIDEBAR row for a session, found by its title.
  *
@@ -354,6 +372,7 @@ const fs = require("node:fs")
 const models = [
   { id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", isDefault: true },
   { id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra" },
+  { id: "gpt-5.6-luna", displayName: "GPT-5.6 Luna" },
   { id: "gpt-5.5", displayName: "GPT-5.5" }
 ]
 const send = (message) =>

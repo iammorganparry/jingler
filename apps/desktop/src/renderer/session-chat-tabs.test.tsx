@@ -128,11 +128,25 @@ describe("SessionChatTabs file tabs", () => {
   it("renders open files in the shared chat tab row", () => {
     renderTabs()
 
+    expect(screen.getByRole("button", { name: "Collapse chats group" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Collapse files group" })).toBeTruthy()
     expect(screen.getByTestId("chat-tab-chat-1")).toBeTruthy()
     expect(screen.getByTestId("file-tab-src/app.ts")).toBeTruthy()
     expect(screen.getByTestId("file-tab-src/other.ts")).toBeTruthy()
     expect(screen.getByRole("button", { name: "src/app.ts" }).getAttribute("aria-current"))
       .toBe("page")
+  })
+
+  it("collapses file tabs without changing the active file", () => {
+    renderTabs()
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse files group" }))
+
+    expect(screen.queryByTestId("file-tab-src/app.ts")).toBeNull()
+    const files = mocks.files
+    if (files === null) throw new Error("Expected the file browser fixture")
+    expect(files.open).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Expand files group" })).toBeTruthy()
   })
 
   it("selects and closes file tabs through the persistent browser actor", () => {

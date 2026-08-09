@@ -1,6 +1,7 @@
 import {
   AdversarialReview,
   HarnessBilling,
+  HarnessCapability,
   ArchiveReason,
   AssetFileEntry,
   AssetPayload,
@@ -34,7 +35,6 @@ import {
   ContextSnapshot,
   Message,
   ModelOption,
-  OpencodeProviderInfo,
   AuthSessionInfo,
   AuthSessionRequest,
   LoadedPlugin,
@@ -57,7 +57,6 @@ import {
   PlanDocument,
   PlanPrd,
   PlanMentionDelivery,
-  PlanParticipant,
   PlanTemplateConfig,
   PrFileChange,
   McpInjectionTarget,
@@ -67,9 +66,6 @@ import {
   MemoryPrivilege,
   OpenConnectorConfig,
   OpenConnectorDefaults,
-  OrchestratorPreference,
-  WorkerActivity,
-  WorkerRoutingConfig,
   ConnectorProvider,
   ConnectorProviderDetail,
   ConnectorConnection,
@@ -82,6 +78,7 @@ import {
   PrSummary,
   ProviderConfig,
   ProviderModels,
+  Project,
   PublishCheckpoint,
   PullRequest,
   QuestionAnswer,
@@ -510,6 +507,54 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Schema.NullOr(WorkspaceConfig)
   }),
 
+  /** Durable repositories registered independently of workspace creation. */
+  Rpc.make("Projects.list", {
+    success: Schema.Array(Project),
+    error: GitError,
+    payload: { environmentId: Schema.optional(Schema.String) }
+  }),
+
+  Rpc.make("Projects.register", {
+    success: Project,
+    error: GitError,
+    payload: {
+      path: Schema.String,
+      name: Schema.optional(Schema.String),
+      environmentId: Schema.optional(Schema.String)
+    }
+  }),
+
+  Rpc.make("Projects.browse", {
+    success: Schema.NullOr(Schema.String)
+  }),
+
+  Rpc.make("Projects.createDirectory", {
+    success: Project,
+    error: GitError,
+    payload: {
+      path: Schema.String,
+      name: Schema.optional(Schema.String),
+      environmentId: Schema.optional(Schema.String)
+    }
+  }),
+
+  Rpc.make("Projects.clone", {
+    success: Project,
+    error: GitError,
+    payload: {
+      url: Schema.String,
+      destination: Schema.String,
+      name: Schema.optional(Schema.String),
+      environmentId: Schema.optional(Schema.String)
+    }
+  }),
+
+  /** Removes only the registration; repositories and workspaces remain intact. */
+  Rpc.make("Projects.remove", {
+    error: GitError,
+    payload: { id: Schema.String, environmentId: Schema.optional(Schema.String) }
+  }),
+
   /** Scan the configured repos directory for git repositories. */
   Rpc.make("Workspace.repos", {
     success: Schema.Array(Repo),
@@ -725,17 +770,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
-  /** Toggle Jingler orchestration for one chat without affecting its siblings. */
-  Rpc.make("Sessions.setOrchestratorEnabled", {
-    success: Session,
-    error: GitError,
-    payload: {
-      sessionId: Schema.String,
-      chatId: Schema.String,
-      orchestratorEnabled: Schema.Boolean
-    }
-  }),
-
   /**
    * A newest-anchored window of the transcript.
    *
@@ -851,7 +885,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       }),
       Schema.Struct({
         sessionId: Schema.String,
-        cli: Schema.Literal("codex", "opencode"),
+        cli: Schema.Literal("codex"),
         reasoning: Schema.optional(CodexReasoningSetting)
       })
     )
@@ -913,41 +947,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * The stream begins with a reset snapshot and then carries lifecycle and
    * normalized harness activity for the producing chat that owns execution.
    */
-  Rpc.make("Agent.watchWorkers", {
-    success: WorkerActivity,
-    stream: true,
-    payload: {
-      sessionId: Schema.String,
-      planId: Schema.String,
-      chatId: Schema.String
-    }
-  }),
-
-  /** Observe the latest worker activity for a session, independent of selection. */
-  Rpc.make("Agent.watchSessionWorkers", {
-    success: WorkerActivity,
-    stream: true,
-    payload: { sessionId: Schema.String }
-  }),
-
-  /** Stop one provider-neutral plan worker without interrupting its siblings. */
-  Rpc.make("Agent.stopWorker", {
-    payload: {
-      sessionId: Schema.String,
-      planId: Schema.String,
-      agentId: Schema.String
-    }
-  }),
-
-  /** Retry one settled worker from its latest durable checkpoint. */
-  Rpc.make("Agent.retryWorker", {
-    payload: {
-      sessionId: Schema.String,
-      planId: Schema.String,
-      agentId: Schema.String
-    }
-  }),
-
   /**
    * Change a session's harness and/or model (used on the next turn — a turn
    * already streaming finishes on the old one).
@@ -1189,30 +1188,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Schema.Array(ProviderModels)
   }),
 
-  /**
-   * The providers opencode resolves for the user, and where each credential came
-   * from — Settings · Providers. Live from the binary, because the answer is a
-   * property of the USER's setup (env vars, `opencode auth login`,
-   * `opencode.json`), not of Jingler.
-   */
-  Rpc.make("Opencode.listProviders", {
-    success: Schema.Array(OpencodeProviderInfo),
-    error: ConfigError
-  }),
-
-  /**
-   * Store an API key for one opencode provider (e.g. `openrouter`).
-   *
-   * Writes to opencode's OWN credential file, exactly as `opencode auth login`
-   * would — NOT to Jingler's `SecretStore`, which stays reserved for the
-   * Jingler bearer token. A key added here therefore works in a bare `opencode`
-   * shell too. Succeeds silently into `false` rather than erroring on a bad key:
-   * opencode doesn't validate on write.
-   */
-  Rpc.make("Opencode.setAuth", {
-    success: Schema.Boolean,
-    error: ConfigError,
-    payload: { providerId: Schema.String, key: Schema.String }
+  Rpc.make("Models.capabilities", {
+    success: Schema.Array(HarnessCapability)
   }),
 
   /** Provider usage / rate-limit windows for the Usage & limits modal. */
@@ -1402,18 +1379,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Persist whether the agentic orchestrator flow is on — the "Jingler mode"
-   * composer toggle. Off drops the session back to driving the source harness
-   * directly. Returns the whole config so the renderer can patch its cache
-   * without a refetch.
-   */
-  Rpc.make("Config.setOrchestratorEnabled", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: Schema.Struct({ orchestratorEnabled: Schema.Boolean })
-  }),
-
-  /**
    * Persist the conversation + code text-size multiplier. Returns the whole
    * config so the renderer can patch its cache without a refetch.
    */
@@ -1437,20 +1402,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: Schema.Struct({ cli: CliKind })
-  }),
-
-  /** Persist the harness/model pair that plans every newly-created session. */
-  Rpc.make("Config.setOrchestrator", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: OrchestratorPreference
-  }),
-
-  /** Persist concrete implementation-worker routes by plan complexity. */
-  Rpc.make("Config.setWorkerRouting", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: WorkerRoutingConfig
   }),
 
   /**
@@ -1568,15 +1519,6 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       baseRevision: Schema.Number,
       plan: PlanPrd,
       author: Schema.Literal("user", "agent")
-    }
-  }),
-
-  /** List only participants whose exact live route can still own a plan reply. */
-  Rpc.make("Plan.participants", {
-    success: Schema.Array(PlanParticipant),
-    payload: {
-      sessionId: Schema.String,
-      planId: Schema.String
     }
   }),
 

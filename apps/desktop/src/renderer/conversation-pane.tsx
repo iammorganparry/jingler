@@ -7,8 +7,13 @@
  */
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import type { Environment, ReasoningSetting, Session } from "@jingler/core"
-import { agentChildren, agentPath, clampFontScale } from "@jingler/core"
+import type { Environment, Session } from "@jingler/core"
+import {
+  agentChildren,
+  agentPath,
+  clampFontScale,
+  resolveHarnessSelection
+} from "@jingler/core"
 import {
   AgentTabBar,
   AgentView,
@@ -36,7 +41,6 @@ import {
   serializeCodeReferences
 } from "./code-reference.js"
 import { useConversation } from "./use-conversation.js"
-import { useOrchestrationAgents } from "./use-orchestration-agents.js"
 import { usePlanDocument } from "./use-plan-document.js"
 import {
   runWithDirectPlanThreadDispatch,
@@ -57,20 +61,6 @@ import {
   rpcFailureReason,
   rpcFailureTag
 } from "./rpc-failure.js"
-
-const workerTabId = (planId: string, agentId: string): string =>
-  `worker:${planId.length}:${planId}${agentId}`
-
-const workerReasoningLabel = (
-  reasoning: ReasoningSetting | undefined
-): string =>
-  reasoning === undefined
-    ? "provider default reasoning"
-    : reasoning.enabled === false
-      ? "thinking off"
-      : reasoning.effort === undefined
-        ? "thinking on · provider default effort"
-        : `${reasoning.effort} reasoning`
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
 
@@ -198,11 +188,6 @@ export function ConversationPane({
     }
   }, [convo.planDraftPresentationNonce, onPlanDraftAvailable, session.id])
   const canonicalPlan = usePlanDocument(session.id)
-  const orchestration = useOrchestrationAgents(
-    session.id,
-    activeChat.id,
-    canonicalPlan.document
-  )
   const initialThreadDispatches = useRef(new Set<string>())
   // A direct reply RPC persists its pending message before it finishes routing.
   // Plan.watch can publish that intermediate revision, so tell the recovery
@@ -304,21 +289,18 @@ export function ConversationPane({
    * which means "leave the new chat on whatever it starts with".
    */
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
-  // The agentic orchestrator flow ("Jingler mode"). The persisted choice belongs
-  // to this chat; the workspace setting is only the backward-compatible default.
-  const jinglerMode =
-    activeChat.orchestratorEnabled ??
-    providersQuery.data?.orchestratorEnabled ??
-    true
-  const jinglerModeMutation = useMutation({
-    mutationFn: (enabled: boolean) =>
-      rpc.sessionsSetOrchestratorEnabled(session.id, activeChat.id, enabled),
-    onSuccess: publishSessionUpdate
+  const capabilitiesQuery = useQuery({
+    queryKey: ["model-capabilities"],
+    queryFn: () => rpc.modelsCapabilities()
   })
-  const toggleJinglerMode = (enabled: boolean) => {
-    jinglerModeMutation.reset()
-    jinglerModeMutation.mutate(enabled)
-  }
+  const harnessSelection = resolveHarnessSelection(capabilitiesQuery.data ?? [], {
+    cli: convo.cli,
+    model: convo.model,
+    mode: convo.mode,
+    ...(convo.reasoning?.effort === undefined
+      ? {}
+      : { reasoningEffort: convo.reasoning.effort })
+  })
   // Conversation text-size multiplier, scoped to the transcript wrapper below via
   // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
   // on purpose: the shared `.sb-md` calc() rules must only scale inside the
@@ -558,22 +540,9 @@ export function ConversationPane({
   // background auto-review), so it is appended here rather than living in the list.
   const subagentsAndReviewer =
     convo.reviewer ? [...convo.subagents, convo.reviewer] : convo.subagents
-  const workerPlanId = orchestration.planId
-  const workerTabs =
-    workerPlanId === null
-      ? []
-      : orchestration.agents.map((agent) => ({
-          id: workerTabId(workerPlanId, agent.id),
-          agent
-        }))
   const activeSubagent =
     subagentsAndReviewer.find((agent) => agent.id === selectedAgent) ?? null
-  const activeWorker =
-    workerTabs.find((worker) => worker.id === selectedAgent)?.agent ?? null
-  const activeAgent =
-    activeSubagent !== null || activeWorker !== null
-      ? selectedAgent
-      : MAIN_AGENT
+  const activeAgent = activeSubagent !== null ? selectedAgent : MAIN_AGENT
 
   // Sub-agents nest, so the bar shows one level at a time: `level` is the agent
   // whose children are listed (MAIN_AGENT = the top level). Derived the same way
@@ -599,20 +568,6 @@ export function ConversationPane({
         action: agent.status === "working" ? "stop" : "close"
       })
     ),
-    ...(effectiveLevel === MAIN_AGENT
-      ? workerTabs.map(
-          ({ id, agent }): AgentTabItem => ({
-            id,
-            name: agent.id,
-            description: `${agent.harness} · ${agent.model} · ${workerReasoningLabel(agent.reasoning)} · ${agent.stageIds.length} ${
-              agent.stageIds.length === 1 ? "stage" : "stages"
-            } · attempt ${agent.attempt}`,
-            status: agent.status,
-            hasChildren: false,
-            ...(agent.status === "running" ? { action: "stop" } : {})
-          })
-        )
-      : []),
     ...(effectiveLevel === MAIN_AGENT && convo.reviewer !== null
       ? [
           {
@@ -630,15 +585,10 @@ export function ConversationPane({
       ? []
       : agentPath(convo.subagents, effectiveLevel).map((s) => ({ id: s.id, name: s.name }))
 
-  const activeAgentTranscript =
-    activeSubagent !== null
-      ? {
-          message: activeSubagent.message,
-          cli: activeSubagent.cli ?? convo.cli
-        }
-      : activeWorker !== null
-        ? { message: activeWorker.message, cli: activeWorker.harness }
-        : null
+  const activeAgentTranscript = activeSubagent === null ? null : {
+    message: activeSubagent.message,
+    cli: activeSubagent.cli ?? convo.cli
+  }
 
   // Drilling into an agent shows its children AND its own transcript; a crumb
   // jumps the level back up. Both keep the two states in step.
@@ -712,13 +662,6 @@ export function ConversationPane({
         )
       }}
       onRetryDocument={canonicalPlan.retry}
-      onStopWorker={(agentId) => {
-        if (planId) void rpc.agentStopWorker(session.id, planId, agentId)
-      }}
-      onRetryWorker={(agentId) => {
-        if (planId) void rpc.agentRetryWorker(session.id, planId, agentId)
-      }}
-      participants={orchestration.participants}
       onReplyThread={async (annotationId, body, mentionedParticipantIds) => {
         const document = canonicalPlan.document
         if (document === null) return
@@ -821,15 +764,9 @@ export function ConversationPane({
           onDrill={goToAgent}
           onNavigate={(id) => (id === MAIN_AGENT ? goToMain() : goToAgent(id))}
           onStop={(id) => {
-            const worker = workerTabs.find((candidate) => candidate.id === id)?.agent
-            if (worker !== undefined && orchestration.planId !== null) {
-              void rpc.agentStopWorker(session.id, orchestration.planId, worker.id)
-              return
-            }
             convo.stopSubagent(id)
           }}
           onClose={(id) => {
-            if (workerTabs.some((worker) => worker.id === id)) return
             // Back to Main FIRST. Both the transcript being read and the level
             // being browsed can point at the tab about to vanish (or at one of
             // its children, which go with it), and a pane left pointing at a
@@ -838,26 +775,6 @@ export function ConversationPane({
             convo.closeSubagent(id)
           }}
         />
-      )}
-      {jinglerModeMutation.error !== null && (
-        <div
-          role="alert"
-          className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
-        >
-          <span className="min-w-0 flex-1">
-            {jinglerModeMutation.error instanceof Error
-              ? jinglerModeMutation.error.message
-              : "Could not update Jingler mode."}
-          </span>
-          <button
-            type="button"
-            aria-label="Dismiss Jingler mode error"
-            onClick={() => jinglerModeMutation.reset()}
-            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            ×
-          </button>
-        </div>
       )}
       {continuationEnvironmentId !== null && (
         <div
@@ -939,8 +856,8 @@ export function ConversationPane({
           hasMoreHistory={convo.hasMoreHistory}
           loadingHistory={convo.loadingHistory}
           onLoadEarlier={convo.loadOlder}
-          mode={convo.mode}
-          cli={convo.cli}
+          mode={harnessSelection.mode}
+          cli={harnessSelection.cli}
           skills={convo.skills}
           files={convo.files}
           paused={convo.paused}
@@ -977,14 +894,15 @@ export function ConversationPane({
               ? `Hand off — run this in a new chat on ${handoffModel}`
               : "Hand off — run this in a new chat"
           }
-          model={convo.model}
+          model={harnessSelection.model}
           catalog={convo.catalog}
+          capabilities={capabilitiesQuery.data ?? []}
           onSetHarness={convo.setHarness}
           onSend={sendPrompt}
           onStop={convo.stop}
           onDecideGate={convo.decideGate}
           onSetMode={convo.setMode}
-          reasoningEffort={convo.reasoning?.effort}
+          reasoningEffort={harnessSelection.reasoningEffort}
           thinkingEnabled={convo.reasoning?.enabled}
           onSetReasoning={convo.setReasoning}
           question={convo.question}
@@ -1029,10 +947,7 @@ export function ConversationPane({
           // transcript is on screen — only the focused pane still has to be checked.
           autoFocusComposer={paneFocused}
           focusKey={activeChat.id}
-          orchestrator={activeChat.role === "orchestrator"}
-          jinglerMode={jinglerMode}
-          jinglerModePending={jinglerModeMutation.isPending}
-          onToggleJinglerMode={toggleJinglerMode}
+          useJinglerTools={providersQuery.data?.openConnector?.preferJinglerTools ?? true}
           followAgent={fileBrowser.followEnabled}
           onToggleFollowAgent={toggleFollowAgent}
           archived={

@@ -72,60 +72,33 @@ describe("ChatTabBar closed chats", () => {
 
     expect(handlers.onReopenChat).toHaveBeenCalledWith("chat-1")
   })
-})
 
-describe("AgentTabBar worker lifecycles", () => {
-  it("renders each worker status with the established theme-token treatment", () => {
-    const { container } = render(
-      <AgentTabBar
-        agents={[
-          item("queued-agent", "queued"),
-          item("running-agent", "running", "stop"),
-          item("blocked-agent", "blocked"),
-          item("failed-agent", "failed"),
-          item("interrupted-agent", "interrupted"),
-          item("completed-agent", "completed")
-        ]}
-        trail={[]}
-        active={MAIN_AGENT}
-        {...callbacks()}
-      />
-    )
-
-    const tone = (status: VisibleAgentStatus): string =>
-      container
-        .querySelector(`[data-agent-status="${status}"] .inline-block`)
-        ?.getAttribute("class") ?? ""
-
-    expect(tone("queued")).toContain("bg-dim")
-    expect(tone("running")).toContain("bg-yellow")
-    expect(tone("running")).toContain("animate-pulse-dot")
-    expect(tone("blocked")).toContain("bg-yellow")
-    expect(tone("blocked")).not.toContain("animate-pulse-dot")
-    expect(tone("failed")).toContain("bg-red")
-    expect(tone("interrupted")).toContain("bg-dim")
-    expect(tone("completed")).toContain("bg-green")
-  })
-
-  it("stops only running workers and gives replay-backed settled workers no close action", () => {
-    const handlers = callbacks()
+  it("collapses chats and files into independently labelled groups", () => {
     render(
-      <AgentTabBar
-        agents={[
-          item("worker-auth", "running", "stop"),
-          item("worker-release", "completed")
+      <ChatTabBar
+        chats={[
+          { id: "chat-1", title: "Main" },
+          { id: "chat-2", title: "Review" }
         ]}
-        trail={[]}
-        active="worker-auth"
-        {...handlers}
+        activeChatId=""
+        fileSlot={[
+          <button key="one">app.ts</button>,
+          <button key="two">app.test.ts</button>
+        ]}
+        filesActive
+        {...chatCallbacks()}
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop worker-auth" }))
-    expect(handlers.onStop).toHaveBeenCalledWith("worker-auth")
-    expect(handlers.onClose).not.toHaveBeenCalled()
-    expect(screen.queryByRole("button", { name: "Close worker-release" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Stop worker-release" })).toBeNull()
+    expect(screen.getByTitle("2 open chats")).toBeTruthy()
+    expect(screen.getByTitle("2 open files")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Collapse chats group" }))
+    expect(screen.queryByRole("button", { name: "Main" })).toBeNull()
+    expect(screen.getByRole("button", { name: "app.ts" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Collapse files group" }))
+    expect(screen.queryByRole("button", { name: "app.ts" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Expand chats group" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Expand files group" })).toBeTruthy()
   })
 })
 

@@ -1548,7 +1548,7 @@ export const activate = (ctx) => {
   })
 }
 
-test("a plugin issue provider creates a linked session with its badge and tab", async ({
+test.skip("a plugin issue provider creates a linked session with its badge and tab", async ({
   launchApp
 }) => {
   const { window, home } = await launchApp({

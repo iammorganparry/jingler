@@ -79,4 +79,25 @@ describe("ModelsService", () => {
       ])
     })
   })
+
+  describe("capabilities", () => {
+    it("returns only Claude and Codex with provider-specific modes and reasoning", async () => {
+      const capabilities = await run(
+        ModelsService.capabilities([
+          cli("cursor", true),
+          cli("opencode", true),
+          cli("codex", true)
+        ])
+      )
+
+      expect(capabilities.map((provider) => provider.cli)).toStrictEqual(["codex"])
+      expect(capabilities[0]?.modes.map((mode) => mode.id)).toStrictEqual([
+        "ask",
+        "accept-edits",
+        "auto",
+        "plan"
+      ])
+      expect(capabilities[0]?.models[0]?.reasoning?.map((option) => option.id)).toContain("xhigh")
+    })
+  })
 })

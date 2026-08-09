@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Jingler is a desktop **agent harness**: an Electron app that runs local coding agents (`claude`, `codex`, `cursor`) as parallel **sessions**, each wired to a repo, a git **worktree**, a branch, and a PR. A separate Hono/Postgres **auth backend** (`apps/server`) gates the app behind sign-in. It's a Turborepo monorepo managed with pnpm.
+Jingler is a desktop **agent harness**: an Electron app that registers durable projects and runs local coding agents (`claude`, `codex`) in parallel **workspaces** (persisted as sessions), each wired to a project checkout or isolated git **worktree**, a branch, and a PR. A separate Hono/Postgres **auth backend** (`apps/server`) gates the app behind sign-in. It's a Turborepo monorepo managed with pnpm.
 
 ## Commands
 
@@ -171,7 +171,19 @@ New plugin: `node scripts/create-jingler-plugin.mjs my-plugin`.
 
 ### Persistence
 
-Desktop state is **JSON files under `~/jingler`** (no ORM) — see `apps/desktop/src/main/app-paths.ts`: `config.json`, `sessions.json`, `worktrees/`, `transcripts/`, `themes/` (user colour themes, watched for live reload), `.jingler/` (plans), `auth.enc` (the bearer token via `SecretStore`). **`JINGLER_HOME` overrides the root** — the e2e suite points it at a throwaway dir so tests never touch the developer's real `~/jingler`. The auth server's own state lives in **Postgres** (Drizzle schema in `apps/server/src/db/schema.ts`), separate from the desktop's JSON store.
+Desktop state is **JSON files under `~/jingler`** (no ORM) — see `apps/desktop/src/main/app-paths.ts`: `config.json`, `projects.json` (durable registered repositories), `sessions.json` (project workspaces), `worktrees/`, `transcripts/`, `themes/` (user colour themes, watched for live reload), `.jingler/` (plans), `auth.enc` (the bearer token via `SecretStore`). **`JINGLER_HOME` overrides the root** — the e2e suite points it at a throwaway dir so tests never touch the developer's real `~/jingler`. The auth server's own state lives in **Postgres** (Drizzle schema in `apps/server/src/db/schema.ts`), separate from the desktop's JSON store.
+
+Project creation and workspace creation are separate product actions. Registering a project never
+creates a session. A workspace references a stable project id and chooses direct checkout or an
+isolated worktree. Legacy sessions are backfilled to projects without moving their worktree or
+changing transcript identity.
+
+The composer supports Claude and Codex only. Its model, permission mode, and reasoning controls
+are derived from the selected harness capability catalogue. Enhanced Plan belongs to the selected
+agent: that same harness executes the approved plan, records progress, and submits complete
+revisions. There is no Jingler orchestrator or worker assignment layer. With **Use Jingler tools**
+enabled, Enhanced Plan replaces the provider-native plan surface; disabling it leaves native tools
+and native planning available to the provider.
 
 Persistence schemas are migration boundaries. `WorkspaceConfig` additions stay
 optional and read-modify-write helpers must preserve every unrelated section.

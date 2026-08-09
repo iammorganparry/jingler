@@ -31,8 +31,7 @@ const stage: PlanPrdStage = {
       evidence: null
     }
   ],
-  dependencies: [],
-  executionStatus: "running"
+  dependencies: []
 }
 
 const document: PlanDocument = {
@@ -55,7 +54,7 @@ describe("plan task progress protocol", () => {
   it("embeds exact completed and in-progress checkpoints in a restart prompt", () => {
     const prompt = resumeCanonicalPlanPrompt(document)
     expect(prompt).toContain(
-      `Stage 01 fingerprint=${planTaskProgressFingerprint(stage)} execution=running`
+      `Stage 01 fingerprint=${planTaskProgressFingerprint(stage)}`
     )
     expect(prompt).toContain("1. [completed] 01.task.1 — Write the checkpoint")
     expect(prompt).toContain("2. [in-progress] 01.task.2 — Resume the plan")

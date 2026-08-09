@@ -12,7 +12,6 @@ import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import type { PlanFileEvidence } from "./plan-doc/plan-file-controls.js"
 import { PlanFileControlsProvider } from "./plan-doc/plan-file-controls.js"
-import { PlanWorkerControlsProvider } from "./plan-doc/plan-worker-controls.js"
 
 const asArray = (value: unknown): ReadonlyArray<unknown> =>
   Array.isArray(value) ? value : []
@@ -195,8 +194,6 @@ export interface PlanEditorProps {
   onSendToAgent?: () => void
   /** Reload the document after a load failure. */
   onRetry?: () => void
-  onStopWorker?: (agentId: string) => void
-  onRetryWorker?: (agentId: string) => void
   /** One-shot stable stage id requested by the composer progress dock. */
   targetStageId?: string | null
   revisionTarget?: { readonly stageId: string | null } | null
@@ -244,8 +241,6 @@ export function PlanEditor({
   onRevise,
   onSendToAgent,
   onRetry,
-  onStopWorker,
-  onRetryWorker,
   targetStageId,
   revisionTarget,
   onTargetStageConsumed,
@@ -358,9 +353,6 @@ export function PlanEditor({
                 knownFiles={knownFiles}
                 open={onOpenFile}
               >
-                <PlanWorkerControlsProvider
-                  controls={{ stop: onStopWorker, retry: onRetryWorker }}
-                >
                   <div className="mx-auto w-full max-w-[760px]">
                     <PlanStepOutline
                       prd={projection}
@@ -373,7 +365,6 @@ export function PlanEditor({
                       revisingStageId={revisionTarget?.stageId}
                     />
                   </div>
-                </PlanWorkerControlsProvider>
               </PlanFileControlsProvider>
             ) : (
               <EmptyPage>{streaming ? "Composing plan…" : "No plan yet."}</EmptyPage>
@@ -413,8 +404,6 @@ export function PlanEditor({
                   setSelectedStepId(stageId)
                   setPage("steps")
                 }}
-                onStopWorker={onStopWorker}
-                onRetryWorker={onRetryWorker}
               />
             ) : (
               <EmptyPage>No workflow yet.</EmptyPage>

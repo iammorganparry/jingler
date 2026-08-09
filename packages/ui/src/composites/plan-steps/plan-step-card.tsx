@@ -6,17 +6,12 @@ import type {
   PlanStepView,
   PlanTask
 } from "@jingler/core"
-import { BookOpen, Check, Circle, MinusCircle, RotateCw, Square, X } from "lucide-react"
+import { BookOpen, Check, Circle, MinusCircle, RotateCw, X } from "lucide-react"
 import { Badge } from "../../components/badge.js"
 import { FileChip } from "../../components/file-chip.js"
 import { StatusDot } from "../../components/status-dot.js"
 import { cn } from "../../lib/cn.js"
 import { usePlanFileControls } from "../plan-doc/plan-file-controls.js"
-import { usePlanWorkerControls } from "../plan-doc/plan-worker-controls.js"
-
-/** Execution states whose owning worker can be halted / re-run from the card. */
-const STOPPABLE: ReadonlySet<PlanStageExecutionStatus> = new Set(["running", "blocked"])
-const RETRYABLE: ReadonlySet<PlanStageExecutionStatus> = new Set(["failed", "interrupted"])
 
 /**
  * Step-based outline card (design screen 04). One digestible card per plan step,
@@ -105,13 +100,8 @@ export function PlanStepCard({ step, active, revising, onSelect, onOpenGuide }: 
   // context (provided around the outline), so chips open the asset and show
   // live +/- while there's uncommitted work — falling back to declared counts.
   const fileControls = usePlanFileControls()
-  const workerControls = usePlanWorkerControls()
   const [filesExpanded, setFilesExpanded] = useState(false)
   const exec = EXECUTION_META[step.executionStatus]
-  const canStop =
-    step.agentId !== null && STOPPABLE.has(step.executionStatus) && workerControls.stop !== undefined
-  const canRetry =
-    step.agentId !== null && RETRYABLE.has(step.executionStatus) && workerControls.retry !== undefined
   const select = () => {
     // A drag that ends inside the card fires a click too; ignore it so
     // selecting text to comment doesn't also select-and-scroll the card.
@@ -193,52 +183,6 @@ export function PlanStepCard({ step, active, revising, onSelect, onOpenGuide }: 
         </button>
       )}
 
-      {/* Worker assignment — who runs this stage, on what route, and its status.
-          Only present once a plan is delegated; a plain plan-mode plan has none. */}
-      {step.agentId !== null && (
-        <div
-          data-plan-assignment-card="true"
-          className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-md border border-hairline bg-surface/40 px-2.5 py-1.5 text-[10.5px] leading-none"
-        >
-          <span className="font-mono font-medium text-text">{step.agentId}</span>
-          {step.worker !== null && <span className="text-muted-foreground">{step.worker}</span>}
-          {step.reasoningEffort !== null && (
-            <span className="text-muted-foreground">Reasoning: {step.reasoningEffort}</span>
-          )}
-          <span className={cn("ml-auto flex items-center gap-1.5 font-medium", exec.text)}>
-            <StatusDot tone={exec.dot} size={6} pulse={exec.pulse} glow={exec.pulse} />
-            {exec.label}
-          </span>
-          {canStop && (
-            <button
-              type="button"
-              aria-label={`Stop worker ${step.agentId}`}
-              title="Stop worker"
-              className="flex flex-none items-center gap-1 rounded border border-line/70 px-1.5 py-0.5 text-red hover:bg-red/10"
-              onClick={(event) => {
-                event.stopPropagation()
-                if (step.agentId !== null) workerControls.stop?.(step.agentId)
-              }}
-            >
-              <Square className="size-3" />
-            </button>
-          )}
-          {canRetry && (
-            <button
-              type="button"
-              aria-label={`Retry worker ${step.agentId}`}
-              title="Retry worker"
-              className="flex flex-none items-center gap-1 rounded border border-line/70 px-1.5 py-0.5 text-blue hover:bg-blue/10"
-              onClick={(event) => {
-                event.stopPropagation()
-                if (step.agentId !== null) workerControls.retry?.(step.agentId)
-              }}
-            >
-              <RotateCw className="size-3" />
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Changes */}
       <CardSection title="Changes" count={step.files.length}>

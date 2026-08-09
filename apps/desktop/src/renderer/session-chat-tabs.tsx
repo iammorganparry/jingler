@@ -138,6 +138,7 @@ export function SessionChatTabs({
       onCloseChat={closeChat}
       onReopenChat={reopenChat}
       fileSlot={fileSlot}
+      filesActive={filesActive}
     />
   )
 }

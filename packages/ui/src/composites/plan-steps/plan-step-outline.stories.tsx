@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { PlanAcceptance, PlanPrd, PlanPrdStage } from "@jingler/core"
+import type { PlanAcceptance, PlanPrd, PlanPrdStage, PlanTaskStatus } from "@jingler/core"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { PlanStepOutline } from "./plan-step-outline.js"
 
@@ -35,7 +35,7 @@ const stage = (s: {
   files: ReadonlyArray<FileSpec>
   acceptance: ReadonlyArray<PlanAcceptance>
   complexity?: PlanPrdStage["complexity"]
-  executionStatus?: PlanPrdStage["executionStatus"]
+  taskStatus?: PlanTaskStatus
   dependencies?: ReadonlyArray<string>
 }): PlanPrdStage => ({
   id: s.id,
@@ -48,7 +48,7 @@ const stage = (s: {
   acceptance: s.acceptance,
   dependencies: s.dependencies ?? [],
   complexity: s.complexity,
-  executionStatus: s.executionStatus
+  tasks: [{ id: `${s.id}.task`, text: s.title, status: s.taskStatus ?? "pending" }]
 })
 
 const prdWith = (stages: ReadonlyArray<PlanPrdStage>): PlanPrd => ({
@@ -79,7 +79,7 @@ const richPrd = prdWith([
       accept("a2", "Files parse out of the data-files block", "passed", "12 assertions green")
     ],
     complexity: "low",
-    executionStatus: "completed"
+    taskStatus: "completed"
   }),
   stage({
     id: "02",
@@ -90,7 +90,7 @@ const richPrd = prdWith([
     files: [{ path: "packages/core/src/plan-execution.ts", change: "M", added: 64, removed: 8 }],
     acceptance: [accept("b1", "Cycles are broken deterministically", "passed", "source order tie-break")],
     complexity: "medium",
-    executionStatus: "completed",
+    taskStatus: "completed",
     dependencies: ["01"]
   }),
   stage({
@@ -108,7 +108,7 @@ const richPrd = prdWith([
       accept("c2", "Completed stages unblock their dependents", "pending")
     ],
     complexity: "high",
-    executionStatus: "running",
+    taskStatus: "in-progress",
     dependencies: ["02"]
   }),
   stage({
@@ -123,18 +123,18 @@ const richPrd = prdWith([
       accept("d2", "Unknown CLI kinds are rejected", "passed")
     ],
     complexity: "high",
-    executionStatus: "failed",
+    taskStatus: "pending",
     dependencies: ["02"]
   }),
   stage({
     id: "05",
     title: "Persist progress state",
-    intent: "Write durable executionStatus back to the plan document.",
+    intent: "Write durable task status back to the plan document.",
     prose: "<p>Blocked until worker routing lands.</p>",
     files: [{ path: "packages/cli-adapters/src/plan-store.ts", change: "M", added: 30, removed: 4 }],
     acceptance: [accept("e1", "Status survives an app restart", "pending")],
     complexity: "medium",
-    executionStatus: "blocked",
+    taskStatus: "blocked",
     dependencies: ["04"]
   }),
   stage({
@@ -152,7 +152,7 @@ const richPrd = prdWith([
       accept("f2", "Acceptance evidence renders under its criterion", "waived", "covered by the interaction test in Stage 07")
     ],
     complexity: "medium",
-    executionStatus: "interrupted",
+    taskStatus: "pending",
     dependencies: ["03"]
   }),
   stage({
@@ -163,7 +163,7 @@ const richPrd = prdWith([
     files: [],
     acceptance: [accept("g1", "Clicking a graph node selects its card", "pending")],
     complexity: "low",
-    executionStatus: "queued",
+    taskStatus: "pending",
     dependencies: ["05", "06"]
   })
 ])
@@ -183,7 +183,7 @@ const singlePrd = prdWith([
       accept("a2", "Limits are per-customer, not global", "pending")
     ],
     complexity: "high",
-    executionStatus: "running"
+    taskStatus: "in-progress"
   })
 ])
 

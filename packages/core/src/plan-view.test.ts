@@ -54,11 +54,14 @@ describe("toPlanStepViews", () => {
     expect(ids(steps)).toEqual(["a", "b", "c"])
   })
 
-  it("defaults executionStatus to queued and passes complexity through", () => {
+  it("derives progress from task state and passes complexity through", () => {
     const [queued, running] = toPlanStepViews(
       prd([
         stage("a", []),
-        stage("b", ["a"], { complexity: "high", executionStatus: "running" })
+        stage("b", ["a"], {
+          complexity: "high",
+          tasks: [{ id: "b.1", text: "Implement", status: "in-progress" }]
+        })
       ])
     )
     expect(queued?.executionStatus).toBe("queued")
@@ -137,29 +140,6 @@ describe("stagesToGraph", () => {
     expect(graph.edges).toEqual([])
   })
 
-  it("carries the assigned worker's agentId and a cli · model label", () => {
-    const graph = stagesToGraph(
-      prd([
-        stage("a", [], {
-          executionStatus: "running",
-          assignment: {
-            agentId: "worker-a",
-            cli: "codex",
-            model: "gpt-5.6-sol",
-            reason: "High complexity route."
-          }
-        }),
-        stage("b", ["a"])
-      ])
-    )
-    const a = graph.nodes.find((node) => node.id === "a")
-    const b = graph.nodes.find((node) => node.id === "b")
-    expect(a?.agentId).toBe("worker-a")
-    expect(a?.worker).toBe("codex · gpt-5.6-sol")
-    // A stage with no assignment carries nulls, not undefined.
-    expect(b?.agentId).toBeNull()
-    expect(b?.worker).toBeNull()
-  })
 })
 
 describe("toPlanArchitectureView", () => {

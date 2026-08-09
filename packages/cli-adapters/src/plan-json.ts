@@ -1,10 +1,8 @@
 import {
   decodePlanEmission,
   formatPlanEmissionDiagnostics,
-  type PlanEmission,
-  type WorkerRoutingConfig
+  type PlanEmission
 } from "@jingler/core"
-import type { OrchestrationRoute } from "./adapter.js"
 
 /**
  * The agent's plan transport is a single fenced ` ```json ` block holding a
@@ -103,19 +101,16 @@ const STAGE_GRAMMAR = [
 /**
  * How a non-Claude harness submits a plan: one fenced JSON block. `mode:"draft"`
  * mirrors the plan into Plan Review as an editable draft with no approval gate;
- * `mode:"submit"` enters the single delegation approval gate. Never emit worker
- * assignments — Jingler routes those.
+ * `mode:"submit"` enters the single approval gate. The producing agent remains
+ * responsible for execution, progress, and later revisions.
  */
-export const planJsonInstructions = (
-  _orchestration?: ReadonlyArray<OrchestrationRoute>,
-  _workerRouting?: WorkerRoutingConfig
-): string =>
+export const planJsonInstructions = (): string =>
   [
     "Submit a plan as ONE fenced ```json block containing exactly:",
     '{ "mode": "draft" | "submit", "plan": { "title": string, "sections": PlanPrdSection[],',
     '  "stages": PlanPrdStage[], "annotations": [] } }',
     'Use "draft" to iterate (it populates Plan Review with no approval gate) and "submit"',
-    "to delegate (one approval gate). A prose preamble before the block is fine — the mode",
+    "to propose the canonical plan (one approval gate). A prose preamble before the block is fine — the mode",
     "field decides, not position.",
     '  A PlanPrdSection: { "id", "title", "blocks": PlanBlock[] }.',
     'The FIRST section must be titled "TL;DR" and briefly summarize the outcome, approach, and main risk.',
@@ -128,5 +123,5 @@ export const planJsonInstructions = (
     "Give every acceptance criterion concrete testReferences: a repository-relative test path",
     "and the exact named test cases that prove that criterion.",
     "Declare complexity, dependencies, files, and acceptance criteria.",
-    "Do NOT add data-assignment: never emit worker assignments, agent ids, harnesses, models, or routes — Jingler assigns those."
+    "Do not add assignment, agent, harness, model, worker, or routing fields."
   ].join("\n")

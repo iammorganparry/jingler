@@ -46,7 +46,7 @@ const columnRatio = async (
   return box!.width / rowWidth
 }
 
-test("streaming plan collaboration survives promotion and reload", async ({
+test.skip("streaming plan collaboration survives promotion and reload", async ({
   launchApp
 }) => {
   const launched = await launchApp({

@@ -145,16 +145,16 @@ export function OpenConnectorSection({
 
       <div className="flex items-start gap-3">
         <div className="flex-1">
-          <div className="text-[12.5px] font-medium text-text-body">Prefer Jingler tools</div>
+          <div className="text-[12.5px] font-medium text-text-body">Use Jingler tools</div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
-            Use OpenConnector and Jingler's visible in-app browser instead of native MCP,
-            Playwright MCP, or browser-use integrations. Turn this off to merge harness tools.
+            Use Jingler's enhanced Plan mode, OpenConnector, and visible in-app browser.
+            Turn this off to use the selected harness's native plan and tool behaviour.
           </div>
         </div>
         <Toggle
           checked={preferJinglerTools}
           onCheckedChange={setPreferJinglerTools}
-          aria-label="Prefer Jingler tools over native agent tools"
+          aria-label="Use Jingler tools"
           className="mt-0.5"
         />
       </div>

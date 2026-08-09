@@ -36,7 +36,8 @@ describe("Composer model chip", () => {
     render(<Composer cli="claude" model="opus" catalog={catalog} onSetHarness={onSetHarness} />)
 
     fireEvent.pointerDown(modelChip(), { button: 0, ctrlKey: false })
-    fireEvent.click(screen.getByText("GPT-5.6-Sol"))
+    fireEvent.click(screen.getByRole("button", { name: /Codex CLI.*1 model/i }))
+    fireEvent.click(screen.getByRole("button", { name: "GPT-5.6-Sol" }))
 
     expect(onSetHarness).toHaveBeenCalledWith("codex", "gpt-5.6-sol")
   })
@@ -46,7 +47,8 @@ describe("Composer model chip", () => {
     render(<Composer cli="claude" model="opus" catalog={catalog} onSetHarness={onSetHarness} />)
 
     fireEvent.pointerDown(modelChip(), { button: 0, ctrlKey: false })
-    fireEvent.click(screen.getByRole("menuitem", { name: "sonnet" }))
+    fireEvent.click(screen.getByRole("button", { name: /Claude Code.*2 models/i }))
+    fireEvent.click(screen.getByRole("button", { name: "sonnet" }))
 
     expect(onSetHarness).toHaveBeenCalledWith("claude", "sonnet")
   })
@@ -73,91 +75,5 @@ describe("Composer model chip", () => {
     render(<Composer cli="claude" model="opus" catalog={[]} />)
     // Only the attach-image button remains clickable; no model chip trigger.
     expect(screen.queryByRole("menuitem")).toBeNull()
-  })
-})
-
-/**
- * Jingler mode owns the permission mode, but the active orchestrator model is a
- * per-chat choice: an existing plan can continue on a different planner without
- * rebuilding the session. Plain chats keep both controls as before.
- */
-describe("Composer Jingler toggle", () => {
-  const jinglerButton = () =>
-    screen.getAllByRole("button").find((b) => b.textContent?.includes("Jingler"))
-  const chip = (text: string) =>
-    screen.getAllByRole("button").find((b) => b.textContent?.includes(text))
-
-  it("keeps the orchestrator model selectable while hiding its permission mode", () => {
-    const onSetHarness = vi.fn()
-    render(
-      <Composer
-        cli="claude"
-        model="opus"
-        catalog={catalog}
-        allowPlan
-        showJinglerToggle
-        jinglerMode
-        onSetHarness={onSetHarness}
-      />
-    )
-    expect(jinglerButton()).toBeDefined()
-    expect(chip("opus")).toBeDefined()
-    expect(chip("accept edits")).toBeUndefined()
-
-    fireEvent.pointerDown(chip("opus")!, { button: 0, ctrlKey: false })
-    fireEvent.click(screen.getByRole("menuitem", { name: "sonnet" }))
-    expect(onSetHarness).toHaveBeenCalledWith("claude", "sonnet")
-  })
-
-  it("shows both chips (and the toggle) when Jingler mode is off", () => {
-    render(
-      <Composer
-        cli="claude"
-        model="opus"
-        catalog={catalog}
-        allowPlan
-        showJinglerToggle
-        jinglerMode={false}
-      />
-    )
-    expect(jinglerButton()).toBeDefined()
-    expect(chip("opus")).toBeDefined()
-  })
-
-  it("reports the flipped value when the toggle is clicked", () => {
-    const onToggle = vi.fn()
-    render(
-      <Composer
-        cli="claude"
-        model="opus"
-        catalog={catalog}
-        showJinglerToggle
-        jinglerMode
-        onToggleJinglerMode={onToggle}
-      />
-    )
-    fireEvent.click(jinglerButton()!)
-    expect(onToggle).toHaveBeenCalledWith(false)
-  })
-
-  it("disables the Jingler toggle while its chat setting is being persisted", () => {
-    render(
-      <Composer
-        cli="claude"
-        model="opus"
-        catalog={catalog}
-        showJinglerToggle
-        jinglerMode
-        jinglerModePending
-      />
-    )
-    expect(jinglerButton()).toHaveProperty("disabled", true)
-    expect(jinglerButton()?.getAttribute("aria-busy")).toBe("true")
-  })
-
-  it("never renders the toggle on a plain (non-orchestrator) chat", () => {
-    render(<Composer cli="claude" model="opus" catalog={catalog} />)
-    expect(jinglerButton()).toBeUndefined()
-    expect(chip("opus")).toBeDefined()
   })
 })

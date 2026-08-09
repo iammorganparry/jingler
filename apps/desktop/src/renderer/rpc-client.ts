@@ -40,6 +40,7 @@ import type {
   NotificationKind,
   NotificationsConfig,
   HarnessBilling,
+  HarnessCapability,
   GithubConfig,
   Issue,
   IssueAutomations,
@@ -60,17 +61,14 @@ import type {
   Message,
   MemoryConfig,
   ModelOption,
-  OpencodeProviderInfo,
-  OrchestratorPreference,
-  WorkerRoutingConfig,
   ProviderModels,
+  Project,
   PermissionMode,
   PlanApprovalResult,
   PlanCommentMessageDeliveryState,
   PlanDocument,
   PlanPrd,
   PlanMentionDelivery,
-  PlanParticipant,
   PlanTemplateConfig,
   PrFileChange,
   PrMergeMethod,
@@ -97,7 +95,6 @@ import type {
   ContextConfig,
   ContextSnapshot,
   Usage,
-  WorkerActivity,
   WorkspaceConfig
 } from "@jingler/core"
 import {
@@ -355,6 +352,27 @@ export const rpc = {
     run((c) => c.Setup.chooseReposDir()),
   workspaceRepos: (): Promise<ReadonlyArray<Repo>> =>
     run((c) => c.Workspace.repos()),
+  projectsList: (environmentId?: string): Promise<ReadonlyArray<Project>> =>
+    run((c) => c.Projects.list(environmentId === undefined ? {} : { environmentId })),
+  projectsRegister: (input: {
+    path: string
+    name?: string
+    environmentId?: string
+  }): Promise<Project> => run((c) => c.Projects.register(input)),
+  projectsBrowse: (): Promise<string | null> => run((c) => c.Projects.browse()),
+  projectsCreateDirectory: (input: {
+    path: string
+    name?: string
+    environmentId?: string
+  }): Promise<Project> => run((c) => c.Projects.createDirectory(input)),
+  projectsClone: (input: {
+    url: string
+    destination: string
+    name?: string
+    environmentId?: string
+  }): Promise<Project> => run((c) => c.Projects.clone(input)),
+  projectsRemove: (id: string, environmentId?: string): Promise<void> =>
+    run((c) => c.Projects.remove({ id, ...(environmentId === undefined ? {} : { environmentId }) })),
   workspaceBranches: (repoPath: string, environmentId?: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Workspace.branches({ repoPath, ...(environmentId ? { environmentId } : {}) })),
   githubConnectionStatus: (): Promise<GitHubAppConnectionStatus> =>
@@ -461,18 +479,6 @@ export const rpc = {
     run((c) => c.Sessions.closeChat({ sessionId, chatId })),
   sessionsReopenChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.reopenChat({ sessionId, chatId })),
-  sessionsSetOrchestratorEnabled: (
-    sessionId: string,
-    chatId: string,
-    orchestratorEnabled: boolean
-  ): Promise<Session> =>
-    run((c) =>
-      c.Sessions.setOrchestratorEnabled({
-        sessionId,
-        chatId,
-        orchestratorEnabled
-      })
-    ),
   /**
    * A newest-anchored window of the transcript. Omit `before` for the newest
    * page; pass the previous page's opaque cursor to page further back. `hasMore`
@@ -613,12 +619,8 @@ export const rpc = {
     run((c) => c.Models.list({ cli })),
   modelsCatalog: (): Promise<ReadonlyArray<ProviderModels>> =>
     run((c) => c.Models.catalog()),
-  /** opencode's resolved providers + where each credential came from. */
-  opencodeListProviders: (): Promise<ReadonlyArray<OpencodeProviderInfo>> =>
-    run((c) => c.Opencode.listProviders()),
-  /** Store an API key in opencode's OWN credential file (not SecretStore). */
-  opencodeSetAuth: (providerId: string, key: string): Promise<boolean> =>
-    run((c) => c.Opencode.setAuth({ providerId, key })),
+  modelsCapabilities: (): Promise<ReadonlyArray<HarnessCapability>> =>
+    run((c) => c.Models.capabilities()),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),
   /** A session's context accounting — drives the meter and the Settings list. */
   contextState: (sessionId: string, chatId: string): Promise<ContextSnapshot> =>
@@ -660,7 +662,7 @@ export const rpc = {
   ): Promise<void> => run((c) => c.Agent.setMode({ sessionId, chatId, mode })),
   agentSetReasoning: (
     sessionId: string,
-    cli: "claude" | "codex" | "opencode",
+    cli: "claude" | "codex",
     reasoning: ReasoningSetting | undefined
   ): Promise<void> =>
     run((c) => {
@@ -730,112 +732,6 @@ export const rpc = {
     run((c) =>
       c.Agent.approvePlan({ sessionId, planId, executionMode, revision })
     ),
-  agentStopWorker: (
-    sessionId: string,
-    planId: string,
-    agentId: string
-  ): Promise<void> =>
-    run((c) => c.Agent.stopWorker({ sessionId, planId, agentId })),
-  agentRetryWorker: (
-    sessionId: string,
-    planId: string,
-    agentId: string
-  ): Promise<void> =>
-    run((c) => c.Agent.retryWorker({ sessionId, planId, agentId })),
-  /**
-   * Observe one canonical plan's orchestration workers without starting or
-   * resuming execution. The returned handle only detaches this renderer.
-   */
-  agentWatchWorkers: (
-    sessionId: string,
-    planId: string,
-    chatId: string,
-    onActivity: (activity: WorkerActivity) => void,
-    onFailure: (error: unknown) => void
-  ): (() => void) => {
-    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
-    let cancelled = false
-    void clientPromise.then(
-      (client) => {
-        if (cancelled) return
-        const streamFiber = coreRuntime.runFork(
-          client.Agent.watchWorkers({ sessionId, planId, chatId }).pipe(
-            Stream.runForEach((activity) =>
-              Effect.sync(() => onActivity(activity))
-            )
-          )
-        )
-        fiber = streamFiber
-        coreRuntime.runFork(
-          Fiber.await(streamFiber).pipe(
-            Effect.tap((exit) =>
-              Effect.sync(() => {
-                if (cancelled) return
-                onFailure(
-                  Exit.isFailure(exit)
-                    ? Cause.squash(exit.cause)
-                    : new Error("Worker activity stream ended unexpectedly.")
-                )
-              })
-            ),
-            Effect.asVoid
-          )
-        )
-      },
-      (error) => {
-        if (!cancelled) onFailure(error)
-      }
-    )
-    return () => {
-      cancelled = true
-      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
-    }
-  },
-  agentWatchSessionWorkers: (
-    sessionId: string,
-    onActivity: (activity: WorkerActivity) => void,
-    onFailure: (error: unknown) => void
-  ): (() => void) => {
-    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
-    let cancelled = false
-    void clientPromise.then(
-      (client) => {
-        if (cancelled) return
-        const streamFiber = coreRuntime.runFork(
-          client.Agent.watchSessionWorkers({ sessionId }).pipe(
-            Stream.runForEach((activity) =>
-              Effect.sync(() => onActivity(activity))
-            )
-          )
-        )
-        fiber = streamFiber
-        coreRuntime.runFork(
-          Fiber.await(streamFiber).pipe(
-            Effect.tap((exit) =>
-              Effect.sync(() => {
-                if (cancelled) return
-                onFailure(
-                  Exit.isFailure(exit)
-                    ? Cause.squash(exit.cause)
-                    : new Error(
-                        "Session worker activity stream ended unexpectedly."
-                      )
-                )
-              })
-            ),
-            Effect.asVoid
-          )
-        )
-      },
-      (error) => {
-        if (!cancelled) onFailure(error)
-      }
-    )
-    return () => {
-      cancelled = true
-      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
-    }
-  },
   agentSetHarness: (
     sessionId: string,
     chatId: string,
@@ -873,26 +769,12 @@ export const rpc = {
   /** Persist ADHD mode; resolves with the whole updated config. */
   configSetAdhdMode: (adhdMode: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setAdhdMode({ adhdMode })),
-  /** Persist Jingler mode (the agentic orchestrator flow); resolves with the whole config. */
-  configSetOrchestratorEnabled: (
-    orchestratorEnabled: boolean
-  ): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setOrchestratorEnabled({ orchestratorEnabled })),
   /** Persist the conversation + code text-size multiplier. */
   configSetFontScale: (fontScale: number): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setFontScale({ fontScale })),
   /** Which harness new sessions start on (Settings · Providers). */
   configSetDefaultCli: (cli: CliKind): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setDefaultCli({ cli })),
-  /** Persist the provider-neutral planner used by newly-created sessions. */
-  configSetOrchestrator: (
-    orchestrator: OrchestratorPreference
-  ): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setOrchestrator(orchestrator)),
-  configSetWorkerRouting: (
-    workerRouting: WorkerRoutingConfig
-  ): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setWorkerRouting(workerRouting)),
   /**
    * Ask main to raise an OS notification. Main decides whether it actually
    * surfaces — it owns window focus and the stored prefs.
@@ -1234,11 +1116,6 @@ export const rpc = {
     plan: PlanPrd
     author: "user" | "agent"
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
-  planParticipants: (
-    sessionId: string,
-    planId: string
-  ): Promise<ReadonlyArray<PlanParticipant>> =>
-    run((c) => c.Plan.participants({ sessionId, planId })),
   planDispatchMessage: (input: {
     sessionId: string
     planId: string

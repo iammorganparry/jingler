@@ -22,7 +22,8 @@ import { GitService } from "./git.js"
 import {
   isSessionPublishBranchReady,
   SessionStore,
-  migrateRepoName
+  migrateRepoName,
+  migrateUnsupportedHarness
 } from "./sessions.js"
 import {
   failureOf,
@@ -435,7 +436,6 @@ describe("SessionStore", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Multi chat" }), {
-          chatRole: "orchestrator",
           defaultMode: "auto",
           defaultModel: "opus"
         })
@@ -467,14 +467,12 @@ describe("SessionStore", () => {
     expect(exit.value.replaced.activeChatId).not.toBe(exit.value.secondChatId)
     expect(exit.value.replaced.chats[0]!.mode).toBe("auto")
     expect(exit.value.replaced.chats[0]!.model).toBe("opus")
-    expect(exit.value.replaced.chats[0]!.role).toBe("orchestrator")
   })
 
   it("persists closed chats and reopens them with their original identity and settings", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Recover chat" }), {
-          chatRole: "orchestrator",
           defaultMode: "auto",
           defaultModel: "opus"
         })
@@ -495,7 +493,6 @@ describe("SessionStore", () => {
       expect.objectContaining({
         id: exit.value.originalId,
         title: "Main workspace",
-        role: "orchestrator",
         mode: "auto",
         model: "opus"
       })
@@ -506,7 +503,6 @@ describe("SessionStore", () => {
       expect.objectContaining({
         id: exit.value.originalId,
         title: "Main workspace",
-        role: "orchestrator",
         mode: "auto",
         model: "opus"
       })
@@ -516,7 +512,6 @@ describe("SessionStore", () => {
   it("stamps provider mode, model, and reasoning defaults when supplied", async () => {
     const withDefaults = await runExit(
       SessionStore.create(input(), {
-        chatRole: "orchestrator",
         defaultMode: "plan",
         defaultModel: "opus",
         defaultReasoning: { enabled: false, effort: "high" }
@@ -525,7 +520,6 @@ describe("SessionStore", () => {
     )
     expect(withDefaults._tag).toBe("Success")
     if (withDefaults._tag === "Success") {
-      expect(activeChat(withDefaults.value).role).toBe("orchestrator")
       expect(activeChat(withDefaults.value).mode).toBe("plan")
       expect(activeChat(withDefaults.value).model).toBe("opus")
       expect(withDefaults.value.reasoning?.claude).toStrictEqual({
@@ -956,56 +950,6 @@ describe("SessionStore", () => {
     }
   })
 
-  it("persists Jingler mode per chat without changing sibling chats", async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const created = yield* SessionStore.create(input({ title: "Per-chat Jingler" }), {
-          chatRole: "orchestrator"
-        })
-        const firstChatId = created.activeChatId
-        const withSecond = yield* SessionStore.createChat(created.id)
-        const secondChatId = withSecond.activeChatId
-        yield* SessionStore.setOrchestratorEnabled(created.id, secondChatId, false)
-        return {
-          session: yield* SessionStore.get(created.id),
-          firstChatId,
-          secondChatId
-        }
-      }).pipe(Effect.provide(services)),
-      temp.layer
-    )
-
-    expect(exit._tag).toBe("Success")
-    if (exit._tag !== "Success") return
-    const first = exit.value.session.chats.find(
-      (chat) => chat.id === exit.value.firstChatId
-    )
-    const second = exit.value.session.chats.find(
-      (chat) => chat.id === exit.value.secondChatId
-    )
-    expect(first?.orchestratorEnabled).toBeUndefined()
-    expect(second?.orchestratorEnabled).toBe(false)
-  })
-
-  it("rejects Jingler mode updates for a chat that does not exist", async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const created = yield* SessionStore.create(
-          input({ title: "Missing chat" })
-        )
-        return yield* SessionStore.setOrchestratorEnabled(
-          created.id,
-          "missing-chat",
-          true
-        )
-      }).pipe(Effect.provide(services)),
-      temp.layer
-    )
-
-    expect(exit._tag).toBe("Failure")
-    expect(failureOf(exit)?.message).toMatch(/does not exist/i)
-  })
-
   it("does not turn an invalid runtime mode into ask", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
@@ -1160,8 +1104,8 @@ describe("SessionStore", () => {
           yield* SessionStore.setHarness(
             created.id,
             withSecond.activeChatId,
-            "cursor",
-            "composer-1"
+            "codex",
+            "gpt-5.6-sol"
           )
           return yield* SessionStore.get(created.id)
         }).pipe(Effect.provide(services)),
@@ -1169,15 +1113,15 @@ describe("SessionStore", () => {
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(exit.value.cli).toBe("cursor")
+      expect(exit.value.cli).toBe("codex")
       expect(exit.value.chats.map((chat) => chat.resumeId)).toStrictEqual([
         undefined,
         undefined
       ])
-      expect(exit.value.chats.map((chat) => chat.mode)).toStrictEqual(["ask", "ask"])
+      expect(exit.value.chats.map((chat) => chat.mode)).toStrictEqual(["plan", "plan"])
       expect(exit.value.chats.map((chat) => chat.model)).toStrictEqual([
         undefined,
-        "composer-1"
+        "gpt-5.6-sol"
       ])
     })
 
@@ -1329,7 +1273,6 @@ describe("SessionStore", () => {
     )
     const exit = await runExit(
       SessionStore.createFromPr(prInput(), {
-        chatRole: "orchestrator",
         defaultMode: "plan",
         defaultModel: "opus"
       }).pipe(Effect.provide(prServices)),
@@ -1348,7 +1291,6 @@ describe("SessionStore", () => {
     expect(s.baseBranch).toBe("main")
     expect(s.title).toBe("Fix Auth Refresh")
     expect(activeChat(s)).toMatchObject({
-      role: "orchestrator",
       mode: "plan",
       model: "opus"
     })
@@ -1665,7 +1607,6 @@ describe("SessionStore", () => {
   it("createFromIssue starts detached, links the issue, and seeds the task", async () => {
     const exit = await runExit(
       SessionStore.createFromIssue(issueInput(), {
-        chatRole: "orchestrator",
         defaultMode: "plan",
         defaultModel: "opus"
       }).pipe(Effect.provide(services)),
@@ -1696,7 +1637,6 @@ describe("SessionStore", () => {
     expect(s.initialPrompt).toBe("Refund route 500s on a stale token\n\nFix the refund route.")
     expect(s.prNumber).toBe(null)
     expect(activeChat(s)).toMatchObject({
-      role: "orchestrator",
       mode: "plan",
       model: "opus"
     })
@@ -1980,5 +1920,26 @@ describe("migrateRepoName", () => {
     expect(migrated.branch).toBe("starbase/fix-auth")
     expect(migrated.worktreePath).toBe("/Users/x/jingler/worktrees/jingler/fix-auth")
     expect(migrated.id).toBe("s1")
+  })
+})
+
+describe("legacy harness migration", () => {
+  it("migrates an unsupported legacy harness without changing transcript or workspace identity", () => {
+    const legacy = {
+      id: "s_legacy",
+      cli: "opencode",
+      repoPath: "/repos/jingler",
+      worktreePath: "/worktrees/jingler/task",
+      chats: [{ id: "c_1", model: "openrouter/model", resumeId: "remote-thread" }]
+    }
+    const migrated = migrateUnsupportedHarness(legacy) as Record<string, unknown>
+
+    expect(migrated).toMatchObject({
+      id: legacy.id,
+      cli: "codex",
+      repoPath: legacy.repoPath,
+      worktreePath: legacy.worktreePath,
+      chats: [{ id: "c_1", model: "gpt-5.6-sol" }]
+    })
   })
 })

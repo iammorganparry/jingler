@@ -1,4 +1,12 @@
-import type { CliInfo, CliKind, ModelOption, ProviderModels } from "@jingler/core"
+import type {
+  CliInfo,
+  CliKind,
+  HarnessCapability,
+  HarnessModeOption,
+  ModelOption,
+  ProviderModels,
+  ReasoningEffort
+} from "@jingler/core"
 import { FALLBACK_MODELS } from "@jingler/core"
 import { Effect, Ref } from "effect"
 import { fetchCodexModels } from "./codex-models.js"
@@ -50,6 +58,49 @@ const fetchFor = (
       : cli === "opencode"
         ? fetchOpencodeModels(binPath)
         : Promise.resolve(null)
+
+const reasoning = (
+  cli: CliKind,
+  model: string
+): { options: ReadonlyArray<{ id: ReasoningEffort; label: string }>; defaultId?: ReasoningEffort } => {
+  const ids: ReadonlyArray<ReasoningEffort> = cli === "claude"
+    ? ["low", "medium", "high", "max"]
+    : model.toLowerCase().includes("luna")
+      ? ["minimal", "low", "medium"]
+      : ["minimal", "low", "medium", "high", "xhigh"]
+  return {
+    options: ids.map((id) => ({ id, label: id })),
+    ...(ids.includes("medium") ? { defaultId: "medium" as const } : {})
+  }
+}
+
+const MODES: Record<"claude" | "codex", ReadonlyArray<HarnessModeOption>> = {
+  claude: [
+    { id: "ask", label: "Default permissions", description: "Ask before sensitive actions", kind: "execute" },
+    { id: "accept-edits", label: "Accept edits", description: "Allow file edits and ask for commands", kind: "execute" },
+    { id: "auto", label: "Full access", description: "Run without approval prompts", kind: "execute" },
+    { id: "plan", label: "Plan", description: "Use Claude Code's native planning mode", kind: "plan" }
+  ],
+  codex: [
+    { id: "ask", label: "Read only", description: "Inspect without changing files", kind: "execute" },
+    { id: "accept-edits", label: "Workspace write", description: "Edit inside the workspace", kind: "execute" },
+    { id: "auto", label: "Full access", description: "Use the unrestricted Codex sandbox", kind: "execute" },
+    { id: "plan", label: "Plan", description: "Use Codex's native planning mode", kind: "plan" }
+  ]
+}
+
+const capabilityModels = (
+  cli: CliKind,
+  models: ReadonlyArray<ModelOption>
+): ReadonlyArray<ModelOption> =>
+  models.map((model) => {
+    const supported = reasoning(cli, model.id)
+    return {
+      ...model,
+      reasoning: supported.options,
+      ...(supported.defaultId === undefined ? {} : { defaultReasoningId: supported.defaultId })
+    }
+  })
 
 /**
  * Narrow a harness's catalogue to the models the user chose to see
@@ -117,6 +168,26 @@ export class ModelsService extends Effect.Service<ModelsService>()("@jingler/Mod
           (c) =>
             list(c.kind, c.binPath).pipe(
               Effect.map((models) => ({ cli: c.kind, label: c.label, models }))
+            ),
+          { concurrency: "unbounded" }
+        ),
+
+      capabilities: (
+        clis: ReadonlyArray<CliInfo>
+      ): Effect.Effect<ReadonlyArray<HarnessCapability>> =>
+        Effect.forEach(
+          clis.filter(
+            (candidate): candidate is CliInfo & { readonly kind: "claude" | "codex" } =>
+              candidate.available && (candidate.kind === "claude" || candidate.kind === "codex")
+          ),
+          (candidate) =>
+            list(candidate.kind, candidate.binPath).pipe(
+              Effect.map((models) => ({
+                cli: candidate.kind,
+                label: candidate.label,
+                modes: MODES[candidate.kind],
+                models: capabilityModels(candidate.kind, models)
+              }))
             ),
           { concurrency: "unbounded" }
         )

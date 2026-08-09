@@ -4,6 +4,7 @@ import type {
   CliKind,
   ExecutionMode,
   GateDecision,
+  HarnessCapability,
   Message,
   ProviderModels,
   PermissionMode,
@@ -105,6 +106,7 @@ export interface ConversationViewProps {
   /** Current harness model id + every installed harness's models (model chip). */
   model?: string
   catalog?: ReadonlyArray<ProviderModels>
+  capabilities?: ReadonlyArray<HarnessCapability>
   onSetHarness?: (cli: CliKind, model: string) => void
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void
   /** Halt the running agent — the Stop button, and Escape outside the composer. */
@@ -188,8 +190,7 @@ export interface ConversationViewProps {
    */
   plan?: Plan | null
   /**
-   * Canonical live plan document. Unlike the legacy `plan` projection, this
-   * carries each worker's mechanical execution status from Plan.watch.
+   * Canonical live plan document with task and acceptance progress from Plan.watch.
    */
   planDocument?: PlanDocument | null
   /**
@@ -220,17 +221,8 @@ export interface ConversationViewProps {
   autoFocusComposer?: boolean
   /** Identity of "the one on screen" — the session id. */
   focusKey?: string
-  /**
-   * This is the session's orchestrator chat — surface the "Jingler mode" toggle
-   * in the composer.
-   */
-  orchestrator?: boolean
-  /** Whether Jingler mode is on (hides permission mode, but keeps its model editable). */
-  jinglerMode?: boolean
-  /** Whether the active chat's Jingler-mode update is in flight. */
-  jinglerModePending?: boolean
-  /** Flip Jingler mode for the active chat; workspace config is its fallback. */
-  onToggleJinglerMode?: (enabled: boolean) => void
+  /** Whether Jingler's enhanced Plan/tools layer is enabled. */
+  useJinglerTools?: boolean
   /** Whether the session Files workspace follows this chat's agent mutations. */
   followAgent?: boolean
   /** Toggle follow mode; enabling may present Files beside the conversation. */
@@ -263,6 +255,7 @@ export function ConversationView({
   onSetEnvironment,
   model,
   catalog = [],
+  capabilities = [],
   onSetHarness,
   onSend,
   onStop,
@@ -305,10 +298,7 @@ export function ConversationView({
   onDraftCodeReferencesClear,
   autoFocusComposer,
   focusKey,
-  orchestrator = false,
-  jinglerMode = true,
-  jinglerModePending = false,
-  onToggleJinglerMode,
+  useJinglerTools = true,
   followAgent = false,
   onToggleFollowAgent,
   archived,
@@ -667,13 +657,11 @@ export function ConversationView({
                 cli={cli}
                 model={model}
                 catalog={catalog}
+                capabilities={capabilities}
                 onSetHarness={onSetHarness}
                 mode={mode}
                 onSetMode={onSetMode}
-                showJinglerToggle={orchestrator}
-                jinglerMode={jinglerMode}
-                jinglerModePending={jinglerModePending}
-                onToggleJinglerMode={onToggleJinglerMode}
+                useJinglerTools={useJinglerTools}
                 followAgent={followAgent}
                 onToggleFollowAgent={onToggleFollowAgent}
                 reasoningEffort={reasoningEffort}

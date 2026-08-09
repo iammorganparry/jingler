@@ -240,4 +240,12 @@ describe("plan document schemas", () => {
 
     expect(planDocumentToPlan(document).summary).toBe("Canonical interactive planning")
   })
+
+  it("decodes a current plan without assignment or worker execution fields", () => {
+    const decoded = Schema.decodeUnknownSync(PlanPrdStage)(structuredStage)
+    const encoded = Schema.encodeSync(PlanPrdStage)(decoded)
+    expect(encoded).not.toHaveProperty("assignment")
+    expect(encoded).not.toHaveProperty("executionStatus")
+    expect(encoded.tasks).toStrictEqual([])
+  })
 })

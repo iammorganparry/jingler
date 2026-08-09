@@ -874,17 +874,13 @@ const driveOpencode = async (
         if (result.error !== undefined) throw new Error(promptError(result.error))
 
         const reply = assistantText(result.data?.parts)
-        const orchestratingUnapproved =
-          !planning &&
-          spec.orchestrationRoutes !== undefined &&
-          spec.orchestrationPlanApproved !== true
         // The mapper held this turn's prose back in plan mode, so the reply is
         // read off the response. `mode` in the emission decides submit vs draft.
         const capture =
-          (planning || orchestratingUnapproved) && planRound < MAX_PLAN_ROUNDS
+          planning && planRound < MAX_PLAN_ROUNDS
             ? capturePlanEmission(reply)
             : null
-        if (planning || orchestratingUnapproved) {
+        if (planning) {
           if (capture?._tag === "reformat" && !planReformatAsked) {
             planReformatAsked = true
             const clear = planDraft.clear()
@@ -908,7 +904,6 @@ const driveOpencode = async (
             // Reject: `followUp` stays null and the turn ends.
           } else if (
             capture?._tag === "emission" &&
-            orchestratingUnapproved &&
             ctx.saveDraftPlan !== undefined
           ) {
             // A "draft" emission in auto orchestration mirrors into Plan Review;

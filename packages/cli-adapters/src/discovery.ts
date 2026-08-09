@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import type { CliInfo, CliKind } from "@jingler/core"
+import { isSupportedCliKind } from "@jingler/core"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect } from "effect"
 import { expandHome, runString, which } from "./command.js"
@@ -214,7 +215,9 @@ export class DiscoveryService extends Effect.Service<DiscoveryService>()(
         CommandExecutor.CommandExecutor
       > =>
         Effect.forEach(
-          Object.entries(CLI_SPECS) as ReadonlyArray<[CliKind, CliSpec]>,
+          (Object.entries(CLI_SPECS) as ReadonlyArray<[CliKind, CliSpec]>).filter(
+            ([kind]) => isSupportedCliKind(kind)
+          ),
           ([kind, spec]) => probe(kind, spec),
           { concurrency: "unbounded" }
         )

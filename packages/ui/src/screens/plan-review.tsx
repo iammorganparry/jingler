@@ -4,8 +4,7 @@ import {
   type PlanCommentMessage,
   type Plan,
   type PlanDocument,
-  type PlanDraft,
-  type PlanParticipant
+  type PlanDraft
 } from "@jingler/core"
 import { ClipboardList } from "lucide-react"
 import { type ReactNode, useState } from "react"
@@ -60,14 +59,11 @@ export interface PlanReviewProps {
   onStartDraft?: () => void
   onSendToAgent?: () => void
   onRetryDocument?: () => void
-  onStopWorker?: (agentId: string) => void
-  onRetryWorker?: (agentId: string) => void
   /**
    * Comment-layer seams (a later stage owns rendering). The plan document is
    * read-only now; these are carried through so the comment layer can consume
    * them without re-plumbing the pane, but nothing here dispatches them yet.
    */
-  participants?: ReadonlyArray<PlanParticipant>
   onReplyThread?: (
     annotationId: string,
     body: string,
@@ -118,15 +114,12 @@ function PlanReviewBody(props: PlanReviewProps) {
     onStartDraft,
     onSendToAgent,
     onRetryDocument,
-    onStopWorker,
-    onRetryWorker,
     selectedStepId,
     revisionTarget,
     onSelectStep,
     patch,
     knownFiles,
     onOpenFile,
-    participants,
     onReplyThread,
     onRetryThread,
     onSetThreadResolved,
@@ -181,7 +174,6 @@ function PlanReviewBody(props: PlanReviewProps) {
     document != null ? (
       <PlanCommentLayer
         annotations={document.plan.annotations}
-        participants={participants ?? []}
         containerRef={container}
         onAddComment={onAddComment ?? (() => {})}
         onReply={onReplyThread ?? (() => {})}
@@ -214,8 +206,6 @@ function PlanReviewBody(props: PlanReviewProps) {
           onRevise={onRevise}
           onSendToAgent={onSendToAgent}
           onRetry={onRetryDocument}
-          onStopWorker={onStopWorker}
-          onRetryWorker={onRetryWorker}
           targetStageId={selectedStepId}
           revisionTarget={revisionTarget}
           onTargetStageConsumed={

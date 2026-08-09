@@ -16,8 +16,6 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
-  OrchestratorPreference,
-  WorkerRoutingConfig,
   ProviderConfig,
   PublishCheckpoint,
   Session,
@@ -66,7 +64,6 @@ import { useTerminalDock } from "./use-terminal-dock.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
-import { useSidebarWorkerActivity } from "./use-sidebar-worker-activity.js";
 import { useSessionDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
@@ -101,6 +98,7 @@ import { useConnectorCenter } from "./use-connector-center.js";
 import { useOpenConnector } from "./use-open-connector.js";
 import { useInjectionTargets } from "./use-injection-targets.js";
 import { useEnvironments } from "./use-environments.js";
+import { useProjects } from "./use-projects.js";
 import {
   PluginProvider,
   useIssueProviders,
@@ -423,7 +421,6 @@ function AuthedApp({
     [],
   );
 
-  useSidebarWorkerActivity(sessions.map((session) => session.id));
   const liveActivity = useSessionActivities();
   const liveDiff = useSessionDiffs();
   const planSessions = usePlanSessions();
@@ -440,6 +437,7 @@ function AuthedApp({
   const unifiedMcp = useOpenConnector();
   const injectionTargets = useInjectionTargets(unifiedMcp.config);
   const environmentController = useEnvironments();
+  const projectController = useProjects();
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
 
   // Renderer-side rpc reads, via react-query.
@@ -470,8 +468,6 @@ function AuthedApp({
   // `newSessionCli`, so a fresh install creates sessions without a visit to
   // Settings.
   const defaultCli = configQuery.data?.defaultCli ?? null;
-  const orchestrator = configQuery.data?.orchestrator ?? null;
-  const workerRouting = configQuery.data?.workerRouting ?? null;
   const contextConfig = configQuery.data?.context ?? null;
   const starredRepos = configQuery.data?.starredRepos ?? [];
   const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
@@ -559,14 +555,6 @@ function AuthedApp({
   };
   const saveDefaultCli = (cli: CliKind) =>
     rpc.configSetDefaultCli(cli).then((saved) => {
-      qc.setQueryData(["config"], saved);
-    });
-  const saveOrchestrator = (preference: OrchestratorPreference) =>
-    rpc.configSetOrchestrator(preference).then((saved) => {
-      qc.setQueryData(["config"], saved);
-    });
-  const saveWorkerRouting = (routing: WorkerRoutingConfig) =>
-    rpc.configSetWorkerRouting(routing).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
   const saveProvider = (cli: CliKind, config: ProviderConfig) =>
@@ -1339,6 +1327,11 @@ function AuthedApp({
         }}
         onSignOut={onSignOut}
         repos={repos}
+        projects={projectController.projects}
+        onBrowseProject={projectController.browse}
+        onRegisterProject={projectController.register}
+        onCreateProjectDirectory={projectController.createDirectory}
+        onCloneProject={projectController.clone}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
         collapsedRepos={collapsedRepos}
@@ -1410,17 +1403,11 @@ function AuthedApp({
         onSaveProvider={saveProvider}
         defaultCli={defaultCli}
         onSaveDefaultCli={saveDefaultCli}
-        orchestrator={orchestrator}
-        onSaveOrchestrator={saveOrchestrator}
-        workerRouting={workerRouting}
-        onSaveWorkerRouting={saveWorkerRouting}
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
         planTemplate={configQuery.data?.planTemplate ?? null}
         onSavePlanTemplate={savePlanTemplate}
         loadModels={rpc.modelsList}
-        loadOpencodeProviders={rpc.opencodeListProviders}
-        onSetOpencodeAuth={rpc.opencodeSetAuth}
         unifiedMcp={unifiedMcp}
         injection={{
           targets: injectionTargets.targets,

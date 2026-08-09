@@ -43,6 +43,7 @@ export const appPathsFor = (root: string): AppPathsShape => ({
   root,
   configFile: join(root, "config.json"),
   sessionsFile: join(root, "sessions.json"),
+  projectsFile: join(root, "projects.json"),
   worktreesDir: join(root, "worktrees"),
   transcriptsDir: join(root, "transcripts"),
   reviewsDir: join(root, "reviews"),

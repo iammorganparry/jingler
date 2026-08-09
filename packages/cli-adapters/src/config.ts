@@ -6,10 +6,8 @@ import type {
   MemoryConfig,
   NotificationsConfig,
   OpenConnectorConfig,
-  OrchestratorPreference,
   PlanTemplateConfig,
   ProviderConfig,
-  WorkerRoutingConfig
 } from "@jingler/core"
 import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
@@ -110,17 +108,12 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.lastRepoPath ? { lastRepoPath: existing.lastRepoPath } : {}),
             ...(existing?.providers ? { providers: existing.providers } : {}),
             ...(existing?.defaultCli ? { defaultCli: existing.defaultCli } : {}),
-            ...(existing?.orchestrator ? { orchestrator: existing.orchestrator } : {}),
-            ...(existing?.workerRouting ? { workerRouting: existing.workerRouting } : {}),
             ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
             ...(existing?.notifications ? { notifications: existing.notifications } : {}),
             // Booleans are checked against `undefined`, not truthiness — a saved
             // `false` is a real setting and must survive an unrelated write.
             ...(existing?.planAutoRun !== undefined ? { planAutoRun: existing.planAutoRun } : {}),
             ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
-            ...(existing?.orchestratorEnabled !== undefined
-              ? { orchestratorEnabled: existing.orchestratorEnabled }
-              : {}),
             ...(existing?.fontScale !== undefined ? { fontScale: existing.fontScale } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
             ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
@@ -146,10 +139,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       /** Whether final completion summaries are shaped for an ADHD reader. */
       const setAdhdMode = (adhdMode: boolean) => patch({ adhdMode })
-
-      /** Whether the agentic orchestrator flow is on (the "Jingler mode" toggle). */
-      const setOrchestratorEnabled = (orchestratorEnabled: boolean) =>
-        patch({ orchestratorEnabled })
 
       /**
        * Conversation + code text-size multiplier, clamped via the shared
@@ -187,14 +176,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
        * harness select — one standing answer instead of the same click per session.
        */
       const setDefaultCli = (defaultCli: CliKind) => patch({ defaultCli })
-
-      /** Persist the provider-neutral planner route used by every new session. */
-      const setOrchestrator = (orchestrator: OrchestratorPreference) =>
-        patch({ orchestrator })
-
-      /** Persist concrete implementation-worker routes by plan complexity. */
-      const setWorkerRouting = (workerRouting: WorkerRoutingConfig) =>
-        patch({ workerRouting })
 
       /**
        * Switch the active colour theme, preserving any `colorCustomizations`
@@ -273,15 +254,12 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setNotifications,
         setPlanAutoRun,
         setAdhdMode,
-        setOrchestratorEnabled,
         setFontScale,
         setStarredRepos,
         setCollapsedRepos,
         setLastRepoPath,
         setContext,
         setDefaultCli,
-        setOrchestrator,
-        setWorkerRouting,
         setProvider,
         setPlanTemplate,
         setActiveTheme,

@@ -137,7 +137,8 @@ export const RemoteDeviceCapability = Schema.Literal(
   "session.start",
   "session.input",
   "session.cancel",
-  "session.observe"
+  "session.observe",
+  "project.manage"
 )
 export type RemoteDeviceCapability = Schema.Schema.Type<
   typeof RemoteDeviceCapability

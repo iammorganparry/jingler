@@ -1100,17 +1100,8 @@ export const runClaude = (
         // so it cannot tell us whether a later native plan-file Write is really
         // a plan submission.
         let nativePlanActive = spec.mode === "plan"
-        // An unapproved orchestrator turn can populate Plan Review straight from
-        // the reply — either a delegation submission (native plan mode or the
-        // explicit marker → the approval gate) or, WITHOUT a marker, a draft the
-        // operator iterates on. Claude only accumulated `planReplyText` under
-        // native plan mode, so an Auto orchestrator that streamed a plan left
-        // Plan Review empty; this widens accumulation + terminal capture to it.
-        const orchestratingUnapproved =
-          spec.orchestrationRoutes !== undefined &&
-          spec.orchestrationPlanApproved !== true
         // Claude's native plan flow normally supplies the PRD through
-        // `ExitPlanMode.input.plan`, but read-only orchestrator runs can instead
+        // `ExitPlanMode.input.plan`, but read-only enhanced-plan runs can instead
         // stream the complete fenced document as assistant text and call the
         // tool with `{}`. Keep the main agent's visible reply as the transport
         // fallback; sub-agent text is never eligible to become the root plan.
@@ -1128,29 +1119,17 @@ export const runClaude = (
           input: Record<string, unknown>,
           options: { toolUseID: string }
         ): Promise<PermissionResult> => {
-          if (
-            toolName === "EnterPlanMode" &&
-            spec.orchestrationRoutes !== undefined
-          ) {
-            if (spec.orchestrationPlanApproved === true) {
-              return {
-                behavior: "deny",
-                message:
-                  "The plan is already approved. Return the complete semantic amendment in your reply without entering plan mode; Jingler applies valid changes without another approval gate."
-              }
-            }
+          if (toolName === "EnterPlanMode") {
             nativePlanActive = true
             return { behavior: "allow", updatedInput: input }
           }
           // Claude sometimes follows its native plan-file convention even
-          // though Jingler's orchestrator protocol says to use ExitPlanMode.
+          // though Jingler's enhanced-plan protocol says to use ExitPlanMode.
           // Let only Write reach this callback, capture a valid structured PRD
           // as the proposal, and still deny the filesystem mutation.
           if (
             toolName === "Write" &&
-            nativePlanActive &&
-            spec.orchestrationRoutes !== undefined &&
-            spec.orchestrationPlanApproved !== true
+            nativePlanActive
           ) {
             const content = strOf(input.content)?.trim() ?? ""
             const capture = content.length === 0 ? null : capturePlanEmission(content)
@@ -1177,31 +1156,21 @@ export const runClaude = (
               message:
                 capture?._tag === "reformat"
                   ? capture.message
-                  : "Jingler orchestrator planning is read-only. Submit the complete structured plan with ExitPlanMode."
+                  : "Jingler enhanced planning is read-only. Submit the complete structured plan with ExitPlanMode."
             }
           }
-          // `Write` is removed from the SDK denylist for orchestrator runs so a
+          // `Write` is removed from the SDK denylist for enhanced-plan runs so a
           // native plan-file write can reach the capture branch above. Preserve
           // read-only confinement for every non-plan Write that uses that seam.
           if (toolName === "Write" && spec.readOnly) {
             return {
               behavior: "deny",
-              message: "This orchestrator is read-only. Delegate implementation to a worker."
+              message: "This planning turn is read-only."
             }
           }
           // Plan mode: the SDK routes ExitPlanMode approval here. Turn the plan
           // into a structured, reviewable Plan and honour the operator's verdict.
           if (toolName === "ExitPlanMode") {
-            if (
-              spec.orchestrationRoutes !== undefined &&
-              spec.orchestrationPlanApproved === true
-            ) {
-              return {
-                behavior: "deny",
-                message:
-                  "The plan is already approved. Return the complete semantic amendment in your reply; Jingler applies valid changes without another approval gate."
-              }
-            }
             const payload = strOf(input.plan)?.trim() ?? ""
             // The plan may arrive in the ExitPlanMode payload or streamed into the
             // reply as a ```json block. Prefer the payload; fall back to the reply.
@@ -1269,9 +1238,7 @@ export const runClaude = (
               message:
                 decision._tag === "Revise"
                   ? decision.feedback
-                  : decision._tag === "Delegate"
-                    ? "Plan approved. Jingler is executing it with assigned worker agents."
-                    : "Plan rejected by the operator."
+                  : "Plan rejected by the operator."
             }
           }
           // Confinement first, and ahead of `toPermissionRequest`: read tools
@@ -1343,7 +1310,7 @@ export const runClaude = (
           options: {
             ...(mcpServers ? { mcpServers } : {}),
             // Covers project/user config, plugins, and sub-agent frontmatter, so
-            // workers inherit the same managed tool boundary as the orchestrator.
+            // nested harness agents inherit the same managed tool boundary.
             strictMcpConfig: spec.mcpPolicy === "managed-only",
             // Never `|| undefined`: an empty cwd makes the SDK inherit the app's
             // working directory, pointing the agent at whatever repo Jingler itself
@@ -1369,20 +1336,21 @@ export const runClaude = (
             model: spec.model ?? undefined,
             permissionMode: mapPermissionMode(spec.mode),
             ...mapClaudeReasoning(spec.reasoningEffort, spec.thinkingEnabled),
-            ...(spec.mode === "plan" || spec.orchestrationRoutes !== undefined
+            ...(spec.mode === "plan"
               ? {
-                  planModeInstructions: planJsonInstructions(
-                    spec.orchestrationRoutes,
-                    spec.workerRouting
-                  )
+                  planModeInstructions: planJsonInstructions()
                 }
               : {}),
             ...(spec.readOnly
               ? {
-                  disallowedTools:
-                    spec.orchestrationRoutes !== undefined
-                      ? READ_ONLY_DISALLOWED.filter((tool) => tool !== "Write")
-                      : [...READ_ONLY_DISALLOWED]
+                  // Write must reach `canUseTool` even when Claude enters native
+                  // plan mode after the query starts. The callback captures a
+                  // structured native plan file and denies every filesystem
+                  // mutation, so this remains read-only without relying on a
+                  // denylist that cannot change mid-turn.
+                  disallowedTools: READ_ONLY_DISALLOWED.filter(
+                    (tool) => tool !== "Write"
+                  )
                 }
               : {}),
             includePartialMessages: true,
@@ -1497,19 +1465,13 @@ export const runClaude = (
              * nothing below depends on it having run late.
              */
             let events = streamEventsFor(msg, tools, bgState)
-            if (nativePlanActive || orchestratingUnapproved) {
+            if (nativePlanActive) {
               const drafts: Array<StreamEvent> = []
               for (const event of events) {
                 if (event._tag === "Assistant" && event.agentId === undefined) {
                   planReplyText += event.text
-                  // Live streaming preview only in native plan mode; an Auto
-                  // orchestrator's plan lands in Plan Review at the terminal
-                  // boundary, so a per-token draft card here would flicker over
-                  // ordinary orchestrator prose that isn't a plan.
-                  if (nativePlanActive) {
-                    const draft = planDraft.append(event.text)
-                    if (draft !== null) drafts.push(draft)
-                  }
+                  const draft = planDraft.append(event.text)
+                  if (draft !== null) drafts.push(draft)
                 }
               }
               if (drafts.length > 0) events = [...events, ...drafts]
@@ -1543,36 +1505,20 @@ export const runClaude = (
              */
             let extended = false
             if ((msg as { type?: unknown }).type === "result") {
-              // A Jingler orchestrator can ignore the ExitPlanMode instruction
-              // and stream the complete PRD before ending the turn instead. The
-              // reply is still the authoritative plan transport: promote it at
-              // the terminal boundary rather than leaving Plan Review empty.
-              //
-              // Keep this orchestrator-only. A direct Claude planning turn needs
-              // ExitPlanMode's live approval result so it can continue into
-              // implementation under the restored execution mode.
-              if (
-                orchestratingUnapproved &&
-                planCount === 0 &&
-                planReplyText.length > 0 &&
-                events.some((event) => event._tag === "Done")
-              ) {
-                // The emission's `mode` decides: "submit" (or native plan mode)
-                // enters the blocking approval gate; "draft" only populates Plan
-                // Review (via a `PlanStore` write `Plan.watch` streams), leaving the
-                // visible ```json preview in chat.
+              // Claude occasionally streams the complete enhanced plan and ends
+              // without calling ExitPlanMode. Preserve that valid submission
+              // instead of clearing its draft at the terminal boundary.
+              if (nativePlanActive && planCount === 0 && planReplyText.length > 0) {
                 const capture = capturePlanEmission(planReplyText)
                 if (capture?._tag === "emission") {
-                  const submitting = nativePlanActive || capture.emission.mode === "submit"
-                  if (submitting) {
+                  if (capture.emission.mode === "submit") {
                     planCount += 1
                     await runP(ctx.proposePlan(capture.emission.plan, capture.block))
-                    planReplyText = ""
-                    planDraft.reset()
                   } else if (ctx.saveDraftPlan !== undefined) {
-                    planCount += 1
                     await runP(ctx.saveDraftPlan(capture.emission.plan, capture.block))
                   }
+                  planReplyText = ""
+                  planDraft.reset()
                 }
               }
               // A terminal, non-plan reply must not leave an incomplete draft

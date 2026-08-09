@@ -3,16 +3,14 @@ import {
   PlanAcceptanceStatus,
   PlanPrd,
   PlanPrdStage,
-  PlanStageAssignment,
-  PlanStageExecutionStatus,
   PlanTaskStatus
 } from "./plan-document.js"
 
 /**
- * What an orchestrator emits as a fenced ` ```json ` block. `mode` replaces the
+ * What the selected agent emits as a fenced ` ```json ` block. `mode` replaces the
  * old position-sensitive `<!-- jingler:submit-plan -->` marker: `draft`
  * populates Plan Review for iteration with no approval gate; `submit` enters the
- * one delegation approval gate. Because it is a typed field inside the decoded
+ * one approval gate. Because it is a typed field inside the decoded
  * object, a preamble before the block can never change its meaning.
  */
 export const PlanEmissionMode = Schema.Literal("draft", "submit")
@@ -98,16 +96,6 @@ export const PlanDelta = Schema.Union(
     criterionId: Schema.String,
     status: PlanAcceptanceStatus,
     evidence: Schema.NullOr(Schema.String)
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal("SetStageExecution"),
-    stageId: Schema.String,
-    status: PlanStageExecutionStatus
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal("SetAssignment"),
-    stageId: Schema.String,
-    assignment: Schema.NullOr(PlanStageAssignment)
   })
 )
 export type PlanDelta = Schema.Schema.Type<typeof PlanDelta>

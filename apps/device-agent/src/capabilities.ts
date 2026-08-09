@@ -91,7 +91,13 @@ export const discoverDeviceCapabilities = (
       platform: sources.platform(),
       capabilities: {
         version: 1,
-        capabilities: ["session.start", "session.input", "session.cancel", "session.observe"],
+        capabilities: [
+          "session.start",
+          "session.input",
+          "session.cancel",
+          "session.observe",
+          "project.manage"
+        ],
         harnesses: harnesses.filter((item) => item.available).map((item) => item.kind),
         maxConcurrentSessions: 4
       },
@@ -106,6 +112,7 @@ const appPaths = (root: string): AppPathsShape => ({
   root,
   configFile: join(root, "config.json"),
   sessionsFile: join(root, "sessions.json"),
+  projectsFile: join(root, "projects.json"),
   worktreesDir: join(root, "worktrees"),
   transcriptsDir: join(root, "transcripts"),
   reviewsDir: join(root, "reviews"),

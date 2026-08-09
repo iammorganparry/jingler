@@ -36,7 +36,6 @@ import { OpenConnectorService } from "./open-connector.js"
 import {
   AgentRunner,
   isContextOverflowFailure,
-  orchestratorAmendmentOutcomeText,
   planEvidenceFromText
 } from "./agent-runner.js"
 import { composeRemoteMcpServers } from "./mcp-config.js"
@@ -141,7 +140,7 @@ const mkPlan = (
   annotations: []
 })
 
-/** An approved delegation plan whose sole stage is a completed worker component. */
+/** An approved plan whose sole stage already has durable evidence. */
 const EXISTING_DELEGATION: PlanPrd = {
   title: "PRD: Existing delegation",
   sections: [],
@@ -156,9 +155,7 @@ const EXISTING_DELEGATION: PlanPrd = {
       notes: [],
       acceptance: [{ id: "01.1", text: "Existing work is verified.", status: "passed", evidence: "verified" }],
       dependencies: [],
-      complexity: "medium",
-      assignment: { agentId: "worker-a", cli: "claude", model: "opus", reason: "Existing work." },
-      executionStatus: "completed"
+      complexity: "medium"
     }
   ],
   annotations: []
@@ -250,43 +247,6 @@ describe("planEvidenceFromText", () => {
         evidence: "Typecheck reports TS2322."
       }
     ])
-  })
-})
-
-describe("orchestrator amendment outcomes", () => {
-  it("returns revisioned diagnostics for invalid and conflicting amendments", () => {
-    expect(
-      orchestratorAmendmentOutcomeText({
-        status: "invalid",
-        currentRevision: 7,
-        diagnostics: ["missing-acceptance: Stage 02 needs a criterion."]
-      })
-    ).toContain(
-      "Jingler amendment outcome: invalid. Current canonical revision: 7."
-    )
-    expect(
-      orchestratorAmendmentOutcomeText({
-        status: "conflict",
-        currentRevision: 8,
-        diagnostics: ["The canonical plan changed."]
-      })
-    ).toContain(
-      "Jingler amendment outcome: conflict. Current canonical revision: 8."
-    )
-    expect(
-      orchestratorAmendmentOutcomeText({
-        status: "applied",
-        currentRevision: 9,
-        diagnostics: []
-      })
-    ).toBeNull()
-    expect(
-      orchestratorAmendmentOutcomeText({
-        status: "not-present",
-        currentRevision: 9,
-        diagnostics: []
-      })
-    ).toBeNull()
   })
 })
 
@@ -384,7 +344,7 @@ describe("AgentRunner saveDraftPlan", () => {
     }
     const doc = await runWith(
       draftingAdapter(VALID_PLAN),
-      // A proposed plan already exists when the orchestrator re-emits a plan.
+      // A proposed plan already exists when the selected agent re-emits a plan.
       PlanStore.promoteDocument(temp.root, {
         sessionId: SESSION,
         producingChatId: SESSION,
@@ -1316,238 +1276,6 @@ describe("AgentRunner plan mode", () => {
     writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
   }
 
-  it("projects the parked orchestrator and relays to an active nested agent on the same run", async () => {
-    const proposed = await Effect.runPromise(Deferred.make<string>())
-    const steerTexts: Array<string> = []
-    const adapter: CliAdapterShape = {
-      run: (_chatId, _spec, context) =>
-        Effect.gen(function* () {
-          if (context.registerTurnSteer !== undefined) {
-            yield* context.registerTurnSteer(async (text) => {
-              steerTexts.push(text)
-              setTimeout(() => {
-                void Effect.runPromise(
-                  context.emit({
-                    _tag: "Assistant",
-                    text: "The nested planner reviewed the concern."
-                  })
-                )
-              }, 0)
-              return "accepted"
-            })
-          }
-          yield* context.emit({
-            _tag: "SubagentStarted",
-            id: "planner-child",
-            name: "Explore",
-            description: "Inspect the plan",
-            parentId: null
-          })
-          const plan = scriptedPlanPrd(SESSION, 1)
-          yield* context.proposePlan(plan)
-          yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-        }),
-      stop: () => Effect.void
-    }
-    const testLayer = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      Layer.succeed(CliAdapter, CliAdapter.of(adapter)),
-      DiscoveryService.Default,
-      ContextManager.Default,
-      temp.layer
-    )
-
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "plan")
-        const run = yield* runner
-          .prompt(SESSION, SESSION, "Create a plan.")
-          .pipe(
-            Stream.tap((event) =>
-              event._tag === "PlanProposed"
-                ? Deferred.succeed(proposed, event.plan.id)
-                : Effect.void
-            ),
-            Stream.runDrain,
-            Effect.fork
-          )
-        const planId = yield* Deferred.await(proposed)
-        const participants = yield* runner.planParticipants(SESSION, planId)
-        const nested = participants.find(
-          (participant) => participant.role === "subagent"
-        )!
-        const routed = yield* runner.steerPlanParticipant({
-          sessionId: SESSION,
-          planId,
-          routingId: nested.routingId,
-          text: "Relay this concern to the nested planner."
-        })
-        yield* runner.approvePlan(SESSION, planId)
-        yield* Fiber.join(run)
-        const stale = yield* runner.steerPlanParticipant({
-          sessionId: SESSION,
-          planId,
-          routingId: nested.routingId,
-          text: "Try the stale route."
-        })
-        return { participants, routed, stale }
-      }).pipe(Effect.provide(testLayer), Effect.timeout("10 seconds"))
-    )
-
-    expect(result.participants.map((participant) => participant.role)).toEqual([
-      "orchestrator",
-      "subagent"
-    ])
-    expect(steerTexts).toEqual(["Relay this concern to the nested planner."])
-    expect(result.routed).toEqual({
-      status: "delivered",
-      reply: "The nested planner reviewed the concern."
-    })
-    expect(result.stale.status).toBe("unavailable")
-  })
-
-  it("serializes concurrent plan-thread steers and collects complete replies", async () => {
-    const proposed = await Effect.runPromise(Deferred.make<string>())
-    const steerTexts: Array<string> = []
-    const adapter: CliAdapterShape = {
-      run: (_chatId, _spec, context) =>
-        Effect.gen(function* () {
-          yield* context.registerTurnSteer?.(async (text) => {
-            steerTexts.push(text)
-            setTimeout(() => {
-              Effect.runFork(context.emit({ _tag: "Assistant", text: `${text}:a` }))
-            }, 10)
-            setTimeout(() => {
-              Effect.runFork(context.emit({ _tag: "Assistant", text: ":b" }))
-            }, 100)
-            return "accepted"
-          }) ?? Effect.void
-          const plan = scriptedPlanPrd(SESSION, 1)
-          yield* context.proposePlan(plan)
-          yield* context.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-        }),
-      stop: () => Effect.void
-    }
-    const testLayer = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      Layer.succeed(CliAdapter, CliAdapter.of(adapter)),
-      DiscoveryService.Default,
-      ContextManager.Default,
-      temp.layer
-    )
-
-    const replies = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "plan")
-        const run = yield* runner.prompt(SESSION, SESSION, "Create a plan.").pipe(
-          Stream.tap((event) =>
-            event._tag === "PlanProposed"
-              ? Deferred.succeed(proposed, event.plan.id)
-              : Effect.void
-          ),
-          Stream.runDrain,
-          Effect.fork
-        )
-        const planId = yield* Deferred.await(proposed)
-        const participant = (yield* runner.planParticipants(SESSION, planId))[0]!
-        const first = yield* runner.steerPlanParticipant({
-          sessionId: SESSION,
-          planId,
-          routingId: participant.routingId,
-          text: "first"
-        }).pipe(Effect.fork)
-        yield* Effect.sleep("20 millis")
-        const second = yield* runner.steerPlanParticipant({
-          sessionId: SESSION,
-          planId,
-          routingId: participant.routingId,
-          text: "second"
-        }).pipe(Effect.fork)
-        const result = [yield* Fiber.join(first), yield* Fiber.join(second)]
-        yield* runner.approvePlan(SESSION, planId)
-        yield* Fiber.join(run)
-        return result
-      }).pipe(Effect.provide(testLayer), Effect.timeout("10 seconds"))
-    )
-
-    expect(steerTexts).toEqual(["first", "second"])
-    expect(replies).toEqual([
-      { status: "delivered", reply: "first:a:b" },
-      { status: "delivered", reply: "second:a:b" }
-    ])
-  })
-
-  it("drives the Electron collaboration fixture through the scripted active plan agent", async () => {
-    const proposed = await Effect.runPromise(Deferred.make<string>())
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "plan")
-        const run = yield* runner
-          .prompt(
-            SESSION,
-            SESSION,
-            "[[plan]] [[stream-plan]] [[active-plan-agent]] refactor auth"
-          )
-          .pipe(
-            Stream.tap((event) =>
-              event._tag === "PlanProposed"
-                ? Deferred.succeed(proposed, event.plan.id)
-                : Effect.void
-            ),
-            Stream.runDrain,
-            Effect.fork
-          )
-        const planId = yield* Deferred.await(proposed)
-        const participants = yield* runner.planParticipants(SESSION, planId)
-        const nested = participants.find(
-          (participant) => participant.role === "subagent"
-        )!
-        const routed = yield* runner.steerPlanParticipant({
-          sessionId: SESSION,
-          planId,
-          routingId: nested.routingId,
-          text: "Relay this message to the active nested agent and return its response."
-        })
-        yield* runner.approvePlan(SESSION, planId)
-        yield* Fiber.join(run)
-        return { participants, routed }
-      }).pipe(Effect.provide(base()), Effect.timeout("10 seconds"))
-    )
-
-    expect(result.participants).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          displayName: "Explore",
-          role: "subagent",
-          lifecycle: "running"
-        })
-      ])
-    )
-    expect(result.routed).toEqual({
-      status: "delivered",
-      reply: "Explore confirms the anchored rollout guidance is safe to keep."
-    })
-  })
-
   it("proposes a plan, records a step comment, and executes on approval", async () => {
     const program = Effect.gen(function* () {
       const runner = yield* AgentRunner
@@ -1757,13 +1485,11 @@ describe("AgentRunner plan mode", () => {
     expect(
       result.document?.plan.stages.map((stage) => ({
         id: stage.id,
-        executionStatus: stage.executionStatus,
         tasks: (stage.tasks ?? []).map((task) => task.status)
       }))
     ).toEqual(
       result.document?.plan.stages.map((stage) => ({
         id: stage.id,
-        executionStatus: "completed",
         tasks: (stage.tasks ?? []).map(() => "completed")
       }))
     )
@@ -2125,10 +1851,7 @@ describe("AgentRunner plan library", () => {
   const WT = "/tmp/jingler/worktrees/jingler/mysession"
 
   /** Seed a session that owns a worktree (so the runner writes/points at plans). */
-  const seedSessionWithWorktree = (
-    mode: PermissionMode,
-    role: Session["chats"][number]["role"] = "direct"
-  ) => {
+  const seedSessionWithWorktree = (mode: PermissionMode) => {
     const session: Session = {
       id: SESSION,
       repo: "acme/widget",
@@ -2143,7 +1866,7 @@ describe("AgentRunner plan library", () => {
       updatedAt: "2026-07-11T10:00:00.000Z",
       worktreePath: WT,
       chats: [
-        chatForSession("2026-07-11T10:00:00.000Z", { mode, role })
+        chatForSession("2026-07-11T10:00:00.000Z", { mode })
       ],
       activeChatId: SESSION,
       mode
@@ -2191,8 +1914,8 @@ describe("AgentRunner plan library", () => {
       temp.layer
     )
 
-  it("keeps plan mode transient so approval can restore the orchestrator's execution policy", async () => {
-    seedSessionWithWorktree("plan", "orchestrator")
+  it("keeps plan mode transient so approval restores the selected agent's execution policy", async () => {
+    seedSessionWithWorktree("plan")
     const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
       prompt: null,
       specs: []
@@ -2224,18 +1947,15 @@ describe("AgentRunner plan library", () => {
       // would survive the in-turn approval and strand Codex in its read-only
       // sandbox instead of restoring Auto.
       expect(spec.readOnly).toBeUndefined()
-      expect(spec.orchestrationRoutes).toBeDefined()
     }
-    expect(captured.specs[0]?.orchestrationPlanApproved).toBe(false)
-    expect(captured.specs[1]?.orchestrationPlanApproved).toBe(true)
-    expect(captured.specs[0]?.prompt).toContain("full native tools")
-    expect(captured.specs[0]?.prompt).toContain("Submit a plan as ONE fenced")
-    expect(captured.specs[1]?.prompt).toContain("without another approval gate")
+    expect(captured.specs[0]?.prompt).toContain("<managed-tools>")
+    expect(captured.specs[1]?.prompt).toContain("<session-context>")
+    expect(captured.specs[1]?.prompt).toContain("current-plan.json")
   })
 
-  it("preserves the operator's execution mode for orchestrator turns", async () => {
+  it("preserves the operator's execution mode for direct turns", async () => {
     for (const mode of ["ask", "accept-edits", "auto"] as const) {
-      seedSessionWithWorktree(mode, "orchestrator")
+      seedSessionWithWorktree(mode)
       const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
         prompt: null,
         specs: []
@@ -2255,8 +1975,8 @@ describe("AgentRunner plan library", () => {
     }
   })
 
-  it("executes and verifies bounded orchestrator work directly without proposing a plan", async () => {
-    seedSessionWithWorktree("auto", "orchestrator")
+  it("executes and verifies bounded work directly without proposing a plan", async () => {
+    seedSessionWithWorktree("auto")
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
@@ -2296,8 +2016,8 @@ describe("AgentRunner plan library", () => {
     expect(result.document).toBeNull()
   })
 
-  it("persists a tagged invalid amendment with diagnostics and the current revision", async () => {
-    seedSessionWithWorktree("auto", "orchestrator")
+  it("leaves invalid amendments at the enhanced plan boundary", async () => {
+    seedSessionWithWorktree("auto")
     // A re-emitted plan whose new stage declares no acceptance criterion — the
     // compiler rejects it (`missing-acceptance`) rather than making it canonical.
     const invalidAmendment = {
@@ -2342,21 +2062,21 @@ describe("AgentRunner plan library", () => {
           ?.parts.filter((part) => part._tag === "Text")
           .map((part) => part.text)
           .join("\n")
-        expect(feedback).toContain("Jingler amendment outcome: invalid.")
-        expect(feedback).toContain(
-          `Current canonical revision: ${before?.revision}.`
-        )
-        expect(feedback).toContain("missing-acceptance")
+        expect(feedback).toContain("I could not complete this amendment.")
+        expect(feedback).not.toContain("Jingler amendment outcome")
         expect(Array.from(events)).toContainEqual({
           _tag: "Assistant",
-          text: expect.stringContaining("Jingler amendment outcome: invalid.")
+          text: expect.stringContaining("I could not complete this amendment.")
         })
+        expect((yield* PlanStore.readDocument(WT, SESSION, SESSION))?.revision).toBe(
+          before?.revision
+        )
       }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
     )
   })
 
   it("leaves the approved plan untouched when the reply carries no amendment block", async () => {
-    seedSessionWithWorktree("auto", "orchestrator")
+    seedSessionWithWorktree("auto")
     const captured = {
       prompt: null,
       reply: "Just some coordination prose — no plan JSON block here."

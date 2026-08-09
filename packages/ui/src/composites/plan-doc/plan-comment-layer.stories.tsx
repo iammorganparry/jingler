@@ -1,5 +1,5 @@
 import { useState } from "react"
-import type { PlanAnnotation, PlanParticipant } from "@jingler/core"
+import type { PlanAnnotation } from "@jingler/core"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { PlanCommentLayer } from "./plan-comment-layer.js"
 
@@ -12,11 +12,6 @@ import { PlanCommentLayer } from "./plan-comment-layer.js"
 const meta: Meta = { title: "Composites/Plan Comment Layer" }
 export default meta
 type Story = StoryObj
-
-const participants: ReadonlyArray<PlanParticipant> = [
-  { routingId: "orch", displayName: "Orchestrator", role: "orchestrator", lifecycle: "running", ownerRoutingId: null },
-  { routingId: "worker-02", displayName: "codex · worker-02", role: "worker", lifecycle: "running", ownerRoutingId: "orch" }
-]
 
 const annotations: ReadonlyArray<PlanAnnotation> = [
   {
@@ -85,7 +80,6 @@ function Harness() {
       {container && (
         <PlanCommentLayer
           annotations={annotations}
-          participants={participants}
           containerRef={container}
           onAddComment={(target, body) =>
             setLog(`add comment on ${target.stageId ? `stage ${target.stageId}` : "selection"}: "${body}"`)

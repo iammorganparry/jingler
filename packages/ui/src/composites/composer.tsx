@@ -3,13 +3,13 @@ import type {
   Attachment,
   CliKind,
   Environment,
+  HarnessCapability,
   PermissionMode,
   ProviderModels,
   ReasoningEffort,
   ReasoningSetting,
   Skill
 } from "@jingler/core"
-import { supportsPlanMode } from "@jingler/core"
 import {
   Content as DropdownMenuContent,
   Item as DropdownMenuItem,
@@ -30,10 +30,8 @@ import {
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { downscaleImage } from "../lib/image-downscale.js"
-import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { modeAccent } from "../tokens.js"
-import { JinglerMark } from "../brand/jingler-mark.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
 import { Button } from "../components/button.js"
 import { ChipMenu, type ChipOption } from "../components/chip-menu.js"
@@ -44,6 +42,7 @@ import { SignalBars } from "../components/signal-bars.js"
 import { StatusDot } from "../components/status-dot.js"
 import { CommandMenu } from "./command-menu.js"
 import { MentionMenu } from "./mention-menu.js"
+import { ModelBrowser } from "./model-browser.js"
 
 /** Cap the number of attached images so the prompt payload stays sane. */
 const MAX_ATTACHMENTS = 8
@@ -85,23 +84,7 @@ const MODE_OPTIONS: ReadonlyArray<ChipOption<PermissionMode>> = [
   { value: "accept-edits", label: "accept edits" },
   { value: "auto", label: "auto" }
 ]
-const modeOptionsFor = (cli: CliKind | undefined): ReadonlyArray<ChipOption<PermissionMode>> =>
-  cli === "codex"
-    ? MODE_OPTIONS.map((option) =>
-        option.value === "ask" ? { ...option, label: "read only" } : option
-      )
-    : MODE_OPTIONS
-/** Offered on any harness that can hold a plan turn — see `supportsPlanMode`. */
-const PLAN_OPTION: ChipOption<PermissionMode> = { value: "plan", label: "plan" }
-
 type ReasoningChoice = "default" | ReasoningEffort
-const reasoningOptionsFor = (
-  cli: CliKind | undefined
-): ReadonlyArray<ChipOption<ReasoningChoice | "off">> => [
-  { value: "default", label: "default" },
-  { value: "off", label: "off" },
-  ...reasoningEffortsFor(cli).map((value) => ({ value, label: value }))
-]
 /**
  * Filled bars for a reasoning choice — its rung on the PROVIDER'S ladder, not a
  * fixed scale. Claude's runs low…max and Codex's minimal…xhigh, so the same word
@@ -111,8 +94,10 @@ const reasoningOptionsFor = (
  * Both `default` and `off` fill nothing: neither is a strength. `off` is told
  * apart by the slash (see `SignalBars`), and the chip's label carries the rest.
  */
-const reasoningLevel = (cli: CliKind | undefined, choice: ReasoningChoice | "off"): number =>
-  choice === "default" || choice === "off" ? 0 : reasoningEffortsFor(cli).indexOf(choice) + 1
+const reasoningLevel = (
+  options: ReadonlyArray<ReasoningEffort>,
+  choice: ReasoningChoice | "off"
+): number => choice === "default" || choice === "off" ? 0 : options.indexOf(choice) + 1
 
 type MenuState = { kind: "slash" | "mention"; query: string; start: number }
 const TRAILING_SPACE = /\s$/
@@ -161,13 +146,11 @@ export function Composer({
   cli,
   model,
   catalog = [],
+  capabilities,
   onSetHarness,
   mode = "accept-edits",
   onSetMode,
-  showJinglerToggle = false,
-  jinglerMode = false,
-  jinglerModePending = false,
-  onToggleJinglerMode,
+  useJinglerTools = true,
   followAgent = false,
   onToggleFollowAgent,
   reasoningEffort,
@@ -227,27 +210,15 @@ export function Composer({
   model?: string
   /** Installed harnesses and their models — the model chip's sectioned menu. */
   catalog?: ReadonlyArray<ProviderModels>
+  /** Authoritative provider/model/mode/reasoning snapshot. */
+  capabilities?: ReadonlyArray<HarnessCapability>
   /** Picking a model implies its harness, so both travel together. */
   onSetHarness?: (cli: CliKind, model: string) => void
   /** Current HITL mode (shown in the mode chip; Shift+Tab cycles it). */
   mode?: PermissionMode
   onSetMode?: (mode: PermissionMode) => void
-  /**
-   * Show the "Jingler mode" toggle in the control row. Set for the orchestrator
-   * chat only — the toggle governs the agentic orchestrator flow, which is a
-   * property of that chat.
-   */
-  showJinglerToggle?: boolean
-  /**
-   * Whether Jingler mode is ON. When on (and the toggle is shown), the
-   * permission-mode chip is hidden because the orchestrator chooses plan/auto
-   * mechanically. Its planning-capable model chip remains editable per chat.
-   */
-  jinglerMode?: boolean
-  /** Disable the toggle while the active chat's setting is being persisted. */
-  jinglerModePending?: boolean
-  /** Flip Jingler mode for the active chat; workspace config is its fallback. */
-  onToggleJinglerMode?: (enabled: boolean) => void
+  /** Enhanced Plan replaces provider-native Plan while Jingler tools are enabled. */
+  useJinglerTools?: boolean
   /** Whether Files is following mutations from this chat's active agent. */
   followAgent?: boolean
   /** Toggle the session file browser's shared agent-follow mode. */
@@ -279,13 +250,42 @@ export function Composer({
   focusKey?: string
   className?: string
 }) {
-  const modeOptions = [
-    ...modeOptionsFor(cli),
-    ...(allowPlan ? [PLAN_OPTION] : [])
+  const resolvedCapabilities = useMemo<ReadonlyArray<HarnessCapability>>(
+    () => capabilities ?? catalog.map((provider) => ({
+      ...provider,
+      modes: [
+        ...MODE_OPTIONS.map((option) => ({
+          id: option.value,
+          label: String(option.label),
+          kind: "execute" as const
+        })),
+        ...(allowPlan
+          ? [{ id: "plan" as const, label: "Plan", kind: "plan" as const }]
+          : [])
+      ]
+    })),
+    [allowPlan, capabilities, catalog]
+  )
+  const selectedCapability = resolvedCapabilities.find((candidate) => candidate.cli === cli)
+  const selectedModel =
+    selectedCapability?.models.find((candidate) => candidate.id === model) ??
+    selectedCapability?.models[0]
+  const modeOptions: ReadonlyArray<ChipOption<PermissionMode>> =
+    (selectedCapability?.modes ?? [])
+      .filter((option) => allowPlan || option.kind !== "plan")
+      .map((option) => ({
+        value: option.id,
+        label: useJinglerTools && option.kind === "plan" ? "Enhanced Plan" : option.label
+      }))
+  const reasoningEfforts = (selectedModel?.reasoning ?? []).map((option) => option.id)
+  const reasoningOptions: ReadonlyArray<ChipOption<ReasoningChoice | "off">> = [
+    { value: "default", label: "default" },
+    { value: "off", label: "off" },
+    ...(selectedModel?.reasoning ?? []).map((option) => ({
+      value: option.id,
+      label: option.label
+    }))
   ]
-  // Jingler owns permission mode mechanically (plan before approval, auto
-  // afterwards), but its model remains a live per-chat choice.
-  const hidePermissionMode = showJinglerToggle && jinglerMode
   const accent = modeAccent[mode]
   // The chip's value and its bar count are the same fact; deriving it once keeps
   // the glyph from drifting out of step with the label beside it.
@@ -298,34 +298,6 @@ export function Composer({
   const tier = useWidthTier()
   const roomy = atLeast(tier, "wide")
 
-  // Menu values are `<cli>:<modelId>`, not a bare model id: ids aren't unique
-  // across harnesses (`gpt-5` is offered by both codex and cursor), and the
-  // provider has to survive the round trip so selecting a model can switch
-  // harness in one go.
-  const modelCatalog = useMemo(
-    () =>
-      showJinglerToggle && jinglerMode
-        ? catalog.filter((provider) => supportsPlanMode(provider.cli))
-        : catalog,
-    [catalog, jinglerMode, showJinglerToggle]
-  )
-  const modelGroups = useMemo(
-    () =>
-      modelCatalog.map((p) => ({
-        label: p.label,
-        options: p.models.map((m) => ({ value: `${p.cli}:${m.id}`, label: m.label }))
-      })),
-    [modelCatalog]
-  )
-  // Prefer the exact harness+model pair; if the session's model isn't in the
-  // catalogue (stale id, or discovery replaced the list), fall back to the first
-  // model of its harness so the chip shows a real label instead of a raw id.
-  // Last resort is the bare model id — the catalogue arrives a beat after mount,
-  // and the chip must read "opus" in the meantime, never blank or "claude:opus".
-  const exact = modelGroups.flatMap((g) => g.options).find((o) => o.value === `${cli}:${model}`)
-  const harnessDefault = modelCatalog.find((p) => p.cli === cli)?.models[0]
-  const modelValue =
-    exact?.value ?? (harnessDefault ? `${cli}:${harnessDefault.id}` : (model ?? ""))
   // Follows the harness — the prompt used to be hardwired to "Message Claude…",
   // which now visibly lies the moment the operator switches provider.
   const prompt = placeholder ?? `Message ${PROVIDER_LABEL[cli ?? "claude"]}…`
@@ -530,7 +502,6 @@ export function Composer({
         // Reflects the active HITL mode so the per-mode theming is inspectable
         // (and assertable in e2e) — the visual accent is derived from it.
         data-mode={mode}
-        data-jingler-mode={showJinglerToggle ? String(jinglerMode) : undefined}
         onDragOver={(e) => {
           if (paused) return
           e.preventDefault()
@@ -547,11 +518,7 @@ export function Composer({
         }}
         className={cn(
           "flex flex-col gap-[11px] rounded-xl border bg-sunken px-[13px] py-2.5 transition-colors",
-          // Jingler mode is already legible from its animated toggle. Keep its
-          // composer neutral; direct harness modes retain their nightlight accent.
-          hidePermissionMode && !dragging
-            ? "border-line shadow-none"
-            : [accent.border, accent.bg, accent.glow],
+          [accent.border, accent.bg, accent.glow],
           paused && "opacity-70",
           // A drag-over always wins visually (cyan), and drops the mode glow.
           dragging && "border-cyan/60 bg-cyan/5 shadow-none"
@@ -726,31 +693,6 @@ export function Composer({
               />
             </button>
           )}
-          {showJinglerToggle && (
-            <button
-              type="button"
-              disabled={jinglerModePending}
-              aria-busy={jinglerModePending}
-              onClick={() => onToggleJinglerMode?.(!jinglerMode)}
-              aria-pressed={jinglerMode}
-              title={
-                jinglerMode
-                  ? "Jingler mode on — the orchestrator plans and hands off automatically. Click to drive the harness directly."
-                  : "Jingler mode off — you're driving the harness directly. Click to let the orchestrator plan and hand off."
-              }
-              className={cn(
-                "jingler-mode-toggle inline-flex items-center gap-1.5 whitespace-nowrap px-2 py-1 text-[11.5px] font-semibold outline-none transition-colors active:scale-[0.96] disabled:cursor-wait disabled:opacity-60",
-                jinglerMode ? "is-active" : "text-muted-foreground hover:text-text"
-              )}
-            >
-              <JinglerMark
-                aria-hidden="true"
-                focusable="false"
-                className="jingler-mode-toggle__mark h-[14px] w-auto flex-none"
-              />
-              <span className="jingler-mode-toggle__label">Jingler</span>
-            </button>
-          )}
           {onSetEnvironment && (
             <ChipMenu
               value={environmentId ?? "__local__"}
@@ -768,32 +710,13 @@ export function Composer({
               className="max-w-[150px]"
             />
           )}
-          {modelValue.length > 0 && (
-          <ChipMenu
-            value={modelValue}
-            groups={modelGroups}
-            appearance="quiet"
-            /* The model list grows with every harness installed and every model
-               a provider ships — long enough to hunt through. The mode chip
-               below is four fixed options, so it stays plain. */
-            searchable
-            searchPlaceholder="Search models…"
-            emptyLabel="No models match"
-            onSelect={(value) => {
-              // Split on the FIRST colon only — the harness is one token, but a
-              // model id could in principle contain one.
-              const separator = value.indexOf(":")
-              if (separator < 0) return
-              onSetHarness?.(value.slice(0, separator) as CliKind, value.slice(separator + 1))
-            }}
-            disabled={modelGroups.length === 0}
-            // Capped rather than fixed: model ids are the longest string in this
-            // row by a wide margin, and left uncapped one of them decides how
-            // much room every other control gets.
+          <ModelBrowser
+            cli={cli}
+            model={model}
+            capabilities={resolvedCapabilities}
+            onSelect={onSetHarness}
             className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
           />
-          )}
-          {!hidePermissionMode && (
           <ChipMenu
             value={mode}
             options={modeOptions}
@@ -803,10 +726,9 @@ export function Composer({
             // permanent toolbar space; cap long modes inside narrow panes.
             className={cn("max-w-[104px]", accent.chip)}
           />
-          )}
           <ChipMenu
             value={reasoningChoice}
-            options={reasoningOptionsFor(cli)}
+            options={reasoningOptions}
             onSelect={(value) =>
               onSetReasoning?.(
                 value === "default"
@@ -820,8 +742,8 @@ export function Composer({
             ariaLabel="Thinking strength"
             icon={
               <SignalBars
-                level={reasoningLevel(cli, reasoningChoice)}
-                total={reasoningEffortsFor(cli).length}
+                level={reasoningLevel(reasoningEfforts, reasoningChoice)}
+                total={reasoningEfforts.length}
                 slashed={thinkingEnabled === false}
               />
             }

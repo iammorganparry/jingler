@@ -3,6 +3,7 @@ import type {
   CliInfo,
   DiffStat,
   Environment,
+  Project,
   SessionPrStatus,
   Session,
   SessionActivity,
@@ -24,6 +25,7 @@ export type { ConversationPaneCtx } from "./session-pane.js"
 
 export interface SessionConversationProps {
   sessions: ReadonlyArray<Session>
+  projects?: ReadonlyArray<Project>
   environments?: ReadonlyArray<Environment>
   clis: ReadonlyArray<CliInfo>
   activeSessionId: string | null
@@ -137,6 +139,8 @@ export interface SessionConversationProps {
   liveDiff?: Record<string, DiffStat>
   /** Open the New Session dialog. */
   onNewSession?: () => void
+  onAddProject?: () => void
+  onNewWorkspace?: (projectId: string) => void
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
   /** Open the Usage & limits modal (from the sidebar account menu). */
@@ -224,6 +228,7 @@ export function SessionConversation(props: SessionConversationProps) {
     <div className="flex min-h-0 min-w-0 flex-1 bg-panel">
       <SessionSidebar
         sessions={props.sessions}
+        projects={props.projects}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
         slotBySession={props.slotBySession}
@@ -243,6 +248,8 @@ export function SessionConversation(props: SessionConversationProps) {
         prStates={props.prStates}
         repoOwners={props.repoOwners}
         onNewSession={props.onNewSession}
+        onAddProject={props.onAddProject}
+        onNewWorkspace={props.onNewWorkspace}
         user={props.user}
         onOpenUsage={props.onOpenUsage}
         onOpenSettings={props.onOpenSettings}

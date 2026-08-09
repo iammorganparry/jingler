@@ -19,9 +19,6 @@ const step = (over: Partial<PlanStepView> & Pick<PlanStepView, "id" | "title">):
   files: [],
   approach: [],
   notes: [],
-  agentId: null,
-  worker: null,
-  reasoningEffort: null,
   ...over
 })
 

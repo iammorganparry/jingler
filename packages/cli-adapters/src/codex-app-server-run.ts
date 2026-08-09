@@ -658,7 +658,7 @@ export const runCodexAppServer = (
               input: turnInput,
               cwd,
               // Thread resume can rejoin an already-running Codex thread whose
-              // sticky settings predate the current Jingler mode. Pin the
+              // sticky settings predate the current enhanced plan flow. Pin the
               // effective policy on every turn so Auto always restores host Git
               // metadata and network access, including the first execution turn
               // immediately after plan approval.
@@ -723,11 +723,7 @@ export const runCodexAppServer = (
               }
 
               const capturing: boolean =
-                reply !== null &&
-                (planning ||
-                  (spec.orchestrationRoutes !== undefined &&
-                    spec.orchestrationPlanApproved !== true)) &&
-                planRound < MAX_PLAN_ROUNDS
+                reply !== null && planning && planRound < MAX_PLAN_ROUNDS
               const capture: PlanCapture | null =
                 capturing && reply !== null ? capturePlanEmission(reply) : null
               if (capture?._tag === "reformat" && !planReformatAsked) {
@@ -763,7 +759,7 @@ export const runCodexAppServer = (
                 }
                 continue
               }
-              // A "draft" emission in auto orchestration mirrors into Plan Review,
+              // A "draft" emission in enhanced plan mode mirrors into Plan Review,
               // then falls through to emit as ordinary chat.
               if (
                 capture?._tag === "emission" &&

@@ -1,12 +1,19 @@
 import { Schema } from "effect"
-import { CliKind } from "./domain.js"
+import { CliKind, PermissionMode, ReasoningEffort } from "./domain.js"
 
 /** A model a harness can run, shown in the composer's model chip. */
 export const ModelOption = Schema.Struct({
   /** The id passed to the harness (`--model` / SDK `model`). */
   id: Schema.String,
   /** Short label shown in the chip/menu. */
-  label: Schema.String
+  label: Schema.String,
+  description: Schema.optional(Schema.String),
+  reasoning: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ id: ReasoningEffort, label: Schema.String })
+    )
+  ),
+  defaultReasoningId: Schema.optional(ReasoningEffort)
 })
 export type ModelOption = Schema.Schema.Type<typeof ModelOption>
 
@@ -19,55 +26,62 @@ export const ProviderModels = Schema.Struct({
 })
 export type ProviderModels = Schema.Schema.Type<typeof ProviderModels>
 
-/** The three capability bands used by automatic implementation-worker routing. */
-export type ModelCapabilityTier = "efficient" | "balanced" | "strongest"
+export const HarnessModeOption = Schema.Struct({
+  id: PermissionMode,
+  label: Schema.String,
+  description: Schema.optional(Schema.String),
+  kind: Schema.Literal("execute", "plan")
+})
+export type HarnessModeOption = Schema.Schema.Type<typeof HarnessModeOption>
 
-/** Stable harness tie-break for equally suitable automatic worker routes. */
-export const AUTOMATIC_MODEL_PROVIDER_ORDER: ReadonlyArray<CliKind> = [
-  "claude",
-  "codex",
-  "opencode",
-  "cursor"
-]
+/** One provider's live model, mode, and reasoning capability snapshot. */
+export const HarnessCapability = Schema.Struct({
+  cli: CliKind,
+  label: Schema.String,
+  modes: Schema.Array(HarnessModeOption),
+  models: Schema.Array(ModelOption)
+})
+export type HarnessCapability = Schema.Schema.Type<typeof HarnessCapability>
 
-const MODEL_TOKEN_SEPARATOR = /[^a-z0-9]+/
-
-const normalizedModelTokens = (model: string): ReadonlySet<string> =>
-  new Set(
-    model
-      .toLowerCase()
-      .split(MODEL_TOKEN_SEPARATOR)
-      .filter((token) => token.length > 0)
-  )
-
-const hasAnyToken = (
-  tokens: ReadonlySet<string>,
-  candidates: ReadonlyArray<string>
-): boolean => candidates.some((candidate) => tokens.has(candidate))
+export interface HarnessSelection {
+  readonly cli: CliKind
+  readonly model: string
+  readonly mode: PermissionMode
+  readonly reasoningEffort?: ReasoningEffort
+}
 
 /**
- * Infer the broad capability band encoded by model-family names exposed by the
- * installed harnesses. This deliberately stays small and provider-neutral:
- * live discovery remains authoritative for availability, while unknown model
- * families take the balanced middle rather than being guessed cheap or strong.
+ * Project a persisted conversation selection onto the capabilities available
+ * right now. This is intentionally a pure derivation: live discovery may change
+ * while a pane is mounted, but rendering a fallback must not write to the
+ * conversation or trigger a cascade of setter effects.
  */
-export const modelCapabilityTier = (model: string): ModelCapabilityTier => {
-  const tokens = normalizedModelTokens(model)
-  if (
-    hasAnyToken(tokens, [
-      "haiku",
-      "luna",
-      "mini",
-      "nano",
-      "flash",
-      "lite",
-      "small"
-    ])
-  ) return "efficient"
-  if (hasAnyToken(tokens, ["opus", "fable", "sol", "pro", "ultra"])) {
-    return "strongest"
+export const resolveHarnessSelection = (
+  capabilities: ReadonlyArray<HarnessCapability>,
+  selection: HarnessSelection
+): HarnessSelection => {
+  const capability =
+    capabilities.find((candidate) => candidate.cli === selection.cli) ?? capabilities[0]
+  if (capability === undefined) return selection
+
+  const model =
+    capability.models.find((candidate) => candidate.id === selection.model) ??
+    capability.models[0]
+  const mode =
+    capability.modes.find((candidate) => candidate.id === selection.mode) ??
+    capability.modes.find((candidate) => candidate.kind === "execute")
+  const reasoningEffort = model?.reasoning?.some(
+    (candidate) => candidate.id === selection.reasoningEffort
+  )
+    ? selection.reasoningEffort
+    : undefined
+
+  return {
+    cli: capability.cli,
+    model: model?.id ?? selection.model,
+    mode: mode?.id ?? selection.mode,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort })
   }
-  return "balanced"
 }
 
 /**

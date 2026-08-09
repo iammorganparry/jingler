@@ -1110,7 +1110,7 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
  * Kept as an explicit set rather than probing with `"agentId" in event`, which is
  * the trap this exists to close: `agentId` is `Schema.optional`, so an event
  * emitted WITHOUT one has no such key at all and the `in` check reports false.
- * Any orchestrator using that check to decide "may I attribute this?" therefore
+ * Any caller using that check to decide "may I attribute this?" therefore
  * silently declined to attribute exactly the events it needed to — every
  * unattributed Assistant/Tool event, which is all of them — and the sub-agent's
  * tab stayed empty while its output landed on the main turn.

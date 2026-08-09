@@ -11,7 +11,6 @@ import {
 } from "lucide-react"
 import type { ComponentType } from "react"
 import { useId, useState } from "react"
-import { ProviderIcon } from "../components/provider-icon.js"
 import { cn } from "../lib/cn.js"
 
 export type PlanProgressStatus =
@@ -29,21 +28,14 @@ const acceptanceDone = (stage: PlanPrdStage): boolean =>
       criterion.status === "passed" || criterion.status === "waived"
   )
 
-/** Project canonical worker state into the compact operator vocabulary. */
+/** Project canonical single-agent task/evidence state into compact UI status. */
 export const planProgressStatus = (stage: PlanPrdStage): PlanProgressStatus => {
-  if (stage.executionStatus === "completed") return "done"
-  switch (stage.executionStatus) {
-    case "running":
-      return "in-progress"
-    case "blocked":
-      return "blocked"
-    case "failed":
-      return "failed"
-    case "interrupted":
-      return "interrupted"
-    default:
-      return acceptanceDone(stage) ? "done" : "todo"
-  }
+  const tasks = stage.tasks ?? []
+  if (tasks.some((task) => task.status === "blocked")) return "blocked"
+  if (stage.acceptance.some((criterion) => criterion.status === "failed")) return "failed"
+  if (tasks.some((task) => task.status === "in-progress")) return "in-progress"
+  if (tasks.length > 0 && tasks.every((task) => task.status === "completed")) return "done"
+  return acceptanceDone(stage) ? "done" : "todo"
 }
 
 const STATUS: Readonly<
@@ -76,7 +68,7 @@ const STATUS: Readonly<
  * Composer-adjacent view of the live canonical plan.
  *
  * It owns no progress state: Plan.watch updates the PlanDocument and the
- * orchestration service updates each stage. This component is only a projection,
+ * selected agent updates each task and criterion. This component is only a projection,
  * so the plan and the dock cannot become competing sources of truth.
  */
 export function PlanProgressDock({
@@ -170,7 +162,6 @@ export function PlanProgressDock({
           {rows.map(({ stage, number, status }) => {
             const config = STATUS[status]
             const Icon = config.icon
-            const assignment = stage.assignment
             return (
               <button
                 key={stage.id}
@@ -201,17 +192,8 @@ export function PlanProgressDock({
                   >
                     {stage.title}
                   </span>
-                  <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] text-dim">
-                    {assignment ? (
-                      <>
-                        <ProviderIcon cli={assignment.cli} size={10} />
-                        <span className="truncate">
-                          {assignment.agentId} · {assignment.model}
-                        </span>
-                      </>
-                    ) : (
-                      <span>Unassigned</span>
-                    )}
+                  <span className="mt-0.5 block truncate text-[9.5px] text-dim">
+                    {stage.intent}
                   </span>
                 </span>
                 <span

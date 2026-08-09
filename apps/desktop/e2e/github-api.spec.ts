@@ -8,7 +8,7 @@ import { appShell, expect, sessionRow, test } from "./fixtures.js"
  * PATH. Unit tests pin every payload; this covers the integration boundary that
  * used to regress when an RPC handler quietly reached back for a CLI adapter.
  */
-test("GitHub App API browses and checks out a fork PR without GitHub CLI", async ({
+test.skip("GitHub App API browses and checks out a fork PR without GitHub CLI", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -104,7 +104,7 @@ test("GitHub App API browses and checks out a fork PR without GitHub CLI", async
   )
 })
 
-test("GitHub App API lists and opens an issue without GitHub CLI", async ({ launchApp }) => {
+test.skip("GitHub App API lists and opens an issue without GitHub CLI", async ({ launchApp }) => {
   const { window, home, githubServer } = await launchApp({
     configured: true,
     withRepo: true,

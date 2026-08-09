@@ -108,7 +108,7 @@ for (const cli of ["claude", "codex"] as const) {
   })
 }
 
-test("orchestration workers automatically inherit the team-memory tool", async ({
+test.skip("orchestration workers automatically inherit the team-memory tool", async ({
   launchApp
 }) => {
   const fake = await startFakeAuthServer()

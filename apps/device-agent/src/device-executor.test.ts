@@ -3,6 +3,7 @@ import type {
   CreateSessionFromPrInput,
   CreateSessionInput,
   RemoteSessionCommand,
+  Project,
   Session
 } from "@jingler/core"
 import { describe, expect, it, vi } from "vitest"
@@ -17,12 +18,25 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 
 const resultSession = { id: "session_1" } as Session
+const resultProject: Project = {
+  id: "p_1",
+  name: "jingler",
+  path: "/repos/jingler",
+  availability: "available",
+  createdAt: "2026-08-09T00:00:00.000Z",
+  updatedAt: "2026-08-09T00:00:00.000Z"
+}
 
 const services = (): DeviceExecutorServices => ({
   create: vi.fn(async (_input: CreateSessionInput) => resultSession),
   createFromPr: vi.fn(async (_input: CreateSessionFromPrInput) => resultSession),
   createFromIssue: vi.fn(async (_input: CreateSessionFromIssueInput) => resultSession),
   continuation: vi.fn(async (_source: Session) => resultSession),
+  listProjects: vi.fn(async () => [resultProject]),
+  registerProject: vi.fn(async () => resultProject),
+  createProjectDirectory: vi.fn(async () => resultProject),
+  cloneProject: vi.fn(async () => resultProject),
+  removeProject: vi.fn(async () => undefined),
   run: vi.fn(async (_sessionId, _input, emit) => {
     await emit({ _tag: "Assistant", text: "hello from device" })
   }),
@@ -60,6 +74,21 @@ const command = (operation: string, payload: unknown): RemoteSessionCommand => (
 })
 
 describe("device session command executor", () => {
+  it("registers and lists projects through the owning device", async () => {
+    const dependencies = services()
+    const executor = makeDeviceSessionCommandExecutor(dependencies)
+    const registered = await executor.execute(
+      command("Projects.register", { path: "/repos/jingler" }),
+      async () => undefined
+    )
+    const listed = await executor.execute(command("Projects.list", {}), async () => undefined)
+
+    expect(dependencies.registerProject).toHaveBeenCalledWith({ path: "/repos/jingler" })
+    expect(dependencies.listProjects).toHaveBeenCalled()
+    expect(registered).toBe(resultProject)
+    expect(listed).toEqual([resultProject])
+  })
+
   it("provisions a blank session through the device SessionStore boundary", async () => {
     const dependencies = services()
     const input: CreateSessionInput = {

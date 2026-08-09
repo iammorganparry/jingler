@@ -3,7 +3,8 @@ import type {
   Attachment,
   Message,
   PlanDocument,
-  PlanPrdStage
+  PlanPrdStage,
+  PlanTaskStatus
 } from "@jingler/core"
 import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
@@ -28,32 +29,24 @@ const img = (name: string): Attachment => ({ id: name, name, mediaType: "image/p
 const planStage = (
   id: string,
   title: string,
-  executionStatus: PlanPrdStage["executionStatus"],
-  passed = false,
-  assignment: NonNullable<PlanPrdStage["assignment"]> = {
-    agentId: "worker-core",
-    cli: "codex",
-    model: "gpt-5.6-sol",
-    reason: "Assigned by the approved plan."
-  }
+  taskStatus: PlanTaskStatus,
+  passed = false
 ): PlanPrdStage => ({
   id,
   title,
   intent: title,
   approach: [],
+  tasks: [{ id: `${id}.task`, text: title, status: taskStatus }],
   files: [],
   diagrams: [],
   notes: [],
-  acceptance: [
-    {
-      id: `${id}.1`,
-      text: `${title} is verified.`,
-      status: passed ? "passed" : "pending",
-      evidence: passed ? "Verified by the worker." : null
-    }
-  ],
-  assignment,
-  executionStatus
+  acceptance: [{
+    id: `${id}.1`,
+    text: `${title} is verified.`,
+    testReferences: [],
+    status: passed ? "passed" : "pending",
+    evidence: passed ? "Verified by the selected agent." : null
+  }]
 })
 
 const LIVE_PLAN: PlanDocument = {
@@ -63,36 +56,20 @@ const LIVE_PLAN: PlanDocument = {
   revision: 8,
   status: "executing",
   plan: {
-    title: "PRD: Provider-neutral orchestration",
+    title: "PRD: Single-agent execution",
     sections: [],
     stages: [
-      planStage("01", "Persist orchestrator settings", "completed", true),
-      planStage("02", "Build execution graph", "completed", true),
-      planStage("03", "Run independent workers", "running", false, {
-        agentId: "worker-execution",
-        cli: "claude",
-        model: "claude-opus-4-1",
-        reason: "High-complexity execution route."
-      }),
-      planStage("04", "Reconcile amendments", "queued", false, {
-        agentId: "worker-execution",
-        cli: "claude",
-        model: "claude-opus-4-1",
-        reason: "Shares dependencies with execution."
-      }),
-      planStage("05", "Verify the workflow", "queued", false, {
-        agentId: "worker-release",
-        cli: "opencode",
-        model: "anthropic/claude-sonnet-4",
-        reason: "Independent verification route."
-      })
+      planStage("01", "Register projects", "completed", true),
+      planStage("02", "Create workspaces", "completed", true),
+      planStage("03", "Redesign the composer", "in-progress"),
+      planStage("04", "Reconcile amendments", "pending"),
+      planStage("05", "Verify the workflow", "pending")
     ],
     annotations: []
   },
   updatedAt: "2026-07-30T09:00:00.000Z",
   updatedBy: "agent"
 }
-
 /** A user turn that attached two screenshots as context, plus a line of text. */
 const USER_TURN_WITH_IMAGES: Message = {
   id: "u_img",
