@@ -73,6 +73,13 @@ export const linearGraphql = async <Data extends object>(
     throw new Error("Linear could not be reached. Check your connection and retry.")
   }
 
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("Linear rejected the API key. Replace it in Settings → Plugins → Linear.")
+  }
+  if (response.status === 429) {
+    throw new Error("Linear's rate limit was reached. Wait a moment and retry.")
+  }
+
   let payload: GraphqlResponse<Data>
   try {
     payload = (await response.json()) as GraphqlResponse<Data>
@@ -81,10 +88,7 @@ export const linearGraphql = async <Data extends object>(
   }
 
   const errors = Array.isArray(payload.errors) ? payload.errors : []
-  if (response.status === 401 || response.status === 403) {
-    throw new Error("Linear rejected the API key. Replace it in Settings → Plugins → Linear.")
-  }
-  if (response.status === 429 || isRateLimited(errors)) {
+  if (isRateLimited(errors)) {
     throw new Error("Linear's rate limit was reached. Wait a moment and retry.")
   }
   if (!response.ok) {

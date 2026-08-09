@@ -54,9 +54,13 @@ describe("linearGraphql", () => {
     )
       .rejects.toThrow("Linear rejected the request")
   })
+})
 
+describe("linearGraphql status errors", () => {
   it("maps authentication and rate-limit failures to actionable messages", async () => {
-    const unauthenticated = vi.fn(async () => json({ errors: [] }, 401))
+    const unauthenticated = vi.fn(async () => new Response("not JSON", { status: 401 }))
+    const forbidden = vi.fn(async () => new Response(null, { status: 403 }))
+    const statusRateLimited = vi.fn(async () => new Response("not JSON", { status: 429 }))
     const rateLimited = vi.fn(async () =>
       json({ errors: [{ extensions: { code: "RATELIMITED" } }] }, 400)
     )
@@ -66,11 +70,21 @@ describe("linearGraphql", () => {
     )
       .rejects.toThrow("Replace it in Settings")
     await expect(
+      linearGraphql({ apiKey: "bad", query: "query Viewer { viewer { id } }", request: forbidden })
+    )
+      .rejects.toThrow("Replace it in Settings")
+    await expect(
+      linearGraphql({ apiKey: "key", query: "query Viewer { viewer { id } }", request: statusRateLimited })
+    )
+      .rejects.toThrow("rate limit")
+    await expect(
       linearGraphql({ apiKey: "key", query: "query Viewer { viewer { id } }", request: rateLimited })
     )
       .rejects.toThrow("rate limit")
   })
+})
 
+describe("linearApiUrl", () => {
   it("uses a host-only endpoint override and validates its protocol", () => {
     expect(linearApiUrl(undefined)).toBe("https://api.linear.app/graphql")
     expect(linearApiUrl("http://127.0.0.1:43123/graphql")).toBe(
