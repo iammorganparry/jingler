@@ -3,8 +3,7 @@ import type {
   IssueCreateRequest,
   IssueDetail,
   IssueGetRequest,
-  IssueListRequest,
-  IssueSummary
+  IssueListRequest
 } from "@jingler/plugin-sdk/host"
 
 export interface LinearDisplayItem {
@@ -48,4 +47,3 @@ export interface LinearCreateRequest extends IssueCreateRequest {
 export type LinearListRequest = IssueListRequest
 export type LinearGetRequest = IssueGetRequest
 export type LinearCommentRequest = IssueAddCommentRequest
-export type LinearIssueSummary = IssueSummary
