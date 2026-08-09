@@ -452,7 +452,8 @@ const websocketHeaders = (
   endpoint?: "desktop" | "device",
   acknowledgedSequence?: string,
   usageAttachmentId?: string,
-  sourceIp?: string
+  sourceIp?: string,
+  controllerLeaseGeneration = claims.controllerLeaseGeneration ?? 0
 ): Headers => {
   const headers = new Headers({
     Upgrade: "websocket",
@@ -464,7 +465,7 @@ const websocketHeaders = (
       claims.attachmentGeneration ?? 0
     ),
     "x-jingler-controller-lease-generation": String(
-      claims.controllerLeaseGeneration ?? 0
+      controllerLeaseGeneration
     ),
     "x-jingler-expires-at": String(claims.expiresAt)
   })
@@ -607,8 +608,8 @@ const handleTunnelSocket = async (
       reason:
         reason === "stale-controller" ? "stale-controller" : "offline",
       message: `Client attachment rejected: ${reason}`,
-      retryable: reason === "offline"
-    }, reason === "offline" ? 409 : 403)
+      retryable: reason === "offline" || reason === "stale-controller"
+    }, reason === "offline" || reason === "stale-controller" ? 409 : 403)
   }
   if (endpoint === "desktop" && !(await registry.notifySession(
     claims.deviceId,
@@ -618,7 +619,7 @@ const handleTunnelSocket = async (
     {
       clientInstanceId: claims.clientInstanceId,
       attachmentGeneration: claims.attachmentGeneration,
-      controllerLeaseGeneration: claims.controllerLeaseGeneration
+      controllerLeaseGeneration: preparation.controllerLeaseGeneration
     }
   ))) {
     await usage.release(usageAttachmentId)
@@ -636,7 +637,8 @@ const handleTunnelSocket = async (
         endpoint,
         acknowledgedSequence,
         usageAttachmentId,
-        sourceIp
+        sourceIp,
+        preparation.controllerLeaseGeneration
       )
     })
   )
@@ -806,13 +808,25 @@ const handleControllerLease = async (
 const handleSessionInventory = async (
   request: Request,
   env: Env,
-  deviceId: string
+  deviceId: string,
+  requestedSessionId?: string
 ): Promise<Response> => {
   const claims = await grant(request, env, "device-control")
   if (!claims || !scopedDevice(claims, deviceId)) {
     return controlPlaneFailure("invalid-grant")
   }
   const registry = env.DEVICE_REGISTRY.getByName(claims.subject)
+  if (requestedSessionId) {
+    const entry = await env.SESSION_TUNNEL
+      .getByName(requestedSessionId)
+      .inventoryEntryFor(claims.subject, deviceId)
+    return json({
+      version: 1,
+      deviceId,
+      generatedAt: Math.floor(Date.now() / 1_000),
+      sessions: entry ? [entry] : []
+    })
+  }
   const sessionIds = await registry.listSessionIds(deviceId)
   if (!sessionIds) return controlPlaneFailure("offline")
   const entries = await Promise.all(
@@ -866,6 +880,17 @@ const worker = {
     const inventoryDeviceId = routeDeviceId(url.pathname, "/sessions")
     if (request.method === "GET" && inventoryDeviceId) {
       return handleSessionInventory(request, env, inventoryDeviceId)
+    }
+    const targetedInventory = url.pathname.match(
+      /^\/v1\/devices\/([A-Za-z0-9_-]{1,128})\/sessions\/([A-Za-z0-9_-]{1,128})$/u
+    )
+    if (request.method === "GET" && targetedInventory) {
+      return handleSessionInventory(
+        request,
+        env,
+        targetedInventory[1]!,
+        targetedInventory[2]!
+      )
     }
     const discoveryDeviceId = routeDeviceId(url.pathname, "/discovery")
     if (request.method === "GET" && discoveryDeviceId) {

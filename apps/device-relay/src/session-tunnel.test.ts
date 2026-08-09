@@ -118,6 +118,56 @@ const connect = async (
 }
 
 describe("encrypted session tunnel", () => {
+  it("reconnects after lease expiry and returns the effective takeover generation", async () => {
+    const input = initialization("session_lease_reconnect_abcd")
+    const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
+    const first = admission(input)
+    await expect(tunnel.prepareConnection({
+      endpoint: "desktop",
+      initialization: input,
+      admission: first
+    }, nowSeconds)).resolves.toEqual({
+      status: "prepared",
+      controllerLeaseGeneration: 1
+    })
+
+    const afterExpiry = input.expiresAt + 1
+    await expect(tunnel.inventoryEntry(afterExpiry)).resolves.toMatchObject({
+      controllerClientInstanceId: null,
+      controllerLeaseGeneration: 2
+    })
+    const refreshed = {
+      ...first,
+      controllerLeaseGeneration: 2,
+      expiresAt: afterExpiry + 600
+    }
+    await expect(tunnel.prepareConnection({
+      endpoint: "desktop",
+      initialization: { ...input, expiresAt: refreshed.expiresAt },
+      admission: refreshed
+    }, afterExpiry)).resolves.toEqual({
+      status: "prepared",
+      controllerLeaseGeneration: 2
+    })
+
+    await expect(tunnel.prepareConnection({
+      endpoint: "desktop",
+      initialization: { ...input, expiresAt: refreshed.expiresAt },
+      admission: { ...refreshed, clientInstanceId: "client_second_abcdefgh" }
+    }, afterExpiry)).resolves.toEqual({
+      status: "prepared",
+      controllerLeaseGeneration: 3
+    })
+    await expect(tunnel.prepareConnection({
+      endpoint: "device",
+      initialization: { ...input, expiresAt: refreshed.expiresAt },
+      admission: { ...refreshed, clientInstanceId: "client_second_abcdefgh" }
+    }, afterExpiry)).resolves.toEqual({
+      status: "prepared",
+      controllerLeaseGeneration: 3
+    })
+  })
+
   it("restores bounded retention counters without scanning envelope history after hibernation", async () => {
     const input = initialization("session_counter_hibernate_abcd")
     const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)

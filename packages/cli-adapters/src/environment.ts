@@ -66,7 +66,24 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
     effect: Effect.gen(function* () {
       const secrets = yield* SecretStore
       const bootstrap = yield* RemoteBootstrapService
-      const clientInstanceId = `client_${crypto.randomUUID()}`
+      const clientInstanceId = yield* Effect.tryPromise({
+        try: async () => {
+          const document = await updateDeviceSecretDocument(secrets, (current) => {
+            if (
+              typeof current.clientInstanceId === "string" &&
+              /^client_[A-Za-z0-9_-]{8,120}$/u.test(current.clientInstanceId)
+            ) {
+              return current
+            }
+            return {
+              ...current,
+              clientInstanceId: `client_${crypto.randomUUID().replaceAll("-", "")}`
+            }
+          })
+          return document.clientInstanceId!
+        },
+        catch: () => environmentError(503, "The device identity store is unavailable.")
+      })
 
       const request = <A, I>(
         path: string,
@@ -147,8 +164,8 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
             deviceId,
             sessionId,
             clientInstanceId,
-            attachmentGeneration: 1,
-            controllerLeaseGeneration: 1
+            attachmentGeneration: null,
+            controllerLeaseGeneration: null
           })
         })
 

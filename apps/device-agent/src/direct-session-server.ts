@@ -1,5 +1,7 @@
 import { createServer, type Server, type Socket } from "node:net"
-import { chmod, rm } from "node:fs/promises"
+import { chmod, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { DirectSessionOpen, EncryptedTunnelEnvelope } from "@jingler/core"
 import {
   DirectSessionOpen as DirectSessionOpenSchema,
@@ -126,12 +128,16 @@ const serveConnection = async (
 }
 
 export const startDirectSessionServer = async (input: {
-  readonly socketPath: string
   readonly enrollment: DeviceEnrollment
   readonly identity: DeviceIdentity
   readonly handlerFor: (sessionId: string) => SessionCommandHandler
-}): Promise<{ readonly close: () => Promise<void> }> => {
-  await rm(input.socketPath, { force: true })
+}): Promise<{ readonly socketPath: string; readonly close: () => Promise<void> }> => {
+  // A random 0700 parent is the local admission boundary. The socket is never
+  // reachable during the listen/chmod interval, and another local account
+  // cannot predict and pre-bind its path.
+  const socketDirectory = await mkdtemp(join(tmpdir(), "jingler-device-"))
+  await chmod(socketDirectory, 0o700)
+  const socketPath = join(socketDirectory, "session.sock")
   const sockets = new Set<Socket>()
   const server: Server = createServer((socket) => {
     sockets.add(socket)
@@ -139,16 +145,23 @@ export const startDirectSessionServer = async (input: {
     void serveConnection(socket, input.enrollment, input.identity, input.handlerFor)
       .catch(() => socket.destroy())
   })
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject)
-    server.listen(input.socketPath, resolve)
-  })
-  await chmod(input.socketPath, 0o600)
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject)
+      server.listen(socketPath, resolve)
+    })
+    await chmod(socketPath, 0o600)
+  } catch (error) {
+    if (server.listening) server.close()
+    await rm(socketDirectory, { recursive: true, force: true })
+    throw error
+  }
   return {
+    socketPath,
     close: async () => {
       for (const socket of sockets) socket.destroy()
       await new Promise<void>((resolve) => server.close(() => resolve()))
-      await rm(input.socketPath, { force: true })
+      await rm(socketDirectory, { recursive: true, force: true })
     }
   }
 }

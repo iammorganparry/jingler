@@ -1,7 +1,7 @@
 import { createConnection } from "node:net"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
   decryptRemotePayload,
   encryptRemotePayload,
@@ -32,14 +32,14 @@ describe("direct session server", () => {
     const handler = new SessionCommandHandler(join(root, "session.json"), {
       execute: async () => ({ ok: true })
     })
-    const socketPath = join(root, "direct.sock")
     const server = await startDirectSessionServer({
-      socketPath,
       enrollment: { subject: "user@example.com", deviceId, serverUrl: "https://example.test" },
       identity,
       handlerFor: () => handler
     })
-    const socket = createConnection(socketPath)
+    expect((await stat(dirname(server.socketPath))).mode & 0o777).toBe(0o700)
+    expect((await stat(server.socketPath)).mode & 0o777).toBe(0o600)
+    const socket = createConnection(server.socketPath)
     socket.setEncoding("utf8")
     const frames: unknown[] = []
     let text = ""

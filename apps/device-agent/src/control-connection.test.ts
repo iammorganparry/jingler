@@ -1,5 +1,5 @@
 import type { DeviceRelayGrantResponse, RemoteDeviceDiscovery } from "@jingler/core"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { type ControlConnectionDependencies, type ControlSocket, runControlConnection } from "./control-connection.js"
 
 const discovery: RemoteDeviceDiscovery = {
@@ -44,6 +44,44 @@ const socket = (code: number, reason: string, sent: Array<string>): ControlSocke
 })
 
 describe("device control connection", () => {
+  it("accepts a released relay session frame without fencing fields", async () => {
+    const controller = new AbortController()
+    let deliver: ((message: unknown) => void) | null = null
+    const handled: Array<Parameters<NonNullable<ControlConnectionDependencies["handleSessionRequest"]>>[0]> = []
+    const running = runControlConnection({
+      refreshGrant: async () => grant(1),
+      discover: async () => discovery,
+      connect: async () => ({
+        send: () => undefined,
+        close: () => undefined,
+        onMessage: (handler) => {
+          deliver = handler
+          return () => undefined
+        },
+        waitForClose: (signal) => new Promise((resolve) => {
+          signal.addEventListener("abort", () => resolve({ code: 1000, reason: "stopped" }), { once: true })
+        })
+      }),
+      sleep: async () => undefined,
+      handleSessionRequest: async (request) => { handled.push(request) }
+    }, controller.signal)
+
+    await vi.waitFor(() => expect(deliver).not.toBeNull())
+    deliver!({
+      type: "session-request",
+      sessionId: "session_legacy_abcdefgh",
+      grant: "legacy-session-grant"
+    })
+    await vi.waitFor(() => expect(handled).toHaveLength(1))
+    expect(handled[0]).toMatchObject({
+      clientInstanceId: expect.stringMatching(/^legacy_/u),
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 1
+    })
+    controller.abort()
+    await expect(running).resolves.toBe("stopped")
+  })
+
   it("refreshes the device grant before reconnect", async () => {
     const controller = new AbortController()
     let refreshes = 0

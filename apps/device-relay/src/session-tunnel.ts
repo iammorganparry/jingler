@@ -111,7 +111,7 @@ export interface AttachmentAdmission {
 }
 
 export type TunnelConnectionPreparation =
-  | { readonly status: "prepared" }
+  | { readonly status: "prepared"; readonly controllerLeaseGeneration: number }
   | {
       readonly status:
         | "resource-mismatch"
@@ -525,9 +525,19 @@ export class SessionTunnelObject extends DurableObject<Env> {
     if (!initialized) {
       result = { status: "resource-mismatch" }
     } else {
+      // A desktop takeover can advance the controller generation after the
+      // signed grant was minted. The device half of the same tunnel does not
+      // publish controller commands, so admit it against the current lease
+      // while retaining the attachment and scope fences from the grant.
+      const effectiveDeviceGeneration = input.endpoint === "device"
+        ? this.normalizedLease(nowSeconds).generation
+        : input.admission.controllerLeaseGeneration
       const attachment = input.endpoint === "desktop"
         ? await this.attachClient(input.admission, nowSeconds, false)
-        : await this.assertAttachment(input.admission, nowSeconds)
+        : await this.assertAttachment({
+            ...input.admission,
+            controllerLeaseGeneration: effectiveDeviceGeneration
+          }, nowSeconds)
       if (
         ("status" in attachment && attachment.status !== "attached") ||
         ("active" in attachment && !attachment.active)
@@ -539,17 +549,23 @@ export class SessionTunnelObject extends DurableObject<Env> {
         const lease = await this.acquireController({
           ...input.admission,
           expectedGeneration: input.admission.controllerLeaseGeneration,
-          takeover: false
+          takeover: true
         }, nowSeconds, false)
         result = lease.status === "acquired"
-          ? { status: "prepared" }
+          ? {
+              status: "prepared",
+              controllerLeaseGeneration: lease.lease.generation
+            }
           : {
               status: lease.status === "released"
                 ? "stale-controller"
                 : lease.status
             }
       } else {
-        result = { status: "prepared" }
+        result = {
+          status: "prepared",
+          controllerLeaseGeneration: effectiveDeviceGeneration
+        }
       }
     }
     await this.scheduleAlarm()
@@ -629,6 +645,17 @@ export class SessionTunnelObject extends DurableObject<Env> {
       controllerLeaseGeneration: lease.generation,
       updatedAt: nowSeconds
     }
+  }
+
+  async inventoryEntryFor(
+    subject: string,
+    deviceId: string,
+    nowSeconds = Math.floor(Date.now() / 1_000)
+  ): Promise<RemoteSessionInventoryEntry | null> {
+    const metadata = this.metadata()
+    return metadata?.subject === subject && metadata.device_id === deviceId
+      ? this.inventoryEntry(nowSeconds)
+      : null
   }
 
   override async fetch(request: Request): Promise<Response> {

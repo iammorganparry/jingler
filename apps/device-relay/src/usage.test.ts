@@ -144,6 +144,34 @@ describe("relay usage policy", () => {
     expect(allowRelayControlOperation()).toBe(true)
   })
 
+  it("enforces durable concurrency while keeping attachment retries idempotent", async () => {
+    const usage = env.RELAY_USAGE.getByName("account:durable-concurrency")
+    for (
+      let index = 0;
+      index < RELAY_USAGE_POLICY.maximumConcurrentClientsPerDevice;
+      index += 1
+    ) {
+      await expect(usage.admit({
+        attachmentId: `attachment-${index}`,
+        deviceId: "device-shared",
+        clientInstanceId: `client-${index}`,
+        sourceIp: `192.0.2.${index + 1}`
+      }, Number.MAX_SAFE_INTEGER, 100)).resolves.toBe("admitted")
+    }
+    await expect(usage.admit({
+      attachmentId: "attachment-extra",
+      deviceId: "device-shared",
+      clientInstanceId: "client-extra",
+      sourceIp: "192.0.2.100"
+    }, Number.MAX_SAFE_INTEGER, 100)).resolves.toBe("concurrency-exceeded")
+    await expect(usage.admit({
+      attachmentId: "attachment-0",
+      deviceId: "device-shared",
+      clientInstanceId: "client-0",
+      sourceIp: "192.0.2.1"
+    }, Number.MAX_SAFE_INTEGER, 100)).resolves.toBe("admitted")
+  })
+
   it("rate limits attachment attempts independently by account client and ip", async () => {
     const usage = env.RELAY_USAGE.getByName("account:rate-limit")
     let result: Awaited<ReturnType<typeof usage.admit>> = "admitted"

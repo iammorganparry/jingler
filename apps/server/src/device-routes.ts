@@ -18,6 +18,7 @@ import {
   DeviceListResponse,
   EnvironmentDiscovery,
   DeviceRelayGrantRequest,
+  RemoteSessionInventory,
   PairingClaimRequest
 } from "@jingler/core"
 import { createHash } from "node:crypto"
@@ -239,9 +240,19 @@ const controlGrant = (
     deviceGeneration: null
   })
 
-const requestClientInstanceId = (request: Request): string | null => {
+const requestClientInstanceId = (request: Request, subject: string): string => {
   const value = request.headers.get("x-jingler-client-instance-id")
-  return value && /^[A-Za-z0-9_-]{1,128}$/u.test(value) ? value : null
+  if (value && /^[A-Za-z0-9_-]{1,128}$/u.test(value)) return value
+  // Compatibility for clients released before per-install client identities.
+  // The bearer is already the authentication boundary; hashing it produces a
+  // stable, non-secret fencing identity without collapsing every account client
+  // onto the same controller lease.
+  const bearer = request.headers.get("authorization") ?? ""
+  const digest = createHash("sha256")
+    .update(`${subject}\0${bearer}`, "utf8")
+    .digest("base64url")
+    .slice(0, 32)
+  return `legacy_${digest}`
 }
 
 const authenticatedUser = async (
@@ -412,12 +423,19 @@ export const createDeviceRoutes = (
         retryable: false
       }, result.status === "expired" ? 401 : 409)
     }
+    const relayCredential = result.device.deviceId === credential.deviceId
+      ? { claim: credential, token }
+      : dependencies.issueClaim({
+          subject: credential.subject,
+          deviceId: result.device.deviceId,
+          clientInstanceId: credential.clientInstanceId
+        })
     const relayRegistration = await relayRequest(
       dependencies,
       "/v1/device-registrations",
-      token,
+      relayCredential.token,
       "POST",
-      { version: 1, claim: credential, registration: input.registration }
+      { version: 1, claim: relayCredential.claim, registration: input.registration }
     ).catch(() => null)
     // A lost relay response can make an exact enrollment retry observe the
     // relay's one-use claim as replayed. The database identity fence above
@@ -452,18 +470,15 @@ export const createDeviceRoutes = (
     const input = await decodeRequest(context.req.raw, DeviceRelayGrantRequest)
     if (!input) return json({ error: "Invalid grant request" }, 400)
     if (input.audience === "device-control") {
-      if (
-        input.deviceId !== null ||
-        input.sessionId !== null ||
-        input.attachmentGeneration !== null ||
-        input.controllerLeaseGeneration !== null
-      ) {
+      if (input.deviceId !== null || input.sessionId !== null) {
         return json({ error: "Invalid device-control scope" }, 400)
       }
+      const clientInstanceId = input.clientInstanceId ??
+        requestClientInstanceId(context.req.raw, subject)
       const issued = controlGrant(
         dependencies,
         subject,
-        input.clientInstanceId
+        clientInstanceId
       )
       deviceServerTelemetry("grant_issued", {
         audience: issued.claims.audience,
@@ -473,12 +488,7 @@ export const createDeviceRoutes = (
       })
       return json(issued)
     }
-    if (
-      !input.deviceId ||
-      !input.sessionId ||
-      input.attachmentGeneration === null ||
-      input.controllerLeaseGeneration === null
-    ) {
+    if (!input.deviceId || !input.sessionId) {
       return json(
         { error: "Session grants require deviceId and sessionId" },
         400
@@ -489,14 +499,39 @@ export const createDeviceRoutes = (
       .catch(() => null)
     if (!device) return json({ error: "Device not found" }, 404)
     if (device.state !== "active") return json({ error: "Device revoked" }, 409)
+    const clientInstanceId = input.clientInstanceId ??
+      requestClientInstanceId(context.req.raw, subject)
+    const inventoryResponse = await relayRequest(
+      dependencies,
+      `/v1/devices/${encodeURIComponent(device.deviceId)}/sessions/${encodeURIComponent(input.sessionId)}`,
+      controlGrant(dependencies, subject, clientInstanceId, device.deviceId).grant,
+      "GET"
+    ).catch(() => null)
+    if (!inventoryResponse?.ok) {
+      return inventoryResponse
+        ? forward(inventoryResponse)
+        : json({ error: "Device relay unavailable" }, 502)
+    }
+    let controllerLeaseGeneration = 1
+    try {
+      const inventory = Schema.decodeUnknownSync(RemoteSessionInventory)(
+        await inventoryResponse.json(),
+        { onExcessProperty: "error" }
+      )
+      controllerLeaseGeneration = inventory.sessions.find(
+        (session) => session.sessionId === input.sessionId
+      )?.controllerLeaseGeneration ?? 1
+    } catch {
+      return json({ error: "Invalid device session inventory response" }, 502)
+    }
     const issued = dependencies.issueGrant({
         audience: "session-tunnel",
         subject,
         deviceId: device.deviceId,
         sessionId: input.sessionId,
-        clientInstanceId: input.clientInstanceId,
-        attachmentGeneration: input.attachmentGeneration,
-        controllerLeaseGeneration: input.controllerLeaseGeneration,
+        clientInstanceId,
+        attachmentGeneration: 1,
+        controllerLeaseGeneration,
         deviceGeneration: device.generation
       })
     deviceServerTelemetry("grant_issued", {
@@ -514,8 +549,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const clientInstanceId = requestClientInstanceId(context.req.raw)
-    if (!clientInstanceId) return json({ error: "Client instance required" }, 400)
+    const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     const input = await decodeRequest(context.req.raw, PairingClaimRequest)
     if (!input) return json({ error: "Invalid pairing claim" }, 400)
     return forward(
@@ -535,8 +569,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const clientInstanceId = requestClientInstanceId(context.req.raw)
-    if (!clientInstanceId) return json({ error: "Client instance required" }, 400)
+    const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     let records: ReadonlyArray<DeviceRecord>
     try {
       records = await deviceStore(dependencies).listForUser(subject)
@@ -592,8 +625,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const clientInstanceId = requestClientInstanceId(context.req.raw)
-    if (!clientInstanceId) return json({ error: "Client instance required" }, 400)
+    const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     const deviceId = context.req.param("deviceId")
     const owned = await deviceStore(dependencies)
       .findForUser(subject, deviceId)
@@ -711,8 +743,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const clientInstanceId = requestClientInstanceId(context.req.raw)
-    if (!clientInstanceId) return json({ error: "Client instance required" }, 400)
+    const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     const deviceId = context.req.param("deviceId")
     const revoked = await deviceStore(dependencies).revokeForUser({
       userId: subject,
@@ -735,8 +766,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const clientInstanceId = requestClientInstanceId(context.req.raw)
-    if (!clientInstanceId) return json({ error: "Client instance required" }, 400)
+    const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     const deviceId = context.req.param("deviceId")
     const input = await decodeRequest(context.req.raw, DeviceRenameRequest)
     if (!input || input.deviceId !== deviceId)
@@ -764,8 +794,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const clientInstanceId = requestClientInstanceId(context.req.raw)
-    if (!clientInstanceId) return json({ error: "Client instance required" }, 400)
+    const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     const deviceId = context.req.param("deviceId")
     return forward(
       await relayRequest(
@@ -783,8 +812,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const clientInstanceId = requestClientInstanceId(context.req.raw)
-    if (!clientInstanceId) return json({ error: "Client instance required" }, 400)
+    const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     const deviceId = context.req.param("deviceId")
     const input = await decodeRequest(context.req.raw, DeviceKeyRotationRequest)
     if (!input || input.challenge.deviceId !== deviceId) {

@@ -45,6 +45,12 @@ interface CountRow {
   readonly count: number
 }
 
+interface AttachmentRow {
+  readonly [key: string]: SqlStorageValue
+  readonly attachment_id: string
+  readonly device_id: string
+}
+
 interface DeviceUsageRow {
   readonly [key: string]: SqlStorageValue
   readonly ciphertext_bytes_in: number
@@ -141,13 +147,12 @@ export class RelayUsageObject extends DurableObject<Env> {
         "DELETE FROM attempt_windows WHERE window_started_at <= ?",
         nowSeconds - 60
       )
-      for (const [dimension, value] of keys) {
-        const result = this.ctx.storage.sql.exec<{
+      const attempts = this.ctx.storage.sql.exec<{
           readonly [key: string]: SqlStorageValue
           readonly attempts: number
         }>(
           `INSERT INTO attempt_windows (dimension, value, window_started_at, attempts)
-           VALUES (?, ?, ?, 1)
+           VALUES (?, ?, ?, 1), (?, ?, ?, 1), (?, ?, ?, 1)
            ON CONFLICT(dimension, value) DO UPDATE SET
              window_started_at = CASE
                WHEN excluded.window_started_at - attempt_windows.window_started_at >= 60
@@ -160,38 +165,58 @@ export class RelayUsageObject extends DurableObject<Env> {
                ELSE attempt_windows.attempts + 1
              END
            RETURNING attempts`,
-          dimension,
-          value,
+          keys[0][0],
+          keys[0][1],
+          nowSeconds,
+          keys[1][0],
+          keys[1][1],
+          nowSeconds,
+          keys[2][0],
+          keys[2][1],
           nowSeconds
-        ).one()
-        rateLimited = result.attempts > RELAY_USAGE_POLICY.maximumAttachmentAttemptsPerMinute
-        if (rateLimited) break
-      }
+        ).toArray()
+      rateLimited = attempts.some(
+        (result) => result.attempts > RELAY_USAGE_POLICY.maximumAttachmentAttemptsPerMinute
+      )
     })
     if (rateLimited) return "rate-limited"
-    const usage = this.usage()
-    if (usage.ciphertext_bytes_in + usage.ciphertext_bytes_out >= quotaBytes) {
-      return "quota-exceeded"
-    }
-    const active = this.ctx.storage.sql.exec<CountRow>(
-      "SELECT COUNT(*) AS count FROM active_attachments WHERE device_id = ?",
-      input.deviceId
-    ).one().count
-    if (active >= RELAY_USAGE_POLICY.maximumConcurrentClientsPerDevice) {
-      return "concurrency-exceeded"
-    }
-    this.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO active_attachments
+    const admitted = this.ctx.storage.sql.exec<AttachmentRow>(
+      `INSERT INTO active_attachments
        (attachment_id, device_id, client_instance_id, source_ip, attached_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       SELECT ?, ?, ?, ?, ?, ?
+       WHERE (
+         SELECT ciphertext_bytes_in + ciphertext_bytes_out
+         FROM account_usage WHERE singleton = 1
+       ) < ?
+       AND (
+         SELECT COUNT(*) FROM active_attachments WHERE device_id = ?
+       ) < ?
+       ON CONFLICT(attachment_id) DO NOTHING
+       RETURNING attachment_id, device_id`,
       input.attachmentId,
       input.deviceId,
       input.clientInstanceId,
       input.sourceIp,
       nowSeconds,
-      expiresAt
-    )
-    return "admitted"
+      expiresAt,
+      quotaBytes,
+      input.deviceId,
+      RELAY_USAGE_POLICY.maximumConcurrentClientsPerDevice
+    ).toArray()[0]
+    if (admitted) return "admitted"
+
+    // Rejections are uncommon, so preserve precise error reporting without
+    // charging every successful attachment for separate quota/count reads.
+    const existing = this.ctx.storage.sql.exec<AttachmentRow>(
+      "SELECT attachment_id, device_id FROM active_attachments WHERE attachment_id = ?",
+      input.attachmentId
+    ).toArray()[0]
+    if (existing?.device_id === input.deviceId) return "admitted"
+    const usage = this.usage()
+    if (usage.ciphertext_bytes_in + usage.ciphertext_bytes_out >= quotaBytes) {
+      return "quota-exceeded"
+    }
+    return "concurrency-exceeded"
   }
 
   async recordTransfer(

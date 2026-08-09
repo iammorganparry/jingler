@@ -8,6 +8,7 @@ export interface DirectSshTarget {
 }
 
 export interface DeviceSecretDocument {
+  readonly clientInstanceId?: string
   readonly remoteSessions?: Readonly<Record<string, unknown>>
   readonly remoteRequestNamespace?: string
   readonly directSshTargets?: Readonly<Record<string, DirectSshTarget>>

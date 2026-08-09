@@ -177,6 +177,7 @@ const repositoryFor = (database: Database) => ({
           .from(ownedDevice)
           .where(eq(ownedDevice.userId, userId))
           .orderBy(asc(ownedDevice.createdAt), asc(ownedDevice.id))
+          .limit(256)
       )
       .pipe(Effect.map((rows) => rows.map(toRecord))),
 

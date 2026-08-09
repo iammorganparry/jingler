@@ -369,6 +369,34 @@ describe("pending device pairing", () => {
         }
       })
   })
+
+  it("registers sessions with generation and capacity checks in one conditional write", async () => {
+    const keys = await keyPair()
+    const paired = await claimDevice(
+      "session_capacity_abcdefgh",
+      "session-capacity-owner",
+      keys.publicKey
+    )
+    await expect(
+      paired.registry.registerSession(paired.claim.deviceId, 2, "wrong-generation", 100)
+    ).resolves.toBe(false)
+    for (let index = 0; index < 64; index += 1) {
+      await expect(
+        paired.registry.registerSession(
+          paired.claim.deviceId,
+          1,
+          `session_${String(index).padStart(3, "0")}`,
+          101 + index
+        )
+      ).resolves.toBe(true)
+    }
+    await expect(
+      paired.registry.registerSession(paired.claim.deviceId, 1, "session_over_capacity", 200)
+    ).resolves.toBe(false)
+    await expect(
+      paired.registry.registerSession(paired.claim.deviceId, 1, "session_000", 201)
+    ).resolves.toBe(true)
+  })
 })
 
 describe("device challenges, key rotation, and revocation", () => {

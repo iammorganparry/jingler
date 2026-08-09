@@ -284,6 +284,55 @@ beforeEach(() => {
 })
 
 describe("conversationMachine — remote session envelopes", () => {
+  it("starts observing a remote turn from idle without dropping its first event", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: remoteEnvelope(1, { _tag: "Started", sessionId: session.id, model: "remote-model" }) })
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: remoteEnvelope(2, { _tag: "Assistant", text: "observed remotely" }) })
+
+    expect(actor.getSnapshot().matches("remoteRunning")).toBe(true)
+    expect(actor.getSnapshot().context.messages.at(-1)?.parts).toContainEqual({
+      _tag: "Text",
+      text: "observed remotely"
+    })
+    expect(actor.getSnapshot().context.sessionEventCursor.sequence).toBe(2)
+
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: remoteEnvelope(3, { _tag: "Done", costUsd: 0, tokens: 10 }) })
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(actor.getSnapshot().context.lastOutcome).toBe("done")
+    actor.stop()
+  })
+
+  it("applies admitted lifecycle envelopes before advancing their cursor", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    const envelope = (
+      sequence: number,
+      event: SessionEventEnvelope["event"]
+    ): SessionEventEnvelope => ({
+      version: 1,
+      eventId: `event_lifecycle_${sequence}`,
+      sessionId: session.id,
+      sequence,
+      revision: sequence,
+      occurredAt: sequence,
+      event
+    })
+
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: envelope(1, { _tag: "StatusChanged", status: "running" }) })
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: envelope(2, { _tag: "DiffChanged", files: { "src/a.ts": { added: 3, removed: 1 }, "src/b.ts": { added: 2, removed: 4 } } }) })
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: envelope(3, { _tag: "PublishProgress", phase: "publishing", message: "Pushing branch" }) })
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: envelope(4, { _tag: "Terminal", outcome: "completed", message: null }) })
+
+    const context = actor.getSnapshot().context
+    expect(context.sessionEventCursor.sequence).toBe(4)
+    expect(context.session.status).toBe("idle")
+    expect(context.session.diff).toEqual({ added: 5, removed: 5 })
+    expect(context.remotePublishProgress).toEqual({ phase: "publishing", message: "Pushing branch" })
+    expect(context.lastOutcome).toBe("done")
+    actor.stop()
+  })
+
   it("folds admitted stream envelopes through the existing conversation reducer", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))

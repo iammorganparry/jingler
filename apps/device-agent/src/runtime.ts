@@ -1,5 +1,4 @@
-import { hostname, homedir, tmpdir } from "node:os"
-import { createHash } from "node:crypto"
+import { hostname, homedir } from "node:os"
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { PendingDeviceRegistrationResponse } from "@jingler/core"
@@ -34,22 +33,50 @@ export interface DeviceAgentPaths {
   readonly deviceDir: string
   readonly identityFile: string
   readonly enrollmentFile: string
-  readonly directSessionSocket: string
+  readonly directSessionSocketFile: string
 }
 
 export const deviceAgentPaths = (): DeviceAgentPaths => {
   const root = join(process.env.JINGLER_HOME ?? homedir(), "jingler")
   const deviceDir = join(root, "device")
-  const socketNamespace = createHash("sha256").update(deviceDir).digest("hex").slice(0, 16)
   return {
     jinglerRoot: root,
     deviceDir,
     identityFile: join(deviceDir, "identity.json"),
     enrollmentFile: join(deviceDir, "enrollment.json"),
-    // Unix socket path limits are as low as 104 bytes on macOS. A short,
-    // deterministic per-home path also lets the separately invoked SSH proxy
-    // find the daemon without storing another secret or configuration value.
-    directSessionSocket: join(tmpdir(), `jingler-${process.getuid?.() ?? "user"}-${socketNamespace}.sock`)
+    directSessionSocketFile: join(deviceDir, "direct-session.socket")
+  }
+}
+
+const publishDirectSessionSocket = async (
+  paths: DeviceAgentPaths,
+  socketPath: string
+): Promise<void> => {
+  await mkdir(paths.deviceDir, { recursive: true, mode: 0o700 })
+  await chmod(paths.deviceDir, 0o700)
+  const temporary = `${paths.directSessionSocketFile}.${process.pid}.next`
+  await rm(temporary, { force: true })
+  await writeFile(temporary, `${socketPath}\n`, { mode: 0o600, flag: "wx" })
+  try {
+    await rename(temporary, paths.directSessionSocketFile)
+    await chmod(paths.directSessionSocketFile, 0o600)
+  } catch (error) {
+    await rm(temporary, { force: true })
+    throw error
+  }
+}
+
+const clearDirectSessionSocket = async (
+  paths: DeviceAgentPaths,
+  socketPath: string
+): Promise<void> => {
+  try {
+    const publishedPath = (await readFile(paths.directSessionSocketFile, "utf8")).trim()
+    if (publishedPath === socketPath) {
+      await rm(paths.directSessionSocketFile, { force: true })
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
 }
 
@@ -217,11 +244,16 @@ export const serveDevice = async (
     return handler
   }
   const directServer = await startDirectSessionServer({
-    socketPath: paths.directSessionSocket,
     enrollment,
     identity,
     handlerFor
   })
+  try {
+    await publishDirectSessionSocket(paths, directServer.socketPath)
+  } catch (error) {
+    await directServer.close()
+    throw error
+  }
   try {
     return await runControlConnection(
       {
@@ -242,8 +274,11 @@ export const serveDevice = async (
       input.signal
     )
   } finally {
-    await directServer.close()
-    await sessionTasks.stop()
+    await Promise.all([
+      clearDirectSessionSocket(paths, directServer.socketPath),
+      directServer.close(),
+      sessionTasks.stop()
+    ])
   }
 }
 

@@ -588,9 +588,9 @@ export const DeviceRelayGrantRequest = Schema.Struct({
   audience: Schema.Literal("device-control", "session-tunnel"),
   deviceId: Schema.NullOr(RemoteDeviceId),
   sessionId: Schema.NullOr(RemoteSessionId),
-  clientInstanceId: RemoteClientInstanceId,
-  attachmentGeneration: Schema.NullOr(Generation),
-  controllerLeaseGeneration: Schema.NullOr(Generation)
+  clientInstanceId: Schema.optional(RemoteClientInstanceId),
+  attachmentGeneration: Schema.optional(Schema.NullOr(Generation)),
+  controllerLeaseGeneration: Schema.optional(Schema.NullOr(Generation))
 })
 export type DeviceRelayGrantRequest = Schema.Schema.Type<
   typeof DeviceRelayGrantRequest

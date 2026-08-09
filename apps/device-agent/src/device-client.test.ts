@@ -97,6 +97,17 @@ describe("device enrollment client", () => {
     await expect(result).rejects.not.toThrow(credential.token)
   })
 
+  it("adopts the canonical id when an existing device identity is re-enrolled", async () => {
+    const canonical = { ...device, deviceId: "device_canonical" }
+    const result = await exchangeDeviceEnrollment(
+      { serverUrl: "https://api.example.test", credential, registration },
+      { fetch: async () => Response.json({ version: 1, device: canonical }, { status: 201 }) }
+    )
+
+    expect(result.enrollment.deviceId).toBe("device_canonical")
+    expect(result.device.deviceId).toBe("device_canonical")
+  })
+
   it("rejects a registration response for a different device identity", async () => {
     await expect(
       exchangeDeviceEnrollment(

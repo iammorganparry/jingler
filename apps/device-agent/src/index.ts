@@ -9,6 +9,7 @@ import {
 } from "./runtime.js"
 import { installDeviceService, removeDeviceService } from "./device-service.js"
 import { createConnection } from "node:net"
+import { readFile } from "node:fs/promises"
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -46,7 +47,12 @@ const readCredentialStdin = async (): Promise<unknown> => {
 const main = async (): Promise<void> => {
   switch (command) {
     case "direct-session": {
-      const socket = createConnection(deviceAgentPaths().directSessionSocket)
+      const socketPath = (await readFile(
+        deviceAgentPaths().directSessionSocketFile,
+        "utf8"
+      )).trim()
+      if (!socketPath) throw new Error("Direct session socket is unavailable")
+      const socket = createConnection(socketPath)
       socket.once("connect", () => {
         process.stdin.pipe(socket)
         socket.pipe(process.stdout)

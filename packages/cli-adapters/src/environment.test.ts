@@ -16,7 +16,7 @@ import {
   RemoteBootstrapService,
   SshBootstrapError
 } from "./remote-bootstrap.js"
-import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
+import { makeInMemorySecretStore, SecretStore, type SecretStoreShape } from "./secret-store.js"
 
 const device: RemoteDevice = {
   version: 1,
@@ -108,7 +108,7 @@ const environmentLayer = (bootstrap: {
   readonly installAndEnroll?: (
     input: InstallAndEnrollOwnedDeviceInput
   ) => Effect.Effect<EnrolledOwnedDevice, SshBootstrapError>
-}) =>
+}, store?: SecretStoreShape) =>
   EnvironmentService.Default.pipe(
     Layer.provide(
       Layer.succeed(RemoteBootstrapService, {
@@ -124,7 +124,11 @@ const environmentLayer = (bootstrap: {
         ...bootstrap
       })
     ),
-    Layer.provide(Layer.effect(SecretStore, makeInMemorySecretStore("desktop-bearer")))
+    Layer.provide(
+      store
+        ? Layer.succeed(SecretStore, store)
+        : Layer.effect(SecretStore, makeInMemorySecretStore("desktop-bearer"))
+    )
   )
 
 afterEach(() => {
@@ -163,6 +167,27 @@ describe("environment metadata", () => {
 })
 
 describe("environment device API", () => {
+  it("persists the per-install client identity across service restarts", async () => {
+    const clientIds: string[] = []
+    vi.stubGlobal("fetch", async (_input: string | URL | Request, init?: RequestInit) => {
+      clientIds.push(new Headers(init?.headers).get("x-jingler-client-instance-id") ?? "")
+      return Response.json({ version: 1, devices: [accountDevice] })
+    })
+    process.env.JINGLER_AUTH_URL = "https://server.test"
+    const store = await Effect.runPromise(makeInMemorySecretStore("desktop-bearer"))
+    const bootstrap = {
+      bootstrap: () => Effect.succeed(pending),
+      installAndBootstrap: () => Effect.succeed(pending)
+    }
+
+    await Effect.runPromise(EnvironmentService.list.pipe(Effect.provide(environmentLayer(bootstrap, store))))
+    await Effect.runPromise(EnvironmentService.list.pipe(Effect.provide(environmentLayer(bootstrap, store))))
+
+    expect(clientIds).toHaveLength(2)
+    expect(clientIds[0]).toMatch(/^client_/u)
+    expect(clientIds[1]).toBe(clientIds[0])
+  })
+
   it("uses the server's /api/devices mount for desktop requests", async () => {
     const urls: Array<string> = []
     vi.stubGlobal("fetch", async (input: string | URL | Request) => {

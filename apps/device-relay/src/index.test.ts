@@ -478,6 +478,24 @@ describe("device relay HTTP authorization", () => {
         }
       ]
     })
+    const targeted = await SELF.fetch(
+      `https://relay.test/v1/devices/${paired.device.deviceId}/sessions/${sessionId}`,
+      { headers: { authorization: `Bearer ${control}` } }
+    )
+    expect(targeted.status).toBe(200)
+    await expect(targeted.json()).resolves.toMatchObject({
+      sessions: [{ sessionId, controllerLeaseGeneration: 2 }]
+    })
+    const otherAccount = await issueGrant({
+      subject: "user-two",
+      deviceId: paired.device.deviceId,
+      grantId: "grant_inventory_other_account"
+    })
+    const hidden = await SELF.fetch(
+      `https://relay.test/v1/devices/${paired.device.deviceId}/sessions/${sessionId}`,
+      { headers: { authorization: `Bearer ${otherAccount}` } }
+    )
+    await expect(hidden.json()).resolves.toMatchObject({ sessions: [] })
   })
 
   it("verifies a signed nonce once before admitting a device connection", async () => {

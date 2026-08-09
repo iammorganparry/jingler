@@ -116,10 +116,6 @@ interface CountRow {
   readonly count: number
 }
 
-interface SessionCapacityRow extends CountRow {
-  readonly exists_already: number
-}
-
 interface ClaimConsumptionRow {
   readonly [key: string]: SqlStorageValue
   readonly claim_id: string
@@ -878,29 +874,37 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     sessionId: string,
     nowSeconds = Math.floor(Date.now() / 1_000)
   ): Promise<boolean> {
-    const current = await this.assertGeneration(deviceId, generation)
-    if (!current.active) return false
-    const capacity = this.ctx.storage.sql
-      .exec<SessionCapacityRow>(
-        `SELECT COUNT(*) AS count,
-                COALESCE(MAX(session_id = ?), 0) AS exists_already
-         FROM device_sessions WHERE device_id = ?`,
-        sessionId,
-        deviceId
-      )
-      .one()
-    if (capacity.exists_already === 0 && capacity.count >= MAX_DEVICE_SESSIONS) return false
-    this.ctx.storage.sql.exec(
+    const registered = this.ctx.storage.sql.exec<SessionRow>(
       `INSERT INTO device_sessions (device_id, session_id, generation, updated_at)
-       VALUES (?, ?, ?, ?)
+       SELECT ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM devices
+         WHERE device_id = ? AND state = 'active' AND generation = ?
+       )
+       AND (
+         EXISTS (
+           SELECT 1 FROM device_sessions
+           WHERE device_id = ? AND session_id = ?
+         )
+         OR (
+           SELECT COUNT(*) FROM device_sessions WHERE device_id = ?
+         ) < ?
+       )
        ON CONFLICT(device_id, session_id) DO UPDATE SET
-         generation = excluded.generation, updated_at = excluded.updated_at`,
+         generation = excluded.generation, updated_at = excluded.updated_at
+       RETURNING session_id`,
       deviceId,
       sessionId,
       generation,
-      nowSeconds
-    )
-    return true
+      nowSeconds,
+      deviceId,
+      generation,
+      deviceId,
+      sessionId,
+      deviceId,
+      MAX_DEVICE_SESSIONS
+    ).toArray()[0]
+    return registered !== undefined
   }
 
   async listSessionIds(

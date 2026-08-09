@@ -125,7 +125,7 @@ export const exchangeDeviceEnrollment = async (
       { onExcessProperty: "error" }
     )
     if (
-      registered.device.deviceId !== credential.claim.deviceId ||
+      registered.device.accountId !== credential.claim.subject ||
       registered.device.publicKey.value !== input.registration.publicKey.value
     ) {
       throw new Error("Device enrollment response scope mismatch")

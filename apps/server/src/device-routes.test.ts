@@ -86,8 +86,17 @@ const harness = (
         generation: device.generation
       })
     }
+    if (url.pathname.includes("/sessions/")) {
+      return Response.json({
+        version: 1,
+        deviceId: device.deviceId,
+        generatedAt: 100,
+        sessions: []
+      })
+    }
     return Response.json({ accepted: true })
-  }
+  },
+  preserveCanonicalDeviceId = false
 ) => {
   const calls: RelayCall[] = []
   let storedDevice: DeviceRecord = deviceRecord
@@ -104,7 +113,7 @@ const harness = (
       }
       storedDevice = {
         ...storedDevice,
-        deviceId: credential.deviceId,
+        deviceId: preserveCanonicalDeviceId ? storedDevice.deviceId : credential.deviceId,
         accountId: credential.subject,
         identityFingerprint,
         displayName: registration.displayName,
@@ -297,6 +306,50 @@ describe("device server routes", () => {
     })
   })
 
+  it("re-enrolls a known identity under its canonical device id in both stores", async () => {
+    const value = harness(undefined, true)
+    const issuedResponse = await value.app.fetch(
+      authenticated("/api/devices/enrollment-credentials", {
+        method: "POST",
+        body: JSON.stringify({
+          version: 1,
+          deviceId: "device_fresh_abcdefghijkl",
+          clientInstanceId: "client_abcdefghijklmnop"
+        })
+      })
+    )
+    const issued = await issuedResponse.json()
+    const response = await value.app.request("/api/devices/enrollments/exchange", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${issued.token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        version: 1,
+        credentialId: issued.claim.claimId,
+        registration: {
+          version: 1,
+          displayName: "Known machine",
+          platform: { os: "linux", arch: "x64" },
+          publicKey,
+          capabilities: device.capabilities
+        }
+      })
+    })
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toMatchObject({
+      device: { deviceId: device.deviceId }
+    })
+    const relay = value.calls.at(-1)!
+    const body = JSON.parse(relay.body!)
+    expect(body.claim.deviceId).toBe(device.deviceId)
+    expect(verifyDeviceClaim(relayGrant(relay), signingSecret, 200)).toMatchObject({
+      deviceId: device.deviceId,
+      subject: "user-one"
+    })
+  })
+
   it("returns typed disabled and invalid bootstrap configuration failures", async () => {
     const value = harness()
     const disabled = new Hono().route(
@@ -466,8 +519,24 @@ describe("device server routes", () => {
     })
   })
 
-  it("looks up the account-owned database generation before issuing a session tunnel grant", async () => {
-    const value = harness()
+  it("looks up authoritative device and lease generations before issuing a session tunnel grant", async () => {
+    const value = harness(async (url) =>
+      url.pathname.includes("/sessions/")
+        ? Response.json({
+            version: 1,
+            deviceId: device.deviceId,
+            generatedAt: 100,
+            sessions: [{
+              version: 1,
+              sessionId: "session_abcdefghijklmnop",
+              state: "idle",
+              controllerClientInstanceId: null,
+              controllerLeaseGeneration: 9,
+              updatedAt: 100
+            }]
+          })
+        : Response.json({ accepted: true })
+    )
     const response = await value.app.fetch(
       authenticated("/api/devices/grants", {
         method: "POST",
@@ -491,11 +560,39 @@ describe("device server routes", () => {
       deviceId: device.deviceId,
       sessionId: "session_abcdefghijklmnop",
       clientInstanceId: "client_abcdefghijklmnop",
-      attachmentGeneration: 2,
-      controllerLeaseGeneration: 3,
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 9,
       deviceGeneration: 7
     })
-    expect(value.calls).toHaveLength(0)
+    expect(value.calls).toHaveLength(1)
+    expect(value.calls[0]?.url).toContain(
+      `/v1/devices/${device.deviceId}/sessions/session_abcdefghijklmnop`
+    )
+  })
+
+  it("accepts a released client grant shape without weakening account authentication", async () => {
+    const value = harness()
+    const response = await value.app.request("/api/devices/grants", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer better-auth-desktop-bearer",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        version: 1,
+        audience: "session-tunnel",
+        deviceId: device.deviceId,
+        sessionId: "session_legacy_abcdefgh"
+      })
+    })
+    expect(response.status).toBe(200)
+    const body: DeviceRelayGrantResponse = await response.json()
+    expect(body.claims).toMatchObject({
+      subject: "user-one",
+      clientInstanceId: expect.stringMatching(/^legacy_/u),
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 1
+    })
   })
 
   it("exchanges a valid device signature for a short-lived device grant", async () => {
