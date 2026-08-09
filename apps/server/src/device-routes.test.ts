@@ -168,8 +168,7 @@ const harness = (
         input,
         { signingSecret, ttlSeconds: 300 },
         100,
-        "claim_abcdefghijklmnop",
-        "A".repeat(43)
+        "claim_abcdefghijklmnop"
       ),
     verifyClaim: (token, nowSeconds) =>
       verifyDeviceClaim(token, signingSecret, nowSeconds),

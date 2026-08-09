@@ -28,7 +28,6 @@ const enrollmentCredential = {
     deviceId: "device_test",
     clientInstanceId: "desktop_test",
     audience: "device-claim",
-    oneTimeSecret: "s".repeat(32),
     issuedAt: 1_000,
     expiresAt: 2_000
   },

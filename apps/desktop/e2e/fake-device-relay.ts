@@ -226,7 +226,6 @@ export const startFakeDeviceRelay = async (
               ? body.clientInstanceId
               : "client_e2e_abcdefghijkl",
           audience: "device-claim",
-          oneTimeSecret: "s".repeat(32),
           issuedAt: now(),
           expiresAt: now() + 300
         },

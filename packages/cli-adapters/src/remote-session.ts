@@ -7,21 +7,13 @@ import type {
   RemoteSessionCommand,
   RemoteSessionEvent,
   RemoteSessionKeyOffer,
-  Session,
-  SessionCommand,
-  SessionEventCursor,
-  SessionEventEnvelope,
-  SessionReplay
+  Session
 } from "@jingler/core"
 import {
-  admitSessionReplay,
   EncryptedTunnelEnvelope as EncryptedTunnelEnvelopeSchema,
-  RemoteSessionEvent as RemoteSessionEventSchema,
-  SessionCommand as SessionCommandSchema,
-  SessionEventEnvelope as SessionEventEnvelopeSchema,
-  SessionReplay as SessionReplaySchema
+  RemoteSessionEvent as RemoteSessionEventSchema
 } from "@jingler/core"
-import { Chunk, Data, Deferred, Effect, Either, Option, Queue, Schema, Stream } from "effect"
+import { Chunk, Data, Deferred, Effect, Either, Queue, Schema, Stream } from "effect"
 import WebSocket from "ws"
 import {
   readDeviceSecretDocument,
@@ -35,54 +27,6 @@ export class RemoteSessionError extends Data.TaggedError("RemoteSessionError")<{
   readonly message: string
   readonly cause?: unknown
 }> {}
-
-/** Legacy operation used to carry the transport-independent command contract. */
-export const TYPED_SESSION_COMMAND_OPERATION = "Session.command"
-
-/**
- * Keeps the existing encrypted tunnel framing while moving the semantic payload
- * to the shared SessionCommand contract. Older RemoteSessionService callers can
- * continue sending operation/payload pairs unchanged.
- */
-export const wrapSessionCommand = (command: SessionCommand): RemoteSessionCommand => ({
-  version: 1,
-  commandId: command.commandId,
-  sessionId: command.sessionId,
-  operation: TYPED_SESSION_COMMAND_OPERATION,
-  payload: command
-})
-
-export const unwrapSessionCommand = (
-  command: RemoteSessionCommand
-): SessionCommand | null => {
-  if (command.operation !== TYPED_SESSION_COMMAND_OPERATION) return null
-  try {
-    const typed = Schema.decodeUnknownSync(SessionCommandSchema)(command.payload)
-    return typed.commandId === command.commandId && typed.sessionId === command.sessionId
-      ? typed
-      : null
-  } catch {
-    return null
-  }
-}
-
-/** Extracts a typed event without changing the legacy event subscriber boundary. */
-export const unwrapSessionEventEnvelope = (
-  event: RemoteSessionEvent
-): SessionEventEnvelope | null => {
-  if (event.kind !== "event") return null
-  try {
-    const envelope = Schema.decodeUnknownSync(SessionEventEnvelopeSchema)(event.payload)
-    return envelope.sessionId === event.sessionId ? envelope : null
-  } catch {
-    return null
-  }
-}
-
-export { admitSessionReplay } from "@jingler/core"
-
-export const decodeSessionReplay = (value: unknown): SessionReplay =>
-  Schema.decodeUnknownSync(SessionReplaySchema)(value)
 
 const sessionInfo = (subject: string, deviceId: string, sessionId: string) =>
   Buffer.from(`jingler.remote.session.v1\0${subject}\0${deviceId}\0${sessionId}`, "utf8")
@@ -1012,36 +956,6 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
           })
         )
 
-      const executeCommand = (
-        session: RemoteSessionResource,
-        command: SessionCommand
-      ): Stream.Stream<SessionEventEnvelope, RemoteSessionError> => {
-        if (command.sessionId !== session.id) {
-          return Stream.fail(new RemoteSessionError({
-            message: "Typed remote command session does not match the tunnel session."
-          }))
-        }
-        const wrapped = wrapSessionCommand(command)
-        return execute(
-          session,
-          wrapped.operation,
-          wrapped.payload,
-          wrapped.commandId
-        ).pipe(
-          Stream.mapEffect((event) => {
-            if (event.kind !== "failed") {
-              return Effect.succeed(Option.fromNullable(unwrapSessionEventEnvelope(event)))
-            }
-            const message = event.payload && typeof event.payload === "object" &&
-              "message" in event.payload && typeof event.payload.message === "string"
-              ? event.payload.message
-              : "Typed remote session command failed."
-            return Effect.fail(new RemoteSessionError({ message }))
-          }),
-          Stream.filterMap((event) => event)
-        )
-      }
-
       const request = (session: RemoteSessionResource, operation: string, payload: unknown) =>
         execute(session, operation, payload).pipe(
           Stream.runCollect,
@@ -1090,7 +1004,7 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
           yield* states.remove(sessionId)
         })
 
-      return { execute, executeCommand, request, requestOnEnvironment, forget } as const
+      return { execute, request, requestOnEnvironment, forget } as const
     })
   }
 ) {}

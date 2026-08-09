@@ -72,7 +72,6 @@ const issueClaim = async (
     deviceId: `device_${crypto.randomUUID()}`,
     clientInstanceId: "client_abcdefghijklmnop",
     audience: "device-claim",
-    oneTimeSecret: "A".repeat(43),
     issuedAt: now,
     expiresAt: now + 300,
     ...overrides

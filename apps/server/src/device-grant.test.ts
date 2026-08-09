@@ -196,8 +196,7 @@ describe("device relay grants", () => {
       },
       config,
       100,
-      "claim_abcdefghijklmnop",
-      "A".repeat(43)
+      "claim_abcdefghijklmnop"
     )
     expect(verifyDeviceClaim(issued.token, config.signingSecret, 200)).toEqual(
       issued.claim

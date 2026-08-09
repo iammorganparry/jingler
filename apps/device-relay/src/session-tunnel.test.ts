@@ -1,8 +1,4 @@
-import type {
-  EncryptedTunnelEnvelope,
-  EncryptedTunnelMutation,
-  TunnelEndpoint
-} from "@jingler/core"
+import type { EncryptedTunnelEnvelope, TunnelEndpoint } from "@jingler/core"
 import { env, evictAllDurableObjects, runInDurableObject } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
 import { type SessionTunnelObject, TUNNEL_POLICY } from "./session-tunnel.js"
@@ -42,24 +38,6 @@ const envelope = (
   algorithm: "AES-256-GCM",
   nonce: "A".repeat(16),
   ciphertext,
-  createdAt: nowSeconds
-})
-
-const mutation = (
-  sessionId: string,
-  clientId = clientInstanceId,
-  controllerLeaseGeneration = 1
-): EncryptedTunnelMutation => ({
-  version: 1,
-  mutationId: "mutation_abcdefghijklmnop",
-  sessionId,
-  clientInstanceId: clientId,
-  attachmentGeneration: 1,
-  controllerLeaseGeneration,
-  sequence: 1,
-  algorithm: "AES-256-GCM",
-  nonce: "A".repeat(16),
-  ciphertext: "encrypted_mutation",
   createdAt: nowSeconds
 })
 
@@ -371,7 +349,7 @@ describe("encrypted session tunnel", () => {
     ).resolves.toMatchObject({ status: "inserted", sequence: 2 })
   })
 
-  it("rejects replayed mutations and stale controller generations after takeover", async () => {
+  it("rejects stale controller generations after takeover", async () => {
     const input = initialization("session_controller_abcdefghij")
     const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
     await tunnel.initialize(input, nowSeconds)
@@ -407,13 +385,6 @@ describe("encrypted session tunnel", () => {
         nowSeconds
       )
     ).resolves.toMatchObject({ status: "inserted", sequence: 1 })
-    await expect(
-      tunnel.publishMutation(socketAttachment, mutation(input.sessionId), nowSeconds)
-    ).resolves.toMatchObject({ status: "inserted" })
-    await expect(
-      tunnel.publishMutation(socketAttachment, mutation(input.sessionId), nowSeconds)
-    ).resolves.toEqual({ status: "replayed" })
-
     const takeoverAdmission = {
       ...firstAdmission,
       clientInstanceId: "client_takeover_abcdefgh"
@@ -431,13 +402,6 @@ describe("encrypted session tunnel", () => {
         generation: 2
       }
     })
-    await expect(
-      tunnel.publishMutation(
-        socketAttachment,
-        { ...mutation(input.sessionId), mutationId: "mutation_stale_abcdefgh" },
-        nowSeconds
-      )
-    ).resolves.toEqual({ status: "stale-controller" })
     await expect(
       tunnel.publishAuthorizedEnvelope(
         socketAttachment,

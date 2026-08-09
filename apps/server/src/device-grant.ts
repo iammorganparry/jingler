@@ -11,7 +11,7 @@ import {
   deviceRelayGrantWindowRejection,
   isValidDeviceRelayGrantScope
 } from "@jingler/core"
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto"
 import { Schema } from "effect"
 
 export interface DeviceGrantConfig {
@@ -72,8 +72,7 @@ export const issueDeviceClaim = (
   input: IssueDeviceClaimInput,
   config: Pick<DeviceGrantConfig, "signingSecret" | "ttlSeconds">,
   nowSeconds = Math.floor(Date.now() / 1_000),
-  claimId: string = randomUUID(),
-  oneTimeSecret: string = randomBytes(32).toString("base64url")
+  claimId: string = randomUUID()
 ): IssuedDeviceClaim => {
   if (
     !Number.isSafeInteger(config.ttlSeconds) ||
@@ -89,7 +88,6 @@ export const issueDeviceClaim = (
     deviceId: input.deviceId,
     clientInstanceId: input.clientInstanceId,
     audience: "device-claim",
-    oneTimeSecret,
     issuedAt: nowSeconds,
     expiresAt: nowSeconds + config.ttlSeconds
   })

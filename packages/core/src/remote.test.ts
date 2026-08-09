@@ -11,7 +11,6 @@ import {
   DeviceRegistrationResponse,
   RelayUsage,
   DeviceRelayGrantClaims,
-  EncryptedTunnelMutation,
   EncryptedTunnelEnvelope,
   PendingDeviceRegistrationRequest,
   RemoteDevice,
@@ -217,7 +216,6 @@ describe("authoritative device control plane contracts", () => {
       deviceId: "device_abcdefghijklmnop",
       clientInstanceId: "client_abcdefghijklmnop",
       audience: "device-claim",
-      oneTimeSecret: "A".repeat(43),
       issuedAt: 100,
       expiresAt: 160
     }
@@ -321,28 +319,4 @@ describe("encrypted tunnel contracts", () => {
     ).toBe(true)
   })
 
-  it("keeps controller metadata outside opaque mutation ciphertext", () => {
-    const mutation = {
-      version: 1,
-      mutationId: "mutation_abcdefghijklmnop",
-      sessionId: envelope.sessionId,
-      clientInstanceId: "client_abcdefghijklmnop",
-      attachmentGeneration: 2,
-      controllerLeaseGeneration: 3,
-      sequence: 1,
-      algorithm: "AES-256-GCM",
-      nonce: "A".repeat(16),
-      ciphertext: "encrypted_mutation",
-      createdAt: 100
-    }
-    expect(Either.isRight(decode(EncryptedTunnelMutation, mutation))).toBe(true)
-    expect(
-      Either.isRight(decode(TunnelClientMessage, { type: "mutation", mutation }))
-    ).toBe(true)
-    expect(
-      Either.isLeft(
-        decode(EncryptedTunnelMutation, { ...mutation, prompt: "do not log" })
-      )
-    ).toBe(true)
-  })
 })
