@@ -31,6 +31,7 @@ import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { readBundledPluginIds } from "./bundled-plugin-ids.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const desktopDir = resolve(here, "..")
@@ -38,14 +39,7 @@ const repoRoot = resolve(desktopDir, "../..")
 const builderYml = join(desktopDir, "electron-builder.yml")
 const isWindows = process.platform === "win32"
 
-/**
- * The bundled plugin ids, read from the `to: plugins/<id>` lines of the
- * `extraResources` block. A regex rather than a YAML parser so this script has
- * no dependencies and can run before anything is installed.
- */
-const ids = [...readFileSync(builderYml, "utf8").matchAll(/^\s*to:\s*plugins\/(\S+)\s*$/gm)].map(
-  (match) => match[1]
-)
+const ids = readBundledPluginIds(builderYml)
 
 if (ids.length === 0) {
   console.error(

@@ -1,7 +1,8 @@
 import { execFileSync, execSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { readBundledPluginIds } from "../scripts/bundled-plugin-ids.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 export const DESKTOP_ROOT = resolve(here, "..")
@@ -9,9 +10,7 @@ export const MAIN_ENTRY = resolve(DESKTOP_ROOT, "out/main/index.js")
 const REPO_ROOT = resolve(DESKTOP_ROOT, "../..")
 export const DEVICE_AGENT_ENTRY = resolve(REPO_ROOT, "apps/device-agent/dist/jingler-device.mjs")
 const BUILDER_CONFIG = resolve(DESKTOP_ROOT, "electron-builder.yml")
-const BUNDLED_PLUGIN_IDS = [
-  ...readFileSync(BUILDER_CONFIG, "utf8").matchAll(/^\s*to:\s*plugins\/(\S+)\s*$/gm)
-].flatMap((match) => (match[1] ? [match[1]] : []))
+const BUNDLED_PLUGIN_IDS = readBundledPluginIds(BUILDER_CONFIG)
 const BUNDLED_PLUGIN_ENTRIES = BUNDLED_PLUGIN_IDS.flatMap((id) => [
   resolve(REPO_ROOT, "plugins", id, "dist/ui.js"),
   resolve(REPO_ROOT, "plugins", id, "dist/main.js")
