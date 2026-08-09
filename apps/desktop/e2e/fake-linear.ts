@@ -40,6 +40,7 @@ const project = { id: "project-1", name: "Payments" }
 const cycle = { id: "cycle-1", name: "Cycle 42", number: 42 }
 const ISSUE_QUERY = /\bissue\s*\(/
 const ISSUES_QUERY = /\bissues\s*\(/
+const SEARCH_ISSUES_QUERY = /\bsearchIssues\s*\(/
 
 const seedIssues = (): FakeLinearIssue[] => [
   {
@@ -190,12 +191,21 @@ const readIssue = (
 const listIssues = (
   state: FakeLinearState,
   variables: Record<string, unknown>,
-  response: ServerResponse
+  response: ServerResponse,
+  operation = "issues"
 ): void => {
-  state.operations.push("issues")
+  state.operations.push(operation)
+  const term = String(variables.term ?? "").trim().toLocaleLowerCase()
+  const issues = term
+    ? state.issues.filter((issue) =>
+        issue.identifier.toLocaleLowerCase().includes(term) ||
+        issue.title.toLocaleLowerCase().includes(term) ||
+        issue.description.toLocaleLowerCase().includes(term)
+      )
+    : state.issues
   const offset = Number(String(variables.after ?? "page-0").replace("page-", ""))
-  const nodes = state.issues.slice(offset, offset + 1).map(issueNode)
-  const hasNextPage = offset + nodes.length < state.issues.length
+  const nodes = issues.slice(offset, offset + 1).map(issueNode)
+  const hasNextPage = offset + nodes.length < issues.length
   json(response, 200, {
     data: {
       issues: {
@@ -222,6 +232,10 @@ const handleGraphql = (
   }
   if (ISSUE_QUERY.test(query)) {
     readIssue(state, variables, response)
+    return
+  }
+  if (SEARCH_ISSUES_QUERY.test(query)) {
+    listIssues(state, variables, response, "searchIssues")
     return
   }
   if (ISSUES_QUERY.test(query)) {

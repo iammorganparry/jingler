@@ -151,6 +151,20 @@ describe("Linear Issue tab states", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy()
   })
 
+  it("offers to unlink a linked issue that cannot be loaded", async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "linear.get") return Promise.resolve(null)
+      return Promise.resolve(successfulHost(command))
+    })
+    render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Linear could not find this issue."
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Unlink issue" }))
+    await waitFor(() => expect(mocks.unlinkIssue).toHaveBeenCalledWith("session-1"))
+  })
+
   it("keeps primary actions accessible at narrow width", async () => {
     mocks.tier = "narrow"
     render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)

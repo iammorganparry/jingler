@@ -107,6 +107,7 @@ export const linearIssueMachine = setup({
   },
   guards: {
     hasLinkedIssue: ({ context }) => context.linkedIssue?.providerId === "linear",
+    hasLoadedIssue: ({ context }) => context.issue !== null,
     canCreate: ({ context }) =>
       context.createInput.teamId.trim().length > 0 && context.createInput.title.trim().length > 0,
     canComment: ({ context }) => context.commentBody.trim().length > 0
@@ -302,14 +303,24 @@ export const linearIssueMachine = setup({
         src: "unlinkIssue",
         input: ({ context }) => ({ services: context.services }),
         onDone: { target: "unlinked", actions: "clearLink" },
-        onError: {
-          target: "detail",
-          actions: assign({ error: ({ event }) => message(event.error) })
-        }
+        onError: [
+          {
+            guard: "hasLoadedIssue",
+            target: "detail",
+            actions: assign({ error: ({ event }) => message(event.error) })
+          },
+          {
+            target: "error",
+            actions: assign({ error: ({ event }) => message(event.error) })
+          }
+        ]
       }
     },
     error: {
-      on: { RETRY: "checkingConfiguration" }
+      on: {
+        RETRY: "checkingConfiguration",
+        UNLINK: { guard: "hasLinkedIssue", target: "unlinking" }
+      }
     }
   }
 })

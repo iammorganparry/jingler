@@ -19,6 +19,7 @@ import {
   CREATE_ISSUE_MUTATION,
   ISSUES_QUERY,
   ISSUE_QUERY,
+  SEARCH_ISSUES_QUERY,
   type LinearActorNode,
   type LinearCommentCreateData,
   type LinearCommentNode,
@@ -241,16 +242,18 @@ const loadIssue = async (
   }
 }
 
-const matchesIssue = (issue: IssueSummary, wanted: string, viewerId: string | null): boolean =>
-  (!wanted ||
-    issue.identifier.toLocaleLowerCase().includes(wanted) ||
-    issue.title.toLocaleLowerCase().includes(wanted) ||
-    issue.body.toLocaleLowerCase().includes(wanted)) &&
-  (!viewerId || issue.assignees.some(({ id }) => id === viewerId))
+interface LinearIssueFilter {
+  readonly assignee?: {
+    readonly id: { readonly eq: string }
+  }
+}
+
+const issueFilter = (viewerId: string | null): LinearIssueFilter | undefined =>
+  viewerId ? { assignee: { id: { eq: viewerId } } } : undefined
 
 interface IssuePageState {
-  readonly wanted: string
-  readonly viewerId: string | null
+  readonly term: string | null
+  readonly filter?: LinearIssueFilter
   readonly after: string | null
   readonly page: number
   readonly accumulated: readonly IssueSummary[]
@@ -261,15 +264,14 @@ const loadIssuesPage = async (
   state: IssuePageState
 ): Promise<readonly IssueSummary[]> => {
   if (state.page >= MAX_ISSUE_PAGES) return state.accumulated
-  const data = await execute<LinearIssuesData>(ISSUES_QUERY, {
+  const data = await execute<LinearIssuesData>(state.term ? SEARCH_ISSUES_QUERY : ISSUES_QUERY, {
     first: PAGE_SIZE,
-    after: state.after
+    after: state.after,
+    ...(state.term ? { term: state.term } : {}),
+    ...(state.filter ? { filter: state.filter } : {})
   })
   const connection = data.issues
-  const matches = connection.nodes
-    .map(summary)
-    .filter((issue) => matchesIssue(issue, state.wanted, state.viewerId))
-  const result = [...state.accumulated, ...matches]
+  const result = [...state.accumulated, ...connection.nodes.map(summary)]
   const info = pageInfo(connection.pageInfo)
   return info.hasNextPage
     ? loadIssuesPage(execute, {
@@ -329,8 +331,8 @@ export const createLinearClient = (options: LinearClientOptions): LinearClient =
     listIssues: async (input) => {
       const viewerId = input.mine ? (await context()).viewer.id : null
       return loadIssuesPage(execute, {
-        wanted: input.search.trim().toLocaleLowerCase(),
-        viewerId,
+        term: input.search.trim() || null,
+        filter: issueFilter(viewerId),
         after: null,
         page: 0,
         accumulated: []

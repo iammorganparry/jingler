@@ -303,7 +303,7 @@ function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
     input: { linkedIssue: session.linkedIssue, services }
   })
   const { context } = snapshot
-  const waiting = snapshot.matches("checkingConfiguration") || snapshot.matches("loadingContext") || snapshot.matches("loadingIssue") || snapshot.matches("searching") || snapshot.matches("creating") || snapshot.matches("linking")
+  const waiting = snapshot.matches("checkingConfiguration") || snapshot.matches("loadingContext") || snapshot.matches("loadingIssue") || snapshot.matches("searching") || snapshot.matches("creating") || snapshot.matches("linking") || snapshot.matches("unlinking")
 
   return (
     <div data-testid="linear-issue-body" className="flex min-h-0 flex-1 flex-col overflow-auto bg-editor">
@@ -324,7 +324,7 @@ function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
           </div>
         )}
         {snapshot.matches("unlinked") && <UnlinkedView snapshot={snapshot} send={send} />}
-        {snapshot.matches("error") && <div className="mx-auto flex min-h-[260px] max-w-[460px] flex-col items-center justify-center gap-3"><ErrorNotice message={context.error ?? "Linear request failed."} /><button type="button" onClick={() => send({ type: "RETRY" })} className="rounded border border-line px-3 py-2 text-[12px] text-text hover:border-blue">Retry</button></div>}
+        {snapshot.matches("error") && <div className="mx-auto flex min-h-[260px] max-w-[460px] flex-col items-center justify-center gap-3"><ErrorNotice message={context.error ?? "Linear request failed."} /><div className="flex gap-2"><button type="button" onClick={() => send({ type: "RETRY" })} className="rounded border border-line px-3 py-2 text-[12px] text-text hover:border-blue">Retry</button>{context.linkedIssue?.providerId === "linear" && <button type="button" onClick={() => send({ type: "UNLINK" })} className="inline-flex items-center gap-1 rounded border border-line px-3 py-2 text-[12px] text-text hover:border-red"><Unlink size={12} /> Unlink issue</button>}</div></div>}
         {context.issue && (snapshot.matches("detail") || snapshot.matches("commenting") || snapshot.matches("unlinking") || snapshot.matches("loadingIssue")) && <DetailView issue={context.issue} error={context.error} busy={snapshot.matches("commenting") || snapshot.matches("unlinking") || snapshot.matches("loadingIssue")} commentBody={context.commentBody} send={send} openExternal={host.openExternal} />}
       </div>
     </div>

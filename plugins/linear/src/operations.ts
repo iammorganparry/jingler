@@ -107,8 +107,15 @@ export const CONTEXT_QUERY = `query LinearContext {
   teams(first: 100) { nodes { id name key } }
 }`
 
-export const ISSUES_QUERY = `query LinearIssues($first: Int!, $after: String) {
-  issues(first: $first, after: $after, orderBy: updatedAt) {
+export const ISSUES_QUERY = `query LinearIssues($first: Int!, $after: String, $filter: IssueFilter) {
+  issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) {
+    nodes { ${ISSUE_FIELDS} }
+    pageInfo { hasNextPage endCursor }
+  }
+}`
+
+export const SEARCH_ISSUES_QUERY = `query LinearIssueSearch($term: String!, $first: Int!, $after: String, $filter: IssueFilter) {
+  issues: searchIssues(term: $term, first: $first, after: $after, filter: $filter) {
     nodes { ${ISSUE_FIELDS} }
     pageInfo { hasNextPage endCursor }
   }

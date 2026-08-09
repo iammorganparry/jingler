@@ -157,6 +157,48 @@ describe("linearIssueMachine persistence and races", () => {
     actor.stop()
   })
 
+  it("unlinks a linked issue that can no longer be loaded", async () => {
+    const unlink = vi.fn().mockResolvedValue(undefined)
+    const actor = createActor(linearIssueMachine, {
+      input: {
+        linkedIssue: reference,
+        services: services({
+          get: vi.fn().mockRejectedValue(new Error("Linear could not find this issue.")),
+          unlink
+        })
+      }
+    }).start()
+
+    await waitFor(actor, (snapshot) => snapshot.matches("error"))
+    actor.send({ type: "UNLINK" })
+    await waitFor(actor, (snapshot) => snapshot.matches("unlinked"))
+
+    expect(unlink).toHaveBeenCalledOnce()
+    expect(actor.getSnapshot().context.linkedIssue).toBeUndefined()
+    actor.stop()
+  })
+
+  it("keeps a dead issue linked when unlink persistence fails", async () => {
+    const actor = createActor(linearIssueMachine, {
+      input: {
+        linkedIssue: reference,
+        services: services({
+          get: vi.fn().mockRejectedValue(new Error("Linear could not find this issue.")),
+          unlink: vi.fn().mockRejectedValue(new Error("Could not save the session."))
+        })
+      }
+    }).start()
+
+    await waitFor(actor, (snapshot) => snapshot.matches("error"))
+    actor.send({ type: "UNLINK" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches("error") && snapshot.context.error === "Could not save the session."
+    )
+
+    expect(actor.getSnapshot().context.linkedIssue).toEqual(reference)
+    actor.stop()
+  })
+
   it("ignores a stale issue response after the session changes", async () => {
     let resolveOld: ((issue: LinearIssueDetail) => void) | undefined
     const other = { ...reference, id: "issue-456", identifier: "ENG-456" }

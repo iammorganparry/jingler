@@ -34,13 +34,15 @@ const rawIssue = (overrides: Record<string, unknown> = {}) => ({
 const repository = { name: "acme/web", path: "/work/acme-web" }
 
 describe("createLinearClient", () => {
-  it("lists and searches Linear issues with cursor pagination", async () => {
+  it("searches Linear issues server-side with cursor pagination", async () => {
     const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body))
+      expect(body.query).toContain("searchIssues")
+      expect(body.variables.term).toBe("ENG-123")
       if (body.variables.after === null) {
         return json({
           issues: {
-            nodes: [rawIssue({ id: "issue-no-match", identifier: "OPS-1", title: "Deploy" })],
+            nodes: [rawIssue({ id: "issue-older", identifier: "ENG-124" })],
             pageInfo: { hasNextPage: true, endCursor: "next-page" }
           }
         })
@@ -59,8 +61,8 @@ describe("createLinearClient", () => {
 
     const issues = await client.listIssues({ repository, search: "ENG-123", mine: false })
 
-    expect(issues).toHaveLength(1)
-    expect(issues[0]).toMatchObject({
+    expect(issues).toHaveLength(2)
+    expect(issues[1]).toMatchObject({
       providerId: "linear",
       id: "issue-1",
       identifier: "ENG-123",
@@ -80,9 +82,11 @@ describe("createLinearClient", () => {
           teams: { nodes: [{ id: "team-1", name: "Engineering", key: "ENG" }] }
         })
       }
+      expect(body.query).not.toContain("searchIssues")
+      expect(body.variables.filter).toEqual({ assignee: { id: { eq: "user-1" } } })
       return json({
         issues: {
-          nodes: [rawIssue(), rawIssue({ id: "issue-2", assignee: null })],
+          nodes: [rawIssue()],
           pageInfo: { hasNextPage: false, endCursor: null }
         }
       })
