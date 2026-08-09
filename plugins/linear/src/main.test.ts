@@ -172,7 +172,7 @@ describe("createLinearClient", () => {
     expect(issue).toMatchObject({ id: "created-1", title: "New issue" })
   })
 
-  it("uses the first accessible team for provider issue creation", async () => {
+  it("uses the only accessible team for provider issue creation", async () => {
     const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body))
       if (body.query.includes("query LinearContext")) {
@@ -198,6 +198,31 @@ describe("createLinearClient", () => {
     const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
 
     await client.createIssue({ repository, title: "New issue", body: "" })
+  })
+
+  it("requires an explicit team when provider issue creation can access multiple teams", async () => {
+    const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      if (!body.query.includes("query LinearContext")) {
+        throw new Error("Issue creation must stop before the mutation.")
+      }
+      return json({
+        viewer: { id: "user-1", name: "Alex", avatarUrl: null },
+        organization: { id: "workspace-1", name: "Acme", urlKey: "acme" },
+        teams: {
+          nodes: [
+            { id: "team-eng", name: "Engineering", key: "ENG" },
+            { id: "team-design", name: "Design", key: "DES" }
+          ]
+        }
+      })
+    })
+    const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
+
+    await expect(
+      client.createIssue({ repository, title: "New issue", body: "" })
+    ).rejects.toThrow("Choose a team in the Linear Issue tab before creating an issue.")
+    expect(request).toHaveBeenCalledOnce()
   })
 
   it("adds a comment and normalizes the mutation result", async () => {

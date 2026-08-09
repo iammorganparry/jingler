@@ -283,13 +283,23 @@ const loadIssuesPage = async (
     : result
 }
 
+const onlyTeamId = async (context: () => Promise<LinearContext>): Promise<string> => {
+  const teams = (await context()).teams
+  if (teams.length === 0) {
+    throw new Error("Linear has no accessible team in which to create an issue.")
+  }
+  if (teams.length > 1) {
+    throw new Error("Choose a team in the Linear Issue tab before creating an issue.")
+  }
+  return teams[0]!.id
+}
+
 const createIssue = async (
   execute: Execute,
   context: () => Promise<LinearContext>,
   input: LinearCreateRequest
 ): Promise<LinearIssueDetail> => {
-  const teamId = input.teamId ?? (await context()).teams[0]?.id
-  if (!teamId) throw new Error("Linear has no accessible team in which to create an issue.")
+  const teamId = input.teamId ?? await onlyTeamId(context)
   const data = await execute<LinearIssueCreateData>(CREATE_ISSUE_MUTATION, {
     input: { teamId, title: input.title, description: input.body }
   })
