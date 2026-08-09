@@ -259,14 +259,16 @@ describe("createLinearClient", () => {
 })
 
 describe("activateWithClient", () => {
-  it("registers the Linear provider and every manifest command", () => {
+  it("registers the Linear provider and every manifest command", async () => {
     const dispose = vi.fn()
     const registration: Disposable = { dispose }
     const registerProvider = vi.fn(() => registration)
     const registeredCommandIds: string[] = []
+    const registeredCommands = new Map<string, (input?: unknown) => unknown | Promise<unknown>>()
     const registerCommand = vi.fn(
-      (commandId: string, _handler: (input?: unknown) => unknown | Promise<unknown>) => {
+      (commandId: string, handler: (input?: unknown) => unknown | Promise<unknown>) => {
         registeredCommandIds.push(commandId)
+        registeredCommands.set(commandId, handler)
         return registration
       }
     )
@@ -333,5 +335,13 @@ describe("activateWithClient", () => {
       "linear.comment"
     ])
     expect(subscriptions).toHaveLength(7)
+
+    await Promise.all(
+      ["linear.list", "linear.get", "linear.create", "linear.comment"].map((commandId) =>
+        expect(registeredCommands.get(commandId)?.()).rejects.toThrow(
+          "Open the Linear Issue tab to use this command."
+        )
+      )
+    )
   })
 })

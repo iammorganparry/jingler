@@ -354,8 +354,13 @@ export const createLinearClient = (options: LinearClientOptions): LinearClient =
   }
 }
 
-const command = <Input, Output>(handler: (input: Input) => Output | Promise<Output>) =>
-  (input?: unknown) => handler(input as Input)
+const issueTabCommand = <Input, Output>(handler: (input: Input) => Output | Promise<Output>) =>
+  async (input?: unknown): Promise<Output> => {
+    if (input === undefined) {
+      throw new Error("Open the Linear Issue tab to use this command.")
+    }
+    return handler(input as Input)
+  }
 
 type LinearHostContext = Pick<HostContext, "issues" | "commands" | "subscriptions">
 
@@ -371,10 +376,10 @@ export const activateWithClient = (ctx: LinearHostContext, client: LinearClient)
     ctx.issues.registerProvider(provider),
     ctx.commands.register("linear.configured", () => client.configured()),
     ctx.commands.register("linear.context", () => client.context()),
-    ctx.commands.register("linear.list", command(client.listIssues)),
-    ctx.commands.register("linear.get", command(client.getIssue)),
-    ctx.commands.register("linear.create", command(client.createIssue)),
-    ctx.commands.register("linear.comment", command(client.addComment))
+    ctx.commands.register("linear.list", issueTabCommand(client.listIssues)),
+    ctx.commands.register("linear.get", issueTabCommand(client.getIssue)),
+    ctx.commands.register("linear.create", issueTabCommand(client.createIssue)),
+    ctx.commands.register("linear.comment", issueTabCommand(client.addComment))
   )
 }
 
