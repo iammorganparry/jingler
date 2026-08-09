@@ -1,5 +1,5 @@
 import { execFileSync, execSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -8,14 +8,17 @@ export const DESKTOP_ROOT = resolve(here, "..")
 export const MAIN_ENTRY = resolve(DESKTOP_ROOT, "out/main/index.js")
 const REPO_ROOT = resolve(DESKTOP_ROOT, "../..")
 export const DEVICE_AGENT_ENTRY = resolve(REPO_ROOT, "apps/device-agent/dist/jingler-device.mjs")
-const GITHUB_ISSUES_PLUGIN_ROOT = resolve(REPO_ROOT, "plugins/github-issues")
-const GITHUB_ISSUES_PLUGIN_ENTRIES = [
-  resolve(GITHUB_ISSUES_PLUGIN_ROOT, "dist/ui.js"),
-  resolve(GITHUB_ISSUES_PLUGIN_ROOT, "dist/main.js")
-] as const
+const BUILDER_CONFIG = resolve(DESKTOP_ROOT, "electron-builder.yml")
+const BUNDLED_PLUGIN_IDS = [
+  ...readFileSync(BUILDER_CONFIG, "utf8").matchAll(/^\s*to:\s*plugins\/(\S+)\s*$/gm)
+].flatMap((match) => (match[1] ? [match[1]] : []))
+const BUNDLED_PLUGIN_ENTRIES = BUNDLED_PLUGIN_IDS.flatMap((id) => [
+  resolve(REPO_ROOT, "plugins", id, "dist/ui.js"),
+  resolve(REPO_ROOT, "plugins", id, "dist/main.js")
+])
 
 const buildBundledPlugins = (): void => {
-  execFileSync("pnpm", ["--filter", "@jingler/plugin-github-issues", "build"], {
+  execFileSync("pnpm", ["--filter", "@jingler/desktop", "build:bundled-plugins"], {
     cwd: REPO_ROOT,
     stdio: "inherit"
   })
@@ -30,7 +33,7 @@ const buildBundledPlugins = (): void => {
  */
 export default function globalSetup(): void {
   const reuseBuild = process.env.SKIP_E2E_BUILD === "1"
-  if (!reuseBuild || GITHUB_ISSUES_PLUGIN_ENTRIES.some((entry) => !existsSync(entry))) {
+  if (!reuseBuild || BUNDLED_PLUGIN_ENTRIES.some((entry) => !existsSync(entry))) {
     buildBundledPlugins()
   }
   if (reuseBuild && existsSync(MAIN_ENTRY)) {

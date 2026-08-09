@@ -375,12 +375,14 @@ interface SessionSnapshot {
 
 ## Changing the session
 
-A snapshot is read-only. The one mutation a plugin may make is detaching the
-session's linked issue:
+A snapshot is read-only. Issue-provider UI can attach the issue the operator
+selected or detach the current issue:
 
 ```tsx
 const session = useSession()
-const { unlinkIssue } = useSessionActions()
+const { linkIssue, unlinkIssue } = useSessionActions()
+
+await linkIssue(session.id, issue) // provider-neutral IssueReference; no automations
 
 <button type="button" onClick={() => void unlinkIssue(session.id)}>Unlink</button>
 ```
@@ -391,13 +393,13 @@ the change — you do not have to reload anything.
 **This list is short and stays short.** A plugin DECORATES a session; it does not
 drive one. There is no `setStatus`, no `rename`, no `archive`, and adding one
 means arguing that the operator can only reach it through the plugin that owns
-the concept. `unlinkIssue` clears that bar because the app knows a session *has*
-a linked issue while the plugin owns the UI where "actually, not that one"
-belongs.
+the concept. Linking and unlinking clear that bar because the app owns session
+persistence while the provider plugin owns the issue-selection UI.
 
-It is not a security boundary: any installed plugin can unlink any session's
-issue, and nothing prompts. That is an accepted risk because it is trivially
-reversible — see `docs/plugins/permissions-and-trust.md`.
+It is not a security boundary: any installed plugin can link or unlink any
+session's issue, and linking replaces an existing issue without another prompt.
+The renderer plugin is trusted to call these methods only after explicit operator
+intent — see `docs/plugins/permissions-and-trust.md`.
 
 ## Storage
 

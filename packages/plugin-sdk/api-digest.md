@@ -105,7 +105,7 @@ never returns null and `useSession` is the better call.
 function useSessionActions(): SessionActions
 ```
 
-The short list of session mutations a plugin may make. Currently only
+The short list of issue-link mutations a plugin may make: `linkIssue` and
 `unlinkIssue`. See `SessionActions` for why the list stays short.
 
 ### `usePluginStorage`
@@ -142,6 +142,20 @@ What a tab view component receives.
 ### `SessionSnapshot`
 
 ```ts
+interface IssueLabel {
+  readonly name: string
+  readonly color: string | null
+}
+
+interface IssueReference {
+  readonly providerId: string
+  readonly id: string
+  readonly identifier: string
+  readonly url: string
+  readonly title: string
+  readonly labels: readonly IssueLabel[]
+}
+
 interface SessionSnapshot {
   readonly id: string
   readonly repo: string          // "owner/repo"
@@ -150,6 +164,7 @@ interface SessionSnapshot {
   readonly cli: "claude" | "codex" | "cursor" | "opencode" | "jingler"
   readonly prNumber: number | null
   readonly issueNumber?: number
+  readonly linkedIssue?: IssueReference
   readonly worktreePath?: string
 }
 ```
@@ -173,6 +188,7 @@ interface HostBridge {
 
 ```ts
 interface SessionActions {
+  linkIssue(sessionId: string, issue: IssueReference): Promise<void>
   unlinkIssue(sessionId: string): Promise<void>
 }
 ```
@@ -180,13 +196,14 @@ interface SessionActions {
 Mutations a plugin may make to the session it is decorating. Deliberately tiny,
 and it stays that way: a plugin DECORATES a session, it does not drive one. An
 entry earns its place by being something the operator can only reach through the
-plugin that owns the concept — `unlinkIssue` qualifies because the app knows a
-session has a linked issue but the plugin owns the UI where "not that one"
-belongs.
+plugin that owns the concept. `linkIssue` persists the provider-neutral issue the
+operator chose without enabling provider-specific automations; `unlinkIssue`
+detaches it.
 
-Not a security boundary: any installed plugin can unlink any session's issue and
-nothing prompts. Reversible, and re-linking is also available, which is why it is
-allowed at all — see `docs/plugins/permissions-and-trust.md`.
+Not a security boundary: any installed plugin can link or unlink any session's
+issue, and linking replaces an existing issue without another prompt. Plugin UI
+is trusted to call these methods only from explicit operator intent — see
+`docs/plugins/permissions-and-trust.md`.
 
 ### `PluginStorage`
 

@@ -36,6 +36,11 @@ export const spawnHostProcess = (): HostProcess => {
     // Named so it is identifiable in Activity Monitor / `ps` — an operator
     // wondering what is using CPU deserves better than a second "Electron".
     serviceName: "jingler-plugin-host",
+    // Electron documents process.env as the default, but passing it explicitly
+    // also preserves launch-time overrides in packaged/E2E utility processes.
+    // Provider endpoints and other host-only configuration must cross this
+    // boundary without ever being copied into the renderer.
+    env: { ...process.env },
     stdio: "inherit"
   })
 

@@ -24,7 +24,7 @@
  * same reason a plugin must never bundle its own React.
  */
 import { createContext, createElement, type ReactNode } from "react"
-import type { PluginStorage, SessionSnapshot } from "./common.js"
+import type { IssueReference, PluginStorage, SessionSnapshot } from "./common.js"
 
 /**
  * Mutations a plugin may make to the session its view is decorating.
@@ -36,20 +36,34 @@ import type { PluginStorage, SessionSnapshot } from "./common.js"
  * earn itself by being something the operator can only reach through the plugin
  * that owns the concept.
  *
- * `unlinkIssue` earns it: the app knows a session HAS a linked issue, but the
- * plugin that linked it owns the UI where "actually, not that one" belongs.
- * Before this existed the built-in Issue tab offered it and the plugin that
- * replaced that tab could not, so the capability was silently lost.
+ * Issue linking earns it: the app knows a session CAN have a linked issue, but
+ * the provider plugin owns the UI where the operator chooses that issue. Before
+ * these actions existed the plugin could render provider data but could not
+ * persist the operator's choice.
  *
  * ## What this is not
  *
- * Not a security boundary. Any installed plugin can unlink any session's issue,
- * and nothing prompts. That is a deliberate reading of the risk — it is trivially
- * reversible, and re-linking is a thing the plugin can also do — but it IS a
- * mutation, so it belongs in the same conversation as everything else in
- * `docs/plugins/permissions-and-trust.md`.
+ * Not a security boundary. Any installed plugin can link or unlink any session's
+ * issue, and linking replaces an existing issue without another prompt. Plugin
+ * UI runs in the renderer's realm and is trusted to act only on explicit operator
+ * intent; these methods preserve that intent through the app's validated RPC and
+ * state-update path, but do not authorize it. This belongs in the same
+ * conversation as everything else in `docs/plugins/permissions-and-trust.md`.
  */
 export interface SessionActions {
+  /**
+   * Attach a provider-neutral issue to a session.
+   *
+   * Resolves once the app's own session state has been updated. No provider-
+   * specific automation is inferred or enabled by this SDK action.
+   *
+   * @example
+   * ```tsx
+   * const { linkIssue } = useSessionActions()
+   * await linkIssue(session.id, issue)
+   * ```
+   */
+  linkIssue(sessionId: string, issue: IssueReference): Promise<void>
   /**
    * Detach the issue linked to a session.
    *

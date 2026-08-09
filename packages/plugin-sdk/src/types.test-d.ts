@@ -26,6 +26,7 @@ import {
 } from "./define.js"
 import type { HostContext, IssueProvider } from "./host.js"
 import type { Disposable, IssueReference, PluginStorage, SessionSnapshot } from "./common.js"
+import type { SessionActions } from "./context.js"
 
 const View: ComponentType<TabProps> = () => null
 
@@ -182,6 +183,9 @@ expectTypeOf<TabProps["pluginId"]>().toEqualTypeOf<string>()
 expectTypeOf<SessionSnapshot["prNumber"]>().toEqualTypeOf<number | null>()
 expectTypeOf<SessionSnapshot["linkedIssue"]>().toEqualTypeOf<IssueReference | undefined>()
 expectTypeOf<SessionSnapshot>().not.toBeAny()
+expectTypeOf<SessionActions["linkIssue"]>().toEqualTypeOf<
+  (sessionId: string, issue: IssueReference) => Promise<void>
+>()
 
 expectTypeOf<HostContext>().not.toBeAny()
 expectTypeOf<HostContext["storage"]>().toEqualTypeOf<PluginStorage>()

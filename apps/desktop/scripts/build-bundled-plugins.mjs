@@ -140,6 +140,15 @@ for (const id of ids) {
       )
     }
   }
+
+  for (const tab of manifest.contributes?.tabs ?? []) {
+    const asset = typeof tab.icon === "object" && tab.icon !== null ? tab.icon.asset : undefined
+    if (typeof asset === "string" && !existsSync(join(dir, asset))) {
+      problems.push(
+        `plugins/${id}: tab ${tab.id ?? "<unknown>"} references missing icon asset "${asset}".`
+      )
+    }
+  }
 }
 
 if (problems.length > 0) {

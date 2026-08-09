@@ -45,6 +45,7 @@ import type {
   IssueAutomations,
   IssueComment,
   IssueDetail,
+  IssueReference,
   IssueProviderDescriptor,
   IssueSummary,
   McpInjectionTarget,
@@ -413,7 +414,7 @@ export const rpc = {
   ): Promise<Session> => run((c) => c.Sessions.createFromIssue(input)),
   sessionsLinkIssue: (
     sessionId: string,
-    issue: IssueSummary,
+    issue: IssueReference,
     automations?: IssueAutomations
   ): Promise<Session> => run((c) => c.Sessions.linkIssue({ sessionId, issue, automations })),
   sessionsUnlinkIssue: (sessionId: string): Promise<Session> =>

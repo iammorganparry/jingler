@@ -139,7 +139,15 @@ test("GitHub App API lists and opens an issue without GitHub CLI", async ({ laun
   const persisted = JSON.parse(
     readFileSync(join(home, "jingler", "sessions.json"), "utf8")
   ) as ReadonlyArray<Record<string, unknown>>
-  expect(persisted[0]).toMatchObject({ issueNumber: 128, repo: "widget" })
+  expect(persisted[0]).toMatchObject({
+    repo: "widget",
+    linkedIssue: {
+      providerId: "github",
+      id: "128",
+      identifier: "#128",
+      title: "Refund route 500s on a stale token"
+    }
+  })
   expect(githubServer.requests.some((request) => request.path.endsWith("/issues"))).toBe(true)
   expect(githubServer.requests.some((request) => request.path === "/user")).toBe(false)
   expect(githubServer.credentialRequests).toContainEqual({

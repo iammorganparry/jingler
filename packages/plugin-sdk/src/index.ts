@@ -65,7 +65,17 @@ export type {
   TabVisibility
 } from "./define.js"
 
-export type { Disposable, PluginStorage, SessionSnapshot } from "./common.js"
+export type {
+  Disposable,
+  IssueActor,
+  IssueComment,
+  IssueDetail,
+  IssueLabel,
+  IssueReference,
+  IssueSummary,
+  PluginStorage,
+  SessionSnapshot
+} from "./common.js"
 
 export {
   useCommand,
