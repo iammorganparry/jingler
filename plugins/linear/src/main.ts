@@ -210,6 +210,9 @@ const loadCommentsPage = async (
     first: PAGE_SIZE,
     after: state.after
   })
+  if (!data.issue) {
+    throw new Error("Linear could not find this issue.")
+  }
   const connection = data.issue.comments
   const comments = [
     ...state.accumulated,

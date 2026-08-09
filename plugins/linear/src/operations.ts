@@ -72,7 +72,7 @@ export interface LinearCommentsData {
       readonly nodes: readonly LinearCommentNode[]
       readonly pageInfo: LinearPageInfo
     }
-  }
+  } | null
 }
 
 export interface LinearIssueCreateData {

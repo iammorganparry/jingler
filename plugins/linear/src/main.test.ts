@@ -139,6 +139,21 @@ describe("createLinearClient", () => {
     expect(issue?.comments.map(({ id }) => id)).toEqual(["comment-1", "comment-2"])
   })
 
+  it("maps an issue disappearing before comments load to a not-found error", async () => {
+    const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      return body.query.includes("query LinearIssue(")
+        ? json({ issue: rawIssue() })
+        : json({ issue: null })
+    })
+    const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
+
+    await expect(client.getIssue({ repository, issueId: "issue-1" })).rejects.toThrow(
+      "Linear could not find this issue."
+    )
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
   it("loads issues with more than 500 comments", async () => {
     const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body))
