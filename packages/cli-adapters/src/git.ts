@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer, type Server } from "node:net"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { AppPaths } from "./app-paths.js"
 import { gitLine, runGit, runGitWithEnv, runString } from "./command.js"
 import type { GitHubPullRequestHead } from "./github-api.js"
@@ -156,6 +156,53 @@ const prepareAskpassBoundary = async (token: string): Promise<AskpassBoundary> =
     throw error
   }
 }
+
+const runGitWithInstallationToken = (
+  cwd: string,
+  args: ReadonlyArray<string>,
+  token: string
+): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
+  Effect.acquireUseRelease(
+    Effect.tryPromise({
+      try: () => prepareAskpassBoundary(token),
+      catch: (cause) =>
+        new GitError({ message: "Could not prepare secure GitHub authentication.", cause })
+    }),
+    ({ script, module, endpoint, nonce }) =>
+      runGitWithEnv(
+        cwd,
+        [
+          "-c", "core.hooksPath=/dev/null",
+          "-c", "credential.helper=",
+          "-c", "credential.interactive=never",
+          "-c", "credential.useHttpPath=true",
+          "-c", "credential.username=x-access-token",
+          "-c", "http.extraHeader=",
+          ...args
+        ],
+        {
+          GIT_ASKPASS: script,
+          GIT_TERMINAL_PROMPT: "0",
+          JINGLER_GIT_ASKPASS_ENDPOINT: endpoint,
+          JINGLER_GIT_ASKPASS_NONCE: nonce,
+          JINGLER_GIT_ASKPASS_RUNTIME: process.execPath,
+          JINGLER_GIT_ASKPASS_MODULE: module,
+          GITHUB_TOKEN: "",
+          GH_TOKEN: ""
+        }
+      ).pipe(
+        Effect.mapError((error) =>
+          new GitError({
+            message: token.length > 0 ? error.message.replaceAll(token, "[redacted]") : error.message
+          })
+        )
+      ),
+    ({ dir, server }) =>
+      Effect.promise(async () => {
+        await closeServer(server)
+        await rm(dir, { recursive: true, force: true })
+      })
+  )
 
 /** Canonical GitHub.com HTTPS transport derived only from API-verified identity. */
 export const githubHttpsPushUrl = (fullName: string): string | null => {
@@ -652,53 +699,32 @@ export class GitService extends Effect.Service<GitService>()(
         }
         return runGit(cwd, ["check-ref-format", "--branch", branch]).pipe(
           Effect.zipRight(
-            Effect.acquireUseRelease(
-              Effect.tryPromise({
-                try: () => prepareAskpassBoundary(token),
-                catch: (cause) =>
-                  new GitError({ message: "Could not prepare secure GitHub authentication.", cause })
-              }),
-              ({ script, module, endpoint, nonce }) =>
-                runGitWithEnv(
-                  cwd,
-                  [
-                    "-c", "core.hooksPath=/dev/null",
-                    "-c", "credential.helper=",
-                    "-c", "credential.interactive=never",
-                    "-c", "credential.useHttpPath=true",
-                    "-c", "credential.username=x-access-token",
-                    "-c", "http.extraHeader=",
-                    "push", pushUrl, `HEAD:refs/heads/${branch}`
-                  ],
-                  {
-                    GIT_ASKPASS: script,
-                    GIT_TERMINAL_PROMPT: "0",
-                    JINGLER_GIT_ASKPASS_ENDPOINT: endpoint,
-                    JINGLER_GIT_ASKPASS_NONCE: nonce,
-                    JINGLER_GIT_ASKPASS_RUNTIME: process.execPath,
-                    JINGLER_GIT_ASKPASS_MODULE: module,
-                    GITHUB_TOKEN: "",
-                    GH_TOKEN: ""
-                  }
-                ).pipe(
-                  Effect.asVoid,
-                  Effect.mapError(
-                    (error) =>
-                      new GitError({
-                        message: token.length > 0
-                          ? error.message.replaceAll(token, "[redacted]")
-                          : error.message
-                      })
-                  )
-                ),
-              ({ dir, server }) =>
-                Effect.promise(async () => {
-                  await closeServer(server)
-                  await rm(dir, { recursive: true, force: true })
-                })
-            )
+            runGitWithInstallationToken(
+              cwd,
+              ["push", pushUrl, `HEAD:refs/heads/${branch}`],
+              token
+            ).pipe(Effect.asVoid)
           )
         )
+      }
+
+      /** Clone an API-verified GitHub repository without exposing its credential. */
+      const cloneWithInstallationToken = (
+        destination: string,
+        repositoryFullName: string,
+        token: string
+      ): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> => {
+        const cloneUrl = githubHttpsPushUrl(repositoryFullName)
+        if (!cloneUrl || token.length === 0) {
+          return Effect.fail(
+            new GitError({ message: "GitHub returned an invalid repository identity or credential." })
+          )
+        }
+        return runGitWithInstallationToken(
+          dirname(destination),
+          ["clone", "--", cloneUrl, destination],
+          token
+        ).pipe(Effect.asVoid)
       }
 
       /**
@@ -937,6 +963,7 @@ export class GitService extends Effect.Service<GitService>()(
         commit,
         pushConfigured,
         pushWithInstallationToken,
+        cloneWithInstallationToken,
         checkoutBranch,
         checkoutPullRequestHead,
         commitsSince,

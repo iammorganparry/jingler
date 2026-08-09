@@ -55,7 +55,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
 
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Ship deterministic publish")
-  await expect(sessionRow(window, "Ship deterministic publish")).toBeVisible()
+  await expect(sessionRow(window, "Untitled session")).toBeVisible()
 
   // A fresh task is detached until the first understanding/retitle pass. The
   // real RPC must persist an actionable failure without staging or touching
@@ -133,12 +133,12 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   })
 
   await expect(appShell(restarted.window)).toBeVisible()
-  await sessionRow(restarted.window, "Ship deterministic publish").click()
+  await sessionRow(restarted.window, "Implement deterministic publishing").click()
   await restarted.window.getByRole("button", { name: "Pull Request" }).click()
   await expect(restarted.window.getByText("Publishing stopped")).toBeVisible()
   await restarted.window.getByRole("button", { name: /Retry from updating-pr/ }).click()
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step, { timeout: 25_000 }).toBe("complete")
-  await expect(restarted.window.getByRole("heading", { name: "Ship deterministic publish" })).toBeVisible()
+  await expect(restarted.window.getByRole("heading", { name: "Implement deterministic publishing" })).toBeVisible()
   await expect(
     restarted.window.getByRole("button", { name: "Open on GitHub ↗" })
   ).toBeVisible()
@@ -152,7 +152,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
     number: 900,
     head: `acme:${session.branch}`,
     base: "main",
-    title: "Ship deterministic publish"
+    title: "Implement deterministic publishing"
   })
   expect(githubServer.publishedPr()?.body).toContain("## Summary")
   expect(githubServer.operations.filter((operation) => operation.startsWith("pr create"))).toHaveLength(1)
@@ -172,7 +172,7 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
 
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Publish automatically")
-  await expect(sessionRow(window, "Publish automatically")).toBeVisible()
+  await expect(sessionRow(window, "Untitled session")).toBeVisible()
 
   const detached = sessionsAt(home)[0]!
   prepareHermeticPush(detached.worktreePath, repoPath)

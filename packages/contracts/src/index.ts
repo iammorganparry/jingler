@@ -17,6 +17,7 @@ import {
   CreateSessionInput,
   GateDecision,
   GitHubAppConnectionStatus,
+  GitHubCloneRepository,
   GitHubFeedbackClaimStatus,
   GitHubRelayStreamMessage,
   GitHubRelayEvent,
@@ -79,6 +80,7 @@ import {
   ProviderConfig,
   ProviderModels,
   Project,
+  ProjectDirectoryListing,
   PublishCheckpoint,
   PullRequest,
   QuestionAnswer,
@@ -528,6 +530,18 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Schema.NullOr(Schema.String)
   }),
 
+  /** Choose the parent folder for a GitHub clone and return its full destination. */
+  Rpc.make("Projects.browseCloneDestination", {
+    success: Schema.NullOr(Schema.String),
+    payload: { repositoryName: Schema.String }
+  }),
+
+  Rpc.make("Projects.listDirectories", {
+    success: ProjectDirectoryListing,
+    error: GitError,
+    payload: { path: Schema.optional(Schema.String) }
+  }),
+
   Rpc.make("Projects.createDirectory", {
     success: Project,
     error: GitError,
@@ -546,6 +560,18 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       destination: Schema.String,
       name: Schema.optional(Schema.String),
       environmentId: Schema.optional(Schema.String)
+    }
+  }),
+
+  /** Clone through the GitHub App without exposing its short-lived credential to the renderer. */
+  Rpc.make("Projects.cloneFromGitHub", {
+    success: Project,
+    error: Schema.Union(GitError, GitHubApiError),
+    payload: {
+      installationId: Schema.String,
+      repository: Schema.String,
+      destination: Schema.String,
+      name: Schema.optional(Schema.String)
     }
   }),
 
@@ -1299,6 +1325,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /** Reconcile and return the signed-in user's shared GitHub App connection. */
   Rpc.make("GitHub.status", {
     success: GitHubAppConnectionStatus,
+    error: AuthError
+  }),
+
+  /** Fetch repositories visible to every active GitHub App installation. */
+  Rpc.make("GitHub.repositories", {
+    success: Schema.Array(GitHubCloneRepository),
     error: AuthError
   }),
 

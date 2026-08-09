@@ -3,7 +3,6 @@ import type {
   CliInfo,
   DiffStat,
   Environment,
-  Project,
   SessionPrStatus,
   Session,
   SessionActivity,
@@ -25,7 +24,6 @@ export type { ConversationPaneCtx } from "./session-pane.js"
 
 export interface SessionConversationProps {
   sessions: ReadonlyArray<Session>
-  projects?: ReadonlyArray<Project>
   environments?: ReadonlyArray<Environment>
   clis: ReadonlyArray<CliInfo>
   activeSessionId: string | null
@@ -137,10 +135,8 @@ export interface SessionConversationProps {
   repoOwners?: Readonly<Record<string, string>>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
-  /** Open the New Session dialog. */
+  /** Open the New Session view. */
   onNewSession?: () => void
-  onAddProject?: () => void
-  onNewWorkspace?: (projectId: string) => void
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
   /** Open the Usage & limits modal (from the sidebar account menu). */
@@ -156,6 +152,8 @@ export interface SessionConversationProps {
    * conversation) while the sidebar stays visible. `onOpenSettings` toggles it.
    */
   settingsView?: ReactNode
+  /** New-session creation takeover; keeps the sidebar visible. */
+  newSessionView?: ReactNode
   /** Organization-scoped Memory takeover; credentials remain outside this tree. */
   memoryView?: ReactNode
   memoryEligible?: boolean
@@ -228,7 +226,6 @@ export function SessionConversation(props: SessionConversationProps) {
     <div className="flex min-h-0 min-w-0 flex-1 bg-panel">
       <SessionSidebar
         sessions={props.sessions}
-        projects={props.projects}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
         slotBySession={props.slotBySession}
@@ -248,8 +245,6 @@ export function SessionConversation(props: SessionConversationProps) {
         prStates={props.prStates}
         repoOwners={props.repoOwners}
         onNewSession={props.onNewSession}
-        onAddProject={props.onAddProject}
-        onNewWorkspace={props.onNewWorkspace}
         user={props.user}
         onOpenUsage={props.onOpenUsage}
         onOpenSettings={props.onOpenSettings}
@@ -266,7 +261,9 @@ export function SessionConversation(props: SessionConversationProps) {
       />
 
       <div className="m-2 ml-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-editor shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)]">
-        {props.memoryView ? (
+        {props.newSessionView ? (
+          props.newSessionView
+        ) : props.memoryView ? (
           props.memoryView
         ) : props.settingsView ? (
           props.settingsView

@@ -192,11 +192,13 @@ test("a direct session completes a turn and deletion preserves its checkout", as
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Direct checkout proof", "direct")
 
-  const row = sessionRow(window, "Direct checkout proof")
-  await expect(row).toBeVisible()
+  await expect(sessionRow(window, "Untitled session")).toBeVisible()
   const created = storedSession(home)
+  const row = window.getByTestId(`session-row-${String(created.id)}`)
+  await expect(row).toBeVisible()
   expect(created).toMatchObject({
-    title: "Direct checkout proof",
+    title: "Untitled session",
+    autoTitle: true,
     branch: "main",
     baseBranch: "main",
     workspaceMode: "direct"

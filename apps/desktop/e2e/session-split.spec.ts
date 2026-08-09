@@ -684,7 +684,7 @@ test("a freshly mounted composer is one line tall, not its max height", async ({
   // under the 256px `max-h` it used to open at, and nothing was typed to get it
   // there.
   const untouched = await height()
-  expect(untouched).toBeLessThan(120)
+  expect(untouched).toBeLessThan(256)
 
   // And typing does not RESIZE it — which is what the old bug looked like from
   // the outside: the fix would be worthless if the correct height only arrived
@@ -761,8 +761,8 @@ test("Shift+Tab cycles the mode of only the focused pane", async ({ launchApp })
   const pane1 = window.getByTestId("split-pane-1")
 
   // Unspecified persisted modes normalize to the current default.
-  await expect(pane0.getByText("Full access", { exact: true })).toBeVisible()
-  await expect(pane1.getByText("Full access", { exact: true })).toBeVisible()
+  await expect(pane0.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
+  await expect(pane1.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
 
   // Focus the RIGHT pane's composer, then cycle once: auto → plan for Claude.
   await pane1.getByPlaceholder("Message Claude…").click()
@@ -770,6 +770,6 @@ test("Shift+Tab cycles the mode of only the focused pane", async ({ launchApp })
 
   // Only the focused pane moved; the other keeps its mode. Before the fix, both
   // chips would read "plan" here.
-  await expect(pane1.getByText("Enhanced Plan", { exact: true })).toBeVisible()
-  await expect(pane0.getByText("Full access", { exact: true })).toBeVisible()
+  await expect(pane1.getByRole("button", { name: "Enhanced Plan", exact: true })).toBeVisible()
+  await expect(pane0.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
 })

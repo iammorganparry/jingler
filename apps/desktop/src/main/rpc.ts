@@ -234,6 +234,9 @@ export const githubConnectionStatus = (): Effect.Effect<
   GitHubAuth
 > => GitHubAuth.status().pipe(Effect.mapError(githubConnectionError));
 
+export const githubRepositories = () =>
+  GitHubAuth.repositories().pipe(Effect.mapError(githubConnectionError));
+
 export const githubConnectionRefresh = (): Effect.Effect<
   GitHubAppConnectionStatus,
   AuthError,
@@ -3627,6 +3630,50 @@ const issueProviderOperation = <A, I>(
 let failGitHubFeedbackMarkOnce =
   process.env.JINGLER_E2E_GITHUB_FAIL_MARK_ONCE === "1";
 
+export const listProjectDirectories = (requestedPath?: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = path.resolve(requestedPath ?? homedir());
+    const info = yield* fs.stat(directory);
+    if (info.type !== "Directory") {
+      return yield* Effect.fail(
+        new GitError({ message: `Not a directory: ${directory}` }),
+      );
+    }
+    const names = yield* fs.readDirectory(directory);
+    const candidates = yield* Effect.forEach(
+      names.filter((name) => !name.startsWith(".")),
+      (name) =>
+        Effect.gen(function* () {
+          const child = path.join(directory, name);
+          const childInfo = yield* fs.stat(child).pipe(Effect.option);
+          if (Option.isNone(childInfo) || childInfo.value.type !== "Directory") {
+            return null;
+          }
+          const isGitRepository = yield* fs
+            .exists(path.join(child, ".git"))
+            .pipe(Effect.orElseSucceed(() => false));
+          return { name, path: child, isGitRepository };
+        }),
+      { concurrency: 16 },
+    );
+    const parent = path.dirname(directory);
+    return {
+      path: directory,
+      parentPath: parent === directory ? null : parent,
+      directories: candidates
+        .filter((candidate) => candidate !== null)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    };
+  }).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof GitError
+        ? cause
+        : new GitError({ message: "Could not read that directory", cause }),
+    ),
+  );
+
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Billing.paths": () => billingPaths,
   "Discovery.list": () => DiscoveryService.list(),
@@ -3719,6 +3766,23 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         allowCreate: false,
       }),
     ),
+  "Projects.browseCloneDestination": ({ repositoryName }) =>
+    Effect.gen(function* () {
+      const dialog = yield* DialogService;
+      const path = yield* Path.Path;
+      const parent = yield* dialog.chooseDirectory({
+        title: `Clone ${repositoryName}`,
+        message: "Choose the folder where this repository should be cloned.",
+        allowCreate: true,
+      });
+      if (parent === null) return null;
+      const directoryName = path.basename(repositoryName.trim().replace(/\.git$/i, ""));
+      if (directoryName.length === 0 || directoryName === ".") {
+        return null;
+      }
+      return path.join(parent, directoryName);
+    }),
+  "Projects.listDirectories": ({ path }) => listProjectDirectories(path),
   "Projects.createDirectory": (input) =>
     input.environmentId === undefined
       ? ProjectService.createDirectory(input)
@@ -3751,6 +3815,23 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
             (cause) => new GitError({ message: "Could not clone the remote project", cause })
           )
         ),
+  "Projects.cloneFromGitHub": (input) =>
+    Effect.gen(function* () {
+      const credential = yield* GitHubAuth.credentialsForInstallation(
+        input.installationId,
+        input.repository,
+        ["contents:read"],
+      );
+      yield* GitService.cloneWithInstallationToken(
+        input.destination,
+        input.repository,
+        credential.token,
+      );
+      return yield* ProjectService.register({
+        path: input.destination,
+        ...(input.name === undefined ? {} : { name: input.name }),
+      });
+    }),
   "Projects.ensureOnEnvironment": ({ projectId, environmentId }) =>
     Effect.gen(function* () {
       const project = yield* ProjectService.get(projectId)
@@ -4254,6 +4335,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       ),
     ),
   "GitHub.status": () => githubConnectionStatus(),
+  "GitHub.repositories": () => githubRepositories(),
   "GitHub.install": () => githubConnectionInstall(),
   "GitHub.refresh": () => githubConnectionRefresh(),
   "GitHub.disconnect": () => githubConnectionDisconnect(),

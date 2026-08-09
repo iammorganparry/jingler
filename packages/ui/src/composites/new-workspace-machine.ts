@@ -21,7 +21,6 @@ export interface NewWorkspaceContext {
   isolation: "worktree" | "direct"
   baseBranch: string
   branches: ReadonlyArray<string>
-  title: string
   draft: string
   cli: CliKind | ""
   error: string | null
@@ -34,7 +33,6 @@ type NewWorkspaceEvent =
   | { type: "SET_ENVIRONMENT"; environmentId: string }
   | { type: "SET_ISOLATION"; isolation: "worktree" | "direct" }
   | { type: "SET_BASE"; baseBranch: string }
-  | { type: "SET_TITLE"; title: string }
   | { type: "SET_DRAFT"; draft: string }
   | { type: "SUBMIT" }
 
@@ -90,7 +88,6 @@ export const newWorkspaceMachine = setup({
         isolation: "worktree" as const,
         baseBranch: "",
         branches: [] as ReadonlyArray<string>,
-        title: "",
         draft: "",
         cli: newSessionCli(deps.clis, deps.defaultCli) ?? ("" as CliKind | ""),
         error: null
@@ -122,7 +119,6 @@ export const newWorkspaceMachine = setup({
     isolation: "worktree",
     baseBranch: "",
     branches: [],
-    title: "",
     draft: "",
     cli: "",
     error: null
@@ -168,7 +164,6 @@ export const newWorkspaceMachine = setup({
         },
         SET_ISOLATION: { actions: assign(({ event }) => ({ isolation: event.isolation })) },
         SET_BASE: { actions: assign(({ event }) => ({ baseBranch: event.baseBranch })) },
-        SET_TITLE: { actions: assign(({ event }) => ({ title: event.title })) },
         SET_DRAFT: { actions: assign(({ event }) => ({ draft: event.draft })) },
         SUBMIT: { guard: "canSubmit", target: "submitting" }
       }
@@ -185,7 +180,6 @@ export const newWorkspaceMachine = setup({
               ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
               repoPath: project.path,
               repoName: project.name,
-              ...(context.title.trim() ? { title: context.title.trim() } : {}),
               ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}),
               cli: context.cli as CliKind,
               baseBranch: context.baseBranch,

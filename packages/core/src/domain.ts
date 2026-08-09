@@ -396,6 +396,30 @@ export const Project = Schema.Struct({
 })
 export type Project = Schema.Schema.Type<typeof Project>
 
+/** One directory shown by the in-app project browser. */
+export const ProjectDirectoryEntry = Schema.Struct({
+  name: Schema.String,
+  path: Schema.String,
+  isGitRepository: Schema.Boolean
+})
+export type ProjectDirectoryEntry = Schema.Schema.Type<typeof ProjectDirectoryEntry>
+
+/** A single navigable level in the in-app project browser. */
+export const ProjectDirectoryListing = Schema.Struct({
+  path: Schema.String,
+  parentPath: Schema.NullOr(Schema.String),
+  directories: Schema.Array(ProjectDirectoryEntry)
+})
+export type ProjectDirectoryListing = Schema.Schema.Type<typeof ProjectDirectoryListing>
+
+/** A repository the signed-in user can clone through an active GitHub App installation. */
+export const GitHubCloneRepository = Schema.Struct({
+  installationId: Schema.String,
+  repositoryId: Schema.String,
+  fullName: Schema.String
+})
+export type GitHubCloneRepository = Schema.Schema.Type<typeof GitHubCloneRepository>
+
 export const PublishStep = Schema.Literal(
   "idle",
   "inspecting",

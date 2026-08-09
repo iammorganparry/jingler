@@ -95,6 +95,19 @@ describe("GitHubAuth desktop grants", () => {
     })
   })
 
+  it("fetches the clone picker repository list from the GitHub integration", async () => {
+    const repositories = [
+      { installationId: "77", repositoryId: "301", fullName: "acme/widget" }
+    ]
+    const client = makeGitHubAuthClient({
+      bearer: async () => "session",
+      fetch: async () => response({ repositories }),
+      baseUrl: () => "https://server.jingler.test"
+    })
+
+    await expect(client.repositories()).resolves.toEqual(repositories)
+  })
+
   it("adds workflows write only when an inspected workflow path changed", () => {
     expect(githubPushPermissions(["src/index.ts", "README.md"])).toEqual(["contents:write"])
     expect(githubPushPermissions(["./.github/workflows/ci.yml", "src/index.ts"])).toEqual([

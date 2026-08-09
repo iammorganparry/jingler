@@ -203,21 +203,21 @@ test("the mode chip lives in the composer and Shift+Tab cycles it (incl. Plan on
   const surface = window.locator("[data-mode]").first()
 
   // Seeded mode is accept-edits → the chip reads "accept edits".
-  await expect(window.getByText("Accept edits", { exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "accept-edits")
 
   // On a Claude session Shift+Tab cycles accept-edits → auto → plan → ask.
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByText("Full access", { exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "auto")
 
   await window.keyboard.press("Shift+Tab")
   // Plan mode is now reachable (Claude-only) and themes the composer purple.
-  await expect(window.getByText("Enhanced Plan", { exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Enhanced Plan", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "plan")
 
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByText("Default permissions", { exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Default", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "ask")
 })
 
@@ -255,10 +255,8 @@ test("the model chip shows the harness model and switches", async ({ launchApp }
   // The menu lists EVERY installed harness's models grouped by provider, so the
   // label must be matched exactly — other harnesses ship near-identical names
   // (Cursor's `sonnet-4.5`), and a substring match resolves to several.
-  const alternate = window.getByRole("button", { name: ALT_CLAUDE_MODEL, exact: true })
-  if (await alternate.count() === 0) {
-    await window.getByRole("button").filter({ hasText: "Claude Code" }).click()
-  }
+  await window.getByRole("option", { name: /^Claude Code\b/ }).click()
+  const alternate = window.getByRole("option", { name: ALT_CLAUDE_MODEL, exact: true })
   await alternate.click()
   await expect(window.getByRole("button", { name: `Model: ${ALT_CLAUDE_MODEL}`, exact: true })).toBeVisible()
 })
@@ -282,8 +280,8 @@ test("the model chip switches provider", async ({ launchApp }) => {
 
   // The catalogue comes from the CLI itself, so assert the shape of an id
   // (`GPT-5.…`) rather than a specific one — it moves upstream.
-  await window.getByRole("button").filter({ hasText: "Codex CLI" }).click()
-  const codexModel = window.getByRole("button", { name: "GPT-5.6 Sol", exact: true })
+  await window.getByRole("option", { name: /^Codex CLI\b/ }).click()
+  const codexModel = window.getByRole("option", { name: "GPT-5.6 Sol", exact: true })
   await codexModel.click()
 
   // The chip follows the pick, and the composer now addresses the new harness.

@@ -54,15 +54,14 @@ const selectComposerEnvironment = async (window: Page, name = "buildbox") => {
   await window.getByRole("option", { name: new RegExp(name) }).click()
 }
 
-const createRemoteWorkspace = async (window: Page, title: string): Promise<string> => {
-  await window.getByTestId("new-workspace").click()
-  await expect(window.getByRole("heading", { name: "New workspace" })).toBeVisible()
-  await window.getByRole("combobox", { name: "Execution host" }).click()
+const createRemoteWorkspace = async (window: Page): Promise<string> => {
+  await window.getByTestId("new-session").click()
+  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+  await window.getByRole("button", { name: "Execution environment" }).click()
   await window.getByRole("option", { name: "buildbox" }).click()
-  await window.getByRole("textbox", { name: "Workspace name" }).fill(title)
   await expect(window.getByRole("button", { name: "Create workspace" })).toBeEnabled({ timeout: 20_000 })
   await window.getByRole("button", { name: "Create workspace" }).click()
-  const row = sessionRow(window, title)
+  const row = sessionRow(window, "Untitled session")
   await expect(row).toBeVisible({ timeout: 20_000 })
   const testId = await row.getAttribute("data-testid")
   if (!testId?.startsWith("session-row-")) throw new Error("Remote session row has no stable id")
@@ -113,7 +112,7 @@ test("clones a missing project and creates a workspace on an account-owned envir
     }
   })
   await enrollBuildbox(app)
-  const sessionId = await createRemoteWorkspace(app.window, "Remote scripted task")
+  const sessionId = await createRemoteWorkspace(app.window)
   const remoteRepo = join(app.deviceHome!, "repos", "widget")
   expect(existsSync(join(remoteRepo, ".git"))).toBe(true)
   const remoteProjects = JSON.parse(readFileSync(join(app.deviceHome!, "jingler", "projects.json"), "utf8"))
@@ -169,7 +168,7 @@ test("resumes a remote turn after relay interruption without duplicate execution
     }
   })
   await enrollBuildbox(app)
-  const sessionId = await createRemoteWorkspace(app.window, "Reconnect exactly once")
+  const sessionId = await createRemoteWorkspace(app.window)
   const composer = app.window.getByPlaceholder("Message Claude…")
   await composer.fill("Complete once after reconnect")
   await composer.press("Enter")

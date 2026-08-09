@@ -1313,9 +1313,12 @@ function AuthedApp({
         repos={repos}
         projects={projectController.projects}
         onBrowseProject={projectController.browse}
+        onBrowseCloneDestination={projectController.browseCloneDestination}
+        onListProjectDirectories={projectController.listDirectories}
+        onListGitHubRepositories={projectController.listGitHubRepositories}
         onRegisterProject={projectController.register}
         onCreateProjectDirectory={projectController.createDirectory}
-        onCloneProject={projectController.clone}
+        onCloneProjectFromGitHub={projectController.cloneFromGitHub}
         onEnsureProjectOnEnvironment={rpc.projectsEnsureOnEnvironment}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
