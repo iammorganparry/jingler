@@ -89,7 +89,6 @@ export const DeviceClaim = Schema.Struct({
   deviceId: RemoteDeviceId,
   clientInstanceId: RemoteClientInstanceId,
   audience: Schema.Literal("device-claim"),
-  oneTimeSecret: Base64Url.pipe(Schema.minLength(32), Schema.maxLength(128)),
   issuedAt: EpochSeconds,
   expiresAt: EpochSeconds
 })
@@ -101,14 +100,6 @@ export const DeviceClaimRequest = Schema.Struct({
   clientInstanceId: RemoteClientInstanceId
 })
 export type DeviceClaimRequest = Schema.Schema.Type<typeof DeviceClaimRequest>
-
-export const DeviceClaimResponse = Schema.Struct({
-  version: Schema.Literal(DEVICE_CLAIM_VERSION),
-  relayOrigin: Schema.String.pipe(Schema.minLength(1)),
-  claim: DeviceClaim,
-  token: Schema.String.pipe(Schema.minLength(1))
-})
-export type DeviceClaimResponse = Schema.Schema.Type<typeof DeviceClaimResponse>
 
 /** Preferred product name for the invisible, SSH-delivered enrollment claim. */
 export const DeviceEnrollmentCredential = DeviceClaim
@@ -792,27 +783,6 @@ export type EncryptedTunnelEnvelope = Schema.Schema.Type<
   typeof EncryptedTunnelEnvelope
 >
 
-/**
- * Opaque state-changing command. The relay can enforce replay and controller
- * ownership without learning the encrypted command payload.
- */
-export const EncryptedTunnelMutation = Schema.Struct({
-  version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
-  mutationId: OpaqueId,
-  sessionId: RemoteSessionId,
-  clientInstanceId: RemoteClientInstanceId,
-  attachmentGeneration: Generation,
-  controllerLeaseGeneration: Generation,
-  sequence: Sequence,
-  algorithm: Schema.Literal("AES-256-GCM"),
-  nonce: Base64Url.pipe(Schema.minLength(16), Schema.maxLength(64)),
-  ciphertext: Base64Url.pipe(Schema.minLength(1), Schema.maxLength(1_000_000)),
-  createdAt: EpochSeconds
-})
-export type EncryptedTunnelMutation = Schema.Schema.Type<
-  typeof EncryptedTunnelMutation
->
-
 export const TunnelAcknowledgement = Schema.Struct({
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   sessionId: RemoteSessionId,
@@ -835,10 +805,6 @@ export const TunnelClientMessage = Schema.Union(
   Schema.Struct({
     type: Schema.Literal("resume"),
     acknowledgedSequence: Schema.Int.pipe(Schema.nonNegative())
-  }),
-  Schema.Struct({
-    type: Schema.Literal("mutation"),
-    mutation: EncryptedTunnelMutation
   }),
   Schema.Struct({ type: Schema.Literal("ping") })
 )

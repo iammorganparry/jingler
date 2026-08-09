@@ -6,10 +6,7 @@ import { join } from "node:path"
 import type {
   DeviceRelayGrantResponse,
   RemoteDevice,
-  RemoteSessionEvent,
-  SessionCommand,
-  SessionEventEnvelope,
-  SessionReplay
+  RemoteSessionEvent
 } from "@jingler/core"
 import { afterEach, describe, expect, it } from "vitest"
 import { Chunk, Effect, Fiber, Layer, Schema, Stream } from "effect"
@@ -17,7 +14,6 @@ import { WebSocketServer } from "ws"
 import { EnvironmentService } from "./environment.js"
 import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
 import {
-  admitSessionReplay,
   decryptRemotePayload,
   deriveDeviceSessionKey,
   encryptRemotePayload,
@@ -27,10 +23,7 @@ import {
   openSshRemoteTunnel,
   RemoteSessionService,
   requestSessionIdForEnvironment,
-  restoreDesktopSessionKey,
-  unwrapSessionCommand,
-  unwrapSessionEventEnvelope,
-  wrapSessionCommand
+  restoreDesktopSessionKey
 } from "./remote-session.js"
 
 const servers: WebSocketServer[] = []
@@ -41,118 +34,6 @@ afterEach(async () => {
 })
 
 describe("RemoteSessionService envelopes", () => {
-  it("carries typed session commands inside the legacy encrypted command boundary", () => {
-    const typed: SessionCommand = {
-      version: 1,
-      commandId: "command_typed_1",
-      sessionId: "session_typed_1",
-      expectedRevision: 2,
-      controllerGeneration: 3,
-      command: { _tag: "Prompt", text: "hello", attachments: [] }
-    }
-
-    const wrapped = wrapSessionCommand(typed)
-
-    expect(wrapped).toMatchObject({
-      commandId: typed.commandId,
-      sessionId: typed.sessionId,
-      operation: "Session.command"
-    })
-    expect(unwrapSessionCommand(wrapped)).toEqual(typed)
-    expect(unwrapSessionCommand({ ...wrapped, commandId: "command_other_1" })).toBeNull()
-  })
-
-  it("extracts typed event envelopes from legacy remote event payloads", () => {
-    const envelope: SessionEventEnvelope = {
-      version: 1,
-      eventId: "event_typed_1",
-      sessionId: "session_typed_1",
-      sequence: 1,
-      revision: 2,
-      occurredAt: 123,
-      event: { _tag: "Stream", event: { _tag: "Assistant", text: "hello" } }
-    }
-    const remote: RemoteSessionEvent = {
-      version: 1,
-      commandId: "command_typed_1",
-      sessionId: envelope.sessionId,
-      eventSequence: 1,
-      kind: "event",
-      payload: envelope
-    }
-
-    expect(unwrapSessionEventEnvelope(remote)).toEqual(envelope)
-    expect(unwrapSessionEventEnvelope({ ...remote, sessionId: "session_other_1" })).toBeNull()
-    expect(unwrapSessionEventEnvelope({ ...remote, kind: "complete" })).toBeNull()
-  })
-
-  it("admits replay pages through the live event sequence and revision fence", () => {
-    const event = (sequence: number, revision = 4): SessionEventEnvelope => ({
-      version: 1,
-      eventId: `event_replay_${sequence}`,
-      sessionId: "session_replay_1",
-      sequence,
-      revision,
-      occurredAt: sequence,
-      event: { _tag: "Stream", event: { _tag: "Assistant", text: `${sequence}` } }
-    })
-    const replay: SessionReplay = {
-      version: 1,
-      sessionId: "session_replay_1",
-      afterSequence: 2,
-      events: [event(3), event(4)],
-      snapshot: null
-    }
-
-    const admitted = admitSessionReplay(
-      { sequence: 2, revision: 3, eventIds: ["event_replay_2"] },
-      replay
-    )
-
-    expect(admitted).toMatchObject({
-      status: "accepted",
-      cursor: { sequence: 4, revision: 4 },
-      events: replay.events
-    })
-    expect(admitSessionReplay(
-      { sequence: 1, revision: 3, eventIds: [] },
-      replay
-    )).toEqual({ status: "sequence-gap", expectedSequence: 2 })
-  })
-
-  it("uses a replay snapshot as the compacted sequence baseline", () => {
-    const replay: SessionReplay = {
-      version: 1,
-      sessionId: "session_replay_1",
-      afterSequence: 0,
-      snapshot: {
-        version: 1,
-        sessionId: "session_replay_1",
-        revision: 7,
-        throughSequence: 10,
-        status: "idle",
-        messages: []
-      },
-      events: [{
-        version: 1,
-        eventId: "event_replay_11",
-        sessionId: "session_replay_1",
-        sequence: 11,
-        revision: 8,
-        occurredAt: 11,
-        event: { _tag: "StatusChanged", status: "running" }
-      }]
-    }
-
-    expect(admitSessionReplay(
-      { sequence: 3, revision: 2, eventIds: ["event_old_3"] },
-      replay
-    )).toMatchObject({
-      status: "accepted",
-      cursor: { sequence: 11, revision: 8, eventIds: ["event_replay_11"] }
-    })
-  })
-
   it("derives the same key without sending it through the relay", () => {
     const device = generateKeyPairSync("x25519"); const jwk = device.publicKey.export({ format: "jwk" }); if (!jwk.x) throw new Error("missing x")
     const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "buildbox", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })

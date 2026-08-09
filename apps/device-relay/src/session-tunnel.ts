@@ -1,14 +1,12 @@
 import type {
   ClientAttachment,
   ControllerLease,
-  EncryptedTunnelMutation,
   EncryptedTunnelEnvelope,
   RemoteSessionInventoryEntry,
   TunnelClientMessage,
   TunnelEndpoint
 } from "@jingler/core"
 import {
-  EncryptedTunnelMutation as EncryptedTunnelMutationSchema,
   EncryptedTunnelEnvelope as EncryptedTunnelEnvelopeSchema,
   TunnelClientMessage as TunnelClientMessageSchema
 } from "@jingler/core"
@@ -79,11 +77,6 @@ interface ControllerLeaseRow {
   readonly expires_at: number | null
 }
 
-interface MutationRow {
-  readonly [key: string]: SqlStorageValue
-  readonly mutation_id: string
-}
-
 export interface TunnelSocketAttachment {
   readonly endpoint: TunnelEndpoint
   readonly sessionId: string
@@ -135,17 +128,6 @@ export type ControllerLeaseResult =
         | "stale-attachment"
         | "stale-controller"
         | "controller-occupied"
-    }
-
-export type PublishMutationResult =
-  | { readonly status: "inserted"; readonly mutationId: string }
-  | {
-      readonly status:
-        | "replayed"
-        | "invalid-mutation"
-        | "stale-attachment"
-        | "stale-controller"
-        | "passive-attachment"
     }
 
 export interface TunnelInitialization {
@@ -220,7 +202,6 @@ const base64UrlBytes = (value: string): number => Math.floor((value.length * 3) 
 export class SessionTunnelObject extends DurableObject<Env> {
   private metadataCache: TunnelMetadataRow | null | undefined
   private envelopeCountCache: number | null = null
-  private mutationCountCache: number | null = null
   private scheduledAlarmAt: number | null | undefined
   private readonly newestSequenceCache = new Map<TunnelEndpoint, number>()
   private readonly acknowledgementCache = new Map<TunnelEndpoint, number>()
@@ -286,19 +267,9 @@ export class SessionTunnelObject extends DurableObject<Env> {
         INSERT OR IGNORE INTO controller_lease
           (singleton, owner_client_instance_id, generation, acquired_at, expires_at)
           VALUES (1, NULL, 1, NULL, NULL);
-        CREATE TABLE IF NOT EXISTS processed_mutations (
-          mutation_id TEXT PRIMARY KEY,
-          client_instance_id TEXT NOT NULL,
-          controller_lease_generation INTEGER NOT NULL,
-          ciphertext TEXT NOT NULL,
-          processed_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS processed_mutations_time
-          ON processed_mutations(processed_at);
         CREATE TABLE IF NOT EXISTS tunnel_counters (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-          envelope_count INTEGER NOT NULL DEFAULT 0,
-          mutation_count INTEGER NOT NULL DEFAULT 0
+          envelope_count INTEGER NOT NULL DEFAULT 0
         );
         INSERT OR IGNORE INTO tunnel_counters (singleton) VALUES (1);
       `)
@@ -331,10 +302,17 @@ export class SessionTunnelObject extends DurableObject<Env> {
       if (counterMigration) {
         this.ctx.storage.sql.exec(`
           UPDATE tunnel_counters SET
-            envelope_count = (SELECT COUNT(*) FROM encrypted_envelopes),
-            mutation_count = (SELECT COUNT(*) FROM processed_mutations)
+            envelope_count = (SELECT COUNT(*) FROM encrypted_envelopes)
           WHERE singleton = 1;
         `)
+      }
+      const unusedMutationMigration = this.ctx.storage.sql
+        .exec<{ readonly id: number }>(
+          "INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (3) RETURNING id"
+        )
+        .toArray()[0]
+      if (unusedMutationMigration) {
+        this.ctx.storage.sql.exec("DROP TABLE IF EXISTS processed_mutations")
       }
     })
   }
@@ -801,21 +779,6 @@ export class SessionTunnelObject extends DurableObject<Env> {
         }
         return
       }
-      case "mutation": {
-        const metered = await this.meterTransfer(
-          socket,
-          attachment,
-          base64UrlBytes(message.mutation.ciphertext)
-        )
-        if (metered !== "recorded") {
-          safeSend(socket, { type: "error", code: metered })
-          safeClose(socket, 4008, "Relay quota exceeded")
-          return
-        }
-        const result = this.publishMutation(attachment, message.mutation)
-        safeSend(socket, { type: "mutation-result", ...result })
-        return
-      }
       case "envelope": {
         const metered = await this.meterTransfer(
           socket,
@@ -969,80 +932,6 @@ export class SessionTunnelObject extends DurableObject<Env> {
     }
     if (client.mode !== "controller") return { status: "passive-attachment" }
     return this.publishEnvelope("desktop", envelope)
-  }
-
-  publishMutation(
-    attachment: TunnelSocketAttachment,
-    mutation: EncryptedTunnelMutation,
-    nowSeconds = Math.floor(Date.now() / 1_000)
-  ): PublishMutationResult {
-    const decoded = Schema.decodeUnknownEither(EncryptedTunnelMutationSchema)(
-      mutation,
-      { onExcessProperty: "error" }
-    )
-    if (Either.isLeft(decoded) || attachment.endpoint !== "desktop") {
-      return { status: "invalid-mutation" }
-    }
-    const normalized = decoded.right
-    if (
-      normalized.sessionId !== attachment.sessionId ||
-      normalized.clientInstanceId !== attachment.clientInstanceId
-    ) {
-      return { status: "invalid-mutation" }
-    }
-    const client = this.attachmentRow(attachment.clientInstanceId)
-    if (
-      !client ||
-      client.expires_at <= nowSeconds ||
-      client.generation !== normalized.attachmentGeneration ||
-      client.generation !== attachment.attachmentGeneration
-    ) {
-      return { status: "stale-attachment" }
-    }
-    const lease = this.normalizedLease(nowSeconds)
-    if (
-      lease.owner_client_instance_id !== normalized.clientInstanceId ||
-      lease.generation !== normalized.controllerLeaseGeneration ||
-      lease.generation !== attachment.controllerLeaseGeneration
-    ) {
-      return { status: "stale-controller" }
-    }
-    if (client.mode !== "controller") {
-      return { status: "passive-attachment" }
-    }
-    const inserted = this.ctx.storage.transactionSync(() => {
-      const rows = this.ctx.storage.sql
-        .exec<MutationRow>(
-          `INSERT OR IGNORE INTO processed_mutations
-           (mutation_id, client_instance_id, controller_lease_generation,
-            ciphertext, processed_at)
-           VALUES (?, ?, ?, ?, ?)
-           RETURNING mutation_id`,
-          normalized.mutationId,
-          normalized.clientInstanceId,
-          normalized.controllerLeaseGeneration,
-          normalized.ciphertext,
-          nowSeconds
-        )
-        .toArray()
-      if (rows.length === 1) {
-        this.ctx.storage.sql.exec(
-          `UPDATE tunnel_counters SET mutation_count = mutation_count + 1
-           WHERE singleton = 1`
-        )
-      }
-      return rows
-    })
-    if (inserted.length !== 1) return { status: "replayed" }
-    this.mutationCountCache =
-      this.mutationCountCache === null
-        ? this.countMutations()
-        : this.mutationCountCache + 1
-    this.pruneCapacity()
-    for (const socket of this.ctx.getWebSockets("endpoint:device")) {
-      safeSend(socket, { type: "mutation", mutation: normalized })
-    }
-    return { status: "inserted", mutationId: normalized.mutationId }
   }
 
   acknowledge(endpoint: TunnelEndpoint, requestedSequence: number): number {
@@ -1419,46 +1308,27 @@ export class SessionTunnelObject extends DurableObject<Env> {
       .one().count
   }
 
-  private countMutations(): number {
-    return this.ctx.storage.sql
-      .exec<CountRow>(
-        "SELECT mutation_count AS count FROM tunnel_counters WHERE singleton = 1"
-      )
-      .one().count
-  }
-
   private pruneExpired(nowSeconds: number): void {
-    const { deletedEnvelopes, deletedMutations } = this.ctx.storage.transactionSync(() => {
+    const deletedEnvelopes = this.ctx.storage.transactionSync(() => {
       const deletedEnvelopes = this.ctx.storage.sql.exec<SequenceRow>(
         `DELETE FROM encrypted_envelopes WHERE created_at <= ?
          RETURNING sequence`,
         nowSeconds - TUNNEL_POLICY.retentionSeconds
       ).toArray().length
-      const deletedMutations = this.ctx.storage.sql.exec<MutationRow>(
-        `DELETE FROM processed_mutations WHERE processed_at <= ?
-         RETURNING mutation_id`,
-        nowSeconds - TUNNEL_POLICY.retentionSeconds
-      ).toArray().length
-      if (deletedEnvelopes > 0 || deletedMutations > 0) {
+      if (deletedEnvelopes > 0) {
         this.ctx.storage.sql.exec(
           `UPDATE tunnel_counters SET
-             envelope_count = MAX(0, envelope_count - ?),
-             mutation_count = MAX(0, mutation_count - ?)
+             envelope_count = MAX(0, envelope_count - ?)
            WHERE singleton = 1`,
-          deletedEnvelopes,
-          deletedMutations
+          deletedEnvelopes
         )
       }
-      return { deletedEnvelopes, deletedMutations }
+      return deletedEnvelopes
     })
     this.envelopeCountCache =
       this.envelopeCountCache === null
         ? this.countEnvelopes()
         : Math.max(0, this.envelopeCountCache - deletedEnvelopes)
-    this.mutationCountCache =
-      this.mutationCountCache === null
-        ? this.countMutations()
-        : Math.max(0, this.mutationCountCache - deletedMutations)
   }
 
   private pruneCapacity(): void {
@@ -1495,30 +1365,6 @@ export class SessionTunnelObject extends DurableObject<Env> {
         "warn"
       )
     }
-    const mutationCount = this.mutationCountCache ?? this.countMutations()
-    this.mutationCountCache = mutationCount
-    const mutationOverflow = mutationCount - TUNNEL_POLICY.maxStoredEnvelopes
-    if (mutationOverflow > 0) {
-      const deleted = this.ctx.storage.transactionSync(() => {
-        const deleted = this.ctx.storage.sql.exec<MutationRow>(
-          `DELETE FROM processed_mutations WHERE mutation_id IN
-           (SELECT mutation_id FROM processed_mutations
-            ORDER BY processed_at ASC, mutation_id ASC LIMIT ?)
-           RETURNING mutation_id`,
-          mutationOverflow
-        ).toArray().length
-        if (deleted > 0) {
-          this.ctx.storage.sql.exec(
-            `UPDATE tunnel_counters SET
-               mutation_count = MAX(0, mutation_count - ?)
-             WHERE singleton = 1`,
-            deleted
-          )
-        }
-        return deleted
-      })
-      this.mutationCountCache = Math.max(0, mutationCount - deleted)
-    }
   }
 
   private async scheduleAlarm(): Promise<void> {
@@ -1531,12 +1377,6 @@ export class SessionTunnelObject extends DurableObject<Env> {
         "SELECT MIN(created_at) AS created_at FROM encrypted_envelopes"
       )
       .one().created_at
-    const oldestMutation = this.ctx.storage.sql
-      .exec<{
-        readonly [key: string]: SqlStorageValue
-        readonly processed_at: number | null
-      }>("SELECT MIN(processed_at) AS processed_at FROM processed_mutations")
-      .one().processed_at
     const attachmentExpiry = this.ctx.storage.sql
       .exec<{
         readonly [key: string]: SqlStorageValue
@@ -1553,9 +1393,6 @@ export class SessionTunnelObject extends DurableObject<Env> {
       ...(oldestEnvelope === null
         ? []
         : [oldestEnvelope + TUNNEL_POLICY.retentionSeconds]),
-      ...(oldestMutation === null
-        ? []
-        : [oldestMutation + TUNNEL_POLICY.retentionSeconds]),
       ...(attachmentExpiry === null ? [] : [attachmentExpiry]),
       ...(leaseExpiry === null ? [] : [leaseExpiry])
     ]

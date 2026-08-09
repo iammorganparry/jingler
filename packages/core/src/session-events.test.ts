@@ -3,9 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   admitSessionEvent,
   isNextSessionEvent,
-  SessionCommand,
-  SessionEventEnvelope,
-  SessionReplay
+  SessionEventEnvelope
 } from "./session-events.js"
 
 const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown) =>
@@ -25,33 +23,6 @@ const envelope = {
 } as const
 
 describe("shared session protocol", () => {
-  it("validates versioned session commands", () => {
-    expect(
-      Either.isRight(
-        decode(SessionCommand, {
-          version: 1,
-          commandId: "command_abcdefghijklmnop",
-          sessionId: "session_abcdefghijklmnop",
-          expectedRevision: 0,
-          controllerGeneration: 1,
-          command: { _tag: "Prompt", text: "Continue", attachments: [] }
-        })
-      )
-    ).toBe(true)
-    expect(
-      Either.isLeft(
-        decode(SessionCommand, {
-          version: 2,
-          commandId: "command_abcdefghijklmnop",
-          sessionId: "session_abcdefghijklmnop",
-          expectedRevision: 0,
-          controllerGeneration: 1,
-          command: { _tag: "Cancel" }
-        })
-      )
-    ).toBe(true)
-  })
-
   it("validates every session event envelope field", () => {
     expect(Either.isRight(decode(SessionEventEnvelope, envelope))).toBe(true)
     expect(
@@ -87,22 +58,4 @@ describe("shared session protocol", () => {
     ).toEqual({ status: "sequence-gap", expectedSequence: 2 })
   })
 
-  it("validates cursor replay and snapshot fallback", () => {
-    const replay = {
-      version: 1,
-      sessionId: envelope.sessionId,
-      afterSequence: 0,
-      events: [envelope],
-      snapshot: null
-    }
-    expect(Either.isRight(decode(SessionReplay, replay))).toBe(true)
-    expect(
-      Either.isLeft(
-        decode(SessionReplay, {
-          ...replay,
-          events: Array.from({ length: 501 }, () => envelope)
-        })
-      )
-    ).toBe(true)
-  })
 })

@@ -90,7 +90,6 @@ const enrollmentCredential: DeviceEnrollmentCredentialResponse = {
     deviceId: device.deviceId,
     clientInstanceId: "client_abcdefghijklmnop",
     audience: "device-claim",
-    oneTimeSecret: "S".repeat(32),
     issuedAt: 100,
     expiresAt: 200
   },
