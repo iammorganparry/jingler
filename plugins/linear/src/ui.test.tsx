@@ -94,6 +94,7 @@ function successfulHost(command: string): unknown {
 }
 
 beforeEach(() => {
+  mocks.invoke.mockReset()
   mocks.invoke.mockImplementation((command: string) => Promise.resolve(successfulHost(command)))
   mocks.openExternal.mockClear()
   mocks.linkIssue.mockClear()
@@ -118,7 +119,7 @@ describe("Linear Issue tab content", () => {
   })
 
   it("renders create and link controls for an unlinked session", async () => {
-    render(<IssueTab pluginId="linear" session={session()} />)
+    const view = render(<IssueTab pluginId="linear" session={session()} />)
 
     const search = await screen.findByLabelText("Search Linear issues")
     expect(screen.getByRole("heading", { name: "Create an issue" })).toBeTruthy()
@@ -130,6 +131,12 @@ describe("Linear Issue tab content", () => {
     const link = await screen.findByRole("button", { name: "Link ENG-123" })
     fireEvent.click(link)
     await waitFor(() => expect(mocks.linkIssue).toHaveBeenCalledWith("session-1", linkedIssue))
+    view.rerender(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
+    expect(await screen.findByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
+
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.configured")).toHaveLength(1)
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.context")).toHaveLength(1)
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.get")).toHaveLength(1)
   })
 })
 

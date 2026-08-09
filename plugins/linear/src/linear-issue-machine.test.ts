@@ -82,6 +82,18 @@ describe("linearIssueMachine configuration and linking", () => {
     expect(actor.getSnapshot().context.issue?.identifier).toBe("ENG-123")
     actor.stop()
   })
+
+  it("loads a linked issue without fetching workspace context", async () => {
+    const context = vi.fn().mockRejectedValue(new Error("context should stay lazy"))
+    const actor = createActor(linearIssueMachine, {
+      input: { linkedIssue: reference, services: services({ context }) }
+    }).start()
+
+    await waitFor(actor, (snapshot) => snapshot.matches("detail"))
+
+    expect(context).not.toHaveBeenCalled()
+    actor.stop()
+  })
 })
 
 describe("linearIssueMachine creation and comments", () => {
@@ -138,7 +150,7 @@ describe("linearIssueMachine creation and comments", () => {
   })
 })
 
-describe("linearIssueMachine persistence and races", () => {
+describe("linearIssueMachine persistence", () => {
   it("unlinks only after persistence succeeds", async () => {
     let resolveUnlink: (() => void) | undefined
     const unlink = vi.fn(() => new Promise<void>((resolve) => { resolveUnlink = resolve }))
@@ -154,6 +166,7 @@ describe("linearIssueMachine persistence and races", () => {
     resolveUnlink?.()
     await waitFor(actor, (snapshot) => snapshot.matches("unlinked"))
     expect(actor.getSnapshot().context.linkedIssue).toBeUndefined()
+    expect(actor.getSnapshot().context.workspace?.workspace.name).toBe("Acme")
     actor.stop()
   })
 
@@ -198,7 +211,9 @@ describe("linearIssueMachine persistence and races", () => {
     expect(actor.getSnapshot().context.linkedIssue).toEqual(reference)
     actor.stop()
   })
+})
 
+describe("linearIssueMachine races", () => {
   it("ignores a stale issue response after the session changes", async () => {
     let resolveOld: ((issue: LinearIssueDetail) => void) | undefined
     const other = { ...reference, id: "issue-456", identifier: "ENG-456" }

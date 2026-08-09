@@ -108,6 +108,7 @@ export const linearIssueMachine = setup({
   guards: {
     hasLinkedIssue: ({ context }) => context.linkedIssue?.providerId === "linear",
     hasLoadedIssue: ({ context }) => context.issue !== null,
+    hasWorkspace: ({ context }) => context.workspace !== null,
     canCreate: ({ context }) =>
       context.createInput.teamId.trim().length > 0 && context.createInput.title.trim().length > 0,
     canComment: ({ context }) => context.commentBody.trim().length > 0
@@ -152,8 +153,9 @@ export const linearIssueMachine = setup({
         src: "checkConfiguration",
         input: ({ context }) => ({ services: context.services }),
         onDone: [
-          { guard: ({ event }) => event.output, target: "loadingContext", actions: "clearError" },
-          { target: "needsConfiguration" }
+          { guard: ({ event }) => !event.output, target: "needsConfiguration" },
+          { guard: "hasLinkedIssue", target: "loadingIssue", actions: "clearError" },
+          { target: "loadingContext", actions: "clearError" }
         ],
         onError: {
           target: "error",
@@ -166,7 +168,7 @@ export const linearIssueMachine = setup({
         src: "loadContext",
         input: ({ context }) => ({ services: context.services }),
         onDone: {
-          target: "routing",
+          target: "unlinked",
           actions: assign({
             workspace: ({ event }) => event.output,
             createInput: ({ context, event }) => ({
@@ -181,12 +183,6 @@ export const linearIssueMachine = setup({
           actions: assign({ error: ({ event }) => message(event.error) })
         }
       }
-    },
-    routing: {
-      always: [
-        { guard: "hasLinkedIssue", target: "loadingIssue" },
-        { target: "unlinked" }
-      ]
     },
     needsConfiguration: {
       on: { CONFIGURATION_CHANGED: "checkingConfiguration" }
@@ -302,7 +298,10 @@ export const linearIssueMachine = setup({
       invoke: {
         src: "unlinkIssue",
         input: ({ context }) => ({ services: context.services }),
-        onDone: { target: "unlinked", actions: "clearLink" },
+        onDone: [
+          { guard: "hasWorkspace", target: "unlinked", actions: "clearLink" },
+          { target: "loadingContext", actions: "clearLink" }
+        ],
         onError: [
           {
             guard: "hasLoadedIssue",

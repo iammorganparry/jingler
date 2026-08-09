@@ -332,7 +332,7 @@ function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
 }
 
 export function IssueTab({ session }: TabProps) {
-  return <LinearIssueView key={`${session.id}:${session.linkedIssue?.providerId ?? "none"}:${session.linkedIssue?.id ?? "none"}`} session={session} />
+  return <LinearIssueView key={session.id} session={session} />
 }
 
 export default definePlugin(manifest, { views: { "linear.issue": IssueTab } })
