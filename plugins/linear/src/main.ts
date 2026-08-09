@@ -58,7 +58,7 @@ export type {
 const API_KEY_SETTING = "linear.api-key"
 const PAGE_SIZE = 50
 const MAX_ISSUE_PAGES = 5
-const MAX_COMMENT_PAGES = 10
+const MAX_COMMENT_PAGES = 100
 
 const configuredApiKey = async (getSecret: (id: string) => Promise<string | undefined>) => {
   const apiKey = await getSecret(API_KEY_SETTING)

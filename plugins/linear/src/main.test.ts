@@ -139,6 +139,38 @@ describe("createLinearClient", () => {
     expect(issue?.comments.map(({ id }) => id)).toEqual(["comment-1", "comment-2"])
   })
 
+  it("loads issues with more than 500 comments", async () => {
+    const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      if (body.query.includes("query LinearIssue(")) return json({ issue: rawIssue() })
+      const page = body.variables.after === null
+        ? 0
+        : Number(String(body.variables.after).replace("comment-page-", ""))
+      return json({
+        issue: {
+          comments: {
+            nodes: Array.from({ length: 50 }, (_, index) => ({
+              id: `comment-${page * 50 + index + 1}`,
+              body: `Comment ${page * 50 + index + 1}`,
+              createdAt: "2026-08-08T11:00:00.000Z",
+              url: null,
+              user: null
+            })),
+            pageInfo: page < 10
+              ? { hasNextPage: true, endCursor: `comment-page-${page + 1}` }
+              : { hasNextPage: false, endCursor: null }
+          }
+        }
+      })
+    })
+    const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
+
+    const issue = await client.getIssue({ repository, issueId: "issue-1" })
+
+    expect(issue?.comments).toHaveLength(550)
+    expect(issue?.comments.at(-1)?.id).toBe("comment-550")
+  })
+
   it("creates a Linear issue with an explicit team and returns the refreshed issue", async () => {
     const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body))
