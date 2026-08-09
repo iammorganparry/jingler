@@ -52,6 +52,22 @@ describe("device session command handler", () => {
     expect(execute).toHaveBeenCalledOnce()
   })
 
+  it("adopts a controller scope for commands persisted by an older daemon", async () => {
+    const file = join(root, "ledger.json")
+    const execute = vi.fn(async () => "ok")
+    const legacy = new SessionCommandHandler(file, { execute })
+    await legacy.handle(command(), 1)
+    const scope = {
+      clientInstanceId: "client_legacy_abcdefgh",
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 2
+    }
+    const upgraded = new SessionCommandHandler(file, { execute })
+    await upgraded.adoptControllerScope(scope)
+    await expect(upgraded.handle(command(), 1, undefined, scope)).resolves.toHaveLength(1)
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
   it("settles a command left admitted by a device crash as a deterministic restart failure", async () => {
     const file = join(root, "ledger.json")
     await writeFile(file, JSON.stringify({
@@ -244,6 +260,40 @@ describe("device session command handler", () => {
     const handler = new SessionCommandHandler(join(root, "ledger.json"), { execute: async () => "ok" })
     await handler.handle(command("run"), 1)
     await expect(handler.handle(command("delete"), 1)).rejects.toThrow("conflicts with its persisted admission")
+  })
+
+  it("durably rejects commands from a stale controller generation", async () => {
+    const file = join(root, "ledger.json")
+    const execute = vi.fn(async () => "ok")
+    const firstScope = {
+      clientInstanceId: "client_first_abcdefgh",
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 1
+    }
+    const takeoverScope = {
+      clientInstanceId: "client_takeover_abcdefgh",
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 2
+    }
+    const handler = new SessionCommandHandler(file, { execute })
+    await handler.adoptControllerScope(firstScope)
+    await handler.handle(command("run", "command_first"), 1, undefined, firstScope)
+    await handler.adoptControllerScope(takeoverScope)
+    await expect(
+      handler.handle(command("delete", "command_delayed"), 2, undefined, firstScope)
+    ).rejects.toThrow("Stale controller execution scope")
+
+    const restarted = new SessionCommandHandler(file, { execute })
+    await expect(restarted.adoptControllerScope(firstScope)).rejects.toThrow(
+      "Stale controller lease generation"
+    )
+    await restarted.handle(
+      command("delete", "command_takeover"),
+      2,
+      undefined,
+      takeoverScope
+    )
+    expect(execute).toHaveBeenCalledTimes(2)
   })
 
   it("rejects a sequence gap without advancing persisted cursors", async () => {

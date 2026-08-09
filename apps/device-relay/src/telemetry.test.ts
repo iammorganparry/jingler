@@ -29,6 +29,28 @@ describe("device relay security telemetry", () => {
 
   it("keeps required telemetry free of credentials and payload content", () => {
     const records = [
+      telemetryRecord("bootstrap_discovery", {
+        enabled: true,
+        outcome: "served",
+        protocolCount: 2
+      }),
+      telemetryRecord("device_claim", {
+        claimId: "claim_opaque",
+        clientInstanceId: "client_opaque",
+        deviceId: "device_opaque",
+        outcome: "consumed"
+      }),
+      telemetryRecord("grant_admission", {
+        audience: "session-tunnel",
+        clientInstanceId: "client_opaque",
+        deviceId: "device_opaque",
+        sessionId: "session_opaque"
+      }),
+      telemetryRecord("presence_change", {
+        deviceId: "device_opaque",
+        previousState: "offline",
+        state: "online"
+      }),
       telemetryRecord(
         "pairing_attempt",
         { deviceId: "device_opaque", failedAttempts: 2, outcome: "invalid-code" },
@@ -52,6 +74,24 @@ describe("device relay security telemetry", () => {
         generation: 2,
         registrySocketsClosed: 1,
         tunnelSocketsClosed: 2
+      }),
+      telemetryRecord("device_registration", {
+        clientInstanceId: "client_opaque",
+        deviceId: "device_opaque",
+        outcome: "registered"
+      }),
+      telemetryRecord("client_attachment", {
+        attachmentGeneration: 2,
+        clientInstanceId: "client_opaque",
+        outcome: "attached",
+        sessionId: "session_opaque"
+      }),
+      telemetryRecord("controller_lease", {
+        clientInstanceId: "client_opaque",
+        generation: 3,
+        operation: "takeover",
+        outcome: "acquired",
+        sessionId: "session_opaque"
       })
     ]
     const serialized = JSON.stringify(records)

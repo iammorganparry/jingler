@@ -19,6 +19,10 @@
       {
         "name": "SESSION_TUNNEL",
         "class_name": "SessionTunnelObject"
+      },
+      {
+        "name": "RELAY_USAGE",
+        "class_name": "RelayUsageObject"
       }
     ]
   },
@@ -27,12 +31,21 @@
       "name": "UNAUTHENTICATED_RATE_LIMITER",
       "namespace_id": "1001",
       "simple": { "limit": 30, "period": 60 }
+    },
+    {
+      "name": "AUTHENTICATED_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": { "limit": 60, "period": 60 }
     }
   ],
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["DeviceRegistryObject", "SessionTunnelObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["RelayUsageObject"]
     }
   ],
   "observability": {

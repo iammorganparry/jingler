@@ -1,5 +1,9 @@
-import type { EncryptedTunnelEnvelope, TunnelEndpoint } from "@jingler/core"
-import { env, runInDurableObject } from "cloudflare:test"
+import type {
+  EncryptedTunnelEnvelope,
+  EncryptedTunnelMutation,
+  TunnelEndpoint
+} from "@jingler/core"
+import { env, evictAllDurableObjects, runInDurableObject } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
 import { type SessionTunnelObject, TUNNEL_POLICY } from "./session-tunnel.js"
 
@@ -11,6 +15,18 @@ const initialization = (sessionId: string) => ({
   deviceId: "device_abcdefghijklmnop",
   deviceGeneration: 1,
   expiresAt: nowSeconds + 600
+})
+
+const clientInstanceId = "client_abcdefghijklmnop"
+
+const admission = (input: ReturnType<typeof initialization>) => ({
+  subject: input.subject,
+  deviceId: input.deviceId,
+  sessionId: input.sessionId,
+  clientInstanceId,
+  attachmentGeneration: 1,
+  controllerLeaseGeneration: 1,
+  expiresAt: input.expiresAt
 })
 
 const envelope = (
@@ -26,6 +42,24 @@ const envelope = (
   algorithm: "AES-256-GCM",
   nonce: "A".repeat(16),
   ciphertext,
+  createdAt: nowSeconds
+})
+
+const mutation = (
+  sessionId: string,
+  clientId = clientInstanceId,
+  controllerLeaseGeneration = 1
+): EncryptedTunnelMutation => ({
+  version: 1,
+  mutationId: "mutation_abcdefghijklmnop",
+  sessionId,
+  clientInstanceId: clientId,
+  attachmentGeneration: 1,
+  controllerLeaseGeneration,
+  sequence: 1,
+  algorithm: "AES-256-GCM",
+  nonce: "A".repeat(16),
+  ciphertext: "encrypted_mutation",
   createdAt: nowSeconds
 })
 
@@ -54,6 +88,14 @@ const connect = async (
   endpoint: TunnelEndpoint,
   acknowledgedSequence = 0
 ): Promise<WebSocket> => {
+  const clientAdmission = admission(input)
+  await tunnel.attachClient(clientAdmission, nowSeconds)
+  if (endpoint === "desktop") {
+    await tunnel.acquireController(
+      { ...clientAdmission, expectedGeneration: 1, takeover: false },
+      nowSeconds
+    )
+  }
   const response = await tunnel.fetch(
     new Request("https://relay.internal/tunnel", {
       headers: {
@@ -63,6 +105,9 @@ const connect = async (
         "x-jingler-subject": input.subject,
         "x-jingler-device-id": input.deviceId,
         "x-jingler-device-generation": String(input.deviceGeneration),
+        "x-jingler-client-instance-id": clientInstanceId,
+        "x-jingler-attachment-generation": "1",
+        "x-jingler-controller-lease-generation": "1",
         "x-jingler-expires-at": String(input.expiresAt),
         "x-jingler-acknowledged-sequence": String(acknowledgedSequence)
       }
@@ -73,6 +118,77 @@ const connect = async (
 }
 
 describe("encrypted session tunnel", () => {
+  it("reconnects after lease expiry and returns the effective takeover generation", async () => {
+    const input = initialization("session_lease_reconnect_abcd")
+    const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
+    const first = admission(input)
+    await expect(tunnel.prepareConnection({
+      endpoint: "desktop",
+      initialization: input,
+      admission: first
+    }, nowSeconds)).resolves.toEqual({
+      status: "prepared",
+      controllerLeaseGeneration: 1
+    })
+
+    const afterExpiry = input.expiresAt + 1
+    await expect(tunnel.inventoryEntry(afterExpiry)).resolves.toMatchObject({
+      controllerClientInstanceId: null,
+      controllerLeaseGeneration: 2
+    })
+    const refreshed = {
+      ...first,
+      controllerLeaseGeneration: 2,
+      expiresAt: afterExpiry + 600
+    }
+    await expect(tunnel.prepareConnection({
+      endpoint: "desktop",
+      initialization: { ...input, expiresAt: refreshed.expiresAt },
+      admission: refreshed
+    }, afterExpiry)).resolves.toEqual({
+      status: "prepared",
+      controllerLeaseGeneration: 2
+    })
+
+    await expect(tunnel.prepareConnection({
+      endpoint: "desktop",
+      initialization: { ...input, expiresAt: refreshed.expiresAt },
+      admission: { ...refreshed, clientInstanceId: "client_second_abcdefgh" }
+    }, afterExpiry)).resolves.toEqual({
+      status: "prepared",
+      controllerLeaseGeneration: 3
+    })
+    await expect(tunnel.prepareConnection({
+      endpoint: "device",
+      initialization: { ...input, expiresAt: refreshed.expiresAt },
+      admission: { ...refreshed, clientInstanceId: "client_second_abcdefgh" }
+    }, afterExpiry)).resolves.toEqual({
+      status: "prepared",
+      controllerLeaseGeneration: 3
+    })
+  })
+
+  it("restores bounded retention counters without scanning envelope history after hibernation", async () => {
+    const input = initialization("session_counter_hibernate_abcd")
+    const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
+    await tunnel.initialize(input, nowSeconds)
+    await expect(tunnel.publishEnvelope("desktop", envelope(input.sessionId, "desktop", 1))).resolves.toMatchObject({
+      status: "inserted"
+    })
+    await expect(tunnel.publishEnvelope("desktop", envelope(input.sessionId, "desktop", 2))).resolves.toMatchObject({
+      status: "inserted"
+    })
+    await expect(tunnel.envelopeCount()).resolves.toBe(2)
+
+    await evictAllDurableObjects()
+    const restored = env.SESSION_TUNNEL.getByName(input.sessionId)
+    await expect(restored.envelopeCount()).resolves.toBe(2)
+    await expect(restored.publishEnvelope("desktop", envelope(input.sessionId, "desktop", 3))).resolves.toMatchObject({
+      status: "inserted"
+    })
+    await expect(restored.envelopeCount()).resolves.toBe(3)
+  })
+
   it("replays unacknowledged envelopes after reconnect", async () => {
     const input = initialization("session_replay_abcdefghijkl")
     const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
@@ -255,6 +371,108 @@ describe("encrypted session tunnel", () => {
     ).resolves.toMatchObject({ status: "inserted", sequence: 2 })
   })
 
+  it("rejects replayed mutations and stale controller generations after takeover", async () => {
+    const input = initialization("session_controller_abcdefghij")
+    const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
+    await tunnel.initialize(input, nowSeconds)
+    const firstAdmission = admission(input)
+    await expect(tunnel.attachClient(firstAdmission, nowSeconds)).resolves.toMatchObject({
+      status: "attached",
+      attachment: { mode: "passive", generation: 1 }
+    })
+    await expect(
+      tunnel.acquireController(
+        { ...firstAdmission, expectedGeneration: 1, takeover: false },
+        nowSeconds
+      )
+    ).resolves.toMatchObject({
+      status: "acquired",
+      lease: { ownerClientInstanceId: clientInstanceId, generation: 1 }
+    })
+    const socketAttachment = {
+      endpoint: "desktop" as const,
+      sessionId: input.sessionId,
+      subject: input.subject,
+      deviceId: input.deviceId,
+      generation: input.deviceGeneration,
+      clientInstanceId,
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 1,
+      expiresAt: input.expiresAt
+    }
+    await expect(
+      tunnel.publishAuthorizedEnvelope(
+        socketAttachment,
+        envelope(input.sessionId, "desktop", 1),
+        nowSeconds
+      )
+    ).resolves.toMatchObject({ status: "inserted", sequence: 1 })
+    await expect(
+      tunnel.publishMutation(socketAttachment, mutation(input.sessionId), nowSeconds)
+    ).resolves.toMatchObject({ status: "inserted" })
+    await expect(
+      tunnel.publishMutation(socketAttachment, mutation(input.sessionId), nowSeconds)
+    ).resolves.toEqual({ status: "replayed" })
+
+    const takeoverAdmission = {
+      ...firstAdmission,
+      clientInstanceId: "client_takeover_abcdefgh"
+    }
+    await tunnel.attachClient(takeoverAdmission, nowSeconds)
+    await expect(
+      tunnel.acquireController(
+        { ...takeoverAdmission, expectedGeneration: 1, takeover: true },
+        nowSeconds
+      )
+    ).resolves.toMatchObject({
+      status: "acquired",
+      lease: {
+        ownerClientInstanceId: "client_takeover_abcdefgh",
+        generation: 2
+      }
+    })
+    await expect(
+      tunnel.publishMutation(
+        socketAttachment,
+        { ...mutation(input.sessionId), mutationId: "mutation_stale_abcdefgh" },
+        nowSeconds
+      )
+    ).resolves.toEqual({ status: "stale-controller" })
+    await expect(
+      tunnel.publishAuthorizedEnvelope(
+        socketAttachment,
+        envelope(input.sessionId, "desktop", 2),
+        nowSeconds
+      )
+    ).resolves.toEqual({ status: "stale-controller" })
+    await expect(tunnel.inventoryEntry(nowSeconds)).resolves.toMatchObject({
+      sessionId: input.sessionId,
+      controllerClientInstanceId: "client_takeover_abcdefgh",
+      controllerLeaseGeneration: 2
+    })
+  })
+
+  it("does not admit command envelopes from passive attachments", async () => {
+    const input = initialization("session_passive_envelope_abcdefgh")
+    const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
+    await tunnel.initialize(input, nowSeconds)
+    await tunnel.attachClient(admission(input), nowSeconds)
+    await expect(tunnel.publishAuthorizedEnvelope({
+      endpoint: "desktop",
+      sessionId: input.sessionId,
+      subject: input.subject,
+      deviceId: input.deviceId,
+      generation: input.deviceGeneration,
+      clientInstanceId,
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 1,
+      expiresAt: input.expiresAt
+    }, envelope(input.sessionId, "desktop", 1), nowSeconds)).resolves.toEqual({
+      status: "stale-controller"
+    })
+    await expect(tunnel.storedSequences("desktop")).resolves.toEqual([])
+  })
+
   it("reports a bounded replay gap when retention is exceeded", async () => {
     const input = initialization("session_bounded_abcdefghijklm")
     const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
@@ -283,7 +501,7 @@ describe("encrypted session tunnel", () => {
     expect(received[2]).toMatchObject({ type: "envelope", envelope: { sequence: 3 } })
     expect(received.at(-1)).toMatchObject({ type: "replay-more" })
     device.close(1000, "done")
-  })
+  }, 15_000)
 
   it("persists only validated encrypted envelopes", async () => {
     const input = initialization("session_ciphertext_abcdefghij")

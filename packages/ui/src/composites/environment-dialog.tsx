@@ -17,7 +17,7 @@ export interface EnvironmentDialogProps {
   state:
     | "discovering"
     | "configuring"
-    | "claiming"
+    | "enrolling"
     | "connected"
     | "failed"
   values: {
@@ -34,14 +34,14 @@ export interface EnvironmentDialogProps {
 }
 
 export function EnvironmentDialog(props: EnvironmentDialogProps) {
-  const busy = props.state === "discovering" || props.state === "claiming"
+  const busy = props.state === "discovering" || props.state === "enrolling"
   const valid = props.values.host.trim().length > 0
   return (
     <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
       <DialogContent className="w-[760px]">
         <DialogHeader>
           <div>
-            <DialogTitle>Add Environment</DialogTitle>
+            <DialogTitle>Add owned machine</DialogTitle>
             <p className="mt-1 text-[12px] text-muted-foreground">
               Connect a remote machine through your local SSH configuration.
             </p>
@@ -68,7 +68,7 @@ export function EnvironmentDialog(props: EnvironmentDialogProps) {
                     onChange={(event) =>
                       props.onEdit("host", event.currentTarget.value)
                     }
-                    placeholder="buildbox"
+                    placeholder="dev-machine"
                   />
                 </label>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -135,7 +135,7 @@ export function EnvironmentDialog(props: EnvironmentDialogProps) {
                 disabled={!valid || busy}
                 onClick={props.onSubmit}
               >
-                <Plus size={14} /> {busy ? "Connecting…" : "Add environment"}
+                <Plus size={14} /> {busy ? "Connecting…" : "Add owned machine"}
               </Button>
             )}
           </DialogFooter>

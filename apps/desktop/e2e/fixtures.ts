@@ -1127,6 +1127,7 @@ export const test = base.extend<{
           ...(deviceRelay
             ? {
                 JINGLER_DEVICE_RELAY_URL: deviceRelay.url,
+                JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ENTRY,
                 JINGLER_SSH_DIR: join(home, ".ssh"),
                 JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl")
               }

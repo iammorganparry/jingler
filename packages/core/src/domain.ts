@@ -64,6 +64,7 @@ export type CliInfo = Schema.Schema.Type<typeof CliInfo>
 export const EnvironmentConnectionState = Schema.Literal(
   "online",
   "offline",
+  "reconnecting",
   "incompatible",
   "revoked"
 )

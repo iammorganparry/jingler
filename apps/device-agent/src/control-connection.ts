@@ -4,8 +4,12 @@ import {
   DeviceRelayGrantResponse as DeviceRelayGrantResponseSchema
 } from "@jingler/core"
 import { Data, Schema } from "effect"
+import { createHash } from "node:crypto"
 import WebSocket from "ws"
+import type { DeviceEnrollment } from "./device-client.js"
 import type { DeviceIdentity } from "./device-identity.js"
+
+export type { DeviceEnrollment } from "./device-client.js"
 
 export class DeviceControlError extends Data.TaggedError("DeviceControlError")<{
   readonly message: string
@@ -13,11 +17,10 @@ export class DeviceControlError extends Data.TaggedError("DeviceControlError")<{
   readonly cause?: unknown
 }> {}
 
-export interface DeviceEnrollment {
-  readonly subject: string
-  readonly deviceId: string
-  readonly serverUrl: string
-}
+const clientInstanceIdPattern = /^[A-Za-z0-9_-]{1,128}$/u
+
+const legacyClientInstanceId = (sessionId: string): string =>
+  `legacy_${createHash("sha256").update(sessionId, "utf8").digest("base64url").slice(0, 32)}`
 
 export interface ControlSocket {
   readonly send: (message: string) => void
@@ -36,6 +39,9 @@ export interface ControlConnectionDependencies {
     readonly sessionId: string
     readonly grant: string
     readonly keyOffer: unknown
+    readonly clientInstanceId: string
+    readonly attachmentGeneration: number
+    readonly controllerLeaseGeneration: number
   }) => Promise<void>
 }
 
@@ -218,12 +224,30 @@ export const runControlConnection = async (
           typeof request.grant !== "string"
         )
           return
+        const clientInstanceId =
+          typeof request.clientInstanceId === "string" &&
+          clientInstanceIdPattern.test(request.clientInstanceId)
+            ? request.clientInstanceId
+            : legacyClientInstanceId(request.sessionId)
+        const attachmentGeneration =
+          Number.isSafeInteger(request.attachmentGeneration) &&
+          (request.attachmentGeneration as number) >= 1
+            ? request.attachmentGeneration as number
+            : 1
+        const controllerLeaseGeneration =
+          Number.isSafeInteger(request.controllerLeaseGeneration) &&
+          (request.controllerLeaseGeneration as number) >= 1
+            ? request.controllerLeaseGeneration as number
+            : 1
         void dependencies
           .handleSessionRequest({
             relayUrl: refreshed.relayUrl,
             sessionId: request.sessionId,
             grant: request.grant,
-            keyOffer: request.keyOffer
+            keyOffer: request.keyOffer,
+            clientInstanceId,
+            attachmentGeneration,
+            controllerLeaseGeneration
           })
           .catch(() => {
             // The control socket remains healthy; a failed session tunnel is
@@ -231,7 +255,6 @@ export const runControlConnection = async (
           })
       })
       socket.send(JSON.stringify({ type: "announce", discovery }))
-      socket.send(JSON.stringify({ type: "ping" }))
       failures = 0
       const closed = await socket.waitForClose(signal)
       stopMessages()

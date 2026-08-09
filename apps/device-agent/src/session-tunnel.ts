@@ -19,6 +19,9 @@ export interface DeviceSessionRequest {
   readonly sessionId: string
   readonly grant: string
   readonly keyOffer: unknown
+  readonly clientInstanceId: string
+  readonly attachmentGeneration: number
+  readonly controllerLeaseGeneration: number
 }
 
 /** Decrypts one session tunnel and dispatches admitted commands exactly once. */
@@ -29,6 +32,18 @@ export const runDeviceSessionTunnel = (
   handler: SessionCommandHandler
 ): Effect.Effect<void, RemoteSessionError> =>
   Effect.scoped(Effect.gen(function* () {
+    const controllerScope = {
+      clientInstanceId: request.clientInstanceId,
+      attachmentGeneration: request.attachmentGeneration,
+      controllerLeaseGeneration: request.controllerLeaseGeneration
+    }
+    yield* Effect.tryPromise({
+      try: () => handler.adoptControllerScope(controllerScope),
+      catch: (cause) => new RemoteSessionError({
+        message: "Stale controller session request.",
+        cause
+      })
+    })
     const offer = yield* Schema.decodeUnknown(RemoteSessionKeyOfferSchema)(request.keyOffer).pipe(
       Effect.mapError((cause) => new RemoteSessionError({ message: "Invalid session key offer.", cause }))
     )
@@ -117,7 +132,8 @@ export const runDeviceSessionTunnel = (
             try: () => handler.handle(
               command,
               envelope.sequence,
-              (commandId) => Effect.runPromise(flushCommand(commandId))
+              (commandId) => Effect.runPromise(flushCommand(commandId)),
+              controllerScope
             ),
             catch: (cause) => new RemoteSessionError({ message: "Remote command dispatch failed.", cause })
           })

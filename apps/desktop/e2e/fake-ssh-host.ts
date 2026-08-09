@@ -35,19 +35,36 @@ const command = process.argv.at(-1) || ""
 if (command.includes("jingler-device") && (command.includes(" serve ") || command.includes(" install-service "))) {
   process.exit(0)
 }
-if (!command.includes("jingler-device pair")) {
+if (!command.includes(" enroll ")) {
   process.stderr.write("unsupported fake SSH command\\n")
   process.exit(127)
 }
-const result = spawnSync(process.execPath, [${JSON.stringify(options.deviceAgentBundle)}, "pair", "--json", "--relay", ${JSON.stringify(options.relayUrl)}, "--name", "buildbox"], {
+let credential = ""
+process.stdin.setEncoding("utf8")
+process.stdin.on("data", (chunk) => { credential += chunk })
+process.stdin.on("end", () => {
+const result = spawnSync(process.execPath, [${JSON.stringify(options.deviceAgentBundle)}, "enroll", "--server", ${JSON.stringify(options.relayUrl)}, "--name", "buildbox"], {
   env: { ...process.env, JINGLER_HOME: ${JSON.stringify(options.deviceHome)}, JINGLER_DEVICE_RELAY_URL: ${JSON.stringify(options.relayUrl)}, JINGLER_SCRIPTED_AGENT: "1", JINGLER_E2E: "1" },
+  input: credential,
   encoding: "utf8"
 })
 process.stdout.write(result.stdout || "")
 process.stderr.write(result.stderr || "")
+if (log && result.stderr) fs.appendFileSync(log, JSON.stringify({ agentStderr: result.stderr }) + "\\n")
 process.exit(result.status ?? 1)
+})
 `
   const sshPath = join(options.binDir, "ssh")
   writeFileSync(sshPath, script)
   chmodSync(sshPath, 0o755)
+
+  const scpScript = `#!/usr/bin/env node
+const fs = require("node:fs")
+const log = process.env.JINGLER_E2E_SSH_LOG
+if (log) fs.appendFileSync(log, JSON.stringify(process.argv.slice(2)) + "\\n")
+process.exit(0)
+`
+  const scpPath = join(options.binDir, "scp")
+  writeFileSync(scpPath, scpScript)
+  chmodSync(scpPath, 0o755)
 }

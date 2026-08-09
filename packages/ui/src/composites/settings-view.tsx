@@ -900,8 +900,8 @@ export function DevicesSection({
               Devices
             </h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              Run Jingler sessions on paired machines without signing in over
-              SSH.
+              Your account-owned machines appear here automatically after SSH
+              setup.
             </p>
           </div>
           <div className="flex gap-2">
@@ -914,7 +914,7 @@ export function DevicesSection({
               <RefreshCw size={13} /> Refresh
             </Button>
             <Button size="sm" onClick={onOpen}>
-              Add environment
+              Add owned machine
             </Button>
           </div>
         </div>
@@ -929,7 +929,7 @@ export function DevicesSection({
         <div className="overflow-hidden rounded-lg border border-line bg-panel">
           {environments.length === 0 ? (
             <div className="px-4 py-10 text-center text-[12px] text-muted-foreground">
-              {loading ? "Loading devices…" : "No paired devices yet."}
+              {loading ? "Loading devices…" : "No owned machines yet."}
             </div>
           ) : (
             environments.map((environment) => (

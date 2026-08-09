@@ -32,11 +32,16 @@ afterEach(cleanup)
 describe("EnvironmentDialog", () => {
   it("opens directly into SSH onboarding", () => {
     render(<EnvironmentDialog {...props} />)
+    expect(
+      screen.getByRole("heading", { name: "Add owned machine" })
+    ).toBeTruthy()
     expect(screen.getByLabelText("SSH host or alias")).toBeTruthy()
     expect(screen.queryByRole("button", { name: /Remote link/i })).toBeNull()
     expect(screen.queryByLabelText("Backend host")).toBeNull()
     expect(screen.queryByLabelText("Device ID")).toBeNull()
     expect(screen.queryByLabelText("Pairing code")).toBeNull()
+    expect(screen.queryByLabelText("Relay URL")).toBeNull()
+    expect(screen.queryByLabelText("Pairing link")).toBeNull()
   })
   it("renders suggested SSH hosts and selects buildbox", () => {
     render(<EnvironmentDialog {...props} />)

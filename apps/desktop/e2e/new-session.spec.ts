@@ -417,6 +417,7 @@ test("creating a session from an issue forks a linked branch and seeds the task"
     repo: "widget",
     automations: { progressComments: true, closeOnMerge: true }
   })
+  expect(persisted[0]).not.toHaveProperty("issueNumber")
   // `initialPrompt` is one-shot but survives until the operator actually SENDS —
   // it is NOT cleared on mount. This test visits the Issue tab above, which is
   // exactly the case that broke: unmounting the pane discarded the composer's

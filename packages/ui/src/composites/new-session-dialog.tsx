@@ -305,7 +305,7 @@ export function NewSessionDialog({
             <div className="flex flex-col gap-1.5">
               <Eyebrow>Environment</Eyebrow>
               <Select value={environmentId ?? "__local__"} onValueChange={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value === "__local__" ? null : value })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-label="Execution environment"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__local__">Local</SelectItem>
                   {environments.map((environment) => {

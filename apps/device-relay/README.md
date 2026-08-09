@@ -1,10 +1,12 @@
 # @jingler/device-relay
 
-Cloudflare Worker control plane for paired environments. A
-`DeviceRegistryObject` owns one user's device identities, pairing codes,
+Cloudflare Worker control plane for account-owned environments. A
+`DeviceRegistryObject` owns one user's device identities, enrollment claims,
 presence, discovery, generations, and revocation. A `SessionTunnelObject` owns
-one remote session's opaque ciphertext replay. Keeping those coordination atoms
-separate prevents a busy session from blocking device management.
+one remote session's opaque ciphertext replay, while `RelayUsageObject` owns the
+account's strongly consistent traffic and attachment budget. Keeping those
+coordination atoms separate prevents a busy session from blocking device
+management.
 
 ## Deploy
 
@@ -23,6 +25,30 @@ short-lived grants for four disjoint audiences: `device-control`,
 `device-challenge`, `device-connect`, and `session-tunnel`. The Worker verifies
 audience, subject, device/session scope, generation, TTL, and grant id before
 routing. Tunnel storage contains encrypted envelopes and cursors only.
+
+## Durable Object cost controls
+
+- Control and tunnel sockets use the WebSocket Hibernation API; no timer or
+  outbound socket keeps an object billed while it is idle.
+- Device inventory is hydrated with four bounded, set-based queries rather than
+  per-device lookups. Session and audit collections have hard cardinality caps
+  and indexed ordering/expiry predicates.
+- Tunnel cursors and retention counts are maintained incrementally. Full-table
+  backfills are guarded by durable schema-migration markers and run once per
+  existing object, not after every hibernation wake.
+- Clients send cumulative acknowledgements in bounded batches. Ciphertext usage
+  is reserved in chunks and carried in each hibernating socket attachment, so
+  ordinary frames do not make a cross-object usage RPC.
+- An edge-local authenticated rate limiter rejects abusive attachment storms
+  before they wake any registry, tunnel, or usage object; the usage object still
+  provides the exact account/client/IP admission fence.
+- Alarm targets are only rewritten when the earliest indexed expiry changes.
+  Attachments, grants, replay envelopes, and mutation idempotency records are
+  pruned by indexed expiry or bounded capacity.
+
+These are part of the correctness boundary: removing a bound, replacing an
+indexed predicate with an unbounded scan, or adding an RPC inside the per-frame
+path requires an explicit cost review and relay tests.
 
 ## Monitoring and recovery
 

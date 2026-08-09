@@ -1,30 +1,37 @@
 import type {
+  AccountDevice,
+  DeviceEnrollmentCredentialResponse,
   DeviceRelayGrantResponse,
   Environment,
   EnvironmentDiscovery,
   PairSshEnvironmentInput,
-  PairingClaimResponse,
   RemoteDevice
 } from "@jingler/core"
 import {
-  DeviceListResponse as DeviceListResponseSchema,
+  AccountDeviceListResponse as AccountDeviceListResponseSchema,
+  DeviceEnrollmentCredentialResponse as DeviceEnrollmentCredentialResponseSchema,
+  DeviceRecord as DeviceRecordSchema,
   DeviceRelayGrantResponse as DeviceRelayGrantResponseSchema,
   EnvironmentError,
-  PairingClaimResponse as PairingClaimResponseSchema,
   EnvironmentDiscovery as EnvironmentDiscoverySchema,
-  RemoteDevice as RemoteDeviceSchema,
   REMOTE_PROTOCOL_VERSION
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
+import type { DirectSshTarget } from "./device-secret-document.js"
+import {
+  readDeviceSecretDocument,
+  updateDeviceSecretDocument
+} from "./device-secret-document.js"
 import { RemoteBootstrapService } from "./remote-bootstrap.js"
 import { SecretStore } from "./secret-store.js"
 
 const authBaseUrl = (): string => process.env.JINGLER_AUTH_URL ?? "http://localhost:9100"
-const relayUrl = (): string | undefined => process.env.JINGLER_DEVICE_RELAY_URL
 const deviceAgentBundlePath = (): string | undefined => process.env.JINGLER_DEVICE_AGENT_BUNDLE
 const DEVICE_API_ROOT = "/api/devices"
 
-export const environmentFromRemoteDevice = (device: RemoteDevice): Environment => ({
+type EnvironmentDevice = RemoteDevice | AccountDevice
+
+export const environmentFromRemoteDevice = (device: EnvironmentDevice): Environment => ({
   id: device.deviceId,
   name: device.displayName,
   platform: device.platform,
@@ -35,7 +42,7 @@ export const environmentFromRemoteDevice = (device: RemoteDevice): Environment =
       : !device.capabilities.capabilities.includes("session.start")
         ? "incompatible"
         : device.presence.state,
-  agentVersion: device.agentVersion ?? null,
+  agentVersion: "agentVersion" in device ? device.agentVersion ?? null : null,
   lastSeenAt: device.presence.lastSeenAt
 })
 
@@ -59,6 +66,24 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
     effect: Effect.gen(function* () {
       const secrets = yield* SecretStore
       const bootstrap = yield* RemoteBootstrapService
+      const clientInstanceId = yield* Effect.tryPromise({
+        try: async () => {
+          const document = await updateDeviceSecretDocument(secrets, (current) => {
+            if (
+              typeof current.clientInstanceId === "string" &&
+              /^client_[A-Za-z0-9_-]{8,120}$/u.test(current.clientInstanceId)
+            ) {
+              return current
+            }
+            return {
+              ...current,
+              clientInstanceId: `client_${crypto.randomUUID().replaceAll("-", "")}`
+            }
+          })
+          return document.clientInstanceId!
+        },
+        catch: () => environmentError(503, "The device identity store is unavailable.")
+      })
 
       const request = <A, I>(
         path: string,
@@ -81,6 +106,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
                 ...init,
                 headers: {
                   authorization: `Bearer ${token}`,
+                  "x-jingler-client-instance-id": clientInstanceId,
                   ...(init?.body ? { "content-type": "application/json" } : {})
                 }
               }),
@@ -102,13 +128,17 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           )
         })
 
+      const accountDevices = () => request(DEVICE_API_ROOT, AccountDeviceListResponseSchema)
+
       const list = Effect.gen(function* () {
-        const response = yield* request(DEVICE_API_ROOT, DeviceListResponseSchema)
+        const response = yield* accountDevices()
         return response.devices.map(environmentFromRemoteDevice)
       })
 
-      const device = (deviceId: string) =>
-        request(DEVICE_API_ROOT, DeviceListResponseSchema).pipe(
+      const device = (
+        deviceId: string
+      ): Effect.Effect<EnvironmentDevice, EnvironmentError> =>
+        accountDevices().pipe(
           Effect.flatMap((response) => {
             const found = response.devices.find((candidate) => candidate.deviceId === deviceId)
             return found
@@ -116,7 +146,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
               : Effect.fail(
                   new EnvironmentError({
                     reason: "not-found",
-                    message: "The selected device is no longer paired."
+                    message: "The selected device is no longer available."
                   })
                 )
           })
@@ -132,70 +162,93 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
             version: REMOTE_PROTOCOL_VERSION,
             audience: "session-tunnel",
             deviceId,
-            sessionId
+            sessionId,
+            clientInstanceId,
+            attachmentGeneration: null,
+            controllerLeaseGeneration: null
           })
         })
 
-      const claim = (pendingDeviceId: string, pairingCode: string) =>
-        request(`${DEVICE_API_ROOT}/pairing/claim`, PairingClaimResponseSchema, {
+      const enrollmentCredential = (
+        deviceId: string
+      ): Effect.Effect<DeviceEnrollmentCredentialResponse, EnvironmentError> =>
+        request(`${DEVICE_API_ROOT}/enrollment-credentials`, DeviceEnrollmentCredentialResponseSchema, {
           method: "POST",
           body: JSON.stringify({
             version: REMOTE_PROTOCOL_VERSION,
-            pendingDeviceId,
-            pairingCode
+            deviceId,
+            clientInstanceId
           })
-        }) as Effect.Effect<PairingClaimResponse, EnvironmentError>
+        })
 
-      const pairSsh = (input: PairSshEnvironmentInput) => {
-        const connection = {
-          host: input.host,
-          ...(input.username === undefined ? {} : { username: input.username }),
-          ...(input.port === undefined ? {} : { port: input.port }),
-          ...(relayUrl() === undefined ? {} : { relayUrl: relayUrl() })
-        }
-        return bootstrap
-          .bootstrap(connection)
-          .pipe(
-            Effect.catchAll((error) => {
-              const agentBundlePath = deviceAgentBundlePath()
-              return error.kind === "incompatible" && agentBundlePath
-                ? bootstrap.installAndBootstrap({
-                    ...connection,
-                    agentBundlePath
-                  })
-                : Effect.fail(error)
-            })
-          )
-          .pipe(
+      const pairSsh = (input: PairSshEnvironmentInput) =>
+        Effect.gen(function* () {
+          const agentBundlePath = deviceAgentBundlePath()
+          if (!agentBundlePath) {
+            return yield* Effect.fail(
+              new EnvironmentError({
+                reason: "unavailable",
+                message: "The device agent bundle is unavailable."
+              })
+            )
+          }
+          const deviceId = `device_${crypto.randomUUID().replaceAll("-", "")}`
+          const credential = yield* enrollmentCredential(deviceId)
+          const enrolled = yield* bootstrap.installAndEnroll({
+            host: input.host,
+            ...(input.username === undefined ? {} : { username: input.username }),
+            ...(input.port === undefined ? {} : { port: input.port }),
+            agentBundlePath,
+            serverUrl: authBaseUrl(),
+            credential
+          }).pipe(
             Effect.mapError(
               (error) =>
                 new EnvironmentError({
                   reason: error.kind === "incompatible" ? "incompatible" : "ssh",
                   message: error.message
                 })
-            ),
-            Effect.flatMap((pending) => claim(pending.pendingDeviceId, pending.pairingCode)),
-            Effect.flatMap((claimed) =>
-              bootstrap
-                .activate({
-                  ...connection,
-                  subject: claimed.subject,
-                  deviceId: claimed.device.deviceId,
-                  serverUrl: authBaseUrl()
-                })
-                .pipe(
-                  Effect.mapError(
-                    (error) =>
-                      new EnvironmentError({
-                        reason: error.kind === "incompatible" ? "incompatible" : "ssh",
-                        message: error.message
-                      })
-                  ),
-                  Effect.as(environmentFromRemoteDevice(claimed.device))
-                )
             )
           )
-      }
+          const response = yield* accountDevices()
+          const registered = response.devices.find(
+            (candidate) => candidate.deviceId === enrolled.deviceId
+          )
+          if (!registered) {
+            return yield* Effect.fail(
+              environmentError(502, "The enrolled device was not returned by the registry.")
+            )
+          }
+          yield* Effect.tryPromise({
+            try: () => updateDeviceSecretDocument(secrets, (document) => ({
+              ...document,
+              directSshTargets: {
+                ...document.directSshTargets,
+                [registered.deviceId]: {
+                  host: input.host,
+                  ...(input.username === undefined ? {} : { username: input.username }),
+                  ...(input.port === undefined ? {} : { port: input.port })
+                }
+              }
+            })),
+            catch: () => environmentError(503, "The SSH connection could not be saved.")
+          })
+          return environmentFromRemoteDevice(registered)
+        })
+
+      const directSsh = (
+        deviceId: string
+      ): Effect.Effect<DirectSshTarget | null, EnvironmentError> =>
+        Effect.tryPromise({
+          try: async () => {
+            const target = (await readDeviceSecretDocument(secrets)).directSshTargets?.[deviceId]
+            if (!target || typeof target.host !== "string" || !/^[A-Za-z0-9_][A-Za-z0-9._-]{0,252}$/u.test(target.host)) return null
+            if (target.username !== undefined && !/^[A-Za-z_][A-Za-z0-9._-]{0,63}$/u.test(target.username)) return null
+            if (target.port !== undefined && (!Number.isSafeInteger(target.port) || target.port < 1 || target.port > 65_535)) return null
+            return target
+          },
+          catch: () => environmentError(503, "The saved SSH connection is unavailable.")
+        })
 
       const rename = (deviceId: string, name: string) =>
         Effect.gen(function* () {
@@ -223,17 +276,39 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
               })
             }
           )
-          const device = yield* Schema.decodeUnknown(RemoteDeviceSchema)(result.device).pipe(
+          const device = yield* Schema.decodeUnknown(DeviceRecordSchema)(result.device).pipe(
             Effect.mapError(() =>
               environmentError(502, "The device service returned an invalid response.")
             )
           )
-          return environmentFromRemoteDevice(device)
+          const current = yield* accountDevices()
+          const joined = current.devices.find((candidate) => candidate.deviceId === device.deviceId)
+          const fallback: Environment = {
+                id: device.deviceId,
+                name: device.displayName,
+                platform: device.platform,
+                capabilities: device.capabilities,
+                state: device.state === "revoked" ? "revoked" : "offline",
+                agentVersion: null,
+                lastSeenAt: null
+              }
+          return joined ? environmentFromRemoteDevice(joined) : fallback
         })
 
       const revoke = (deviceId: string) =>
-        request(`${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/revoke`, Schema.Unknown, {
-          method: "POST"
+        Effect.gen(function* () {
+          yield* request(`${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/revoke`, Schema.Unknown, {
+            method: "POST"
+          })
+          yield* Effect.tryPromise({
+            try: () => updateDeviceSecretDocument(secrets, (document) => {
+              if (!document.directSshTargets?.[deviceId]) return document
+              const directSshTargets = { ...document.directSshTargets }
+              delete directSshTargets[deviceId]
+              return { ...document, directSshTargets }
+            }),
+            catch: () => environmentError(503, "The saved SSH connection could not be removed.")
+          })
         }).pipe(Effect.asVoid)
 
       const discovery = (deviceId: string): Effect.Effect<EnvironmentDiscovery, EnvironmentError> =>
@@ -250,6 +325,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
         refresh: list,
         suggestHosts: bootstrap.discoverHosts,
         pairSsh,
+        directSsh,
         rename,
         revoke
       } as const

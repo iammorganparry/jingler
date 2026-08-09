@@ -26,6 +26,8 @@ import type {
   ReasoningSetting,
   ReviewPhase,
   Session,
+  SessionEventCursor,
+  SessionEventEnvelope,
   SessionStatus,
   SettledSessionStatus,
   Skill,
@@ -34,6 +36,7 @@ import type {
 } from "@jingler/core"
 import {
   activityOf,
+  admitSessionEvent,
   addPlanComment,
   applyReviewEvent,
   applyStreamEvent,
@@ -59,6 +62,7 @@ import {
   assign,
   fromCallback,
   fromPromise,
+  raise,
   setup,
   spawnChild,
   stopChild
@@ -146,6 +150,12 @@ export interface ConversationContext {
   readonly session: Session
   readonly chatId: string
   readonly messages: ReadonlyArray<Message>
+  /** Ordered remote-event fence; local STREAM_EVENT delivery bypasses it unchanged. */
+  readonly sessionEventCursor: SessionEventCursor
+  readonly remotePublishProgress: {
+    readonly phase: "inspecting" | "preparing" | "publishing" | "complete"
+    readonly message: string
+  } | null
   readonly mode: PermissionMode
   /** Last concrete harness permission mode, retained while Plan is selected. */
   readonly executionMode: ExecutionMode
@@ -322,6 +332,7 @@ type ConversationEvent =
    */
   | { type: "STEER_RESULT"; queued: QueuedMessage; result: SteerResult; auto?: boolean }
   | { type: "STREAM_EVENT"; event: StreamEvent }
+  | { type: "SESSION_EVENT_ENVELOPE"; envelope: SessionEventEnvelope }
   | { type: "PATCH_UPDATED"; patch: string }
   | { type: "FILES_UPDATED"; files: ReadonlyArray<string> }
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
@@ -739,6 +750,22 @@ export const conversationMachine = setup({
     isTerminal: ({ event }) =>
       event.type === "STREAM_EVENT" &&
       (event.event._tag === "Done" || event.event._tag === "Failed"),
+    isAcceptedStreamEnvelope: ({ context, event }) =>
+      event.type === "SESSION_EVENT_ENVELOPE" &&
+      event.envelope.sessionId === context.session.id &&
+      event.envelope.event._tag === "Stream" &&
+      admitSessionEvent(context.sessionEventCursor, event.envelope).status === "accepted",
+    isAcceptedSessionEnvelope: ({ context, event }) =>
+      event.type === "SESSION_EVENT_ENVELOPE" &&
+      event.envelope.sessionId === context.session.id &&
+      event.envelope.event._tag !== "Stream" &&
+      admitSessionEvent(context.sessionEventCursor, event.envelope).status === "accepted",
+    isAcceptedTerminalSessionEnvelope: ({ context, event }) =>
+      event.type === "SESSION_EVENT_ENVELOPE" &&
+      event.envelope.sessionId === context.session.id &&
+      (event.envelope.event._tag === "Cancelled" ||
+        event.envelope.event._tag === "Terminal") &&
+      admitSessionEvent(context.sessionEventCursor, event.envelope).status === "accepted",
     hasQueued: ({ context }) => context.queued.length > 0,
     /**
      * Ready to start the next queued turn — nothing queued is still in flight.
@@ -808,6 +835,102 @@ export const conversationMachine = setup({
       !context.loadingHistory,
   },
   actions: {
+    admitSessionEnvelope: assign(({ context, event }) => {
+      if (event.type !== "SESSION_EVENT_ENVELOPE") return {}
+      const admission = admitSessionEvent(context.sessionEventCursor, event.envelope)
+      return admission.status === "accepted"
+        ? { sessionEventCursor: admission.cursor }
+        : {}
+    }),
+    raiseSessionStream: raise(({ event }) => {
+      if (
+        event.type !== "SESSION_EVENT_ENVELOPE" ||
+        event.envelope.event._tag !== "Stream"
+      ) {
+        throw new Error("Only stream session envelopes can be folded into a conversation")
+      }
+      return { type: "STREAM_EVENT", event: event.envelope.event.event }
+    }),
+    beginRemoteTurn: assign(({ context, event }) => {
+      if (event.type !== "SESSION_EVENT_ENVELOPE") return {}
+      const last = context.messages.at(-1)
+      if (last?.role === "assistant" && last.streaming) return {}
+      return {
+        runStartedAt: event.envelope.occurredAt * 1_000,
+        lastOutcome: null,
+        messages: [
+          ...context.messages,
+          assistantMessage(
+            `a_remote_${event.envelope.eventId}`,
+            new Date(event.envelope.occurredAt * 1_000).toISOString()
+          )
+        ]
+      }
+    }),
+    applySessionEnvelope: assign(({ context, event }) => {
+      if (
+        event.type !== "SESSION_EVENT_ENVELOPE" ||
+        event.envelope.event._tag === "Stream"
+      ) return {}
+      const admission = admitSessionEvent(context.sessionEventCursor, event.envelope)
+      if (admission.status !== "accepted") return {}
+      const remote = event.envelope.event
+      if (remote._tag === "StatusChanged") {
+        return {
+          sessionEventCursor: admission.cursor,
+          session: { ...context.session, status: remote.status },
+          persistedStatus: remote.status
+        }
+      }
+      if (remote._tag === "DiffChanged") {
+        const diff = Object.values(remote.files).reduce(
+          (total, file) => ({
+            added: total.added + file.added,
+            removed: total.removed + file.removed
+          }),
+          { added: 0, removed: 0 }
+        )
+        return {
+          sessionEventCursor: admission.cursor,
+          session: { ...context.session, diff }
+        }
+      }
+      if (remote._tag === "PublishProgress") {
+        return {
+          sessionEventCursor: admission.cursor,
+          remotePublishProgress: { phase: remote.phase, message: remote.message }
+        }
+      }
+      const terminal = remote._tag === "Cancelled"
+        ? { _tag: "Failed" as const, message: remote.reason }
+        : remote.outcome === "completed"
+          ? { _tag: "Done" as const, costUsd: 0, tokens: context.tokens }
+          : { _tag: "Failed" as const, message: remote.message ?? "Remote session failed." }
+      const last = context.messages.at(-1)
+      const messages = last?.role === "assistant"
+        ? patchLast(context.messages, (message) => applyStreamEvent(message, terminal))
+        : [
+            ...context.messages,
+            applyStreamEvent(
+              assistantMessage(
+                `a_remote_${event.envelope.eventId}`,
+                new Date(event.envelope.occurredAt * 1_000).toISOString()
+              ),
+              terminal
+            )
+          ]
+      return {
+        sessionEventCursor: admission.cursor,
+        messages,
+        session: { ...context.session, status: "idle" },
+        persistedStatus: "idle",
+        runStartedAt: null,
+        lastOutcome:
+          remote._tag === "Terminal"
+            ? remote.outcome === "completed" ? "done" as const : "failed" as const
+            : null
+      }
+    }),
     appendTurns: assign(({ context, event }) => {
       if (event.type !== "SEND") return {}
       const text = event.text
@@ -1727,6 +1850,10 @@ export const conversationMachine = setup({
   // fetched out of band, its reply can arrive while the transcript is still
   // loading, and a per-state handler would drop it on the floor.
   on: {
+    SESSION_EVENT_ENVELOPE: {
+      guard: "isAcceptedSessionEnvelope",
+      actions: "applySessionEnvelope"
+    },
     CATALOG_LOADED: { actions: "applyCatalog" },
     SKILLS_LOADED: { actions: "applySkills" },
     REVIEW_EVENT: { actions: "applyReview" },
@@ -1785,6 +1912,8 @@ export const conversationMachine = setup({
       session: input.session,
       chatId: chat.id,
       messages: [],
+      sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] },
+      remotePublishProgress: null,
       mode: chat.mode ?? defaultModeFor(input.session.cli),
       executionMode:
         chat.mode && isExecutionMode(chat.mode)
@@ -1917,6 +2046,11 @@ export const conversationMachine = setup({
       // status can be recorded truthfully.
       entry: "persistSettledStatus",
       on: {
+        SESSION_EVENT_ENVELOPE: {
+          guard: "isAcceptedStreamEnvelope",
+          target: "remoteRunning",
+          actions: ["beginRemoteTurn", "admitSessionEnvelope", "raiseSessionStream"]
+        },
         SEND: [
           { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
           { target: "running", actions: "appendTurns" }
@@ -1963,6 +2097,17 @@ export const conversationMachine = setup({
         })
       },
       on: {
+        SESSION_EVENT_ENVELOPE: [
+          {
+            guard: "isAcceptedStreamEnvelope",
+            actions: ["admitSessionEnvelope", "raiseSessionStream"]
+          },
+          {
+            guard: "isAcceptedTerminalSessionEnvelope",
+            target: "refreshingDiff",
+            actions: "applySessionEnvelope"
+          }
+        ],
         STREAM_EVENT: [
           {
             guard: "isDuplicateExternalAcceptance",
@@ -2034,6 +2179,30 @@ export const conversationMachine = setup({
           target: "stopping",
           actions: ["settleStoppedRun", "clearQueue", "clearSubagents"]
         }
+      }
+    },
+    remoteRunning: {
+      on: {
+        SESSION_EVENT_ENVELOPE: [
+          {
+            guard: "isAcceptedStreamEnvelope",
+            actions: ["admitSessionEnvelope", "raiseSessionStream"]
+          },
+          {
+            guard: "isAcceptedTerminalSessionEnvelope",
+            target: "refreshingDiff",
+            actions: "applySessionEnvelope"
+          }
+        ],
+        STREAM_EVENT: [
+          { guard: "isTerminal", target: "refreshingDiff", actions: "foldEvent" },
+          { actions: ["foldEvent", "liveRefreshDiff"] }
+        ],
+        SEND: { actions: "enqueue" },
+        PATCH_UPDATED: { actions: "applyLivePatch" },
+        FILES_UPDATED: { actions: "applyLiveFiles" },
+        SET_MODE: { actions: "persistMode" },
+        SET_HARNESS: { actions: "persistHarness" }
       }
     },
     /**

@@ -1,10 +1,21 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
+  ClientAttachment,
+  AccountDeviceListResponse,
+  ControllerLease,
+  DeviceBootstrapConfiguration,
+  DeviceClaim,
+  DeviceControlPlaneError,
+  DeviceRegistrationRequest,
+  DeviceRegistrationResponse,
+  RelayUsage,
   DeviceRelayGrantClaims,
+  EncryptedTunnelMutation,
   EncryptedTunnelEnvelope,
   PendingDeviceRegistrationRequest,
   RemoteDevice,
+  RemoteSessionInventory,
   TunnelClientMessage
 } from "./remote.js"
 
@@ -73,6 +84,9 @@ describe("device relay grants", () => {
       subject: "opaque-user-subject",
       deviceId: "device_abcdefghijklmnop",
       sessionId: "session_abcdefghijklmnop",
+      clientInstanceId: "client_abcdefghijklmnop",
+      attachmentGeneration: 2,
+      controllerLeaseGeneration: 3,
       deviceGeneration: 4,
       issuedAt: 100,
       expiresAt: 160,
@@ -84,6 +98,177 @@ describe("device relay grants", () => {
     )
     expect(
       Either.isLeft(decode(DeviceRelayGrantClaims, { ...claims, deviceGeneration: 0 }))
+    ).toBe(true)
+  })
+})
+
+describe("authoritative device control plane contracts", () => {
+  it("validates account-owned registry enrollment presence and usage contracts", () => {
+    const registration = {
+      version: 1,
+      credentialId: "claim_abcdefghijklmnop",
+      registration: {
+        version: 1,
+        displayName: "Owned machine",
+        platform: { os: "linux", arch: "arm64" },
+        publicKey: {
+          algorithm: "Ed25519",
+          encoding: "base64url",
+          value: "A".repeat(43)
+        },
+        capabilities: {
+          version: 1,
+          capabilities: ["session.start"],
+          harnesses: ["codex"],
+          maxConcurrentSessions: 2
+        }
+      }
+    }
+    expect(Either.isRight(decode(DeviceRegistrationRequest, registration))).toBe(true)
+    const device = {
+      deviceId: "device_abcdefghijklmnop",
+      accountId: "account_abcdefghijklmnop",
+      identityFingerprint: "A".repeat(43),
+      ...registration.registration,
+      state: "active",
+      generation: 1,
+      enrolledAt: 100,
+      createdAt: 100,
+      updatedAt: 100,
+      revokedAt: null
+    }
+    expect(
+      Either.isRight(decode(DeviceRegistrationResponse, { version: 1, device }))
+    ).toBe(true)
+    expect(
+      Either.isRight(
+        decode(AccountDeviceListResponse, {
+          version: 1,
+          devices: [{
+            ...device,
+            presence: {
+              version: 1,
+              deviceId: device.deviceId,
+              state: "reconnecting",
+              connectedAt: null,
+              lastSeenAt: 110,
+              activeSessionIds: []
+            }
+          }]
+        })
+      )
+    ).toBe(true)
+    expect(
+      Either.isRight(
+        decode(RelayUsage, {
+          version: 1,
+          accountId: device.accountId,
+          deviceId: device.deviceId,
+          clientInstanceId: "client_abcdefghijklmnop",
+          ciphertextBytesIn: 10,
+          ciphertextBytesOut: 20,
+          activeAttachments: 1,
+          quotaBytes: 1_000,
+          measuredAt: 120
+        })
+      )
+    ).toBe(true)
+  })
+
+  it("validates secret-free bootstrap metadata and typed failures", () => {
+    const bootstrap = {
+      version: 1,
+      enabled: true,
+      relayOrigin: "https://relay.jingler.dev",
+      protocols: ["jingler-device-v1", "jingler-session-v1"],
+      issuedAt: 100,
+      expiresAt: 160,
+      cacheMaxAgeSeconds: 60
+    }
+    expect(Either.isRight(decode(DeviceBootstrapConfiguration, bootstrap))).toBe(true)
+    expect(
+      Either.isLeft(
+        decode(DeviceBootstrapConfiguration, {
+          ...bootstrap,
+          relayOrigin: "https://relay.jingler.dev/path"
+        })
+      )
+    ).toBe(true)
+    const error = new DeviceControlPlaneError({
+      reason: "stale-controller",
+      message: "Controller generation changed",
+      retryable: true
+    })
+    expect(
+      Either.isRight(
+        decode(
+          DeviceControlPlaneError,
+          Schema.encodeSync(DeviceControlPlaneError)(error)
+        )
+      )
+    ).toBe(true)
+  })
+
+  it("binds claims, attachments, inventory, and leases to explicit identities", () => {
+    const claim = {
+      version: 1,
+      claimId: "claim_abcdefghijklmnop",
+      subject: "account_abcdefghijklmnop",
+      deviceId: "device_abcdefghijklmnop",
+      clientInstanceId: "client_abcdefghijklmnop",
+      audience: "device-claim",
+      oneTimeSecret: "A".repeat(43),
+      issuedAt: 100,
+      expiresAt: 160
+    }
+    expect(Either.isRight(decode(DeviceClaim, claim))).toBe(true)
+
+    const attachment = {
+      version: 1,
+      attachmentId: "attachment_abcdefghijklmnop",
+      subject: claim.subject,
+      deviceId: claim.deviceId,
+      sessionId: "session_abcdefghijklmnop",
+      clientInstanceId: claim.clientInstanceId,
+      mode: "controller",
+      generation: 2,
+      controllerLeaseGeneration: 3,
+      attachedAt: 100,
+      expiresAt: 160
+    }
+    expect(Either.isRight(decode(ClientAttachment, attachment))).toBe(true)
+    expect(
+      Either.isRight(
+        decode(ControllerLease, {
+          version: 1,
+          subject: claim.subject,
+          deviceId: claim.deviceId,
+          sessionId: attachment.sessionId,
+          ownerClientInstanceId: claim.clientInstanceId,
+          generation: 3,
+          acquiredAt: 100,
+          expiresAt: 160
+        })
+      )
+    ).toBe(true)
+    expect(
+      Either.isRight(
+        decode(RemoteSessionInventory, {
+          version: 1,
+          deviceId: claim.deviceId,
+          generatedAt: 120,
+          sessions: [
+            {
+              version: 1,
+              sessionId: attachment.sessionId,
+              state: "running",
+              controllerClientInstanceId: claim.clientInstanceId,
+              controllerLeaseGeneration: 3,
+              updatedAt: 120
+            }
+          ]
+        })
+      )
     ).toBe(true)
   })
 })
@@ -132,6 +317,31 @@ describe("encrypted tunnel contracts", () => {
             acknowledgedSequence: 1
           }
         })
+      )
+    ).toBe(true)
+  })
+
+  it("keeps controller metadata outside opaque mutation ciphertext", () => {
+    const mutation = {
+      version: 1,
+      mutationId: "mutation_abcdefghijklmnop",
+      sessionId: envelope.sessionId,
+      clientInstanceId: "client_abcdefghijklmnop",
+      attachmentGeneration: 2,
+      controllerLeaseGeneration: 3,
+      sequence: 1,
+      algorithm: "AES-256-GCM",
+      nonce: "A".repeat(16),
+      ciphertext: "encrypted_mutation",
+      createdAt: 100
+    }
+    expect(Either.isRight(decode(EncryptedTunnelMutation, mutation))).toBe(true)
+    expect(
+      Either.isRight(decode(TunnelClientMessage, { type: "mutation", mutation }))
+    ).toBe(true)
+    expect(
+      Either.isLeft(
+        decode(EncryptedTunnelMutation, { ...mutation, prompt: "do not log" })
       )
     ).toBe(true)
   })

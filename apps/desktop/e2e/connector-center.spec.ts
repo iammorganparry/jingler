@@ -62,6 +62,7 @@ test("persists the native tool merge preference", async ({ launchApp }) => {
     await app.window.getByRole("button", { name: "Close settings" }).click()
     await openSettings(app.window)
     await app.window.getByRole("button", { name: /Connectors/ }).click()
+    await app.window.getByRole("button", { name: "Manage connection" }).click()
     await expect(
       app.window.getByRole("switch", {
         name: "Prefer Jingler tools over native agent tools"

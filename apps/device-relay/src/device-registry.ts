@@ -1,4 +1,5 @@
 import type {
+  DeviceClaim,
   DeviceChallenge,
   DeviceListResponse,
   DevicePublicKey,
@@ -71,9 +72,17 @@ interface PresenceRow {
   readonly last_seen_at: number | null
 }
 
+interface DevicePresenceRow extends PresenceRow {
+  readonly device_id: string
+}
+
 interface SessionRow {
   readonly [key: string]: SqlStorageValue
   readonly session_id: string
+}
+
+interface DeviceSessionRow extends SessionRow {
+  readonly device_id: string
 }
 
 interface MetadataRow {
@@ -85,6 +94,10 @@ interface DiscoveryRow {
   readonly [key: string]: SqlStorageValue
   readonly discovery_json: string
   readonly updated_at: number
+}
+
+interface DeviceDiscoveryRow extends DiscoveryRow {
+  readonly device_id: string
 }
 
 interface ChallengeRow {
@@ -101,6 +114,11 @@ interface ChallengeRow {
 interface CountRow {
   readonly [key: string]: SqlStorageValue
   readonly count: number
+}
+
+interface ClaimConsumptionRow {
+  readonly [key: string]: SqlStorageValue
+  readonly claim_id: string
 }
 
 interface DeviceSocketAttachment {
@@ -131,6 +149,14 @@ export type PairingClaimResult =
         | "rate-limited"
         | "already-claimed"
     }
+
+export type DeviceClaimConsumptionResult =
+  | { readonly status: "consumed" }
+  | { readonly status: "expired" | "replayed" | "claim-mismatch" }
+
+export type ClaimedRegistrationResult =
+  | { readonly status: "registered"; readonly device: RemoteDevice }
+  | { readonly status: "revoked" | "already-registered" }
 
 export type DeviceChallengeResult =
   | {
@@ -213,10 +239,16 @@ const safeSocketClose = (
 
 /** Per-user authorization state, plus isolated one-row instances for pending pairings. */
 export class DeviceRegistryObject extends DurableObject<Env> {
+  private scheduledAlarmAt: number | null | undefined
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS _sql_schema_migrations (
+          id INTEGER PRIMARY KEY,
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         CREATE TABLE IF NOT EXISTS registry_metadata (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
@@ -237,6 +269,8 @@ export class DeviceRegistryObject extends DurableObject<Env> {
           claimed_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS pending_devices_expiry ON pending_devices(expires_at);
+        CREATE INDEX IF NOT EXISTS pending_devices_unclaimed_expiry
+          ON pending_devices(expires_at) WHERE claimed_subject IS NULL;
         CREATE TABLE IF NOT EXISTS devices (
           device_id TEXT PRIMARY KEY,
           display_name TEXT NOT NULL,
@@ -257,6 +291,8 @@ export class DeviceRegistryObject extends DurableObject<Env> {
           last_seen_at INTEGER,
           FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
         );
+        CREATE INDEX IF NOT EXISTS devices_created
+          ON devices(created_at, device_id);
         CREATE TABLE IF NOT EXISTS device_discovery (
           device_id TEXT PRIMARY KEY,
           discovery_json TEXT NOT NULL,
@@ -281,7 +317,11 @@ export class DeviceRegistryObject extends DurableObject<Env> {
           consumed_at INTEGER,
           FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
         );
+        CREATE INDEX IF NOT EXISTS device_sessions_recent
+          ON device_sessions(device_id, generation, updated_at DESC, session_id);
         CREATE INDEX IF NOT EXISTS device_challenges_expiry ON device_challenges(expires_at);
+        CREATE INDEX IF NOT EXISTS device_challenges_unconsumed_expiry
+          ON device_challenges(expires_at) WHERE consumed_at IS NULL;
         CREATE TABLE IF NOT EXISTS audit_records (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           event TEXT NOT NULL,
@@ -290,28 +330,47 @@ export class DeviceRegistryObject extends DurableObject<Env> {
           details_json TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS audit_records_time ON audit_records(occurred_at);
+        CREATE TABLE IF NOT EXISTS consumed_device_claims (
+          claim_id TEXT PRIMARY KEY,
+          subject TEXT NOT NULL,
+          device_id TEXT NOT NULL,
+          client_instance_id TEXT NOT NULL,
+          consumed_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS consumed_device_claims_expiry
+          ON consumed_device_claims(expires_at);
       `)
       // SQLite-backed Durable Objects are long lived. CREATE TABLE IF NOT
       // EXISTS does not add columns to objects created by an older worker, so
       // evolve those objects in place before any request can observe them.
-      const pendingColumns = new Set(
-        [...this.ctx.storage.sql.exec<{ readonly name: string }>("PRAGMA table_info(pending_devices)")]
-          .map((column) => column.name)
-      )
-      if (!pendingColumns.has("encryption_public_key_json")) {
-        this.ctx.storage.sql.exec(
-          "ALTER TABLE pending_devices ADD COLUMN encryption_public_key_json TEXT"
-        )
-      }
-      const deviceColumns = new Set(
-        [...this.ctx.storage.sql.exec<{ readonly name: string }>("PRAGMA table_info(devices)")]
-          .map((column) => column.name)
-      )
-      if (!deviceColumns.has("encryption_public_key_json")) {
-        this.ctx.storage.sql.exec(
-          "ALTER TABLE devices ADD COLUMN encryption_public_key_json TEXT"
-        )
-      }
+      this.ctx.storage.transactionSync(() => {
+        const encryptionKeyMigration = this.ctx.storage.sql
+          .exec<{ readonly id: number }>(
+            "INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (1) RETURNING id"
+          )
+          .toArray()[0]
+        if (encryptionKeyMigration) {
+          const pendingColumns = new Set(
+            [...this.ctx.storage.sql.exec<{ readonly name: string }>("PRAGMA table_info(pending_devices)")]
+              .map((column) => column.name)
+          )
+          if (!pendingColumns.has("encryption_public_key_json")) {
+            this.ctx.storage.sql.exec(
+              "ALTER TABLE pending_devices ADD COLUMN encryption_public_key_json TEXT"
+            )
+          }
+          const deviceColumns = new Set(
+            [...this.ctx.storage.sql.exec<{ readonly name: string }>("PRAGMA table_info(devices)")]
+              .map((column) => column.name)
+          )
+          if (!deviceColumns.has("encryption_public_key_json")) {
+            this.ctx.storage.sql.exec(
+              "ALTER TABLE devices ADD COLUMN encryption_public_key_json TEXT"
+            )
+          }
+        }
+      })
     })
   }
 
@@ -398,12 +457,24 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       return
     }
     const nowSeconds = Math.floor(Date.now() / 1_000)
-    await this.setPresence(
+    if (message.type === "ping") {
+      await this.setPresence(
+        attachment.deviceId,
+        attachment.generation,
+        "online",
+        nowSeconds
+      )
+      socket.send(JSON.stringify({ type: "pong", at: nowSeconds }))
+      return
+    }
+    const current = await this.assertGeneration(
       attachment.deviceId,
-      attachment.generation,
-      "online",
-      nowSeconds
+      attachment.generation
     )
+    if (!current.active) {
+      safeSocketClose(socket, 4003, "Device revoked")
+      return
+    }
     if (message.type === "announce") {
       this.ctx.storage.sql.exec(
         `INSERT INTO device_discovery (device_id, discovery_json, updated_at)
@@ -427,7 +498,6 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       socket.send(JSON.stringify({ type: "announced", at: nowSeconds }))
       return
     }
-    socket.send(JSON.stringify({ type: "pong", at: nowSeconds }))
   }
 
   override async webSocketClose(
@@ -502,6 +572,70 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       pairingCode: input.pairingCode,
       expiresAt
     }
+  }
+
+  async consumeDeviceClaim(
+    claim: DeviceClaim,
+    nowSeconds = Math.floor(Date.now() / 1_000)
+  ): Promise<DeviceClaimConsumptionResult> {
+    if (claim.expiresAt <= nowSeconds) return { status: "expired" }
+    const inserted = this.ctx.storage.sql.exec<ClaimConsumptionRow>(
+      `INSERT OR IGNORE INTO consumed_device_claims
+       (claim_id, subject, device_id, client_instance_id, consumed_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       RETURNING claim_id`,
+      claim.claimId,
+      claim.subject,
+      claim.deviceId,
+      claim.clientInstanceId,
+      nowSeconds,
+      claim.expiresAt
+    )
+    if (inserted.toArray().length !== 1) return { status: "replayed" }
+    await this.scheduleAlarm()
+    return { status: "consumed" }
+  }
+
+  async registerClaimedDevice(
+    claim: DeviceClaim,
+    registration: PendingDeviceRegistrationRequest,
+    nowSeconds = Math.floor(Date.now() / 1_000)
+  ): Promise<ClaimedRegistrationResult> {
+    await this.initializeSubject(claim.subject)
+    const existing = this.deviceRow(claim.deviceId)
+    if (existing?.state === "revoked") return { status: "revoked" }
+    if (existing) return { status: "already-registered" }
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO devices (
+           device_id, display_name, platform_json, public_key_json,
+           encryption_public_key_json, capabilities_json, state, generation,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)`,
+        claim.deviceId,
+        registration.displayName,
+        JSON.stringify(registration.platform),
+        JSON.stringify(registration.publicKey),
+        registration.encryptionPublicKey
+          ? JSON.stringify(registration.encryptionPublicKey)
+          : null,
+        JSON.stringify(registration.capabilities),
+        nowSeconds,
+        nowSeconds
+      )
+      this.ctx.storage.sql.exec(
+        `INSERT INTO device_presence
+         (device_id, state, connected_at, last_seen_at)
+         VALUES (?, 'offline', NULL, NULL)`,
+        claim.deviceId
+      )
+    })
+    this.audit("device-registered", claim.deviceId, nowSeconds, {
+      clientInstanceId: claim.clientInstanceId
+    })
+    const device = this.device(claim.deviceId)
+    if (!device) throw new Error("Claimed device registration was not persisted")
+    return { status: "registered", device }
   }
 
   async claimPending(
@@ -639,10 +773,63 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   async listDevices(): Promise<DeviceListResponse> {
     const rows = this.ctx.storage.sql
       .exec<DeviceRow>(
-        "SELECT * FROM devices ORDER BY created_at ASC, device_id ASC LIMIT 256"
+        `SELECT device_id, display_name, platform_json, public_key_json,
+                encryption_public_key_json, capabilities_json, state,
+                generation, created_at, updated_at
+         FROM devices ORDER BY created_at ASC, device_id ASC LIMIT 256`
       )
       .toArray()
-    return { version: 1, devices: rows.map((row) => this.deviceFromRow(row)) }
+    if (rows.length === 0) return { version: 1, devices: [] }
+
+    // Hydrate the bounded list in set-based reads. This keeps one refresh at
+    // four SQL queries instead of multiplying three lookups by every device.
+    const deviceIds = rows.map((row) => row.device_id)
+    const placeholders = deviceIds.map(() => "?").join(", ")
+    const discoveries = this.ctx.storage.sql
+      .exec<DeviceDiscoveryRow>(
+        `SELECT device_id, discovery_json, updated_at FROM device_discovery
+         WHERE device_id IN (${placeholders})`,
+        ...deviceIds
+      )
+      .toArray()
+    const presences = this.ctx.storage.sql
+      .exec<DevicePresenceRow>(
+        `SELECT device_id, state, connected_at, last_seen_at FROM device_presence
+         WHERE device_id IN (${placeholders})`,
+        ...deviceIds
+      )
+      .toArray()
+    const sessions = this.ctx.storage.sql
+      .exec<DeviceSessionRow>(
+        `SELECT device_id, session_id FROM device_sessions
+         WHERE device_id IN (${placeholders})
+         ORDER BY device_id ASC, session_id ASC`,
+        ...deviceIds
+      )
+      .toArray()
+    const discoveryByDevice = new Map(
+      discoveries.map((row) => [row.device_id, row] as const)
+    )
+    const presenceByDevice = new Map(
+      presences.map((row) => [row.device_id, row] as const)
+    )
+    const sessionsByDevice = new Map<string, string[]>()
+    for (const session of sessions) {
+      const deviceSessions = sessionsByDevice.get(session.device_id) ?? []
+      deviceSessions.push(session.session_id)
+      sessionsByDevice.set(session.device_id, deviceSessions)
+    }
+    return {
+      version: 1,
+      devices: rows.map((row) =>
+        this.deviceFromParts(
+          row,
+          discoveryByDevice.get(row.device_id),
+          presenceByDevice.get(row.device_id),
+          sessionsByDevice.get(row.device_id) ?? []
+        )
+      )
+    }
   }
 
   async getDevice(deviceId: string): Promise<RemoteDevice | null> {
@@ -687,45 +874,60 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     sessionId: string,
     nowSeconds = Math.floor(Date.now() / 1_000)
   ): Promise<boolean> {
-    const current = await this.assertGeneration(deviceId, generation)
-    if (!current.active) return false
-    const existing = this.ctx.storage.sql
-      .exec<CountRow>(
-        "SELECT COUNT(*) AS count FROM device_sessions WHERE device_id = ? AND session_id = ?",
-        deviceId,
-        sessionId
-      )
-      .one().count
-    const sessions = this.ctx.storage.sql
-      .exec<CountRow>(
-        "SELECT COUNT(*) AS count FROM device_sessions WHERE device_id = ?",
-        deviceId
-      )
-      .one().count
-    if (existing === 0 && sessions >= MAX_DEVICE_SESSIONS) return false
-    this.ctx.storage.sql.exec(
+    const registered = this.ctx.storage.sql.exec<SessionRow>(
       `INSERT INTO device_sessions (device_id, session_id, generation, updated_at)
-       VALUES (?, ?, ?, ?)
+       SELECT ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM devices
+         WHERE device_id = ? AND state = 'active' AND generation = ?
+       )
+       AND (
+         EXISTS (
+           SELECT 1 FROM device_sessions
+           WHERE device_id = ? AND session_id = ?
+         )
+         OR (
+           SELECT COUNT(*) FROM device_sessions WHERE device_id = ?
+         ) < ?
+       )
        ON CONFLICT(device_id, session_id) DO UPDATE SET
-         generation = excluded.generation, updated_at = excluded.updated_at`,
+         generation = excluded.generation, updated_at = excluded.updated_at
+       RETURNING session_id`,
       deviceId,
       sessionId,
       generation,
-      nowSeconds
-    )
-    return true
+      nowSeconds,
+      deviceId,
+      generation,
+      deviceId,
+      sessionId,
+      deviceId,
+      MAX_DEVICE_SESSIONS
+    ).toArray()[0]
+    return registered !== undefined
   }
 
   async notifySession(
     deviceId: string,
     sessionId: string,
     grant: string,
-    keyOffer: unknown
+    keyOffer: unknown,
+    scope: {
+      readonly clientInstanceId: string
+      readonly attachmentGeneration: number
+      readonly controllerLeaseGeneration: number
+    }
   ): Promise<boolean> {
     const sockets = this.ctx.getWebSockets(`device:${deviceId}`)
     if (sockets.length === 0) return false
     for (const socket of sockets) {
-      socket.send(JSON.stringify({ type: "session-request", sessionId, grant, keyOffer }))
+      socket.send(JSON.stringify({
+        type: "session-request",
+        sessionId,
+        grant,
+        keyOffer,
+        ...scope
+      }))
     }
     return true
   }
@@ -923,6 +1125,12 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   ): Promise<boolean> {
     const current = await this.assertGeneration(deviceId, generation)
     if (!current.active) return false
+    const previous = this.ctx.storage.sql
+      .exec<PresenceRow>(
+        "SELECT state, connected_at, last_seen_at FROM device_presence WHERE device_id = ?",
+        deviceId
+      )
+      .toArray()[0]
     this.ctx.storage.sql.exec(
       `UPDATE device_presence SET state = ?,
          connected_at = CASE WHEN ? = 'online' AND state = 'offline' THEN ? ELSE connected_at END,
@@ -933,6 +1141,14 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       nowSeconds,
       deviceId
     )
+    if (previous?.state !== state) {
+      deviceRelayTelemetry("presence_change", {
+        deviceId,
+        generation,
+        previousState: previous?.state ?? null,
+        state
+      })
+    }
     return true
   }
 
@@ -943,6 +1159,7 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   }
 
   override async alarm(): Promise<void> {
+    this.scheduledAlarmAt = null
     const nowSeconds = Math.floor(Date.now() / 1_000)
     this.ctx.storage.sql.exec(
       "DELETE FROM pending_devices WHERE expires_at <= ? AND claimed_subject IS NULL",
@@ -950,6 +1167,10 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     )
     this.ctx.storage.sql.exec(
       "DELETE FROM device_challenges WHERE expires_at <= ?",
+      nowSeconds
+    )
+    this.ctx.storage.sql.exec(
+      "DELETE FROM consumed_device_claims WHERE expires_at <= ?",
       nowSeconds
     )
     const expiredDevices = new Set<string>()
@@ -996,7 +1217,11 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     return (
       this.ctx.storage.sql
         .exec<PendingDeviceRow>(
-          "SELECT * FROM pending_devices WHERE pending_device_id = ?",
+          `SELECT pending_device_id, device_id, pairing_hash, display_name,
+                  platform_json, public_key_json, encryption_public_key_json,
+                  capabilities_json, created_at, expires_at, failed_attempts,
+                  claimed_subject, claimed_at
+           FROM pending_devices WHERE pending_device_id = ?`,
           pendingDeviceId
         )
         .toArray()[0] ?? null
@@ -1026,7 +1251,13 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   private deviceRow(deviceId: string): DeviceRow | null {
     return (
       this.ctx.storage.sql
-        .exec<DeviceRow>("SELECT * FROM devices WHERE device_id = ?", deviceId)
+        .exec<DeviceRow>(
+          `SELECT device_id, display_name, platform_json, public_key_json,
+                  encryption_public_key_json, capabilities_json, state,
+                  generation, created_at, updated_at
+           FROM devices WHERE device_id = ?`,
+          deviceId
+        )
         .toArray()[0] ?? null
     )
   }
@@ -1043,13 +1274,10 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         row.device_id
       )
       .toArray()[0]
-    const agentVersion = discoveryRow
-      ? decodeJson(RemoteDeviceDiscoverySchema, discoveryRow.discovery_json).agentVersion
-      : null
     const presence =
       this.ctx.storage.sql
         .exec<PresenceRow>(
-          "SELECT * FROM device_presence WHERE device_id = ?",
+          "SELECT state, connected_at, last_seen_at FROM device_presence WHERE device_id = ?",
           row.device_id
         )
         .toArray()[0] ?? null
@@ -1059,6 +1287,23 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         row.device_id
       )
       .toArray()
+    return this.deviceFromParts(
+      row,
+      discoveryRow,
+      presence,
+      sessions.map((session) => session.session_id)
+    )
+  }
+
+  private deviceFromParts(
+    row: DeviceRow,
+    discoveryRow: DiscoveryRow | undefined,
+    presence: PresenceRow | null | undefined,
+    sessionIds: readonly string[]
+  ): RemoteDevice {
+    const agentVersion = discoveryRow
+      ? decodeJson(RemoteDeviceDiscoverySchema, discoveryRow.discovery_json).agentVersion
+      : null
     return {
       version: 1,
       deviceId: row.device_id,
@@ -1082,7 +1327,7 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         state: presence?.state ?? "offline",
         connectedAt: presence?.connected_at ?? null,
         lastSeenAt: presence?.last_seen_at ?? null,
-        activeSessionIds: sessions.map((session) => session.session_id)
+        activeSessionIds: sessionIds
       }
     }
   }
@@ -1096,7 +1341,9 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   ): Promise<DeviceChallengeResult> {
     const row = this.ctx.storage.sql
       .exec<ChallengeRow>(
-        "SELECT * FROM device_challenges WHERE challenge_id = ?",
+        `SELECT challenge_id, device_id, nonce_hash, purpose, issued_at,
+                expires_at, consumed_at
+         FROM device_challenges WHERE challenge_id = ?`,
         challenge.challengeId
       )
       .toArray()[0]
@@ -1248,17 +1495,41 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         Math.floor(Date.now() / 1_000)
       )
       .one().expires_at
+    const claimExpiry = this.ctx.storage.sql
+      .exec<{
+        readonly [key: string]: SqlStorageValue
+        readonly expires_at: number | null
+      }>(
+        `SELECT MIN(expires_at) AS expires_at FROM consumed_device_claims
+         WHERE expires_at > ?`,
+        Math.floor(Date.now() / 1_000)
+      )
+      .one().expires_at
     const socketExpiries = this.ctx
       .getWebSockets()
       .map((socket) => this.socketAttachment(socket)?.expiresAt)
       .filter((expiresAt): expiresAt is number => typeof expiresAt === "number")
-    const expiries = [pendingExpiry, challengeExpiry, ...socketExpiries].filter(
+    const expiries = [
+      pendingExpiry,
+      challengeExpiry,
+      claimExpiry,
+      ...socketExpiries
+    ].filter(
       (expiresAt): expiresAt is number => typeof expiresAt === "number"
     )
     if (expiries.length === 0) {
-      await this.ctx.storage.deleteAlarm()
+      const current = this.scheduledAlarmAt === undefined
+        ? await this.ctx.storage.getAlarm()
+        : this.scheduledAlarmAt
+      if (current !== null) await this.ctx.storage.deleteAlarm()
+      this.scheduledAlarmAt = null
       return
     }
-    await this.ctx.storage.setAlarm(Math.min(...expiries) * 1_000)
+    const next = Math.min(...expiries) * 1_000
+    const current = this.scheduledAlarmAt === undefined
+      ? await this.ctx.storage.getAlarm()
+      : this.scheduledAlarmAt
+    if (current !== next) await this.ctx.storage.setAlarm(next)
+    this.scheduledAlarmAt = next
   }
 }

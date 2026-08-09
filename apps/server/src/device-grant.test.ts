@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
   DeviceGrantError,
+  issueDeviceClaim,
   issueDeviceGrant,
+  verifyDeviceClaim,
   verifyDeviceGrant
 } from "./device-grant.js"
 
@@ -20,6 +22,9 @@ describe("device relay grants", () => {
           subject: "user-one",
           deviceId: null,
           sessionId: null,
+          clientInstanceId: "client_abcdefghijklmnop",
+          attachmentGeneration: null,
+          controllerLeaseGeneration: null,
           deviceGeneration: null
         },
         config,
@@ -32,6 +37,9 @@ describe("device relay grants", () => {
           subject: "user-one",
           deviceId: "device_abcdefghijklmnop",
           sessionId: null,
+          clientInstanceId: null,
+          attachmentGeneration: null,
+          controllerLeaseGeneration: null,
           deviceGeneration: null
         },
         config,
@@ -44,6 +52,9 @@ describe("device relay grants", () => {
           subject: "user-one",
           deviceId: "device_abcdefghijklmnop",
           sessionId: null,
+          clientInstanceId: null,
+          attachmentGeneration: null,
+          controllerLeaseGeneration: null,
           deviceGeneration: 2
         },
         config,
@@ -56,6 +67,9 @@ describe("device relay grants", () => {
           subject: "user-one",
           deviceId: "device_abcdefghijklmnop",
           sessionId: "session_abcdefghijklmnop",
+          clientInstanceId: "client_abcdefghijklmnop",
+          attachmentGeneration: 2,
+          controllerLeaseGeneration: 3,
           deviceGeneration: 2
         },
         config,
@@ -84,6 +98,9 @@ describe("device relay grants", () => {
           subject: "user-one",
           deviceId: "device_abcdefghijklmnop",
           sessionId: null,
+          clientInstanceId: "client_abcdefghijklmnop",
+          attachmentGeneration: 1,
+          controllerLeaseGeneration: 1,
           deviceGeneration: 1
         },
         config
@@ -96,6 +113,9 @@ describe("device relay grants", () => {
           subject: "user-one",
           deviceId: "device_abcdefghijklmnop",
           sessionId: "session_abcdefghijklmnop",
+          clientInstanceId: null,
+          attachmentGeneration: null,
+          controllerLeaseGeneration: null,
           deviceGeneration: 1
         },
         config
@@ -108,6 +128,9 @@ describe("device relay grants", () => {
           subject: "user-one",
           deviceId: null,
           sessionId: null,
+          clientInstanceId: "client_abcdefghijklmnop",
+          attachmentGeneration: null,
+          controllerLeaseGeneration: null,
           deviceGeneration: null
         },
         { ...config, ttlSeconds: 901 }
@@ -122,6 +145,9 @@ describe("device relay grants", () => {
         subject: "user-one",
         deviceId: "device_abcdefghijklmnop",
         sessionId: "session_abcdefghijklmnop",
+        clientInstanceId: "client_abcdefghijklmnop",
+        attachmentGeneration: 1,
+        controllerLeaseGeneration: 1,
         deviceGeneration: 1
       },
       config,
@@ -146,6 +172,9 @@ describe("device relay grants", () => {
         subject: "user-one",
         deviceId: null,
         sessionId: null,
+        clientInstanceId: "client_abcdefghijklmnop",
+        attachmentGeneration: null,
+        controllerLeaseGeneration: null,
         deviceGeneration: null
       },
       config,
@@ -156,5 +185,25 @@ describe("device relay grants", () => {
     expect(serialized).not.toContain("better-auth-desktop-bearer")
     expect(serialized).not.toContain("privateKey")
     expect(serialized).not.toContain("encryptionKey")
+  })
+
+  it("issues short-lived one-time claims bound to account, device, and client", () => {
+    const issued = issueDeviceClaim(
+      {
+        subject: "user-one",
+        deviceId: "device_abcdefghijklmnop",
+        clientInstanceId: "client_abcdefghijklmnop"
+      },
+      config,
+      100,
+      "claim_abcdefghijklmnop",
+      "A".repeat(43)
+    )
+    expect(verifyDeviceClaim(issued.token, config.signingSecret, 200)).toEqual(
+      issued.claim
+    )
+    expect(() =>
+      verifyDeviceClaim(issued.token, config.signingSecret, 400)
+    ).toThrow(DeviceGrantError)
   })
 })

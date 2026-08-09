@@ -1,9 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import type { Environment } from "@jingler/core"
 import type { NewSessionDialogProps } from "./new-session-dialog.js"
 import { NewSessionDialog } from "./new-session-dialog.js"
 
 beforeAll(() => {
+  Element.prototype.hasPointerCapture = () => false
+  Element.prototype.setPointerCapture = () => undefined
+  Element.prototype.releasePointerCapture = () => undefined
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -41,6 +45,95 @@ const props: NewSessionDialogProps = {
   loadBranches: async () => ["main"],
   onCreate: async () => {}
 }
+
+const ownedMachine: Environment = {
+  id: "device-buildbox",
+  name: "buildbox",
+  platform: { os: "linux", arch: "x64" },
+  capabilities: {
+    version: 1,
+    capabilities: ["session.start"],
+    harnesses: ["codex"],
+    maxConcurrentSessions: 2
+  },
+  state: "online",
+  agentVersion: "2.0.3",
+  lastSeenAt: 1
+}
+
+describe("NewSessionDialog environments", () => {
+  it("shows Local and automatically discovered owned machines", () => {
+    render(<NewSessionDialog {...props} environments={[ownedMachine]} />)
+    expect(
+      screen.getByRole("combobox", { name: "Execution environment" })
+        .textContent
+    ).toContain("Local")
+    expect(screen.getByText(/buildbox.*uses codex/i, { selector: "option" }))
+      .toBeTruthy()
+  })
+
+  it("does not render sharing code pairing link or relay URL controls", () => {
+    render(<NewSessionDialog {...props} environments={[ownedMachine]} />)
+    expect(screen.queryByLabelText(/sharing code/i)).toBeNull()
+    expect(screen.queryByLabelText(/pairing link/i)).toBeNull()
+    expect(screen.queryByLabelText(/relay url/i)).toBeNull()
+  })
+
+  it("selects an online device and switches to its preferred supported harness", async () => {
+    render(
+      <NewSessionDialog
+        {...props}
+        environments={[ownedMachine]}
+        clis={[
+          ...props.clis,
+          {
+            kind: "codex",
+            label: "Codex",
+            binPath: "/usr/bin/codex",
+            version: "1.0.0",
+            available: true
+          }
+        ]}
+        loadEnvironmentDiscovery={async () => ({
+          version: 1,
+          deviceId: ownedMachine.id,
+          discovery: {
+            version: 1,
+            agentVersion: "2.0.3",
+            platform: ownedMachine.platform,
+            capabilities: {
+              version: 1 as const,
+              capabilities: ["session.start"] as const,
+              harnesses: ["codex"] as const,
+              maxConcurrentSessions: 2
+            },
+            repositories: props.repos.map((repo) => ({
+              ...repo,
+              branches: [repo.defaultBranch ?? "main"]
+            }))
+          },
+          updatedAt: 1
+        })}
+      />
+    )
+    fireEvent.change(document.querySelector("select")!, {
+      target: { value: ownedMachine.id }
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Execution environment" })
+          .textContent
+      ).toContain("buildbox")
+    )
+    expect(screen.getByText("Codex")).toBeTruthy()
+  })
+
+  it("explains which harness an owned machine will use", () => {
+    render(<NewSessionDialog {...props} environments={[ownedMachine]} />)
+    expect(screen.getByText(/buildbox.*uses codex/i, { selector: "option" }))
+      .toBeTruthy()
+  })
+})
 
 describe("NewSessionDialog workspace choice", () => {
   it("labels the default-on toggle and explains both workspace modes", () => {

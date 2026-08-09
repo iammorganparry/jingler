@@ -200,6 +200,19 @@ export const loadEnv = (environment: Environment = process.env) => {
       `DEVICE_RELAY_GRANT_TTL_SECONDS must be an integer no greater than ${REMOTE_GRANT_MAX_TTL_SECONDS}`
     )
   }
+  const deviceBootstrapTtlSeconds = positiveNumber(
+    environment,
+    "DEVICE_BOOTSTRAP_TTL_SECONDS",
+    300
+  )
+  if (
+    !Number.isSafeInteger(deviceBootstrapTtlSeconds) ||
+    deviceBootstrapTtlSeconds > 3_600
+  ) {
+    throw new Error(
+      "DEVICE_BOOTSTRAP_TTL_SECONDS must be an integer no greater than 3600"
+    )
+  }
   return {
     nodeEnv,
     isDev: nodeEnv !== "production",
@@ -243,6 +256,7 @@ export const loadEnv = (environment: Environment = process.env) => {
       "dev-device-relay-signing-secret-change-me"
     ),
     deviceRelayGrantTtlSeconds,
+    deviceBootstrapTtlSeconds,
     googleClientId: optional(environment, "GOOGLE_CLIENT_ID"),
     googleClientSecret: optional(environment, "GOOGLE_CLIENT_SECRET"),
     resendApiKey: optional(environment, "RESEND_API_KEY"),

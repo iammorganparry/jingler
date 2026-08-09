@@ -1,4 +1,11 @@
 export type DeviceRelaySecurityEvent =
+  | "bootstrap_discovery"
+  | "device_registration"
+  | "device_claim"
+  | "grant_admission"
+  | "presence_change"
+  | "client_attachment"
+  | "controller_lease"
   | "rejected_grant"
   | "pairing_attempt"
   | "reconnect_depth"

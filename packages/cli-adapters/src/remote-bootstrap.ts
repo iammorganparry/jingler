@@ -2,8 +2,14 @@ import { spawn } from "node:child_process"
 import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import type { PendingDeviceRegistrationResponse } from "@jingler/core"
-import { PendingDeviceRegistrationResponse as PendingDeviceRegistrationResponseSchema } from "@jingler/core"
+import type {
+  DeviceEnrollmentCredentialResponse,
+  PendingDeviceRegistrationResponse
+} from "@jingler/core"
+import {
+  DeviceEnrollmentCredentialResponse as DeviceEnrollmentCredentialResponseSchema,
+  PendingDeviceRegistrationResponse as PendingDeviceRegistrationResponseSchema
+} from "@jingler/core"
 import { Data, Effect, Schema } from "effect"
 
 export interface SshHostSuggestion {
@@ -17,6 +23,9 @@ export interface SshHostSuggestion {
 const PUBLIC_SERVICE_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org", "ssh.dev.azure.com"])
 const CONCRETE_HOST = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,252}$/u
 const SSH_USER = /^[A-Za-z_][A-Za-z0-9._-]{0,63}$/u
+const SSH_AUTHENTICATION_FAILURE = /permission denied|authentication failed|publickey/iu
+const MISSING_LOCAL_BUNDLE =
+  /stat local [^\r\n]*: (?:no such file or directory|not a regular file)/iu
 
 const usableHost = (host: string): boolean =>
   CONCRETE_HOST.test(host) &&
@@ -123,7 +132,15 @@ export const discoverSshHosts = (
   )
 
 export class SshBootstrapError extends Data.TaggedError("SshBootstrapError")<{
-  readonly kind: "invalid-host" | "authentication" | "incompatible" | "connection" | "invalid-response"
+  readonly kind:
+    | "invalid-host"
+    | "authentication"
+    | "incompatible"
+    | "connection"
+    | "upload"
+    | "enrollment"
+    | "service"
+    | "invalid-response"
   readonly message: string
   readonly cause?: unknown
 }> {}
@@ -139,6 +156,21 @@ export interface BootstrapSshInput {
 export interface InstallAndBootstrapSshInput extends BootstrapSshInput {
   readonly agentBundlePath: string
   readonly scpBinary?: string
+}
+
+export interface InstallAndEnrollOwnedDeviceInput
+  extends Omit<BootstrapSshInput, "relayUrl"> {
+  readonly agentBundlePath: string
+  readonly scpBinary?: string
+  readonly serverUrl: string
+  readonly credential: DeviceEnrollmentCredentialResponse
+  readonly displayName?: string
+}
+
+export interface EnrolledOwnedDevice {
+  readonly version: 1
+  readonly deviceId: string
+  readonly displayName: string
 }
 
 export interface ActivateRemoteDeviceInput extends BootstrapSshInput {
@@ -157,7 +189,7 @@ export interface SshProcessRunner {
   readonly run: (
     binary: string,
     args: ReadonlyArray<string>,
-    options: { readonly shell: false }
+    options: { readonly shell: false; readonly stdin?: string }
   ) => Promise<SpawnResult>
 }
 
@@ -166,20 +198,28 @@ export const nodeSshProcessRunner: SshProcessRunner = {
     new Promise((resolve, reject) => {
       const child = spawn(binary, [...args], {
         shell: options.shell,
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"]
       })
       let stdout = ""
       let stderr = ""
-      child.stdout.setEncoding("utf8")
-      child.stderr.setEncoding("utf8")
-      child.stdout.on("data", (chunk: string) => {
+      const childStdout = child.stdout
+      const childStderr = child.stderr
+      if (!childStdout || !childStderr) {
+        child.kill()
+        reject(new Error("SSH process output pipes are unavailable"))
+        return
+      }
+      childStdout.setEncoding("utf8")
+      childStderr.setEncoding("utf8")
+      childStdout.on("data", (chunk: string) => {
         stdout += chunk
       })
-      child.stderr.on("data", (chunk: string) => {
+      childStderr.on("data", (chunk: string) => {
         stderr += chunk
       })
       child.once("error", reject)
       child.once("close", (exitCode) => resolve({ exitCode: exitCode ?? 255, stdout, stderr }))
+      if (options.stdin !== undefined) child.stdin?.end(options.stdin)
     })
 }
 
@@ -203,6 +243,33 @@ const pairingResponse = (stdout: string): PendingDeviceRegistrationResponse => {
     throw new SshBootstrapError({
       kind: "invalid-response",
       message: "Device agent returned an invalid pairing result",
+      cause
+    })
+  }
+}
+
+const EnrolledOwnedDeviceSchema = Schema.Struct({
+  version: Schema.Literal(1),
+  deviceId: Schema.String.pipe(Schema.minLength(1)),
+  displayName: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(120))
+})
+
+const enrolledDeviceResponse = (stdout: string): EnrolledOwnedDevice => {
+  const candidate = stdout.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean).at(-1)
+  if (!candidate) {
+    throw new SshBootstrapError({
+      kind: "invalid-response",
+      message: "Device agent returned no enrollment result"
+    })
+  }
+  try {
+    return Schema.decodeUnknownSync(EnrolledOwnedDeviceSchema)(JSON.parse(candidate), {
+      onExcessProperty: "error"
+    })
+  } catch (cause) {
+    throw new SshBootstrapError({
+      kind: "invalid-response",
+      message: "Device agent returned an invalid enrollment result",
       cause
     })
   }
@@ -238,50 +305,112 @@ const pairingCommand = (relayUrl: string | undefined): string => {
 const sshAuthenticationMessage = (host: string): string =>
   `SSH authentication failed for ${host}. Make sure ssh ${host} works without a password and that its Host entry in ~/.ssh/config sets the correct User and IdentityFile.`
 
+interface CheckedSshTarget {
+  readonly destination: string
+  readonly port: number | undefined
+}
+
+const checkedSshTarget = (
+  input: Pick<BootstrapSshInput, "host" | "username" | "port">
+): Effect.Effect<CheckedSshTarget, SshBootstrapError> =>
+  Effect.gen(function* () {
+    if (!usableHost(input.host)) {
+      return yield* Effect.fail(
+        new SshBootstrapError({ kind: "invalid-host", message: "SSH host or alias is invalid" })
+      )
+    }
+    if (input.username !== undefined && !SSH_USER.test(input.username)) {
+      return yield* Effect.fail(
+        new SshBootstrapError({ kind: "invalid-host", message: "SSH username is invalid" })
+      )
+    }
+    if (
+      input.port !== undefined &&
+      (!Number.isSafeInteger(input.port) || input.port < 1 || input.port > 65_535)
+    ) {
+      return yield* Effect.fail(
+        new SshBootstrapError({ kind: "invalid-host", message: "SSH port is invalid" })
+      )
+    }
+    return {
+      destination: input.username ? `${input.username}@${input.host}` : input.host,
+      port: input.port
+    }
+  })
+
+const sshArguments = (
+  target: CheckedSshTarget,
+  remoteCommand: string
+): ReadonlyArray<string> => [
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  "ConnectTimeout=10",
+  ...(target.port === undefined ? [] : ["-p", String(target.port)]),
+  target.destination,
+  remoteCommand
+]
+
+const uploadDeviceAgent = (
+  input: Pick<InstallAndBootstrapSshInput, "host" | "agentBundlePath" | "scpBinary">,
+  target: CheckedSshTarget,
+  runner: SshProcessRunner,
+  failureKind: "connection" | "upload",
+  missingBundleMessage?: string
+): Effect.Effect<void, SshBootstrapError> =>
+  Effect.gen(function* () {
+    const upload = yield* Effect.tryPromise({
+      try: () =>
+        runner.run(
+          input.scpBinary ?? "scp",
+          [
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            ...(target.port === undefined ? [] : ["-P", String(target.port)]),
+            input.agentBundlePath,
+            `${target.destination}:.jingler-device-upload.mjs`
+          ],
+          { shell: false }
+        ),
+      catch: (cause) =>
+        new SshBootstrapError({ kind: failureKind, message: "Device agent upload failed", cause })
+    })
+    if (upload.exitCode === 0) return
+    const authentication = SSH_AUTHENTICATION_FAILURE.test(upload.stderr)
+    return yield* Effect.fail(
+      new SshBootstrapError({
+        kind: authentication ? "authentication" : failureKind,
+        message: authentication
+          ? sshAuthenticationMessage(input.host)
+          : missingBundleMessage && MISSING_LOCAL_BUNDLE.test(upload.stderr)
+            ? missingBundleMessage
+            : "Device agent upload failed"
+      })
+    )
+  })
+
 const executeBootstrap = (
   input: BootstrapSshInput,
   remoteAgentCommand: string,
   runner: SshProcessRunner = nodeSshProcessRunner
 ): Effect.Effect<PendingDeviceRegistrationResponse, SshBootstrapError> =>
-  Effect.tryPromise({
-    try: async () => {
-      if (!usableHost(input.host)) {
-        throw new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH host or alias is invalid"
-        })
-      }
-      if (input.username !== undefined && !SSH_USER.test(input.username)) {
-        throw new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH username is invalid"
-        })
-      }
-      const port = input.port
-      if (port !== undefined && (!Number.isSafeInteger(port) || port < 1 || port > 65_535)) {
-        throw new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH port is invalid"
-        })
-      }
-      const destination = input.username ? `${input.username}@${input.host}` : input.host
-      const result = await runner.run(
-        input.sshBinary ?? "ssh",
-        [
-          "-o",
-          "BatchMode=yes",
-          "-o",
-          "ConnectTimeout=10",
-          ...(port === undefined ? [] : ["-p", String(port)]),
-          destination,
-          remoteAgentCommand
-        ],
-        { shell: false }
-      )
-      if (result.exitCode !== 0) {
-        const authentication = /permission denied|authentication failed|publickey/iu.test(result.stderr)
-        const incompatible = /not found|protocol|unsupported|incompatible/iu.test(result.stderr)
-        throw new SshBootstrapError({
+  Effect.gen(function* () {
+    const target = yield* checkedSshTarget(input)
+    const result = yield* Effect.tryPromise({
+      try: () =>
+        runner.run(input.sshBinary ?? "ssh", sshArguments(target, remoteAgentCommand), {
+          shell: false
+        }),
+      catch: (cause) =>
+        new SshBootstrapError({ kind: "connection", message: "SSH bootstrap failed", cause })
+    })
+    if (result.exitCode !== 0) {
+      const authentication = SSH_AUTHENTICATION_FAILURE.test(result.stderr)
+      const incompatible = /not found|protocol|unsupported|incompatible/iu.test(result.stderr)
+      return yield* Effect.fail(
+        new SshBootstrapError({
           kind: authentication ? "authentication" : incompatible ? "incompatible" : "connection",
           message: authentication
             ? sshAuthenticationMessage(input.host)
@@ -289,17 +418,9 @@ const executeBootstrap = (
               ? "The remote Jingler device agent is missing or incompatible"
               : "Could not start the remote Jingler device agent"
         })
-      }
-      return pairingResponse(result.stdout)
-    },
-    catch: (cause) =>
-      cause instanceof SshBootstrapError
-        ? cause
-        : new SshBootstrapError({
-            kind: "connection",
-            message: "SSH bootstrap failed",
-            cause
-          })
+      )
+    }
+    return pairingResponse(result.stdout)
   })
 
 export const bootstrapRemoteDevice = (
@@ -352,71 +473,14 @@ export const installAndBootstrapRemoteDevice = (
   runner: SshProcessRunner = nodeSshProcessRunner
 ): Effect.Effect<PendingDeviceRegistrationResponse, SshBootstrapError> =>
   Effect.gen(function* () {
-    if (!usableHost(input.host)) {
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH host or alias is invalid"
-        })
-      )
-    }
-    if (input.username !== undefined && !SSH_USER.test(input.username)) {
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH username is invalid"
-        })
-      )
-    }
-    const port = input.port
-    if (port !== undefined && (!Number.isSafeInteger(port) || port < 1 || port > 65_535)) {
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH port is invalid"
-        })
-      )
-    }
-    const destination = input.username ? `${input.username}@${input.host}` : input.host
-    const upload = yield* Effect.tryPromise({
-      try: () =>
-        runner.run(
-          input.scpBinary ?? "scp",
-          [
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            ...(port === undefined ? [] : ["-P", String(port)]),
-            input.agentBundlePath,
-            `${destination}:.jingler-device-upload.mjs`
-          ],
-          { shell: false }
-        ),
-      catch: (cause) =>
-        new SshBootstrapError({
-          kind: "connection",
-          message: "Device agent upload failed",
-          cause
-        })
-    })
-    if (upload.exitCode !== 0) {
-      const authentication = /permission denied|authentication failed|publickey/iu.test(upload.stderr)
-      const missingLocalBundle =
-        /stat local [^\r\n]*: (?:no such file or directory|not a regular file)/iu.test(
-          upload.stderr
-        )
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: authentication ? "authentication" : "connection",
-          message: authentication
-            ? sshAuthenticationMessage(input.host)
-            : missingLocalBundle
-              ? "The bundled device agent is missing; rebuild and restart Jingler"
-              : "Device agent upload failed"
-        })
-      )
-    }
+    const target = yield* checkedSshTarget(input)
+    yield* uploadDeviceAgent(
+      input,
+      target,
+      runner,
+      "connection",
+      "The bundled device agent is missing; rebuild and restart Jingler"
+    )
     const relay = checkedRelayUrl(input.relayUrl)
     if (!relay) {
       return yield* Effect.fail(
@@ -430,7 +494,7 @@ export const installAndBootstrapRemoteDevice = (
       {
         host: input.host,
         ...(input.username === undefined ? {} : { username: input.username }),
-        ...(port === undefined ? {} : { port }),
+        ...(target.port === undefined ? {} : { port: target.port }),
         ...(input.sshBinary === undefined ? {} : { sshBinary: input.sshBinary })
       },
       `${INSTALL_AGENT} && ${loginShellCommand(
@@ -440,37 +504,86 @@ export const installAndBootstrapRemoteDevice = (
     )
   })
 
+/**
+ * Upload and enroll an owned machine without exposing the single-use
+ * credential in argv, shell history, process listings, or failure messages.
+ */
+export const installAndEnrollOwnedDevice = (
+  input: InstallAndEnrollOwnedDeviceInput,
+  runner: SshProcessRunner = nodeSshProcessRunner
+): Effect.Effect<EnrolledOwnedDevice, SshBootstrapError> =>
+  Effect.gen(function* () {
+    const target = yield* checkedSshTarget(input)
+    const server = checkedRelayUrl(input.serverUrl)
+    if (!server) {
+      return yield* Effect.fail(
+        new SshBootstrapError({ kind: "invalid-host", message: "Jingler server URL is invalid" })
+      )
+    }
+    let credential: DeviceEnrollmentCredentialResponse
+    try {
+      credential = Schema.decodeUnknownSync(DeviceEnrollmentCredentialResponseSchema)(input.credential, {
+        onExcessProperty: "error"
+      })
+    } catch (cause) {
+      return yield* Effect.fail(
+        new SshBootstrapError({
+          kind: "enrollment",
+          message: "Device enrollment credential is invalid",
+          cause
+        })
+      )
+    }
+    yield* uploadDeviceAgent(input, target, runner, "upload")
+    const name = input.displayName?.trim()
+    const enrollArguments = [
+      "enroll",
+      "--server",
+      quoteRemoteArgument(server),
+      "--install-service",
+      ...(name ? ["--name", quoteRemoteArgument(name)] : [])
+    ].join(" ")
+    const remoteCommand = `${INSTALL_AGENT} && ${loginShellCommand(
+      `${INSTALL_RUNTIME} && ${installedAgentCommand(enrollArguments)}`
+    )}`
+    const result = yield* Effect.tryPromise({
+      try: () =>
+        runner.run(
+          input.sshBinary ?? "ssh",
+          sshArguments(target, remoteCommand),
+          { shell: false, stdin: `${JSON.stringify(credential)}\n` }
+        ),
+      catch: (cause) =>
+        new SshBootstrapError({
+          kind: "enrollment",
+          message: "Device enrollment exchange failed",
+          cause
+        })
+    })
+    if (result.exitCode !== 0) {
+      const authentication = SSH_AUTHENTICATION_FAILURE.test(result.stderr)
+      const service = /launchd|launchctl|systemd|systemctl|persistent device service/iu.test(result.stderr)
+      return yield* Effect.fail(
+        new SshBootstrapError({
+          kind: authentication ? "authentication" : service ? "service" : "enrollment",
+          message: authentication
+            ? sshAuthenticationMessage(input.host)
+            : service
+              ? "Device service start failed"
+              : "Device enrollment exchange failed"
+        })
+      )
+    }
+    return enrolledDeviceResponse(result.stdout)
+  })
+
 /** Activate a claimed device and leave its outbound daemon running after SSH exits. */
 export const activateRemoteDevice = (
   input: ActivateRemoteDeviceInput,
   runner: SshProcessRunner = nodeSshProcessRunner
 ): Effect.Effect<void, SshBootstrapError> =>
   Effect.gen(function* () {
-    if (!usableHost(input.host)) {
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH host or alias is invalid"
-        })
-      )
-    }
-    if (input.username !== undefined && !SSH_USER.test(input.username)) {
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH username is invalid"
-        })
-      )
-    }
-    const port = input.port
-    if (port !== undefined && (!Number.isSafeInteger(port) || port < 1 || port > 65_535)) {
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: "invalid-host",
-          message: "SSH port is invalid"
-        })
-      )
-    }
+    const target = yield* checkedSshTarget(input)
     const server = checkedRelayUrl(input.serverUrl)
     if (!server) {
       return yield* Effect.fail(
@@ -480,7 +593,6 @@ export const activateRemoteDevice = (
         })
       )
     }
-    const destination = input.username ? `${input.username}@${input.host}` : input.host
     const serviceArguments = [
       "install-service",
       "--subject",
@@ -498,15 +610,7 @@ export const activateRemoteDevice = (
       try: () =>
         runner.run(
           input.sshBinary ?? "ssh",
-          [
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            ...(port === undefined ? [] : ["-p", String(port)]),
-            destination,
-            remoteCommand
-          ],
+          sshArguments(target, remoteCommand),
           { shell: false }
         ),
       catch: (cause) =>
@@ -517,7 +621,7 @@ export const activateRemoteDevice = (
         })
     })
     if (result.exitCode !== 0) {
-      const authentication = /permission denied|authentication failed|publickey/iu.test(result.stderr)
+      const authentication = SSH_AUTHENTICATION_FAILURE.test(result.stderr)
       return yield* Effect.fail(
         new SshBootstrapError({
           kind: authentication ? "authentication" : "connection",
@@ -537,6 +641,7 @@ export class RemoteBootstrapService extends Effect.Service<RemoteBootstrapServic
       discoverHosts: discoverSshHosts,
       bootstrap: bootstrapRemoteDevice,
       installAndBootstrap: installAndBootstrapRemoteDevice,
+      installAndEnroll: installAndEnrollOwnedDevice,
       activate: activateRemoteDevice
     })
   }

@@ -1,4 +1,5 @@
 import type {
+  DeviceClaim,
   DeviceChallenge,
   DevicePublicKey,
   DeviceRelayGrantClaims,
@@ -24,13 +25,20 @@ const issueGrant = async (
   overrides: Partial<DeviceRelayGrantClaims> = {}
 ): Promise<string> => {
   const now = Math.floor(Date.now() / 1_000)
+  const audience = overrides.audience ?? "device-control"
   const claims: DeviceRelayGrantClaims = {
     version: 1,
     issuer: "jingler",
-    audience: "device-control",
+    audience,
     subject: "user-one",
     deviceId: null,
     sessionId: null,
+    clientInstanceId:
+      audience === "device-control" || audience === "session-tunnel"
+        ? "client_abcdefghijklmnop"
+        : null,
+    attachmentGeneration: audience === "session-tunnel" ? 1 : null,
+    controllerLeaseGeneration: audience === "session-tunnel" ? 1 : null,
     deviceGeneration: null,
     issuedAt: now,
     expiresAt: now + 300,
@@ -51,6 +59,38 @@ const issueGrant = async (
     await crypto.subtle.sign("HMAC", key, encoder.encode(signed))
   )
   return `${signed}.${base64Url(signature)}`
+}
+
+const issueClaim = async (
+  overrides: Partial<DeviceClaim> = {}
+): Promise<{ readonly claim: DeviceClaim; readonly token: string }> => {
+  const now = Math.floor(Date.now() / 1_000)
+  const claim: DeviceClaim = {
+    version: 1,
+    claimId: `claim_${crypto.randomUUID()}`,
+    subject: "user-claim-flow",
+    deviceId: `device_${crypto.randomUUID()}`,
+    clientInstanceId: "client_abcdefghijklmnop",
+    audience: "device-claim",
+    oneTimeSecret: "A".repeat(43),
+    issuedAt: now,
+    expiresAt: now + 300,
+    ...overrides
+  }
+  const header = jsonPart({ alg: "HS256", typ: "JinglerDeviceClaim", version: 1 })
+  const payload = jsonPart(claim)
+  const signed = `${header}.${payload}`
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  )
+  const signature = new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, encoder.encode(signed))
+  )
+  return { claim, token: `${signed}.${base64Url(signature)}` }
 }
 
 const keyPair = async (): Promise<{
@@ -129,6 +169,92 @@ const nextMessage = (socket: WebSocket): Promise<Record<string, unknown>> =>
   messages(socket, 1).then(([message]) => message!)
 
 describe("device relay HTTP authorization", () => {
+  it("consumes a server-issued device claim exactly once", async () => {
+    const keys = await keyPair()
+    const issued = await issueClaim()
+    const registration = {
+      version: 1,
+      displayName: "SSH host",
+      platform: { os: "linux", arch: "x64" },
+      publicKey: keys.publicKey,
+      capabilities: {
+        version: 1,
+        capabilities: ["session.start"],
+        harnesses: ["codex"],
+        maxConcurrentSessions: 1
+      }
+    }
+    const request = () =>
+      SELF.fetch("https://relay.test/v1/device-registrations", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${issued.token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ version: 1, claim: issued.claim, registration })
+      })
+    const first = await request()
+    const firstBody = await first.json()
+    expect({ status: first.status, body: firstBody }).toMatchObject({
+      status: 201,
+      body: {
+      device: { deviceId: issued.claim.deviceId, state: "active" }
+      }
+    })
+    const replay = await request()
+    expect(replay.status).toBe(409)
+    await expect(replay.json()).resolves.toMatchObject({ reason: "replayed" })
+  })
+
+  it("rejects a fresh registration claim for a revoked device identity", async () => {
+    const keys = await keyPair()
+    const subject = "user-revoked-registration"
+    const issued = await issueClaim({ subject })
+    const registration = {
+      version: 1,
+      displayName: "Revoked SSH host",
+      platform: { os: "linux", arch: "arm64" },
+      publicKey: keys.publicKey,
+      capabilities: {
+        version: 1,
+        capabilities: ["session.start"],
+        harnesses: ["codex"],
+        maxConcurrentSessions: 1
+      }
+    }
+    const register = (claim: DeviceClaim, token: string) =>
+      SELF.fetch("https://relay.test/v1/device-registrations", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ version: 1, claim, registration })
+      })
+    expect((await register(issued.claim, issued.token)).status).toBe(201)
+    const control = await issueGrant({
+      subject,
+      deviceId: issued.claim.deviceId,
+      grantId: "grant_revoke_claimed_abcd"
+    })
+    const revoked = await SELF.fetch(
+      `https://relay.test/v1/devices/${issued.claim.deviceId}/revoke`,
+      { method: "POST", headers: { authorization: `Bearer ${control}` } }
+    )
+    expect(revoked.status).toBe(200)
+
+    const replacement = await issueClaim({
+      subject,
+      deviceId: issued.claim.deviceId
+    })
+    const rejected = await register(replacement.claim, replacement.token)
+    expect(rejected.status).toBe(409)
+    await expect(rejected.json()).resolves.toMatchObject({
+      _tag: "DeviceControlPlaneError",
+      reason: "revoked"
+    })
+  })
+
   it("claims a pending device once and isolates per-user registries", async () => {
     const keys = await keyPair()
     const pendingResponse = await SELF.fetch("https://relay.test/v1/pending-devices", {
@@ -225,6 +351,135 @@ describe("device relay HTTP authorization", () => {
       { headers: { Upgrade: "websocket", authorization: `Bearer ${tunnelGrant}` } }
     )
     expect(mismatch.status).toBe(401)
+  })
+
+  it("coordinates passive attachments, takeover, release validation, and compact inventory", async () => {
+    const keys = await keyPair()
+    const subject = "user-lease-operations"
+    const paired = await registerAndClaim("lease-operations", keys.publicKey, subject)
+    const sessionId = "session_lease_operations_abcdef"
+    const firstClient = "client_first_abcdefghijkl"
+    const secondClient = "client_second_abcdefghijk"
+    const firstGrant = await issueGrant({
+      audience: "session-tunnel",
+      subject,
+      deviceId: paired.device.deviceId,
+      deviceGeneration: paired.device.generation,
+      sessionId,
+      clientInstanceId: firstClient,
+      grantId: "grant_first_lease_abcdef"
+    })
+    const attachment = await SELF.fetch(
+      `https://relay.test/v1/session-tunnels/${sessionId}/attachments`,
+      { method: "POST", headers: { authorization: `Bearer ${firstGrant}` } }
+    )
+    expect(attachment.status).toBe(201)
+    await expect(attachment.json()).resolves.toMatchObject({
+      clientInstanceId: firstClient,
+      mode: "passive",
+      generation: 1
+    })
+    const acquire = await SELF.fetch(
+      `https://relay.test/v1/session-tunnels/${sessionId}/controller/acquire`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${firstGrant}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          version: 1,
+          clientInstanceId: firstClient,
+          expectedGeneration: 1,
+          takeover: false
+        })
+      }
+    )
+    expect(acquire.status).toBe(200)
+    await expect(acquire.json()).resolves.toMatchObject({
+      ownerClientInstanceId: firstClient,
+      generation: 1
+    })
+
+    const secondGrant = await issueGrant({
+      audience: "session-tunnel",
+      subject,
+      deviceId: paired.device.deviceId,
+      deviceGeneration: paired.device.generation,
+      sessionId,
+      clientInstanceId: secondClient,
+      grantId: "grant_second_lease_abcdef"
+    })
+    await SELF.fetch(
+      `https://relay.test/v1/session-tunnels/${sessionId}/attachments`,
+      { method: "POST", headers: { authorization: `Bearer ${secondGrant}` } }
+    )
+    const takeover = await SELF.fetch(
+      `https://relay.test/v1/session-tunnels/${sessionId}/controller/takeover`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${secondGrant}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          version: 1,
+          clientInstanceId: secondClient,
+          expectedGeneration: 1,
+          takeover: true
+        })
+      }
+    )
+    expect(takeover.status).toBe(200)
+    await expect(takeover.json()).resolves.toMatchObject({
+      ownerClientInstanceId: secondClient,
+      generation: 2
+    })
+
+    const staleRelease = await SELF.fetch(
+      `https://relay.test/v1/session-tunnels/${sessionId}/controller/release`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${firstGrant}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          version: 1,
+          clientInstanceId: firstClient,
+          expectedGeneration: 1,
+          takeover: false
+        })
+      }
+    )
+    expect(staleRelease.status).toBe(403)
+    await expect(staleRelease.json()).resolves.toMatchObject({
+      reason: "stale-controller"
+    })
+
+    const control = await issueGrant({
+      subject,
+      deviceId: paired.device.deviceId,
+      grantId: "grant_inventory_abcdefgh"
+    })
+    const targeted = await SELF.fetch(
+      `https://relay.test/v1/devices/${paired.device.deviceId}/sessions/${sessionId}`,
+      { headers: { authorization: `Bearer ${control}` } }
+    )
+    expect(targeted.status).toBe(200)
+    await expect(targeted.json()).resolves.toMatchObject({
+      sessions: [{ sessionId, controllerLeaseGeneration: 2 }]
+    })
+    const otherAccount = await issueGrant({
+      subject: "user-two",
+      deviceId: paired.device.deviceId,
+      grantId: "grant_inventory_other_account"
+    })
+    const hidden = await SELF.fetch(
+      `https://relay.test/v1/devices/${paired.device.deviceId}/sessions/${sessionId}`,
+      { headers: { authorization: `Bearer ${otherAccount}` } }
+    )
+    await expect(hidden.json()).resolves.toMatchObject({ sessions: [] })
   })
 
   it("verifies a signed nonce once before admitting a device connection", async () => {
@@ -383,7 +638,10 @@ describe("authorized session tunnel routing", () => {
     const desktopResponse = await connect("desktop")
     await expect(sessionRequest).resolves.toMatchObject({
       type: "session-request",
-      sessionId
+      sessionId,
+      clientInstanceId: "client_abcdefghijklmnop",
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 1
     })
     const deviceResponse = await connect("device")
     expect(desktopResponse.status).toBe(101)
