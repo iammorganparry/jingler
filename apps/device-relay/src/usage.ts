@@ -88,6 +88,12 @@ export class RelayUsageObject extends DurableObject<Env> {
         );
         CREATE INDEX IF NOT EXISTS active_attachments_device
           ON active_attachments(device_id);
+        CREATE TABLE IF NOT EXISTS released_attachments (
+          attachment_id TEXT PRIMARY KEY,
+          released_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS released_attachments_age
+          ON released_attachments(released_at);
         CREATE TABLE IF NOT EXISTS attempt_windows (
           dimension TEXT NOT NULL CHECK (dimension IN ('account', 'client', 'ip')),
           value TEXT NOT NULL,
@@ -142,6 +148,10 @@ export class RelayUsageObject extends DurableObject<Env> {
       this.ctx.storage.sql.exec(
         "DELETE FROM active_attachments WHERE expires_at <= ?",
         nowSeconds
+      )
+      this.ctx.storage.sql.exec(
+        "DELETE FROM released_attachments WHERE released_at <= ?",
+        nowSeconds - 24 * 60 * 60
       )
       this.ctx.storage.sql.exec(
         "DELETE FROM attempt_windows WHERE window_started_at <= ?",
@@ -291,13 +301,22 @@ export class RelayUsageObject extends DurableObject<Env> {
     unusedTransferBytes = 0
   ): Promise<void> {
     this.ctx.storage.transactionSync(() => {
-      const released = this.ctx.storage.sql.exec(
+      this.ctx.storage.sql.exec(
         "DELETE FROM active_attachments WHERE attachment_id = ?",
         attachmentId
       )
-      // WebSocket close delivery and RPC retries must not refund the same
-      // reservation twice. The attachment row is the idempotency fence.
-      if (released.rowsWritten !== 1 || !deviceId || unusedTransferBytes <= 0) return
+      // Expiry pruning may remove the active row before close delivery. Keep a
+      // short-lived idempotency fence so that close/RPC retries refund exactly
+      // once without retaining every historical attachment forever.
+      const released = this.ctx.storage.sql.exec<{ readonly attachment_id: string }>(
+        `INSERT INTO released_attachments (attachment_id, released_at)
+         VALUES (?, ?)
+         ON CONFLICT(attachment_id) DO NOTHING
+         RETURNING attachment_id`,
+        attachmentId,
+        Math.floor(Date.now() / 1_000)
+      ).toArray()[0]
+      if (!released || !deviceId || unusedTransferBytes <= 0) return
       this.ctx.storage.sql.exec(
         `UPDATE account_usage SET
          ciphertext_bytes_in = MAX(0, ciphertext_bytes_in - ?),

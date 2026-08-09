@@ -73,6 +73,7 @@ export class DeviceControlPlaneError extends Schema.TaggedError<DeviceControlPla
       "not-found",
       "quota-exceeded",
       "rate-limited",
+      "concurrency-exceeded",
       "stale-controller"
     ),
     message: Schema.String,

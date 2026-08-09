@@ -907,29 +907,6 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     return registered !== undefined
   }
 
-  async listSessionIds(
-    deviceId: string,
-    generation?: number
-  ): Promise<ReadonlyArray<string> | null> {
-    const current = this.deviceRow(deviceId)
-    if (
-      !current ||
-      current.state !== "active" ||
-      (generation !== undefined && current.generation !== generation)
-    ) return null
-    return this.ctx.storage.sql
-      .exec<SessionRow>(
-        `SELECT session_id FROM device_sessions
-         WHERE device_id = ? AND generation = ?
-         ORDER BY updated_at DESC, session_id ASC LIMIT ?`,
-        deviceId,
-        current.generation,
-        MAX_DEVICE_SESSIONS
-      )
-      .toArray()
-      .map((row) => row.session_id)
-  }
-
   async notifySession(
     deviceId: string,
     sessionId: string,

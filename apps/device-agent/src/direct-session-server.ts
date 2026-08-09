@@ -108,9 +108,13 @@ const serveConnection = async (
     }
     const before = await handler.transportState()
     const duplicate = envelope.sequence <= before.highestReceivedDesktopSequence
-    void handler.handle(command, envelope.sequence, (commandId) => scheduleFlush(handler, commandId), scope)
-      .then(() => scheduleFlush(handler, command.commandId))
-      .catch(() => socket.destroy())
+    await handler.handle(
+      command,
+      envelope.sequence,
+      (commandId) => scheduleFlush(handler, commandId),
+      scope
+    )
+    scheduleFlush(handler, command.commandId)
     writeFrame(socket, { type: "envelope-result", status: duplicate ? "duplicate" : "inserted", sequence: envelope.sequence })
   }
   socket.on("data", (chunk: string) => {

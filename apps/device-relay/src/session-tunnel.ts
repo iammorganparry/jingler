@@ -224,6 +224,7 @@ export class SessionTunnelObject extends DurableObject<Env> {
   private scheduledAlarmAt: number | null | undefined
   private readonly newestSequenceCache = new Map<TunnelEndpoint, number>()
   private readonly acknowledgementCache = new Map<TunnelEndpoint, number>()
+  private readonly transferMeters = new WeakMap<WebSocket, Promise<void>>()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -1389,19 +1390,25 @@ export class SessionTunnelObject extends DurableObject<Env> {
     attachment: TunnelSocketAttachment,
     bytes: number
   ): Promise<"recorded" | "quota-exceeded" | "invalid-frame"> {
-    let remaining = attachment.remainingTransferBytes ?? 0
-    if (remaining < bytes) {
-      const reservation = await this.env.RELAY_USAGE.getByName(
-        attachment.subject
-      ).reserveTransfer(attachment.deviceId, bytes)
-      if (reservation.status !== "reserved") return reservation.status
-      remaining += reservation.bytes
-    }
-    socket.serializeAttachment({
-      ...attachment,
-      remainingTransferBytes: remaining - bytes
-    } satisfies TunnelSocketAttachment)
-    return "recorded"
+    const previous = this.transferMeters.get(socket) ?? Promise.resolve()
+    const metered = previous.catch(() => undefined).then(async () => {
+      const current = this.attachment(socket) ?? attachment
+      let remaining = current.remainingTransferBytes ?? 0
+      if (remaining < bytes) {
+        const reservation = await this.env.RELAY_USAGE.getByName(
+          current.subject
+        ).reserveTransfer(current.deviceId, bytes)
+        if (reservation.status !== "reserved") return reservation.status
+        remaining += reservation.bytes
+      }
+      socket.serializeAttachment({
+        ...current,
+        remainingTransferBytes: remaining - bytes
+      } satisfies TunnelSocketAttachment)
+      return "recorded" as const
+    })
+    this.transferMeters.set(socket, metered.then(() => undefined, () => undefined))
+    return metered
   }
 
   private countEnvelopes(): number {

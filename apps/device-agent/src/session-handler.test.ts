@@ -52,6 +52,22 @@ describe("device session command handler", () => {
     expect(execute).toHaveBeenCalledOnce()
   })
 
+  it("adopts a controller scope for commands persisted by an older daemon", async () => {
+    const file = join(root, "ledger.json")
+    const execute = vi.fn(async () => "ok")
+    const legacy = new SessionCommandHandler(file, { execute })
+    await legacy.handle(command(), 1)
+    const scope = {
+      clientInstanceId: "client_legacy_abcdefgh",
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 2
+    }
+    const upgraded = new SessionCommandHandler(file, { execute })
+    await upgraded.adoptControllerScope(scope)
+    await expect(upgraded.handle(command(), 1, undefined, scope)).resolves.toHaveLength(1)
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
   it("settles a command left admitted by a device crash as a deterministic restart failure", async () => {
     const file = join(root, "ledger.json")
     await writeFile(file, JSON.stringify({

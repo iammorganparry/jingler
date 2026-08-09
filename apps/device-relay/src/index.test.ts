@@ -462,22 +462,6 @@ describe("device relay HTTP authorization", () => {
       deviceId: paired.device.deviceId,
       grantId: "grant_inventory_abcdefgh"
     })
-    const inventory = await SELF.fetch(
-      `https://relay.test/v1/devices/${paired.device.deviceId}/sessions`,
-      { headers: { authorization: `Bearer ${control}` } }
-    )
-    expect(inventory.status).toBe(200)
-    await expect(inventory.json()).resolves.toMatchObject({
-      version: 1,
-      deviceId: paired.device.deviceId,
-      sessions: [
-        {
-          sessionId,
-          controllerClientInstanceId: secondClient,
-          controllerLeaseGeneration: 2
-        }
-      ]
-    })
     const targeted = await SELF.fetch(
       `https://relay.test/v1/devices/${paired.device.deviceId}/sessions/${sessionId}`,
       { headers: { authorization: `Bearer ${control}` } }

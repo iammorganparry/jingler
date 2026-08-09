@@ -603,13 +603,20 @@ const handleTunnelSocket = async (
   if (preparation.status !== "prepared") {
     await usage.release(usageAttachmentId)
     const reason = preparation.status
+    const retryable = reason === "offline" ||
+      reason === "controller-occupied" ||
+      reason === "stale-controller"
+    const publicReason = reason === "stale-controller"
+      ? "stale-controller"
+      : retryable
+        ? "offline"
+        : "invalid-grant"
     return json({
       _tag: "DeviceControlPlaneError",
-      reason:
-        reason === "stale-controller" ? "stale-controller" : "offline",
+      reason: publicReason,
       message: `Client attachment rejected: ${reason}`,
-      retryable: reason === "offline" || reason === "stale-controller"
-    }, reason === "offline" || reason === "stale-controller" ? 409 : 403)
+      retryable
+    }, retryable ? 409 : 403)
   }
   if (endpoint === "desktop" && !(await registry.notifySession(
     claims.deviceId,
@@ -809,36 +816,20 @@ const handleSessionInventory = async (
   request: Request,
   env: Env,
   deviceId: string,
-  requestedSessionId?: string
+  requestedSessionId: string
 ): Promise<Response> => {
   const claims = await grant(request, env, "device-control")
   if (!claims || !scopedDevice(claims, deviceId)) {
     return controlPlaneFailure("invalid-grant")
   }
-  const registry = env.DEVICE_REGISTRY.getByName(claims.subject)
-  if (requestedSessionId) {
-    const entry = await env.SESSION_TUNNEL
-      .getByName(requestedSessionId)
-      .inventoryEntryFor(claims.subject, deviceId)
-    return json({
-      version: 1,
-      deviceId,
-      generatedAt: Math.floor(Date.now() / 1_000),
-      sessions: entry ? [entry] : []
-    })
-  }
-  const sessionIds = await registry.listSessionIds(deviceId)
-  if (!sessionIds) return controlPlaneFailure("offline")
-  const entries = await Promise.all(
-    sessionIds.map((sessionId) =>
-      env.SESSION_TUNNEL.getByName(sessionId).inventoryEntry()
-    )
-  )
+  const entry = await env.SESSION_TUNNEL
+    .getByName(requestedSessionId)
+    .inventoryEntryFor(claims.subject, deviceId)
   return json({
     version: 1,
     deviceId,
     generatedAt: Math.floor(Date.now() / 1_000),
-    sessions: entries.filter((entry) => entry !== null)
+    sessions: entry ? [entry] : []
   })
 }
 
@@ -876,10 +867,6 @@ const worker = {
     }
     if (request.method === "GET" && url.pathname === "/v1/devices") {
       return handleDeviceList(request, env)
-    }
-    const inventoryDeviceId = routeDeviceId(url.pathname, "/sessions")
-    if (request.method === "GET" && inventoryDeviceId) {
-      return handleSessionInventory(request, env, inventoryDeviceId)
     }
     const targetedInventory = url.pathname.match(
       /^\/v1\/devices\/([A-Za-z0-9_-]{1,128})\/sessions\/([A-Za-z0-9_-]{1,128})$/u

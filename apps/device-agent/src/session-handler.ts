@@ -230,6 +230,13 @@ export class SessionCommandHandler {
         }
       }
       if (sameControllerScope(current, scope)) return
+      if (!current) {
+        for (const [commandId, command] of Object.entries(ledger.commands)) {
+          if (!command.controllerScope) {
+            ledger.commands[commandId] = { ...command, controllerScope: scope }
+          }
+        }
+      }
       ledger.controllerScope = scope
       await this.#write(ledger)
     }))

@@ -1,3 +1,4 @@
+import { env } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
 import {
   RELAY_USAGE_POLICY,
@@ -113,6 +114,37 @@ describe("relay usage policy", () => {
     })
   })
 
+  it("refunds an unused reservation after admission expiry pruning", async () => {
+    const usage = env.RELAY_USAGE.getByName("account:expired-reservation")
+    await expect(usage.admit({
+      attachmentId: "expired-attachment",
+      deviceId: "device-1",
+      clientInstanceId: "client-1",
+      sourceIp: "203.0.113.2",
+      expiresAt: 101
+    }, 10_000_000, 100)).resolves.toBe("admitted")
+    await expect(usage.reserveTransfer("device-1", 500, 10_000_000)).resolves.toMatchObject({
+      status: "reserved"
+    })
+    await usage.admit({
+      attachmentId: "replacement-attachment",
+      deviceId: "device-2",
+      clientInstanceId: "client-2",
+      sourceIp: "203.0.113.3"
+    }, 10_000_000, 102)
+    await usage.release(
+      "expired-attachment",
+      "device-1",
+      RELAY_USAGE_POLICY.transferReservationBytes - 500
+    )
+    await expect(usage.snapshot(10_000_000, "device-1")).resolves.toMatchObject({
+      ciphertextBytesIn: 500,
+      ciphertextBytesOut: 500,
+      deviceCiphertextBytesIn: 500,
+      deviceCiphertextBytesOut: 500
+    })
+  })
+
   it("uses one account-ledger reservation for many small encrypted frames", async () => {
     const usage = env.RELAY_USAGE.getByName("account:batched-metering")
     const first = await usage.reserveTransfer("device-1", 128, 10_000_000)
@@ -190,4 +222,3 @@ describe("relay usage policy", () => {
     expect(result).toBe("rate-limited")
   })
 })
-import { env } from "cloudflare:test"

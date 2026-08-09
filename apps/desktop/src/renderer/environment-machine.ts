@@ -64,10 +64,13 @@ const inventoryMessageOf = (error: unknown): string =>
 const upsertEnvironment = (
   environments: ReadonlyArray<Environment>,
   environment: Environment
-): ReadonlyArray<Environment> => [
-  ...environments.filter((item) => item.id !== environment.id),
-  environment
-]
+): ReadonlyArray<Environment> => {
+  const index = environments.findIndex((item) => item.id === environment.id)
+  if (index < 0) return [...environments, environment]
+  return environments.map((item, itemIndex) =>
+    itemIndex === index ? environment : item
+  )
+}
 
 export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
   setup({
