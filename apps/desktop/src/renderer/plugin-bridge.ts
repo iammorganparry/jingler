@@ -32,10 +32,14 @@ import { publishSessionUpdate } from "./session-updates.js"
  * Not closed over a plugin id: unlike `invoke` and `storage`, this reaches the
  * app's own state rather than the plugin's, so there is nothing to scope. The
  * `sessionId` is the caller's, and any plugin can name any session — see the
- * note on `SessionActions` in the SDK for why that is an accepted risk here and
- * would not be for anything less reversible.
+ * note on `SessionActions` in the SDK for the trust decision: this preserves
+ * explicit operator intent through validated RPC, but does not authorize it.
  */
 const sessionActions: SessionActions = {
+  linkIssue: async (sessionId, issue) => {
+    const session = await rpc.sessionsLinkIssue(sessionId, issue)
+    publishSessionUpdate(session)
+  },
   unlinkIssue: async (sessionId: string) => {
     const session = await rpc.sessionsUnlinkIssue(sessionId)
     publishSessionUpdate(session)

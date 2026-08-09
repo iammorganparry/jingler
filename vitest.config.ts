@@ -13,6 +13,7 @@ export default defineConfig({
     // root `test` script invokes that package in a second, isolated process.
     projects: [
       "packages/*/vitest.config.ts",
+      "plugins/*/vitest.config.ts",
       "apps/desktop/vitest.config.ts",
       "apps/device-agent/vitest.config.ts",
       "apps/memory-worker/vitest.config.ts",

@@ -91,6 +91,7 @@ import {
   GitError,
   IssueComment,
   IssueDetail,
+  IssueReference,
   IssueSummary,
   issueReferenceOf,
   parsePlanThreadReply,
@@ -2401,10 +2402,10 @@ export const removeRemoteSessionMirror = <A, E1, R1, E2, R2>(
   forgetLocal: Effect.Effect<void, E2, R2>,
 ) => removeRemote.pipe(Effect.ignore, Effect.zipRight(forgetLocal));
 
-/** `Sessions.linkIssue` handler — attach an issue (+ automations) to a live session. */
+/** `Sessions.linkIssue` handler — attach a provider-neutral issue to a live session. */
 export const linkIssue = (input: {
   sessionId: string;
-  issue: IssueSummary;
+  issue: IssueReference;
   automations?: IssueAutomations;
 }) =>
   Effect.gen(function* () {

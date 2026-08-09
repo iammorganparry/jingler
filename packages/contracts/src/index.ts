@@ -27,6 +27,7 @@ import {
   IssueAutomations,
   IssueComment,
   IssueDetail,
+  IssueReference,
   IssueProviderDescriptor,
   IssueSummary,
   ContextConfig,
@@ -585,18 +586,18 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: CreateSessionFromIssueInput
   }),
 
-  /** Link a GitHub issue to a live session (attach flow); returns the updated session. */
+  /** Link a provider-neutral issue to a live session; returns the updated session. */
   Rpc.make("Sessions.linkIssue", {
     success: Session,
     error: Schema.Union(GitError, SessionNotFoundError),
     payload: {
       sessionId: Schema.String,
-      issue: IssueSummary,
+      issue: IssueReference,
       automations: Schema.optional(IssueAutomations)
     }
   }),
 
-  /** Unlink the session's GitHub issue; returns the updated session. */
+  /** Unlink the session's provider-neutral issue; returns the updated session. */
   Rpc.make("Sessions.unlinkIssue", {
     success: Session,
     error: Schema.Union(GitError, SessionNotFoundError),

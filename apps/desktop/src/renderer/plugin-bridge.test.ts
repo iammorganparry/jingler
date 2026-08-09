@@ -1,7 +1,7 @@
 /**
  * The bridge's scoping rules, and the one place it reaches the app's own state.
  *
- * `sessions.unlinkIssue` is the odd one out here: `invoke` and `storage` are
+ * The session actions are the odd ones out here: `invoke` and `storage` are
  * closed over a plugin id and can only reach that plugin's things, while this
  * mutates a session the app owns. What it must not do is mutate it and stop
  * there — the record has to be republished through `session-updates`, or the
@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Session } from "@jingler/core"
 
 const sessionsUnlinkIssue = vi.fn()
+const sessionsLinkIssue = vi.fn()
 
 vi.mock("./rpc-client.js", () => ({
   rpc: {
@@ -21,6 +22,7 @@ vi.mock("./rpc-client.js", () => ({
     pluginsStorageSet: vi.fn(async () => undefined),
     pluginsStorageDelete: vi.fn(async () => undefined),
     pluginsStorageKeys: vi.fn(async () => []),
+    sessionsLinkIssue: (id: string, issue: unknown) => sessionsLinkIssue(id, issue),
     sessionsUnlinkIssue: (id: string) => sessionsUnlinkIssue(id)
   }
 }))
@@ -29,10 +31,39 @@ const { pluginBridge } = await import("./plugin-bridge.js")
 const { onSessionUpdate } = await import("./session-updates.js")
 
 const unlinked = { id: "s1", repo: "widget", issueNumber: null } as unknown as Session
+const issue = {
+  providerId: "linear",
+  id: "issue-uuid",
+  identifier: "ENG-123",
+  url: "https://linear.app/acme/issue/ENG-123",
+  title: "Retry failed payments",
+  labels: []
+}
+const linked = { ...unlinked, linkedIssue: issue } as unknown as Session
 
 beforeEach(() => {
   sessionsUnlinkIssue.mockReset()
   sessionsUnlinkIssue.mockResolvedValue(unlinked)
+  sessionsLinkIssue.mockReset()
+  sessionsLinkIssue.mockResolvedValue(linked)
+})
+
+describe("sessions.linkIssue", () => {
+  it("links the provider-neutral reference without provider-specific automations", async () => {
+    await pluginBridge("some-plugin").sessions.linkIssue("s1", issue)
+
+    expect(sessionsLinkIssue).toHaveBeenCalledWith("s1", issue)
+  })
+
+  it("republishes the linked record, so tabs and badges update immediately", async () => {
+    const seen: Session[] = []
+    const off = onSessionUpdate((session) => seen.push(session))
+
+    await pluginBridge("some-plugin").sessions.linkIssue("s1", issue)
+
+    expect(seen).toEqual([linked])
+    off()
+  })
 })
 
 describe("sessions.unlinkIssue", () => {

@@ -130,16 +130,17 @@ plugin author to look would find out.
 
 ## Session mutations are not consent-gated
 
-A plugin can detach a session's linked issue — `useSessionActions().unlinkIssue`
-— and nothing prompts. That is a deliberate reading of the risk rather than an
-oversight: the action is trivially reversible, re-linking is available through
-the same plugin, and no credential or data leaves the machine. Putting a native
-dialog in front of it would train operators to click through dialogs, which is
-the one thing that would make the `getSession` prompt above worth less.
+A plugin can attach or detach a session's linked issue through
+`useSessionActions()`, and nothing prompts. Linking replaces any current issue.
+That is a deliberate trust decision rather than an authorization boundary:
+plugin UI already runs in the renderer's realm, and is trusted to call these
+methods only after explicit operator intent. The app validates the
+provider-neutral reference, persists it, and republishes the updated session;
+it does not infer provider-specific automations or send credentials or issue
+data anywhere.
 
-It is still a mutation, and it is the only one. If this list ever grows past
-"reversible in one click", it needs the consent machinery, not a bigger
-paragraph here.
+These are still mutations. If this list grows beyond issue linkage, it needs a
+fresh consent analysis rather than a bigger paragraph here.
 
 ## For plugin authors
 

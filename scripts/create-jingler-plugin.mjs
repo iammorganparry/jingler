@@ -199,19 +199,10 @@ export default definePlugin(manifest, {
 })
 `,
 
-  "scripts/emit-manifest.mjs": `/**
- * Write \`jingler.plugin.json\` from the TypeScript manifest.
- *
- * One source of truth: a hand-maintained JSON copy drifts the first time
- * someone renames a tab.
- */
-import { writeFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
+  "scripts/emit-manifest.mjs": `import { emitManifest } from "@jingler/plugin-sdk/emit-manifest"
 import { manifest } from "../src/manifest.ts"
 
-const out = fileURLToPath(new URL("../jingler.plugin.json", import.meta.url))
-writeFileSync(out, \`\${JSON.stringify(manifest, null, 2)}\\n\`, "utf8")
-console.log(\`Wrote \${out}\`)
+emitManifest(manifest, new URL("..", import.meta.url))
 `,
 
   "scripts/install-local.mjs": `/**

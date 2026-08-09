@@ -31,6 +31,7 @@ import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { readBundledPluginIds } from "./bundled-plugin-ids.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const desktopDir = resolve(here, "..")
@@ -38,14 +39,7 @@ const repoRoot = resolve(desktopDir, "../..")
 const builderYml = join(desktopDir, "electron-builder.yml")
 const isWindows = process.platform === "win32"
 
-/**
- * The bundled plugin ids, read from the `to: plugins/<id>` lines of the
- * `extraResources` block. A regex rather than a YAML parser so this script has
- * no dependencies and can run before anything is installed.
- */
-const ids = [...readFileSync(builderYml, "utf8").matchAll(/^\s*to:\s*plugins\/(\S+)\s*$/gm)].map(
-  (match) => match[1]
-)
+const ids = readBundledPluginIds(builderYml)
 
 if (ids.length === 0) {
   console.error(
@@ -137,6 +131,15 @@ for (const id of ids) {
     if (!existsSync(join(dir, entry))) {
       problems.push(
         `plugins/${id}: manifest ${field} is "${entry}" but plugins/${id}/${entry} does not exist.`
+      )
+    }
+  }
+
+  for (const tab of manifest.contributes?.tabs ?? []) {
+    const asset = typeof tab.icon === "object" && tab.icon !== null ? tab.icon.asset : undefined
+    if (typeof asset === "string" && !existsSync(join(dir, asset))) {
+      problems.push(
+        `plugins/${id}: tab ${tab.id ?? "<unknown>"} references missing icon asset "${asset}".`
       )
     }
   }

@@ -12,10 +12,16 @@
     "./vite": {
       "types": "./vite.d.ts",
       "default": "./vite.mjs"
+    },
+    "./emit-manifest": {
+      "types": "./emit-manifest.d.ts",
+      "default": "./emit-manifest.mjs"
     }
   },
   "files": [
     "src",
+    "emit-manifest.mjs",
+    "emit-manifest.d.ts",
     "vite.mjs",
     "vite.d.ts",
     "jingler.plugin.schema.json",

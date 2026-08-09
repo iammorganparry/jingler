@@ -30,7 +30,7 @@ Your own npm dependencies are **bundled into your output** — there is no
 six specifiers Jingler supplies at runtime are external, and
 `@jingler/plugin-sdk/vite` already lists them.
 
-### Four import paths
+### Five import paths
 
 | Import from | Runs in | Gives you |
 |---|---|---|
@@ -38,12 +38,23 @@ six specifiers Jingler supplies at runtime are external, and
 | `@jingler/plugin-sdk/ui` | renderer | the themed component kit — use this before writing your own |
 | `@jingler/plugin-sdk/host` | extension host | `HostContext`, `Activate`, credentials, `exec` |
 | `@jingler/plugin-sdk/vite` | your build | `jinglerPluginBuild`, `JINGLER_EXTERNALS` |
+| `@jingler/plugin-sdk/emit-manifest` | your build | `emitManifest` |
 
 `@jingler/plugin-sdk/ui` is what makes a plugin look like part of the app rather
 than a webpage inside it: `Markdown`, `Spinner`, `Card`, `Callout`, `Badge`,
 `Avatar`, `Input`, `Toggle`, `Kbd`, `cn`, `relativeTime`, `useWidthTier` and more.
 It is externalised, so importing it costs your bundle nothing. See `api-digest.md`
 for the full list.
+
+Generate the JSON manifest from the typed source instead of maintaining two
+copies:
+
+```js
+import { emitManifest } from "@jingler/plugin-sdk/emit-manifest"
+import { manifest } from "../src/manifest.ts"
+
+emitManifest(manifest, new URL("..", import.meta.url))
+```
 
 ### Set `apiVersion`
 
@@ -375,12 +386,14 @@ interface SessionSnapshot {
 
 ## Changing the session
 
-A snapshot is read-only. The one mutation a plugin may make is detaching the
-session's linked issue:
+A snapshot is read-only. Issue-provider UI can attach the issue the operator
+selected or detach the current issue:
 
 ```tsx
 const session = useSession()
-const { unlinkIssue } = useSessionActions()
+const { linkIssue, unlinkIssue } = useSessionActions()
+
+await linkIssue(session.id, issue) // provider-neutral IssueReference; no automations
 
 <button type="button" onClick={() => void unlinkIssue(session.id)}>Unlink</button>
 ```
@@ -391,13 +404,13 @@ the change — you do not have to reload anything.
 **This list is short and stays short.** A plugin DECORATES a session; it does not
 drive one. There is no `setStatus`, no `rename`, no `archive`, and adding one
 means arguing that the operator can only reach it through the plugin that owns
-the concept. `unlinkIssue` clears that bar because the app knows a session *has*
-a linked issue while the plugin owns the UI where "actually, not that one"
-belongs.
+the concept. Linking and unlinking clear that bar because the app owns session
+persistence while the provider plugin owns the issue-selection UI.
 
-It is not a security boundary: any installed plugin can unlink any session's
-issue, and nothing prompts. That is an accepted risk because it is trivially
-reversible — see `docs/plugins/permissions-and-trust.md`.
+It is not a security boundary: any installed plugin can link or unlink any
+session's issue, and linking replaces an existing issue without another prompt.
+The renderer plugin is trusted to call these methods only after explicit operator
+intent — see `docs/plugins/permissions-and-trust.md`.
 
 ## Storage
 

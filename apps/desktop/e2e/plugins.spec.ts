@@ -739,14 +739,24 @@ test("cancelling the install picker changes nothing", async ({ launchApp }) => {
   })
 
   await openPluginSettings(window)
-  // The built-in GitHub Issues plugin is the whole list before the click (see
-  // the note in the install test about the development bundled root).
+  // Official plugins remain present before and after a cancelled picker.
   await expect(window.getByTestId("plugin-row-github-issues")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByTestId("plugin-row-linear")).toBeVisible()
   await window.getByTestId("plugin-install-folder").click()
 
   // Nothing installed, and no failure reported for closing a dialog.
   await expect(window.getByTestId("plugin-row-github-issues")).toBeVisible()
+  await expect(window.getByTestId("plugin-row-linear")).toBeVisible()
   await expect(window.getByTestId("plugins-undecodable")).toHaveCount(0)
+})
+
+test("lists every official bundled plugin", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true })
+  await openPluginSettings(window)
+
+  await expect(window.getByTestId("plugin-row-github-issues")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByTestId("plugin-row-linear")).toBeVisible()
+  await expect(window.getByTestId("plugin-row-linear").locator("[data-plugin-asset-icon='ready']")).toBeVisible()
 })
 
 test("a plugin's dock pane mounts beside the session", async ({ launchApp }) => {
@@ -1463,12 +1473,12 @@ const seedIssueProviderPlugin = (home: string) => {
     ui: "dist/ui.js",
     main: "dist/main.js",
     contributes: {
-      issueProviders: [{ id: "linear", label: "E2E Linear" }],
+      issueProviders: [{ id: "e2e-linear", label: "E2E Linear" }],
       tabs: [
         {
           id: "e2e-linear.issue",
           label: "Linear issue",
-          when: { issueProvider: "linear", includeUnlinked: true }
+          when: { issueProvider: "e2e-linear", includeUnlinked: true }
         }
       ]
     }
@@ -1496,7 +1506,7 @@ export default definePlugin(
 `,
     main: `
 const issue = {
-  providerId: "linear",
+  providerId: "e2e-linear",
   id: "issue-uuid-123",
   identifier: "ENG-123",
   url: "https://linear.app/acme/issue/ENG-123",
@@ -1511,7 +1521,7 @@ const issue = {
 
 export const activate = (ctx) => {
   ctx.subscriptions.push(ctx.issues.registerProvider({
-    id: "linear",
+    id: "e2e-linear",
     listIssues: async ({ search }) =>
       issue.title.toLowerCase().includes(search.toLowerCase()) ? [issue] : [],
     getIssue: async ({ issueId }) =>
@@ -1580,14 +1590,14 @@ test("a plugin issue provider creates a linked session with its badge and tab", 
   })
   await expect(window.getByRole("button", { name: "Issue", exact: true })).toHaveCount(0)
   await window.getByRole("button", { name: "Linear issue" }).click()
-  await expect(window.getByTestId("e2e-linear-issue")).toHaveText("linear:ENG-123")
+  await expect(window.getByTestId("e2e-linear-issue")).toHaveText("e2e-linear:ENG-123")
 
   const persisted = JSON.parse(
     await readFile(join(home, "jingler", "sessions.json"), "utf8")
   )
   expect(persisted[0]).toMatchObject({
     linkedIssue: {
-      providerId: "linear",
+      providerId: "e2e-linear",
       id: "issue-uuid-123",
       identifier: "ENG-123"
     }

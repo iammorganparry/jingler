@@ -383,15 +383,18 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   await expect(window.getByTestId("plugin-error-github-issues")).toHaveCount(0)
   await expect(window.getByRole("button", { name: "Issue" })).toBeVisible()
 
-  // Real outcome: the deterministic issue worktree exists but remains detached
+  // Real outcome: the provider-keyed issue worktree exists but remains detached
   // from main until the agent proposes a semantic feat/fix/chore branch.
+  const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))
+  expect(persisted).toHaveLength(1)
   const worktreePath = join(
     home,
     "jingler",
     "worktrees",
     "widget",
-    "128-refund-route-500s-on-a-stale-token"
+    "github-128-refund-route-500s-on-a-stale-token"
   )
+  expect(persisted[0].worktreePath).toBe(worktreePath)
   expect(existsSync(worktreePath)).toBe(true)
   const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
     cwd: worktreePath,
@@ -400,15 +403,17 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   expect(branch).toBe("HEAD")
 
   // Real outcome: the session is persisted with the issue linked + task seeded.
-  const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))
-  expect(persisted).toHaveLength(1)
   expect(persisted[0]).toMatchObject({
     title: "Refund route 500s on a stale token",
     branch: "main",
     semanticBranchPending: true,
     baseBranch: "main",
-    issueNumber: 128,
-    issueUrl: "https://github.com/acme/widget/issues/128",
+    linkedIssue: {
+      providerId: "github",
+      id: "128",
+      identifier: "#128",
+      url: "https://github.com/acme/widget/issues/128"
+    },
     repo: "widget",
     automations: { progressComments: true, closeOnMerge: true }
   })
