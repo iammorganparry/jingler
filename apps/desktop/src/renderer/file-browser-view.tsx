@@ -284,8 +284,8 @@ function FileCanvas({
     browser.selectedPath
   ])
   useEffect(() => {
-    if (followedSelection !== null) onSelectionChange(followedSelection)
-  }, [browser.payload, followedSelection, onSelectionChange])
+    if (followedSelection !== null) onSelectionChange(null)
+  }, [followedSelection, onSelectionChange])
 
   const referenceForDiffSelection = useCallback(
     (next: JinglerLineSelection): CodeReference | null =>

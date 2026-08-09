@@ -537,6 +537,15 @@ test("reveals the followed mutation diff and sends selected feedback with contex
   await expect(followed.getByText("export const mode = 'modern'", { exact: true })).toBeVisible()
   await expect(followed.locator("[data-jingler-pierre-code-view-footer]")).toBeAttached()
 
+  await expect(followed.getByRole("button", { name: "Add to chat" })).toHaveCount(0)
+  await expect(followed.getByPlaceholder("Ask the agent to fix this…")).toHaveCount(0)
+
+  const followedLine = followed
+    .locator('[data-line-type="change-addition"][data-column-number="1"]')
+    .first()
+  await expect(followedLine).toBeVisible()
+  await followedLine.click({ position: { x: 6, y: 6 } })
+
   const addToChat = followed.getByRole("button", { name: "Add to chat" })
   await expect(addToChat).toBeVisible()
   await addToChat.click()
@@ -546,6 +555,7 @@ test("reveals the followed mutation diff and sends selected feedback with contex
 
   await filesTab(window).click()
   await expect(followed).toBeVisible()
+  await followedLine.click({ position: { x: 6, y: 6 } })
   const comment = followed.getByPlaceholder("Ask the agent to fix this…")
   await comment.fill("[[expect-code-context]] Keep the new mode but document it.")
   await followed.getByRole("button", { name: "Send to agent" }).click()
