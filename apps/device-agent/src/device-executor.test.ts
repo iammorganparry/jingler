@@ -36,6 +36,7 @@ const services = (): DeviceExecutorServices => ({
   registerProject: vi.fn(async () => resultProject),
   createProjectDirectory: vi.fn(async () => resultProject),
   cloneProject: vi.fn(async () => resultProject),
+  ensureProject: vi.fn(async () => resultProject),
   removeProject: vi.fn(async () => undefined),
   run: vi.fn(async (_sessionId, _input, emit) => {
     await emit({ _tag: "Assistant", text: "hello from device" })
@@ -87,6 +88,20 @@ describe("device session command executor", () => {
     expect(dependencies.listProjects).toHaveBeenCalled()
     expect(registered).toBe(resultProject)
     expect(listed).toEqual([resultProject])
+  })
+
+  it("ensures a missing project through the owning device", async () => {
+    const dependencies = services()
+    const result = await makeDeviceSessionCommandExecutor(dependencies).execute(
+      command("Projects.ensure", { url: "git@github.com:iammorganparry/jingler.git", name: "jingler" }),
+      async () => undefined
+    )
+
+    expect(dependencies.ensureProject).toHaveBeenCalledWith({
+      url: "git@github.com:iammorganparry/jingler.git",
+      name: "jingler"
+    })
+    expect(result).toBe(resultProject)
   })
 
   it("provisions a blank session through the device SessionStore boundary", async () => {

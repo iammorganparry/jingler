@@ -64,6 +64,20 @@ describe("Composer send row", () => {
     expect(screen.getByRole("button", { name: /^Stop$/ }).textContent).toBe("")
   })
 
+  it("uses Paseo's softer shell without an outer glow and keeps send compact", () => {
+    render(<Composer />)
+    const composer = screen.getByTestId("composer")
+    const surface = composer.firstElementChild as HTMLElement
+    const send = screen.getByRole("button", { name: /Send/ })
+
+    expect(surface.className).toContain("rounded-2xl")
+    expect(surface.className).toContain("border-line")
+    expect(surface.className).not.toMatch(/border-(blue|green|orange|purple)/)
+    expect(surface.className).not.toMatch(/shadow-\[0_0/)
+    expect(send.className).toContain("size-7")
+    expect(send.className).toContain("rounded-full")
+  })
+
   it("fills one bar per rung of the harness's own reasoning ladder", () => {
     // Claude's native ladder makes "high" the third of four strengths.
     const { rerender } = render(<Composer cli="claude" model="opus" capabilities={capabilities} reasoningEffort="high" />)

@@ -1,38 +1,41 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { Check, ChevronDown, Search } from "lucide-react"
+import { Check, ChevronDown } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList
+} from "./command.js"
+import { Popover, PopoverContent, PopoverTrigger } from "./popover.js"
 
 export interface ChipOption<T extends string> {
   value: T
   label: ReactNode
-  /**
-   * What `searchable` matches this option on. Only needed when `label` isn't a
-   * plain string — a rendered label can't be read as text, so an option with a
-   * non-string label is invisible to search without this.
-   */
+  description?: string
   searchText?: string
 }
 
-/** A titled run of options — one section of the menu (e.g. a harness). */
 export interface ChipGroup<T extends string> {
   label: string
   options: ReadonlyArray<ChipOption<T>>
 }
 
-/** The text `searchable` matches an option on. */
-const textOf = <T extends string>(o: ChipOption<T>): string =>
-  o.searchText ?? (typeof o.label === "string" ? o.label : "")
+const textOf = <T extends string>(option: ChipOption<T>): string =>
+  option.searchText ?? (typeof option.label === "string" ? option.label : option.value)
 
-/**
- * A compact chip that opens a dropdown to pick one value — used for the
- * composer's mode and model chips. Built on Radix DropdownMenu (accessible,
- * handles outside-click / Esc / keyboard). Styled to match the composer.
- *
- * Pass `options` for a flat list, or `groups` for sectioned ones (the model chip
- * groups models under their harness, so picking a model also picks a provider).
- */
+const includesSearch = (value: string, search: string, keywords?: ReadonlyArray<string>): number => {
+  const query = search.trim().toLowerCase()
+  if (query === "") return 1
+  return [value, ...(keywords ?? [])].some((candidate) => candidate.toLowerCase().includes(query))
+    ? 1
+    : 0
+}
+
+/** A compact shadcn-style Command picker anchored to its composer control. */
 export function ChipMenu<T extends string>({
   value,
   options,
@@ -51,99 +54,40 @@ export function ChipMenu<T extends string>({
   ariaLabel,
   className
 }: {
-  /** The currently-selected value (a check marks it in the list). */
   value: T
   options?: ReadonlyArray<ChipOption<T>>
-  /** Sectioned alternative to `options`; takes precedence when both are given. */
   groups?: ReadonlyArray<ChipGroup<T>>
   onSelect?: (value: T) => void
-  /** Leading glyph inside the chip. */
   icon?: ReactNode
-  /**
-   * Put a filter box at the top of the menu, matching an option's text and its
-   * section heading — so "codex" finds a harness's models and "opus" finds one
-   * model. Worth it for a long, growing list (models); noise on a short fixed
-   * one (modes).
-   */
   searchable?: boolean
   searchPlaceholder?: string
-  /** Shown when the filter matches nothing. */
   emptyLabel?: string
   disabled?: boolean
-  /**
-   * Render the trigger yourself instead of the default chip.
-   *
-   * The menu's real value is the searchable, sectioned, keyboard-driven list —
-   * the chip is just one way in. A form FIELD (the repo picker) wants the same
-   * list under a full-width control, and duplicating the list to get a different
-   * trigger is how two subtly different menus end up in one app.
-   */
   trigger?: (state: { current: ChipOption<T> | undefined; open: boolean }) => ReactNode
-  /**
-   * Extra content at the end of an option's row — a star toggle, a badge.
-   *
-   * Anything interactive in here must stop `pointerdown`, `pointerup` and
-   * `click`: a Radix menu item commits on pointer UP, so swallowing click alone
-   * still lets the tap select the option and close the menu.
-   */
   renderTrailing?: (option: ChipOption<T>) => ReactNode
-  /** Which side of the trigger the menu opens on. Chips open up; fields open down. */
   side?: "top" | "bottom"
-  /** Make the menu exactly as wide as its trigger — what a field wants. */
   matchTriggerWidth?: boolean
-  /** `quiet` keeps the menu behavior while removing the composer's pill chrome. */
   appearance?: "chip" | "quiet"
-  /** Accessible name when the visible value alone does not name the setting. */
   ariaLabel?: string
   className?: string
 }) {
   const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
+  const sections: ReadonlyArray<ChipGroup<T>> = useMemo(
+    () => groups ?? [{ label: "", options: options ?? [] }],
+    [groups, options]
+  )
+  const current = sections.flatMap((section) => section.options).find((option) => option.value === value)
+  const showHeaders = sections.length > 1
 
-  // Put the caret in the filter box on open, so the menu is type-to-filter the
-  // moment it appears. It has to happen AFTER Radix's own focus: a menu focuses
-  // its content on open (and there's no `onOpenAutoFocus` on Menu content to
-  // pre-empt, unlike a popover), so claiming focus on the next frame wins.
   useEffect(() => {
     if (!open || !searchable) return
     const id = requestAnimationFrame(() => inputRef.current?.focus())
     return () => cancelAnimationFrame(id)
   }, [open, searchable])
 
-  // Memoised on the inputs themselves: rebuilding this array every render gives
-  // `visible` a new dependency each time, so its own memo never hits and the
-  // whole list is re-filtered on every keystroke.
-  const sections: ReadonlyArray<ChipGroup<T>> = useMemo(
-    () => groups ?? [{ label: "", options: options ?? [] }],
-    [groups, options]
-  )
-  // A lone section needs no header — with one harness installed, labelling it
-  // would just be noise above a plain model list. Decided on the FULL list, not
-  // the filtered one, so headings don't pop in and out as you type (and so a
-  // filtered-down list still says which harness its models belong to).
-  const showHeaders = sections.length > 1
-
-  // Match on the option's text OR its section heading: you don't always want a
-  // named model — sometimes you want "whatever Codex has".
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!searchable || q === "") return sections
-    return sections
-      .map((s) => ({
-        ...s,
-        options: s.options.filter(
-          (o) => textOf(o).toLowerCase().includes(q) || s.label.toLowerCase().includes(q)
-        )
-      }))
-      .filter((s) => s.options.length > 0)
-  }, [sections, query, searchable])
-
-  const matches = visible.flatMap((s) => s.options)
-  const current = sections.flatMap((s) => s.options).find((o) => o.value === value)
-
-  const pick = (v: T) => {
-    onSelect?.(v)
+  const pick = (next: T) => {
+    onSelect?.(next)
     setOpen(false)
   }
 
@@ -151,9 +95,6 @@ export function ChipMenu<T extends string>({
     trigger({ current, open })
   ) : (
     <span
-      // `title` so the full value survives truncation — model ids run to
-      // "claude-sonnet-4-5-20250929", which is 26 characters of chip in a
-      // composer row that may only have 320px for everything.
       title={typeof (current?.label ?? value) === "string" ? String(current?.label ?? value) : undefined}
       className={cn(
         "inline-flex min-w-0 items-center gap-1.5 rounded-md font-mono text-[11px] text-text-bright",
@@ -168,10 +109,6 @@ export function ChipMenu<T extends string>({
       )}
     >
       {icon}
-      {/* `min-w-0 truncate` on the LABEL, not the chip: the chevron and icon
-          must keep their size, and only the text has anything to give. Without
-          it a flex item's floor is its min-content width, so the chip refused
-          to shrink and pushed the whole toolbar past the composer's border. */}
       <span className="min-w-0 truncate">{current?.label ?? value}</span>
       {!disabled && <ChevronDown size={11} className="flex-none text-dim" />}
     </span>
@@ -180,121 +117,62 @@ export function ChipMenu<T extends string>({
   if (disabled) return chip
 
   return (
-    <DropdownMenu.Root
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o)
-        // A stale filter would greet you on reopen with most of the list missing.
-        if (!o) setQuery("")
-      }}
-    >
-      <DropdownMenu.Trigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <button
           type="button"
           aria-label={ariaLabel}
           className={cn(
             "min-w-0 outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-ring",
             appearance === "quiet" && "inline-flex min-h-10 items-center",
-            // A custom trigger is usually a full-width field; the default chip
-            // must stay intrinsically sized.
             trigger && "w-full text-left"
           )}
         >
           {chip}
         </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          side={side}
-          align="start"
-          sideOffset={6}
-          // Radix portals to the body, so the menu can't be clipped — but it CAN
-          // spill across a neighbouring pane. `collisionPadding` keeps it inside
-          // the window, and `--radix-dropdown-menu-content-available-width` is
-          // the measured room it actually has, which the `max-w` below honours.
-          collisionPadding={8}
-          style={
-            matchTriggerWidth
-              ? // Radix exposes the trigger's measured width as a CSS var on the
-                // content — the only way to match it without measuring in React
-                // and re-rendering on every resize.
-                { width: "var(--radix-dropdown-menu-trigger-width)" }
-              : undefined
-          }
-          className={cn(
-            "z-50 flex max-h-[300px] max-w-[var(--radix-dropdown-menu-content-available-width)] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl",
-            !matchTriggerWidth && (searchable ? "min-w-[210px]" : "min-w-[160px]"),
-            // When searching, the filter box stays put and only the list scrolls.
-            !searchable && "overflow-auto"
-          )}
-        >
-          {searchable && (
-            <div className="flex flex-none items-center gap-1.5 border-b border-line px-1.5 pb-1.5">
-              <Search size={11} className="flex-none text-dim" />
-              <input
-                ref={inputRef}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={searchPlaceholder}
-                aria-label={searchPlaceholder}
-                className="w-full bg-transparent font-mono text-[12px] text-text-bright outline-none placeholder:text-dim"
-                onKeyDown={(e) => {
-                  // Radix implements typeahead on the menu: letter keys jump to
-                  // matching items. That would eat every keystroke aimed at this
-                  // box, so ordinary typing stays local. The keys that mean
-                  // "navigate the menu" still belong to Radix — Up/Down move into
-                  // the list, Escape closes, Tab leaves.
-                  if (e.key === "ArrowDown" || e.key === "ArrowUp") return
-                  if (e.key === "Escape" || e.key === "Tab") return
-                  if (e.key === "Enter") {
-                    // Enter takes the top match, so filtering to one model is
-                    // type-then-Enter rather than type-arrow-Enter.
-                    e.preventDefault()
-                    const first = matches[0]
-                    if (first) pick(first.value)
-                    return
-                  }
-                  e.stopPropagation()
-                }}
-              />
-            </div>
-          )}
-          <div className={cn("flex flex-col gap-0.5", searchable && "min-h-0 flex-1 overflow-auto")}>
-            {matches.length === 0 ? (
-              <div className="px-2.5 py-[7px] font-mono text-[12px] text-dim">{emptyLabel}</div>
-            ) : (
-              visible.map((section, i) => (
-                <DropdownMenu.Group key={section.label || i}>
-                  {showHeaders && (
-                    <DropdownMenu.Label
-                      className={cn(
-                        "px-2.5 pb-1 font-mono text-[10px] uppercase tracking-wider text-dim",
-                        i > 0 && "mt-1.5 border-t border-line pt-2"
+      </PopoverTrigger>
+      <PopoverContent
+        side={side}
+        align="start"
+        style={matchTriggerWidth ? { width: "var(--radix-popover-trigger-width)" } : undefined}
+        className={cn(
+          "overflow-hidden p-0",
+          !matchTriggerWidth && (searchable ? "w-[280px]" : "w-[210px]")
+        )}
+      >
+        <Command loop filter={includesSearch}>
+          {searchable && <CommandInput ref={inputRef} placeholder={searchPlaceholder} />}
+          <CommandList>
+            <CommandEmpty>{emptyLabel}</CommandEmpty>
+            {sections.map((section, index) => (
+              <CommandGroup
+                key={section.label || index}
+                heading={showHeaders ? section.label : undefined}
+              >
+                {section.options.map((option) => (
+                  <CommandItem
+                    key={option.value}
+                    value={option.value}
+                    keywords={[section.label, textOf(option)]}
+                    onSelect={() => pick(option.value)}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{option.label}</span>
+                      {option.description && (
+                        <span className="block truncate text-[10.5px] text-muted-foreground">
+                          {option.description}
+                        </span>
                       )}
-                    >
-                      {section.label}
-                    </DropdownMenu.Label>
-                  )}
-                  {section.options.map((o) => (
-                    <DropdownMenu.Item
-                      key={o.value}
-                      onSelect={() => onSelect?.(o.value)}
-                      className={cn(
-                        "flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[7px] font-mono text-[12px] outline-none",
-                        "text-text-body data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
-                      )}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                      {o.value === value && <Check size={13} className="flex-none text-blue" />}
-                      {renderTrailing?.(o)}
-                    </DropdownMenu.Item>
-                  ))}
-                </DropdownMenu.Group>
-              ))
-            )}
-          </div>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+                    </span>
+                    {option.value === value && <Check size={13} className="flex-none text-blue" />}
+                    {renderTrailing?.(option)}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }

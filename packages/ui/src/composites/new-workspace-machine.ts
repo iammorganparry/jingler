@@ -8,6 +8,7 @@ export interface NewWorkspaceDeps {
   defaultCli?: CliKind | null
   defaultProjectId?: string | null
   loadBranches: (path: string, environmentId?: string) => Promise<ReadonlyArray<string>>
+  prepareProject: (projectId: string, environmentId?: string) => Promise<Project>
   onCreate: (input: CreateSessionInput) => Promise<void>
   onClose: () => void
 }
@@ -15,6 +16,8 @@ export interface NewWorkspaceDeps {
 export interface NewWorkspaceContext {
   getDeps: () => NewWorkspaceDeps
   projectId: string
+  environmentId: string
+  resolvedProject: Project | null
   isolation: "worktree" | "direct"
   baseBranch: string
   branches: ReadonlyArray<string>
@@ -28,6 +31,7 @@ type NewWorkspaceEvent =
   | { type: "OPEN"; projectId?: string }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
+  | { type: "SET_ENVIRONMENT"; environmentId: string }
   | { type: "SET_ISOLATION"; isolation: "worktree" | "direct" }
   | { type: "SET_BASE"; baseBranch: string }
   | { type: "SET_TITLE"; title: string }
@@ -52,17 +56,24 @@ export const newWorkspaceMachine = setup({
     input: {} as { getDeps: () => NewWorkspaceDeps }
   },
   actors: {
-    loadBranches: fromPromise(
-      ({ input }: { input: { run: NewWorkspaceDeps["loadBranches"]; project?: Project } }) =>
-        input.project === undefined
-          ? Promise.resolve([])
-          : input.run(input.project.path, input.project.environmentId)
+    prepareWorkspace: fromPromise(
+      async ({ input }: { input: {
+        prepare: NewWorkspaceDeps["prepareProject"]
+        loadBranches: NewWorkspaceDeps["loadBranches"]
+        project?: Project
+        environmentId?: string
+      } }) => {
+        if (input.project === undefined) return { project: null, branches: [] as ReadonlyArray<string> }
+        const project = await input.prepare(input.project.id, input.environmentId)
+        const branches = await input.loadBranches(project.path, project.environmentId)
+        return { project, branches }
+      }
     ),
     submit: fromPromise(({ input }: { input: { run: () => Promise<void> } }) => input.run())
   },
   guards: {
     canSubmit: ({ context }) =>
-      context.projectId.length > 0 && context.baseBranch.length > 0 && context.cli !== ""
+      context.resolvedProject !== null && context.baseBranch.length > 0 && context.cli !== ""
   },
   actions: {
     seed: assign(({ context, event }) => {
@@ -74,6 +85,8 @@ export const newWorkspaceMachine = setup({
         deps.projects.find((project) => project.availability === "available")
       return {
         projectId: selected?.id ?? "",
+        environmentId: "local",
+        resolvedProject: null,
         isolation: "worktree" as const,
         baseBranch: "",
         branches: [] as ReadonlyArray<string>,
@@ -84,12 +97,13 @@ export const newWorkspaceMachine = setup({
       }
     }),
     applyBranches: assign(({ event }) => {
-      const branches = (event as unknown as { output: ReadonlyArray<string> }).output
-      return { branches, baseBranch: preferredBranch(branches), error: null }
+      const output = (event as unknown as { output: { project: Project | null; branches: ReadonlyArray<string> } }).output
+      return { resolvedProject: output.project, branches: output.branches, baseBranch: preferredBranch(output.branches), error: null }
     }),
     setLoadError: assign(({ event }) => ({
       branches: [],
       baseBranch: "",
+      resolvedProject: null,
       error: errorText((event as unknown as { error: unknown }).error, "Could not load branches.")
     })),
     setSubmitError: assign(({ event }) => ({
@@ -103,6 +117,8 @@ export const newWorkspaceMachine = setup({
   context: ({ input }) => ({
     getDeps: input.getDeps,
     projectId: "",
+    environmentId: "local",
+    resolvedProject: null,
     isolation: "worktree",
     baseBranch: "",
     branches: [],
@@ -115,8 +131,13 @@ export const newWorkspaceMachine = setup({
     closed: { on: { OPEN: { target: "loading", actions: "seed" } } },
     loading: {
       invoke: {
-        src: "loadBranches",
-        input: ({ context }) => ({ run: context.getDeps().loadBranches, project: projectFor(context) }),
+        src: "prepareWorkspace",
+        input: ({ context }) => ({
+          prepare: context.getDeps().prepareProject,
+          loadBranches: context.getDeps().loadBranches,
+          project: projectFor(context),
+          ...(context.environmentId === "local" ? {} : { environmentId: context.environmentId })
+        }),
         onDone: { target: "editing", actions: "applyBranches" },
         onError: { target: "editing", actions: "setLoadError" }
       },
@@ -131,6 +152,17 @@ export const newWorkspaceMachine = setup({
             projectId: event.projectId,
             branches: [],
             baseBranch: "",
+            resolvedProject: null,
+            error: null
+          }))
+        },
+        SET_ENVIRONMENT: {
+          target: "loading",
+          actions: assign(({ event }) => ({
+            environmentId: event.environmentId,
+            branches: [],
+            baseBranch: "",
+            resolvedProject: null,
             error: null
           }))
         },
@@ -146,8 +178,8 @@ export const newWorkspaceMachine = setup({
         src: "submit",
         input: ({ context }) => ({
           run: () => {
-            const project = projectFor(context)
-            if (project === undefined) return Promise.reject(new Error("Select a project."))
+            const project = context.resolvedProject
+            if (project === null) return Promise.reject(new Error("Select a project."))
             return context.getDeps().onCreate({
               projectId: project.id,
               ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),

@@ -91,12 +91,19 @@ export interface PlanView {
   readonly workflow: PlanWorkflowGraph
 }
 
-const executionStatusOf = (stage: PlanPrdStage): PlanStageExecutionStatus => {
+/** Derive one canonical status for every plan surface. */
+export const planStageExecutionStatus = (stage: PlanPrdStage): PlanStageExecutionStatus => {
   const tasks = stage.tasks ?? []
   if (tasks.some((task) => task.status === "blocked")) return "blocked"
   if (stage.acceptance.some((criterion) => criterion.status === "failed")) return "failed"
   if (tasks.some((task) => task.status === "in-progress")) return "running"
   if (tasks.length > 0 && tasks.every((task) => task.status === "completed")) return "completed"
+  if (
+    stage.acceptance.length > 0 &&
+    stage.acceptance.every(
+      (criterion) => criterion.status === "passed" || criterion.status === "waived"
+    )
+  ) return "completed"
   return "queued"
 }
 
@@ -106,7 +113,7 @@ const toStepView = (stage: PlanPrdStage): PlanStepView => {
     title: stage.title,
     intent: stage.intent,
     complexity: stage.complexity,
-    executionStatus: executionStatusOf(stage),
+    executionStatus: planStageExecutionStatus(stage),
     acceptance: stage.acceptance,
     tasks: stage.tasks ?? [],
     diagrams: stage.diagrams,
@@ -186,7 +193,7 @@ export const stagesToGraph = (prd: PlanPrd): PlanWorkflowGraph => {
       stageId: stage.id,
       title: stage.title,
       complexity: stage.complexity,
-      executionStatus: executionStatusOf(stage)
+      executionStatus: planStageExecutionStatus(stage)
     }
   })
 

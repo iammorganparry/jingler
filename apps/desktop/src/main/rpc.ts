@@ -91,7 +91,6 @@ import {
   PlanConflictError,
   PlanPersistenceError,
   type PlanValidationError,
-  planStageSemanticFingerprint,
   resolveFindings,
   ReviewError,
   reviewModelFor,
@@ -988,22 +987,20 @@ export const planDispatchMessage = (input: PlanDispatchMessageInput) =>
     mentionedParticipantIds: [],
     deliveryState: "sent",
   }).pipe(
-    Effect.map((document) => {
+    Effect.flatMap((document) => {
       const messageId = document.plan.annotations
         .find((annotation) => annotation.id === input.annotationId)
         ?.messages.at(-1)?.id;
       if (messageId === undefined) {
-        return {
-          document,
-          messageId: "",
-          deliveries: [] as ReadonlyArray<PlanMentionDelivery>,
-        };
+        return Effect.fail(
+          planMutationConflict("The recorded plan comment is no longer available."),
+        );
       }
-      return {
+      return Effect.succeed({
         document,
         messageId,
         deliveries: [] as ReadonlyArray<PlanMentionDelivery>,
-      };
+      });
     }),
   );
 
@@ -1034,11 +1031,23 @@ export const planDispatchExistingMessage = (
               "The canonical plan changed before the comment could be recorded.",
             ),
           )
-        : Effect.succeed({
-            document,
-            messageId: input.messageId,
-            deliveries: [] as ReadonlyArray<PlanMentionDelivery>,
-          }),
+        : (() => {
+            const message = document.plan.annotations
+              .find((annotation) => annotation.id === input.annotationId)
+              ?.messages.find((candidate) => candidate.id === input.messageId);
+            return message === undefined ||
+              (message.deliveryState !== "pending" && message.deliveryState !== "failed")
+              ? Effect.fail(
+                  planMutationConflict(
+                    `Retryable comment message "${input.messageId}" is no longer available.`,
+                  ),
+                )
+              : Effect.succeed({
+                  document,
+                  messageId: message.id,
+                  deliveries: [] as ReadonlyArray<PlanMentionDelivery>,
+                });
+          })(),
     ),
     Effect.catchTag("SessionNotFoundError", () =>
       Effect.fail(planMutationConflict("The plan session no longer exists.")),
@@ -3646,15 +3655,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Projects.list": ({ environmentId }) =>
     environmentId === undefined
       ? Effect.gen(function* () {
-          const registered = yield* ProjectService.list()
-          if (registered.length > 0) return registered
           const sessions = yield* SessionStore.list()
           const discovered = yield* WorkspaceService.listRepos().pipe(
             Effect.orElseSucceed(() => [])
           )
           const projects = yield* ProjectService.backfill([
             ...sessions.flatMap((session) =>
-              session.repoPath === undefined
+              session.environmentId !== undefined || session.repoPath === undefined
                 ? []
                 : [{ path: session.repoPath, name: session.repo }]
             ),
@@ -3666,10 +3673,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           const byPath = new Map(projects.map((project) => [project.path, project.id]))
           yield* Effect.forEach(
             sessions.filter(
-              (session) => session.projectId === undefined && session.repoPath !== undefined
+              (session) =>
+                session.environmentId === undefined &&
+                session.projectId === undefined &&
+                session.repoPath !== undefined
             ),
             (session) => {
-              const projectId = byPath.get(session.repoPath!)
+              const projectId = byPath.get(resolve(session.repoPath!))
               return projectId === undefined
                 ? Effect.void
                 : SessionStore.setProject(session.id, projectId).pipe(Effect.asVoid)
@@ -3741,6 +3751,30 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
             (cause) => new GitError({ message: "Could not clone the remote project", cause })
           )
         ),
+  "Projects.ensureOnEnvironment": ({ projectId, environmentId }) =>
+    Effect.gen(function* () {
+      const project = yield* ProjectService.get(projectId)
+      const url = yield* GitService.remoteUrl(project.path).pipe(
+        Effect.flatMap((value) =>
+          value === null
+            ? Effect.fail(new GitError({ message: `${project.name} has no origin remote to clone.` }))
+            : Effect.succeed(value)
+        )
+      )
+      return yield* RemoteSessionService.requestOnEnvironment(
+        environmentId,
+        "Projects.ensure",
+        { url, name: project.name }
+      ).pipe(
+        Effect.flatMap(Schema.decodeUnknown(ProjectSchema)),
+        Effect.map((remoteProject) => ({ ...remoteProject, environmentId })),
+        Effect.mapError((cause) =>
+          cause instanceof GitError
+            ? cause
+            : new GitError({ message: `Could not prepare ${project.name} on the selected host`, cause })
+        )
+      )
+    }),
   "Projects.remove": ({ id, environmentId }) =>
     environmentId === undefined
       ? ProjectService.remove(id)

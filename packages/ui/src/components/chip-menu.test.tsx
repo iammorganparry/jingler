@@ -22,7 +22,7 @@ const groups = [
   }
 ]
 
-const open = () => fireEvent.pointerDown(screen.getByRole("button"), { button: 0, ctrlKey: false })
+const open = () => fireEvent.click(screen.getByRole("button"))
 
 describe("ChipMenu", () => {
   it("shows the selected option's label, not its value", () => {
@@ -45,7 +45,7 @@ describe("ChipMenu", () => {
     expect(screen.queryByText("Claude Code")).toBeNull()
     // The models themselves are still listed (the chip also reads "opus", so
     // this asserts against the menu item rather than the text).
-    expect(screen.getByRole("menuitem", { name: "opus" })).toBeDefined()
+    expect(screen.getByRole("option", { name: "opus" })).toBeDefined()
   })
 
   it("emits the full value so the caller can tell which harness was picked", () => {

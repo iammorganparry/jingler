@@ -5,6 +5,9 @@ import type { SessionActivity } from "@jingler/core"
 let activities: Record<string, SessionActivity> = {}
 const listeners = new Set<() => void>()
 
+/** Read-only seam for non-React consumers and behavioral tests. */
+export const sessionActivitiesSnapshot = (): Readonly<Record<string, SessionActivity>> => activities
+
 const same = (a: SessionActivity | undefined, b: SessionActivity): boolean =>
   a?.kind === b.kind && a.verb === b.verb && a.target === b.target
 
@@ -23,10 +26,14 @@ export const setSessionActivity = (id: string, activity: SessionActivity | null)
   for (const listener of listeners) listener()
 }
 
-const subscribe = (listener: () => void): (() => void) => {
+export const subscribeSessionActivities = (listener: () => void): (() => void) => {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
 
 export const useSessionActivities = (): Record<string, SessionActivity> =>
-  useSyncExternalStore(subscribe, () => activities, () => activities)
+  useSyncExternalStore(
+    subscribeSessionActivities,
+    sessionActivitiesSnapshot,
+    sessionActivitiesSnapshot
+  )

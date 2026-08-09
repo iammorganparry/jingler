@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { appShell, expect, sessionRow, test, type LaunchedApp, type SeedSession } from "./fixtures.js"
@@ -50,17 +51,17 @@ const enrollBuildbox = async (app: LaunchedApp): Promise<void> => {
 
 const selectComposerEnvironment = async (window: Page, name = "buildbox") => {
   await window.getByRole("button", { name: "Execution environment" }).click()
-  await window.getByRole("menuitem", { name }).click()
+  await window.getByRole("option", { name: new RegExp(name) }).click()
 }
 
-const createRemoteSession = async (window: Page, title: string): Promise<string> => {
-  await window.getByTestId("new-session").click()
-  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
-  await window.getByRole("combobox").first().click()
+const createRemoteWorkspace = async (window: Page, title: string): Promise<string> => {
+  await window.getByTestId("new-workspace").click()
+  await expect(window.getByRole("heading", { name: "New workspace" })).toBeVisible()
+  await window.getByRole("combobox", { name: "Execution host" }).click()
   await window.getByRole("option", { name: "buildbox" }).click()
-  await window.getByPlaceholder("Leave blank for agent naming").fill(title)
-  await expect(window.getByRole("button", { name: "Create", exact: true })).toBeEnabled({ timeout: 15_000 })
-  await window.getByRole("button", { name: "Create", exact: true }).click()
+  await window.getByRole("textbox", { name: "Workspace name" }).fill(title)
+  await expect(window.getByRole("button", { name: "Create workspace" })).toBeEnabled({ timeout: 20_000 })
+  await window.getByRole("button", { name: "Create workspace" }).click()
   const row = sessionRow(window, title)
   await expect(row).toBeVisible({ timeout: 20_000 })
   const testId = await row.getAttribute("data-testid")
@@ -88,15 +89,35 @@ test("selects an account-owned environment from the composer and reflects it in 
     sessions: ({ repoPath }) => [localSession(repoPath)]
   })
   await enrollBuildbox(app)
+  await expect(
+    app.window.getByRole("button", { name: "Execution environment" }).locator('[data-environment-icon="local"]')
+  ).toBeVisible()
   await selectComposerEnvironment(app.window)
   await expect(app.window.getByTestId("session-environment-session_local_abcdefgh")).toHaveText("buildbox")
   await expect(app.window.getByRole("button", { name: "Execution environment" })).toContainText("buildbox")
+  await expect(
+    app.window.getByRole("button", { name: "Execution environment" }).locator('[data-environment-icon="remote"]')
+  ).toBeVisible()
 })
 
-test("creates and runs a session on an account-owned environment", async ({ launchApp }) => {
-  const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true })
+test("clones a missing project and creates a workspace on an account-owned environment", async ({ launchApp }) => {
+  const app = await launchApp({
+    configured: true,
+    withRepo: true,
+    remoteEnvironment: true,
+    remoteRepo: false,
+    seed: ({ reposDir, repoPath }) => {
+      const origin = join(reposDir, "widget-origin.git")
+      execFileSync("git", ["clone", "--bare", repoPath, origin])
+      execFileSync("git", ["remote", "add", "origin", origin], { cwd: repoPath })
+    }
+  })
   await enrollBuildbox(app)
-  const sessionId = await createRemoteSession(app.window, "Remote scripted task")
+  const sessionId = await createRemoteWorkspace(app.window, "Remote scripted task")
+  const remoteRepo = join(app.deviceHome!, "repos", "widget")
+  expect(existsSync(join(remoteRepo, ".git"))).toBe(true)
+  const remoteProjects = JSON.parse(readFileSync(join(app.deviceHome!, "jingler", "projects.json"), "utf8"))
+  expect(remoteProjects).toEqual([expect.objectContaining({ name: "widget", path: remoteRepo })])
   const composer = app.window.getByPlaceholder("Message Claude…")
   await composer.fill("Reply from buildbox")
   await composer.press("Enter")
@@ -135,10 +156,20 @@ test("continues an existing session on another environment without mutating the 
   await expect(app.window.getByTestId("session-row-session_local_abcdefgh")).toBeVisible()
 })
 
-test.skip("resumes a remote turn after relay interruption without duplicate execution", async ({ launchApp }) => {
-  const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true })
+test("resumes a remote turn after relay interruption without duplicate execution", async ({ launchApp }) => {
+  const app = await launchApp({
+    configured: true,
+    withRepo: true,
+    remoteEnvironment: true,
+    remoteRepo: false,
+    seed: ({ reposDir, repoPath }) => {
+      const origin = join(reposDir, "widget-origin.git")
+      execFileSync("git", ["clone", "--bare", repoPath, origin])
+      execFileSync("git", ["remote", "add", "origin", origin], { cwd: repoPath })
+    }
+  })
   await enrollBuildbox(app)
-  const sessionId = await createRemoteSession(app.window, "Reconnect exactly once")
+  const sessionId = await createRemoteWorkspace(app.window, "Reconnect exactly once")
   const composer = app.window.getByPlaceholder("Message Claude…")
   await composer.fill("Complete once after reconnect")
   await composer.press("Enter")
@@ -175,5 +206,5 @@ test("revokes an account-owned environment while preserving local sessions", asy
   await app.window.getByRole("button", { name: "Close settings" }).click()
   await expect(sessionRow(app.window, "Local session")).toBeVisible()
   await app.window.getByRole("button", { name: "Execution environment" }).click()
-  await expect(app.window.getByRole("menuitem", { name: /buildbox/ })).toHaveCount(0)
+  await expect(app.window.getByRole("option", { name: /buildbox/ })).toHaveCount(0)
 })

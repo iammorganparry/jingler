@@ -20,6 +20,7 @@ import type {
 import {
   GitHubApiError,
   GitError,
+  defaultModel,
   issueReferenceOf,
   semanticBranchProposalFromName,
   SessionNotFoundError,
@@ -206,17 +207,18 @@ export const migrateUnsupportedHarness = (value: unknown): unknown => {
   const chats = Array.isArray(value.chats)
     ? value.chats.map((chat) =>
         isRecord(chat)
-          ? { ...chat, model: "gpt-5.6-sol", resumeId: undefined }
+          ? { ...chat, model: defaultModel("codex"), resumeId: undefined }
           : chat
       )
     : value.chats
+  const reasoning = isRecord(value.reasoning) && value.reasoning.codex !== undefined
+    ? { codex: value.reasoning.codex }
+    : undefined
   return {
     ...value,
     cli: "codex",
     ...(chats === undefined ? {} : { chats }),
-    reasoning: isRecord(value.reasoning)
-      ? { codex: value.reasoning.codex ?? { enabled: true, effort: "medium" } }
-      : { codex: { enabled: true, effort: "medium" } }
+    ...(reasoning === undefined ? {} : { reasoning })
   }
 }
 

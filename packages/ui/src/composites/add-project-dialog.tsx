@@ -45,7 +45,7 @@ export function AddProjectDialog(props: AddProjectDialogProps) {
     <Dialog open={props.open} onOpenChange={(open) => { if (!open) send({ type: "CLOSE" }) }}>
       <DialogContent className="max-w-[720px]">
         <DialogHeader>
-          <DialogTitle>{form ? "Add project" : "Add project"}</DialogTitle>
+          <DialogTitle>Add project</DialogTitle>
         </DialogHeader>
         <DialogBody className="p-0">
           {!form ? (

@@ -56,6 +56,7 @@ describe("PlanProgressDock", () => {
     expect(planProgressStatus(stage("3", "Blocked", "blocked"))).toBe("blocked")
     expect(planProgressStatus(stage("4", "Failed", "pending", "failed"))).toBe("failed")
     expect(planProgressStatus(stage("5", "Done", "completed", "passed"))).toBe("done")
+    expect(planProgressStatus({ ...stage("6", "Verified", "pending", "passed"), tasks: [] })).toBe("done")
   })
 
   it("expands from the composer summary and opens a stable plan stage", () => {

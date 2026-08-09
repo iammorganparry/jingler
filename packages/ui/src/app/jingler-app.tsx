@@ -10,8 +10,6 @@ import type {
   ContextSnapshot,
   CliInfo,
   CliKind,
-  CreateSessionFromIssueInput,
-  CreateSessionFromPrInput,
   CreateSessionInput,
   GitHubConnection,
   GitConfig,
@@ -20,11 +18,8 @@ import type {
   DiffStat,
   Environment,
   EnvironmentDiscovery,
-  IssueSummary,
-  IssueProviderDescriptor,
   ModelOption,
   SessionPrStatus,
-  PrSummary,
   ProviderConfig,
   Project,
   PlanTemplateConfig,
@@ -136,6 +131,7 @@ export interface JinglerAppProps {
   onRegisterProject?: (input: { path: string; name?: string }) => Promise<Project>
   onCreateProjectDirectory?: (input: { path: string; name?: string }) => Promise<Project>
   onCloneProject?: (input: { url: string; destination: string; name?: string }) => Promise<Project>
+  onEnsureProjectOnEnvironment?: (projectId: string, environmentId: string) => Promise<Project>
   /** Absolute paths of starred repos — surfaced first in the picker + sidebar. */
   starredRepos?: ReadonlyArray<string>
   /** Toggle a repo's starred state (by absolute path); persists upstream. */
@@ -359,34 +355,6 @@ export interface JinglerAppProps {
   /** Permanently delete a session from the sidebar quick-actions (confirms first). */
   onDeleteSession?: (id: string) => void
   /**
-   * List open PRs for a repo (the New Session "From PR" picker). Presence wires
-   * the `Blank | From PR` toggle; absent (e.g. GitHub not connected) hides it.
-   */
-  loadPrs?: (
-    repoPath: string,
-    opts: { mine: boolean; search: string }
-  ) => Promise<ReadonlyArray<PrSummary>>
-  /** Create a session from an existing PR (checks out its head branch) and return it. */
-  onCreateSessionFromPr?: (input: CreateSessionFromPrInput) => Promise<Session>
-  /**
-   * List open issues for a repo. Presence (with `onCreateSessionFromIssue`) wires
-   * the "From issue" mode; absent (GitHub not connected) hides it.
-   */
-  loadIssues?: (
-    repoPath: string,
-    opts: { mine: boolean; search: string }
-  ) => Promise<ReadonlyArray<IssueSummary>>
-  /** Enabled plugin-backed issue providers shown beside the built-in GitHub provider. */
-  issueProviders?: ReadonlyArray<IssueProviderDescriptor>
-  /** List normalized issues through a plugin-backed provider. */
-  loadProviderIssues?: (
-    providerId: string,
-    repoPath: string,
-    opts: { mine: boolean; search: string }
-  ) => Promise<ReadonlyArray<IssueSummary>>
-  /** Create a session from a normalized issue (forks a fresh branch, links it) and return it. */
-  onCreateSessionFromIssue?: (input: CreateSessionFromIssueInput) => Promise<Session>
-  /**
    * Commands contributed by loaded plugins, for the palette.
    *
    * Passed in rather than read here: this package has no RPC client and no
@@ -428,6 +396,7 @@ export function JinglerApp({
   onRegisterProject,
   onCreateProjectDirectory,
   onCloneProject,
+  onEnsureProjectOnEnvironment,
   starredRepos = [],
   onToggleStar,
   collapsedRepos = [],
@@ -1186,11 +1155,19 @@ export function JinglerApp({
           open={newOpen}
           onClose={() => setNewOpen(false)}
           projects={projects}
+          environments={environments}
           requestedProjectId={requestedProjectId}
           defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
           clis={clis}
           defaultCli={defaultCli}
           loadBranches={loadBranches}
+          prepareProject={async (projectId, environmentId) => {
+            const project = projects.find((candidate) => candidate.id === projectId)
+            if (project === undefined) throw new Error("Project not found.")
+            if (environmentId === undefined) return project
+            if (!onEnsureProjectOnEnvironment) throw new Error("Remote project provisioning is unavailable.")
+            return onEnsureProjectOnEnvironment(projectId, environmentId)
+          }}
           onCreate={handleCreate}
         />
       )}
@@ -1202,9 +1179,8 @@ export function JinglerApp({
           register={onRegisterProject}
           createDirectory={onCreateProjectDirectory}
           clone={onCloneProject}
-          onAdded={(project) => {
+          onAdded={() => {
             setAddProjectOpen(false)
-            setRequestedProjectId(project.id)
           }}
         />
       )}

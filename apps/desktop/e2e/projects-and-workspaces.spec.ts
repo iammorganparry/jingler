@@ -31,7 +31,7 @@ const addProject = async (window: Page, projectPath: string) => {
 
 const createWorkspace = async (
   window: Page,
-  input: { title: string; checkout: "Local checkout" | "New worktree"; task?: string }
+  input: { title: string; checkout: "Host checkout" | "New worktree"; task?: string }
 ) => {
   await window.getByTestId("new-workspace").click()
   await expect(window.getByRole("heading", { name: "New workspace" })).toBeVisible()
@@ -64,7 +64,7 @@ test("creates a direct workspace from a registered project", async ({ launchApp 
   await addProject(launched.window, projectPath)
   await createWorkspace(launched.window, {
     title: "Direct workspace",
-    checkout: "Local checkout"
+    checkout: "Host checkout"
   })
 
   const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]

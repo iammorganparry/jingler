@@ -14,6 +14,12 @@ const actorFor = () => createActor(newWorkspaceMachine, {
       projects,
       clis: [{ kind: "codex", label: "Codex", available: true, binPath: "/bin/codex", version: null, authStatus: "authenticated" }],
       defaultCli: "codex",
+      prepareProject: async (projectId, environmentId) => {
+        const project = projects.find((candidate) => candidate.id === projectId)!
+        return environmentId === undefined
+          ? project
+          : { ...project, id: `${project.id}-${environmentId}`, environmentId, path: `/remote/${project.name}` }
+      },
       loadBranches: async (path) => path.endsWith("remote") ? ["develop"] : ["main", "feature"],
       onCreate: vi.fn(async () => undefined),
       onClose: vi.fn()
@@ -48,6 +54,23 @@ describe("newWorkspaceMachine", () => {
       isolation: "direct",
       baseBranch: "develop",
       draft: "Run the tests"
+    })
+  })
+
+  it("prepares a local project on a remote host before loading its branches", async () => {
+    const actor = actorFor().start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-1" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+
+    expect(actor.getSnapshot().context).toMatchObject({
+      environmentId: "device-1",
+      resolvedProject: {
+        id: "p-local-device-1",
+        environmentId: "device-1",
+        path: "/remote/local"
+      }
     })
   })
 })

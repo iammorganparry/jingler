@@ -33,11 +33,8 @@ const selectModel = async (
   model: string
 ) => {
   await window.getByRole("button", { name: /^Model:/ }).click()
-  const modelButton = window.getByRole("button", { name: model, exact: true })
-  if (await modelButton.count() === 0) {
-    await window.getByRole("button").filter({ hasText: provider }).click()
-  }
-  await modelButton.click()
+  await window.getByRole("option", { name: new RegExp(`^${provider}\\b`) }).click()
+  await window.getByRole("option", { name: new RegExp(`^${model}\\b`) }).click()
 }
 
 test("offers only Claude Code and Codex providers", async ({ launchApp }) => {
@@ -61,15 +58,15 @@ test("updates modes when switching from Claude to Codex", async ({ launchApp }) 
   })
   await expect(appShell(launched.window)).toBeVisible()
 
-  await launched.window.getByText("Accept edits", { exact: true }).click()
-  await expect(launched.window.getByRole("menuitem", { name: "Default permissions" })).toBeVisible()
-  await expect(launched.window.getByRole("menuitem", { name: "Read only" })).toHaveCount(0)
+  await launched.window.getByText("Accept Edits", { exact: true }).click()
+  await expect(launched.window.getByRole("option", { name: /^Default\b/ })).toBeVisible()
+  await expect(launched.window.getByRole("option", { name: /^Read Only\b/ })).toHaveCount(0)
   await launched.window.keyboard.press("Escape")
 
   await selectModel(launched.window, "Codex CLI", "GPT-5.6 Sol")
-  await launched.window.getByText("Workspace write", { exact: true }).click()
-  await expect(launched.window.getByRole("menuitem", { name: "Read only" })).toBeVisible()
-  await expect(launched.window.getByRole("menuitem", { name: "Default permissions" })).toHaveCount(0)
+  await launched.window.getByText("Workspace Write", { exact: true }).click()
+  await expect(launched.window.getByRole("option", { name: /^Read Only\b/ })).toBeVisible()
+  await expect(launched.window.getByRole("option", { name: /^Default\b/ })).toHaveCount(0)
 })
 
 test("updates reasoning options when switching Codex models", async ({ launchApp }) => {
@@ -82,14 +79,14 @@ test("updates reasoning options when switching Codex models", async ({ launchApp
 
   await selectModel(launched.window, "Codex CLI", "GPT-5.6 Luna")
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
-  await expect(launched.window.getByRole("menuitem", { name: "medium", exact: true })).toBeVisible()
-  await expect(launched.window.getByRole("menuitem", { name: "high", exact: true })).toHaveCount(0)
+  await expect(launched.window.getByRole("option", { name: "Medium", exact: true })).toBeVisible()
+  await expect(launched.window.getByRole("option", { name: "High", exact: true })).toHaveCount(0)
   await launched.window.keyboard.press("Escape")
 
   await selectModel(launched.window, "Codex CLI", "GPT-5.6 Sol")
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
-  await expect(launched.window.getByRole("menuitem", { name: "high", exact: true })).toBeVisible()
-  await expect(launched.window.getByRole("menuitem", { name: "xhigh", exact: true })).toBeVisible()
+  await expect(launched.window.getByRole("option", { name: "High", exact: true })).toBeVisible()
+  await expect(launched.window.getByRole("option", { name: "Extra High", exact: true })).toBeVisible()
 })
 
 test("persists provider model mode and reasoning selections across restart", async ({ launchApp }) => {
@@ -100,10 +97,10 @@ test("persists provider model mode and reasoning selections across restart", asy
   })
   await expect(appShell(first.window)).toBeVisible()
   await selectModel(first.window, "Codex CLI", "GPT-5.6 Sol")
-  await first.window.getByText("Workspace write", { exact: true }).click()
-  await first.window.getByRole("menuitem", { name: "Full access" }).click()
+  await first.window.getByText("Workspace Write", { exact: true }).click()
+  await first.window.getByRole("option", { name: /^Full Access\b/ }).click()
   await first.window.getByRole("button", { name: "Thinking strength" }).click()
-  await first.window.getByRole("menuitem", { name: "high", exact: true }).click()
+  await first.window.getByRole("option", { name: "High", exact: true }).click()
   await expect.poll(() => {
     const persisted = JSON.parse(readFileSync(join(first.home, "jingler", "sessions.json"), "utf8"))[0]
     return {
@@ -129,6 +126,27 @@ test("persists provider model mode and reasoning selections across restart", asy
   })
   await expect(appShell(reopened.window)).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Model: GPT-5.6 Sol" })).toBeVisible()
-  await expect(reopened.window.getByText("Full access", { exact: true })).toBeVisible()
-  await expect(reopened.window.getByRole("button", { name: "Thinking strength" })).toContainText("high")
+  await expect(reopened.window.getByText("Full Access", { exact: true })).toBeVisible()
+  await expect(reopened.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
+})
+
+test("blocks sending when the workspace harness is unavailable and offers recovery", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: session("s_unavailable_harness"),
+    e2eEnv: { JINGLER_E2E_AVAILABLE_HARNESSES: "codex" }
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+
+  await expect(
+    launched.window.getByRole("alert").filter({ hasText: "Claude Code is unavailable" })
+  ).toBeVisible()
+  await expect(launched.window.getByPlaceholder(/Claude Code is unavailable/)).toBeDisabled()
+  await expect(launched.window.getByRole("button", { name: "Send ↵" })).toHaveCount(0)
+
+  await selectModel(launched.window, "Codex CLI", "GPT-5.6 Sol")
+  await expect(launched.window.getByPlaceholder(/Message Codex/i)).toBeEnabled()
 })

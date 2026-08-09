@@ -146,8 +146,8 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.click()
   // Switch to Auto via the composer's mode chip (seeded as accept-edits).
-  await window.getByText("Accept edits", { exact: true }).click()
-  await window.getByRole("menuitem", { name: "Full access" }).click()
+  await window.getByText("Accept Edits", { exact: true }).click()
+  await window.getByRole("option", { name: /^Full Access\b/ }).click()
 
   await composer.pressSequentially("Add rate limiting.")
   await composer.press("Enter")
@@ -230,15 +230,16 @@ test("thinking strength is a compact per-session composer control", async ({ lau
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
   const thinking = window.getByRole("button", { name: "Thinking strength" })
 
-  await expect(thinking).toContainText("default")
+  await expect(thinking).toContainText("Default")
   await thinking.click()
   // The menu offers the provider's OWN reasoning efforts now, not Claude's
   // "think"/"think hard" prompt phrases — see `reasoningEffortsFor`, which gives
   // Claude low/medium/high/xhigh/max. Read the option list from there rather than
   // naming one, so a provider adding or renaming a tier doesn't silently rot this.
   const effort = reasoningEffortsFor("claude")[2]!
-  await window.getByRole("menuitem", { name: effort, exact: true }).click()
-  await expect(thinking).toContainText(effort)
+  const effortLabel = effort[0]!.toUpperCase() + effort.slice(1)
+  await window.getByRole("option", { name: effortLabel, exact: true }).click()
+  await expect(thinking).toContainText(effortLabel)
 })
 
 test("the model chip shows the harness model and switches", async ({ launchApp }) => {

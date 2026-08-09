@@ -210,9 +210,13 @@ export class ProjectService extends Effect.Service<ProjectService>()(
             const key = `${repository.environmentId ?? "local"}\0${resolved}`
             if (!unique.has(key)) unique.set(key, { ...repository, path: resolved })
           }
+          // Legacy records are hints, not authoritative registrations. Deleted
+          // worktrees and remote-host paths must not make the whole local
+          // catalogue unreadable; register what is valid and leave the rest
+          // untouched for the owning session/environment to resolve.
           yield* Effect.forEach(
             [...unique.values()].sort((left, right) => left.path.localeCompare(right.path)),
-            register,
+            (repository) => register(repository).pipe(Effect.either),
             { concurrency: 1, discard: true }
           )
           return yield* list()

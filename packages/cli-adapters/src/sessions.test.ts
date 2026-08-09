@@ -1941,5 +1941,6 @@ describe("legacy harness migration", () => {
       worktreePath: legacy.worktreePath,
       chats: [{ id: "c_1", model: "gpt-5.6-sol" }]
     })
+    expect(migrated).not.toHaveProperty("reasoning")
   })
 })

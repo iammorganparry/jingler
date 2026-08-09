@@ -88,6 +88,7 @@ import {
   modelsList,
   mismatchedIssueProviderId,
   planAppendMessage,
+  planDispatchExistingMessage,
   planSetThreadResolved,
   planUpdateMessageDelivery,
   reconcileRelaySessionRoutes,
@@ -563,7 +564,16 @@ describe("RPC handlers", () => {
             author: "user",
           }),
         );
-        return { appended, delivered, resolved, stale, watched };
+        const retrySent = yield* Effect.either(
+          planDispatchExistingMessage({
+            sessionId: "session-plan-thread",
+            planId: plan.id,
+            baseRevision: resolved.revision,
+            annotationId,
+            messageId,
+          }),
+        );
+        return { appended, delivered, resolved, stale, retrySent, watched };
       }).pipe(Effect.provide(services)),
     );
 
@@ -583,6 +593,7 @@ describe("RPC handlers", () => {
       "Verified.",
     );
     expect(Either.isLeft(result.stale)).toBe(true);
+    expect(Either.isLeft(result.retrySent)).toBe(true);
     if (Either.isLeft(result.stale)) {
       expect(result.stale.left).toMatchObject({
         _tag: "PlanConflictError",

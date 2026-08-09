@@ -36,8 +36,8 @@ export const PlaintextSecretStoreLive = Layer.effect(
         Effect.orElseSucceed(() => null)
       ),
       set: (token: string) =>
-        fs
-          .writeFileString(path, token)
+        fs.makeDirectory(paths.root, { recursive: true })
+          .pipe(Effect.zipRight(fs.writeFileString(path, token)))
           .pipe(
             Effect.mapError(
               () => new SecretStoreUnavailable({ message: "e2e write failed" })
@@ -86,7 +86,8 @@ export const SecretStoreLive = Layer.effect(
       }),
       set: (token: string) =>
         safeStorage.isEncryptionAvailable()
-          ? fs.writeFile(path, safeStorage.encryptString(token)).pipe(
+          ? fs.makeDirectory(paths.root, { recursive: true }).pipe(
+              Effect.zipRight(fs.writeFile(path, safeStorage.encryptString(token))),
               Effect.mapError(
                 () =>
                   new SecretStoreUnavailable({

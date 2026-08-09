@@ -101,17 +101,20 @@ const READ_ONLY_DISALLOWED: ReadonlyArray<string> = [
  * ungated. This is the same reasoning the plan-approval path uses when it
  * restores "default" mid-run (see `setPermissionMode` below).
  *
- * "plan" ALSO maps to "default", NOT the SDK's "plan" mode — deliberately. The
- * SDK's plan mode hard-blocks every edit tool BEFORE `canUseTool` runs, so a
- * planning agent that tries to write (e.g. drafting the plan to a file) gets an
- * opaque tool error and derails instead of planning. In Jingler, writes are
- * always enabled in plan mode and gated only by our own `canUseTool` — the plan
- * OUTPUT protocol still comes from `planModeInstructions` (injected on
- * `spec.mode === "plan"`, independent of this permission mode) and `ExitPlanMode`
- * is still intercepted by `canUseTool` in "default" mode.
+ * Enhanced "plan" maps to "default" because Jingler owns its structured plan
+ * protocol and approval gate. When enhanced planning is disabled, "plan" maps
+ * to the SDK's native plan mode and no Jingler plan instructions or interception
+ * are installed.
  */
-export const mapPermissionMode = (mode: PermissionMode): SdkPermissionMode =>
-  mode === "accept-edits" ? "acceptEdits" : "default"
+export const mapPermissionMode = (
+  mode: PermissionMode,
+  enhancedPlan = true
+): SdkPermissionMode =>
+  mode === "plan" && !enhancedPlan
+    ? "plan"
+    : mode === "accept-edits"
+      ? "acceptEdits"
+      : "default"
 
 /** Validate provider-native values for Claude's adaptive-thinking API. */
 export const mapClaudeReasoning = (
@@ -1028,6 +1031,7 @@ export const runClaude = (
   resume: Map<string, string>
 ): Effect.Effect<void, CliExecError> =>
   Effect.gen(function* () {
+    const enhancedPlan = spec.enhancedPlan !== false
     const runtime = yield* Effect.runtime<never>()
     const runP = <A>(effect: Effect.Effect<A>): Promise<A> => Runtime.runPromise(runtime)(effect)
     const abort = new AbortController()
@@ -1099,7 +1103,7 @@ export const runClaude = (
         // ordinary Auto turn. `spec.mode` only describes how the turn started,
         // so it cannot tell us whether a later native plan-file Write is really
         // a plan submission.
-        let nativePlanActive = spec.mode === "plan"
+        let nativePlanActive = enhancedPlan && spec.mode === "plan"
         // Claude's native plan flow normally supplies the PRD through
         // `ExitPlanMode.input.plan`, but read-only enhanced-plan runs can instead
         // stream the complete fenced document as assistant text and call the
@@ -1119,7 +1123,7 @@ export const runClaude = (
           input: Record<string, unknown>,
           options: { toolUseID: string }
         ): Promise<PermissionResult> => {
-          if (toolName === "EnterPlanMode") {
+          if (toolName === "EnterPlanMode" && enhancedPlan) {
             nativePlanActive = true
             return { behavior: "allow", updatedInput: input }
           }
@@ -1170,7 +1174,7 @@ export const runClaude = (
           }
           // Plan mode: the SDK routes ExitPlanMode approval here. Turn the plan
           // into a structured, reviewable Plan and honour the operator's verdict.
-          if (toolName === "ExitPlanMode") {
+          if (toolName === "ExitPlanMode" && enhancedPlan) {
             const payload = strOf(input.plan)?.trim() ?? ""
             // The plan may arrive in the ExitPlanMode payload or streamed into the
             // reply as a ```json block. Prefer the payload; fall back to the reply.
@@ -1334,9 +1338,9 @@ export const runClaude = (
             // more importantly, what it does not.
             ...(spec.unattended === true ? { sandbox: unattendedSandbox() } : {}),
             model: spec.model ?? undefined,
-            permissionMode: mapPermissionMode(spec.mode),
+            permissionMode: mapPermissionMode(spec.mode, spec.enhancedPlan),
             ...mapClaudeReasoning(spec.reasoningEffort, spec.thinkingEnabled),
-            ...(spec.mode === "plan"
+            ...(spec.mode === "plan" && enhancedPlan
               ? {
                   planModeInstructions: planJsonInstructions()
                 }
@@ -1508,7 +1512,12 @@ export const runClaude = (
               // Claude occasionally streams the complete enhanced plan and ends
               // without calling ExitPlanMode. Preserve that valid submission
               // instead of clearing its draft at the terminal boundary.
-              if (nativePlanActive && planCount === 0 && planReplyText.length > 0) {
+              if (
+                enhancedPlan &&
+                nativePlanActive &&
+                planCount === 0 &&
+                planReplyText.length > 0
+              ) {
                 const capture = capturePlanEmission(planReplyText)
                 if (capture?._tag === "emission") {
                   if (capture.emission.mode === "submit") {

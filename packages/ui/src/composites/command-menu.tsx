@@ -1,4 +1,5 @@
 import type { Skill } from "@jingler/core"
+import { Command, CommandItem, CommandList } from "../components/command.js"
 import { cn } from "../lib/cn.js"
 import { SlashCommandRow } from "./slash-command-row.js"
 
@@ -23,36 +24,35 @@ export function CommandMenu({
 }) {
   if (skills.length === 0) return null
   return (
-    <div
-      role="listbox"
+    <Command
+      shouldFilter={false}
       className={cn(
-        "flex max-h-[260px] flex-col gap-0.5 overflow-auto rounded-lg border border-line bg-sunken p-1.5 shadow-2xl",
+        "rounded-xl border border-line shadow-2xl",
         className
       )}
     >
-      {skills.map((skill, i) => (
-        <button
-          key={skill.name}
-          type="button"
-          role="option"
-          aria-selected={i === activeIndex}
-          onMouseDown={(e) => {
-            e.preventDefault()
-            onSelect(skill)
-          }}
-          onMouseEnter={() => onHover?.(i)}
-          className="text-left"
-        >
-          <SlashCommandRow
-            name={skill.name}
-            description={skill.description}
-            glyphTone={skill.source === "skill" ? "purple" : "blue"}
-            badge={skill.source === "skill" ? "skill" : undefined}
-            badgeTone="purple"
-            active={i === activeIndex}
-          />
-        </button>
-      ))}
-    </div>
+      <CommandList className="max-h-[260px]">
+        {skills.map((skill, i) => (
+          <CommandItem
+            key={skill.name}
+            value={skill.name}
+            aria-selected={i === activeIndex}
+            onMouseDown={(event) => event.preventDefault()}
+            onSelect={() => onSelect(skill)}
+            onMouseEnter={() => onHover?.(i)}
+            className={cn("p-0", i === activeIndex && "bg-surface")}
+          >
+            <SlashCommandRow
+              name={skill.name}
+              description={skill.description}
+              glyphTone={skill.source === "skill" ? "purple" : "blue"}
+              badge={skill.source === "skill" ? "skill" : undefined}
+              badgeTone="purple"
+              active={i === activeIndex}
+            />
+          </CommandItem>
+        ))}
+      </CommandList>
+    </Command>
   )
 }

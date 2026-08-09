@@ -549,6 +549,16 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
+  /** Ensure a locally registered project is available on a selected remote host. */
+  Rpc.make("Projects.ensureOnEnvironment", {
+    success: Project,
+    error: GitError,
+    payload: {
+      projectId: Schema.String,
+      environmentId: Schema.String
+    }
+  }),
+
   /** Removes only the registration; repositories and workspaces remain intact. */
   Rpc.make("Projects.remove", {
     error: GitError,

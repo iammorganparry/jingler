@@ -1017,12 +1017,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // mode, for the same reason: no system-prompt hook is shared by every
           // harness, and this has to survive a mid-session harness switch.
           const ask = questionNote(cli)
-          // How this harness submits a plan. Null for Claude — the adapter passes
+          const preferJinglerTools =
+            workspaceConfig?.openConnector?.preferJinglerTools ?? true
+          // How this harness submits an enhanced plan. Null for Claude — the adapter passes
           // `planModeInstructions` as a real SDK option there, and saying it twice
           // would compete with the `ExitPlanMode` tool the harness is steered
-          // toward. Everything else is told to end its reply with the block.
+          // toward. With Jingler tools disabled, the harness owns planning and
+          // receives none of Jingler's structured plan protocol.
           const planProtocol =
-            mode === "plan"
+            mode === "plan" && preferJinglerTools
               ? planNote(cli)
               : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
@@ -1036,9 +1039,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               : undefined
           const resolvedReasoning =
             reasoning === undefined ? providerReasoning : reasoning
-          const preferJinglerTools =
-            workspaceConfig?.openConnector?.preferJinglerTools ?? true
-
           // Resolve every remote MCP source once, here, where the full service
           // context is available — adapters run in `R = never` async code and
           // cannot reach services. Best-effort: a configured connector read
@@ -1127,7 +1127,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // read-only instead of restoring the operator's Auto policy.
             // Each adapter enforces plan mode in its own native vocabulary.
             remoteMcpServers,
-            mcpPolicy: preferJinglerTools ? "managed-only" : "merge"
+            mcpPolicy: preferJinglerTools ? "managed-only" : "merge",
+            enhancedPlan: preferJinglerTools
           }
 
           // Clear the PERSISTED id too, so a crash between here and the harness
@@ -1710,11 +1711,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 automaticAmendment =
                   current !== null &&
                   current.producingChatId === chatId &&
-                  ["approved", "executing", "needs-verification", "done"].includes(current.status)
+                  ["approved", "executing", "needs-verification"].includes(current.status)
                 basePlanId =
                   current !== null &&
                   current.producingChatId === chatId &&
-                  current.status !== "rejected"
+                  current.status !== "rejected" &&
+                  current.status !== "done"
                     ? current.id
                     : undefined
               }

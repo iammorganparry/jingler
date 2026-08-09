@@ -184,6 +184,23 @@ export const ComposerWithMenus: Story = {
   render: () => (
     <div className="w-[560px] bg-editor p-6">
       <Composer
+        environments={[
+          {
+            id: "mac-mini",
+            name: "Mac Mini",
+            platform: { os: "darwin", arch: "arm64" },
+            capabilities: {
+              version: 1,
+              capabilities: ["session.start"],
+              harnesses: ["claude", "codex"],
+              maxConcurrentSessions: 4
+            },
+            state: "online",
+            agentVersion: "2.0.3",
+            lastSeenAt: Date.now()
+          }
+        ]}
+        onSetEnvironment={() => {}}
         skills={[
           { name: "/plan", description: "Draft a plan before editing", source: "command" },
           { name: "/deploy", description: "Ship the app to production", source: "skill" }

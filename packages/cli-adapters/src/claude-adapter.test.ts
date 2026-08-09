@@ -773,6 +773,11 @@ describe("plan mode + AskUserQuestion (canUseTool path)", () => {
     expect(mapPermissionMode("ask")).toBe("default")
   })
 
+  it("restores Claude's native plan permission mode when enhanced planning is disabled", () => {
+    expect(mapPermissionMode("plan", false)).toBe("plan")
+    expect(mapPermissionMode("plan", true)).toBe("default")
+  })
+
   it("keeps canUseTool live in every mode, so questions/plans are never shadowed", () => {
     // The SDK consults canUseTool in every mode EXCEPT bypassPermissions, so no
     // mode may map to it — see the mapPermissionMode docblock.

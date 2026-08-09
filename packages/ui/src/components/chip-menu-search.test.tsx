@@ -28,15 +28,15 @@ const groups = [
   }
 ]
 
-const open = () => fireEvent.pointerDown(screen.getByRole("button"), { button: 0, ctrlKey: false })
-const box = () => screen.getByRole("textbox")
-const items = () => screen.queryAllByRole("menuitem").map((n) => n.textContent)
+const open = () => fireEvent.click(screen.getByRole("button"))
+const box = () => screen.getByRole("combobox")
+const items = () => screen.queryAllByRole("option").map((n) => n.textContent)
 
 describe("ChipMenu search", () => {
   it("has no filter box unless asked for (the mode chip stays plain)", () => {
     render(<ChipMenu value="claude:opus" groups={groups} />)
     open()
-    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(screen.queryByRole("combobox")).toBeNull()
   })
 
   it("filters to a model by name", () => {
@@ -84,8 +84,8 @@ describe("ChipMenu search", () => {
     fireEvent.change(box(), { target: { value: "terra" } })
     // Filtering to one group must not drop the heading — you'd lose which
     // harness you're about to switch to.
-    expect(screen.getByText("Codex CLI")).toBeDefined()
-    expect(screen.queryByText("Claude Code")).toBeNull()
+    expect(screen.getByRole("group", { name: "Codex CLI" })).toBeDefined()
+    expect(screen.queryByRole("group", { name: "Claude Code" })).toBeNull()
   })
 
   it("forgets the filter once closed, so reopening shows the whole list", () => {
@@ -104,55 +104,30 @@ describe("ChipMenu search", () => {
   })
 })
 
-describe("ChipMenu search — keyboard, against Radix's own handling", () => {
+describe("ChipMenu search — shadcn/cmdk keyboard behavior", () => {
   it("takes focus on open, so you can just start typing", async () => {
     render(<ChipMenu value="claude:opus" groups={groups} searchable />)
     open()
-    // Radix focuses the menu itself on open; we claim the caret a frame later.
+    // Popover opens first; the shared picker claims the search field next frame.
     await new Promise((r) => requestAnimationFrame(() => r(null)))
     expect(document.activeElement).toBe(box())
   })
 
-  /**
-   * Radix's menu implements typeahead: a bare letter key jumps focus to the item
-   * it matches, which inside a filter box would rip the caret away mid-word. The
-   * guard is to stop ordinary keystrokes reaching the menu, while letting the
-   * ones that MEAN "navigate the menu" through.
-   *
-   * We assert on propagation rather than on focus moving, because jsdom doesn't
-   * reproduce Radix's typeahead focus change (verified) — a focus assertion here
-   * would pass whether or not the guard exists. Radix's own handler is a React
-   * onKeyDown in this same synthetic tree, so a spy on an ancestor stands in for
-   * it exactly: portalled content still propagates through the React tree.
-   */
-  const keysReachingTheMenu = () => {
-    const spy = vi.fn()
-    render(
-      <div onKeyDown={(e) => spy(e.key)}>
-        <ChipMenu value="claude:opus" groups={groups} searchable />
-      </div>
-    )
+  it("uses cmdk arrow navigation without moving focus out of the search field", () => {
+    render(<ChipMenu value="claude:opus" groups={groups} searchable />)
     open()
-    return spy
-  }
-
-  it("keeps ordinary typing out of Radix's typeahead", () => {
-    const spy = keysReachingTheMenu()
-    fireEvent.keyDown(box(), { key: "s" })
-    expect(spy).not.toHaveBeenCalled()
-  })
-
-  it("still lets arrow keys through, so you can move into the list", () => {
-    const spy = keysReachingTheMenu()
+    const selectedBefore = document.querySelector('[cmdk-item][data-selected="true"]')
     fireEvent.keyDown(box(), { key: "ArrowDown" })
-    expect(spy).toHaveBeenCalledWith("ArrowDown")
+    const selectedAfter = document.querySelector('[cmdk-item][data-selected="true"]')
+    expect(selectedAfter).not.toBe(selectedBefore)
+    expect(document.activeElement).toBe(box())
   })
 
-  it("leaves Escape to Radix, so the menu still closes from the filter", async () => {
+  it("lets Escape close the popover from the filter", async () => {
     render(<ChipMenu value="claude:opus" groups={groups} searchable />)
     open()
     await new Promise((r) => requestAnimationFrame(() => r(null)))
     fireEvent.keyDown(box(), { key: "Escape" })
-    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(screen.queryByRole("combobox")).toBeNull()
   })
 })

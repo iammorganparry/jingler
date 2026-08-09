@@ -43,47 +43,6 @@ export const HarnessCapability = Schema.Struct({
 })
 export type HarnessCapability = Schema.Schema.Type<typeof HarnessCapability>
 
-export interface HarnessSelection {
-  readonly cli: CliKind
-  readonly model: string
-  readonly mode: PermissionMode
-  readonly reasoningEffort?: ReasoningEffort
-}
-
-/**
- * Project a persisted conversation selection onto the capabilities available
- * right now. This is intentionally a pure derivation: live discovery may change
- * while a pane is mounted, but rendering a fallback must not write to the
- * conversation or trigger a cascade of setter effects.
- */
-export const resolveHarnessSelection = (
-  capabilities: ReadonlyArray<HarnessCapability>,
-  selection: HarnessSelection
-): HarnessSelection => {
-  const capability =
-    capabilities.find((candidate) => candidate.cli === selection.cli) ?? capabilities[0]
-  if (capability === undefined) return selection
-
-  const model =
-    capability.models.find((candidate) => candidate.id === selection.model) ??
-    capability.models[0]
-  const mode =
-    capability.modes.find((candidate) => candidate.id === selection.mode) ??
-    capability.modes.find((candidate) => candidate.kind === "execute")
-  const reasoningEffort = model?.reasoning?.some(
-    (candidate) => candidate.id === selection.reasoningEffort
-  )
-    ? selection.reasoningEffort
-    : undefined
-
-  return {
-    cli: capability.cli,
-    model: model?.id ?? selection.model,
-    mode: mode?.id ?? selection.mode,
-    ...(reasoningEffort === undefined ? {} : { reasoningEffort })
-  }
-}
-
 /**
  * Fallback model choices per harness — used only when live discovery from the
  * provider fails (offline / no credentials). The real list is fetched at runtime

@@ -1783,6 +1783,44 @@ describe("AgentRunner plan mode", () => {
     expect(ranTool(events, "plan-edit-1")).toBe(false)
     expect(planParts(transcript)[0]!.plan.status).toBe("rejected")
   })
+
+  it("requires a fresh approval gate for a new plan after the previous plan is done", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "plan")
+        let completedPlanId = ""
+        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
+          Stream.tap((event) => {
+            if (event._tag !== "PlanProposed") return Effect.void
+            completedPlanId = event.plan.id
+            return runner.approvePlan(SESSION, event.plan.id)
+          }),
+          Stream.runDrain
+        )
+        expect((yield* PlanStore.readDocument(temp.root))?.status).toBe("done")
+
+        yield* runner.setMode(SESSION, "plan")
+        let nextPlanId = ""
+        const nextEvents: Array<StreamEvent> = []
+        yield* runner.prompt(SESSION, SESSION, "[[plan]] implement a separate task").pipe(
+          Stream.tap((event) => {
+            if (event._tag !== "PlanProposed") return Effect.void
+            nextPlanId = event.plan.id
+            return runner.stop(SESSION)
+          }),
+          Stream.runForEach((event) => Effect.sync(() => nextEvents.push(event)))
+        )
+
+        return { completedPlanId, nextPlanId, nextEvents }
+      }).pipe(Effect.provide(base()))
+    )
+
+    expect(result.nextPlanId).not.toBe("")
+    expect(result.nextPlanId).not.toBe(result.completedPlanId)
+    expect(result.nextEvents.some((event) => event._tag === "PlanProposed")).toBe(true)
+    expect(ranTool(result.nextEvents, "plan-edit-1")).toBe(false)
+  })
 })
 
 describe("AgentRunner model", () => {
@@ -1973,6 +2011,33 @@ describe("AgentRunner plan library", () => {
       expect(captured.specs[0]?.mode).toBe(mode)
       expect(captured.specs[0]?.readOnly).toBeUndefined()
     }
+  })
+
+  it("leaves plan protocol and capture with the native harness when Jingler tools are disabled", async () => {
+    seedSessionWithWorktree("plan")
+    const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
+      prompt: null,
+      specs: []
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* OpenConnectorService.set({
+          endpoint: "",
+          enabled: false,
+          serverName: "open-connector",
+          preferJinglerTools: false
+        })
+        yield* (yield* AgentRunner)
+          .prompt(SESSION, SESSION, "Plan this using the harness's native flow.")
+          .pipe(Stream.runDrain)
+      }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
+    )
+
+    expect(captured.specs).toHaveLength(1)
+    expect(captured.specs[0]?.mode).toBe("plan")
+    expect(captured.specs[0]?.enhancedPlan).toBe(false)
+    expect(captured.prompt).not.toContain("PLAN MODE —")
+    expect(captured.prompt).not.toContain("PlanPrdStage")
   })
 
   it("executes and verifies bounded work directly without proposing a plan", async () => {

@@ -223,6 +223,8 @@ export interface ConversationViewProps {
   focusKey?: string
   /** Whether Jingler's enhanced Plan/tools layer is enabled. */
   useJinglerTools?: boolean
+  /** Disable sending while preserving the model picker as the recovery path. */
+  composerDisabledReason?: string
   /** Whether the session Files workspace follows this chat's agent mutations. */
   followAgent?: boolean
   /** Toggle follow mode; enabling may present Files beside the conversation. */
@@ -255,7 +257,7 @@ export function ConversationView({
   onSetEnvironment,
   model,
   catalog = [],
-  capabilities = [],
+  capabilities,
   onSetHarness,
   onSend,
   onStop,
@@ -299,6 +301,7 @@ export function ConversationView({
   autoFocusComposer,
   focusKey,
   useJinglerTools = true,
+  composerDisabledReason,
   followAgent = false,
   onToggleFollowAgent,
   archived,
@@ -658,6 +661,7 @@ export function ConversationView({
                 model={model}
                 catalog={catalog}
                 capabilities={capabilities}
+                disabledReason={composerDisabledReason}
                 onSetHarness={onSetHarness}
                 mode={mode}
                 onSetMode={onSetMode}

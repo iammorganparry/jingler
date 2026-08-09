@@ -7,7 +7,7 @@ import type {
   ProviderModels,
   ReasoningEffort
 } from "@jingler/core"
-import { FALLBACK_MODELS } from "@jingler/core"
+import { FALLBACK_MODELS, providerReasoningCapabilitiesFor } from "@jingler/core"
 import { Effect, Ref } from "effect"
 import { fetchCodexModels } from "./codex-models.js"
 import { fetchOpencodeModels } from "./opencode-models.js"
@@ -59,32 +59,43 @@ const fetchFor = (
         ? fetchOpencodeModels(binPath)
         : Promise.resolve(null)
 
+const CODEX_MODEL_REASONING: Readonly<Record<string, ReadonlyArray<ReasoningEffort>>> = {
+  "gpt-5.6-luna": ["minimal", "low", "medium"]
+}
+
+const REASONING_LABEL: Record<ReasoningEffort, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+  max: "Max"
+}
+
 const reasoning = (
   cli: CliKind,
   model: string
 ): { options: ReadonlyArray<{ id: ReasoningEffort; label: string }>; defaultId?: ReasoningEffort } => {
-  const ids: ReadonlyArray<ReasoningEffort> = cli === "claude"
-    ? ["low", "medium", "high", "max"]
-    : model.toLowerCase().includes("luna")
-      ? ["minimal", "low", "medium"]
-      : ["minimal", "low", "medium", "high", "xhigh"]
+  const ids = cli === "codex"
+    ? (CODEX_MODEL_REASONING[model] ?? providerReasoningCapabilitiesFor(cli).efforts)
+    : providerReasoningCapabilitiesFor(cli).efforts
   return {
-    options: ids.map((id) => ({ id, label: id })),
+    options: ids.map((id) => ({ id, label: REASONING_LABEL[id] })),
     ...(ids.includes("medium") ? { defaultId: "medium" as const } : {})
   }
 }
 
 const MODES: Record<"claude" | "codex", ReadonlyArray<HarnessModeOption>> = {
   claude: [
-    { id: "ask", label: "Default permissions", description: "Ask before sensitive actions", kind: "execute" },
-    { id: "accept-edits", label: "Accept edits", description: "Allow file edits and ask for commands", kind: "execute" },
-    { id: "auto", label: "Full access", description: "Run without approval prompts", kind: "execute" },
+    { id: "ask", label: "Default", description: "Use Claude Code's default permission checks", kind: "execute" },
+    { id: "accept-edits", label: "Accept Edits", description: "Use Claude Code's acceptEdits mode", kind: "execute" },
+    { id: "auto", label: "Full Access", description: "Auto-approve Claude Code tool requests", kind: "execute" },
     { id: "plan", label: "Plan", description: "Use Claude Code's native planning mode", kind: "plan" }
   ],
   codex: [
-    { id: "ask", label: "Read only", description: "Inspect without changing files", kind: "execute" },
-    { id: "accept-edits", label: "Workspace write", description: "Edit inside the workspace", kind: "execute" },
-    { id: "auto", label: "Full access", description: "Use the unrestricted Codex sandbox", kind: "execute" },
+    { id: "ask", label: "Read Only", description: "Use Codex's read-only sandbox", kind: "execute" },
+    { id: "accept-edits", label: "Workspace Write", description: "Use Codex's workspace-write sandbox", kind: "execute" },
+    { id: "auto", label: "Full Access", description: "Use Codex's danger-full-access sandbox", kind: "execute" },
     { id: "plan", label: "Plan", description: "Use Codex's native planning mode", kind: "plan" }
   ]
 }

@@ -215,7 +215,7 @@ test("a direct session completes a turn and deletion preserves its checkout", as
 
   const composer = window.getByPlaceholder("Message Claude…")
   await expect(composer).toBeVisible()
-  await expect(window.getByText("Full access", { exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Full Access" })).toBeVisible()
   await composer.fill("Run the direct-checkout verification.")
   await composer.press("Enter")
   await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })

@@ -645,7 +645,8 @@ export const runCodexAppServer = (
           let questionRound = 0
           let planRound = 0
           let planReformatAsked = false
-          let planning = spec.mode === "plan"
+          const enhancedPlan = spec.enhancedPlan !== false
+          let planning = enhancedPlan && spec.mode === "plan"
           const planDraft = createPlanDraftStream(
             () => `plan_${sessionId}_${planRound + 1}`
           )
@@ -733,7 +734,11 @@ export const runCodexAppServer = (
                 followUp = capture.message
                 continue
               }
-              if (capture?._tag === "emission" && (planning || capture.emission.mode === "submit")) {
+              if (
+                enhancedPlan &&
+                capture?._tag === "emission" &&
+                (planning || capture.emission.mode === "submit")
+              ) {
                 planRound += 1
                 const decision: PlanDecision = await runP(
                   ctx.proposePlan(capture.emission.plan, capture.block)

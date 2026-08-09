@@ -12,9 +12,9 @@ const capabilities: ReadonlyArray<HarnessCapability> = [{
   models: [{
     id: "sol",
     label: "Sol",
-    reasoning: ["minimal", "low", "medium", "high", "xhigh"].map((id) => ({
+    reasoning: ["minimal", "low", "medium", "high", "xhigh"].map((id, index) => ({
       id: id as "minimal" | "low" | "medium" | "high" | "xhigh",
-      label: id
+      label: ["Minimal", "Low", "Medium", "High", "Extra High"][index]!
     }))
   }]
 }]
@@ -23,7 +23,7 @@ describe("Composer thinking strength", () => {
   it("shows the native harness default until the session overrides it", () => {
     render(<Composer />)
     expect(screen.getByRole("button", { name: "Thinking strength" }).textContent).toContain(
-      "default"
+      "Default"
     )
   })
 
@@ -33,19 +33,13 @@ describe("Composer thinking strength", () => {
       <Composer cli="codex" model="sol" capabilities={capabilities} reasoningEffort="low" onSetReasoning={onSetReasoning} />
     )
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Thinking strength" }), {
-      button: 0,
-      ctrlKey: false
-    })
-    fireEvent.click(screen.getByRole("menuitem", { name: "xhigh" }))
+    fireEvent.click(screen.getByRole("button", { name: "Thinking strength" }))
+    fireEvent.click(screen.getByRole("option", { name: "Extra High" }))
     expect(onSetReasoning).toHaveBeenCalledWith({ enabled: true, effort: "xhigh" })
 
     rerender(<Composer cli="codex" model="sol" capabilities={capabilities} reasoningEffort="low" onSetReasoning={onSetReasoning} />)
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Thinking strength" }), {
-      button: 0,
-      ctrlKey: false
-    })
-    fireEvent.click(screen.getByRole("menuitem", { name: "default" }))
+    fireEvent.click(screen.getByRole("button", { name: "Thinking strength" }))
+    fireEvent.click(screen.getByRole("option", { name: "Default" }))
     expect(onSetReasoning).toHaveBeenLastCalledWith(undefined)
   })
 

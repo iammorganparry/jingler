@@ -1,5 +1,5 @@
 import * as React from "react"
-import type { CliInfo, CliKind, CreateSessionInput, Project } from "@jingler/core"
+import type { CliInfo, CliKind, CreateSessionInput, Environment, Project } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import { GitBranch, MessageCircle, Send } from "lucide-react"
 import { Button } from "../components/button.js"
@@ -12,10 +12,12 @@ import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-mach
 export interface NewWorkspaceViewProps {
   open: boolean
   projects: ReadonlyArray<Project>
+  environments?: ReadonlyArray<Environment>
   clis: ReadonlyArray<CliInfo>
   defaultCli?: CliKind | null
   defaultProjectId?: string | null
   requestedProjectId?: string | null
+  prepareProject: NewWorkspaceDeps["prepareProject"]
   loadBranches: NewWorkspaceDeps["loadBranches"]
   onCreate: (input: CreateSessionInput) => Promise<void>
   onClose: () => void
@@ -32,7 +34,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     else send({ type: "CLOSE" })
   }, [props.open, props.requestedProjectId, send])
 
-  const { projectId, isolation, baseBranch, branches, title, draft, cli, error } = state.context
+  const { projectId, environmentId, isolation, baseBranch, branches, title, draft, cli, error } = state.context
   const selectedProject = props.projects.find((project) => project.id === projectId)
   const submitting = state.matches("submitting")
   const loading = state.matches("loading")
@@ -45,8 +47,8 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
           <DialogTitle>New workspace</DialogTitle>
         </DialogHeader>
         <DialogBody className="space-y-5 p-6">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <Select value={projectId} onValueChange={(value) => send({ type: "SET_PROJECT", projectId: value })}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <Select value={projectId} onValueChange={(value) => send({ type: "SET_PROJECT", projectId: value })} disabled={loading}>
               <SelectTrigger aria-label="Project"><SelectValue placeholder="Choose project" /></SelectTrigger>
               <SelectContent>
                 {props.projects.map((project) => (
@@ -56,15 +58,26 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={isolation} onValueChange={(value) => send({ type: "SET_ISOLATION", isolation: value as "worktree" | "direct" })}>
+            <Select value={environmentId} onValueChange={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value })} disabled={loading}>
+              <SelectTrigger aria-label="Execution host"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="local">Local</SelectItem>
+                {(props.environments ?? []).map((environment) => (
+                  <SelectItem key={environment.id} value={environment.id} disabled={environment.state !== "online"}>
+                    {environment.name}{environment.state !== "online" ? ` (${environment.state})` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={isolation} onValueChange={(value) => send({ type: "SET_ISOLATION", isolation: value as "worktree" | "direct" })} disabled={loading}>
               <SelectTrigger aria-label="Checkout"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="worktree">New worktree</SelectItem>
-                <SelectItem value="direct">Local checkout</SelectItem>
+                <SelectItem value="direct">Host checkout</SelectItem>
               </SelectContent>
             </Select>
             <Select value={baseBranch} onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })} disabled={loading}>
-              <SelectTrigger aria-label="Base branch"><SelectValue placeholder={loading ? "Loading branches…" : "Base branch"} /></SelectTrigger>
+              <SelectTrigger aria-label="Base branch"><SelectValue placeholder={loading ? (environmentId === "local" ? "Loading branches…" : "Preparing on host…") : "Base branch"} /></SelectTrigger>
               <SelectContent>
                 {branches.map((branch) => <SelectItem key={branch} value={branch}>{branch}</SelectItem>)}
               </SelectContent>
@@ -75,6 +88,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             aria-label="Workspace name"
             placeholder="Workspace name (optional — the agent can name it)"
             value={title}
+            disabled={loading}
             onChange={(event) => send({ type: "SET_TITLE", title: event.currentTarget.value })}
           />
 
@@ -84,6 +98,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
               aria-label="First task"
               placeholder="Message the agent, tag @files, or use /commands and /skills"
               value={draft}
+              disabled={loading}
               onChange={(event) => send({ type: "SET_DRAFT", draft: event.currentTarget.value })}
               className="min-h-32 w-full resize-none bg-transparent text-[13px] leading-6 text-text outline-none placeholder:text-dim"
             />

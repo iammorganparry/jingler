@@ -121,7 +121,7 @@ export const createWorkspace = async (
   await expect(window.getByRole("heading", { name: "New workspace" })).toBeVisible()
   if (checkout === "direct") {
     await window.getByRole("combobox", { name: "Checkout" }).click()
-    await window.getByRole("option", { name: "Local checkout" }).click()
+    await window.getByRole("option", { name: "Host checkout" }).click()
   }
   await window.getByRole("textbox", { name: "Workspace name" }).fill(title)
   const create = window.getByRole("button", { name: "Create workspace" })
@@ -235,6 +235,8 @@ export interface LaunchOptions {
   readonly config?: Readonly<Record<string, unknown>>
   /** Create a real git repo in the seeded repos dir (for the create-session flow). */
   readonly withRepo?: boolean
+  /** Seed the default repository on the fake remote host (defaults to true). */
+  readonly remoteRepo?: boolean
   /**
    * Seed sessions.json — either a fixed list, or a function of the launch context
    * (so a session's `worktreePath` can point at the just-created repo).
@@ -832,6 +834,8 @@ export interface LaunchedApp {
   readonly githubRelay: FakeGitHubRelay
   /** Present only for a launch using the hermetic remote-environment fixture. */
   readonly deviceRelay?: FakeDeviceRelay
+  /** Throwaway home used by the hermetic remote device agent. */
+  readonly deviceHome?: string
   /**
    * Keys the fake opencode was asked to store, in the order it was asked. The
    * point of the assertion is WHERE a key lands: opencode's own credential
@@ -994,15 +998,20 @@ export const test = base.extend<{
        * every harness-gated flow (create-session, harness picker, model chip)
        * silently skip. Specs that want opencode install their own shim above.
        */
-      installVersionOnlyHarness(binDir, "claude", "2.0.0 (Claude Code)")
-      installFakeCodex(binDir)
+      const availableHarnesses = options.e2eEnv?.JINGLER_E2E_AVAILABLE_HARNESSES
+      if (availableHarnesses !== "codex") {
+        installVersionOnlyHarness(binDir, "claude", "2.0.0 (Claude Code)")
+      }
+      if (availableHarnesses !== "claude") installFakeCodex(binDir)
 
       let deviceRelay: FakeDeviceRelay | undefined
+      let deviceHome: string | undefined
       if (options.remoteEnvironment || options.realRemoteEnvironment) {
-        const deviceHome = mkdtempSync(join(tmpdir(), "jingler-e2e-device-"))
+        deviceHome = mkdtempSync(join(tmpdir(), "jingler-e2e-device-"))
         cleanups.push(() => rmSync(deviceHome, { recursive: true, force: true }))
         const deviceRepo = join(deviceHome, "repos", "widget")
-        initRepo(deviceRepo)
+        mkdirSync(join(deviceHome, "repos"), { recursive: true })
+        if (options.remoteRepo !== false) initRepo(deviceRepo)
         mkdirSync(join(deviceHome, "jingler"), { recursive: true })
         writeFileSync(
           join(deviceHome, "jingler", "config.json"),
@@ -1238,6 +1247,7 @@ export const test = base.extend<{
         githubServer,
         githubRelay,
         ...(deviceRelay ? { deviceRelay } : {}),
+        ...(deviceHome ? { deviceHome } : {}),
         completeDeepLinkSignIn,
         completeGitHubConnection,
         opencodeAuthWrites,

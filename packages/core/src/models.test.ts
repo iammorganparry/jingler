@@ -5,7 +5,6 @@ import {
   FALLBACK_MODELS,
   ModelOption,
   defaultModel,
-  resolveHarnessSelection,
   reviewModelFor
 } from "./models.js"
 
@@ -23,28 +22,6 @@ describe("ModelOption", () => {
 
   it("rejects a malformed option", () => {
     expect(Either.isLeft(Schema.decodeUnknownEither(ModelOption)({ id: 5 }))).toBe(true)
-  })
-})
-
-describe("resolveHarnessSelection", () => {
-  it("declaratively falls back to supported model, mode, and reasoning values", () => {
-    expect(resolveHarnessSelection(
-      [{
-        cli: "codex",
-        label: "Codex",
-        modes: [{ id: "accept-edits", label: "Workspace write", kind: "execute" }],
-        models: [{
-          id: "sol",
-          label: "Sol",
-          reasoning: [{ id: "high", label: "High" }]
-        }]
-      }],
-      { cli: "cursor", model: "retired", mode: "plan", reasoningEffort: "xhigh" }
-    )).toStrictEqual({
-      cli: "codex",
-      model: "sol",
-      mode: "accept-edits"
-    })
   })
 })
 

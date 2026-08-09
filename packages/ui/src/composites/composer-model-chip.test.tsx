@@ -35,9 +35,9 @@ describe("Composer model chip", () => {
     const onSetHarness = vi.fn()
     render(<Composer cli="claude" model="opus" catalog={catalog} onSetHarness={onSetHarness} />)
 
-    fireEvent.pointerDown(modelChip(), { button: 0, ctrlKey: false })
-    fireEvent.click(screen.getByRole("button", { name: /Codex CLI.*1 model/i }))
-    fireEvent.click(screen.getByRole("button", { name: "GPT-5.6-Sol" }))
+    fireEvent.click(modelChip())
+    fireEvent.click(screen.getByRole("option", { name: /Codex CLI.*1 model/i }))
+    fireEvent.click(screen.getByRole("option", { name: "GPT-5.6-Sol" }))
 
     expect(onSetHarness).toHaveBeenCalledWith("codex", "gpt-5.6-sol")
   })
@@ -46,9 +46,9 @@ describe("Composer model chip", () => {
     const onSetHarness = vi.fn()
     render(<Composer cli="claude" model="opus" catalog={catalog} onSetHarness={onSetHarness} />)
 
-    fireEvent.pointerDown(modelChip(), { button: 0, ctrlKey: false })
-    fireEvent.click(screen.getByRole("button", { name: /Claude Code.*2 models/i }))
-    fireEvent.click(screen.getByRole("button", { name: "sonnet" }))
+    fireEvent.click(modelChip())
+    fireEvent.click(screen.getByRole("option", { name: /Claude Code.*2 models/i }))
+    fireEvent.click(screen.getByRole("option", { name: "sonnet" }))
 
     expect(onSetHarness).toHaveBeenCalledWith("claude", "sonnet")
   })
@@ -60,15 +60,33 @@ describe("Composer model chip", () => {
     expect(chip!.textContent).not.toContain("codex:")
   })
 
-  /**
-   * A session can hold a model id the catalogue no longer has — Codex's list is
-   * live, so yesterday's id can vanish. The chip must fall back to the harness's
-   * first (default) model rather than render a raw composite value.
-   */
-  it("falls back to the harness default when the session's model is gone", () => {
+  it("shows the actual persisted model when it is no longer in the catalogue", () => {
     render(<Composer cli="codex" model="gpt-5-codex-retired" catalog={catalog} />)
-    const chip = screen.getAllByRole("button").find((b) => b.textContent?.includes("GPT-5.6-Sol"))
-    expect(chip).toBeDefined()
+    expect(screen.getByRole("button", { name: "Model: gpt-5-codex-retired" })).toBeTruthy()
+  })
+
+  it("uses the catalogue fallback while live capabilities are still unavailable", () => {
+    render(<Composer cli="claude" model="opus" catalog={catalog} />)
+    fireEvent.click(screen.getByText("Accept Edits"))
+    expect(screen.getByRole("option", { name: "Full Access" })).toBeTruthy()
+  })
+
+  it("blocks sending for an unavailable selection but keeps model recovery enabled", () => {
+    const onSend = vi.fn()
+    render(
+      <Composer
+        cli="claude"
+        model="retired"
+        catalog={catalog}
+        disabledReason="Model retired is unavailable. Choose a supported model to continue."
+        onSend={onSend}
+      />
+    )
+
+    expect((screen.getByPlaceholderText(/Model retired is unavailable/) as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.queryByRole("button", { name: "Send ↵" })).toBeNull()
+    expect((screen.getByRole("button", { name: "Model: retired" }) as HTMLButtonElement).disabled).toBe(false)
+    expect(onSend).not.toHaveBeenCalled()
   })
 
   it("disables the chip when no harness is installed", () => {

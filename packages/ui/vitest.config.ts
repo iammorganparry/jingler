@@ -13,6 +13,7 @@ export default defineConfig({
   test: {
     name: "ui",
     environment: "jsdom",
+    setupFiles: ["./src/test/setup-cmdk.ts"],
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"]
   }
 })

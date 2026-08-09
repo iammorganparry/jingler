@@ -24,6 +24,16 @@ const capabilities: ReadonlyArray<HarnessCapability> = [
 afterEach(cleanup)
 
 describe("ModelBrowser", () => {
+  it("aligns the harness search inset with the menu items", () => {
+    render(<ModelBrowser cli="claude" model="opus" capabilities={capabilities} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Model: Opus" }))
+
+    const search = screen.getByPlaceholderText("Search harnesses…")
+    expect(search.parentElement?.className).toContain("px-2")
+    expect(search.parentElement?.className).not.toContain("px-3")
+  })
+
   it("shows only supported providers and switches provider plus model", () => {
     const onSelect = vi.fn()
     render(
@@ -35,16 +45,13 @@ describe("ModelBrowser", () => {
       />
     )
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Opus/i }), {
-      button: 0,
-      ctrlKey: false
-    })
+    fireEvent.click(screen.getByRole("button", { name: /Opus/i }))
     expect(screen.getByText("Claude")).toBeTruthy()
     expect(screen.getByText("Codex")).toBeTruthy()
     expect(screen.queryByText("OpenCode")).toBeNull()
 
-    fireEvent.click(screen.getByRole("button", { name: /Codex.*2 models/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Luna/i }))
+    fireEvent.click(screen.getByRole("option", { name: /Codex.*2 models/i }))
+    fireEvent.click(screen.getByRole("option", { name: /Luna/i }))
     expect(onSelect).toHaveBeenCalledWith("codex", "luna")
   })
 
@@ -58,11 +65,8 @@ describe("ModelBrowser", () => {
       />
     )
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: /Sol/i }), {
-      button: 0,
-      ctrlKey: false
-    })
-    fireEvent.click(screen.getByRole("button", { name: /Codex.*2 models/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Sol/i }))
+    fireEvent.click(screen.getByRole("option", { name: /Codex.*2 models/i }))
     fireEvent.change(screen.getByPlaceholderText("Search models…"), {
       target: { value: "fast" }
     })

@@ -10,8 +10,6 @@ import type {
   ContextConfig,
   VsCodeTheme,
   CliKind,
-  CreateSessionFromIssueInput,
-  CreateSessionFromPrInput,
   CreateSessionInput,
   GitConfig,
   GithubConfig,
@@ -101,7 +99,6 @@ import { useEnvironments } from "./use-environments.js";
 import { useProjects } from "./use-projects.js";
 import {
   PluginProvider,
-  useIssueProviders,
   usePluginCommands,
   usePluginPanes,
   usePluginTabs,
@@ -360,7 +357,6 @@ function AuthedApp({
   const pluginTabs = usePluginTabs();
   const pluginPanes = usePluginPanes();
   const pluginCommands = usePluginCommands();
-  const issueProviders = useIssueProviders();
   const plugins = usePlugins();
   const memory = useMemory();
 
@@ -600,18 +596,6 @@ function AuthedApp({
 
   const createSession = async (input: CreateSessionInput) => {
     const session = await rpc.sessionsCreate(input);
-    void rememberLastRepo(input.repoPath);
-    send({ type: "SESSION_CREATED", session });
-    return session;
-  };
-  const createSessionFromPr = async (input: CreateSessionFromPrInput) => {
-    const session = await rpc.sessionsCreateFromPr(input);
-    void rememberLastRepo(input.repoPath);
-    send({ type: "SESSION_CREATED", session });
-    return session;
-  };
-  const createSessionFromIssue = async (input: CreateSessionFromIssueInput) => {
-    const session = await rpc.sessionsCreateFromIssue(input);
     void rememberLastRepo(input.repoPath);
     send({ type: "SESSION_CREATED", session });
     return session;
@@ -1332,6 +1316,7 @@ function AuthedApp({
         onRegisterProject={projectController.register}
         onCreateProjectDirectory={projectController.createDirectory}
         onCloneProject={projectController.clone}
+        onEnsureProjectOnEnvironment={rpc.projectsEnsureOnEnvironment}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
         collapsedRepos={collapsedRepos}
@@ -1428,21 +1413,6 @@ function AuthedApp({
         onDeleteSession={(id) =>
           setPendingDelete(sessions.find((s) => s.id === id) ?? null)
         }
-        loadPrs={connected ? rpc.githubListPrs : undefined}
-        onCreateSessionFromPr={connected ? createSessionFromPr : undefined}
-        loadIssues={connected ? rpc.githubListIssues : undefined}
-        issueProviders={issueProviders}
-        loadProviderIssues={(providerId, repoPath, options) =>
-          rpc.pluginsIssueProviderList({
-            providerId,
-            repository: {
-              name: repos.find((repo) => repo.path === repoPath)?.name ?? repoPath,
-              path: repoPath,
-            },
-            ...options,
-          })
-        }
-        onCreateSessionFromIssue={createSessionFromIssue}
         planSessions={planSessions}
         renderConversation={(session: Session, view, ctx) => (
           <ConversationPane

@@ -67,6 +67,25 @@ describe("ProjectService", () => {
     expect(JSON.stringify(legacy)).toBe(before)
   })
 
+  it("skips stale legacy paths without failing or discarding valid projects", async () => {
+    const valid = initGitRepo(join(repos.dir, "valid"))
+    const missing = join(repos.dir, "deleted-worktree")
+
+    const result = await runExit(
+      ProjectService.backfill([
+        { path: missing, name: "deleted" },
+        { path: valid, name: "valid" }
+      ]).pipe(Effect.provide(ProjectService.Default)),
+      temp.layer
+    )
+
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value).toEqual([
+      expect.objectContaining({ name: "valid", path: valid, availability: "available" })
+    ])
+  })
+
   it("returns a missing registration without deleting its identity", async () => {
     const repoPath = initGitRepo(join(repos.dir, "movable"))
     const registered = await runExit(

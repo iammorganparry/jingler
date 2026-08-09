@@ -97,7 +97,41 @@ describe("ModelsService", () => {
         "auto",
         "plan"
       ])
+      expect(capabilities[0]?.modes.map((mode) => mode.label)).toStrictEqual([
+        "Read Only",
+        "Workspace Write",
+        "Full Access",
+        "Plan"
+      ])
       expect(capabilities[0]?.models[0]?.reasoning?.map((option) => option.id)).toContain("xhigh")
+      expect(
+        capabilities[0]?.models[0]?.reasoning?.find((option) => option.id === "xhigh")?.label
+      ).toBe("Extra High")
+    })
+
+    it("uses the shared Claude ladder and exact Codex model overrides", async () => {
+      const capabilities = await run(
+        ModelsService.capabilities([cli("claude", true), cli("codex", true)])
+      )
+      const claude = capabilities.find((provider) => provider.cli === "claude")
+      const codex = capabilities.find((provider) => provider.cli === "codex")
+
+      expect(claude?.models[0]?.reasoning?.map(({ id }) => id)).toStrictEqual([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ])
+      expect(claude?.modes.map(({ label }) => label)).toStrictEqual([
+        "Default",
+        "Accept Edits",
+        "Full Access",
+        "Plan"
+      ])
+      expect(
+        codex?.models.find(({ id }) => id === "gpt-5.6-luna")?.reasoning?.map(({ id }) => id)
+      ).toStrictEqual(["minimal", "low", "medium"])
     })
   })
 })

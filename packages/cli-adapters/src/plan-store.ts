@@ -184,6 +184,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           // state that disappears on the next read.
           const encoded = encodeDocument(document)
           const decoded = decodeDocument(encoded)
+          if (decoded._tag === "Left") {
+            yield* Effect.logError(
+              `Plan ${document.id} failed its schema round-trip before persistence: ${String(decoded.left)}`
+            )
+          }
           const normalized = decoded._tag === "Right" ? decoded.right : document
           const fs = yield* FileSystem.FileSystem
           const dir = yield* dirFor(worktreePath)

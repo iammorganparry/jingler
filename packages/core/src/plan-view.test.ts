@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { PlanPrd, PlanPrdSection, PlanPrdStage } from "./plan-document.js"
 import {
+  planStageExecutionStatus,
   stagesToGraph,
   toPlanArchitectureView,
   toPlanStepViews,
@@ -68,6 +69,23 @@ describe("toPlanStepViews", () => {
     expect(queued?.complexity).toBeUndefined()
     expect(running?.executionStatus).toBe("running")
     expect(running?.complexity).toBe("high")
+  })
+
+  it("treats verified taskless stages consistently as completed", () => {
+    const verified = stage("verified", [], {
+      tasks: [],
+      acceptance: [{
+        id: "verified.1",
+        text: "Verified",
+        testReferences: [],
+        status: "passed",
+        evidence: "Checked."
+      }]
+    })
+
+    expect(planStageExecutionStatus(verified)).toBe("completed")
+    expect(toPlanStepViews(prd([verified]))[0]?.executionStatus).toBe("completed")
+    expect(stagesToGraph(prd([verified])).nodes[0]?.executionStatus).toBe("completed")
   })
 
   it("passes a stage's structured file list through", () => {

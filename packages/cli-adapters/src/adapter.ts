@@ -102,6 +102,9 @@ export interface SessionSpec {
   /** Whether managed attachments replace or merge with harness-native MCP config. */
   readonly mcpPolicy?: "managed-only" | "merge"
 
+  /** Jingler owns structured plan capture/approval for this turn. */
+  readonly enhancedPlan?: boolean
+
   readonly readOnly?: boolean
   /**
    * This agent runs with nobody watching, so apply the protections that implies.
@@ -1029,7 +1032,7 @@ export const scriptedRun =
       // document inline. Model that contract
       // directly so the runner exercises amendment reconciliation without opening
       // a second approval gate.
-      if (spec.prompt.includes("[[amendment]]")) {
+      if (spec.enhancedPlan !== false && spec.prompt.includes("[[amendment]]")) {
         yield* emit({
           _tag: "Thinking",
           text: "Folding the requested audit amendment into the approved plan.",
@@ -1045,7 +1048,10 @@ export const scriptedRun =
 
       // A `[[plan]]` marker drives plan mode: propose a plan, then execute on
       // approval or re-propose a revised one on revise (one cycle max, for tests).
-      if (spec.prompt.includes("[[plan]]") || spec.mode === "plan") {
+      if (
+        spec.enhancedPlan !== false &&
+        (spec.prompt.includes("[[plan]]") || spec.mode === "plan")
+      ) {
         yield* emit({ _tag: "Thinking", text: "Mapping out the work before touching anything.", seconds: 3, done: true })
         yield* pause
         let rev = spec.prompt.includes("[[amendment]]") ? 2 : 1
@@ -1135,22 +1141,24 @@ export const scriptedRun =
                     `PLAN_TASK stage=${stage.id} fingerprint=${planTaskProgressFingerprint(stage)} task=${task.id} status=completed`
                 )
               ),
-              ...[
-                "s_01.1",
-                "s_02.1",
-                "s_03.1",
-                "s_04.1",
-                "s_4a.1",
-                "s_4a.2",
-                "s_4a.3",
-                "s_4a.4",
-                "s_4b.1",
-                "s_05.1",
-                "s_06.1"
-              ].map(
-                (criterion) =>
-                  `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted implementation completed and verified.`
-              )
+              ...(spec.prompt.includes("[[plan-needs-verification]]")
+                ? []
+                : [
+                    "s_01.1",
+                    "s_02.1",
+                    "s_03.1",
+                    "s_04.1",
+                    "s_4a.1",
+                    "s_4a.2",
+                    "s_4a.3",
+                    "s_4a.4",
+                    "s_4b.1",
+                    "s_05.1",
+                    "s_06.1"
+                  ].map(
+                    (criterion) =>
+                      `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted implementation completed and verified.`
+                  ))
             ].join("\n")
             // Claude delivers text token-by-token. Fragment the protocol across
             // arbitrary event boundaries so the runner must parse the settled

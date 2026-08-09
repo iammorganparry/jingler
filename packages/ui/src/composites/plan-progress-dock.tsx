@@ -1,4 +1,5 @@
 import type { PlanDocument, PlanPrdStage } from "@jingler/core"
+import { planStageExecutionStatus } from "@jingler/core"
 import {
   CheckCircle2,
   ChevronDown,
@@ -21,21 +22,16 @@ export type PlanProgressStatus =
   | "failed"
   | "interrupted"
 
-const acceptanceDone = (stage: PlanPrdStage): boolean =>
-  stage.acceptance.length > 0 &&
-  stage.acceptance.every(
-    (criterion) =>
-      criterion.status === "passed" || criterion.status === "waived"
-  )
-
 /** Project canonical single-agent task/evidence state into compact UI status. */
 export const planProgressStatus = (stage: PlanPrdStage): PlanProgressStatus => {
-  const tasks = stage.tasks ?? []
-  if (tasks.some((task) => task.status === "blocked")) return "blocked"
-  if (stage.acceptance.some((criterion) => criterion.status === "failed")) return "failed"
-  if (tasks.some((task) => task.status === "in-progress")) return "in-progress"
-  if (tasks.length > 0 && tasks.every((task) => task.status === "completed")) return "done"
-  return acceptanceDone(stage) ? "done" : "todo"
+  switch (planStageExecutionStatus(stage)) {
+    case "queued": return "todo"
+    case "running": return "in-progress"
+    case "completed": return "done"
+    case "blocked": return "blocked"
+    case "failed": return "failed"
+    case "interrupted": return "interrupted"
+  }
 }
 
 const STATUS: Readonly<

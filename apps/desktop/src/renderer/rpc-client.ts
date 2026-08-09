@@ -371,6 +371,8 @@ export const rpc = {
     name?: string
     environmentId?: string
   }): Promise<Project> => run((c) => c.Projects.clone(input)),
+  projectsEnsureOnEnvironment: (projectId: string, environmentId: string): Promise<Project> =>
+    run((c) => c.Projects.ensureOnEnvironment({ projectId, environmentId })),
   projectsRemove: (id: string, environmentId?: string): Promise<void> =>
     run((c) => c.Projects.remove({ id, ...(environmentId === undefined ? {} : { environmentId }) })),
   workspaceBranches: (repoPath: string, environmentId?: string): Promise<ReadonlyArray<string>> =>

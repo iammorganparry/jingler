@@ -85,9 +85,12 @@ test("the producing agent amends an approved plan in place without regressing co
     sessions: session("s_amended_plan")
   })
   await expect(appShell(launched.window)).toBeVisible()
-  await proposePlan(launched)
+  await proposePlan(
+    launched,
+    "[[plan]] [[plan-needs-verification]] refactor auth to a TokenStore"
+  )
   await approvePlan(launched)
-  await expect.poll(() => readPlan(launched).status, { timeout: 30_000 }).toBe("done")
+  await expect.poll(() => readPlan(launched).status, { timeout: 30_000 }).toBe("needs-verification")
 
   const completedBefore = readPlan(launched).plan.stages.flatMap(
     (stage: { tasks: ReadonlyArray<{ id: string; status: string }> }) =>
@@ -156,6 +159,11 @@ test("disabling Jingler tools restores the selected provider native plan mode", 
   const surface = launched.window.locator("[data-mode='plan']")
   await expect(surface).toContainText("Plan")
   await expect(surface).not.toContainText("Enhanced Plan")
+
+  await composer.fill("[[storm]] Use the provider-native planning flow.")
+  await composer.press("Enter")
+  await expect(launched.window.getByText("Scanned four files.")).toBeVisible()
+  expect(existsSync(currentPlanPath(launched))).toBe(false)
 })
 
 test("restart preserves completed tasks in a partially executed plan", async ({ launchApp }) => {

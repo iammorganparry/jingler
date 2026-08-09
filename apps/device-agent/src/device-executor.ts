@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { AgentRunner } from "@jingler/cli-adapters/agent-runner"
@@ -150,6 +151,10 @@ const ProjectClonePayload = Schema.Struct({
   destination: Schema.String,
   name: Schema.optional(Schema.String)
 })
+const ProjectEnsurePayload = Schema.Struct({
+  url: Schema.String,
+  name: Schema.String
+})
 const ProjectIdPayload = Schema.Struct({ id: Schema.String })
 
 export interface DeviceExecutorServices {
@@ -161,6 +166,7 @@ export interface DeviceExecutorServices {
   readonly registerProject: (input: Schema.Schema.Type<typeof ProjectRegisterPayload>) => Promise<ProjectValue>
   readonly createProjectDirectory: (input: Schema.Schema.Type<typeof ProjectRegisterPayload>) => Promise<ProjectValue>
   readonly cloneProject: (input: Schema.Schema.Type<typeof ProjectClonePayload>) => Promise<ProjectValue>
+  readonly ensureProject: (input: Schema.Schema.Type<typeof ProjectEnsurePayload>) => Promise<ProjectValue>
   readonly removeProject: (id: string) => Promise<void>
   readonly run: (
     sessionId: string,
@@ -218,6 +224,8 @@ export const makeDeviceSessionCommandExecutor = (
         return services.createProjectDirectory(decodePayload(command, ProjectRegisterPayload))
       case "Projects.clone":
         return services.cloneProject(decodePayload(command, ProjectClonePayload))
+      case "Projects.ensure":
+        return services.ensureProject(decodePayload(command, ProjectEnsurePayload))
       case "Projects.remove":
         return services.removeProject(decodePayload(command, ProjectIdPayload).id)
       case "Agent.run": {
@@ -327,6 +335,20 @@ const deviceRuntime = (root: string) => {
 
 const deviceSession = (sessionId: string) => SessionStore.get(sessionId)
 
+const normalizedRemoteUrl = (value: string): string =>
+  value
+    .trim()
+    .replace(/^git@([^:]+):/, "https://$1/")
+    .replace(/^ssh:\/\/git@/, "https://")
+    .replace(/\.git\/?$/, "")
+    .replace(/\/$/, "")
+    .toLowerCase()
+
+const safeProjectDirectory = (name: string): string => {
+  const safe = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "")
+  return safe || "project"
+}
+
 /** Install the real cli-adapters runtime used by the `serve` command. */
 export const makeLiveDeviceSessionCommandExecutor = (
   jinglerRoot: string
@@ -347,6 +369,13 @@ export const makeLiveDeviceSessionCommandExecutor = (
         )
       : Effect.succeed(explicit)
 
+  const listProjects = Effect.gen(function* () {
+    const discovered = yield* WorkspaceService.listRepos().pipe(Effect.orElseSucceed(() => []))
+    return yield* ProjectService.backfill(
+      discovered.map((repository) => ({ path: repository.path, name: repository.name }))
+    )
+  })
+
   return makeDeviceSessionCommandExecutor({
     create: (input) => run(SessionStore.create(input)),
     createFromPr: (input) => run(SessionStore.createFromPr(input)),
@@ -360,10 +389,31 @@ export const makeLiveDeviceSessionCommandExecutor = (
       baseBranch: source.baseBranch ?? source.branch,
       useWorktree: true
     })),
-    listProjects: () => run(ProjectService.list()),
+    listProjects: () => run(listProjects),
     registerProject: (input) => run(ProjectService.register(input)),
     createProjectDirectory: (input) => run(ProjectService.createDirectory(input)),
     cloneProject: (input) => run(ProjectService.clone(input)),
+    ensureProject: (input) => run(Effect.gen(function* () {
+      const projects = yield* listProjects
+      const wanted = normalizedRemoteUrl(input.url)
+      for (const project of projects.filter((candidate) => candidate.availability === "available")) {
+        const remote = yield* GitService.remoteUrl(project.path).pipe(Effect.orElseSucceed(() => null))
+        if (remote !== null && normalizedRemoteUrl(remote) === wanted) return project
+      }
+
+      const config = yield* ConfigService.get()
+      if (config === null || config.reposDir === null) {
+        return yield* Effect.fail(new Error("The remote host has no repository directory configured."))
+      }
+      const directory = safeProjectDirectory(input.name)
+      const collision = projects.some((project) => project.path === join(config.reposDir!, directory))
+      const suffix = createHash("sha256").update(wanted).digest("hex").slice(0, 8)
+      return yield* ProjectService.clone({
+        url: input.url,
+        destination: join(config.reposDir, collision ? `${directory}-${suffix}` : directory),
+        name: input.name
+      })
+    })),
     removeProject: (id) => run(ProjectService.remove(id)),
     run: (sessionId, input, emit) => run(
       Effect.gen(function* () {

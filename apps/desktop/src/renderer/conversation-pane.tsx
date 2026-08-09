@@ -7,12 +7,17 @@
  */
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import type { Environment, Session } from "@jingler/core"
+import type {
+  CliKind,
+  Environment,
+  HarnessCapability,
+  PermissionMode,
+  Session
+} from "@jingler/core"
 import {
   agentChildren,
   agentPath,
-  clampFontScale,
-  resolveHarnessSelection
+  clampFontScale
 } from "@jingler/core"
 import {
   AgentTabBar,
@@ -63,6 +68,26 @@ import {
 } from "./rpc-failure.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
+
+const harnessUnavailableMessage = (
+  capabilities: ReadonlyArray<HarnessCapability> | undefined,
+  selection: { cli: CliKind; model: string; mode: PermissionMode }
+): string | undefined => {
+  if (capabilities === undefined) return undefined
+
+  const capability = capabilities.find(({ cli }) => cli === selection.cli)
+  if (capability === undefined) {
+    const label = selection.cli === "claude" ? "Claude Code" : "Codex CLI"
+    return `${label} is unavailable. Choose an installed harness to continue.`
+  }
+  if (!capability.models.some(({ id }) => id === selection.model)) {
+    return `Model ${selection.model} is unavailable. Choose a supported model to continue.`
+  }
+  if (!capability.modes.some(({ id }) => id === selection.mode)) {
+    return `Mode ${selection.mode} is unavailable. Choose a supported mode to continue.`
+  }
+  return undefined
+}
 
 const initialPlanSplitRatio = (): number => {
   try {
@@ -293,14 +318,9 @@ export function ConversationPane({
     queryKey: ["model-capabilities"],
     queryFn: () => rpc.modelsCapabilities()
   })
-  const harnessSelection = resolveHarnessSelection(capabilitiesQuery.data ?? [], {
-    cli: convo.cli,
-    model: convo.model,
-    mode: convo.mode,
-    ...(convo.reasoning?.effort === undefined
-      ? {}
-      : { reasoningEffort: convo.reasoning.effort })
-  })
+  // The chips describe the values that will actually be sent. Discovery may
+  // offer a recovery choice, but never projects a different harness silently.
+  const composerDisabledReason = harnessUnavailableMessage(capabilitiesQuery.data, convo)
   // Conversation text-size multiplier, scoped to the transcript wrapper below via
   // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
   // on purpose: the shared `.sb-md` calc() rules must only scale inside the
@@ -848,6 +868,14 @@ export function ConversationPane({
           </button>
         </div>
       )}
+      {composerDisabledReason !== undefined && (
+        <div
+          role="alert"
+          className="flex flex-none items-center border-b border-yellow/30 bg-yellow/5 px-3 py-2 text-[11px] text-yellow"
+        >
+          {composerDisabledReason}
+        </div>
+      )}
       {activeAgentTranscript !== null ? (
         <AgentView agent={activeAgentTranscript} />
       ) : (
@@ -856,8 +884,8 @@ export function ConversationPane({
           hasMoreHistory={convo.hasMoreHistory}
           loadingHistory={convo.loadingHistory}
           onLoadEarlier={convo.loadOlder}
-          mode={harnessSelection.mode}
-          cli={harnessSelection.cli}
+          mode={convo.mode}
+          cli={convo.cli}
           skills={convo.skills}
           files={convo.files}
           paused={convo.paused}
@@ -894,15 +922,16 @@ export function ConversationPane({
               ? `Hand off — run this in a new chat on ${handoffModel}`
               : "Hand off — run this in a new chat"
           }
-          model={harnessSelection.model}
+          model={convo.model}
           catalog={convo.catalog}
-          capabilities={capabilitiesQuery.data ?? []}
+          capabilities={capabilitiesQuery.data}
+          composerDisabledReason={composerDisabledReason}
           onSetHarness={convo.setHarness}
           onSend={sendPrompt}
           onStop={convo.stop}
           onDecideGate={convo.decideGate}
           onSetMode={convo.setMode}
-          reasoningEffort={harnessSelection.reasoningEffort}
+          reasoningEffort={convo.reasoning?.effort}
           thinkingEnabled={convo.reasoning?.enabled}
           onSetReasoning={convo.setReasoning}
           question={convo.question}

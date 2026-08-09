@@ -1,4 +1,5 @@
 import { cn } from "../lib/cn.js"
+import { Command, CommandItem, CommandList } from "../components/command.js"
 import { FileIcon } from "../components/file-icon.js"
 
 /**
@@ -21,38 +22,34 @@ export function MentionMenu({
 }) {
   if (files.length === 0) return null
   return (
-    <div
-      role="listbox"
+    <Command
+      shouldFilter={false}
       className={cn(
-        "flex max-h-[260px] flex-col gap-0.5 overflow-auto rounded-lg border border-line bg-sunken p-1.5 shadow-2xl",
+        "rounded-xl border border-line shadow-2xl",
         className
       )}
     >
-      {files.map((path, i) => {
-        const name = path.split("/").pop() ?? path
-        const dir = path.slice(0, path.length - name.length)
-        return (
-          <button
-            key={path}
-            type="button"
-            role="option"
-            aria-selected={i === activeIndex}
-            onMouseDown={(e) => {
-              e.preventDefault()
-              onSelect(path)
-            }}
-            onMouseEnter={() => onHover?.(i)}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-2.5 py-[7px] text-left",
-              i === activeIndex && "bg-surface"
-            )}
-          >
-            <FileIcon path={path} />
-            <span className="font-mono text-[12px] text-text-bright">{name}</span>
-            {dir && <span className="truncate font-mono text-[10.5px] text-dim">{dir}</span>}
-          </button>
-        )
-      })}
-    </div>
+      <CommandList className="max-h-[260px]">
+        {files.map((path, i) => {
+          const name = path.split("/").pop() ?? path
+          const dir = path.slice(0, path.length - name.length)
+          return (
+            <CommandItem
+              key={path}
+              value={path}
+              aria-selected={i === activeIndex}
+              onMouseDown={(event) => event.preventDefault()}
+              onSelect={() => onSelect(path)}
+              onMouseEnter={() => onHover?.(i)}
+              className={cn(i === activeIndex && "bg-surface")}
+            >
+              <FileIcon path={path} />
+              <span className="font-mono text-[12px] text-text-bright">{name}</span>
+              {dir && <span className="truncate font-mono text-[10.5px] text-dim">{dir}</span>}
+            </CommandItem>
+          )
+        })}
+      </CommandList>
+    </Command>
   )
 }

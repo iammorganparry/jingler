@@ -12,7 +12,7 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - Run Claude Code or Codex CLI workspaces from one desktop app.
 - Work on several tasks in parallel, each in an isolated git worktree.
 - Review plans, diffs, agent activity, and pull requests without leaving the session.
-- Start work from a new branch, an existing GitHub pull request, or a GitHub issue.
+- Start work from a project checkout or a new isolated worktree.
 - Use built-in terminals, browser previews, themes, MCP servers, and agent skills.
 - Give paid teams a cited, agent-managed shared Memory wiki with private lexical search, analytics, and an explicit-evidence mind map.
 
@@ -90,7 +90,6 @@ finds an older version.
    settings when you want the provider's native plan behaviour instead.
 
 5. If the Jingler GitHub App is connected, create or link a pull request from the PR view.
-   Sessions can also be created directly from open pull requests or issues.
 
 ## Common commands
 
