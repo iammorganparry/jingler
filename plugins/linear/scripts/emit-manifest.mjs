@@ -1,20 +1,12 @@
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs"
-import { dirname, resolve } from "node:path"
+import { emitManifest } from "@jingler/plugin-sdk/emit-manifest"
+import { copyFileSync, mkdirSync } from "node:fs"
+import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { manifest } from "../src/manifest.ts"
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const manifestPath = resolve(root, "jingler.plugin.json")
+const root = fileURLToPath(new URL("..", import.meta.url))
 const assetDir = resolve(root, "dist/assets")
 
 mkdirSync(assetDir, { recursive: true })
 copyFileSync(resolve(root, "assets/linear-mark.svg"), resolve(assetDir, "linear-mark.svg"))
-writeFileSync(
-  manifestPath,
-  `${JSON.stringify(
-    { $schema: "../../packages/plugin-sdk/jingler.plugin.schema.json", ...manifest },
-    null,
-    2
-  )}\n`,
-  "utf8"
-)
+emitManifest(manifest, root)

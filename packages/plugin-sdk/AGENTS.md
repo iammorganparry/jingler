@@ -30,7 +30,7 @@ Your own npm dependencies are **bundled into your output** — there is no
 six specifiers Jingler supplies at runtime are external, and
 `@jingler/plugin-sdk/vite` already lists them.
 
-### Four import paths
+### Five import paths
 
 | Import from | Runs in | Gives you |
 |---|---|---|
@@ -38,12 +38,23 @@ six specifiers Jingler supplies at runtime are external, and
 | `@jingler/plugin-sdk/ui` | renderer | the themed component kit — use this before writing your own |
 | `@jingler/plugin-sdk/host` | extension host | `HostContext`, `Activate`, credentials, `exec` |
 | `@jingler/plugin-sdk/vite` | your build | `jinglerPluginBuild`, `JINGLER_EXTERNALS` |
+| `@jingler/plugin-sdk/emit-manifest` | your build | `emitManifest` |
 
 `@jingler/plugin-sdk/ui` is what makes a plugin look like part of the app rather
 than a webpage inside it: `Markdown`, `Spinner`, `Card`, `Callout`, `Badge`,
 `Avatar`, `Input`, `Toggle`, `Kbd`, `cn`, `relativeTime`, `useWidthTier` and more.
 It is externalised, so importing it costs your bundle nothing. See `api-digest.md`
 for the full list.
+
+Generate the JSON manifest from the typed source instead of maintaining two
+copies:
+
+```js
+import { emitManifest } from "@jingler/plugin-sdk/emit-manifest"
+import { manifest } from "../src/manifest.ts"
+
+emitManifest(manifest, new URL("..", import.meta.url))
+```
 
 ### Set `apiVersion`
 

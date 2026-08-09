@@ -4,7 +4,7 @@ Every export, with its signature and one line of purpose. For the narrative
 version see `AGENTS.md`; for the manifest's validated shape see
 `jingler.plugin.schema.json`.
 
-Four entrypoints, deliberately separate so a host-only plugin never pulls React
+Five entrypoints, deliberately separate so a host-only plugin never pulls React
 into Node and a UI-only plugin never pulls Node types into the browser:
 
 | Import from | Runs in | Use for |
@@ -13,6 +13,7 @@ into Node and a UI-only plugin never pulls Node types into the browser:
 | `@jingler/plugin-sdk/ui` | Jingler's renderer | the themed component kit |
 | `@jingler/plugin-sdk/host` | Node, in the extension host | network, CLIs, credentials |
 | `@jingler/plugin-sdk/vite` | your build | externals config |
+| `@jingler/plugin-sdk/emit-manifest` | your build | generate `jingler.plugin.json` |
 
 ---
 
@@ -509,6 +510,17 @@ runaway process cannot exhaust memory and a chatty `stdout` cannot starve the
 `… output truncated` when the cap was hit.
 
 ---
+
+## `@jingler/plugin-sdk/emit-manifest`
+
+### `emitManifest`
+
+```ts
+function emitManifest(manifest: ManifestInput, pluginRoot: string | URL): string
+```
+
+Writes `jingler.plugin.json` with stable formatting and a schema reference
+computed relative to the plugin root. Returns the output path.
 
 ## `@jingler/plugin-sdk/vite`
 
