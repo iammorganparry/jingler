@@ -485,16 +485,16 @@ export function JinglerApp({
   )
   const selected = split.activeSessionId
   const setSelected = split.selectSession
+  const [newOpen, setNewOpen] = useState(false)
   const selectSession = useCallback(
     (id: string) => {
       memory?.onClose()
+      setNewOpen(false)
       setSelected(id)
     },
     [memory, setSelected]
   )
   const group = split.group
-  const [newOpen, setNewOpen] = useState(false)
-  const [requestedProjectId, setRequestedProjectId] = useState<string | null>(null)
   const [addProjectOpen, setAddProjectOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   const [usageLoading, setUsageLoading] = useState(false)
@@ -520,6 +520,11 @@ export function JinglerApp({
     nonce: number
   } | null>(null)
   const clearTabRequest = useCallback(() => setTabRequest(null), [])
+  const openNewSession = useCallback(() => {
+    memory?.onClose()
+    setSettingsOpen(false)
+    setNewOpen(true)
+  }, [memory])
 
   // An outside request to jump to a session (notification click). Keyed on the
   // NONCE, not the id: clicking two notifications for the same session must
@@ -530,6 +535,7 @@ export function JinglerApp({
   useEffect(() => {
     if (requestId === undefined) return
     setSelected(requestId)
+    setNewOpen(false)
     // Jumping to a session means SHOWING it — a notification that lands the
     // operator behind the Settings dialog has not done its job.
     setSettingsOpen(false)
@@ -722,7 +728,7 @@ export function JinglerApp({
         case "new-session": {
           if (!onCreateSession) return
           e.preventDefault()
-          setNewOpen(true)
+          openNewSession()
           return
         }
         // Swallow the chord only if it actually added a pane — at the cap, or
@@ -772,7 +778,8 @@ export function JinglerApp({
     split,
     addNextSessionAsPane,
     active,
-    renderFileQuickOpen
+    renderFileQuickOpen,
+    openNewSession
   ])
 
   /**
@@ -803,7 +810,7 @@ export function JinglerApp({
       label: s.title || UNTITLED_SESSION,
       detail: `${s.repo} · ${s.branch}`,
       group: s.archived ? PALETTE_GROUP.archived : PALETTE_GROUP.sessions,
-      run: () => setSelected(s.id)
+      run: () => selectSession(s.id)
     })
 
     for (const s of sessions) if (!s.archived) items.push(sessionItem(s))
@@ -816,7 +823,7 @@ export function JinglerApp({
         group: PALETTE_GROUP.actions,
         hint: "⌘N",
         icon: SquareTerminal,
-        run: () => setNewOpen(true)
+        run: openNewSession
       })
     }
 
@@ -886,7 +893,10 @@ export function JinglerApp({
         label: "Open Settings",
         group: PALETTE_GROUP.actions,
         icon: SettingsIcon,
-        run: () => setSettingsOpen(true)
+        run: () => {
+          setNewOpen(false)
+          setSettingsOpen(true)
+        }
       })
     }
 
@@ -958,7 +968,7 @@ export function JinglerApp({
   }, [
     sessions,
     active,
-    setSelected,
+    selectSession,
     onCreateSession,
     onToggleTerminal,
     terminalActive,
@@ -972,16 +982,18 @@ export function JinglerApp({
     liveDiff,
     tabContributions,
     pluginCommands,
-    onRunPluginCommand
+    onRunPluginCommand,
+    openNewSession
   ])
 
   const handleCreate = useCallback(
     async (input: CreateSessionInput) => {
       if (!onCreateSession) return
       const session = await onCreateSession(input)
+      setNewOpen(false)
       setSelected(session.id)
     },
-    [onCreateSession]
+    [onCreateSession, setSelected]
   )
 
   return (
@@ -993,7 +1005,6 @@ export function JinglerApp({
     >
       <SessionConversation
         sessions={sessions}
-        projects={projects}
         environments={environments}
         clis={clis}
         activeSessionId={selected}
@@ -1047,23 +1058,16 @@ export function JinglerApp({
         prStates={prStates}
         repoOwners={repoOwners}
         liveDiff={liveDiff}
-        onNewSession={onCreateSession ? () => {
-          setRequestedProjectId(null)
-          setNewOpen(true)
-        } : undefined}
-        onAddProject={onRegisterProject ? () => setAddProjectOpen(true) : undefined}
-        onNewWorkspace={onCreateSession ? (projectId) => {
-          setRequestedProjectId(projectId)
-          setNewOpen(true)
-        } : undefined}
+        onNewSession={onCreateSession ? openNewSession : undefined}
         user={user}
         onSignOut={onSignOut}
         onOpenUsage={onLoadUsage ? openUsage : undefined}
         onOpenSettings={
           onSaveProvider
             ? () => {
-                memory?.onClose()
-                setSettingsSection("providers")
+              memory?.onClose()
+              setNewOpen(false)
+              setSettingsSection("providers")
                 setSettingsOpen(true)
               }
             : undefined
@@ -1071,8 +1075,9 @@ export function JinglerApp({
         onOpenGithubSettings={
           onSaveProvider
             ? () => {
-                memory?.onClose()
-                setSettingsSection("github")
+              memory?.onClose()
+              setNewOpen(false)
+              setSettingsSection("github")
                 setSettingsOpen(true)
               }
             : undefined
@@ -1082,12 +1087,40 @@ export function JinglerApp({
         onOpenMemory={
           memory
             ? () => {
-                setSettingsOpen(false)
-                memory.onOpen()
+              setSettingsOpen(false)
+              setNewOpen(false)
+              memory.onOpen()
               }
             : undefined
         }
         memoryView={memory?.active ? memory.content : undefined}
+        newSessionView={
+          newOpen && onCreateSession ? (
+            <NewWorkspaceView
+              open
+              onClose={() => setNewOpen(false)}
+              onAddProject={
+                onBrowseProject && onRegisterProject && onCreateProjectDirectory && onCloneProject
+                  ? () => setAddProjectOpen(true)
+                  : undefined
+              }
+              projects={projects}
+              environments={environments}
+              defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
+              clis={clis}
+              defaultCli={defaultCli}
+              loadBranches={loadBranches}
+              prepareProject={async (projectId, environmentId) => {
+                const project = projects.find((candidate) => candidate.id === projectId)
+                if (project === undefined) throw new Error("Project not found.")
+                if (environmentId === undefined) return project
+                if (!onEnsureProjectOnEnvironment) throw new Error("Remote project provisioning is unavailable.")
+                return onEnsureProjectOnEnvironment(projectId, environmentId)
+              }}
+              onCreate={handleCreate}
+            />
+          ) : undefined
+        }
         settingsView={
           settingsOpen && onSaveProvider ? (
             <SettingsView
@@ -1150,27 +1183,6 @@ export function JinglerApp({
         onTabRequestHandled={clearTabRequest}
         version={version}
       />
-      {onCreateSession && (
-        <NewWorkspaceView
-          open={newOpen}
-          onClose={() => setNewOpen(false)}
-          projects={projects}
-          environments={environments}
-          requestedProjectId={requestedProjectId}
-          defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
-          clis={clis}
-          defaultCli={defaultCli}
-          loadBranches={loadBranches}
-          prepareProject={async (projectId, environmentId) => {
-            const project = projects.find((candidate) => candidate.id === projectId)
-            if (project === undefined) throw new Error("Project not found.")
-            if (environmentId === undefined) return project
-            if (!onEnsureProjectOnEnvironment) throw new Error("Remote project provisioning is unavailable.")
-            return onEnsureProjectOnEnvironment(projectId, environmentId)
-          }}
-          onCreate={handleCreate}
-        />
-      )}
       {onBrowseProject && onRegisterProject && onCreateProjectDirectory && onCloneProject && (
         <AddProjectDialog
           open={addProjectOpen}

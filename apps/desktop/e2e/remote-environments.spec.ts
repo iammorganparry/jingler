@@ -55,9 +55,9 @@ const selectComposerEnvironment = async (window: Page, name = "buildbox") => {
 }
 
 const createRemoteWorkspace = async (window: Page, title: string): Promise<string> => {
-  await window.getByTestId("new-workspace").click()
-  await expect(window.getByRole("heading", { name: "New workspace" })).toBeVisible()
-  await window.getByRole("combobox", { name: "Execution host" }).click()
+  await window.getByTestId("new-session").click()
+  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+  await window.getByRole("button", { name: "Execution environment" }).click()
   await window.getByRole("option", { name: "buildbox" }).click()
   await window.getByRole("textbox", { name: "Workspace name" }).fill(title)
   await expect(window.getByRole("button", { name: "Create workspace" })).toBeEnabled({ timeout: 20_000 })

@@ -44,7 +44,7 @@ export function EmptyConversation({
               className="flex items-center gap-2 rounded-md bg-blue px-4 py-[9px] text-[13px] font-semibold text-editor outline-none transition-[filter] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Plus size={15} />
-              New workspace
+              New session
               <span className="ml-0.5 rounded-[3px] bg-editor/30 px-1.5 py-px font-mono text-[10px]">
                 ⌘N
               </span>
@@ -85,7 +85,7 @@ export function EmptyConversation({
 
       {/* Keyboard hint bar */}
       <div className="flex h-[38px] flex-none items-center gap-5 border-t border-hairline bg-panel px-[18px] text-[11px] text-dim">
-        <Shortcut keys="⌘N" label="New workspace" />
+        <Shortcut keys="⌘N" label="New session" />
         <Shortcut keys="⌘K" label="Command palette" />
         <Shortcut keys="⌘," label="Settings" />
         <div className="flex-1" />

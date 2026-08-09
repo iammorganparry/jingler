@@ -22,6 +22,8 @@ const makeProject = (home: string, name: string): string => {
 }
 
 const addProject = async (window: Page, projectPath: string) => {
+  await window.getByTestId("new-session").click()
+  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
   await window.getByRole("button", { name: "Add project" }).click()
   await expect(window.getByRole("heading", { name: "Add project" })).toBeVisible()
   await window.getByRole("button", { name: /Search for directory/ }).click()
@@ -33,13 +35,19 @@ const createWorkspace = async (
   window: Page,
   input: { title: string; checkout: "Host checkout" | "New worktree"; task?: string }
 ) => {
-  await window.getByTestId("new-workspace").click()
-  await expect(window.getByRole("heading", { name: "New workspace" })).toBeVisible()
+  if (!(await window.getByTestId("new-session-view").isVisible())) {
+    await window.getByTestId("new-session").click()
+  }
+  await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
   await window.getByRole("combobox", { name: "Checkout" }).click()
   await window.getByRole("option", { name: input.checkout }).click()
   await window.getByRole("textbox", { name: "Workspace name" }).fill(input.title)
-  if (input.task) await window.getByRole("textbox", { name: "First task" }).fill(input.task)
-  await window.getByRole("button", { name: /Create (workspace|and start)/ }).click()
+  if (input.task) {
+    await window.getByPlaceholder(/Message the agent/).fill(input.task)
+    await window.getByPlaceholder(/Message the agent/).press("Enter")
+  } else {
+    await window.getByRole("button", { name: "Create workspace" }).click()
+  }
   await expect(sessionRow(window, input.title)).toBeVisible({ timeout: 20_000 })
 }
 
@@ -49,7 +57,12 @@ test("adds an existing directory as a project without creating a workspace", asy
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
 
-  await expect(launched.window.getByText("sample-project", { exact: true })).toBeVisible()
+  await expect(launched.window.getByTestId("project-list")).toHaveCount(0)
+  await expect(launched.window.getByTestId("new-session-view")).toBeVisible()
+  await expect(launched.window.getByRole("dialog")).toHaveCount(0)
+  await expect(launched.window.getByRole("combobox", { name: "Project" })).toContainText("sample-project")
+  await expect(launched.window.getByTestId("composer")).toBeVisible()
+  await launched.window.getByRole("button", { name: "Close new session" }).click()
   const projects = JSON.parse(readFileSync(join(launched.home, "jingler", "projects.json"), "utf8"))
   expect(projects).toHaveLength(1)
   expect(projects[0]).toMatchObject({ name: "sample-project", path: projectPath })
@@ -120,9 +133,7 @@ test("migrates a legacy repository and session into the project workspace hierar
     sessions: legacy
   })
   await expect(appShell(launched.window)).toBeVisible()
-  await expect(
-    launched.window.getByTestId("project-list").getByText("widget", { exact: true })
-  ).toBeVisible()
+  await expect(launched.window.getByTestId("project-list")).toHaveCount(0)
   await expect(sessionRow(launched.window, "Legacy workspace")).toBeVisible()
 
   await expect.poll(() => existsSync(join(launched.home, "jingler", "projects.json"))).toBe(true)

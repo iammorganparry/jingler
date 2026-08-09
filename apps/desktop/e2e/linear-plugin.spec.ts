@@ -52,8 +52,8 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
 
     await configureLinear(launched.window)
 
-    await launched.window.getByTestId("new-workspace").click()
-    await expect(launched.window.getByRole("heading", { name: "New workspace" })).toBeVisible()
+    await launched.window.getByTestId("new-session").click()
+    await expect(launched.window.getByRole("heading", { name: "New session" })).toBeVisible()
     await launched.window.getByRole("combobox", { name: "Checkout" }).click()
     await launched.window.getByRole("option", { name: "Host checkout" }).click()
     await launched.window

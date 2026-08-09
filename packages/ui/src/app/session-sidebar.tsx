@@ -1,12 +1,11 @@
 import * as React from "react"
-import type { Environment, Project, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
+import type { Environment, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
 import { displayStatusOf, persistentOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
   BrainCircuit,
   Columns2,
   GitBranch,
-  FolderGit2,
   Layers,
   PanelLeft,
   Plus,
@@ -44,7 +43,6 @@ import {
 
 export interface SessionSidebarProps {
   sessions: ReadonlyArray<Session>
-  projects?: ReadonlyArray<Project>
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
   /**
@@ -87,12 +85,8 @@ export interface SessionSidebarProps {
   prStates?: Record<string, SessionPrStatus>
   /** GitHub owner login per session, used for repository avatars. */
   repoOwners?: Readonly<Record<string, string>>
-  /** Open the New Session dialog (header "+" / ⌘N). */
+  /** Open the New Session view (header "+" / ⌘N). */
   onNewSession?: () => void
-  /** Register a durable project without creating a workspace. */
-  onAddProject?: () => void
-  /** Create a workspace preselected to one registered project. */
-  onNewWorkspace?: (projectId: string) => void
   /** The signed-in user, shown in the footer account menu. */
   user?: User
   /** Open the Usage & limits modal (from the account menu). */
@@ -142,7 +136,6 @@ function SidebarBody({
   width,
   onResize,
   sessions,
-  projects = [],
   environments = [],
   activeSessionId,
   slotBySession,
@@ -162,8 +155,6 @@ function SidebarBody({
   prStates,
   repoOwners,
   onNewSession,
-  onAddProject,
-  onNewWorkspace,
   user,
   onOpenUsage,
   onOpenSettings,
@@ -450,12 +441,11 @@ function SidebarBody({
         <button
           type="button"
           onClick={onNewSession}
-          aria-label="New workspace"
-          title="New workspace (⌘N)"
-          // Three buttons in the app answer to the accessible name "New
-          // session" — this one, the sidebar's empty-state prompt, and the
-          // dialog's own submit. A testid is the only unambiguous handle.
-          data-testid="new-workspace"
+          aria-label="New session"
+          title="New session (⌘N)"
+          // The expanded and collapsed sidebar both expose this action, so a
+          // testid is the stable handle regardless of the responsive layout.
+          data-testid="new-session"
           className="flex size-7 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Plus size={15} />
@@ -511,42 +501,14 @@ function SidebarBody({
             type="button"
             data-testid="persistent-session-add"
             onClick={onNewSession}
-            aria-label="New workspace"
-            title="New workspace"
+            aria-label="New session"
+            title="New session"
             className="flex h-[68px] min-w-0 items-center justify-center rounded-2xl border border-dashed border-line text-dim outline-none transition-colors hover:border-blue hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus size={16} />
           </button>
         )}
       </div>
-
-      {projects.length > 0 && (
-        <div className="flex-none border-t border-hairline px-2 py-2" data-testid="project-list">
-          <div className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-dim">
-            Projects
-          </div>
-          {projects.map((project) => (
-            <div key={project.id} className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface">
-              <FolderGit2 size={13} className="text-cyan" />
-              <span className="min-w-0 flex-1 truncate text-[11.5px] text-text" title={project.path}>
-                {project.name}
-              </span>
-              {project.availability !== "available" ? (
-                <span className="text-[9px] text-red">{project.availability}</span>
-              ) : onNewWorkspace ? (
-                <button
-                  type="button"
-                  aria-label={`New workspace in ${project.name}`}
-                  onClick={() => onNewWorkspace(project.id)}
-                  className="flex size-6 items-center justify-center rounded text-dim outline-none hover:bg-panel hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <Plus size={13} />
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Groups (or the empty hint when there are no sessions yet) */}
       <div className="flex flex-1 flex-col overflow-auto px-2 pb-2 pt-0.5">
@@ -686,18 +648,6 @@ function SidebarBody({
 
       {/* Footer: account menu (name / email / avatar → Settings, Usage, Sign out). */}
       <div className="flex-none border-t border-hairline p-1.5">
-        {onAddProject && (
-          <button
-            type="button"
-            data-testid="add-project"
-            onClick={onAddProject}
-            className="mb-1 flex h-9 w-full items-center gap-2 rounded-md px-2 text-[12px] text-muted-foreground outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <FolderGit2 size={14} />
-            <span className="flex-1 text-left">Add project</span>
-            <Plus size={13} />
-          </button>
-        )}
         {user ? (
           <UserMenu
             user={user}
@@ -879,8 +829,8 @@ function SessionRail({
       <button
         type="button"
         onClick={onNewSession}
-        aria-label="New workspace"
-        title="New workspace (⌘N)"
+        aria-label="New session"
+        title="New session (⌘N)"
         className="flex size-8 flex-none items-center justify-center rounded-md text-dim outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Plus size={15} />
