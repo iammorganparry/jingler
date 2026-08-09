@@ -40,6 +40,12 @@ export interface PlanExecutionGroup {
   readonly assignment: PlanStageAssignment | null
   /** Exact declared paths whose overlap also joins otherwise-independent stages. */
   readonly files: ReadonlyArray<string>
+  /**
+   * Ids of the other groups this one depends on — a stage here depends on a stage
+   * there. The scheduler must run those groups to completion first; groups with no
+   * (unfinished) dependency run in parallel. Empty for a root group.
+   */
+  readonly dependsOn: ReadonlyArray<string>
 }
 
 export interface PlanExecutionGraph {
@@ -323,7 +329,7 @@ const assignWorkerRouting = (
     const route = routing[group.complexity] ?? routing.default
     const reason =
       `Worker router selected ${route.cli}/${route.model} for this ` +
-      `${group.complexity}-complexity dependency/file component.`
+      `${group.complexity}-complexity file component.`
     for (const stageId of group.stageIds) {
       assignmentByStageId.set(stageId, {
         agentId,
@@ -537,6 +543,11 @@ export const buildPlanExecutionGraph = (
     if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot)
   }
 
+  // A dependency is an ORDERING edge, not an ownership edge: it does NOT merge the
+  // two stages into one worker (that would serialise the whole DAG). Independent
+  // branches stay separate so they can run in parallel; the scheduler honours the
+  // ordering via each group's `dependsOn`. Only file overlap (below) still merges,
+  // to keep concurrent edits to the same file on one worker.
   for (const stage of stageById.values()) {
     for (const dependency of dependenciesOf(stage)) {
       if (dependency === stage.id) {
@@ -553,9 +564,7 @@ export const buildPlanExecutionGraph = (
           message: `Stage "${stage.id}" depends on missing stage "${dependency}".`,
           stageId: stage.id
         })
-        continue
       }
-      union(stage.id, dependency)
     }
   }
 
@@ -620,6 +629,56 @@ export const buildPlanExecutionGraph = (
     }
   }
 
+  // Dependency-only ordering can leave two file-overlap components each depending
+  // (transitively) on the other — a cross-file cycle that cannot run as separate
+  // ordered workers. Merge every such pair onto one worker until the component
+  // dependency graph is acyclic. (A plain stage cycle is already reported above.)
+  const componentDependencyRoots = (): Map<string, Set<string>> => {
+    const deps = new Map<string, Set<string>>()
+    for (const stage of stageById.values()) {
+      const to = find(stage.id)
+      for (const dependency of dependenciesOf(stage)) {
+        if (!stageById.has(dependency)) continue
+        const from = find(dependency)
+        if (from === to) continue
+        const set = deps.get(to) ?? new Set<string>()
+        set.add(from)
+        deps.set(to, set)
+      }
+    }
+    return deps
+  }
+  for (;;) {
+    const deps = componentDependencyRoots()
+    const roots = [...new Set([...stageById.keys()].map((id) => find(id)))]
+    const reachable = new Map<string, Set<string>>()
+    const walk = (root: string, acc: Set<string>): void => {
+      for (const dep of deps.get(root) ?? []) {
+        if (!acc.has(dep)) {
+          acc.add(dep)
+          walk(dep, acc)
+        }
+      }
+    }
+    for (const root of roots) {
+      const acc = new Set<string>()
+      walk(root, acc)
+      reachable.set(root, acc)
+    }
+    let mergedAny = false
+    for (const a of roots) {
+      for (const b of reachable.get(a) ?? []) {
+        if (a !== b && reachable.get(b)?.has(a)) {
+          union(a, b)
+          mergedAny = true
+          break
+        }
+      }
+      if (mergedAny) break
+    }
+    if (!mergedAny) break
+  }
+
   const componentIds = new Map<string, Array<string>>()
   for (const stageId of stageById.keys()) {
     const root = find(stageId)
@@ -632,6 +691,21 @@ export const buildPlanExecutionGraph = (
     const leftIndex = Math.min(...left.map((id) => sourceIndex.get(id) ?? 0))
     const rightIndex = Math.min(...right.map((id) => sourceIndex.get(id) ?? 0))
     return leftIndex - rightIndex
+  })
+
+  // Stable group id per component root, resolved up-front so a group can name the
+  // OTHER groups it depends on (whose id isn't known yet during its own build).
+  const rootOf = (component: ReadonlyArray<string>): string => find(component[0] ?? "")
+  const groupIdByRoot = new Map<string, string>()
+  components.forEach((component, index) => {
+    const assignment = component
+      .map((id) => stageById.get(id))
+      .map((stage) => (stage ? assignmentOf(stage) : null))
+      .find((candidate): candidate is PlanStageAssignment => candidate !== null) ?? null
+    groupIdByRoot.set(
+      rootOf(component),
+      assignment?.agentId ?? `agent-${String(index + 1).padStart(2, "0")}`
+    )
   })
 
   const groups: Array<PlanExecutionGroup> = []
@@ -714,12 +788,25 @@ export const buildPlanExecutionGraph = (
         })
       }
     }
+    // Cross-component dependencies this group must wait on (mapped to their group id).
+    const componentRoot = rootOf(component)
+    const dependsOn = [
+      ...new Set(
+        componentStages.flatMap((stage) =>
+          dependenciesOf(stage)
+            .filter((dep) => stageById.has(dep) && find(dep) !== componentRoot)
+            .map((dep) => groupIdByRoot.get(find(dep)))
+            .filter((id): id is string => id !== undefined)
+        )
+      )
+    ].sort()
     groups.push({
-      id: assignment?.agentId ?? `agent-${String(groupIndex + 1).padStart(2, "0")}`,
+      id: groupIdByRoot.get(componentRoot) ?? `agent-${String(groupIndex + 1).padStart(2, "0")}`,
       stageIds: ordered,
       complexity,
       assignment,
-      files
+      files,
+      dependsOn
     })
   }
 

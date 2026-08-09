@@ -97,26 +97,41 @@ describe("planStructuralDiagnostics", () => {
 })
 
 describe("buildPlanExecutionGraph", () => {
-  it("groups dependency-connected stages under one logical assignment in topological order", () => {
-    const assignment = {
-      agentId: "agent-backend",
-      cli: "codex" as const,
-      model: "gpt-5",
-      reason: "Shared implementation context."
-    }
+  it("treats a dependency as an ordering edge (dependsOn) across SEPARATE parallel workers", () => {
+    // A dependency no longer merges the two stages into one worker — that would
+    // serialise the whole DAG. Independent branches get their own worker; the
+    // ordering is carried by `dependsOn` for the scheduler to honour.
+    const route = { cli: "codex" as const, model: "gpt-5", reason: "Routed." }
     const result = buildPlanExecutionGraph([
-      stage("02", { dependencies: ["01"], complexity: "high", assignment }),
-      stage("01", { assignment })
+      stage("02", { dependencies: ["01"], complexity: "high", assignment: { agentId: "agent-02", ...route } }),
+      stage("01", { assignment: { agentId: "agent-01", ...route } })
+    ], { requireAssignments: true })
+
+    expect(result.valid).toBe(true)
+    expect(result.groups).toHaveLength(2)
+    const first = result.groups.find((group) => group.stageIds.includes("01"))!
+    const second = result.groups.find((group) => group.stageIds.includes("02"))!
+    expect(first.dependsOn).toEqual([])
+    expect(second.dependsOn).toEqual([first.id])
+    expect(second.complexity).toBe("high")
+  })
+
+  it("merges only a cross-file dependency CYCLE onto one worker (keeps the DAG acyclic)", () => {
+    // A shares a file with B, C shares a file with D. A depends on D and C depends
+    // on B → the {A,B} and {C,D} file-components each depend on the other. They
+    // cannot run as ordered separate workers, so they condense onto one.
+    const route = { agentId: "agent-01", cli: "codex" as const, model: "gpt-5", reason: "r" }
+    const result = buildPlanExecutionGraph([
+      stage("A", { files: files("src/ab.ts"), dependencies: ["D"], assignment: route }),
+      stage("B", { files: files("src/ab.ts"), assignment: route }),
+      stage("C", { files: files("src/cd.ts"), dependencies: ["B"], assignment: route }),
+      stage("D", { files: files("src/cd.ts"), assignment: route })
     ], { requireAssignments: true })
 
     expect(result.valid).toBe(true)
     expect(result.groups).toHaveLength(1)
-    expect(result.groups[0]).toMatchObject({
-      id: "agent-backend",
-      stageIds: ["01", "02"],
-      complexity: "high",
-      assignment
-    })
+    expect([...result.groups[0]!.stageIds].sort()).toEqual(["A", "B", "C", "D"])
+    expect(result.groups[0]!.dependsOn).toEqual([])
   })
 
   it("keeps independent assignments separate and joins normalized file overlaps", () => {
@@ -193,10 +208,13 @@ describe("buildPlanExecutionGraph", () => {
       code: "dependency-cycle"
     },
     {
+      // Two stages that share a file are one worker (edits must serialise); the
+      // planner giving them different default agents is the conflict. (A dependency
+      // no longer merges workers, so it can no longer cause this.)
       name: "conflicting assignment",
       stages: [
         stage("01", { files: files("src/shared.ts") }),
-        stage("02", { dependencies: ["01"] })
+        stage("02", { files: files("src/shared.ts") })
       ],
       code: "assignment-conflict"
     }
@@ -491,7 +509,7 @@ describe("worker routing", () => {
     }))).toBe(true)
   })
 
-  it("normalizes each dependency/file component to its strongest complexity route", () => {
+  it("routes dep-linked stages as SEPARATE workers, each by its own complexity", () => {
     const stages = [
       stage("01", {
         title: "Inspect",
@@ -523,9 +541,11 @@ describe("worker routing", () => {
     const routed = applyWorkerRouting(stages, configured)
 
     expect(routed.map((item) => item.assignment)).toMatchObject([
-      { agentId: "worker-auth", cli: "claude", model: "opus" },
-      { agentId: "worker-auth", cli: "claude", model: "opus" },
-      { agentId: "agent-02", cli: "codex", model: "gpt-5.6-sol" }
+      // 01 (low) and 02 (high) are independent workers now, each routed by its own
+      // complexity, rather than merged under one high-complexity worker.
+      { agentId: "worker-auth", cli: "claude", model: "haiku" },
+      { agentId: "worker-auth-2", cli: "claude", model: "opus" },
+      { agentId: "agent-03", cli: "codex", model: "gpt-5.6-sol" }
     ])
     expect(routed.every((item) => item.assignment?.reasoning === undefined)).toBe(true)
     expect(workerRoutingMismatch(routed, configured)).toBeNull()
@@ -547,21 +567,22 @@ describe("worker routing", () => {
     expect(compiled.valid).toBe(true)
     if (!compiled.valid) return
     expect(compiled.graph.valid).toBe(true)
+    // Each stage is its own parallel worker now (deps order, they don't merge).
     expect(compiled.plan.stages.map((item) => item.assignment)).toMatchObject([
       {
         agentId: "agent-01",
         cli: "claude",
-        model: "opus",
-        reasoning: { enabled: true, effort: "high" }
+        model: "haiku",
+        reasoning: { enabled: true, effort: "low" }
       },
       {
-        agentId: "agent-01",
+        agentId: "agent-02",
         cli: "claude",
         model: "opus",
         reasoning: { enabled: true, effort: "high" }
       },
       {
-        agentId: "agent-02",
+        agentId: "agent-03",
         cli: "claude",
         model: "haiku",
         reasoning: { enabled: true, effort: "low" }
@@ -596,10 +617,12 @@ describe("worker routing", () => {
 
     expect(amendment.valid).toBe(true)
     if (!amendment.valid) return
+    // The dependent stage is its own parallel worker (agent-03), not merged back
+    // onto its prerequisite's worker; the existing worker keeps its id.
     expect(amendment.plan.stages.map((item) => item.assignment?.agentId)).toStrictEqual([
       "agent-01",
       "agent-02",
-      "agent-01"
+      "agent-03"
     ])
     expect(amendment.plan.stages[1]?.executionStatus).toBe("queued")
   })
