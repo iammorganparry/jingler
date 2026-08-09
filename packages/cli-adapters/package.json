@@ -18,6 +18,7 @@
     "./harness-adapter": "./src/harness-adapter.ts",
     "./open-connector": "./src/open-connector.ts",
     "./plan-store": "./src/plan-store.ts",
+    "./projects": "./src/projects.ts",
     "./publish-metadata": "./src/publish-metadata.ts",
     "./remote-session": "./src/remote-session.ts",
     "./secret-store": "./src/secret-store.ts",
@@ -29,7 +30,6 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist .turbo *.tsbuildinfo",
-    "eval:orchestrators": "tsx scripts/eval-orchestrators.ts",
     "probe:codex-silent": "tsx scripts/probe-codex-silent-turn.ts",
     "probe:claude-steer": "tsx scripts/probe-claude-steer.ts"
   },

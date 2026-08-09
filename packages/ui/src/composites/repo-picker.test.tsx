@@ -52,7 +52,7 @@ describe("RepoPicker", () => {
     const input = await open()
     // Only unstarred repos match, so the Starred heading must go with them.
     await userEvent.type(input, "athena")
-    expect(screen.queryByText("Starred")).toBeNull()
+    expect(screen.queryByRole("group", { name: "Starred" })).toBeNull()
     expect(screen.queryByText("athena")).toBeTruthy()
   })
 

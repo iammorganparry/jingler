@@ -12,8 +12,10 @@ import * as React from "react"
  * re-renders every subtree that reads the width. The frame is cancelled on
  * unmount so a pane closed mid-drag doesn't setState on a dead component.
  *
- * Returns `0` until the first observation lands. Callers treat 0 as "unmeasured"
- * rather than "tiny" — see `WidthTierProvider`.
+ * Takes one synchronous layout measurement before subscribing. That prevents a
+ * newly mounted pane from briefly rendering the wide layout and also keeps the
+ * hook correct in test/runtime environments whose ResizeObserver shim only
+ * implements subscription bookkeeping.
  */
 export function useContainerWidth<T extends HTMLElement = HTMLDivElement>(): [
   React.RefObject<T | null>,
@@ -26,12 +28,12 @@ export function useContainerWidth<T extends HTMLElement = HTMLDivElement>(): [
     const el = ref.current
     if (!el) return
 
-    // jsdom (unit tests) and any exotic runtime without ResizeObserver get a
-    // single static measurement rather than an exception. The tier provider
-    // then holds whatever that first read said, which for a test harness is the
-    // explicitly-set width it wanted anyway.
+    const initialWidth = el.getBoundingClientRect().width
+    setWidth(initialWidth)
+
+    // jsdom (unit tests) and any exotic runtime without ResizeObserver keep the
+    // static measurement above rather than throwing.
     if (typeof ResizeObserver === "undefined") {
-      setWidth(el.getBoundingClientRect().width)
       return
     }
 

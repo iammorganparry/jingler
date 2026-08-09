@@ -80,10 +80,11 @@ describe("DiscoveryService.list — pinned bin dir", () => {
     if (exit._tag !== "Success") return
     const byKind = Object.fromEntries(exit.value.map((c) => [c.kind, c]))
     expect(byKind.claude).toMatchObject({ available: true, binPath: `${PIN}/claude` })
-    // The others are installed on this fake host, and must still be invisible.
+    // The other supported harness is installed on this fake host and must still
+    // be invisible. Removed providers are not returned at all.
     expect(byKind.codex?.available).toBe(false)
-    expect(byKind.opencode?.available).toBe(false)
-    expect(byKind.cursor?.available).toBe(false)
+    expect(byKind.opencode).toBeUndefined()
+    expect(byKind.cursor).toBeUndefined()
   })
 
   /** PATH scrubbing alone could never do this — the candidates are absolute. */
@@ -128,13 +129,13 @@ describe("DiscoveryService.list", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     const byKind = Object.fromEntries(exit.value.map((c) => [c.kind, c]))
-    expect(exit.value).toHaveLength(4) // one entry per supported external CLI
+    expect(exit.value).toHaveLength(2) // Claude Code and Codex are the supported harnesses.
 
     expect(byKind.claude).toMatchObject({ available: true, version: "claude 2.1.0" })
     expect(byKind.claude?.binPath).toBe("/usr/local/bin/claude")
     expect(byKind.codex?.available).toBe(false)
-    expect(byKind.cursor?.available).toBe(false)
-    expect(byKind.opencode?.available).toBe(false)
+    expect(byKind.cursor).toBeUndefined()
+    expect(byKind.opencode).toBeUndefined()
   })
 
   it("marks every CLI unavailable when nothing resolves", async () => {
@@ -143,44 +144,6 @@ describe("DiscoveryService.list", () => {
     if (exit._tag === "Success") {
       expect(external(exit.value).every((c) => !c.available)).toBe(true)
     }
-  })
-
-  /**
-   * Version-gated CLIs must read as unavailable with an actionable note, not as
-   * missing. Codex's gate protects the SDK JSONL protocol; opencode's protects
-   * the command and persistence interfaces its adapter requires.
-   */
-  const opencodeAt = (version: string) =>
-    run((command, args) => {
-      if (command === "which" || command === "where") {
-        return args[0] === "opencode" ? { stdout: "/opt/homebrew/bin/opencode" } : { stdout: "" }
-      }
-      if (args.includes("--version") && basename(command) === "opencode") {
-        return { stdout: version }
-      }
-      return { stdout: "" }
-    })
-
-  it("marks opencode available at the minimum version", async () => {
-    const exit = await opencodeAt("1.18.0")
-    expect(exit._tag).toBe("Success")
-    if (exit._tag !== "Success") return
-    const opencode = exit.value.find((c) => c.kind === "opencode")
-    expect(opencode).toMatchObject({ available: true, version: "1.18.0" })
-    expect(opencode?.binPath).toBe("/opt/homebrew/bin/opencode")
-    expect(opencode?.note).toBeUndefined()
-  })
-
-  it("rejects an installed-but-too-old opencode, explaining why", async () => {
-    const exit = await opencodeAt("1.0.220")
-    expect(exit._tag).toBe("Success")
-    if (exit._tag !== "Success") return
-    const opencode = exit.value.find((c) => c.kind === "opencode")
-    expect(opencode).toMatchObject({ available: false, binPath: null })
-    // The note is the whole point: it names the version found and the fix.
-    expect(opencode?.note).toContain("1.0.220")
-    expect(opencode?.note).toContain("1.18")
-    expect(opencode?.note).toContain("opencode upgrade")
   })
 
   const codexAt = (version: string) =>

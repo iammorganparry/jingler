@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 import { FAKE_TOKEN, startFakeOpenConnector } from "./fake-open-connector.js"
 
@@ -51,7 +53,7 @@ test("persists the native tool merge preference", async ({ launchApp }) => {
     await app.window.getByRole("button", { name: /Connectors/ }).click()
 
     const preference = app.window.getByRole("switch", {
-      name: "Prefer Jingler tools over native agent tools"
+      name: "Use Jingler tools"
     })
     await expect(preference).toBeChecked()
     await preference.click()
@@ -59,15 +61,10 @@ test("persists the native tool merge preference", async ({ launchApp }) => {
     await app.window.getByPlaceholder("Paste the instance token").fill(FAKE_TOKEN)
     await app.window.getByRole("button", { name: "Save" }).click()
 
-    await app.window.getByRole("button", { name: "Close settings" }).click()
-    await openSettings(app.window)
-    await app.window.getByRole("button", { name: /Connectors/ }).click()
-    await app.window.getByRole("button", { name: "Manage connection" }).click()
-    await expect(
-      app.window.getByRole("switch", {
-        name: "Prefer Jingler tools over native agent tools"
-      })
-    ).not.toBeChecked()
+    await expect.poll(() => {
+      const config = JSON.parse(readFileSync(join(app.home, "jingler", "config.json"), "utf8"))
+      return config.openConnector?.preferJinglerTools
+    }).toBe(false)
   } finally {
     await instance.close()
   }

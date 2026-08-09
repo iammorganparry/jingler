@@ -645,7 +645,8 @@ export const runCodexAppServer = (
           let questionRound = 0
           let planRound = 0
           let planReformatAsked = false
-          let planning = spec.mode === "plan"
+          const enhancedPlan = spec.enhancedPlan !== false
+          let planning = enhancedPlan && spec.mode === "plan"
           const planDraft = createPlanDraftStream(
             () => `plan_${sessionId}_${planRound + 1}`
           )
@@ -658,7 +659,7 @@ export const runCodexAppServer = (
               input: turnInput,
               cwd,
               // Thread resume can rejoin an already-running Codex thread whose
-              // sticky settings predate the current Jingler mode. Pin the
+              // sticky settings predate the current enhanced plan flow. Pin the
               // effective policy on every turn so Auto always restores host Git
               // metadata and network access, including the first execution turn
               // immediately after plan approval.
@@ -723,11 +724,7 @@ export const runCodexAppServer = (
               }
 
               const capturing: boolean =
-                reply !== null &&
-                (planning ||
-                  (spec.orchestrationRoutes !== undefined &&
-                    spec.orchestrationPlanApproved !== true)) &&
-                planRound < MAX_PLAN_ROUNDS
+                reply !== null && planning && planRound < MAX_PLAN_ROUNDS
               const capture: PlanCapture | null =
                 capturing && reply !== null ? capturePlanEmission(reply) : null
               if (capture?._tag === "reformat" && !planReformatAsked) {
@@ -737,7 +734,11 @@ export const runCodexAppServer = (
                 followUp = capture.message
                 continue
               }
-              if (capture?._tag === "emission" && (planning || capture.emission.mode === "submit")) {
+              if (
+                enhancedPlan &&
+                capture?._tag === "emission" &&
+                (planning || capture.emission.mode === "submit")
+              ) {
                 planRound += 1
                 const decision: PlanDecision = await runP(
                   ctx.proposePlan(capture.emission.plan, capture.block)
@@ -763,7 +764,7 @@ export const runCodexAppServer = (
                 }
                 continue
               }
-              // A "draft" emission in auto orchestration mirrors into Plan Review,
+              // A "draft" emission in enhanced plan mode mirrors into Plan Review,
               // then falls through to emit as ordinary chat.
               if (
                 capture?._tag === "emission" &&

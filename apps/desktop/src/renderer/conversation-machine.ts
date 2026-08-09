@@ -1503,11 +1503,11 @@ export const conversationMachine = setup({
     }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}
-      if (context.cli === "claude" || context.cli === "codex" || context.cli === "opencode") {
+      if (context.cli === "claude" || context.cli === "codex") {
         void rpc.agentSetReasoning(context.session.id, context.cli, event.reasoning)
       }
       const key =
-        context.cli === "claude" || context.cli === "codex" || context.cli === "opencode"
+        context.cli === "claude" || context.cli === "codex"
           ? context.cli
           : null
       return {
@@ -1529,9 +1529,7 @@ export const conversationMachine = setup({
       const chat = event.session.chats.find((candidate) => candidate.id === context.chatId)
       if (chat === undefined) return { session: event.session }
       const reasoning =
-        event.session.cli === "claude" ||
-        event.session.cli === "codex" ||
-        event.session.cli === "opencode"
+        event.session.cli === "claude" || event.session.cli === "codex"
           ? event.session.reasoning?.[event.session.cli]
           : undefined
       const persistedMode = chat.mode ?? defaultModeFor(event.session.cli)
@@ -1707,7 +1705,7 @@ export const conversationMachine = setup({
 
       const mode = context.mode === "plan" && !supportsPlanMode(event.cli) ? "ask" : context.mode
       const reasoning =
-        event.cli === "claude" || event.cli === "codex" || event.cli === "opencode"
+        event.cli === "claude" || event.cli === "codex"
           ? context.session.reasoning?.[event.cli]
           : undefined
       return {
@@ -1903,9 +1901,7 @@ export const conversationMachine = setup({
         contextTokens: input.session.contextTokens
       }
     const reasoning =
-      input.session.cli === "claude" ||
-      input.session.cli === "codex" ||
-      input.session.cli === "opencode"
+      input.session.cli === "claude" || input.session.cli === "codex"
         ? input.session.reasoning?.[input.session.cli]
         : undefined
     return {

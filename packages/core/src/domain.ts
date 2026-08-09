@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { CLI_KINDS, CliKind } from "./cli.js"
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js"
-import { PlanTemplateConfig, WorkerRoutingConfig } from "./plan-document.js"
+import { PlanTemplateConfig } from "./plan-document.js"
 import { ThemeConfig } from "./theme.js"
 
 /**
@@ -265,9 +265,8 @@ export type ExecutionMode = Schema.Schema.Type<typeof ExecutionMode>
  *
  * "Can" means two things, and a harness needs both: a way to be held read-only
  * while it thinks, and a channel to submit a plan through. Claude has a real
- * `ExitPlanMode` tool the adapter intercepts; Codex and opencode submit the same
- * plan protocol in a fenced reply. Cursor falls through to the scripted stub,
- * so offering plan mode there would fabricate support it does not have.
+ * `ExitPlanMode` tool the adapter intercepts; Codex submits the same plan
+ * protocol in a fenced reply.
  *
  * A predicate rather than a scatter of `cli === "claude"` checks because the
  * gate is enforced in four places — the composer chip, the Shift+Tab cycle, and
@@ -276,7 +275,7 @@ export type ExecutionMode = Schema.Schema.Type<typeof ExecutionMode>
  * with no message.
  */
 export const supportsPlanMode = (cli: CliKind): boolean =>
-  cli === "claude" || cli === "codex" || cli === "opencode"
+  cli === "claude" || cli === "codex"
 
 /**
  * Whether the harness can take new input INTO a live turn (`Agent.steer`).
@@ -306,7 +305,7 @@ export const supportsSteer = (cli: CliKind): boolean =>
  * that cannot can opt out in one place.
  */
 export const supportsAutoMode = (cli: CliKind): boolean =>
-  cli === "claude" || cli === "codex" || cli === "cursor" || cli === "opencode"
+  cli === "claude" || cli === "codex"
 
 /**
  * The mode a fresh session should start in: the operator's configured default
@@ -359,9 +358,6 @@ export type IssueReference = Schema.Schema.Type<typeof IssueReference>
 
 /** A single agent session shown in the sidebar and opened in the main pane. */
 /** One isolated conversation inside a session's shared worktree. */
-export const ChatRole = Schema.Literal("direct", "orchestrator")
-export type ChatRole = Schema.Schema.Type<typeof ChatRole>
-
 export const Chat = Schema.Struct({
   id: Schema.String,
   /** Null until the first message provides an automatic title. */
@@ -371,16 +367,6 @@ export const Chat = Schema.Struct({
   /** Provider thread identities belong to the chat, not the shared worktree. */
   resumeId: Schema.optional(Schema.String),
   /** Permission and model choices are restored independently for each chat. */
-  /**
-   * What this conversation is responsible for. Absent means `direct`, which
-   * keeps sessions written before orchestration behaving exactly as they did.
-   */
-  role: Schema.optional(ChatRole),
-  /**
-   * Whether this orchestrator chat uses Jingler's worker flow. Per-chat so one
-   * composer's toggle cannot change another conversation.
-   */
-  orchestratorEnabled: Schema.optional(Schema.Boolean),
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
@@ -389,13 +375,26 @@ export const Chat = Schema.Struct({
 export type Chat = Schema.Schema.Type<typeof Chat>
 export type ChatId = Chat["id"]
 
-/** Backward-compatible semantic role for a persisted chat. */
-export const chatRoleOf = (chat: Pick<Chat, "role">): ChatRole =>
-  chat.role ?? "direct"
-
 /** How a session uses its repository checkout. */
 export const WorkspaceMode = Schema.Literal("worktree", "direct")
 export type WorkspaceMode = Schema.Schema.Type<typeof WorkspaceMode>
+
+/** Whether a registered project can currently be reached on its owning host. */
+export const ProjectAvailability = Schema.Literal("available", "missing", "offline")
+export type ProjectAvailability = Schema.Schema.Type<typeof ProjectAvailability>
+
+/** A durable repository registration, independent of any workspace/session. */
+export const Project = Schema.Struct({
+  id: Schema.String,
+  /** Stable paired-device identity. Absent means this desktop. */
+  environmentId: Schema.optional(Schema.String),
+  name: Schema.String,
+  path: Schema.String,
+  availability: ProjectAvailability,
+  createdAt: Schema.String,
+  updatedAt: Schema.String
+})
+export type Project = Schema.Schema.Type<typeof Project>
 
 export const PublishStep = Schema.Literal(
   "idle",
@@ -440,6 +439,8 @@ export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>
 
 export const Session = Schema.Struct({
   id: Schema.String,
+  /** Durable project identity. Absent on sessions created before Projects existed. */
+  projectId: Schema.optional(Schema.String),
   /** Stable paired-device identity. Absent means this desktop (legacy-safe). */
   environmentId: Schema.optional(Schema.String),
   /** owner/repo, e.g. "trigify/api". */
@@ -808,29 +809,6 @@ export const ProviderConfig = Schema.Struct({
 export type ProviderConfig = Schema.Schema.Type<typeof ProviderConfig>
 
 /**
- * The harness/model pair that owns planning for every newly-created session.
- * This is deliberately a real `CliKind`, not a synthetic Jingler provider:
- * orchestration is a role Jingler layers over any planning-capable harness.
- */
-export const OrchestratorPreference = Schema.Struct({
-  cli: CliKind,
-  model: Schema.String
-})
-export type OrchestratorPreference = Schema.Schema.Type<
-  typeof OrchestratorPreference
->
-
-/** The effective route plus enough information for Settings to name a fallback. */
-export const OrchestratorResolution = Schema.Struct({
-  preference: OrchestratorPreference,
-  isFallback: Schema.Boolean,
-  fallbackReason: Schema.optional(Schema.String)
-})
-export type OrchestratorResolution = Schema.Schema.Type<
-  typeof OrchestratorResolution
->
-
-/**
  * Where an opencode provider's credential came from. opencode resolves providers
  * from the user's own setup, and this says which part of it:
  *  - `env` — an environment variable they exported (`OPENROUTER_API_KEY`, …)
@@ -1058,17 +1036,6 @@ export const WorkspaceConfig = Schema.Struct({
    * available one", so a fresh install can still create sessions.
    */
   defaultCli: Schema.optional(CliKind),
-  /**
-   * The preferred planner for new sessions. Absent on legacy configs; the
-   * resolver chooses the first installed planning-capable harness in that case.
-   */
-  orchestrator: Schema.optional(OrchestratorPreference),
-  /**
-   * Concrete implementation-worker routes by plan-stage complexity. Kept
-   * separate from `orchestrator`: choosing a cheap planner must not silently
-   * downgrade high-complexity implementation work.
-   */
-  workerRouting: Schema.optional(WorkerRoutingConfig),
   /** Custom PRD/MDX structure injected into every native planning turn. */
   planTemplate: Schema.optional(PlanTemplateConfig),
   /**
@@ -1092,20 +1059,6 @@ export const WorkspaceConfig = Schema.Struct({
    * the compaction primer), but explicitly applies only when the task is done.
    */
   adhdMode: Schema.optional(Schema.Boolean),
-  /**
-   * Whether a session's orchestrator chat runs the agentic orchestrator flow.
-   * Absent means ON (see `ORCHESTRATOR_ENABLED_DEFAULT`).
-   *
-   * On by default: the orchestrator is the point of the app — a natural planner
-   * that acts on quick work itself, hands large work to worker agents, and never
-   * re-gates an approved plan. Turned OFF, the orchestrator role is not used at
-   * all: the orchestrator chat behaves like any plain chat on the session's own
-   * harness (its own persona, its own mode/model chips, no forced plan turn), so
-   * an operator who wants manual control leans on the source harness directly as
-   * they did before the orchestrator existed. Read per turn, so flipping it
-   * applies to the next message of an already-running session.
-   */
-  orchestratorEnabled: Schema.optional(Schema.Boolean),
   /**
    * Multiplier applied to conversation + code text size. Absent means 1
    * (`FONT_SCALE_DEFAULT`) — the unscaled default.
@@ -1151,72 +1104,11 @@ export const WorkspaceConfig = Schema.Struct({
 })
 export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>
 
-/**
- * Resolve a stored orchestrator against the live, uncurated model catalogue.
- *
- * Catalogue order is discovery order, so the fallback is deterministic. A
- * provider default is preferred when it still exists; otherwise the provider's
- * first live model is used. `null` means this host has no planning-capable
- * harness/model pair and the caller must retain its existing no-provider
- * behaviour.
- */
-export const resolveOrchestratorPreference = (
-  config:
-    Pick<WorkspaceConfig, "orchestrator" | "providers"> | null | undefined,
-  catalog: ReadonlyArray<{
-    readonly cli: CliKind
-    readonly models: ReadonlyArray<{ readonly id: string }>
-  }>
-): OrchestratorResolution | null => {
-  const planning = catalog.filter(
-    (provider) =>
-      supportsPlanMode(provider.cli) &&
-      provider.models.length > 0 &&
-      config?.providers?.[provider.cli]?.enabled !== false
-  )
-  const preferred = config?.orchestrator
-  const exactProvider = preferred
-    ? planning.find((provider) => provider.cli === preferred.cli)
-    : undefined
-  const exactModel = exactProvider?.models.find(
-    (model) => model.id === preferred?.model
-  )
-  if (preferred && exactModel) {
-    return {
-      preference: preferred,
-      isFallback: false
-    }
-  }
-
-  const provider = exactProvider ?? planning[0]
-  if (!provider) return null
-  const configuredModel = config?.providers?.[provider.cli]?.defaultModel
-  const model =
-    provider.models.find((candidate) => candidate.id === configuredModel) ??
-    provider.models[0]
-  if (!model) return null
-
-  const preference = { cli: provider.cli, model: model.id }
-  return {
-    preference,
-    isFallback: true,
-    fallbackReason: preferred
-      ? `Configured orchestrator ${preferred.cli}/${preferred.model} is unavailable; using ${preference.cli}/${preference.model}.`
-      : `No orchestrator is configured; using ${preference.cli}/${preference.model}.`
-  }
-}
-
 /** Plan mode runs its (read-only) commands unattended unless told otherwise. */
 export const PLAN_AUTO_RUN_DEFAULT = true
 
 /** ADHD response shaping is opt-in — it rewrites the voice of every session. */
 export const ADHD_MODE_DEFAULT = false
-
-/**
- * The agentic orchestrator flow is on by default — it is the product. Turning it
- * off drops sessions back to driving the source harness directly.
- */
-export const ORCHESTRATOR_ENABLED_DEFAULT = true
 
 /** Conversation + code text is unscaled (1×) unless the operator picks a size. */
 export const FONT_SCALE_DEFAULT = 1
@@ -2044,6 +1936,8 @@ export type AdversarialReview = Schema.Schema.Type<typeof AdversarialReview>
 export const CreateSessionInput = Schema.Struct({
   /** Paired execution device. Omitted means this desktop. */
   environmentId: Schema.optional(Schema.String),
+  /** Registered project to resolve at the execution boundary. */
+  projectId: Schema.optional(Schema.String),
   /** Absolute path to the origin repo. */
   repoPath: Schema.String,
   /** The repo's folder name, used for grouping + the worktree directory. */
@@ -2055,6 +1949,8 @@ export const CreateSessionInput = Schema.Struct({
    * produces a validated semantic branch.
    */
   title: Schema.optional(Schema.String),
+  /** Optional first task, opened as the new workspace's initial composer draft. */
+  initialPrompt: Schema.optional(Schema.String),
   /** Which CLI will drive the session. */
   cli: CliKind,
   /** The branch to fork the worktree from, or check out for a direct session. */

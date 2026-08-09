@@ -1,9 +1,5 @@
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
-import {
-  type PlanPrd,
-  type StreamEvent,
-  type WorkerRoutingConfig
-} from "@jingler/core"
+import { type PlanPrd, type StreamEvent } from "@jingler/core"
 import { Effect } from "effect"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { AgentContext, SessionSpec } from "./adapter.js"
@@ -72,13 +68,6 @@ const routedStreamedPlan: PlanPrd = {
   annotations: []
 }
 const repeatedAgentPlanHtml = ["```json", JSON.stringify({ mode: "submit", plan: routedStreamedPlan }), "```"].join("\n")
-
-const workerRouting: WorkerRoutingConfig = {
-  default: { cli: "codex", model: "gpt-5" },
-  low: { cli: "codex", model: "gpt-5" },
-  medium: { cli: "codex", model: "gpt-5" },
-  high: { cli: "claude", model: "opus" }
-}
 
 let visibleReply = ""
 let exitInput: Record<string, unknown> = {}
@@ -213,7 +202,6 @@ const spec: SessionSpec = {
   model: null,
   resumeId: null,
   readOnly: true,
-  orchestrationRoutes: []
 }
 
 const harness = (
@@ -281,36 +269,6 @@ describe("Claude plan submission", () => {
     expect(writeDecision).toMatchObject({ behavior: "deny" })
   })
 
-  it("refuses to reopen native plan mode after the orchestrator plan is approved", async () => {
-    visibleReply = "Coordinating the approved work."
-    callEnterPlanMode = true
-    const { ctx, proposed } = harness()
-
-    await Effect.runPromise(
-      runClaude(
-        "session-approved",
-        {
-          ...spec,
-          mode: "auto",
-          readOnly: undefined,
-          orchestrationPlanApproved: true
-        },
-        ctx,
-        new Map()
-      )
-    )
-
-    expect(proposed).toHaveLength(0)
-    expect(enterDecision).toMatchObject({
-      behavior: "deny",
-      message: expect.stringContaining("without another approval gate")
-    })
-    expect(exitDecision).toMatchObject({
-      behavior: "deny",
-      message: expect.stringContaining("without another approval gate")
-    })
-  })
-
   it("captures a structured native plan-file Write without allowing the filesystem edit", async () => {
     visibleReply = "Writing the completed plan."
     writeInput = {
@@ -370,87 +328,6 @@ describe("Claude plan submission", () => {
       _tag: "Assistant",
       text: visibleReply
     })
-  })
-
-  it("mirrors an Auto orchestrator's unmarked plan into a draft without native plan mode", async () => {
-    // The reported bug: an Auto (not native-plan) orchestrator streams a plan in
-    // an ordinary three-backtick block and never calls ExitPlanMode, so Plan
-    // Review stayed empty. It must now become a draft — no approval gate.
-    const shownPlan = `Here's the plan for review:\n\n${planHtml("Onboarding perf", "draft")}`
-    visibleReply = shownPlan
-    callExitPlanMode = false
-    const { ctx, events, proposed, drafts } = harness()
-
-    await Effect.runPromise(
-      runClaude(
-        "session-auto-draft",
-        {
-          ...spec,
-          mode: "auto",
-          readOnly: undefined,
-          orchestrationRoutes: [
-            { cli: "claude", models: [{ id: "opus", label: "Opus" }] }
-          ]
-        },
-        ctx,
-        new Map()
-      )
-    )
-
-    // Not a delegation submission — the approval gate is untouched…
-    expect(proposed).toHaveLength(0)
-    // …the plan is captured as an iteration draft so Plan Review populates…
-    expect(drafts).toHaveLength(1)
-    expect(drafts[0]?.title).toBe("PRD: Onboarding perf")
-    // …and the visible reply still shows in chat.
-    expect(events).toContainEqual({ _tag: "Assistant", text: shownPlan })
-  })
-
-  it("submits (not drafts) an Auto orchestrator plan carrying the delegation marker", async () => {
-    visibleReply = planHtml("Marked plan")
-    callExitPlanMode = false
-    const { ctx, proposed, drafts } = harness([{ _tag: "Reject" }])
-
-    await Effect.runPromise(
-      runClaude(
-        "session-auto-marked",
-        {
-          ...spec,
-          mode: "auto",
-          readOnly: undefined,
-          orchestrationRoutes: [
-            { cli: "claude", models: [{ id: "opus", label: "Opus" }] }
-          ]
-        },
-        ctx,
-        new Map()
-      )
-    )
-
-    // The marker routes to the blocking approval gate, not the draft path.
-    expect(proposed).toHaveLength(1)
-    expect(proposed[0]?.title).toBe("PRD: Marked plan")
-    expect(drafts).toHaveLength(0)
-  })
-
-  it("discards planner worker ids before proposing a compiled orchestrator PRD", async () => {
-    visibleReply = repeatedAgentPlanHtml
-    const { ctx, proposed } = harness()
-
-    await Effect.runPromise(
-      runClaude(
-        "session-routed-stream",
-        { ...spec, workerRouting },
-        ctx,
-        new Map()
-      )
-    )
-
-    expect(proposed).toHaveLength(1)
-    // The adapter passes the decoded plan through; worker routing is applied
-    // later in agent-runner's proposePlan (covered by plan-execution tests).
-    expect(proposed[0]?.title).toBe("PRD: Routed streamed plan")
-    expect(proposed[0]?.stages.map((stage) => stage.id)).toStrictEqual(["05", "06"])
   })
 
   it("prefers a valid explicit payload over buffered assistant text", async () => {

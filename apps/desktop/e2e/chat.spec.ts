@@ -146,8 +146,8 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
   const composer = window.getByPlaceholder("Message Claude…")
   await composer.click()
   // Switch to Auto via the composer's mode chip (seeded as accept-edits).
-  await window.getByText("accept edits").click()
-  await window.getByRole("menuitem", { name: "auto" }).click()
+  await window.getByText("Accept Edits", { exact: true }).click()
+  await window.getByRole("option", { name: /^Full Access\b/ }).click()
 
   await composer.pressSequentially("Add rate limiting.")
   await composer.press("Enter")
@@ -203,21 +203,21 @@ test("the mode chip lives in the composer and Shift+Tab cycles it (incl. Plan on
   const surface = window.locator("[data-mode]").first()
 
   // Seeded mode is accept-edits → the chip reads "accept edits".
-  await expect(window.getByText("accept edits")).toBeVisible()
+  await expect(window.getByText("Accept edits", { exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "accept-edits")
 
   // On a Claude session Shift+Tab cycles accept-edits → auto → plan → ask.
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByText("auto")).toBeVisible()
+  await expect(window.getByText("Full access", { exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "auto")
 
   await window.keyboard.press("Shift+Tab")
   // Plan mode is now reachable (Claude-only) and themes the composer purple.
-  await expect(window.getByText("plan")).toBeVisible()
+  await expect(window.getByText("Enhanced Plan", { exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "plan")
 
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByText("ask")).toBeVisible()
+  await expect(window.getByText("Default permissions", { exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "ask")
 })
 
@@ -230,15 +230,16 @@ test("thinking strength is a compact per-session composer control", async ({ lau
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
   const thinking = window.getByRole("button", { name: "Thinking strength" })
 
-  await expect(thinking).toContainText("default")
+  await expect(thinking).toContainText("Default")
   await thinking.click()
   // The menu offers the provider's OWN reasoning efforts now, not Claude's
   // "think"/"think hard" prompt phrases — see `reasoningEffortsFor`, which gives
   // Claude low/medium/high/xhigh/max. Read the option list from there rather than
   // naming one, so a provider adding or renaming a tier doesn't silently rot this.
   const effort = reasoningEffortsFor("claude")[2]!
-  await window.getByRole("menuitem", { name: effort, exact: true }).click()
-  await expect(thinking).toContainText(effort)
+  const effortLabel = effort[0]!.toUpperCase() + effort.slice(1)
+  await window.getByRole("option", { name: effortLabel, exact: true }).click()
+  await expect(thinking).toContainText(effortLabel)
 })
 
 test("the model chip shows the harness model and switches", async ({ launchApp }) => {
@@ -247,15 +248,19 @@ test("the model chip shows the harness model and switches", async ({ launchApp }
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
 
   // The chip opens on the harness's default model (fallback list; no API key in e2e).
-  const modelChip = window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true })
+  const modelChip = window.getByRole("button", { name: `Model: ${DEFAULT_CLAUDE_MODEL}`, exact: true })
   await expect(modelChip).toBeVisible()
   await modelChip.click()
 
   // The menu lists EVERY installed harness's models grouped by provider, so the
   // label must be matched exactly — other harnesses ship near-identical names
   // (Cursor's `sonnet-4.5`), and a substring match resolves to several.
-  await window.getByRole("menuitem", { name: ALT_CLAUDE_MODEL, exact: true }).click()
-  await expect(window.getByRole("button", { name: ALT_CLAUDE_MODEL, exact: true })).toBeVisible()
+  const alternate = window.getByRole("button", { name: ALT_CLAUDE_MODEL, exact: true })
+  if (await alternate.count() === 0) {
+    await window.getByRole("button").filter({ hasText: "Claude Code" }).click()
+  }
+  await alternate.click()
+  await expect(window.getByRole("button", { name: `Model: ${ALT_CLAUDE_MODEL}`, exact: true })).toBeVisible()
 })
 
 /**
@@ -272,17 +277,17 @@ test("the model chip switches provider", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
 
-  await window.getByRole("button", { name: DEFAULT_CLAUDE_MODEL, exact: true }).click()
+  await window.getByRole("button", { name: `Model: ${DEFAULT_CLAUDE_MODEL}`, exact: true }).click()
   await expect(window.getByText("Codex CLI", { exact: true })).toBeVisible()
 
   // The catalogue comes from the CLI itself, so assert the shape of an id
   // (`GPT-5.…`) rather than a specific one — it moves upstream.
-  const codexModel = window.getByRole("menuitem").filter({ hasText: /^GPT-5\./ }).first()
-  const label = (await codexModel.textContent())!.trim()
+  await window.getByRole("button").filter({ hasText: "Codex CLI" }).click()
+  const codexModel = window.getByRole("button", { name: "GPT-5.6 Sol", exact: true })
   await codexModel.click()
 
   // The chip follows the pick, and the composer now addresses the new harness.
-  await expect(window.getByRole("button", { name: label })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Model: GPT-5.6 Sol" })).toBeVisible()
   await expect(window.getByPlaceholder("Message Codex…")).toBeVisible()
 })
 

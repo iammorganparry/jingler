@@ -24,11 +24,11 @@ import {
   HarnessCliAdapterLive,
   ModelsService,
   MemoryServiceLive,
-  OrchestrationService,
   PlanStore,
   PluginRegistry,
   PluginHost,
   PluginAuth,
+  ProjectService,
   ReviewService,
   ReviewStore,
   SessionStore,
@@ -92,7 +92,6 @@ const HarnessLayers = Layer.mergeAll(
   // layer memoization therefore builds one app-lifetime MemoryService for both
   // runner captures and renderer RPCs, keeping the outbox lock and proxy shared.
   MemoryServiceLive,
-  OrchestrationService.Default,
   ReviewService.Default,
   ContextManager.Default
 )
@@ -121,7 +120,7 @@ const RpcServicesLayer = RpcServerLive.pipe(
   // captures the command executor used by its NUL-safe repository listing, so its
   // platform dependencies are provided at construction. Reusing NodeContext.layer
   // keeps Effect's memoized platform instance shared with the final app layer.
-  Layer.provide(Layer.mergeAll(WorkspaceService.Default, AssetLayer)),
+  Layer.provide(Layer.mergeAll(WorkspaceService.Default, ProjectService.Default, AssetLayer)),
   // Before SessionStore so the stores below satisfy the daemon's requirements —
   // a stage is provided-to by everything that follows it.
   // Merged so startup recovery can mark interrupted canonical plan revisions

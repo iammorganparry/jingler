@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import type {
   Chat,
-  ChatRole,
   CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -21,6 +20,7 @@ import type {
 import {
   GitHubApiError,
   GitError,
+  defaultModel,
   issueReferenceOf,
   semanticBranchProposalFromName,
   SessionNotFoundError,
@@ -64,9 +64,6 @@ const runtimeMode = (value: unknown): PermissionMode | undefined => {
 const persistedMode = (value: unknown): PermissionMode | undefined =>
   runtimeMode(value) ?? (typeof value === "string" ? "ask" : undefined)
 
-const persistedChatRole = (value: unknown): ChatRole | undefined =>
-  value === "direct" || value === "orchestrator" ? value : undefined
-
 const initialChat = (
   sessionId: string,
   now: string,
@@ -76,9 +73,6 @@ const initialChat = (
   title: null,
   createdAt: now,
   updatedAt: now,
-  ...(persistedChatRole(legacy.role) === undefined
-    ? {}
-    : { role: persistedChatRole(legacy.role) }),
   ...(typeof legacy.resumeId === "string" ? { resumeId: legacy.resumeId } : {}),
   ...(persistedMode(legacy.mode) === undefined ? {} : { mode: persistedMode(legacy.mode) }),
   ...(Array.isArray(legacy.allowlist) &&
@@ -203,6 +197,29 @@ export const migrateRepoName = (value: unknown): unknown => {
   // empty group heading is worse than a stale one, so keep what was stored.
   if (derived.length === 0 || derived === value.repo) return value
   return { ...value, repo: derived }
+}
+
+/** Rebind legacy Cursor/OpenCode sessions without touching workspace or transcript identity. */
+export const migrateUnsupportedHarness = (value: unknown): unknown => {
+  if (!isRecord(value) || (value.cli !== "cursor" && value.cli !== "opencode")) {
+    return value
+  }
+  const chats = Array.isArray(value.chats)
+    ? value.chats.map((chat) =>
+        isRecord(chat)
+          ? { ...chat, model: defaultModel("codex"), resumeId: undefined }
+          : chat
+      )
+    : value.chats
+  const reasoning = isRecord(value.reasoning) && value.reasoning.codex !== undefined
+    ? { codex: value.reasoning.codex }
+    : undefined
+  return {
+    ...value,
+    cli: "codex",
+    ...(chats === undefined ? {} : { chats }),
+    ...(reasoning === undefined ? {} : { reasoning })
+  }
 }
 
 /**
@@ -379,7 +396,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const sessions: Array<Session> = []
           for (const value of parsed) {
             const decoded = Schema.decodeUnknownEither(SessionSchema)(
-              migrateRepoName(migrateSessionChats(value))
+              migrateUnsupportedHarness(migrateRepoName(migrateSessionChats(value)))
             )
             if (Either.isRight(decoded)) sessions.push(decoded.right)
           }
@@ -491,7 +508,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         input: CreateSessionInput,
         /** Provider defaults (from config) to stamp onto the new session. */
         options: {
-          chatRole?: ChatRole
           defaultMode?: PermissionMode
           defaultModel?: string
           defaultReasoning?: ReasoningSetting
@@ -543,7 +559,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
           const id = `s_${slug}`
           const chat = initialChat(id, now, {
-            role: options.chatRole,
             mode: options.defaultMode,
             model: options.defaultModel
           })
@@ -553,11 +568,15 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             workspaceMode: WorkspaceMode
           ): Session => ({
             id,
+            ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
             ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
             repo: input.repoName,
             branch: workspace.branch,
             ...(workspaceMode === "worktree" ? { semanticBranchPending: true } : {}),
             title,
+            ...(input.initialPrompt?.trim()
+              ? { initialPrompt: input.initialPrompt.trim() }
+              : {}),
             autoTitle: explicit.length === 0,
             status: "idle",
             cli: input.cli,
@@ -704,7 +723,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         input: CreateSessionFromPrInput,
         opts: {
           allowSharedCheckout?: boolean
-          chatRole?: ChatRole
           defaultMode?: PermissionMode
           defaultModel?: string
           defaultReasoning?: ReasoningSetting
@@ -756,7 +774,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
           const id = `s_${slug}_${stamp}`
           const chat = initialChat(id, now, {
-            role: opts.chatRole,
             mode: opts.defaultMode,
             model: opts.defaultModel
           })
@@ -813,7 +830,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const createFromIssue = (
         input: CreateSessionFromIssueInput,
         options: {
-          chatRole?: ChatRole
           defaultMode?: PermissionMode
           defaultModel?: string
           defaultReasoning?: ReasoningSetting
@@ -870,7 +886,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               .join("\n\n")
           const id = `s_${slug}_${stamp}`
           const chat = initialChat(id, now, {
-            role: options.chatRole,
             mode: options.defaultMode,
             model: options.defaultModel
           })
@@ -968,10 +983,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
-              ...(source?.role === undefined ? {} : { role: source.role }),
-              ...(source?.orchestratorEnabled === undefined
-                ? {}
-                : { orchestratorEnabled: source.orchestratorEnabled }),
               ...(source?.mode === undefined ? {} : { mode: source.mode }),
               ...(source?.model === undefined ? {} : { model: source.model }),
               ...(source?.allowlist === undefined ? {} : { allowlist: source.allowlist })
@@ -1023,10 +1034,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
-              ...(closed?.role === undefined ? {} : { role: closed.role }),
-              ...(closed?.orchestratorEnabled === undefined
-                ? {}
-                : { orchestratorEnabled: closed.orchestratorEnabled }),
               ...(closed?.mode === undefined ? {} : { mode: closed.mode }),
               ...(closed?.model === undefined ? {} : { model: closed.model }),
               ...(closed?.allowlist === undefined ? {} : { allowlist: closed.allowlist })
@@ -1086,27 +1093,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
         })
 
-      /** Persist one orchestrator chat's Jingler-mode choice. */
-      const setOrchestratorEnabled = (
-        id: string,
-        chatId: string,
-        orchestratorEnabled: boolean
-      ) =>
-        Effect.gen(function* () {
-          const session = yield* get(id)
-          if (!session.chats.some((chat) => chat.id === chatId)) {
-            return yield* Effect.fail(
-              new GitError({
-                message: `Chat "${chatId}" does not exist in session "${id}".`
-              })
-            )
-          }
-          yield* updateChat(id, chatId, (chat) => ({
-            ...chat,
-            orchestratorEnabled
-          }))
-          return yield* get(id)
-        })
 
       /** Persist one chat's harness model. */
       const setModel = (id: string, chatIdOrModel: string, maybeModel?: string) =>
@@ -1582,6 +1568,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setWorktreePath = (id: string, worktreePath: string) =>
         update(id, (s) => ({ ...s, worktreePath }))
 
+      /** Attach a durable project identity without changing checkout/transcript state. */
+      const setProject = (id: string, projectId: string) =>
+        update(id, (session) => ({ ...session, projectId }))
+
       /** Link (or, with `null`, unlink) a normalized issue on a live session. */
       const setIssue = (
         id: string,
@@ -1724,7 +1714,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         closeChat,
         reopenChat,
         setMode,
-        setOrchestratorEnabled,
         setModel,
         setReasoning,
         setReasoningEffort,
@@ -1749,6 +1738,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         markGitHubFeedbackDispatched,
         setPublishCheckpoint,
         setWorktreePath,
+        setProject,
         setIssue,
         clearInitialPrompt,
         archive,

@@ -8,6 +8,7 @@ import {
 import { join } from "node:path"
 import {
   appShell,
+  createWorkspace,
   expect,
   sessionRow,
   showSessions,
@@ -189,16 +190,7 @@ test("a direct session completes a turn and deletion preserves its checkout", as
   const committedReadme = readFileSync(join(repoPath, "README.md"), "utf-8")
 
   await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("new-session").click()
-  const worktree = window.getByRole("switch", {
-    name: "Use isolated worktree"
-  })
-  await expect(worktree).toBeChecked()
-  await worktree.click()
-  await window
-    .getByPlaceholder("Leave blank for agent naming")
-    .fill("Direct checkout proof")
-  await window.getByRole("button", { name: "Create" }).click()
+  await createWorkspace(window, "Direct checkout proof", "direct")
 
   const row = sessionRow(window, "Direct checkout proof")
   await expect(row).toBeVisible()
@@ -223,11 +215,7 @@ test("a direct session completes a turn and deletion preserves its checkout", as
 
   const composer = window.getByPlaceholder("Message Claude…")
   await expect(composer).toBeVisible()
-  const jingler = window.getByRole("button", { name: "Jingler", exact: true })
-  if ((await jingler.getAttribute("aria-pressed")) === "true") {
-    await jingler.click()
-  }
-  await expect(window.getByRole("button", { name: "auto", exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Full Access" })).toBeVisible()
   await composer.fill("Run the direct-checkout verification.")
   await composer.press("Enter")
   await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })

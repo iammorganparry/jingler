@@ -5,7 +5,6 @@ import type {
   PlanCommentMessageDeliveryState,
   PlanPrd,
   PlanAcceptanceStatus,
-  PlanStageExecutionStatus,
   PlanTaskStatus
 } from "@jingler/core"
 
@@ -31,20 +30,6 @@ export const setCriterionStatus = (
       return { ...criterion, status, evidence }
     })
   }))
-  return found ? { ...plan, stages } : null
-}
-
-export const setStageExecution = (
-  plan: PlanPrd,
-  stageId: string,
-  status: PlanStageExecutionStatus
-): PlanPrd | null => {
-  let found = false
-  const stages = plan.stages.map((stage) => {
-    if (stage.id !== stageId) return stage
-    found = true
-    return { ...stage, executionStatus: status }
-  })
   return found ? { ...plan, stages } : null
 }
 
@@ -153,59 +138,3 @@ export const resolveAnnotations = (
     annotationIds.has(annotation.id) ? { ...annotation, status: "resolved" } : annotation
   )
 })
-
-/** Create or replace a worker's progress note for a stage. */
-export const upsertWorkerAnnotation = (
-  plan: PlanPrd,
-  input: {
-    readonly id: string
-    readonly stageId: string
-    readonly body: string
-    readonly status: "open" | "resolved"
-    readonly createdAt: string
-    readonly authorId: string
-  }
-): PlanPrd => {
-  const message: PlanCommentMessage = {
-    id: `${input.id}-message`,
-    body: input.body,
-    authorKind: "agent",
-    authorId: input.authorId,
-    createdAt: input.createdAt,
-    mentionedParticipantIds: [],
-    deliveryState: "sent"
-  }
-  const existing = plan.annotations.find((candidate) => candidate.id === input.id)
-  if (existing !== undefined) {
-    // Update the worker's own note (the first message) and the summary/status,
-    // but PRESERVE any later replies (e.g. an operator's) on the same thread.
-    const messages =
-      existing.messages.length > 0
-        ? [
-            { ...existing.messages[0]!, body: input.body, createdAt: input.createdAt },
-            ...existing.messages.slice(1)
-          ]
-        : [message]
-    return {
-      ...plan,
-      annotations: plan.annotations.map((candidate) =>
-        candidate.id === input.id
-          ? { ...candidate, body: input.body, status: input.status, messages }
-          : candidate
-      )
-    }
-  }
-  const annotation: PlanAnnotation = {
-    id: input.id,
-    stageId: input.stageId,
-    body: input.body,
-    author: "agent",
-    createdAt: input.createdAt,
-    messages: [message],
-    status: input.status
-  }
-  return { ...plan, annotations: [...plan.annotations, annotation] }
-}
-
-export const resolveWorkerAnnotation = (plan: PlanPrd, id: string): PlanPrd =>
-  setAnnotationStatus(plan, id, "resolved") ?? plan

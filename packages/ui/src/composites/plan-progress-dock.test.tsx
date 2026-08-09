@@ -1,40 +1,30 @@
 // @vitest-environment jsdom
-import type { PlanDocument, PlanPrdStage } from "@jingler/core"
+import type { PlanDocument, PlanPrdStage, PlanTaskStatus } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import {
-  PlanProgressDock,
-  planProgressStatus
-} from "./plan-progress-dock.js"
+import { PlanProgressDock, planProgressStatus } from "./plan-progress-dock.js"
 
 const stage = (
   id: string,
   title: string,
-  executionStatus: PlanPrdStage["executionStatus"],
+  taskStatus: PlanTaskStatus = "pending",
   acceptanceStatus: PlanPrdStage["acceptance"][number]["status"] = "pending"
 ): PlanPrdStage => ({
   id,
   title,
   intent: title,
   approach: [],
+  tasks: [{ id: `${id}.task`, text: title, status: taskStatus }],
   files: [],
   diagrams: [],
   notes: [],
-  acceptance: [
-    {
-      id: `${id}.1`,
-      text: `${title} is verified.`,
-      status: acceptanceStatus,
-      evidence: acceptanceStatus === "passed" ? "Verified." : null
-    }
-  ],
-  assignment: {
-    agentId: `worker-${id}`,
-    cli: "codex",
-    model: "gpt-5.6-sol",
-    reason: "Assigned by the approved plan."
-  },
-  executionStatus
+  acceptance: [{
+    id: `${id}.1`,
+    text: `${title} is verified.`,
+    testReferences: [],
+    status: acceptanceStatus,
+    evidence: acceptanceStatus === "passed" ? "Verified." : null
+  }]
 })
 
 const document: PlanDocument = {
@@ -48,8 +38,8 @@ const document: PlanDocument = {
     sections: [],
     stages: [
       stage("01", "Inspect the code", "completed", "passed"),
-      stage("02", "Build the dock", "running"),
-      stage("03", "Verify the workflow", "queued")
+      stage("02", "Build the dock", "in-progress"),
+      stage("03", "Verify the workflow")
     ],
     annotations: []
   },
@@ -60,80 +50,45 @@ const document: PlanDocument = {
 afterEach(cleanup)
 
 describe("PlanProgressDock", () => {
-  it("projects every canonical worker state into the operator vocabulary", () => {
-    expect(planProgressStatus(stage("1", "Todo", "queued"))).toBe("todo")
-    expect(planProgressStatus(stage("2", "Working", "running"))).toBe(
-      "in-progress"
-    )
-    expect(planProgressStatus(stage("2b", "Working", "running", "passed"))).toBe(
-      "in-progress"
-    )
+  it("projects selected-agent task and evidence progress", () => {
+    expect(planProgressStatus(stage("1", "Todo"))).toBe("todo")
+    expect(planProgressStatus(stage("2", "Working", "in-progress"))).toBe("in-progress")
     expect(planProgressStatus(stage("3", "Blocked", "blocked"))).toBe("blocked")
-    expect(planProgressStatus(stage("4", "Failed", "failed"))).toBe("failed")
-    expect(planProgressStatus(stage("5", "Paused", "interrupted"))).toBe(
-      "interrupted"
-    )
-    expect(planProgressStatus(stage("6", "Done", "queued", "passed"))).toBe(
-      "done"
-    )
+    expect(planProgressStatus(stage("4", "Failed", "pending", "failed"))).toBe("failed")
+    expect(planProgressStatus(stage("5", "Done", "completed", "passed"))).toBe("done")
+    expect(planProgressStatus({ ...stage("6", "Verified", "pending", "passed"), tasks: [] })).toBe("done")
   })
 
   it("expands from the composer summary and opens a stable plan stage", () => {
     const onOpenStage = vi.fn()
-    render(
-      <PlanProgressDock document={document} onOpenStage={onOpenStage} />
-    )
-
-    const summary = screen.getByRole("button", {
-      name: "Plan progress: 1 of 3 done"
-    })
-    expect(summary.getAttribute("aria-expanded")).toBe("false")
+    render(<PlanProgressDock document={document} onOpenStage={onOpenStage} />)
+    const summary = screen.getByRole("button", { name: "Plan progress: 1 of 3 done" })
     expect(screen.getByText(/Build the dock · In progress/)).toBeTruthy()
-
     fireEvent.click(summary)
-    expect(summary.getAttribute("aria-expanded")).toBe("true")
-    expect(screen.getByText("To do")).toBeTruthy()
-    expect(screen.getByText("In progress")).toBeTruthy()
-    expect(screen.getByText("Done")).toBeTruthy()
-    const completedTitle = screen.getByText("Inspect the code")
-    expect(completedTitle.classList.contains("text-muted-foreground")).toBe(
-      true
-    )
-    expect(completedTitle.classList.contains("text-muted")).toBe(false)
-    expect(
-      screen.getByTestId("plan-progress-stage-02").textContent
-    ).toContain("worker-02 · gpt-5.6-sol")
-
+    expect(screen.getByTestId("plan-progress-stage-02").textContent).toContain("Build the dock")
+    expect(screen.getByTestId("plan-progress-stage-02").textContent).not.toContain("worker")
     fireEvent.click(screen.getByTestId("plan-progress-stage-02"))
     expect(onOpenStage).toHaveBeenCalledWith("02")
   })
 
   it("reflects a Plan.watch revision without retaining local progress", () => {
     const view = render(<PlanProgressDock document={document} />)
-    view.rerender(
-      <PlanProgressDock
-        document={{
-          ...document,
-          revision: 8,
-          plan: {
-            ...document.plan,
-            stages: document.plan.stages.map((item) => ({
-              ...item,
-              executionStatus: "completed" as const,
-              acceptance: item.acceptance.map((criterion) => ({
-                ...criterion,
-                status: "passed" as const,
-                evidence: "Verified live."
-              }))
-            }))
-          }
-        }}
-      />
-    )
-
-    expect(
-      screen.getByRole("button", { name: "Plan progress: 3 of 3 done" })
-    ).toBeTruthy()
-    expect(screen.getByText("All steps done")).toBeTruthy()
+    view.rerender(<PlanProgressDock document={{
+      ...document,
+      revision: 8,
+      plan: {
+        ...document.plan,
+        stages: document.plan.stages.map((item) => ({
+          ...item,
+          tasks: (item.tasks ?? []).map((task) => ({ ...task, status: "completed" as const })),
+          acceptance: item.acceptance.map((criterion) => ({
+            ...criterion,
+            status: "passed" as const,
+            evidence: "Verified live."
+          }))
+        }))
+      }
+    }} />)
+    expect(screen.getByRole("button", { name: "Plan progress: 3 of 3 done" })).toBeTruthy()
   })
 })

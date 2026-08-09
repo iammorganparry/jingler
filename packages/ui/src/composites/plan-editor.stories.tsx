@@ -57,8 +57,6 @@ function Harness({ transient }: { transient?: boolean }) {
         onApprove={() => setLog("approve")}
         onResume={() => setLog("resume")}
         onRevise={() => setLog("revise")}
-        onStopWorker={(id) => setLog(`stop ${id}`)}
-        onRetryWorker={(id) => setLog(`retry ${id}`)}
       />
       {log && (
         <div className="flex-none border-t border-hairline bg-panel px-3 py-1.5 font-mono text-[10px] text-muted-foreground">

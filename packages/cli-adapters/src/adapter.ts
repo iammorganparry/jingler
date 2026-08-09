@@ -1,26 +1,18 @@
 import type {
   Attachment,
   CliKind,
-  ModelOption,
   PermissionMode,
   Plan,
   PlanPrd,
   QuestionAnswer,
   QuestionRequest,
   ReasoningEffort,
-  StreamEvent,
-  WorkerRoutingConfig
+  StreamEvent
 } from "@jingler/core"
 import type { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
 import { planTaskProgressFingerprint } from "./plan-task-progress.js"
 import { isE2eEnv } from "./scripted.js"
-
-/** Installed provider/model routes a planning turn may assign to workers. */
-export interface OrchestrationRoute {
-  readonly cli: CliKind
-  readonly models: ReadonlyArray<ModelOption>
-}
 
 /**
  * A remote MCP attachment ready for a harness launch.
@@ -58,16 +50,6 @@ export interface SessionSpec {
   readonly model: string | null
   /** The configured canonical PRD structure for a native plan-mode turn. */
   readonly planTemplate?: string
-  /**
-   * Present only for an orchestrator turn. Native and reply-channel planners
-   * receive this same catalogue and assignment grammar, so choosing a smaller
-   * model cannot silently downgrade the plan procedure.
-   */
-  readonly orchestrationRoutes?: ReadonlyArray<OrchestrationRoute>
-  /** True after this orchestrator has crossed its one plan-approval gate. */
-  readonly orchestrationPlanApproved?: boolean
-  /** Effective concrete worker routes by component complexity. */
-  readonly workerRouting?: WorkerRoutingConfig
   /** Whether provider thinking is enabled; absent leaves its default untouched. */
   readonly thinkingEnabled?: boolean
   /** Provider-native effort; absent leaves the harness default untouched. */
@@ -119,6 +101,9 @@ export interface SessionSpec {
 
   /** Whether managed attachments replace or merge with harness-native MCP config. */
   readonly mcpPolicy?: "managed-only" | "merge"
+
+  /** Jingler owns structured plan capture/approval for this turn. */
+  readonly enhancedPlan?: boolean
 
   readonly readOnly?: boolean
   /**
@@ -180,14 +165,11 @@ export type AskQuestion = (
 /**
  * The operator's verdict on a proposed plan (mirrors ExitPlanMode's approval):
  * - `Approve` — start execution under `mode` (the session's restored exec mode),
- * - `Delegate` — the plan was approved, but Jingler's provider-neutral
- *   orchestrator owns execution rather than this planning harness,
  * - `Revise` — keep planning, addressing `feedback` (bundled step comments),
  * - `Reject` — abandon the plan (e.g. the run was stopped).
  */
 export type PlanDecision = Data.TaggedEnum<{
   Approve: { readonly mode: PermissionMode; readonly plan?: Plan }
-  Delegate: {}
   Revise: { readonly feedback: string }
   Reject: {}
 }>
@@ -206,8 +188,8 @@ export type ProposePlan = (
 ) => Effect.Effect<PlanDecision>
 
 /**
- * Persist an orchestrator-emitted plan (`mode:"draft"`) as a DRAFT `PlanDocument`
- * WITHOUT the approval gate `proposePlan` blocks on. Auto/orchestrator mode: a
+ * Persist an agent-emitted plan (`mode:"draft"`) as a DRAFT `PlanDocument`
+ * WITHOUT the approval gate `proposePlan` blocks on. Draft mode: a
  * plan the agent shows for iteration populates Plan Review. Never clobbers a
  * non-draft plan, so calling it is always safe. Returns immediately.
  */
@@ -234,17 +216,6 @@ export type SteerTurn = (
   text: string,
   images: ReadonlyArray<Attachment>
 ) => Promise<TurnSteerResult>
-
-/**
- * Provider-neutral result of steering an addressable plan participant.
- * `unavailable` is reserved for a stale routing identity; `failed` means the
- * same identity may be retried because its live control channel was temporarily
- * absent or rejected the steer.
- */
-export type PlanParticipantSteerResult =
-  | { readonly status: "delivered"; readonly reply: string | null }
-  | { readonly status: "unavailable"; readonly detail: string }
-  | { readonly status: "failed"; readonly detail: string }
 
 export interface AgentContext {
   readonly emit: (event: StreamEvent) => Effect.Effect<void>
@@ -346,7 +317,6 @@ const scriptedPlanHtml = (
 <section data-stage="s_01" data-title="Audit session middleware" data-depends-on="" data-complexity="low">
 <h3>Intent</h3>
 <p>See how sessions read tokens today.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <h3>Approach</h3>
 <ol><li>Read session.ts</li><li>Trace the token path</li></ol>
 <ul data-files><li data-change="M" data-added="0" data-removed="0">src/auth/memory-store.ts</li></ul>
@@ -355,28 +325,24 @@ const scriptedPlanHtml = (
 <section data-stage="s_02" data-title="Create TokenStore module" data-depends-on="s_01" data-complexity="medium">
 <h3>Intent</h3>
 <p>A dedicated store for token lifecycle.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="A" data-added="40" data-removed="0">src/auth/token-store.ts</li></ul>
 <div data-acceptance="s_02.1" data-status="passed">TokenStore exposes get/set/refresh and is covered by tests.</div>
 </section>
 <section data-stage="s_03" data-title="Swap MemoryStore to TokenStore" data-depends-on="s_02" data-complexity="medium">
 <h3>Intent</h3>
 <p>Route the session through the new store.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="8" data-removed="3">src/auth/session.ts</li></ul>
 <div data-acceptance="s_03.1" data-status="pending">Session reads route through TokenStore.</div>
 </section>
 <section data-stage="s_04" data-title="Handle token refresh" data-depends-on="s_03" data-complexity="high">
 <h3>Intent</h3>
 <p>Decide the refresh path on expiry.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li>src/auth/refresh.ts</li></ul>
 <div data-acceptance="s_04.1" data-status="pending">The refresh decision is specified.</div>
 </section>
 <section data-stage="s_4a" data-title="refresh() and retry on 401" data-depends-on="s_04" data-complexity="high">
 <h3>Intent</h3>
 <p>Mint a new token and replay once.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="18" data-removed="0">src/auth/refresh.ts</li><li data-change="A" data-added="15" data-removed="0">src/auth/retry.ts</li></ul>
 <div data-acceptance="s_4a.1" data-status="passed">A new token is written before the replay.</div>
 <div data-acceptance="s_4a.2" data-status="passed">Refresh fires at most once per request.</div>
@@ -386,14 +352,12 @@ const scriptedPlanHtml = (
 <section data-stage="s_4b" data-title="Proceed with request" data-depends-on="s_04" data-complexity="low">
 <h3>Intent</h3>
 <p>Token still valid, carry on.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li>src/auth/session.ts</li></ul>
 <div data-acceptance="s_4b.1" data-status="pending">A valid token proceeds without refreshing.</div>
 </section>
 <section data-stage="s_05" data-title="Update auth tests" data-depends-on="s_4a s_4b" data-complexity="medium">
 <h3>Intent</h3>
 <p>Cover the new store and the refresh path.</p>
-<div data-assignment data-agent-id="worker-auth" data-cli="claude" data-model="opus" data-reason="The dependent auth stages share one context and benefit from strong implementation reasoning." data-status="queued"></div>
 <ul data-files><li data-change="M" data-added="24" data-removed="2">src/auth/session.test.ts</li></ul>
 <div data-acceptance="s_05.1" data-status="pending">Tests cover the store, the 401 retry${summary.includes("(revised)") ? ", and the requested audit amendment" : ""}.</div>
 </section>
@@ -401,7 +365,6 @@ const scriptedPlanHtml = (
 <h3>Intent</h3>
 <p>Ship the refactor for review.</p>
 ${holdWorker ? "<p>[[worker-hold]] Wait for an explicit stop before completing the first attempt.</p>" : ""}
-<div data-assignment data-agent-id="worker-release" data-cli="codex" data-model="gpt-5.6-sol" data-reason="Release preparation is independent and can run concurrently on a lower-cost route." data-status="queued"></div>
 <ul data-files><li>CHANGELOG.md</li></ul>
 <div data-acceptance="s_06.1" data-status="pending">A PR is opened against main.</div>
 </section>
@@ -455,12 +418,6 @@ export const scriptedPlanPrd = (
   includeAuditStage = false,
   includeRoutingStage = false
 ): PlanPrd => {
-  const assignment = {
-    agentId: "worker-auth",
-    cli: "claude" as const,
-    model: "opus",
-    reason: "The dependent auth stages share one context."
-  }
   const stage = (
     id: string,
     title: string,
@@ -534,8 +491,7 @@ export const scriptedPlanPrd = (
       evidence: null
     })),
     dependencies: [...dependencies],
-    complexity,
-    assignment: { ...assignment }
+    complexity
   })
   const stages = [
     stage("s_01", "Audit session middleware", [], "low", [{ path: "src/auth/memory-store.ts", change: "M" }], [{
@@ -663,10 +619,6 @@ export const scriptedPlanEmission = (
  * `[[memory-propose-conflict]]` submits a stale accepted-page revision through
  * the same E2E-only path so the harness-facing conflict remains observable.
  */
-const SCRIPTED_TASK_PROTOCOL_PATTERN =
-  /PLAN_TASK stage=(\S+) fingerprint=(\S+) task=<task-id> status=<status>/
-const SCRIPTED_TASK_PATTERN =
-  /^\d+\. \[(pending|in-progress|completed|blocked)\] (\S+) —/gm
 const SCRIPTED_MEMORY_PROTOCOL = "2026-07-28"
 const SCRIPTED_MEMORY_PROPOSE_MARKER = "[[memory-propose]]"
 const SCRIPTED_MEMORY_CONFLICT_MARKER = "[[memory-propose-conflict]]"
@@ -841,88 +793,6 @@ export const scriptedRun =
       if (spec.prompt.includes("[[queue-hold]]")) {
         yield* emit({ _tag: "Assistant", text: "Holding the active turn for queue actions." })
         yield* Effect.never
-        return
-      }
-
-      // Provider-neutral worker turns are launched by OrchestrationService, not
-      // by the session's planning harness. Keep this branch visibly paced so
-      // Electron coverage can observe independent owners running concurrently,
-      // then return the exact evidence protocol the service persists.
-      if (
-        spec.prompt.includes("[[orchestration-worker]]") ||
-        spec.prompt.includes("executing an approved Jingler plan")
-      ) {
-        const taskProtocol = SCRIPTED_TASK_PROTOCOL_PATTERN.exec(spec.prompt)
-        const scriptedTasks = [...spec.prompt.matchAll(SCRIPTED_TASK_PATTERN)].map(
-          (match) => ({ status: match[1]!, id: match[2]! })
-        )
-        const openTasks = scriptedTasks.filter(
-          (task) => task.status === "pending" || task.status === "in-progress"
-        )
-        const progressLine = (
-          taskId: string,
-          status: "in-progress" | "completed"
-        ): string | null =>
-          taskProtocol === null
-            ? null
-            : `PLAN_TASK stage=${taskProtocol[1]} fingerprint=${taskProtocol[2]} task=${taskId} status=${status}`
-        yield* emit({
-          _tag: "Thinking",
-          text: "Executing the assigned stage and its verification.",
-          seconds: 2,
-          done: true
-        })
-        yield* pause
-        const firstTask = openTasks[0]
-        if (firstTask?.status === "pending") {
-          const line = progressLine(firstTask.id, "in-progress")
-          if (line !== null) yield* emit({ _tag: "Assistant", text: line })
-        }
-        yield* emit({
-          _tag: "ToolStart",
-          id: `worker-test-${sessionId}`,
-          name: "Bash",
-          target: "pnpm test"
-        })
-        if (
-          spec.prompt.includes("[[worker-hold]]") &&
-          spec.resumeId === null
-        ) {
-          yield* Effect.never
-        }
-        yield* pause
-        yield* emit({
-          _tag: "ToolEnd",
-          id: `worker-test-${sessionId}`,
-          status: "success",
-          meta: "scripted verification passed",
-          diff: null,
-          preview: null
-        })
-        for (const [index, task] of openTasks.entries()) {
-          if (index > 0 && task.status === "pending") {
-            const started = progressLine(task.id, "in-progress")
-            if (started !== null) yield* emit({ _tag: "Assistant", text: started })
-          }
-          const completed = progressLine(task.id, "completed")
-          if (completed !== null) yield* emit({ _tag: "Assistant", text: completed })
-        }
-        yield* pause
-        const criteria =
-          /Criteria:\s*([^\n]+)/.exec(spec.prompt)?.[1]
-            ?.split(",")
-            .map((criterion) => criterion.trim())
-            .filter((criterion) => criterion.length > 0) ?? []
-        yield* emit({
-          _tag: "Assistant",
-          text: criteria
-            .map(
-              (criterion) =>
-                `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted worker completed and verified its assigned stage.`
-            )
-            .join("\n")
-        })
-        yield* emit({ _tag: "Done", costUsd: 0.01, tokens: 120 })
         return
       }
 
@@ -1158,11 +1028,11 @@ export const scriptedRun =
         return
       }
 
-      // Once an orchestrator plan is approved, later plan amendments run in auto
-      // mode and return the complete revised document inline. Model that contract
+      // Once a plan is approved, later amendments return the complete revised
+      // document inline. Model that contract
       // directly so the runner exercises amendment reconciliation without opening
       // a second approval gate.
-      if (spec.prompt.includes("[[amendment]]") && spec.mode !== "plan") {
+      if (spec.enhancedPlan !== false && spec.prompt.includes("[[amendment]]")) {
         yield* emit({
           _tag: "Thinking",
           text: "Folding the requested audit amendment into the approved plan.",
@@ -1170,10 +1040,8 @@ export const scriptedRun =
           done: true
         })
         yield* pause
-        yield* emit({
-          _tag: "Assistant",
-          text: `Folding that in.\n\n\`\`\`json\n${scriptedPlanEmission(sessionId, 2, false, "submit", true)}\n\`\`\``
-        })
+        yield* emit({ _tag: "Assistant", text: "Folding that in." })
+        yield* proposePlan(scriptedPlanPrd(sessionId, 2, false, true))
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         return
       }
@@ -1181,48 +1049,11 @@ export const scriptedRun =
       // A `[[plan]]` marker drives plan mode: propose a plan, then execute on
       // approval or re-propose a revised one on revise (one cycle max, for tests).
       if (
-        spec.prompt.includes("[[plan]]") ||
-        (spec.mode === "plan" && spec.orchestrationRoutes === undefined)
+        spec.enhancedPlan !== false &&
+        (spec.prompt.includes("[[plan]]") || spec.mode === "plan")
       ) {
         yield* emit({ _tag: "Thinking", text: "Mapping out the work before touching anything.", seconds: 3, done: true })
         yield* pause
-        const exposesPlanAgent = spec.prompt.includes("[[active-plan-agent]]")
-        const planAgentId = `plan_agent_${sessionId}`
-        let pendingPlanThreadRelay: string | null = null
-        if (exposesPlanAgent) {
-          yield* emit({
-            _tag: "SubagentStarted",
-            id: planAgentId,
-            name: "Explore",
-            description: "Review the streamed plan with the operator",
-            parentId: null
-          })
-          if (registerTurnSteer !== undefined) {
-            yield* registerTurnSteer((text) => {
-              pendingPlanThreadRelay = text
-              return Promise.resolve("accepted" as const)
-            })
-            yield* Effect.fork(
-              Effect.forever(
-                Effect.sleep("25 millis").pipe(
-                  Effect.zipRight(
-                    Effect.gen(function* () {
-                      const relay = pendingPlanThreadRelay
-                      if (relay === null) return
-                      pendingPlanThreadRelay = null
-                      yield* emit({
-                        _tag: "Assistant",
-                        text: relay.includes("Relay this message to the active nested agent")
-                          ? "Explore confirms the anchored rollout guidance is safe to keep."
-                          : "The orchestrator has reviewed the plan comment."
-                      })
-                    })
-                  )
-                )
-              )
-            )
-          }
-        }
         let rev = spec.prompt.includes("[[amendment]]") ? 2 : 1
         while (true) {
           if (spec.prompt.includes("[[stream-plan]]")) {
@@ -1310,22 +1141,24 @@ export const scriptedRun =
                     `PLAN_TASK stage=${stage.id} fingerprint=${planTaskProgressFingerprint(stage)} task=${task.id} status=completed`
                 )
               ),
-              ...[
-                "s_01.1",
-                "s_02.1",
-                "s_03.1",
-                "s_04.1",
-                "s_4a.1",
-                "s_4a.2",
-                "s_4a.3",
-                "s_4a.4",
-                "s_4b.1",
-                "s_05.1",
-                "s_06.1"
-              ].map(
-                (criterion) =>
-                  `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted implementation completed and verified.`
-              )
+              ...(spec.prompt.includes("[[plan-needs-verification]]")
+                ? []
+                : [
+                    "s_01.1",
+                    "s_02.1",
+                    "s_03.1",
+                    "s_04.1",
+                    "s_4a.1",
+                    "s_4a.2",
+                    "s_4a.3",
+                    "s_4a.4",
+                    "s_4b.1",
+                    "s_05.1",
+                    "s_06.1"
+                  ].map(
+                    (criterion) =>
+                      `PLAN_RESULT criterion=${criterion} status=passed evidence=Scripted implementation completed and verified.`
+                  ))
             ].join("\n")
             // Claude delivers text token-by-token. Fragment the protocol across
             // arbitrary event boundaries so the runner must parse the settled
@@ -1338,13 +1171,6 @@ export const scriptedRun =
             }
             break
           }
-          if (decision._tag === "Delegate") {
-            yield* emit({
-              _tag: "Assistant",
-              text: "Plan approved — Jingler assigned it to worker agents."
-            })
-            break
-          }
           if (decision._tag === "Reject" || rev >= 2) {
             yield* emit({ _tag: "Assistant", text: "Holding here until you're ready." })
             break
@@ -1352,10 +1178,6 @@ export const scriptedRun =
           yield* emit({ _tag: "Assistant", text: "Good call — revising the plan to guard the refresh loop." })
           yield* pause
           rev += 1
-        }
-        if (exposesPlanAgent) {
-          yield* emit({ _tag: "SubagentEnded", id: planAgentId, status: "done" })
-          if (registerTurnSteer !== undefined) yield* registerTurnSteer(null)
         }
         yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
         return

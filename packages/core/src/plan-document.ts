@@ -1,7 +1,7 @@
 import { Option, Schema } from "effect"
 import { CliKind } from "./cli.js"
 import type { Plan } from "./conversation.js"
-import type { ReasoningEffort, ReasoningSetting } from "./domain.js"
+import type { ReasoningEffort } from "./domain.js"
 
 /**
  * Jingler's plan document is a fully structured DTO — an Effect `Schema` the
@@ -98,10 +98,19 @@ export type PlanCommentMentionDelivery = Schema.Schema.Type<
   typeof PlanCommentMentionDelivery
 >
 
+/** Compatibility result for comment dispatch; single-agent comments return an empty list. */
+export const PlanMentionDelivery = Schema.Struct({
+  participantId: Schema.String,
+  status: Schema.Literal("delivered", "unavailable", "failed"),
+  detail: Schema.NullOr(Schema.String),
+  retryable: Schema.Boolean
+})
+export type PlanMentionDelivery = Schema.Schema.Type<typeof PlanMentionDelivery>
+
 /**
  * One durable entry in a plan annotation thread. `authorId` is deliberately
- * separate from `authorKind`: a worker and the coordinating agent are both
- * agents, but remain addressable participants for replies and mentions.
+ * separate from `authorKind` so historical agent-authored comments retain
+ * their original identity after participant routing is removed.
  */
 export const PlanCommentMessage = Schema.Struct({
   id: Schema.String,
@@ -231,23 +240,9 @@ export const PlanPrdSection = Schema.Struct({
 })
 export type PlanPrdSection = Schema.Schema.Type<typeof PlanPrdSection>
 
-/** Planner-owned estimate used to choose an appropriate worker model. */
+/** Planner-owned estimate of implementation complexity. */
 export const PlanStageComplexity = Schema.Literal("low", "medium", "high")
 export type PlanStageComplexity = Schema.Schema.Type<typeof PlanStageComplexity>
-
-/** Worker routes use the same provider schema as sessions and discovery. */
-export const PlanWorkerCli = CliKind
-export type PlanWorkerCli = Schema.Schema.Type<typeof PlanWorkerCli>
-
-// Kept structurally identical to the shared session setting without importing
-// its runtime schema: `domain.ts` owns WorkspaceConfig and therefore already
-// imports this module for WorkerRoutingConfig.
-const WorkerReasoningSetting: Schema.Schema<ReasoningSetting> = Schema.Struct({
-  enabled: Schema.Boolean,
-  effort: Schema.optional(
-    Schema.Literal("minimal", "low", "medium", "high", "xhigh", "max")
-  )
-})
 
 export interface ProviderReasoningCapabilities {
   /** Whether the harness accepts an explicit on/off thinking setting. */
@@ -267,7 +262,7 @@ const CODEX_REASONING_CAPABILITIES: ProviderReasoningCapabilities = {
  * session controls historically show before a harness is selected.
  */
 export const providerReasoningCapabilitiesFor = (
-  cli: PlanWorkerCli | undefined
+  cli: Schema.Schema.Type<typeof CliKind> | undefined
 ): ProviderReasoningCapabilities => {
   switch (cli) {
     case "claude":
@@ -284,69 +279,16 @@ export const providerReasoningCapabilitiesFor = (
   }
 }
 
-/** Explain why an explicit reasoning setting cannot be sent to a harness. */
-export const workerReasoningSettingIssue = (
-  cli: PlanWorkerCli,
-  reasoning: ReasoningSetting | undefined
-): string | null => {
-  if (reasoning === undefined) return null
-  if (!reasoning.enabled && reasoning.effort !== undefined) {
-    return "disabled thinking cannot also select a reasoning effort"
-  }
-  const capabilities = providerReasoningCapabilitiesFor(cli)
-  if (!capabilities.explicitToggle) {
-    return "Cursor does not support an explicit reasoning setting"
-  }
-  if (reasoning.effort === undefined) return null
-  return capabilities.efforts.includes(reasoning.effort)
-    ? null
-    : `${cli} does not support reasoning effort "${reasoning.effort}"`
-}
-
-/** One concrete provider/model target selected by the worker router. */
-export const WorkerModelRoute = Schema.Struct({
-  cli: PlanWorkerCli,
-  model: Schema.String,
-  /** Absent means use the selected provider/model's own reasoning default. */
-  reasoning: Schema.optional(WorkerReasoningSetting)
-}).pipe(
-  Schema.filter(
-    (route) =>
-      workerReasoningSettingIssue(route.cli, route.reasoning) ?? true
-  )
-)
-export type WorkerModelRoute = Schema.Schema.Type<typeof WorkerModelRoute>
-
-/**
- * Complexity router for implementation workers. `default` is the durable
- * fallback for unavailable or unclassified work; explicit buckets let the
- * operator trade capability and cost without changing the orchestrator model.
- */
-export const WorkerRoutingConfig = Schema.Struct({
-  default: WorkerModelRoute,
-  low: WorkerModelRoute,
-  medium: WorkerModelRoute,
-  high: WorkerModelRoute
-})
-export type WorkerRoutingConfig = Schema.Schema.Type<typeof WorkerRoutingConfig>
-
-/** Provider-neutral route selected by the orchestrator for one logical worker. */
-export const PlanStageAssignment = Schema.Struct({
+/** Legacy worker metadata accepted only while decoding historical plans. */
+const LegacyPlanStageAssignment = Schema.Struct({
   agentId: Schema.String,
-  cli: PlanWorkerCli,
+  cli: CliKind,
   model: Schema.String,
   reason: Schema.String,
-  /** Absent on legacy plans and interpreted as the provider/model default. */
-  reasoning: Schema.optional(WorkerReasoningSetting)
-}).pipe(
-  Schema.filter(
-    (assignment) =>
-      workerReasoningSettingIssue(assignment.cli, assignment.reasoning) ?? true
-  )
-)
-export type PlanStageAssignment = Schema.Schema.Type<typeof PlanStageAssignment>
+  reasoning: Schema.optional(Schema.Unknown)
+})
 
-/** Durable state written by the orchestration service as a worker progresses. */
+/** Derived stage status used by plan projections; it is not persisted. */
 export const PlanStageExecutionStatus = Schema.Literal(
   "queued",
   "running",
@@ -357,7 +299,7 @@ export const PlanStageExecutionStatus = Schema.Literal(
 )
 export type PlanStageExecutionStatus = Schema.Schema.Type<typeof PlanStageExecutionStatus>
 
-export const PlanPrdStage = Schema.Struct({
+const PlanPrdStageFields = {
   id: Schema.String,
   title: Schema.String,
   /** One-line summary of what the stage does. */
@@ -385,10 +327,25 @@ export const PlanPrdStage = Schema.Struct({
   callPathDiff: Schema.optional(PlanCallPathDiff),
   acceptance: Schema.Array(PlanAcceptance),
   dependencies: Schema.optional(Schema.Array(Schema.String)),
-  complexity: Schema.optional(PlanStageComplexity),
-  assignment: Schema.optional(Schema.NullOr(PlanStageAssignment)),
+  complexity: Schema.optional(PlanStageComplexity)
+} as const
+
+const CurrentPlanPrdStage = Schema.Struct(PlanPrdStageFields)
+const LegacyCompatiblePlanPrdStage = Schema.Struct({
+  ...PlanPrdStageFields,
+  assignment: Schema.optional(Schema.NullOr(LegacyPlanStageAssignment)),
   executionStatus: Schema.optional(PlanStageExecutionStatus)
 })
+
+export const PlanPrdStage = Schema.transform(
+  LegacyCompatiblePlanPrdStage,
+  CurrentPlanPrdStage,
+  {
+    strict: true,
+    decode: ({ assignment: _assignment, executionStatus: _executionStatus, ...stage }) => stage,
+    encode: (stage) => stage
+  }
+)
 export type PlanPrdStage = Schema.Schema.Type<typeof PlanPrdStage>
 
 export const PlanPrd = Schema.Struct({

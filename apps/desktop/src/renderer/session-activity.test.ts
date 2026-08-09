@@ -1,30 +1,47 @@
-import { describe, expect, it } from "vitest"
-import type { SessionActivity } from "@jingler/core"
-import { selectSessionActivity } from "./session-activity.js"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import {
+  sessionActivitiesSnapshot,
+  setSessionActivity,
+  subscribeSessionActivities
+} from "./session-activity.js"
 
-const activity = (
-  kind: SessionActivity["kind"],
-  verb: string,
-  target: string | null = null
-): SessionActivity => ({ kind, verb, target })
+const ids = ["session-1", "session-2"]
 
-describe("selectSessionActivity", () => {
-  it("keeps a session active while only orchestration workers are running", () => {
-    const workers = activity("delegating", "Delegating", "2 agents")
-    expect(selectSessionActivity(undefined, workers)).toEqual(workers)
+afterEach(() => {
+  for (const id of ids) setSessionActivity(id, null)
+})
+
+describe("setSessionActivity", () => {
+  it("publishes and clears activity by workspace", () => {
+    const activity = { kind: "thinking" as const, verb: "Thinking", target: null }
+    setSessionActivity("session-1", activity)
+    setSessionActivity("session-2", { kind: "editing", verb: "Editing", target: "src/app.ts" })
+
+    expect(sessionActivitiesSnapshot()).toEqual({
+      "session-1": activity,
+      "session-2": { kind: "editing", verb: "Editing", target: "src/app.ts" }
+    })
+
+    setSessionActivity("session-1", null)
+    expect(sessionActivitiesSnapshot()).toEqual({
+      "session-2": { kind: "editing", verb: "Editing", target: "src/app.ts" }
+    })
   })
 
-  it("lets worker delegation replace an idle main-agent thinking state", () => {
-    const workers = activity("delegating", "Delegating", "2 agents")
-    expect(
-      selectSessionActivity(activity("thinking", "Thinking"), workers)
-    ).toEqual(workers)
-  })
+  it("notifies subscribers only for observable changes", () => {
+    const listener = vi.fn()
+    const unsubscribe = subscribeSessionActivities(listener)
+    const activity = { kind: "thinking" as const, verb: "Thinking", target: null }
 
-  it("does not hide operator attention behind worker activity", () => {
-    const gate = activity("needs-input", "Needs input")
-    expect(
-      selectSessionActivity(gate, activity("delegating", "Delegating", "2 agents"))
-    ).toEqual(gate)
+    setSessionActivity("session-1", activity)
+    const firstSnapshot = sessionActivitiesSnapshot()
+    setSessionActivity("session-1", { ...activity })
+    expect(sessionActivitiesSnapshot()).toBe(firstSnapshot)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    setSessionActivity("session-1", null)
+    setSessionActivity("session-1", null)
+    expect(listener).toHaveBeenCalledTimes(2)
+    unsubscribe()
   })
 })

@@ -1,65 +1,63 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Attachment,
   CliKind,
   Environment,
+  HarnessCapability,
   PermissionMode,
   ProviderModels,
   ReasoningEffort,
   ReasoningSetting,
-  Skill
-} from "@jingler/core"
-import { supportsPlanMode } from "@jingler/core"
-import {
-  Content as DropdownMenuContent,
-  Item as DropdownMenuItem,
-  Portal as DropdownMenuPortal,
-  Root as DropdownMenuRoot,
-  Separator as DropdownMenuSeparator,
-  Trigger as DropdownMenuTrigger
-} from "@radix-ui/react-dropdown-menu"
+  Skill,
+} from "@jingler/core";
 import {
   ArrowUp,
   FolderGit2,
   GitBranch,
   ImagePlus,
+  Monitor,
   MousePointer2,
   Plus,
+  Server,
   Sparkles,
-  Square
-} from "lucide-react"
-import { cn } from "../lib/cn.js"
-import { downscaleImage } from "../lib/image-downscale.js"
-import { reasoningEffortsFor } from "../lib/reasoning-options.js"
-import { atLeast, useWidthTier } from "../hooks/width-tier.js"
-import { modeAccent } from "../tokens.js"
-import { JinglerMark } from "../brand/jingler-mark.js"
-import { AttachmentThumb } from "../components/attachment-thumb.js"
-import { Button } from "../components/button.js"
-import { ChipMenu, type ChipOption } from "../components/chip-menu.js"
-import { CodeChip } from "../components/code-chip.js"
-import { Pill } from "../components/pill.js"
-import { PROVIDER_LABEL } from "../components/provider-icon.js"
-import { SignalBars } from "../components/signal-bars.js"
-import { StatusDot } from "../components/status-dot.js"
-import { CommandMenu } from "./command-menu.js"
-import { MentionMenu } from "./mention-menu.js"
+  Square,
+} from "lucide-react";
+import { cn } from "../lib/cn.js";
+import { downscaleImage } from "../lib/image-downscale.js";
+import { atLeast, useWidthTier } from "../hooks/width-tier.js";
+import { AttachmentThumb } from "../components/attachment-thumb.js";
+import { Button } from "../components/button.js";
+import { ChipMenu, type ChipOption } from "../components/chip-menu.js";
+import { CodeChip } from "../components/code-chip.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/dropdown-menu.js";
+import { Pill } from "../components/pill.js";
+import { PROVIDER_LABEL } from "../components/provider-icon.js";
+import { SignalBars } from "../components/signal-bars.js";
+import { StatusDot } from "../components/status-dot.js";
+import { CommandMenu } from "./command-menu.js";
+import { MentionMenu } from "./mention-menu.js";
+import { ModelBrowser } from "./model-browser.js";
 
 /** Cap the number of attached images so the prompt payload stays sane. */
-const MAX_ATTACHMENTS = 8
+const MAX_ATTACHMENTS = 8;
 
 /** Read a `File` as raw base64 — the original bytes, no resizing. */
 const readOriginal = (file: File): Promise<string> =>
   new Promise((resolve) => {
-    const reader = new FileReader()
+    const reader = new FileReader();
     reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : ""
-      const comma = result.indexOf(",")
-      resolve(comma >= 0 ? result.slice(comma + 1) : "")
-    }
-    reader.onerror = () => resolve("")
-    reader.readAsDataURL(file)
-  })
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : "");
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
 
 /**
  * Read an image `File` into a base64 `Attachment` (null if it isn't an image).
@@ -71,37 +69,25 @@ const readOriginal = (file: File): Promise<string> =>
  * already within the cap, a re-encode that came out larger) falls through to the
  * original bytes, so an attachment is never lost to the optimisation.
  */
-const readAttachment = async (file: File, id: string): Promise<Attachment | null> => {
-  if (!file.type.startsWith("image/")) return null
-  const name = file.name || "pasted-image.png"
-  const shrunk = await downscaleImage(file, file.type)
-  if (shrunk !== null) return { id, name, mediaType: shrunk.mediaType, data: shrunk.data }
-  const data = await readOriginal(file)
-  return data === "" ? null : { id, name, mediaType: file.type, data }
-}
+const readAttachment = async (
+  file: File,
+  id: string,
+): Promise<Attachment | null> => {
+  if (!file.type.startsWith("image/")) return null;
+  const name = file.name || "pasted-image.png";
+  const shrunk = await downscaleImage(file, file.type);
+  if (shrunk !== null)
+    return { id, name, mediaType: shrunk.mediaType, data: shrunk.data };
+  const data = await readOriginal(file);
+  return data === "" ? null : { id, name, mediaType: file.type, data };
+};
 
 const MODE_OPTIONS: ReadonlyArray<ChipOption<PermissionMode>> = [
-  { value: "ask", label: "ask" },
-  { value: "accept-edits", label: "accept edits" },
-  { value: "auto", label: "auto" }
-]
-const modeOptionsFor = (cli: CliKind | undefined): ReadonlyArray<ChipOption<PermissionMode>> =>
-  cli === "codex"
-    ? MODE_OPTIONS.map((option) =>
-        option.value === "ask" ? { ...option, label: "read only" } : option
-      )
-    : MODE_OPTIONS
-/** Offered on any harness that can hold a plan turn — see `supportsPlanMode`. */
-const PLAN_OPTION: ChipOption<PermissionMode> = { value: "plan", label: "plan" }
-
-type ReasoningChoice = "default" | ReasoningEffort
-const reasoningOptionsFor = (
-  cli: CliKind | undefined
-): ReadonlyArray<ChipOption<ReasoningChoice | "off">> => [
-  { value: "default", label: "default" },
-  { value: "off", label: "off" },
-  ...reasoningEffortsFor(cli).map((value) => ({ value, label: value }))
-]
+  { value: "ask", label: "Ask Before Actions" },
+  { value: "accept-edits", label: "Accept Edits" },
+  { value: "auto", label: "Full Access" },
+];
+type ReasoningChoice = "default" | ReasoningEffort;
 /**
  * Filled bars for a reasoning choice — its rung on the PROVIDER'S ladder, not a
  * fixed scale. Claude's runs low…max and Codex's minimal…xhigh, so the same word
@@ -111,36 +97,41 @@ const reasoningOptionsFor = (
  * Both `default` and `off` fill nothing: neither is a strength. `off` is told
  * apart by the slash (see `SignalBars`), and the chip's label carries the rest.
  */
-const reasoningLevel = (cli: CliKind | undefined, choice: ReasoningChoice | "off"): number =>
-  choice === "default" || choice === "off" ? 0 : reasoningEffortsFor(cli).indexOf(choice) + 1
+const reasoningLevel = (
+  options: ReadonlyArray<ReasoningEffort>,
+  choice: ReasoningChoice | "off",
+): number =>
+  choice === "default" || choice === "off" ? 0 : options.indexOf(choice) + 1;
 
-type MenuState = { kind: "slash" | "mention"; query: string; start: number }
-const TRAILING_SPACE = /\s$/
+type MenuState = { kind: "slash" | "mention"; query: string; start: number };
+const TRAILING_SPACE = /\s$/;
 
 /** Display-only projection of the renderer-owned captured code reference. */
 export interface ComposerCodeReference {
-  readonly path: string
-  readonly startLine: number
-  readonly endLine: number
+  readonly path: string;
+  readonly startLine: number;
+  readonly endLine: number;
   /** Canonical range label produced by the code-reference boundary. */
-  readonly label: string
+  readonly label: string;
 }
 
 /** The trigger token (`/…` or `@…`) immediately before the caret, if any. */
 const activeToken = (value: string, caret: number): MenuState | null => {
-  const match = value.slice(0, caret).match(/(?:^|\s)([/@])(\S*)$/)
-  if (!match) return null
-  const query = match[2] ?? ""
+  const match = value.slice(0, caret).match(/(?:^|\s)([/@])(\S*)$/);
+  if (!match) return null;
+  const query = match[2] ?? "";
   return {
     kind: match[1] === "/" ? "slash" : "mention",
     query,
-    start: caret - query.length - 1
-  }
-}
+    start: caret - query.length - 1,
+  };
+};
 
 /** Codex invokes skills with `$name`; the palette keeps `/` as its common discovery trigger. */
 const skillInsertion = (cli: CliKind | undefined, skill: Skill): string =>
-  cli === "codex" && skill.source === "skill" ? `$${skill.name.slice(1)}` : skill.name
+  cli === "codex" && skill.source === "skill"
+    ? `$${skill.name.slice(1)}`
+    : skill.name;
 
 /**
  * The prompt composer — a real controlled textarea with Enter-to-send /
@@ -161,13 +152,11 @@ export function Composer({
   cli,
   model,
   catalog = [],
+  capabilities,
   onSetHarness,
   mode = "accept-edits",
   onSetMode,
-  showJinglerToggle = false,
-  jinglerMode = false,
-  jinglerModePending = false,
-  onToggleJinglerMode,
+  useJinglerTools = true,
   followAgent = false,
   onToggleFollowAgent,
   reasoningEffort,
@@ -175,6 +164,7 @@ export function Composer({
   onSetReasoning,
   allowPlan = false,
   paused = false,
+  disabledReason,
   busy = false,
   placeholder,
   autoFocus = false,
@@ -187,191 +177,197 @@ export function Composer({
   codeReferences = [],
   onCodeReferenceRemove,
   onCodeReferencesClear,
-  className
+  className,
 }: {
-  skills?: ReadonlyArray<Skill>
-  files?: ReadonlyArray<string>
-  onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void
+  skills?: ReadonlyArray<Skill>;
+  files?: ReadonlyArray<string>;
+  onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void;
   /** Halt the running agent. Given one, the button becomes Stop while `busy`. */
-  onStop?: () => void
+  onStop?: () => void;
   /** Git branch backing this session's worktree. */
-  branch?: string
+  branch?: string;
   /** Repository name backing this session — shown at the composer's bottom-left. */
-  repo?: string
-  environments?: ReadonlyArray<Environment>
-  environmentId?: string
-  environmentPending?: boolean
-  onSetEnvironment?: (environmentId?: string) => void
+  repo?: string;
+  environments?: ReadonlyArray<Environment>;
+  environmentId?: string;
+  environmentPending?: boolean;
+  onSetEnvironment?: (environmentId?: string) => void;
   /** Seed the draft once on mount (e.g. a task prefilled from a linked issue). */
-  initialValue?: string
+  initialValue?: string;
   /**
    * Lift the draft text out of this component. The app passes this so a draft
    * survives a session switch — which UNMOUNTS the composer (the pane is keyed by
    * session id), destroying any local state. Omit it and the composer stays
    * happily uncontrolled (stories, Storybook).
    */
-  value?: string
-  onValueChange?: (value: string) => void
+  value?: string;
+  onValueChange?: (value: string) => void;
   /** Lift the attachments out too — same reasoning as `value`. */
-  attachments?: ReadonlyArray<Attachment>
-  onAttachmentsChange?: (attachments: ReadonlyArray<Attachment>) => void
+  attachments?: ReadonlyArray<Attachment>;
+  onAttachmentsChange?: (attachments: ReadonlyArray<Attachment>) => void;
   /** Captured repository ranges attached as structured draft context. */
-  codeReferences?: ReadonlyArray<ComposerCodeReference>
+  codeReferences?: ReadonlyArray<ComposerCodeReference>;
   /** Remove one captured range without disturbing text or image attachments. */
-  onCodeReferenceRemove?: (index: number) => void
+  onCodeReferenceRemove?: (index: number) => void;
   /** Clear every captured range after a composer send. */
-  onCodeReferencesClear?: () => void
+  onCodeReferencesClear?: () => void;
   /** The session's current harness (which section of the menu is checked). */
-  cli?: CliKind
+  cli?: CliKind;
   /** Current harness model id (shown in the model chip). */
-  model?: string
+  model?: string;
   /** Installed harnesses and their models — the model chip's sectioned menu. */
-  catalog?: ReadonlyArray<ProviderModels>
+  catalog?: ReadonlyArray<ProviderModels>;
+  /** Authoritative provider/model/mode/reasoning snapshot. */
+  capabilities?: ReadonlyArray<HarnessCapability>;
   /** Picking a model implies its harness, so both travel together. */
-  onSetHarness?: (cli: CliKind, model: string) => void
+  onSetHarness?: (cli: CliKind, model: string) => void;
   /** Current HITL mode (shown in the mode chip; Shift+Tab cycles it). */
-  mode?: PermissionMode
-  onSetMode?: (mode: PermissionMode) => void
-  /**
-   * Show the "Jingler mode" toggle in the control row. Set for the orchestrator
-   * chat only — the toggle governs the agentic orchestrator flow, which is a
-   * property of that chat.
-   */
-  showJinglerToggle?: boolean
-  /**
-   * Whether Jingler mode is ON. When on (and the toggle is shown), the
-   * permission-mode chip is hidden because the orchestrator chooses plan/auto
-   * mechanically. Its planning-capable model chip remains editable per chat.
-   */
-  jinglerMode?: boolean
-  /** Disable the toggle while the active chat's setting is being persisted. */
-  jinglerModePending?: boolean
-  /** Flip Jingler mode for the active chat; workspace config is its fallback. */
-  onToggleJinglerMode?: (enabled: boolean) => void
+  mode?: PermissionMode;
+  onSetMode?: (mode: PermissionMode) => void;
+  /** Enhanced Plan replaces provider-native Plan while Jingler tools are enabled. */
+  useJinglerTools?: boolean;
   /** Whether Files is following mutations from this chat's active agent. */
-  followAgent?: boolean
+  followAgent?: boolean;
   /** Toggle the session file browser's shared agent-follow mode. */
-  onToggleFollowAgent?: (enabled: boolean) => void
+  onToggleFollowAgent?: (enabled: boolean) => void;
   /** Per-session thinking strength; absent preserves the harness default. */
-  reasoningEffort?: ReasoningEffort
-  thinkingEnabled?: boolean
-  onSetReasoning?: (reasoning?: ReasoningSetting) => void
+  reasoningEffort?: ReasoningEffort;
+  thinkingEnabled?: boolean;
+  onSetReasoning?: (reasoning?: ReasoningSetting) => void;
   /** Offer the Plan mode option (harnesses that pass `supportsPlanMode`). */
-  allowPlan?: boolean
-  paused?: boolean
+  allowPlan?: boolean;
+  paused?: boolean;
+  /** Disable composing without disabling the model picker used to recover. */
+  disabledReason?: string;
   /**
    * The agent is producing a turn — sends are queued (processed once it's free)
    * rather than blocked, so the composer stays live and the button reads "Queue".
    */
-  busy?: boolean
+  busy?: boolean;
   /** Overrides the default "Message <harness>…" prompt. */
-  placeholder?: string
+  placeholder?: string;
   /**
    * Take the caret when this composer becomes the one on screen. The host passes
    * the focused pane's flag, so a split never has two composers fighting for it.
    */
-  autoFocus?: boolean
+  autoFocus?: boolean;
   /**
    * What "became the one on screen" means — the session id. Refocusing is keyed
    * on this, so replacing a pane's session re-focuses even though the component
    * never unmounted.
    */
-  focusKey?: string
-  className?: string
+  focusKey?: string;
+  className?: string;
 }) {
-  const modeOptions = [
-    ...modeOptionsFor(cli),
-    ...(allowPlan ? [PLAN_OPTION] : [])
-  ]
-  // Jingler owns permission mode mechanically (plan before approval, auto
-  // afterwards), but its model remains a live per-chat choice.
-  const hidePermissionMode = showJinglerToggle && jinglerMode
-  const accent = modeAccent[mode]
+  const resolvedCapabilities = useMemo<ReadonlyArray<HarnessCapability>>(
+    () =>
+      capabilities ??
+      catalog.map((provider) => ({
+        ...provider,
+        modes: [
+          ...MODE_OPTIONS.map((option) => ({
+            id: option.value,
+            label: String(option.label),
+            kind: "execute" as const,
+          })),
+          ...(allowPlan
+            ? [{ id: "plan" as const, label: "Plan", kind: "plan" as const }]
+            : []),
+        ],
+      })),
+    [allowPlan, capabilities, catalog],
+  );
+  const selectedCapability = resolvedCapabilities.find(
+    (candidate) => candidate.cli === cli,
+  );
+  const selectedModel = selectedCapability?.models.find(
+    (candidate) => candidate.id === model,
+  );
+  const modeOptions: ReadonlyArray<ChipOption<PermissionMode>> = (
+    selectedCapability?.modes ?? []
+  )
+    .filter((option) => allowPlan || option.kind !== "plan")
+    .map((option) => ({
+      value: option.id,
+      label:
+        useJinglerTools && option.kind === "plan"
+          ? "Enhanced Plan"
+          : option.label,
+      description: option.description,
+    }));
+  const reasoningEfforts = (selectedModel?.reasoning ?? []).map(
+    (option) => option.id,
+  );
+  const reasoningOptions: ReadonlyArray<ChipOption<ReasoningChoice | "off">> = [
+    { value: "default", label: "Default" },
+    { value: "off", label: "Off" },
+    ...(selectedModel?.reasoning ?? []).map((option) => ({
+      value: option.id,
+      label: option.label,
+    })),
+  ];
   // The chip's value and its bar count are the same fact; deriving it once keeps
   // the glyph from drifting out of step with the label beside it.
   const reasoningChoice: ReasoningChoice | "off" =
-    thinkingEnabled === false ? "off" : (reasoningEffort ?? "default")
+    thinkingEnabled === false ? "off" : (reasoningEffort ?? "default");
 
   // The pane's tier (see `session-pane.tsx`). The composer sits in a 760px
   // reading column, so above `wide` it always has its full width; below it, the
   // column is the pane and every pixel is contested.
-  const tier = useWidthTier()
-  const roomy = atLeast(tier, "wide")
+  const tier = useWidthTier();
+  const roomy = atLeast(tier, "wide");
 
-  // Menu values are `<cli>:<modelId>`, not a bare model id: ids aren't unique
-  // across harnesses (`gpt-5` is offered by both codex and cursor), and the
-  // provider has to survive the round trip so selecting a model can switch
-  // harness in one go.
-  const modelCatalog = useMemo(
-    () =>
-      showJinglerToggle && jinglerMode
-        ? catalog.filter((provider) => supportsPlanMode(provider.cli))
-        : catalog,
-    [catalog, jinglerMode, showJinglerToggle]
-  )
-  const modelGroups = useMemo(
-    () =>
-      modelCatalog.map((p) => ({
-        label: p.label,
-        options: p.models.map((m) => ({ value: `${p.cli}:${m.id}`, label: m.label }))
-      })),
-    [modelCatalog]
-  )
-  // Prefer the exact harness+model pair; if the session's model isn't in the
-  // catalogue (stale id, or discovery replaced the list), fall back to the first
-  // model of its harness so the chip shows a real label instead of a raw id.
-  // Last resort is the bare model id — the catalogue arrives a beat after mount,
-  // and the chip must read "opus" in the meantime, never blank or "claude:opus".
-  const exact = modelGroups.flatMap((g) => g.options).find((o) => o.value === `${cli}:${model}`)
-  const harnessDefault = modelCatalog.find((p) => p.cli === cli)?.models[0]
-  const modelValue =
-    exact?.value ?? (harnessDefault ? `${cli}:${harnessDefault.id}` : (model ?? ""))
   // Follows the harness — the prompt used to be hardwired to "Message Claude…",
   // which now visibly lies the moment the operator switches provider.
-  const prompt = placeholder ?? `Message ${PROVIDER_LABEL[cli ?? "claude"]}…`
+  const prompt = placeholder ?? `Message ${PROVIDER_LABEL[cli ?? "claude"]}…`;
 
   // Controlled when the host passes `value`/`attachments` (the app, so drafts
   // outlive the pane's unmount); otherwise these locals own the draft. Seeded once
   // from `initialValue` — note that only ever applies in the UNCONTROLLED case, so
   // the lazy initializer can't go stale under a controlled host.
-  const [internalValue, setInternalValue] = useState(() => initialValue ?? "")
-  const [internalAttachments, setInternalAttachments] = useState<ReadonlyArray<Attachment>>([])
-  const [menu, setMenu] = useState<MenuState | null>(null)
-  const [activeIndex, setActiveIndex] = useState(0)
+  const [internalValue, setInternalValue] = useState(() => initialValue ?? "");
+  const [internalAttachments, setInternalAttachments] = useState<
+    ReadonlyArray<Attachment>
+  >([]);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
 
   // Shims, so every call site below reads/writes exactly as it did when this was
   // plain local state — including the `setAttachments(prev => …)` updater form.
-  const value = controlledValue ?? internalValue
-  const attachments = controlledAttachments ?? internalAttachments
+  const value = controlledValue ?? internalValue;
+  const attachments = controlledAttachments ?? internalAttachments;
 
   // An updater must see the LATEST draft, not the one captured when this render
   // ran — two `addFiles` in flight at once (paste, paste again before the first
   // FileReader resolves) would otherwise both merge into the same stale array and
   // the first batch would vanish. These refs are written through on every set, so
   // calls that land in the same tick chain instead of racing.
-  const valueRef = useRef(value)
-  const attachmentsRef = useRef(attachments)
-  valueRef.current = value
-  attachmentsRef.current = attachments
+  const valueRef = useRef(value);
+  const attachmentsRef = useRef(attachments);
+  valueRef.current = value;
+  attachmentsRef.current = attachments;
 
   const setValue = (next: string | ((prev: string) => string)) => {
-    const resolved = typeof next === "function" ? next(valueRef.current) : next
-    valueRef.current = resolved
-    if (controlledValue === undefined) setInternalValue(resolved)
-    onValueChange?.(resolved)
-  }
+    const resolved = typeof next === "function" ? next(valueRef.current) : next;
+    valueRef.current = resolved;
+    if (controlledValue === undefined) setInternalValue(resolved);
+    onValueChange?.(resolved);
+  };
   const setAttachments = (
-    next: ReadonlyArray<Attachment> | ((prev: ReadonlyArray<Attachment>) => ReadonlyArray<Attachment>)
+    next:
+      | ReadonlyArray<Attachment>
+      | ((prev: ReadonlyArray<Attachment>) => ReadonlyArray<Attachment>),
   ) => {
-    const resolved = typeof next === "function" ? next(attachmentsRef.current) : next
-    attachmentsRef.current = resolved
-    if (controlledAttachments === undefined) setInternalAttachments(resolved)
-    onAttachmentsChange?.(resolved)
-  }
-  const [dragging, setDragging] = useState(false)
-  const ref = useRef<HTMLTextAreaElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const attachIdRef = useRef(0)
+    const resolved =
+      typeof next === "function" ? next(attachmentsRef.current) : next;
+    attachmentsRef.current = resolved;
+    if (controlledAttachments === undefined) setInternalAttachments(resolved);
+    onAttachmentsChange?.(resolved);
+  };
+  const [dragging, setDragging] = useState(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachIdRef = useRef(0);
 
   // Read dropped/pasted/picked image files into base64 attachments (capped).
   const addFiles = async (files: ReadonlyArray<File>) => {
@@ -381,15 +377,17 @@ export function Composer({
         // The counter is bumped as its own statement rather than inside the
         // template literal: an assignment in an expression position reads as a
         // comparison, and this one has a side effect per attachment.
-        attachIdRef.current += 1
-        return readAttachment(f, `att_${attachIdRef.current}`)
-      })
-    )
-    const next = read.filter((a): a is Attachment => a !== null)
-    if (next.length > 0) setAttachments((prev) => [...prev, ...next].slice(0, MAX_ATTACHMENTS))
-  }
+        attachIdRef.current += 1;
+        return readAttachment(f, `att_${attachIdRef.current}`);
+      }),
+    );
+    const next = read.filter((a): a is Attachment => a !== null);
+    if (next.length > 0)
+      setAttachments((prev) => [...prev, ...next].slice(0, MAX_ATTACHMENTS));
+  };
 
-  const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id))
+  const removeAttachment = (id: string) =>
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
 
   // Opening a conversation puts the caret in its composer — the point of the app
   // is to type at an agent, so arriving anywhere else is a wasted keystroke.
@@ -400,112 +398,131 @@ export function Composer({
   // pane's session refocuses without an unmount, and gated on `autoFocus` so in a
   // split only the pane the operator is looking at takes it.
   useEffect(() => {
-    if (!autoFocus) return
-    const id = requestAnimationFrame(() => ref.current?.focus())
-    return () => cancelAnimationFrame(id)
-  }, [autoFocus, focusKey])
+    if (!autoFocus) return;
+    const id = requestAnimationFrame(() => ref.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [autoFocus, focusKey]);
 
   // The textarea auto-grows in LAYOUT (`field-sizing: content`), not from a
   // measurement taken here — see the note on the element itself.
   const skillMatches = useMemo(
     () =>
       menu?.kind === "slash"
-        ? skills.filter((s) => s.name.toLowerCase().includes(menu.query.toLowerCase()))
-        : [],
-    [menu, skills]
+        ? skills.filter((s) =>
+            s.name.toLowerCase().includes(menu.query.toLowerCase()),
   )
+        : [],
+    [menu, skills],
+  );
   const fileMatches = useMemo(
     () =>
       menu?.kind === "mention"
-        ? files.filter((f) => f.toLowerCase().includes(menu.query.toLowerCase())).slice(0, 50)
+        ? files
+            .filter((f) => f.toLowerCase().includes(menu.query.toLowerCase()))
+            .slice(0, 50)
         : [],
-    [menu, files]
-  )
-  const count = menu?.kind === "slash" ? skillMatches.length : fileMatches.length
+    [menu, files],
+  );
+  const count =
+    menu?.kind === "slash" ? skillMatches.length : fileMatches.length;
 
-  const mentions = useMemo(() => [...value.matchAll(/@(\S+)/g)].map((m) => m[1]!), [value])
+  const mentions = useMemo(
+    () => [...value.matchAll(/@(\S+)/g)].map((m) => m[1]!),
+    [value],
+  );
 
   const sync = (next: string, caret: number) => {
-    setValue(next)
-    setMenu(activeToken(next, caret))
-    setActiveIndex(0)
-  }
+    setValue(next);
+    setMenu(activeToken(next, caret));
+    setActiveIndex(0);
+  };
 
   const replaceToken = (insert: string) => {
-    if (!menu) return
-    const before = value.slice(0, menu.start)
-    const after = value.slice(menu.start + 1 + menu.query.length)
-    const next = `${before}${insert} ${after}`
-    setValue(next)
-    setMenu(null)
-    requestAnimationFrame(() => ref.current?.focus())
-  }
+    if (!menu) return;
+    const before = value.slice(0, menu.start);
+    const after = value.slice(menu.start + 1 + menu.query.length);
+    const next = `${before}${insert} ${after}`;
+    setValue(next);
+    setMenu(null);
+    requestAnimationFrame(() => ref.current?.focus());
+  };
 
   const send = () => {
-    const text = value.trim()
-    if ((text.length === 0 && attachments.length === 0 && codeReferences.length === 0) || paused)
-      return
-    onSend?.(text, attachments)
-    setValue("")
-    setAttachments([])
-    onCodeReferencesClear?.()
-    setMenu(null)
-  }
+    const text = value.trim();
+    if (
+      (text.length === 0 &&
+        attachments.length === 0 &&
+        codeReferences.length === 0) ||
+      paused ||
+      disabledReason !== undefined
+    )
+      return;
+    onSend?.(text, attachments);
+    setValue("");
+    setAttachments([]);
+    onCodeReferencesClear?.();
+    setMenu(null);
+  };
 
   const openSkills = () => {
-    const separator = value.length > 0 && !TRAILING_SPACE.test(value) ? " " : ""
-    const next = `${value}${separator}/`
-    setValue(next)
-    setMenu({ kind: "slash", query: "", start: next.length - 1 })
-    setActiveIndex(0)
-    requestAnimationFrame(() => ref.current?.focus())
-  }
+    const separator =
+      value.length > 0 && !TRAILING_SPACE.test(value) ? " " : "";
+    const next = `${value}${separator}/`;
+    setValue(next);
+    setMenu({ kind: "slash", query: "", start: next.length - 1 });
+    setActiveIndex(0);
+    requestAnimationFrame(() => ref.current?.focus());
+  };
 
   // Pasting an image (e.g. a screenshot) attaches it instead of dropping a blob.
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"))
-    if (files.length === 0) return
-    e.preventDefault()
-    void addFiles(files)
-  }
+    const files = Array.from(e.clipboardData.files).filter((f) =>
+      f.type.startsWith("image/"),
+    );
+    if (files.length === 0) return;
+    e.preventDefault();
+    void addFiles(files);
+  };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (menu && count > 0) {
       if (e.key === "ArrowDown") {
-        e.preventDefault()
-        setActiveIndex((i) => (i + 1) % count)
-        return
+        e.preventDefault();
+        setActiveIndex((i) => (i + 1) % count);
+        return;
       }
       if (e.key === "ArrowUp") {
-        e.preventDefault()
-        setActiveIndex((i) => (i - 1 + count) % count)
-        return
+        e.preventDefault();
+        setActiveIndex((i) => (i - 1 + count) % count);
+        return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault()
+        e.preventDefault();
         if (menu.kind === "slash") {
-          replaceToken(skillInsertion(cli, skillMatches[activeIndex]!))
-        }
-        else replaceToken(`@${fileMatches[activeIndex]!}`)
-        return
+          replaceToken(skillInsertion(cli, skillMatches[activeIndex]!));
+        } else replaceToken(`@${fileMatches[activeIndex]!}`);
+        return;
       }
       if (e.key === "Escape") {
-        e.preventDefault()
-        setMenu(null)
-        return
+        e.preventDefault();
+        setMenu(null);
+        return;
       }
     }
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      send()
-    }
+      e.preventDefault();
+      send();
   }
+  };
 
   return (
     // `data-testid` anchors the e2e geometry assertions: they measure where the
     // composer's OUTER box sits in its pane, which the textarea alone cannot
     // stand in for (the model / mode / Send row hangs ~80px below it).
-    <div data-testid="composer" className={cn("relative flex flex-col gap-2", className)}>
+    <div
+      data-testid="composer"
+      className={cn("relative flex flex-col gap-2", className)}
+    >
       {menu && count > 0 && (
         <div className="absolute inset-x-0 bottom-full z-10 mb-2">
           {menu.kind === "slash" ? (
@@ -527,34 +544,30 @@ export function Composer({
       )}
 
       <div
-        // Reflects the active HITL mode so the per-mode theming is inspectable
-        // (and assertable in e2e) — the visual accent is derived from it.
+        // Keep the mode available to tests and integrations without tinting the
+        // composer chrome. The selected menu item carries the state.
         data-mode={mode}
-        data-jingler-mode={showJinglerToggle ? String(jinglerMode) : undefined}
         onDragOver={(e) => {
-          if (paused) return
-          e.preventDefault()
-          setDragging(true)
+          if (paused || disabledReason !== undefined) return;
+          e.preventDefault();
+          setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => {
-          setDragging(false)
-          if (paused) return
-          const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"))
-          if (files.length === 0) return
-          e.preventDefault()
-          void addFiles(files)
+          setDragging(false);
+          if (paused || disabledReason !== undefined) return;
+          const files = Array.from(e.dataTransfer.files).filter((f) =>
+            f.type.startsWith("image/"),
+          );
+          if (files.length === 0) return;
+          e.preventDefault();
+          void addFiles(files);
         }}
         className={cn(
-          "flex flex-col gap-[11px] rounded-xl border bg-sunken px-[13px] py-2.5 transition-colors",
-          // Jingler mode is already legible from its animated toggle. Keep its
-          // composer neutral; direct harness modes retain their nightlight accent.
-          hidePermissionMode && !dragging
-            ? "border-line shadow-none"
-            : [accent.border, accent.bg, accent.glow],
-          paused && "opacity-70",
-          // A drag-over always wins visually (cyan), and drops the mode glow.
-          dragging && "border-cyan/60 bg-cyan/5 shadow-none"
+          "flex flex-col gap-3 rounded-2xl border border-line bg-sunken px-4 py-3.5 transition-colors",
+          (paused || disabledReason !== undefined) && "opacity-70",
+          // A drag-over is the only temporary coloured border.
+          dragging && "border-cyan/60 bg-cyan/5 shadow-none",
         )}
       >
         {(codeReferences.length > 0 || mentions.length > 0) && (
@@ -572,7 +585,14 @@ export function Composer({
               <CodeChip
                 key={`${path}-${i}`}
                 path={path}
-                onRemove={() => setValue((v) => v.replace(`@${path}`, "").replace(/\s{2,}/g, " ").trimStart())}
+                onRemove={() =>
+                  setValue((v) =>
+                    v
+                      .replace(`@${path}`, "")
+                      .replace(/\s{2,}/g, " ")
+                      .trimStart(),
+                  )
+                }
               />
             ))}
           </div>
@@ -603,15 +623,21 @@ export function Composer({
         <textarea
           ref={ref}
           value={value}
-          disabled={paused}
+          disabled={paused || disabledReason !== undefined}
           placeholder={
-            paused
+            disabledReason ??
+            (paused
               ? "Reply, or answer the prompt above…"
               : busy
                 ? "Queue a message while the agent works…"
-                : prompt
+                : prompt)
           }
-          onChange={(e) => sync(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+          onChange={(e) =>
+            sync(
+              e.target.value,
+              e.target.selectionStart ?? e.target.value.length,
+            )
+          }
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           /*
@@ -645,8 +671,8 @@ export function Composer({
           multiple
           className="hidden"
           onChange={(e) => {
-            void addFiles(Array.from(e.target.files ?? []))
-            e.target.value = ""
+            void addFiles(Array.from(e.target.files ?? []));
+            e.target.value = "";
           }}
         />
         {/*
@@ -661,54 +687,54 @@ export function Composer({
           a composer toolbar is a set of unrelated controls, not a sequence, so a
           second line costs nothing but 26px of height.
         */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-0.5 gap-y-1 [&>button]:min-h-8">
-          <DropdownMenuRoot>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1.5 [&>button]:min-h-8">
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
                 aria-label="Composer menu"
                 title="Add context"
-                disabled={paused}
+                disabled={paused || disabledReason !== undefined}
                 className="flex size-8 flex-none items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Plus size={17} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuContent
-                side="top"
-                align="start"
-                sideOffset={7}
-                collisionPadding={8}
-                className="z-50 flex min-w-[220px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
-              >
+            <DropdownMenuContent side="top" align="start" className="min-w-[220px]">
                 <DropdownMenuItem
                   onSelect={() => fileInputRef.current?.click()}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
                 >
-                  <ImagePlus size={15} className="flex-none text-muted-foreground" />
+                  <ImagePlus
+                    size={15}
+                    className="flex-none text-muted-foreground"
+                  />
                   <span className="flex-1">Add image</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={skills.length === 0}
                   onSelect={openSkills}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[disabled]:cursor-default data-[disabled]:opacity-40 data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
                 >
-                  <Sparkles size={15} className="flex-none text-muted-foreground" />
+                  <Sparkles
+                    size={15}
+                    className="flex-none text-muted-foreground"
+                  />
                   <span className="flex-1">Skills</span>
                   {skills.length > 0 && (
-                    <span className="font-mono text-[10.5px] text-dim">{skills.length}</span>
+                    <span className="font-mono text-[10.5px] text-dim">
+                      {skills.length}
+                    </span>
                   )}
                 </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenuPortal>
-          </DropdownMenuRoot>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {onToggleFollowAgent !== undefined && (
             <button
               type="button"
               className={cn(
                 "jingler-mode-toggle inline-flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors active:scale-[0.96]",
-                followAgent ? "is-active" : "text-muted-foreground hover:text-text"
+                followAgent
+                  ? "is-active"
+                  : "text-muted-foreground hover:text-text",
               )}
               aria-label="Follow agent"
               aria-pressed={followAgent}
@@ -726,74 +752,62 @@ export function Composer({
               />
             </button>
           )}
-          {showJinglerToggle && (
-            <button
-              type="button"
-              disabled={jinglerModePending}
-              aria-busy={jinglerModePending}
-              onClick={() => onToggleJinglerMode?.(!jinglerMode)}
-              aria-pressed={jinglerMode}
-              title={
-                jinglerMode
-                  ? "Jingler mode on — the orchestrator plans and hands off automatically. Click to drive the harness directly."
-                  : "Jingler mode off — you're driving the harness directly. Click to let the orchestrator plan and hand off."
-              }
-              className={cn(
-                "jingler-mode-toggle inline-flex items-center gap-1.5 whitespace-nowrap px-2 py-1 text-[11.5px] font-semibold outline-none transition-colors active:scale-[0.96] disabled:cursor-wait disabled:opacity-60",
-                jinglerMode ? "is-active" : "text-muted-foreground hover:text-text"
-              )}
-            >
-              <JinglerMark
-                aria-hidden="true"
-                focusable="false"
-                className="jingler-mode-toggle__mark h-[14px] w-auto flex-none"
-              />
-              <span className="jingler-mode-toggle__label">Jingler</span>
-            </button>
-          )}
           {onSetEnvironment && (
             <ChipMenu
               value={environmentId ?? "__local__"}
               options={[
-                { value: "__local__", label: "Local" },
+                {
+                  value: "__local__",
+                  searchText: "Local",
+                  label: (
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      <Monitor
+                        size={13}
+                        className="flex-none"
+                        aria-hidden
+                        data-environment-icon="local"
+                      />
+                      <span className="truncate">Local</span>
+                    </span>
+                  ),
+                },
                 ...environments.map((environment) => ({
                   value: environment.id,
-                  label: `${environment.name}${environment.state === "online" ? "" : ` · ${environment.state}`}`
-                }))
+                  searchText: `${environment.name} ${environment.state}`,
+                  label: (
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      <Server
+                        size={13}
+                        className="flex-none"
+                        aria-hidden
+                        data-environment-icon="remote"
+                      />
+                      <span className="truncate">
+                        {environment.name}
+                        {environment.state === "online"
+                          ? ""
+                          : ` · ${environment.state}`}
+                      </span>
+                    </span>
+                  ),
+                })),
               ]}
-              onSelect={(value) => onSetEnvironment(value === "__local__" ? undefined : value)}
+              onSelect={(value) =>
+                onSetEnvironment(value === "__local__" ? undefined : value)
+              }
               disabled={busy || environmentPending}
               appearance="quiet"
               ariaLabel="Execution environment"
               className="max-w-[150px]"
             />
           )}
-          {modelValue.length > 0 && (
-          <ChipMenu
-            value={modelValue}
-            groups={modelGroups}
-            appearance="quiet"
-            /* The model list grows with every harness installed and every model
-               a provider ships — long enough to hunt through. The mode chip
-               below is four fixed options, so it stays plain. */
-            searchable
-            searchPlaceholder="Search models…"
-            emptyLabel="No models match"
-            onSelect={(value) => {
-              // Split on the FIRST colon only — the harness is one token, but a
-              // model id could in principle contain one.
-              const separator = value.indexOf(":")
-              if (separator < 0) return
-              onSetHarness?.(value.slice(0, separator) as CliKind, value.slice(separator + 1))
-            }}
-            disabled={modelGroups.length === 0}
-            // Capped rather than fixed: model ids are the longest string in this
-            // row by a wide margin, and left uncapped one of them decides how
-            // much room every other control gets.
+          <ModelBrowser
+            cli={cli}
+            model={model}
+            capabilities={resolvedCapabilities}
+            onSelect={onSetHarness}
             className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
           />
-          )}
-          {!hidePermissionMode && (
           <ChipMenu
             value={mode}
             options={modeOptions}
@@ -801,27 +815,26 @@ export function Composer({
             appearance="quiet"
             // Quiet chrome sizes to its current label instead of reserving
             // permanent toolbar space; cap long modes inside narrow panes.
-            className={cn("max-w-[104px]", accent.chip)}
+            className="max-w-[104px]"
           />
-          )}
           <ChipMenu
             value={reasoningChoice}
-            options={reasoningOptionsFor(cli)}
+            options={reasoningOptions}
             onSelect={(value) =>
               onSetReasoning?.(
                 value === "default"
                   ? undefined
                   : value === "off"
                     ? { enabled: false }
-                    : { enabled: true, effort: value }
+                    : { enabled: true, effort: value },
               )
             }
             appearance="quiet"
             ariaLabel="Thinking strength"
             icon={
               <SignalBars
-                level={reasoningLevel(cli, reasoningChoice)}
-                total={reasoningEffortsFor(cli).length}
+                level={reasoningLevel(reasoningEfforts, reasoningChoice)}
+                total={reasoningEfforts.length}
                 slashed={thinkingEnabled === false}
               />
             }
@@ -836,7 +849,11 @@ export function Composer({
               it and the primary action keeps its full size on the trailing line,
               rather than being the thing pushed past the border. */}
           <span className="flex-none">
-          {paused ? (
+            {disabledReason !== undefined ? (
+              <Pill tone="yellow" dot>
+                {roomy ? "harness unavailable" : "unavailable"}
+              </Pill>
+            ) : paused ? (
             <Pill tone="yellow" dot>
               {roomy ? "paused for approval" : "paused"}
             </Pill>
@@ -861,15 +878,15 @@ export function Composer({
               <Square size={12} fill="currentColor" />
             </Button>
           ) : (
-            <Button
-              variant="primary"
-              size="icon"
-              className="size-8"
+              <Button
+                variant="primary"
+                size="icon"
+                className="size-7 rounded-full"
               aria-label={busy ? "Queue ↵" : "Send ↵"}
               title={busy ? "Queue this message (↵)" : "Send (↵)"}
               onClick={send}
             >
-              <ArrowUp size={16} />
+              <ArrowUp size={14} />
             </Button>
           )}
           </span>
@@ -904,5 +921,5 @@ export function Composer({
         )}
       </div>
     </div>
-  )
+  );
 }

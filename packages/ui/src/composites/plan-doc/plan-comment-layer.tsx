@@ -1,4 +1,4 @@
-import type { PlanAnnotation, PlanAnnotationAnchor, PlanCommentMessage, PlanParticipant } from "@jingler/core"
+import type { PlanAnnotation, PlanAnnotationAnchor, PlanCommentMessage } from "@jingler/core"
 import { MessageSquarePlus, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { cn } from "../../lib/cn.js"
@@ -24,7 +24,6 @@ import {
 
 export interface PlanCommentLayerProps {
   readonly annotations: ReadonlyArray<PlanAnnotation>
-  readonly participants: ReadonlyArray<PlanParticipant>
   /** The rendered read-only doc element (PlanDocView's scroll container). */
   readonly containerRef: HTMLElement | null
   readonly onAddComment: (
@@ -94,7 +93,6 @@ const enclosingStageId = (node: Node): string | undefined => {
 
 export function PlanCommentLayer({
   annotations,
-  participants,
   containerRef,
   onAddComment,
   onReply,
@@ -238,8 +236,8 @@ export function PlanCommentLayer({
   }, [containerRef])
 
   const controls = useMemo(
-    () => ({ participants, disabled, onReply, onRetry, onSetResolved }),
-    [participants, disabled, onReply, onRetry, onSetResolved]
+    () => ({ disabled, onReply, onRetry, onSetResolved }),
+    [disabled, onReply, onRetry, onSetResolved]
   )
 
   const submit = useCallback(
@@ -359,7 +357,6 @@ export function PlanCommentLayer({
               delivery semantics (unlike a reply). Offering it would silently
               drop it. Mentions live on the reply composer inside PlanCommentThread. */}
           <PlanCommentComposer
-            participants={[]}
             autoFocus
             disabled={disabled}
             placeholder="Add a comment…"

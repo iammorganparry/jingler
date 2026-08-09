@@ -85,7 +85,7 @@ describe("ConnectorsSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("switch", { name: /Prefer Jingler tools/ }))
+    fireEvent.click(screen.getByRole("switch", { name: /Use Jingler tools/ }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith(

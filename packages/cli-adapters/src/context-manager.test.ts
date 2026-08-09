@@ -504,54 +504,6 @@ describe("ContextManager.observe", () => {
       expect(rec.runs.count).toBe(0)
     })
 
-    // Cursor has no headless adapter and runs on the scripted fallback, whose
-    // token numbers are fixtures. Compacting against invented data is worse than
-    // not compacting at all.
-    it("leaves a harness that reports no usage alone", async () => {
-      const rec = recorder()
-      const phase = await run(
-        Effect.gen(function* () {
-          yield* seed({ cli: "cursor", model: "auto" })
-          return yield* observeAndPhase(900_000)
-        }),
-        recordingAdapter(GOOD_REPLY, rec)
-      )
-      expect(phase).toBe("unknown")
-      expect(rec.runs.count).toBe(0)
-    })
-
-    // opencode resolves models from the user's own credentials across ~167
-    // providers, so there is no honest window to infer — it stays unknown until
-    // the user declares one in Settings.
-    it("leaves a harness with an unknowable window alone", async () => {
-      const rec = recorder()
-      const phase = await run(
-        Effect.gen(function* () {
-          yield* seed({ cli: "opencode", model: "opencode/big-pickle" })
-          return yield* observeAndPhase(900_000)
-        }),
-        recordingAdapter(GOOD_REPLY, rec)
-      )
-      expect(phase).toBe("unknown")
-      expect(rec.runs.count).toBe(0)
-    })
-
-    it("compacts opencode once the user declares the window", async () => {
-      const rec = recorder()
-      await run(
-        Effect.gen(function* () {
-          yield* seed({ cli: "opencode", model: "opencode/big-pickle" })
-          yield* ConfigService.setProvider("opencode", {
-            enabled: true,
-            defaultMode: "accept-edits",
-            contextWindow: 200_000
-          })
-          yield* observeAndSettle(180_000, rec)
-        }),
-        recordingAdapter(GOOD_REPLY, rec)
-      )
-      expect(rec.runs.count).toBe(1)
-    })
   })
 })
 
@@ -777,20 +729,6 @@ describe("window correction", () => {
     expect(snap.phase).toBe("idle")
   })
 
-  // An unmeasurable harness must not have a ceiling invented from one reading.
-  it("still reports unknown for a harness with no window", async () => {
-    const rec = recorder()
-    const snap = await run(
-      Effect.gen(function* () {
-        yield* seed({ cli: "opencode", model: "opencode/big-pickle" })
-        yield* ContextManager.observe(SESSION, 598_000, null)
-        return yield* ContextManager.snapshot(SESSION)
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(snap.window).toBeNull()
-    expect(snap.phase).toBe("unknown")
-  })
 })
 
 /**
@@ -1058,19 +996,6 @@ describe("ContextManager.compactNow", () => {
     expect(rec.runs.count).toBe(1)
   })
 
-  // Manual or not, a compaction against an unmeasurable harness is guesswork.
-  it("still refuses a harness whose window is unknown", async () => {
-    const rec = recorder()
-    await run(
-      Effect.gen(function* () {
-        yield* seed({ cli: "opencode", model: "opencode/big-pickle" })
-        yield* ContextManager.compactNow(SESSION)
-        yield* settle()
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(rec.runs.count).toBe(0)
-  })
 })
 
 describe("ContextManager.prepareUnknownCodexResume", () => {
@@ -1232,20 +1157,6 @@ describe("ContextManager.snapshot", () => {
     )
     expect(snap.window).toBe(200_000)
     expect(snap.triggerAt).toBe(150_000)
-  })
-
-  it("reports unknown for a harness it cannot measure", async () => {
-    const rec = recorder()
-    const snap = await run(
-      Effect.gen(function* () {
-        yield* seed({ cli: "cursor", model: "auto" })
-        return yield* ContextManager.snapshot(SESSION)
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(snap.window).toBeNull()
-    expect(snap.triggerAt).toBeNull()
-    expect(snap.phase).toBe("unknown")
   })
 
   // A freshly reopened session must show its real size before its first turn,

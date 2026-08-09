@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { AgentRunner } from "@jingler/cli-adapters/agent-runner"
@@ -13,6 +14,7 @@ import { GitHubAuth } from "@jingler/cli-adapters/github-auth"
 import { HarnessCliAdapterLive } from "@jingler/cli-adapters/harness-adapter"
 import { OpenConnectorService } from "@jingler/cli-adapters/open-connector"
 import { PlanStore } from "@jingler/cli-adapters/plan-store"
+import { ProjectService } from "@jingler/cli-adapters/projects"
 import { InMemorySecretStoreLive } from "@jingler/cli-adapters/secret-store"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
@@ -33,6 +35,7 @@ import {
   Message,
   QuestionAnswer,
   ReasoningSetting,
+  Project,
   RemotePublishCompleteInput,
   RemotePublishPrepared,
   Session,
@@ -45,6 +48,7 @@ import type {
   RemoteSessionCommand,
   RemotePublishPrepared as RemotePublishPreparedValue,
   Session as SessionValue,
+  Project as ProjectValue,
   StreamEvent as StreamEventValue
 } from "@jingler/core"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
@@ -138,12 +142,32 @@ const stripTranscriptAttachmentData = (
 const ArchivePayload = Schema.Struct({ reason: ArchiveReason })
 const RepoPathPayload = Schema.Struct({ repoPath: Schema.optional(Schema.String) })
 const ContinuationPayload = Schema.Struct({ sourceSession: Session })
+const ProjectRegisterPayload = Schema.Struct({
+  path: Schema.String,
+  name: Schema.optional(Schema.String)
+})
+const ProjectClonePayload = Schema.Struct({
+  url: Schema.String,
+  destination: Schema.String,
+  name: Schema.optional(Schema.String)
+})
+const ProjectEnsurePayload = Schema.Struct({
+  url: Schema.String,
+  name: Schema.String
+})
+const ProjectIdPayload = Schema.Struct({ id: Schema.String })
 
 export interface DeviceExecutorServices {
   readonly create: (input: CreateSessionInputValue) => Promise<SessionValue>
   readonly createFromPr: (input: CreateSessionFromPrInputValue) => Promise<SessionValue>
   readonly createFromIssue: (input: CreateSessionFromIssueInputValue) => Promise<SessionValue>
   readonly continuation: (source: SessionValue) => Promise<SessionValue>
+  readonly listProjects: () => Promise<ReadonlyArray<ProjectValue>>
+  readonly registerProject: (input: Schema.Schema.Type<typeof ProjectRegisterPayload>) => Promise<ProjectValue>
+  readonly createProjectDirectory: (input: Schema.Schema.Type<typeof ProjectRegisterPayload>) => Promise<ProjectValue>
+  readonly cloneProject: (input: Schema.Schema.Type<typeof ProjectClonePayload>) => Promise<ProjectValue>
+  readonly ensureProject: (input: Schema.Schema.Type<typeof ProjectEnsurePayload>) => Promise<ProjectValue>
+  readonly removeProject: (id: string) => Promise<void>
   readonly run: (
     sessionId: string,
     input: Schema.Schema.Type<typeof RunPayload>,
@@ -191,6 +215,19 @@ export const makeDeviceSessionCommandExecutor = (
         return services.createFromIssue(decodePayload(command, CreateSessionFromIssueInput))
       case "Sessions.continueOnEnvironment":
         return services.continuation(decodePayload(command, ContinuationPayload).sourceSession)
+      case "Projects.list":
+        payloadRecord(command)
+        return services.listProjects()
+      case "Projects.register":
+        return services.registerProject(decodePayload(command, ProjectRegisterPayload))
+      case "Projects.createDirectory":
+        return services.createProjectDirectory(decodePayload(command, ProjectRegisterPayload))
+      case "Projects.clone":
+        return services.cloneProject(decodePayload(command, ProjectClonePayload))
+      case "Projects.ensure":
+        return services.ensureProject(decodePayload(command, ProjectEnsurePayload))
+      case "Projects.remove":
+        return services.removeProject(decodePayload(command, ProjectIdPayload).id)
       case "Agent.run": {
         const input = decodePayload(command, RunPayload)
         await services.run(command.sessionId, input, (event) => emit({ kind: "event", payload: event }))
@@ -250,6 +287,7 @@ const appPathsLayer = (root: string) => Layer.succeed(AppPaths, {
   root,
   configFile: join(root, "config.json"),
   sessionsFile: join(root, "sessions.json"),
+  projectsFile: join(root, "projects.json"),
   worktreesDir: join(root, "worktrees"),
   transcriptsDir: join(root, "transcripts"),
   reviewsDir: join(root, "reviews"),
@@ -277,6 +315,7 @@ const deviceRuntime = (root: string) => {
     TranscriptStore.Default,
     BackgroundTaskStore.Default,
     PlanStore.Default,
+    ProjectService.Default,
     ContextManager.Default,
     DiscoveryService.Default,
     ConfigService.Default,
@@ -295,6 +334,20 @@ const deviceRuntime = (root: string) => {
 }
 
 const deviceSession = (sessionId: string) => SessionStore.get(sessionId)
+
+const normalizedRemoteUrl = (value: string): string =>
+  value
+    .trim()
+    .replace(/^git@([^:]+):/, "https://$1/")
+    .replace(/^ssh:\/\/git@/, "https://")
+    .replace(/\.git\/?$/, "")
+    .replace(/\/$/, "")
+    .toLowerCase()
+
+const safeProjectDirectory = (name: string): string => {
+  const safe = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "")
+  return safe || "project"
+}
 
 /** Install the real cli-adapters runtime used by the `serve` command. */
 export const makeLiveDeviceSessionCommandExecutor = (
@@ -316,6 +369,13 @@ export const makeLiveDeviceSessionCommandExecutor = (
         )
       : Effect.succeed(explicit)
 
+  const listProjects = Effect.gen(function* () {
+    const discovered = yield* WorkspaceService.listRepos().pipe(Effect.orElseSucceed(() => []))
+    return yield* ProjectService.backfill(
+      discovered.map((repository) => ({ path: repository.path, name: repository.name }))
+    )
+  })
+
   return makeDeviceSessionCommandExecutor({
     create: (input) => run(SessionStore.create(input)),
     createFromPr: (input) => run(SessionStore.createFromPr(input)),
@@ -329,6 +389,32 @@ export const makeLiveDeviceSessionCommandExecutor = (
       baseBranch: source.baseBranch ?? source.branch,
       useWorktree: true
     })),
+    listProjects: () => run(listProjects),
+    registerProject: (input) => run(ProjectService.register(input)),
+    createProjectDirectory: (input) => run(ProjectService.createDirectory(input)),
+    cloneProject: (input) => run(ProjectService.clone(input)),
+    ensureProject: (input) => run(Effect.gen(function* () {
+      const projects = yield* listProjects
+      const wanted = normalizedRemoteUrl(input.url)
+      for (const project of projects.filter((candidate) => candidate.availability === "available")) {
+        const remote = yield* GitService.remoteUrl(project.path).pipe(Effect.orElseSucceed(() => null))
+        if (remote !== null && normalizedRemoteUrl(remote) === wanted) return project
+      }
+
+      const config = yield* ConfigService.get()
+      if (config === null || config.reposDir === null) {
+        return yield* Effect.fail(new Error("The remote host has no repository directory configured."))
+      }
+      const directory = safeProjectDirectory(input.name)
+      const collision = projects.some((project) => project.path === join(config.reposDir!, directory))
+      const suffix = createHash("sha256").update(wanted).digest("hex").slice(0, 8)
+      return yield* ProjectService.clone({
+        url: input.url,
+        destination: join(config.reposDir, collision ? `${directory}-${suffix}` : directory),
+        name: input.name
+      })
+    })),
+    removeProject: (id) => run(ProjectService.remove(id)),
     run: (sessionId, input, emit) => run(
       Effect.gen(function* () {
         const runner = yield* AgentRunner

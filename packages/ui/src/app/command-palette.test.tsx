@@ -1,27 +1,10 @@
 import * as React from "react"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { CommandPalette, PALETTE_PLACEHOLDER } from "./command-palette.js"
 import type { PaletteItem } from "./command-palette-model.js"
 
 afterEach(cleanup)
-
-/**
- * Two jsdom gaps cmdk trips over, stubbed here rather than in a global setup
- * file: this is the only suite that mounts cmdk, and a shared shim would quietly
- * hand every other test a `ResizeObserver` that never fires — which is a
- * different lie from not having one. The app's own components already guard with
- * `typeof ResizeObserver === "undefined"` (see `use-container-width.ts`);
- * cmdk does not.
- */
-beforeAll(() => {
-  Element.prototype.scrollIntoView ??= () => {}
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-})
 
 const item = (over: Partial<PaletteItem> & { id: string }): PaletteItem => ({
   kind: "action",

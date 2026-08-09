@@ -37,7 +37,7 @@ export { stripPlanTaskProgressProtocol }
 export const planWithExecutionProgress = (document: PlanDocument): Plan => {
   const projected = planDocumentToPlan(document)
   const checkpoints = document.plan.stages.flatMap((stage) => [
-    `Stage ${stage.id} fingerprint=${planTaskProgressFingerprint(stage)} execution=${stage.executionStatus ?? "queued"}`,
+    `Stage ${stage.id} fingerprint=${planTaskProgressFingerprint(stage)}`,
     ...(stage.tasks ?? []).map(
       (task, index) => `${index + 1}. [${task.status}] ${task.id} — ${task.text}`
     ),

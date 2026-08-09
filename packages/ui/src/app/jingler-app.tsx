@@ -10,24 +10,18 @@ import type {
   ContextSnapshot,
   CliInfo,
   CliKind,
-  CreateSessionFromIssueInput,
-  CreateSessionFromPrInput,
   CreateSessionInput,
   GitHubConnection,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
-  OrchestratorPreference,
   DiffStat,
   Environment,
   EnvironmentDiscovery,
-  IssueSummary,
-  IssueProviderDescriptor,
   ModelOption,
-  OpencodeProviderInfo,
   SessionPrStatus,
-  PrSummary,
   ProviderConfig,
+  Project,
   PlanTemplateConfig,
   ProvidersConfig,
   Repo,
@@ -35,12 +29,12 @@ import type {
   SessionActivity,
   Usage,
   User,
-  WorkerRoutingConfig
 } from "@jingler/core"
 import { UNTITLED_SESSION } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
-import { NewSessionDialog } from "../composites/new-session-dialog.js"
+import { AddProjectDialog } from "../composites/add-project-dialog.js"
+import { NewWorkspaceView } from "../composites/new-workspace-view.js"
 import { UsageModal } from "../composites/usage-modal.js"
 import {
   SettingsView,
@@ -124,14 +118,6 @@ export interface JinglerAppProps {
   defaultCli?: CliKind | null
   /** Persist the default harness for new sessions. */
   onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
-  /** Preferred harness/model for orchestrator chats created in new sessions. */
-  orchestrator?: OrchestratorPreference | null
-  onSaveOrchestrator?: (
-    orchestrator: OrchestratorPreference
-  ) => Promise<void> | void
-  /** Complexity-based concrete routes for implementation workers. */
-  workerRouting?: WorkerRoutingConfig | null
-  onSaveWorkerRouting?: (routing: WorkerRoutingConfig) => Promise<void> | void
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
@@ -139,6 +125,13 @@ export interface JinglerAppProps {
   onSignOut?: () => void
   /** Repos discovered under the workspace, for the New Session picker. */
   repos?: ReadonlyArray<Repo>
+  /** Durable registered repositories, independent of workspaces. */
+  projects?: ReadonlyArray<Project>
+  onBrowseProject?: () => Promise<string | null>
+  onRegisterProject?: (input: { path: string; name?: string }) => Promise<Project>
+  onCreateProjectDirectory?: (input: { path: string; name?: string }) => Promise<Project>
+  onCloneProject?: (input: { url: string; destination: string; name?: string }) => Promise<Project>
+  onEnsureProjectOnEnvironment?: (projectId: string, environmentId: string) => Promise<Project>
   /** Absolute paths of starred repos — surfaced first in the picker + sidebar. */
   starredRepos?: ReadonlyArray<string>
   /** Toggle a repo's starred state (by absolute path); persists upstream. */
@@ -221,10 +214,6 @@ export interface JinglerAppProps {
   onSavePlanTemplate?: (template: PlanTemplateConfig) => void
   /** Load the selectable models for a CLI (Settings · Providers). */
   loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
-  /** opencode's resolved providers + credential origins (Settings · Providers). */
-  loadOpencodeProviders?: () => Promise<ReadonlyArray<OpencodeProviderInfo>>
-  /** Store an API key in opencode's own credential file. */
-  onSetOpencodeAuth?: (providerId: string, key: string) => Promise<boolean>
   /** Unified MCP (OpenConnector) connection settings (Settings → Connectors). */
   unifiedMcp?: OpenConnectorSectionProps
   /** MCP Connector Center data + actions (Settings → Connector Center). */
@@ -366,34 +355,6 @@ export interface JinglerAppProps {
   /** Permanently delete a session from the sidebar quick-actions (confirms first). */
   onDeleteSession?: (id: string) => void
   /**
-   * List open PRs for a repo (the New Session "From PR" picker). Presence wires
-   * the `Blank | From PR` toggle; absent (e.g. GitHub not connected) hides it.
-   */
-  loadPrs?: (
-    repoPath: string,
-    opts: { mine: boolean; search: string }
-  ) => Promise<ReadonlyArray<PrSummary>>
-  /** Create a session from an existing PR (checks out its head branch) and return it. */
-  onCreateSessionFromPr?: (input: CreateSessionFromPrInput) => Promise<Session>
-  /**
-   * List open issues for a repo. Presence (with `onCreateSessionFromIssue`) wires
-   * the "From issue" mode; absent (GitHub not connected) hides it.
-   */
-  loadIssues?: (
-    repoPath: string,
-    opts: { mine: boolean; search: string }
-  ) => Promise<ReadonlyArray<IssueSummary>>
-  /** Enabled plugin-backed issue providers shown beside the built-in GitHub provider. */
-  issueProviders?: ReadonlyArray<IssueProviderDescriptor>
-  /** List normalized issues through a plugin-backed provider. */
-  loadProviderIssues?: (
-    providerId: string,
-    repoPath: string,
-    opts: { mine: boolean; search: string }
-  ) => Promise<ReadonlyArray<IssueSummary>>
-  /** Create a session from a normalized issue (forks a fresh branch, links it) and return it. */
-  onCreateSessionFromIssue?: (input: CreateSessionFromIssueInput) => Promise<Session>
-  /**
    * Commands contributed by loaded plugins, for the palette.
    *
    * Passed in rather than read here: this package has no RPC client and no
@@ -426,14 +387,16 @@ export function JinglerApp({
   clis,
   defaultCli,
   onSaveDefaultCli,
-  orchestrator,
-  onSaveOrchestrator,
-  workerRouting,
-  onSaveWorkerRouting,
   sessions,
   user,
   onSignOut,
   repos = [],
+  projects = [],
+  onBrowseProject,
+  onRegisterProject,
+  onCreateProjectDirectory,
+  onCloneProject,
+  onEnsureProjectOnEnvironment,
   starredRepos = [],
   onToggleStar,
   collapsedRepos = [],
@@ -473,8 +436,6 @@ export function JinglerApp({
   planTemplate,
   onSavePlanTemplate,
   loadModels,
-  loadOpencodeProviders,
-  onSetOpencodeAuth,
   unifiedMcp,
   connector,
   injection,
@@ -511,12 +472,6 @@ export function JinglerApp({
   onArchiveSession,
   onRestoreSession,
   onDeleteSession,
-  loadPrs,
-  onCreateSessionFromPr,
-  loadIssues,
-  issueProviders,
-  loadProviderIssues,
-  onCreateSessionFromIssue,
   version,
   memory
 }: JinglerAppProps) {
@@ -539,6 +494,8 @@ export function JinglerApp({
   )
   const group = split.group
   const [newOpen, setNewOpen] = useState(false)
+  const [requestedProjectId, setRequestedProjectId] = useState<string | null>(null)
+  const [addProjectOpen, setAddProjectOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -855,7 +812,7 @@ export function JinglerApp({
       items.push({
         id: "action:new-session",
         kind: "action",
-        label: "New Session",
+        label: "New Workspace",
         group: PALETTE_GROUP.actions,
         hint: "⌘N",
         icon: SquareTerminal,
@@ -1027,24 +984,6 @@ export function JinglerApp({
     [onCreateSession]
   )
 
-  const handleCreateFromPr = useCallback(
-    async (input: CreateSessionFromPrInput) => {
-      if (!onCreateSessionFromPr) return
-      const session = await onCreateSessionFromPr(input)
-      setSelected(session.id)
-    },
-    [onCreateSessionFromPr]
-  )
-
-  const handleCreateFromIssue = useCallback(
-    async (input: CreateSessionFromIssueInput) => {
-      if (!onCreateSessionFromIssue) return
-      const session = await onCreateSessionFromIssue(input)
-      setSelected(session.id)
-    },
-    [onCreateSessionFromIssue]
-  )
-
   return (
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
@@ -1054,6 +993,7 @@ export function JinglerApp({
     >
       <SessionConversation
         sessions={sessions}
+        projects={projects}
         environments={environments}
         clis={clis}
         activeSessionId={selected}
@@ -1107,7 +1047,15 @@ export function JinglerApp({
         prStates={prStates}
         repoOwners={repoOwners}
         liveDiff={liveDiff}
-        onNewSession={onCreateSession ? () => setNewOpen(true) : undefined}
+        onNewSession={onCreateSession ? () => {
+          setRequestedProjectId(null)
+          setNewOpen(true)
+        } : undefined}
+        onAddProject={onRegisterProject ? () => setAddProjectOpen(true) : undefined}
+        onNewWorkspace={onCreateSession ? (projectId) => {
+          setRequestedProjectId(projectId)
+          setNewOpen(true)
+        } : undefined}
         user={user}
         onSignOut={onSignOut}
         onOpenUsage={onLoadUsage ? openUsage : undefined}
@@ -1150,15 +1098,9 @@ export function JinglerApp({
               onSaveProvider={onSaveProvider}
               defaultCli={defaultCli}
               onSaveDefaultCli={onSaveDefaultCli}
-              orchestrator={orchestrator}
-              onSaveOrchestrator={onSaveOrchestrator}
-              workerRouting={workerRouting}
-              onSaveWorkerRouting={onSaveWorkerRouting}
               planTemplate={planTemplate}
               onSavePlanTemplate={onSavePlanTemplate}
               loadModels={loadModels ?? (async () => [])}
-              loadOpencodeProviders={loadOpencodeProviders}
-              onSetOpencodeAuth={onSetOpencodeAuth}
               unifiedMcp={unifiedMcp}
               connector={connector}
               injection={injection}
@@ -1209,29 +1151,37 @@ export function JinglerApp({
         version={version}
       />
       {onCreateSession && (
-        <NewSessionDialog
+        <NewWorkspaceView
           open={newOpen}
           onClose={() => setNewOpen(false)}
-          repos={repos}
+          projects={projects}
           environments={environments}
-          loadEnvironmentDiscovery={loadEnvironmentDiscovery}
-          starredRepos={starredRepos}
-          onToggleStar={onToggleStar}
-          defaultRepoPath={defaultRepoPath}
+          requestedProjectId={requestedProjectId}
+          defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
           clis={clis}
           defaultCli={defaultCli}
           loadBranches={loadBranches}
+          prepareProject={async (projectId, environmentId) => {
+            const project = projects.find((candidate) => candidate.id === projectId)
+            if (project === undefined) throw new Error("Project not found.")
+            if (environmentId === undefined) return project
+            if (!onEnsureProjectOnEnvironment) throw new Error("Remote project provisioning is unavailable.")
+            return onEnsureProjectOnEnvironment(projectId, environmentId)
+          }}
           onCreate={handleCreate}
-          loadPrs={loadPrs}
-          onCreateFromPr={
-            onCreateSessionFromPr ? handleCreateFromPr : undefined
-          }
-          loadIssues={loadIssues}
-          issueProviders={issueProviders}
-          loadProviderIssues={loadProviderIssues}
-          onCreateFromIssue={
-            onCreateSessionFromIssue ? handleCreateFromIssue : undefined
-          }
+        />
+      )}
+      {onBrowseProject && onRegisterProject && onCreateProjectDirectory && onCloneProject && (
+        <AddProjectDialog
+          open={addProjectOpen}
+          onClose={() => setAddProjectOpen(false)}
+          browse={onBrowseProject}
+          register={onRegisterProject}
+          createDirectory={onCreateProjectDirectory}
+          clone={onCloneProject}
+          onAdded={() => {
+            setAddProjectOpen(false)
+          }}
         />
       )}
       {onLoadUsage && (

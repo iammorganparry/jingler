@@ -1,5 +1,5 @@
 /**
- * Jingler-specific privacy and orchestration policy for every attached harness.
+ * Jingler-specific privacy policy for every attached harness.
  * The MCP server's MEMORY_MCP_INSTRUCTIONS remains the canonical, compact
  * transport workflow for external clients; this prompt adds deterministic
  * pre-turn recall and silent-use rules that only Jingler can guarantee.

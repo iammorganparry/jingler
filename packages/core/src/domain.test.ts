@@ -2,7 +2,6 @@ import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   AdversarialReview,
-  chatRoleOf,
   CLI_KINDS,
   type CliInfo,
   type CliKind,
@@ -21,7 +20,6 @@ import {
   Repo,
   Session,
   newSessionCli,
-  resolveOrchestratorPreference,
   startableClis,
   supportsAutoMode,
   supportsPlanMode,
@@ -184,24 +182,6 @@ describe("WorkspaceConfig", () => {
       Schema.encodeSync(WorkspaceConfig)(config)
     )
     expect(roundTripped).toStrictEqual(config)
-  })
-
-  it("round-trips a preferred orchestrator while older configs omit it", () => {
-    const legacy = Schema.decodeUnknownSync(WorkspaceConfig)({
-      reposDir: "/repos",
-      createdAt: "2026-07-11T10:00:00.000Z"
-    })
-    expect(legacy.orchestrator).toBeUndefined()
-
-    const configured: WorkspaceConfig = {
-      ...legacy,
-      orchestrator: { cli: "codex", model: "gpt-5.6-sol" }
-    }
-    expect(
-      Schema.decodeUnknownSync(WorkspaceConfig)(
-        Schema.encodeSync(WorkspaceConfig)(configured)
-      ).orchestrator
-    ).toStrictEqual(configured.orchestrator)
   })
 
   it("round-trips renderer-safe memory selection while legacy configs keep it absent", () => {
@@ -392,7 +372,6 @@ describe("Session", () => {
 
   it("decodes a legacy session as non-persistent and worktree-backed", () => {
     const decoded = Schema.decodeUnknownSync(Session)(base)
-    expect(chatRoleOf(decoded.chats[0]!)).toBe("direct")
     expect(persistentOf(decoded)).toBe(false)
     expect(workspaceModeOf(decoded)).toBe("worktree")
   })
@@ -520,112 +499,6 @@ describe("provider-neutral issue schemas", () => {
   })
 })
 
-describe("resolveOrchestratorPreference", () => {
-  const catalog = [
-    {
-      cli: "claude" as const,
-      models: [{ id: "opus" }, { id: "sonnet" }]
-    },
-    {
-      cli: "codex" as const,
-      models: [{ id: "gpt-5.6-sol" }, { id: "gpt-5.5" }]
-    },
-    {
-      cli: "cursor" as const,
-      models: [{ id: "auto" }]
-    }
-  ]
-
-  it("keeps an available configured harness/model pair", () => {
-    expect(
-      resolveOrchestratorPreference(
-        {
-          orchestrator: { cli: "codex", model: "gpt-5.5" }
-        },
-        catalog
-      )
-    ).toStrictEqual({
-      preference: { cli: "codex", model: "gpt-5.5" },
-      isFallback: false
-    })
-  })
-
-  it("falls back deterministically to a planning provider's configured default", () => {
-    const resolution = resolveOrchestratorPreference(
-      {
-        orchestrator: { cli: "opencode", model: "missing" },
-        providers: {
-          claude: {
-            enabled: true,
-            defaultMode: "plan",
-            defaultModel: "sonnet"
-          }
-        }
-      },
-      catalog
-    )
-    expect(resolution?.preference).toStrictEqual({
-      cli: "claude",
-      model: "sonnet"
-    })
-    expect(resolution?.isFallback).toBe(true)
-    expect(resolution?.fallbackReason).toContain("opencode/missing")
-  })
-
-  it("keeps the configured provider when only its preferred model disappeared", () => {
-    const resolution = resolveOrchestratorPreference(
-      {
-        orchestrator: { cli: "codex", model: "retired" },
-        providers: {
-          codex: {
-            enabled: true,
-            defaultMode: "plan",
-            defaultModel: "gpt-5.5"
-          }
-        }
-      },
-      catalog
-    )
-
-    expect(resolution?.preference).toStrictEqual({
-      cli: "codex",
-      model: "gpt-5.5"
-    })
-    expect(resolution?.isFallback).toBe(true)
-  })
-
-  it("never chooses an installed harness that cannot plan", () => {
-    expect(
-      resolveOrchestratorPreference(null, [
-        { cli: "cursor", models: [{ id: "auto" }] }
-      ])
-    ).toBeNull()
-  })
-
-  it("excludes providers the operator explicitly disabled", () => {
-    const resolution = resolveOrchestratorPreference(
-      {
-        orchestrator: { cli: "claude", model: "opus" },
-        providers: {
-          claude: { enabled: false, defaultMode: "plan" },
-          codex: {
-            enabled: true,
-            defaultMode: "plan",
-            defaultModel: "gpt-5.5"
-          }
-        }
-      },
-      catalog
-    )
-
-    expect(resolution?.preference).toStrictEqual({
-      cli: "codex",
-      model: "gpt-5.5"
-    })
-    expect(resolution?.isFallback).toBe(true)
-  })
-})
-
 describe("Repo", () => {
   it("accepts null for every optional-origin field (repo with no remote)", () => {
     const result = decode(Repo, {
@@ -686,16 +559,16 @@ describe("supportsPlanMode", () => {
    * what keeps a missed site from looking like a bug with no message.
    */
   it("covers every harness that can actually hold a plan turn", () => {
-    // Claude via `ExitPlanMode`; codex and opencode via the fenced ```plan block.
+    // Claude via `ExitPlanMode`; Codex via the fenced JSON plan protocol.
     expect(supportsPlanMode("claude")).toBe(true)
     expect(supportsPlanMode("codex")).toBe(true)
-    expect(supportsPlanMode("opencode")).toBe(true)
   })
 
   it("excludes the harnesses that would fabricate a plan", () => {
-    // cursor falls through to the scripted stub in `harness-adapter.ts`, so its
-    // plan would be invented.
+    // These values remain decodable for legacy sessions but are not supported
+    // by the current product surface.
     expect(supportsPlanMode("cursor")).toBe(false)
+    expect(supportsPlanMode("opencode")).toBe(false)
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {
@@ -728,10 +601,11 @@ describe("supportsSteer", () => {
 })
 
 describe("supportsAutoMode", () => {
-  it("is true for every harness Jingler ships today", () => {
-    // All four map `auto` to a fully-autonomous run; the predicate exists so a
-    // future harness that cannot can opt out in one place.
-    for (const cli of CLI_KINDS) expect(supportsAutoMode(cli)).toBe(true)
+  it("is true for the supported Claude and Codex harnesses", () => {
+    expect(supportsAutoMode("claude")).toBe(true)
+    expect(supportsAutoMode("codex")).toBe(true)
+    expect(supportsAutoMode("cursor")).toBe(false)
+    expect(supportsAutoMode("opencode")).toBe(false)
   })
 
   it("classifies every CliKind, so a new harness cannot be forgotten", () => {

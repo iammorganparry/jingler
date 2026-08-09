@@ -1,18 +1,18 @@
 # Jingler
 
-Jingler is a desktop workspace for running coding agents across multiple repositories. Each
-session gets its own git branch and isolated worktree, so agents can plan, edit, test, and open
-pull requests without colliding with one another.
+Jingler is a desktop workspace for running coding agents across multiple projects. Projects are
+registered once; each workspace is a separate coding session in either the project checkout or an
+isolated git worktree, so agents can plan, edit, test, and open pull requests without colliding.
 
 It is an Electron application backed by a small local authentication service. Jingler discovers
 the coding CLIs already installed on your machine and keeps its desktop state in `~/jingler`.
 
 ## What you can do
 
-- Run Claude Code, Codex CLI, Cursor Agent, or OpenCode sessions from one desktop app.
+- Run Claude Code or Codex CLI workspaces from one desktop app.
 - Work on several tasks in parallel, each in an isolated git worktree.
 - Review plans, diffs, agent activity, and pull requests without leaving the session.
-- Start work from a new branch, an existing GitHub pull request, or a GitHub issue.
+- Start work from a project checkout or a new isolated worktree.
 - Use built-in terminals, browser previews, themes, MCP servers, and agent skills.
 - Give paid teams a cited, agent-managed shared Memory wiki with private lexical search, analytics, and an explicit-evidence mind map.
 
@@ -27,8 +27,8 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 Pull-request and issue features use the Jingler GitHub App. Connect it during
 onboarding or from **Settings → GitHub**; the GitHub CLI is not required.
 
-Jingler currently requires Codex CLI 0.144 or newer and OpenCode 1.18 or newer. The app reports
-an upgrade command if it finds an older version.
+Jingler currently requires Codex CLI 0.144 or newer. The app reports an upgrade command if it
+finds an older version.
 
 ## Run Jingler from source
 
@@ -70,25 +70,26 @@ an upgrade command if it finds an older version.
    In local development, copy the magic-link URL printed by the server process and open it in
    your browser. The browser redirects back to the desktop app through the `jingler://` protocol.
 
-## First session
+## First project and workspace
 
-1. On the welcome screen, choose the parent folder that contains your git repositories, such as
-   `~/repos`. Jingler scans for repositories up to three directories deep.
+1. Choose **Add project** and register an existing git directory. Registering a project does not
+   create a coding session or worktree.
 
-2. Open **New session** or press <kbd>⌘</kbd><kbd>N</kbd>, then select a repository and base
-   branch. The default coding CLI is configured under **Settings → Providers**.
+2. Choose **New workspace**, select the project and branch, then decide whether to work directly
+   in the project checkout or create an isolated worktree. Select Claude Code or Codex; the model,
+   mode, and reasoning menus show only capabilities supported by that selection.
 
-3. Create the session. A fresh worktree starts detached at the latest available
+3. Create the workspace. An isolated worktree starts detached at the latest available
    `origin/<base>` (or the safe local base while offline) under
    `~/jingler/worktrees`. After the first task-understanding turn, Jingler
    validates the agent's metadata and creates a conventional `type/kebab-slug`
    branch itself.
 
-4. Describe the task in the composer. Use the plan controls when you want a reviewable plan before
-   implementation, and inspect file changes from the session's changes view.
+4. Describe the task in the composer. Enhanced Plan keeps one approval gate and is executed,
+   progressed, and amended by the selected agent. Turn off **Use Jingler tools** under connector
+   settings when you want the provider's native plan behaviour instead.
 
 5. If the Jingler GitHub App is connected, create or link a pull request from the PR view.
-   Sessions can also be created directly from open pull requests or issues.
 
 ## Common commands
 
@@ -117,8 +118,10 @@ Playwright suite runs locally and is not part of CI.
 
 ## Configuration and data
 
-The desktop stores configuration, sessions, transcripts, themes, worktrees, and encrypted auth
-state under `~/jingler`. Set `JINGLER_HOME` before starting the app to use another location.
+The desktop stores registered projects, workspaces (sessions), transcripts, themes, worktrees, and
+encrypted auth state under `~/jingler`. Set `JINGLER_HOME` before starting the app to use another
+location. Legacy sessions are linked to stable project records on read without moving their
+worktrees or changing transcript identity.
 
 The desktop connects to `http://localhost:9100` by default. Set `JINGLER_AUTH_URL` to point it at
 another auth service.
@@ -138,7 +141,7 @@ guide.
 | `apps/github-relay` | Cloudflare Worker that verifies GitHub webhooks and streams resumable review events |
 | `apps/memory-worker` | Organization-isolated Cloudflare vault, workflows, search, graph, and analytics |
 | `packages/memory` | Deterministic Markdown, revision, graph, analytics, export, and linting contracts |
-| `packages/core` | Shared domain models, schemas, and orchestration logic |
+| `packages/core` | Shared domain models, schemas, and plan logic |
 | `packages/cli-adapters` | Coding-agent, git, GitHub, terminal, session, and workspace services |
 | `packages/ui` | Shared React components, screens, styles, and themes |
 
@@ -203,9 +206,9 @@ stops scanning after three nested directory levels and ignores build and depende
 
 **No coding CLI is available**
 
-Install and authenticate Claude Code, Codex CLI, Cursor Agent, or OpenCode, then reopen the new
-session dialog. GUI applications can have a limited `PATH`; Jingler also checks common install
-locations such as `~/.local/bin` and `/opt/homebrew/bin`.
+Install and authenticate Claude Code or Codex CLI, then reopen the workspace composer. GUI
+applications can have a limited `PATH`; Jingler also checks common install locations such as
+`~/.local/bin` and `/opt/homebrew/bin`.
 
 **Sign-in email does not arrive in local development**
 

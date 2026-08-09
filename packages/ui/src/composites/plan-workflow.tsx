@@ -21,7 +21,7 @@ import {
   ReactFlow,
   ReactFlowProvider
 } from "@xyflow/react"
-import { RotateCcw, Square, Waypoints } from "lucide-react"
+import { Waypoints } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { layoutDagre } from "./flow-layout.js"
 
@@ -74,21 +74,12 @@ const COMPLEXITY_TEXT: Record<PlanStageComplexity, string> = {
 interface NodeData extends Record<string, unknown> {
   readonly node: PlanWorkflowNode
   readonly selected: boolean
-  readonly onStop?: (agentId: string) => void
-  readonly onRetry?: (agentId: string) => void
 }
-
-/** Statuses whose owning worker can be halted / re-run straight from the node. */
-const STOPPABLE: ReadonlySet<PlanStageExecutionStatus> = new Set(["running", "blocked"])
-const RETRYABLE: ReadonlySet<PlanStageExecutionStatus> = new Set(["failed", "interrupted"])
 
 /** One stage as a workflow node: status accent + title + complexity chip. */
 function WorkflowNode({ data }: NodeProps<Node<NodeData>>) {
-  const { node, selected, onStop, onRetry } = data
+  const { node, selected } = data
   const status = STATUS_STYLE[node.executionStatus]
-  const agentId = node.agentId
-  const canStop = agentId !== null && STOPPABLE.has(node.executionStatus) && onStop !== undefined
-  const canRetry = agentId !== null && RETRYABLE.has(node.executionStatus) && onRetry !== undefined
   return (
     <div
       style={{ width: NODE_W, minHeight: NODE_H }}
@@ -117,45 +108,6 @@ function WorkflowNode({ data }: NodeProps<Node<NodeData>>) {
         )}
       </div>
       <span className="truncate text-[12px] font-medium text-text">{node.title}</span>
-      {(canStop || canRetry) && (
-        // `nodrag nopan` so a tap on the control acts, not pans the canvas; the
-        // click also stops propagating so it doesn't double as a node-select.
-        <div className="nodrag nopan mt-0.5 flex items-center gap-1.5">
-          {node.worker && (
-            <span className="min-w-0 flex-1 truncate font-mono text-[8.5px] text-muted-foreground">
-              {node.worker}
-            </span>
-          )}
-          {canStop && (
-            <button
-              type="button"
-              title="Stop worker"
-              aria-label={`Stop worker ${agentId}`}
-              onClick={(event) => {
-                event.stopPropagation()
-                onStop?.(agentId as string)
-              }}
-              className="flex size-5 flex-none items-center justify-center rounded border border-red/40 text-red transition-colors hover:bg-red/10"
-            >
-              <Square size={10} />
-            </button>
-          )}
-          {canRetry && (
-            <button
-              type="button"
-              title="Retry worker"
-              aria-label={`Retry worker ${agentId}`}
-              onClick={(event) => {
-                event.stopPropagation()
-                onRetry?.(agentId as string)
-              }}
-              className="flex size-5 flex-none items-center justify-center rounded border border-blue/40 text-blue transition-colors hover:bg-blue/10"
-            >
-              <RotateCcw size={10} />
-            </button>
-          )}
-        </div>
-      )}
       <Handle type="source" position={Position.Bottom} className="!size-1.5 !border-0 !bg-line-strong" />
     </div>
   )
@@ -197,8 +149,6 @@ export function PlanWorkflow({
   prd,
   selectedStageId,
   onSelectStage,
-  onStopWorker,
-  onRetryWorker,
   className
 }: {
   /** The canonical plan; its stages + dependencies become the graph. */
@@ -207,10 +157,6 @@ export function PlanWorkflow({
   selectedStageId?: string | null
   /** Called with a node's stage id when clicked. */
   onSelectStage?: (stageId: string) => void
-  /** Halt the worker owning a running/blocked stage, straight from its node. */
-  onStopWorker?: (agentId: string) => void
-  /** Re-run the worker owning a failed/interrupted stage, straight from its node. */
-  onRetryWorker?: (agentId: string) => void
   className?: string
 }) {
   const graph = useMemo(() => stagesToGraph(prd), [prd])
@@ -223,12 +169,10 @@ export function PlanWorkflow({
         ...n,
         data: {
           ...n.data,
-          selected: n.data.node.stageId === selectedStageId,
-          onStop: onStopWorker,
-          onRetry: onRetryWorker
+          selected: n.data.node.stageId === selectedStageId
         }
       })),
-    [laidOut, selectedStageId, onStopWorker, onRetryWorker]
+    [laidOut, selectedStageId]
   )
   const edges = laidOut.edges
 

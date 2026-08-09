@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, sessionRow, test } from "./fixtures.js"
+import { appShell, createWorkspace, expect, sessionRow, test } from "./fixtures.js"
 
 const sessions = (home: string): Array<{
   title: string
@@ -39,9 +39,7 @@ test("a fresh task starts detached and becomes a visible collision-safe semantic
   expect(updatedBaseSha).not.toBe(staleLocalBase)
 
   await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("new-session").click()
-  await window.getByPlaceholder("Leave blank for agent naming").fill("Fix token refresh")
-  await window.getByRole("button", { name: "Create" }).click()
+  await createWorkspace(window, "Fix token refresh")
   await expect(sessionRow(window, "Fix token refresh")).toBeVisible()
 
   const staged = sessions(home)[0]!

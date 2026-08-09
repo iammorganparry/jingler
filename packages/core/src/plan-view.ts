@@ -30,7 +30,7 @@ export interface PlanStepView {
   readonly intent: string
   /** Planner complexity estimate; undefined when the stage never declared one. */
   readonly complexity: PlanStageComplexity | undefined
-  /** Durable worker state; defaults to "queued" for not-yet-executed stages. */
+  /** Status derived from the selected agent's task and acceptance progress. */
   readonly executionStatus: PlanStageExecutionStatus
   readonly acceptance: ReadonlyArray<PlanAcceptance>
   /** Planner-authored work items with durable per-task progress. */
@@ -47,12 +47,6 @@ export interface PlanStepView {
   readonly walkthrough?: ReadonlyArray<PlanBlock>
   /** Before/after runtime path, rendered in Guide rather than the checklist. */
   readonly callPathDiff?: PlanCallPathDiff
-  /** The assigned worker's agent id, when a worker owns this stage; else null. */
-  readonly agentId: string | null
-  /** A short "cli · model" worker label, when assigned; else null. */
-  readonly worker: string | null
-  /** The worker's reasoning effort (e.g. "xhigh"), when set; else null. */
-  readonly reasoningEffort: string | null
 }
 
 /** One stage's architecture, kept linked to the Main review card by stage id. */
@@ -75,10 +69,6 @@ export interface PlanWorkflowNode {
   readonly title: string
   readonly complexity: PlanStageComplexity | undefined
   readonly executionStatus: PlanStageExecutionStatus
-  /** The assigned worker's agent id, when a worker owns this stage; else null. */
-  readonly agentId: string | null
-  /** A short "cli · model" worker label for the node, when assigned; else null. */
-  readonly worker: string | null
 }
 
 /** A directed edge from a prerequisite stage (`from`) to a dependent (`to`). */
@@ -101,14 +91,29 @@ export interface PlanView {
   readonly workflow: PlanWorkflowGraph
 }
 
+/** Derive one canonical status for every plan surface. */
+export const planStageExecutionStatus = (stage: PlanPrdStage): PlanStageExecutionStatus => {
+  const tasks = stage.tasks ?? []
+  if (tasks.some((task) => task.status === "blocked")) return "blocked"
+  if (stage.acceptance.some((criterion) => criterion.status === "failed")) return "failed"
+  if (tasks.some((task) => task.status === "in-progress")) return "running"
+  if (tasks.length > 0 && tasks.every((task) => task.status === "completed")) return "completed"
+  if (
+    stage.acceptance.length > 0 &&
+    stage.acceptance.every(
+      (criterion) => criterion.status === "passed" || criterion.status === "waived"
+    )
+  ) return "completed"
+  return "queued"
+}
+
 const toStepView = (stage: PlanPrdStage): PlanStepView => {
-  const assignment = stage.assignment ?? null
   return {
     id: stage.id,
     title: stage.title,
     intent: stage.intent,
     complexity: stage.complexity,
-    executionStatus: stage.executionStatus ?? "queued",
+    executionStatus: planStageExecutionStatus(stage),
     acceptance: stage.acceptance,
     tasks: stage.tasks ?? [],
     diagrams: stage.diagrams,
@@ -116,10 +121,7 @@ const toStepView = (stage: PlanPrdStage): PlanStepView => {
     files: stage.files,
     notes: stage.notes,
     walkthrough: stage.walkthrough ?? [],
-    callPathDiff: stage.callPathDiff,
-    agentId: assignment?.agentId ?? null,
-    worker: assignment ? `${assignment.cli} · ${assignment.model}` : null,
-    reasoningEffort: assignment?.reasoning?.effort ?? null
+    callPathDiff: stage.callPathDiff
   }
 }
 
@@ -186,15 +188,12 @@ export const toPlanArchitectureView = (prd: PlanPrd): PlanArchitectureView => {
 export const stagesToGraph = (prd: PlanPrd): PlanWorkflowGraph => {
   const stageById = new Map(prd.stages.map((stage) => [stage.id, stage]))
   const nodes: Array<PlanWorkflowNode> = orderedStages(prd).map((stage) => {
-    const assignment = stage.assignment ?? null
     return {
       id: stage.id,
       stageId: stage.id,
       title: stage.title,
       complexity: stage.complexity,
-      executionStatus: stage.executionStatus ?? "queued",
-      agentId: assignment?.agentId ?? null,
-      worker: assignment ? `${assignment.cli} · ${assignment.model}` : null
+      executionStatus: planStageExecutionStatus(stage)
     }
   })
 

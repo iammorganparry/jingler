@@ -1,7 +1,7 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { useState, type ReactNode } from "react"
-import { ChevronRight, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
-import type { SubagentStatus, WorkerLifecycleStatus } from "@jingler/core"
+import { ChevronRight, FileStack, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
+import type { SubagentStatus } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -10,7 +10,7 @@ import { StatusDot } from "../components/status-dot.js"
 export const MAIN_AGENT = "main"
 
 /** Every lifecycle rendered in the shared agent rail. */
-export type VisibleAgentStatus = SubagentStatus | WorkerLifecycleStatus
+export type VisibleAgentStatus = SubagentStatus
 
 /** One visible-agent cell's data, sans transcript. */
 export interface AgentTabItem {
@@ -25,9 +25,7 @@ export interface AgentTabItem {
   /**
    * The source-authoritative action for this tab.
    *
-   * Claude sub-agents stop while working and close once settled. A running
-   * orchestration worker can stop, but replay-backed workers never close.
-   * Reviewers and queued workers expose no action.
+   * Harness sub-agents stop while working and close once settled.
    */
   action?: "stop" | "close"
 }
@@ -55,6 +53,8 @@ export interface ChatTabBarProps {
   onReopenChat?: (id: string) => void
   /** Session-owned tabs rendered beside chats, before the new-chat action. */
   fileSlot?: ReactNode
+  /** Whether the file group owns the currently visible session surface. */
+  filesActive?: boolean
 }
 
 export interface AgentTabBarProps {
@@ -84,13 +84,7 @@ const DOT: Record<VisibleAgentStatus, { tone: string; pulse: boolean }> = {
   working: { tone: "bg-yellow", pulse: true },
   done: { tone: "bg-green", pulse: false },
   error: { tone: "bg-red", pulse: false },
-  stopped: { tone: "bg-dim", pulse: false },
-  queued: { tone: "bg-dim", pulse: false },
-  running: { tone: "bg-yellow", pulse: true },
-  blocked: { tone: "bg-yellow", pulse: false },
-  failed: { tone: "bg-red", pulse: false },
-  interrupted: { tone: "bg-dim", pulse: false },
-  completed: { tone: "bg-green", pulse: false }
+  stopped: { tone: "bg-dim", pulse: false }
 }
 
 /**
@@ -278,12 +272,16 @@ export function ChatTabBar({
   onRenameChat,
   onCloseChat,
   onReopenChat,
-  fileSlot
+  fileSlot,
+  filesActive = false
 }: ChatTabBarProps) {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
+  const [chatsExpanded, setChatsExpanded] = useState(true)
+  const [filesExpanded, setFilesExpanded] = useState(true)
   const tier = useWidthTier()
   const width = CHAT_WIDTH[tier]
+  const fileCount = Array.isArray(fileSlot) ? fileSlot.length : fileSlot == null ? 0 : 1
   const commit = (id: string) => {
     if (draft.trim()) onRenameChat(id, draft.trim())
     setEditing(null)
@@ -291,7 +289,23 @@ export function ChatTabBar({
 
   return (
     <>
-      {chats.map((chat, index) => {
+      <button
+        type="button"
+        aria-label={`${chatsExpanded ? "Collapse" : "Expand"} chats group`}
+        aria-expanded={chatsExpanded}
+        title={`${chats.length} open ${chats.length === 1 ? "chat" : "chats"}`}
+        onClick={() => setChatsExpanded((expanded) => !expanded)}
+        className={cn(
+          "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
+          !filesActive ? "bg-panel text-text-bright" : "text-muted-foreground"
+        )}
+      >
+        <ChevronRight className={cn("size-3 transition-transform", chatsExpanded && "rotate-90")} />
+        <MessagesSquare className="size-3 text-blue" />
+        <span>Chats</span>
+        <span className="text-dim">{chats.length}</span>
+      </button>
+      {chatsExpanded && chats.map((chat, index) => {
         const active = chat.id === activeChatId
         // The active chat keeps its name at every width. Losing it would leave a
         // row of identical dots and no answer to "which one am I typing into".
@@ -364,8 +378,7 @@ export function ChatTabBar({
           </div>
         )
       })}
-      {fileSlot}
-      <button
+      {chatsExpanded && <button
         type="button"
         aria-label="New chat"
         title="New chat (⌘T)"
@@ -373,8 +386,8 @@ export function ChatTabBar({
         className="flex flex-none items-center rounded-md px-1.5 py-1.5 text-dim outline-none transition-colors hover:bg-panel hover:text-text"
       >
         <Plus className="size-3.5" />
-      </button>
-      {closedChats.length > 0 && onReopenChat !== undefined && (
+      </button>}
+      {chatsExpanded && closedChats.length > 0 && onReopenChat !== undefined && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
@@ -408,6 +421,25 @@ export function ChatTabBar({
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       )}
+      {fileCount > 0 && (
+        <button
+          type="button"
+          aria-label={`${filesExpanded ? "Collapse" : "Expand"} files group`}
+          aria-expanded={filesExpanded}
+          title={`${fileCount} open ${fileCount === 1 ? "file" : "files"}`}
+          onClick={() => setFilesExpanded((expanded) => !expanded)}
+          className={cn(
+            "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
+            filesActive ? "bg-panel text-text-bright" : "text-muted-foreground"
+          )}
+        >
+          <ChevronRight className={cn("size-3 transition-transform", filesExpanded && "rotate-90")} />
+          <FileStack className="size-3 text-purple" />
+          <span>Files</span>
+          <span className="text-dim">{fileCount}</span>
+        </button>
+      )}
+      {filesExpanded ? fileSlot : null}
     </>
   )
 }

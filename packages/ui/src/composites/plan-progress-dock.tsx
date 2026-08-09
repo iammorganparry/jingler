@@ -1,4 +1,5 @@
 import type { PlanDocument, PlanPrdStage } from "@jingler/core"
+import { planStageExecutionStatus } from "@jingler/core"
 import {
   CheckCircle2,
   ChevronDown,
@@ -11,7 +12,6 @@ import {
 } from "lucide-react"
 import type { ComponentType } from "react"
 import { useId, useState } from "react"
-import { ProviderIcon } from "../components/provider-icon.js"
 import { cn } from "../lib/cn.js"
 
 export type PlanProgressStatus =
@@ -22,27 +22,15 @@ export type PlanProgressStatus =
   | "failed"
   | "interrupted"
 
-const acceptanceDone = (stage: PlanPrdStage): boolean =>
-  stage.acceptance.length > 0 &&
-  stage.acceptance.every(
-    (criterion) =>
-      criterion.status === "passed" || criterion.status === "waived"
-  )
-
-/** Project canonical worker state into the compact operator vocabulary. */
+/** Project canonical single-agent task/evidence state into compact UI status. */
 export const planProgressStatus = (stage: PlanPrdStage): PlanProgressStatus => {
-  if (stage.executionStatus === "completed") return "done"
-  switch (stage.executionStatus) {
-    case "running":
-      return "in-progress"
-    case "blocked":
-      return "blocked"
-    case "failed":
-      return "failed"
-    case "interrupted":
-      return "interrupted"
-    default:
-      return acceptanceDone(stage) ? "done" : "todo"
+  switch (planStageExecutionStatus(stage)) {
+    case "queued": return "todo"
+    case "running": return "in-progress"
+    case "completed": return "done"
+    case "blocked": return "blocked"
+    case "failed": return "failed"
+    case "interrupted": return "interrupted"
   }
 }
 
@@ -76,7 +64,7 @@ const STATUS: Readonly<
  * Composer-adjacent view of the live canonical plan.
  *
  * It owns no progress state: Plan.watch updates the PlanDocument and the
- * orchestration service updates each stage. This component is only a projection,
+ * selected agent updates each task and criterion. This component is only a projection,
  * so the plan and the dock cannot become competing sources of truth.
  */
 export function PlanProgressDock({
@@ -170,7 +158,6 @@ export function PlanProgressDock({
           {rows.map(({ stage, number, status }) => {
             const config = STATUS[status]
             const Icon = config.icon
-            const assignment = stage.assignment
             return (
               <button
                 key={stage.id}
@@ -201,17 +188,8 @@ export function PlanProgressDock({
                   >
                     {stage.title}
                   </span>
-                  <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] text-dim">
-                    {assignment ? (
-                      <>
-                        <ProviderIcon cli={assignment.cli} size={10} />
-                        <span className="truncate">
-                          {assignment.agentId} · {assignment.model}
-                        </span>
-                      </>
-                    ) : (
-                      <span>Unassigned</span>
-                    )}
+                  <span className="mt-0.5 block truncate text-[9.5px] text-dim">
+                    {stage.intent}
                   </span>
                 </span>
                 <span
