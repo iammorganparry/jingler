@@ -1,4 +1,4 @@
-import type { Project } from "@jingler/core"
+import type { CreateSessionInput, Project } from "@jingler/core"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
 import { newWorkspaceMachine } from "./new-workspace-machine.js"
@@ -8,7 +8,9 @@ const projects: ReadonlyArray<Project> = [
   { id: "p-remote", environmentId: "device-1", name: "remote", path: "/repos/remote", availability: "available", createdAt: "now", updatedAt: "now" }
 ]
 
-const actorFor = () => createActor(newWorkspaceMachine, {
+const actorFor = (
+  onCreate: (input: CreateSessionInput) => Promise<void> = vi.fn(async () => undefined)
+) => createActor(newWorkspaceMachine, {
   input: {
     getDeps: () => ({
       projects,
@@ -21,7 +23,7 @@ const actorFor = () => createActor(newWorkspaceMachine, {
           : { ...project, id: `${project.id}-${environmentId}`, environmentId, path: `/remote/${project.name}` }
       },
       loadBranches: async (path) => path.endsWith("remote") ? ["develop"] : ["main", "feature"],
-      onCreate: vi.fn(async () => undefined),
+      onCreate,
       onClose: vi.fn()
     })
   }
@@ -72,5 +74,20 @@ describe("newWorkspaceMachine", () => {
         path: "/remote/local"
       }
     })
+  })
+
+  it("leaves naming to automatic title generation", async () => {
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_DRAFT", draft: "Refine the empty-state transitions" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      initialPrompt: "Refine the empty-state transitions"
+    }))
+    expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("title")
   })
 })

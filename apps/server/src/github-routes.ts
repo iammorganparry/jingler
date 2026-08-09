@@ -2,6 +2,7 @@
 import type {
   GitHubAppConnectionStatus,
   GitHubAppInstallation as GitHubAppInstallationView,
+  GitHubCloneRepository,
   GitHubSessionRoute
 } from "@jingler/core"
 import { createHmac, randomBytes, randomUUID } from "node:crypto"
@@ -983,6 +984,41 @@ export const createGitHubRoutes = (
       return c.json(await readStatus(dependencies, userId), 200, noStore)
     } catch {
       return c.json({ error: "GitHub refresh failed" }, 502, noStore)
+    }
+  })
+
+  routes.get("/repositories", async (c) => {
+    const dependencies = resolveDependencies()
+    const userId = await authenticated(c.req.raw.headers, dependencies)
+    if (!userId) return c.json({ error: "Authentication required" }, 401, noStore)
+    if (!available(dependencies)) {
+      return c.json({ error: "GitHub App is not configured" }, 503, noStore)
+    }
+    try {
+      await reconcileIfStale(dependencies, userId)
+      const authorization = await dependencies.store.findAuthorizationByUserId(userId)
+      if (!authorization) return c.json({ error: "GitHub authorization required" }, 403, noStore)
+      const token = await activeUserToken(dependencies, authorization)
+      const installations = (
+        await dependencies.store.listInstallationsByAuthorizationId(authorization.id)
+      ).filter((installation) => installation.suspendedAt === null)
+      const repositories = (
+        await Promise.all(
+          installations.map(async (installation) =>
+            (await dependencies.github.listInstallationRepositories(
+              token.accessToken,
+              installation.installationId
+            )).map((repository): GitHubCloneRepository => ({
+              installationId: installation.installationId,
+              repositoryId: repository.id,
+              fullName: repository.fullName
+            }))
+          )
+        )
+      ).flat().sort((left, right) => left.fullName.localeCompare(right.fullName))
+      return c.json({ repositories }, 200, noStore)
+    } catch {
+      return c.json({ error: "GitHub repositories could not be loaded" }, 502, noStore)
     }
   })
 

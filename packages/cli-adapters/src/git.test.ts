@@ -701,6 +701,52 @@ describe("GitService.pushWithInstallationToken", () => {
   })
 })
 
+describe("GitService.cloneWithInstallationToken", () => {
+  let temp: ReturnType<typeof withTempRoot>
+  let repos: ReturnType<typeof mkTemp>
+
+  beforeEach(() => {
+    temp = withTempRoot()
+    repos = mkTemp("jingler-secure-clone-")
+  })
+  afterEach(() => {
+    temp.cleanup()
+    repos.cleanup()
+  })
+
+  it("clones the API-derived repository without persisting the installation token", async () => {
+    const source = join(repos.dir, "source")
+    const { origin } = initGitRepoWithOrigin(source)
+    const destination = join(repos.dir, "widget")
+    const config = join(repos.dir, "gitconfig")
+    writeFileSync(config, `[url "file://${origin}"]\n\tinsteadOf = https://github.com/acme/widget.git\n`)
+    const previousConfig = process.env.GIT_CONFIG_GLOBAL
+    process.env.GIT_CONFIG_GLOBAL = config
+    const token = "ghs_clone_secret_not_for_disk"
+
+    try {
+      const exit = await runExit(
+        GitService.cloneWithInstallationToken(destination, "acme/widget", token).pipe(
+          Effect.provide(GitService.Default)
+        ),
+        temp.layer
+      )
+      const failure = failureOf(exit)
+      expect(exit._tag, `${failure?.message} ${String(failure?.cause)}`).toBe("Success")
+    } finally {
+      if (previousConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL
+      else process.env.GIT_CONFIG_GLOBAL = previousConfig
+    }
+
+    expect(existsSync(join(destination, ".git"))).toBe(true)
+    expect(execFileSync("git", ["remote", "get-url", "origin"], {
+      cwd: destination,
+      encoding: "utf8"
+    }).trim()).toBe("https://github.com/acme/widget.git")
+    expect(readFileSync(join(destination, ".git", "config"), "utf8")).not.toContain(token)
+  })
+})
+
 describe("GitService.pushConfigured", () => {
   let temp: ReturnType<typeof withTempRoot>
   let repos: ReturnType<typeof mkTemp>

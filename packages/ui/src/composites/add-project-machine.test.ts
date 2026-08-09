@@ -19,10 +19,13 @@ describe("addProjectMachine", () => {
     const actor = createActor(addProjectMachine, {
       input: {
         getDeps: () => ({
-          browse: async () => null,
+          browse: async () => "/repos/jingler",
+          browseCloneDestination: async () => null,
+          listDirectories: async () => ({ path: "/repos", parentPath: "/", directories: [] }),
+          listGitHubRepositories: async () => [],
           register,
           createDirectory: async () => project,
-          clone: async () => project,
+          cloneFromGitHub: async () => project,
           onAdded: added,
           onClose: vi.fn()
         })
@@ -30,12 +33,91 @@ describe("addProjectMachine", () => {
     }).start()
 
     actor.send({ type: "OPEN" })
-    actor.send({ type: "SELECT", method: "existing" })
-    actor.send({ type: "SET_PATH", path: "/repos/jingler" })
+    actor.send({ type: "SELECT", method: "browse" })
+    await waitFor(actor, (snapshot) => snapshot.matches("form"))
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("closed"))
 
     expect(register).toHaveBeenCalledWith({ path: "/repos/jingler" })
     expect(added).toHaveBeenCalledWith(project)
+  })
+})
+
+describe("addProjectMachine directory browser", () => {
+  it("navigates the in-app directory browser before registering a project", async () => {
+    const register = vi.fn(async () => project)
+    const listDirectories = vi.fn(async (path?: string) => ({
+      path: path ?? "/repos",
+      parentPath: "/",
+      directories: []
+    }))
+    const actor = createActor(addProjectMachine, {
+      input: {
+        getDeps: () => ({
+          browse: async () => null,
+          browseCloneDestination: async () => null,
+          listDirectories,
+          listGitHubRepositories: async () => [],
+          register,
+          createDirectory: async () => project,
+          cloneFromGitHub: async () => project,
+          onAdded: vi.fn(),
+          onClose: vi.fn()
+        })
+      }
+    }).start()
+
+    actor.send({ type: "OPEN" })
+    actor.send({ type: "SELECT", method: "existing" })
+    await waitFor(actor, (snapshot) => snapshot.matches("directory"))
+    actor.send({ type: "OPEN_DIRECTORY", path: "/repos/jingler" })
+    await waitFor(actor, (snapshot) => snapshot.matches("directory"))
+    actor.send({ type: "CHOOSE_DIRECTORY", path: "/repos/jingler" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(listDirectories).toHaveBeenNthCalledWith(1, undefined)
+    expect(listDirectories).toHaveBeenNthCalledWith(2, "/repos/jingler")
+    expect(register).toHaveBeenCalledWith({ path: "/repos/jingler" })
+  })
+})
+
+describe("addProjectMachine GitHub clone", () => {
+  it("loads installation repositories, chooses a clone destination, and clones with identity", async () => {
+    const repository = {
+      installationId: "101",
+      repositoryId: "301",
+      fullName: "acme/widget"
+    }
+    const cloneFromGitHub = vi.fn(async () => project)
+    const actor = createActor(addProjectMachine, {
+      input: {
+        getDeps: () => ({
+          browse: async () => null,
+          browseCloneDestination: async () => "/repos/widget",
+          listDirectories: async () => ({ path: "/repos", parentPath: "/", directories: [] }),
+          listGitHubRepositories: async () => [repository],
+          register: async () => project,
+          createDirectory: async () => project,
+          cloneFromGitHub,
+          onAdded: vi.fn(),
+          onClose: vi.fn()
+        })
+      }
+    }).start()
+
+    actor.send({ type: "OPEN" })
+    actor.send({ type: "SELECT", method: "clone" })
+    await waitFor(actor, (snapshot) => snapshot.matches("githubRepositories"))
+    actor.send({ type: "SELECT_GITHUB_REPOSITORY", repository })
+    await waitFor(actor, (snapshot) => snapshot.matches("cloneReady"))
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(cloneFromGitHub).toHaveBeenCalledWith({
+      installationId: "101",
+      repository: "acme/widget",
+      destination: "/repos/widget"
+    })
   })
 })

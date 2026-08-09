@@ -56,11 +56,8 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
     await expect(launched.window.getByRole("heading", { name: "New session" })).toBeVisible()
     await launched.window.getByRole("combobox", { name: "Checkout" }).click()
     await launched.window.getByRole("option", { name: "Host checkout" }).click()
-    await launched.window
-      .getByLabel("Workspace name")
-      .fill("Manage Linear issues")
     await launched.window.getByRole("button", { name: "Create workspace", exact: true }).click()
-    const linkRow = sessionRow(launched.window, "Manage Linear issues")
+    const linkRow = sessionRow(launched.window, "Untitled session")
     await expect(linkRow).toBeVisible()
     await openLinearIssueTab(launched.window)
     await expect(launched.window.getByRole("heading", { name: "Link an existing issue" })).toBeVisible({

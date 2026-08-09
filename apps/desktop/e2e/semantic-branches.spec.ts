@@ -40,7 +40,7 @@ test("a fresh task starts detached and becomes a visible collision-safe semantic
 
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Fix token refresh")
-  await expect(sessionRow(window, "Fix token refresh")).toBeVisible()
+  await expect(sessionRow(window, "Untitled session")).toBeVisible()
 
   const staged = sessions(home)[0]!
   expect(staged).toMatchObject({

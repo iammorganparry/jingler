@@ -1,6 +1,7 @@
 import type {
   GitHubAppConnectionStatus,
   GitHubAppInstallation,
+  GitHubCloneRepository,
   GitHubDesktopGrantResponse,
   GitHubSessionRelayGrantResponse,
   GitHubSessionRoute
@@ -64,6 +65,7 @@ export interface GitHubPullRequestCreateInput {
 
 export interface GitHubAuthClient {
   readonly status: () => Promise<GitHubAppConnectionStatus>
+  readonly repositories: () => Promise<ReadonlyArray<GitHubCloneRepository>>
   readonly install: (redirect?: string) => Promise<string>
   readonly refresh: () => Promise<GitHubAppConnectionStatus>
   readonly disconnect: () => Promise<void>
@@ -199,6 +201,23 @@ const parseGrant = (value: unknown): GitHubDesktopGrantResponse | null => {
       grantId: string(claims?.grantId) ?? ""
     }
   }
+}
+
+const parseRepositories = (value: unknown): ReadonlyArray<GitHubCloneRepository> | null => {
+  const body = record(value)
+  if (!Array.isArray(body?.repositories)) return null
+  const repositories = body.repositories.map((value) => {
+    const repository = record(value)
+    const installationId = string(repository?.installationId)
+    const repositoryId = string(repository?.repositoryId)
+    const fullName = string(repository?.fullName)
+    return installationId && repositoryId && fullName
+      ? { installationId, repositoryId, fullName }
+      : null
+  })
+  return repositories.some((repository) => repository === null)
+    ? null
+    : repositories.filter((repository): repository is GitHubCloneRepository => repository !== null)
 }
 
 const parseSessionRoute = (value: unknown): GitHubSessionRoute | null => {
@@ -355,6 +374,18 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
       })
     }
     return url
+  }
+
+  const repositories = async (): Promise<ReadonlyArray<GitHubCloneRepository>> => {
+    const response = await authenticatedRequest("/api/github/repositories")
+    const parsed = parseRepositories(await response.json().catch(() => null))
+    if (!parsed) {
+      throw new GitHubApiError({
+        reason: "unavailable",
+        message: "The GitHub connection service returned an invalid repository list."
+      })
+    }
+    return parsed
   }
 
   const refresh = async (): Promise<GitHubAppConnectionStatus> => {
@@ -617,6 +648,7 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
 
   return {
     status,
+    repositories,
     install,
     refresh,
     disconnect,
@@ -700,6 +732,7 @@ export class GitHubAuth extends Effect.Service<GitHubAuth>()("@jingler/GitHubAut
       })
     return {
       status: () => wrap(client.status),
+      repositories: () => wrap(client.repositories),
       install: (redirect?: string) => wrap(() => client.install(redirect)),
       refresh: () => wrap(client.refresh),
       disconnect: () => wrap(client.disconnect),

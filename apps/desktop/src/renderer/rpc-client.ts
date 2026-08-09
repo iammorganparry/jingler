@@ -32,6 +32,7 @@ import type {
   ExternalInstructionIdentity,
   GateDecision,
   GitHubAppConnectionStatus,
+  GitHubCloneRepository,
   GitHubFeedbackClaimStatus,
   GitHubRelayDelivery,
   GitHubRelayConnectionUpdate,
@@ -63,6 +64,7 @@ import type {
   ModelOption,
   ProviderModels,
   Project,
+  ProjectDirectoryListing,
   PermissionMode,
   PlanApprovalResult,
   PlanCommentMessageDeliveryState,
@@ -360,6 +362,10 @@ export const rpc = {
     environmentId?: string
   }): Promise<Project> => run((c) => c.Projects.register(input)),
   projectsBrowse: (): Promise<string | null> => run((c) => c.Projects.browse()),
+  projectsBrowseCloneDestination: (repositoryName: string): Promise<string | null> =>
+    run((c) => c.Projects.browseCloneDestination({ repositoryName })),
+  projectsListDirectories: (path?: string): Promise<ProjectDirectoryListing> =>
+    run((c) => c.Projects.listDirectories(path === undefined ? {} : { path })),
   projectsCreateDirectory: (input: {
     path: string
     name?: string
@@ -371,6 +377,12 @@ export const rpc = {
     name?: string
     environmentId?: string
   }): Promise<Project> => run((c) => c.Projects.clone(input)),
+  projectsCloneFromGitHub: (input: {
+    installationId: string
+    repository: string
+    destination: string
+    name?: string
+  }): Promise<Project> => run((c) => c.Projects.cloneFromGitHub(input)),
   projectsEnsureOnEnvironment: (projectId: string, environmentId: string): Promise<Project> =>
     run((c) => c.Projects.ensureOnEnvironment({ projectId, environmentId })),
   projectsRemove: (id: string, environmentId?: string): Promise<void> =>
@@ -379,6 +391,8 @@ export const rpc = {
     run((c) => c.Workspace.branches({ repoPath, ...(environmentId ? { environmentId } : {}) })),
   githubConnectionStatus: (): Promise<GitHubAppConnectionStatus> =>
     run((c) => c.GitHub.status()),
+  githubRepositories: (): Promise<ReadonlyArray<GitHubCloneRepository>> =>
+    run((c) => c.GitHub.repositories()),
   githubConnectionInstall: (): Promise<string> =>
     run((c) => c.GitHub.install()),
   githubConnectionRefresh: (): Promise<GitHubAppConnectionStatus> =>

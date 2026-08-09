@@ -11,6 +11,7 @@ import type {
   CliInfo,
   CliKind,
   CreateSessionInput,
+  GitHubCloneRepository,
   GitHubConnection,
   GitConfig,
   GithubConfig,
@@ -22,6 +23,7 @@ import type {
   SessionPrStatus,
   ProviderConfig,
   Project,
+  ProjectDirectoryListing,
   PlanTemplateConfig,
   ProvidersConfig,
   Repo,
@@ -128,9 +130,12 @@ export interface JinglerAppProps {
   /** Durable registered repositories, independent of workspaces. */
   projects?: ReadonlyArray<Project>
   onBrowseProject?: () => Promise<string | null>
+  onBrowseCloneDestination?: (repositoryName: string) => Promise<string | null>
+  onListProjectDirectories?: (path?: string) => Promise<ProjectDirectoryListing>
+  onListGitHubRepositories?: () => Promise<ReadonlyArray<GitHubCloneRepository>>
   onRegisterProject?: (input: { path: string; name?: string }) => Promise<Project>
   onCreateProjectDirectory?: (input: { path: string; name?: string }) => Promise<Project>
-  onCloneProject?: (input: { url: string; destination: string; name?: string }) => Promise<Project>
+  onCloneProjectFromGitHub?: (input: { installationId: string; repository: string; destination: string; name?: string }) => Promise<Project>
   onEnsureProjectOnEnvironment?: (projectId: string, environmentId: string) => Promise<Project>
   /** Absolute paths of starred repos — surfaced first in the picker + sidebar. */
   starredRepos?: ReadonlyArray<string>
@@ -393,9 +398,12 @@ export function JinglerApp({
   repos = [],
   projects = [],
   onBrowseProject,
+  onBrowseCloneDestination,
+  onListProjectDirectories,
+  onListGitHubRepositories,
   onRegisterProject,
   onCreateProjectDirectory,
-  onCloneProject,
+  onCloneProjectFromGitHub,
   onEnsureProjectOnEnvironment,
   starredRepos = [],
   onToggleStar,
@@ -1100,7 +1108,7 @@ export function JinglerApp({
               open
               onClose={() => setNewOpen(false)}
               onAddProject={
-                onBrowseProject && onRegisterProject && onCreateProjectDirectory && onCloneProject
+                onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub
                   ? () => setAddProjectOpen(true)
                   : undefined
               }
@@ -1183,14 +1191,17 @@ export function JinglerApp({
         onTabRequestHandled={clearTabRequest}
         version={version}
       />
-      {onBrowseProject && onRegisterProject && onCreateProjectDirectory && onCloneProject && (
+      {onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub && (
         <AddProjectDialog
           open={addProjectOpen}
           onClose={() => setAddProjectOpen(false)}
           browse={onBrowseProject}
+          browseCloneDestination={onBrowseCloneDestination}
+          listDirectories={onListProjectDirectories}
+          listGitHubRepositories={onListGitHubRepositories}
           register={onRegisterProject}
           createDirectory={onCreateProjectDirectory}
-          clone={onCloneProject}
+          cloneFromGitHub={onCloneProjectFromGitHub}
           onAdded={() => {
             setAddProjectOpen(false)
           }}

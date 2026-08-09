@@ -114,7 +114,7 @@ export const appShell = (window: Page) =>
 /** Create a normal workspace through the current project-scoped composer. */
 export const createWorkspace = async (
   window: Page,
-  title: string,
+  _taskDescription: string,
   checkout: "worktree" | "direct" = "worktree"
 ): Promise<void> => {
   await window.getByTestId("new-session").click()
@@ -123,7 +123,6 @@ export const createWorkspace = async (
     await window.getByRole("combobox", { name: "Checkout" }).click()
     await window.getByRole("option", { name: "Host checkout" }).click()
   }
-  await window.getByRole("textbox", { name: "Workspace name" }).fill(title)
   const create = window.getByRole("button", { name: "Create workspace" })
   await expect(create).toBeEnabled()
   await create.click()

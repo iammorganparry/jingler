@@ -328,6 +328,21 @@ export const startFakeGitHubServer = async (
           json(res, 200, status());
           return;
         }
+        if (requestUrl.pathname === "/api/github/repositories" && method === "GET") {
+          const repositories = installation.repositories ?? [
+            { id: "301", fullName: `${installation.account.login}/widget` },
+          ];
+          json(res, 200, {
+            repositories: connected && installation.status === "active"
+              ? repositories.map((repository) => ({
+                  installationId: installation.id,
+                  repositoryId: repository.id,
+                  fullName: repository.fullName,
+                }))
+              : [],
+          });
+          return;
+        }
         if (requestUrl.pathname === "/api/github/install" && method === "GET") {
           const address = server.address() as AddressInfo;
           json(res, 200, {

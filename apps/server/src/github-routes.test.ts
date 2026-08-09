@@ -740,6 +740,22 @@ describe("GitHub connection routes", () => {
     })
   })
 
+  it("lists repositories for all active installations on demand", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+
+    const response = await value.routes.request("/repositories", {
+      headers: asUser("user-1")
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      repositories: [
+        { installationId: "99", repositoryId: "301", fullName: "acme/widget" }
+      ]
+    })
+  })
+
   it("issues only a short-lived relay grant for an active installation and disconnects", async () => {
     const value = harness()
     expect((await connect(value)).status).toBe(302)
