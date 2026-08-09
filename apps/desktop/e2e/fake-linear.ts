@@ -272,7 +272,13 @@ const handleRequest = async (
     json(response, 401, { errors: [{ message: "Authentication required" }] })
     return
   }
-  const body = await bodyOf(request)
+  let body: Record<string, unknown>
+  try {
+    body = await bodyOf(request)
+  } catch {
+    json(response, 400, { errors: [{ message: "Invalid JSON request body" }] })
+    return
+  }
   handleGraphql(
     state,
     typeof body.query === "string" ? body.query : "",
