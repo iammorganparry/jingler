@@ -1473,6 +1473,29 @@ export const scriptedRun =
         return
       }
 
+      // The fixture performs a real move before this event. Reporting the
+      // source path mirrors harnesses that publish the path attached to the
+      // original edit tool while the workspace diff carries the destination.
+      if (spec.prompt.includes("[[follow-file-move]]")) {
+        yield* emit({
+          _tag: "ToolStart",
+          id: "follow-move-1",
+          name: "Edit",
+          target: "src/config.ts"
+        })
+        yield* pause
+        yield* emit({
+          _tag: "ToolEnd",
+          id: "follow-move-1",
+          status: "success",
+          meta: null,
+          diff: { added: 1, removed: 1 },
+          preview: "-export const mode = 'legacy'\n+export const mode = 'modern'"
+        })
+        yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        return
+      }
+
       if (spec.prompt.includes("[[expect-code-context]]")) {
         yield* emit({
           _tag: "Assistant",

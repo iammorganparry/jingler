@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { NodeContext } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
@@ -196,6 +196,31 @@ describe("WorkspaceService", () => {
       encoding: "utf-8"
     })
     expect(stillUntracked.startsWith("??")).toBe(true)
+  })
+
+  it("diff() reports a moved file as one rename even when repository config disables detection", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "renamed"))
+    mkdirSync(join(repoPath, "docs"), { recursive: true })
+    execFileSync("git", ["config", "diff.renames", "false"], { cwd: repoPath })
+    renameSync(join(repoPath, "README.md"), join(repoPath, "docs", "README.md"))
+
+    const exit = await runExit(
+      WorkspaceService.diff(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value).toContain("rename from README.md")
+    expect(exit.value).toContain("rename to docs/README.md")
+    expect(exit.value).not.toContain("deleted file mode")
+    expect(exit.value).not.toContain("new file mode")
+    expect(
+      execFileSync("git", ["status", "--porcelain=v1"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      })
+    ).toContain("?? docs/")
   })
 
   it("diff() never mutates the developer's staged index", async () => {

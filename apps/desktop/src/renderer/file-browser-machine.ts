@@ -6,6 +6,7 @@ import type {
 } from "@jingler/core"
 import { Cause, Option, Runtime } from "effect"
 import { assign, fromPromise, raise, setup } from "xstate"
+import { resolveAgentFollowPath } from "./file-diff-context.js"
 
 export interface FileBrowserApi {
   readonly list: (
@@ -102,6 +103,7 @@ export type FileBrowserEvent =
       readonly preview?: string | null
       readonly completed: boolean
     }
+  | { readonly type: "DIFF_LOADED"; readonly patch: string }
   | { readonly type: "TRY_PENDING_AGENT_TARGET" }
 
 const isTextPayload = (payload: AssetPayload): payload is AssetTextPayload => "text" in payload
@@ -264,11 +266,43 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                 eventId: event.eventId,
                 preview: event.preview ?? null,
                 completed: event.completed,
-                refreshRequested: false
+                refreshRequested: event.completed
               }
             }
           : {}
       ),
+      resolveAgentTargetPath: assign(({ context, event }) => {
+        if (event.type !== "DIFF_LOADED") return {}
+        const currentPath = context.pendingAgentTarget?.path
+        const resolvedPath =
+          currentPath === undefined
+            ? null
+            : resolveAgentFollowPath(event.patch, currentPath)
+        const moved =
+          currentPath !== undefined && resolvedPath !== null && resolvedPath !== currentPath
+        return {
+          ...(resolvedPath === null ? {} : { agentTargetPath: resolvedPath }),
+          ...(moved
+            ? {
+                openPaths: Array.from(
+                  new Set(
+                    context.openPaths.map((path) =>
+                      path === currentPath ? resolvedPath : path
+                    )
+                  )
+                ),
+                selectedPath:
+                  context.selectedPath === currentPath
+                    ? resolvedPath
+                    : context.selectedPath
+              }
+            : {}),
+          pendingAgentTarget:
+            context.pendingAgentTarget === null || resolvedPath === null
+              ? context.pendingAgentTarget
+              : { ...context.pendingAgentTarget, path: resolvedPath }
+        }
+      }),
       selectPendingAgentTarget: assign(({ context }) => {
         const path = context.pendingAgentTarget?.path
         if (path === undefined) return {}
@@ -407,10 +441,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       pendingClose: ({ context }) => context.pendingDiscard?.type === "close",
       pendingAgentTargetIsSelected: ({ context }) =>
         context.pendingAgentTarget !== null &&
+        !context.pendingAgentTarget.completed &&
         context.pendingAgentTarget.path === context.selectedPath,
       pendingAgentTargetIsSelectedAndCompleted: ({ context }) =>
         context.pendingAgentTarget?.completed === true &&
-        context.pendingAgentTarget.path === context.selectedPath,
+        context.pendingAgentTarget.path === context.selectedPath &&
+        context.entries.some((entry) => entry.path === context.pendingAgentTarget?.path),
       pendingAgentTargetCanOpen: ({ context }) =>
         context.pendingAgentTarget !== null &&
         context.entries.some((entry) => entry.path === context.pendingAgentTarget?.path) &&
@@ -465,14 +501,17 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                   guard: "completedAgentTarget",
                   actions: [
                     "rememberAgentTarget",
+                    raise({ type: "REFRESH_TREE" }),
                     raise({ type: "REFRESH_DIFF" }),
-                    raise({ type: "TRY_PENDING_AGENT_TARGET" })
                   ]
                 },
                 {
                   actions: ["rememberAgentTarget", raise({ type: "TRY_PENDING_AGENT_TARGET" })]
                 }
-              ]
+              ],
+              DIFF_LOADED: {
+                actions: ["resolveAgentTargetPath", raise({ type: "TRY_PENDING_AGENT_TARGET" })]
+              }
             }
           }
         }
@@ -603,10 +642,16 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               input: ({ context }) => ({ sessionId: context.sessionId }),
               onDone: {
                 target: "ready",
-                actions: assign({
-                  patch: ({ event }) => event.output,
-                  patchError: null
-                })
+                actions: [
+                  assign({
+                    patch: ({ event }) => event.output,
+                    patchError: null
+                  }),
+                  raise(({ event }) => ({
+                    type: "DIFF_LOADED" as const,
+                    patch: event.output
+                  }))
+                ]
               },
               onError: {
                 target: "error",

@@ -5,7 +5,7 @@ import type { CommandExecutor } from "@effect/platform"
 import { Effect, Option } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
-import { gitLine, runGit, runGitDiff } from "./command.js"
+import { gitLine, runGit, runGitWithEnv } from "./command.js"
 
 /** How deep to descend from the repos directory before giving up on a branch. */
 const MAX_DEPTH = 3
@@ -222,46 +222,38 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
       /**
        * The unified working diff for a worktree, including untracked files.
        *
-       * This is intentionally index-free. The previous `git add -N` + `reset`
-       * implementation turned a background read into two index writes and could
-       * unstage a developer's concurrent work in a direct session. `--no-index`
-       * produces the same full-addition patch for each untracked path without
-       * touching repository state.
+       * Git only detects a move when both sides are in the same index, but the
+       * destination of an ordinary filesystem move is untracked. Build a
+       * disposable index from HEAD, add the worktree to that isolated index,
+       * then diff it. This lets Git correlate renames while never reading from
+       * or writing to the developer's real staging area.
        */
       diff: (
         worktreePath: string
-      ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
-        Effect.gen(function* () {
-          const untracked = (yield* runGit(worktreePath, [
-            "ls-files",
-            "--others",
-            "--exclude-standard"
-          ]).pipe(Effect.orElseSucceed(() => "")))
-            .split("\n")
-            .map((l) => l.trim())
-            .filter(Boolean)
-          const tracked = yield* runGitDiff(worktreePath, [
-            "diff",
-            "--binary",
-            "HEAD"
-          ])
-          const additions = yield* Effect.forEach(
-            untracked,
-            (path) =>
-              runGitDiff(worktreePath, [
-                "diff",
-                "--no-index",
-                "--binary",
-                "--",
-                "/dev/null",
-                path
-              ]),
-            { concurrency: 4 }
-          )
-          return [tracked, ...additions]
-            .filter((part) => part.length > 0)
-            .join("\n")
-        }),
+      ): Effect.Effect<
+        string,
+        GitError,
+        FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
+      > =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem
+            const path = yield* Path.Path
+            const directory = yield* fs.makeTempDirectoryScoped().pipe(
+              Effect.mapError(
+                (cause) => new GitError({ message: "Failed to create isolated Git index", cause })
+              )
+            )
+            const environment = { GIT_INDEX_FILE: path.join(directory, "index") }
+            yield* runGitWithEnv(worktreePath, ["read-tree", "HEAD"], environment)
+            yield* runGitWithEnv(worktreePath, ["add", "-A", "--", "."], environment)
+            return yield* runGitWithEnv(
+              worktreePath,
+              ["diff", "--cached", "--find-renames", "--binary", "HEAD"],
+              environment
+            )
+          })
+        ),
 
       /** The uncommitted working diff for one file (`git diff HEAD -- <path>`). */
       fileDiff: (

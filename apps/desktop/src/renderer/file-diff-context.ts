@@ -1,11 +1,20 @@
 import type { JinglerLineSelection } from "@jingler/ui"
-import { parseUnifiedDiffForPath } from "@jingler/ui"
+import { parsePierreFileDiffForPath, parseUnifiedDiffForPath } from "@jingler/ui"
 import { normalizeCodeReference, type CodeReference } from "./code-reference.js"
 
 type ChangeRow = Extract<
   ReturnType<typeof parseUnifiedDiffForPath>[number],
   { readonly kind: "line" }
 >
+
+/** Follow a Git rename to its destination while leaving ordinary paths unchanged. */
+export const resolveAgentFollowPath = (patch: string, path: string): string => {
+  try {
+    return parsePierreFileDiffForPath(patch, path)?.name ?? path
+  } catch {
+    return path
+  }
+}
 
 const changedPreviewLines = (
   preview: string | null,

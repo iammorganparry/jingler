@@ -406,6 +406,78 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().matches({ follow: "enabled" })).toBe(true)
   })
 
+  it("refreshes the tree and follows the destination when an agent moves a file", async () => {
+    const renamePatch = [
+      "diff --git a/src/config.ts b/src/settings/config.ts",
+      "similarity index 100%",
+      "rename from src/config.ts",
+      "rename to src/settings/config.ts",
+      ""
+    ].join("\n")
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([{ path: "src/config.ts", status: "clean" as const }])
+      .mockResolvedValue([
+        { path: "src/settings/config.ts", status: "renamed" as const }
+      ])
+    const diff = vi.fn().mockResolvedValueOnce("").mockResolvedValue(renamePatch)
+    let moved = false
+    const read = vi.fn((_: string, path: string) => {
+      if (!moved && path === "src/config.ts") {
+        return Promise.resolve({
+          ...payload("before move", "sha256:before-move"),
+          path,
+          absolutePath: `/worktree/${path}`
+        })
+      }
+      return path === "src/settings/config.ts"
+        ? Promise.resolve({
+            ...payload("moved", "sha256:moved"),
+            path,
+            absolutePath: `/worktree/${path}`
+          })
+        : Promise.reject(new Error(`Missing moved file: ${path}`))
+    })
+    const { actor } = start({ list, diff, read })
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.matches({ tree: "ready" }) && snapshot.matches({ changes: "ready" })
+    )
+
+    actor.send({ type: "OPEN", path: "src/config.ts" })
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ document: { ready: "clean" } }) &&
+        snapshot.context.selectedPath === "src/config.ts"
+    )
+    moved = true
+
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({
+      type: "AGENT_TARGET",
+      path: "src/config.ts",
+      eventId: "move-1",
+      completed: true
+    })
+
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ tree: "ready" }) &&
+        snapshot.matches({ document: { ready: "clean" } }) &&
+        snapshot.context.selectedPath === "src/settings/config.ts"
+    )
+
+    expect(list.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(read).toHaveBeenCalledWith("session-a", "src/settings/config.ts")
+    expect(actor.getSnapshot().context).toMatchObject({
+      entries: [{ path: "src/settings/config.ts", status: "renamed" }],
+      openPaths: ["src/settings/config.ts"],
+      agentTargetPath: "src/settings/config.ts"
+    })
+  })
+
   it("refreshes the tree and follows a newly created agent file", async () => {
     const list = vi
       .fn()

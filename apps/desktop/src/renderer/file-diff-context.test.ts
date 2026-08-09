@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest"
 import {
   agentFollowDiffSelection,
-  captureDiffCodeReference
+  captureDiffCodeReference,
+  resolveAgentFollowPath
 } from "./file-diff-context.js"
 
 const patch = [
@@ -22,6 +23,20 @@ const patch = [
 ].join("\n")
 
 describe("file diff context", () => {
+  it("resolves a followed source path to the destination of a Git rename", () => {
+    const renamePatch = [
+      "diff --git a/src/config.ts b/src/settings/config.ts",
+      "similarity index 100%",
+      "rename from src/config.ts",
+      "rename to src/settings/config.ts",
+      ""
+    ].join("\n")
+
+    expect(resolveAgentFollowPath(renamePatch, "src/config.ts")).toBe(
+      "src/settings/config.ts"
+    )
+  })
+
   it("focuses the exact changed range described by an agent tool preview", () => {
     expect(
       agentFollowDiffSelection(

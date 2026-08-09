@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
@@ -456,9 +456,11 @@ test("follows the selected chat agent through edited and newly created files", a
   await composer.fill("[[codex-edit-preview]] Update and create the configuration files.")
   await composer.press("Enter")
 
-  await expect(window.getByRole("textbox", { name: "src/config.ts" })).toBeVisible({
-    timeout: 20_000
-  })
+  await expect(
+    window
+      .getByTestId("file-tab-src/config.ts")
+      .getByRole("button", { name: "src/config.ts", exact: true })
+  ).toBeVisible({ timeout: 20_000 })
   await expect(window.getByRole("region", { name: "src/created.ts changes" })).toBeVisible({
     timeout: 20_000
   })
@@ -496,14 +498,73 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
   await composer.fill("[[subagent-edit-preview]] Delegate this file update.")
   await composer.press("Enter")
 
-  await expect(window.getByRole("textbox", { name: "src/delegated.ts" })).toBeVisible({
-    timeout: 20_000
-  })
+  await expect(
+    window.getByRole("region", { name: "src/delegated.ts changes" })
+  ).toBeVisible({ timeout: 20_000 })
   await expect(
     window
       .getByTestId("file-tab-src/delegated.ts")
       .getByRole("button", { name: "src/delegated.ts", exact: true })
   ).toHaveAttribute("aria-current", "page")
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
+})
+
+test("refreshes the repository tree and follows a moved file to its destination", async ({
+  launchApp
+}) => {
+  const { window, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedRepository,
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  const composerFollow = window
+    .getByTestId("composer")
+    .getByRole("button", { name: "Follow agent", exact: true })
+  await composerFollow.click()
+  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+  await selectTreePath(window, "src/config.ts")
+  await composerFollow.click()
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
+
+  mkdirSync(join(repoPath, "src", "settings"), { recursive: true })
+  renameSync(
+    join(repoPath, "src", "config.ts"),
+    join(repoPath, "src", "settings", "config.ts")
+  )
+  writeFileSync(
+    join(repoPath, "src", "settings", "config.ts"),
+    [
+      "export const mode = 'modern'",
+      "export const retries = 2",
+      "export const timeout = 1_000"
+    ].join("\n") + "\n"
+  )
+
+  const composer = window.getByPlaceholder("Message Codex…")
+  await composer.fill("[[follow-file-move]] Move and update the configuration file.")
+  await composer.press("Enter")
+
+  await expect(
+    window
+      .getByTestId("file-tab-src/settings/config.ts")
+      .getByRole("button", { name: "src/settings/config.ts", exact: true })
+  ).toHaveAttribute("aria-current", "page", { timeout: 20_000 })
+  const movedDiff = window.getByRole("region", {
+    name: "src/settings/config.ts changes"
+  })
+  await expect(movedDiff).toBeVisible()
+  await expect(
+    movedDiff.getByText("export const mode = 'modern'", { exact: true })
+  ).toBeVisible()
+
+  const tree = window.locator(
+    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
+  )
+  await expect(tree.locator('[data-item-path="src/config.ts"]')).toHaveCount(0)
+  await expect(tree.locator('[data-item-path="src/settings/"]')).toHaveCount(1)
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -544,6 +605,29 @@ test("reveals the followed mutation diff and sends selected feedback with contex
     .locator('[data-line-type="change-addition"][data-column-number="1"]')
     .first()
   await expect(followedLine).toBeVisible()
+  await expect(followedLine).not.toHaveAttribute("data-selected-line")
+  const followedLineColors = await followedLine.evaluate((element) => {
+    const root = element.getRootNode()
+    if (!(root instanceof ShadowRoot)) throw new Error("Pierre diff shadow root is missing")
+    const resolveBackground = (value: string): string => {
+      const probe = document.createElement("span")
+      probe.style.backgroundColor = value
+      root.append(probe)
+      const resolved = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return resolved
+    }
+    const hostStyle = getComputedStyle(root.host)
+    return {
+      actual: getComputedStyle(element).backgroundColor,
+      addition: resolveBackground(hostStyle.getPropertyValue("--sb-diff-add-bg")),
+      deletion: resolveBackground(hostStyle.getPropertyValue("--sb-diff-del-bg")),
+      selection: resolveBackground(hostStyle.getPropertyValue("--sb-selection"))
+    }
+  })
+  expect(followedLineColors.actual).toBe(followedLineColors.addition)
+  expect(followedLineColors.actual).not.toBe(followedLineColors.deletion)
+  expect(followedLineColors.actual).not.toBe(followedLineColors.selection)
   await followedLine.click({ position: { x: 6, y: 6 } })
 
   const addToChat = followed.getByRole("button", { name: "Add to chat" })
