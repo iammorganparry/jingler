@@ -292,29 +292,3 @@ describe("linearIssueMachine persistence", () => {
     actor.stop()
   })
 })
-
-describe("linearIssueMachine races", () => {
-  it("ignores a stale issue response after the session changes", async () => {
-    let resolveOld: ((issue: LinearIssueDetail) => void) | undefined
-    const other = { ...reference, id: "issue-456", identifier: "ENG-456" }
-    const get = vi.fn((id: string) =>
-      id === reference.id
-        ? new Promise<LinearIssueDetail>((resolve) => { resolveOld = resolve })
-        : Promise.resolve({ ...detail, ...other })
-    )
-    const actor = createActor(linearIssueMachine, {
-      input: { linkedIssue: reference, services: services({ get }) }
-    }).start()
-    await waitFor(actor, (snapshot) => snapshot.matches("loadingIssue"))
-
-    actor.send({ type: "SESSION_CHANGED", linkedIssue: other })
-    await waitFor(actor, (snapshot) =>
-      snapshot.matches("detail") && snapshot.context.issue?.id === other.id
-    )
-    resolveOld?.(detail)
-    await Promise.resolve()
-
-    expect(actor.getSnapshot().context.issue?.id).toBe(other.id)
-    actor.stop()
-  })
-})

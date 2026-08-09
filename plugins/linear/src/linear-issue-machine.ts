@@ -51,7 +51,6 @@ type LinearIssueEvent =
   | { type: "COMMENT_SUBMIT" }
   | { type: "UNLINK" }
   | { type: "RETRY" }
-  | { type: "SESSION_CHANGED"; linkedIssue?: IssueReference }
 
 const message = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause)
@@ -116,15 +115,7 @@ export const linearIssueMachine = setup({
   actions: {
     clearError: assign({ error: null }),
     clearComment: assign({ commentBody: "" }),
-    clearLink: assign({ linkedIssue: undefined, issue: null, error: null }),
-    resetForSession: assign(({ event }) => ({
-      linkedIssue: event.type === "SESSION_CHANGED" ? event.linkedIssue : undefined,
-      issue: null,
-      results: [],
-      query: "",
-      commentBody: "",
-      error: null
-    }))
+    clearLink: assign({ linkedIssue: undefined, issue: null, error: null })
   }
 }).createMachine({
   id: "linearIssue",
@@ -140,13 +131,6 @@ export const linearIssueMachine = setup({
     commentBody: "",
     error: null
   }),
-  on: {
-    SESSION_CHANGED: {
-      target: ".checkingConfiguration",
-      actions: "resetForSession",
-      reenter: true
-    }
-  },
   states: {
     checkingConfiguration: {
       invoke: {
