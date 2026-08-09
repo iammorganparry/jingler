@@ -190,7 +190,7 @@ export const linearIssueMachine = setup({
     unlinked: {
       on: {
         SEARCH_CHANGED: { actions: assign({ query: ({ event }) => event.query }) },
-        SEARCH: "searching",
+        SEARCH: { target: "searching", actions: "clearError" },
         LINK: {
           target: "linking",
           actions: assign({ linkedIssue: ({ event }) => referenceOf(event.issue) })
@@ -203,7 +203,7 @@ export const linearIssueMachine = setup({
             })
           })
         },
-        CREATE_SUBMIT: { guard: "canCreate", target: "creating" }
+        CREATE_SUBMIT: { guard: "canCreate", target: "creating", actions: "clearError" }
       }
     },
     searching: {
@@ -215,7 +215,7 @@ export const linearIssueMachine = setup({
           actions: assign({ results: ({ event }) => event.output, error: null })
         },
         onError: {
-          target: "error",
+          target: "unlinked",
           actions: assign({ error: ({ event }) => message(event.error) })
         }
       }
@@ -229,7 +229,7 @@ export const linearIssueMachine = setup({
           actions: assign({ linkedIssue: ({ event }) => referenceOf(event.output), error: null })
         },
         onError: {
-          target: "error",
+          target: "unlinked",
           actions: assign({ error: ({ event }) => message(event.error) })
         }
       }
@@ -265,17 +265,24 @@ export const linearIssueMachine = setup({
           target: "detail",
           actions: assign({ issue: ({ event }) => event.output, error: null })
         },
-        onError: {
-          target: "error",
-          actions: assign({ error: ({ event }) => message(event.error) })
-        }
+        onError: [
+          {
+            guard: "hasLoadedIssue",
+            target: "detail",
+            actions: assign({ error: ({ event }) => message(event.error) })
+          },
+          {
+            target: "error",
+            actions: assign({ error: ({ event }) => message(event.error) })
+          }
+        ]
       }
     },
     detail: {
       on: {
-        REFRESH: "loadingIssue",
+        REFRESH: { target: "loadingIssue", actions: "clearError" },
         COMMENT_CHANGED: { actions: assign({ commentBody: ({ event }) => event.body }) },
-        COMMENT_SUBMIT: { guard: "canComment", target: "commenting" },
+        COMMENT_SUBMIT: { guard: "canComment", target: "commenting", actions: "clearError" },
         UNLINK: "unlinking"
       }
     },
@@ -289,7 +296,7 @@ export const linearIssueMachine = setup({
         }),
         onDone: { target: "loadingIssue", actions: "clearComment" },
         onError: {
-          target: "error",
+          target: "detail",
           actions: assign({ error: ({ event }) => message(event.error) })
         }
       }

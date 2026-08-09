@@ -172,6 +172,29 @@ describe("Linear Issue tab states", () => {
     await waitFor(() => expect(mocks.unlinkIssue).toHaveBeenCalledWith("session-1"))
   })
 
+  it("keeps issue detail and the draft visible when commenting fails", async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "linear.comment") {
+        return Promise.reject(new Error("Linear rate limit reached."))
+      }
+      return Promise.resolve(successfulHost(command))
+    })
+    render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
+
+    expect(await screen.findByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
+    const comment = screen.getByLabelText("Add a comment")
+    fireEvent.change(comment, { target: { value: "Keep this draft." } })
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Linear rate limit reached")
+    expect(screen.getByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
+    expect((screen.getByLabelText("Add a comment") as HTMLTextAreaElement).value).toBe(
+      "Keep this draft."
+    )
+  })
+})
+
+describe("Linear Issue tab rendering", () => {
   it("keeps primary actions accessible at narrow width", async () => {
     mocks.tier = "narrow"
     render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)

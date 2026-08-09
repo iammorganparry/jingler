@@ -96,7 +96,7 @@ describe("linearIssueMachine configuration and linking", () => {
   })
 })
 
-describe("linearIssueMachine creation and comments", () => {
+describe("linearIssueMachine creation", () => {
   it("creates and links a new issue", async () => {
     const create = vi.fn().mockResolvedValue(summary)
     const link = vi.fn().mockResolvedValue(undefined)
@@ -118,7 +118,9 @@ describe("linearIssueMachine creation and comments", () => {
     expect(link).toHaveBeenCalledWith(reference)
     actor.stop()
   })
+})
 
+describe("linearIssueMachine comments", () => {
   it("adds a comment and refreshes the timeline", async () => {
     const refreshed = {
       ...detail,
@@ -146,6 +148,84 @@ describe("linearIssueMachine creation and comments", () => {
 
     expect(comment).toHaveBeenCalledWith("issue-123", "I can reproduce this.")
     expect(actor.getSnapshot().context.commentBody).toBe("")
+    actor.stop()
+  })
+
+  it("keeps the issue and draft visible when commenting fails", async () => {
+    const actor = createActor(linearIssueMachine, {
+      input: {
+        linkedIssue: reference,
+        services: services({
+          comment: vi.fn().mockRejectedValue(new Error("Linear rate limit reached."))
+        })
+      }
+    }).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("detail"))
+
+    actor.send({ type: "COMMENT_CHANGED", body: "Do not lose this draft." })
+    actor.send({ type: "COMMENT_SUBMIT" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches("detail") && snapshot.context.error === "Linear rate limit reached."
+    )
+
+    expect(actor.getSnapshot().context.issue?.id).toBe(reference.id)
+    expect(actor.getSnapshot().context.commentBody).toBe("Do not lose this draft.")
+    actor.stop()
+  })
+})
+
+describe("linearIssueMachine inline request recovery", () => {
+  it("keeps the unlinked view available when search fails", async () => {
+    const actor = createActor(linearIssueMachine, {
+      input: {
+        services: services({ list: vi.fn().mockRejectedValue(new Error("Search unavailable.")) })
+      }
+    }).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("unlinked"))
+
+    actor.send({ type: "SEARCH" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches("unlinked") && snapshot.context.error === "Search unavailable."
+    )
+
+    expect(actor.getSnapshot().context.workspace?.teams).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("keeps the create form available when issue creation fails", async () => {
+    const actor = createActor(linearIssueMachine, {
+      input: {
+        services: services({ create: vi.fn().mockRejectedValue(new Error("Create unavailable.")) })
+      }
+    }).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("unlinked"))
+
+    actor.send({ type: "CREATE_CHANGED", field: "teamId", value: "team-1" })
+    actor.send({ type: "CREATE_CHANGED", field: "title", value: "Keep this title" })
+    actor.send({ type: "CREATE_SUBMIT" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches("unlinked") && snapshot.context.error === "Create unavailable."
+    )
+
+    expect(actor.getSnapshot().context.createInput.title).toBe("Keep this title")
+    actor.stop()
+  })
+
+  it("keeps loaded issue detail available when refresh fails", async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce(detail)
+      .mockRejectedValueOnce(new Error("Refresh unavailable."))
+    const actor = createActor(linearIssueMachine, {
+      input: { linkedIssue: reference, services: services({ get }) }
+    }).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("detail"))
+
+    actor.send({ type: "REFRESH" })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches("detail") && snapshot.context.error === "Refresh unavailable."
+    )
+
+    expect(actor.getSnapshot().context.issue?.id).toBe(reference.id)
     actor.stop()
   })
 })
