@@ -8,7 +8,10 @@ export const manifest = defineManifest({
   description: "Create, link, and discuss Linear issues without leaving Jingler.",
   ui: "dist/ui.js",
   main: "dist/main.js",
-  activationEvents: ["onStartupFinished"],
+  // Dormant until the operator opens the Issue tab. Issue-provider RPCs also
+  // activate their declaring plugin before dispatch, so creating a session from
+  // Linear remains race-free without starting the host half on every app boot.
+  activationEvents: ["onTab:linear.issue"],
   contributes: {
     issueProviders: [{ id: "linear", label: "Linear" }],
     tabs: [
