@@ -387,8 +387,14 @@ test("creating a session from an issue forks a linked branch and seeds the task"
   // from main until the agent proposes a semantic feat/fix/chore branch.
   const persisted = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf-8"))
   expect(persisted).toHaveLength(1)
-  const worktreePath = persisted[0].worktreePath
-  expect(worktreePath).toEqual(expect.any(String))
+  const worktreePath = join(
+    home,
+    "jingler",
+    "worktrees",
+    "widget",
+    "github-128-refund-route-500s-on-a-stale-token"
+  )
+  expect(persisted[0].worktreePath).toBe(worktreePath)
   expect(existsSync(worktreePath)).toBe(true)
   const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
     cwd: worktreePath,
