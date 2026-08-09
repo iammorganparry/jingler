@@ -106,7 +106,7 @@ afterEach(cleanup)
 
 describe("Linear Issue tab content", () => {
   it("renders issue metadata, description, and comments", async () => {
-    render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
+    const view = render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
 
     expect(await screen.findByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
     expect(screen.getByText("Payment retries stop after the first failure.")).toBeTruthy()
@@ -116,6 +116,10 @@ describe("Linear Issue tab content", () => {
     expect(screen.getByText("Alex")).toBeTruthy()
     expect(screen.getByText("Reliability")).toBeTruthy()
     expect(screen.getByText("August")).toBeTruthy()
+    expect(view.container.querySelector("[data-linear-mark]")?.getAttribute("style")).toContain(
+      "jingler-plugin://linear/dist/assets/linear-mark.svg?v=1.0.0"
+    )
+    expect(view.container.querySelector("[data-linear-mark] path")).toBeNull()
   })
 
   it("renders create and link controls for an unlinked session", async () => {
