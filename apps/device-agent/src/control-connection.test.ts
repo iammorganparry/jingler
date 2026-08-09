@@ -26,6 +26,9 @@ const grant = (id: number): DeviceRelayGrantResponse => ({
     subject: "user-1",
     deviceId: "device-1",
     sessionId: null,
+    clientInstanceId: null,
+    attachmentGeneration: null,
+    controllerLeaseGeneration: null,
     deviceGeneration: 1,
     issuedAt: 100,
     expiresAt: 200,
@@ -81,7 +84,7 @@ describe("device control connection", () => {
     await runControlConnection(dependencies, controller.signal)
     expect(sent).toHaveLength(2)
     for (const messages of sent) {
-      expect(messages.map((message) => JSON.parse(message).type)).toStrictEqual(["announce", "ping"])
+      expect(messages.map((message) => JSON.parse(message).type)).toStrictEqual(["announce"])
       expect(JSON.parse(messages[0] ?? "{}").discovery).toStrictEqual(discovery)
     }
   })

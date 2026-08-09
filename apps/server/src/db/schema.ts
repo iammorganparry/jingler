@@ -104,6 +104,56 @@ export const invitation = pgTable("invitation", {
     .references(() => user.id, { onDelete: "cascade" })
 })
 
+// ── Account-owned remote devices ──────────────────────────────────────────────────────
+// Durable ownership lives here. Relay Durable Objects contain only ephemeral
+// presence and routing state, so an offline device remains discoverable.
+export const ownedDevice = pgTable(
+  "owned_device",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    identityFingerprint: text("identity_fingerprint").notNull(),
+    displayName: text("display_name").notNull(),
+    platform: text("platform_json").notNull(),
+    publicKey: text("public_key_json").notNull(),
+    encryptionPublicKey: text("encryption_public_key_json"),
+    capabilities: text("capabilities_json").notNull(),
+    agentVersion: text("agent_version"),
+    state: text("state").default("active").notNull(),
+    generation: integer("generation").default(1).notNull(),
+    enrolledAt: timestamp("enrolled_at").notNull(),
+    revokedAt: timestamp("revoked_at"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("owned_device_user_identity_unique").on(
+      table.userId,
+      table.identityFingerprint
+    )
+  ]
+)
+
+/**
+ * Server-side replay ledger for invisible SSH-delivered enrollment credentials.
+ * The signed credential remains outside the database; only its identifier and
+ * scope are stored, and consumption is performed in the device upsert transaction.
+ */
+export const deviceEnrollment = pgTable("device_enrollment", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  deviceId: text("device_id").notNull(),
+  clientInstanceId: text("client_instance_id").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"),
+  identityFingerprint: text("identity_fingerprint"),
+  createdAt: timestamp("created_at").notNull()
+})
+
 // ── Personal Access Tokens (headless team-memory MCP auth) ───────────────────
 // Long-lived, org-scoped bearer credentials that let an EXTERNAL agent call the
 // hosted team-memory MCP endpoint without the desktop app minting a short-lived
@@ -329,6 +379,8 @@ export const schema = {
   organization,
   member,
   invitation,
+  ownedDevice,
+  deviceEnrollment,
   personalAccessToken,
   githubUserAuthorization,
   githubInstallation,

@@ -5,7 +5,10 @@ import {
 } from "@jingler/core"
 import { Data, Schema } from "effect"
 import WebSocket from "ws"
+import type { DeviceEnrollment } from "./device-client.js"
 import type { DeviceIdentity } from "./device-identity.js"
+
+export type { DeviceEnrollment } from "./device-client.js"
 
 export class DeviceControlError extends Data.TaggedError("DeviceControlError")<{
   readonly message: string
@@ -13,11 +16,7 @@ export class DeviceControlError extends Data.TaggedError("DeviceControlError")<{
   readonly cause?: unknown
 }> {}
 
-export interface DeviceEnrollment {
-  readonly subject: string
-  readonly deviceId: string
-  readonly serverUrl: string
-}
+const clientInstanceIdPattern = /^[A-Za-z0-9_-]{1,128}$/u
 
 export interface ControlSocket {
   readonly send: (message: string) => void
@@ -36,6 +35,9 @@ export interface ControlConnectionDependencies {
     readonly sessionId: string
     readonly grant: string
     readonly keyOffer: unknown
+    readonly clientInstanceId: string
+    readonly attachmentGeneration: number
+    readonly controllerLeaseGeneration: number
   }) => Promise<void>
 }
 
@@ -215,7 +217,13 @@ export const runControlConnection = async (
         if (
           request.type !== "session-request" ||
           typeof request.sessionId !== "string" ||
-          typeof request.grant !== "string"
+          typeof request.grant !== "string" ||
+          typeof request.clientInstanceId !== "string" ||
+          !clientInstanceIdPattern.test(request.clientInstanceId) ||
+          !Number.isSafeInteger(request.attachmentGeneration) ||
+          (request.attachmentGeneration as number) < 1 ||
+          !Number.isSafeInteger(request.controllerLeaseGeneration) ||
+          (request.controllerLeaseGeneration as number) < 1
         )
           return
         void dependencies
@@ -223,7 +231,10 @@ export const runControlConnection = async (
             relayUrl: refreshed.relayUrl,
             sessionId: request.sessionId,
             grant: request.grant,
-            keyOffer: request.keyOffer
+            keyOffer: request.keyOffer,
+            clientInstanceId: request.clientInstanceId,
+            attachmentGeneration: request.attachmentGeneration as number,
+            controllerLeaseGeneration: request.controllerLeaseGeneration as number
           })
           .catch(() => {
             // The control socket remains healthy; a failed session tunnel is
@@ -231,7 +242,6 @@ export const runControlConnection = async (
           })
       })
       socket.send(JSON.stringify({ type: "announce", discovery }))
-      socket.send(JSON.stringify({ type: "ping" }))
       failures = 0
       const closed = await socket.waitForClose(signal)
       stopMessages()

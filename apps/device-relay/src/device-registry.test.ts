@@ -108,6 +108,33 @@ const claimDevice = async (
 }
 
 describe("pending device pairing", () => {
+  it("uses partial expiry indexes for alarm scheduling", async () => {
+    const stub = env.DEVICE_REGISTRY.getByName("index-plan-registry")
+    await stub.schemaVersion()
+    await runInDurableObject(stub, async (_instance, state) => {
+      const pendingPlan = state.storage.sql
+        .exec<{ readonly [key: string]: SqlStorageValue; readonly detail: string }>(
+          `EXPLAIN QUERY PLAN SELECT MIN(expires_at) FROM pending_devices
+           WHERE claimed_subject IS NULL AND expires_at > ?`,
+          100
+        )
+        .toArray()
+        .map((row) => row.detail)
+        .join(" ")
+      const challengePlan = state.storage.sql
+        .exec<{ readonly [key: string]: SqlStorageValue; readonly detail: string }>(
+          `EXPLAIN QUERY PLAN SELECT MIN(expires_at) FROM device_challenges
+           WHERE consumed_at IS NULL AND expires_at > ?`,
+          100
+        )
+        .toArray()
+        .map((row) => row.detail)
+        .join(" ")
+      expect(pendingPlan).toContain("pending_devices_unclaimed_expiry")
+      expect(challengePlan).toContain("device_challenges_unconsumed_expiry")
+    })
+  })
+
   it("claims one pending pairing code exactly once", async () => {
     const keys = await keyPair()
     const pending = await registerPending(
@@ -281,6 +308,66 @@ describe("pending device pairing", () => {
       devices: [{ deviceId: paired.claim.deviceId, agentVersion: "2.0.3" }]
     })
     await expect(env.DEVICE_REGISTRY.getByName(`user:${outsider}`).getDiscovery(paired.claim.deviceId)).resolves.toBeNull()
+  })
+
+  it("hydrates multiple devices with their independent discovery, presence, and sessions", async () => {
+    const firstKeys = await keyPair()
+    const secondKeys = await keyPair()
+    const first = await claimDevice(
+      "batch_list_first_abcdefgh",
+      "batch-list-owner",
+      firstKeys.publicKey
+    )
+    const second = await claimDevice(
+      "batch_list_second_abcdefg",
+      "batch-list-owner",
+      secondKeys.publicKey
+    )
+    await first.registry.registerSession(
+      first.claim.deviceId,
+      1,
+      "session_batch_first_abcdef",
+      200
+    )
+    await first.registry.registerSession(
+      second.claim.deviceId,
+      1,
+      "session_batch_second_abcde",
+      201
+    )
+    await first.registry.setPresence(first.claim.deviceId, 1, "online", 202)
+    await runInDurableObject(first.registry, async (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO device_discovery (device_id, discovery_json, updated_at) VALUES (?, ?, ?)",
+        second.claim.deviceId,
+        JSON.stringify({
+          version: 1,
+          agentVersion: "2.1.0",
+          platform: { os: "linux", arch: "arm64" },
+          capabilities: registration(secondKeys.publicKey).capabilities,
+          repositories: []
+        }),
+        203
+      )
+    })
+
+    const listed = await first.registry.listDevices()
+    expect(listed.devices).toHaveLength(2)
+    expect(listed.devices.find((device) => device.deviceId === first.claim.deviceId))
+      .toMatchObject({
+        presence: {
+          state: "online",
+          activeSessionIds: ["session_batch_first_abcdef"]
+        }
+      })
+    expect(listed.devices.find((device) => device.deviceId === second.claim.deviceId))
+      .toMatchObject({
+        agentVersion: "2.1.0",
+        presence: {
+          state: "offline",
+          activeSessionIds: ["session_batch_second_abcde"]
+        }
+      })
   })
 })
 

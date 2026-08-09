@@ -34,7 +34,7 @@ const dialog = {
 afterEach(cleanup)
 
 describe("Devices settings", () => {
-  it("renders paired device connection and compatibility states", () => {
+  it("renders account-owned device connection and compatibility states", () => {
     render(
       <DevicesSection
         environments={[
@@ -51,6 +51,9 @@ describe("Devices settings", () => {
     )
     expect(screen.getByText("online")).toBeTruthy()
     expect(screen.getByText("incompatible")).toBeTruthy()
+    expect(
+      screen.getByText(/account-owned machines appear here automatically/i)
+    ).toBeTruthy()
   })
   it("confirms before revoking an environment", () => {
     const revoke = vi.fn()

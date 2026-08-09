@@ -1,5 +1,6 @@
-import { hostname, homedir } from "node:os"
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { hostname, homedir, tmpdir } from "node:os"
+import { createHash } from "node:crypto"
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { PendingDeviceRegistrationResponse } from "@jingler/core"
 import { PendingDeviceRegistrationResponse as PendingDeviceRegistrationResponseSchema } from "@jingler/core"
@@ -10,9 +11,13 @@ import {
   abortableSleep,
   connectDeviceWebSocket,
   createDeviceGrantRefresher,
-  type DeviceEnrollment,
   runControlConnection
 } from "./control-connection.js"
+import {
+  exchangeDeviceEnrollment,
+  type DeviceEnrollment,
+  type ExchangeDeviceEnrollmentDependencies
+} from "./device-client.js"
 import {
   loadOrCreateDeviceIdentity,
   rotateDeviceIdentity
@@ -20,6 +25,7 @@ import {
 import { SessionCommandHandler, type SessionCommandExecutor } from "./session-handler.js"
 import { runDeviceSessionTunnel } from "./session-tunnel.js"
 import { makeLiveDeviceSessionCommandExecutor } from "./device-executor.js"
+import { startDirectSessionServer } from "./direct-session-server.js"
 
 export const DEVICE_AGENT_VERSION = packageJson.version
 
@@ -28,16 +34,22 @@ export interface DeviceAgentPaths {
   readonly deviceDir: string
   readonly identityFile: string
   readonly enrollmentFile: string
+  readonly directSessionSocket: string
 }
 
 export const deviceAgentPaths = (): DeviceAgentPaths => {
   const root = join(process.env.JINGLER_HOME ?? homedir(), "jingler")
   const deviceDir = join(root, "device")
+  const socketNamespace = createHash("sha256").update(deviceDir).digest("hex").slice(0, 16)
   return {
     jinglerRoot: root,
     deviceDir,
     identityFile: join(deviceDir, "identity.json"),
-    enrollmentFile: join(deviceDir, "enrollment.json")
+    enrollmentFile: join(deviceDir, "enrollment.json"),
+    // Unix socket path limits are as low as 104 bytes on macOS. A short,
+    // deterministic per-home path also lets the separately invoked SSH proxy
+    // find the daemon without storing another secret or configuration value.
+    directSessionSocket: join(tmpdir(), `jingler-${process.getuid?.() ?? "user"}-${socketNamespace}.sock`)
   }
 }
 
@@ -47,11 +59,20 @@ export const persistEnrollment = async (
 ): Promise<void> => {
   await mkdir(paths.deviceDir, { recursive: true, mode: 0o700 })
   await chmod(paths.deviceDir, 0o700)
-  await writeFile(paths.enrollmentFile, `${JSON.stringify(enrollment)}\n`, {
+  const temporary = `${paths.enrollmentFile}.${process.pid}.next`
+  await rm(temporary, { force: true })
+  await writeFile(temporary, `${JSON.stringify(enrollment)}\n`, {
     mode: 0o600,
-    flag: "w"
+    flag: "wx"
   })
-  await chmod(paths.enrollmentFile, 0o600)
+  try {
+    await chmod(temporary, 0o600)
+    await rename(temporary, paths.enrollmentFile)
+    await chmod(paths.enrollmentFile, 0o600)
+  } catch (error) {
+    await rm(temporary, { force: true })
+    throw error
+  }
 }
 
 const readEnrollment = async (paths: DeviceAgentPaths): Promise<DeviceEnrollment | null> => {
@@ -97,6 +118,43 @@ export const registerPendingDevice = async (
   return Schema.decodeUnknownSync(PendingDeviceRegistrationResponseSchema)(await response.json(), {
     onExcessProperty: "error"
   })
+}
+
+export interface EnrollOwnedDeviceInput {
+  readonly serverUrl: string
+  readonly credential: unknown
+  readonly displayName?: string
+}
+
+/** Exchange the invisible bootstrap credential and persist only renewable identity metadata. */
+export const enrollOwnedDevice = async (
+  input: EnrollOwnedDeviceInput,
+  paths = deviceAgentPaths(),
+  dependencies?: ExchangeDeviceEnrollmentDependencies
+): Promise<{ readonly version: 1; readonly deviceId: string; readonly displayName: string }> => {
+  const identity = await Effect.runPromise(loadOrCreateDeviceIdentity(paths.identityFile))
+  const discovery = await Effect.runPromise(
+    discoverLiveDeviceCapabilities(paths.jinglerRoot, DEVICE_AGENT_VERSION)
+  )
+  const displayName = input.displayName?.trim() || hostname()
+  const result = await exchangeDeviceEnrollment(
+    {
+      serverUrl: input.serverUrl,
+      credential: input.credential,
+      registration: {
+        version: 1,
+        displayName,
+        platform: discovery.platform,
+        publicKey: identity.publicKey,
+        encryptionPublicKey: identity.encryptionPublicKey,
+        capabilities: discovery.capabilities,
+        agentVersion: DEVICE_AGENT_VERSION
+      }
+    },
+    dependencies
+  )
+  await persistEnrollment(paths, result.enrollment)
+  return { version: 1, deviceId: result.device.deviceId, displayName: result.device.displayName }
 }
 
 export interface ServeDeviceInput {
@@ -150,6 +208,20 @@ export const serveDevice = async (
     input.sessionExecutor ?? makeLiveDeviceSessionCommandExecutor(paths.jinglerRoot)
   const sessionHandlers = new Map<string, SessionCommandHandler>()
   const sessionTasks = new DeviceSessionTasks()
+  const handlerFor = (sessionId: string): SessionCommandHandler => {
+    const handler = sessionHandlers.get(sessionId) ?? new SessionCommandHandler(
+      join(paths.deviceDir, "sessions", `${sessionId}.json`),
+      executor
+    )
+    sessionHandlers.set(sessionId, handler)
+    return handler
+  }
+  const directServer = await startDirectSessionServer({
+    socketPath: paths.directSessionSocket,
+    enrollment,
+    identity,
+    handlerFor
+  })
   try {
     return await runControlConnection(
       {
@@ -161,11 +233,7 @@ export const serveDevice = async (
           ),
         sleep: abortableSleep,
         handleSessionRequest: (request) => {
-          const handler = sessionHandlers.get(request.sessionId) ?? new SessionCommandHandler(
-            join(paths.deviceDir, "sessions", `${request.sessionId}.json`),
-            executor
-          )
-          sessionHandlers.set(request.sessionId, handler)
+          const handler = handlerFor(request.sessionId)
           return sessionTasks.run(
             runDeviceSessionTunnel(request, enrollment, identity, handler)
           )
@@ -174,6 +242,7 @@ export const serveDevice = async (
       input.signal
     )
   } finally {
+    await directServer.close()
     await sessionTasks.stop()
   }
 }

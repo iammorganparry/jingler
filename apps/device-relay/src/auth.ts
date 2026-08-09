@@ -1,5 +1,10 @@
-import type { DeviceRelayGrantAudience, DeviceRelayGrantClaims } from "@jingler/core"
+import type {
+  DeviceClaim,
+  DeviceRelayGrantAudience,
+  DeviceRelayGrantClaims
+} from "@jingler/core"
 import {
+  DeviceClaim as DeviceClaimSchema,
   DeviceRelayGrantClaims as DeviceRelayGrantClaimsSchema,
   deviceRelayGrantWindowRejection,
   isValidDeviceRelayGrantScope
@@ -22,6 +27,10 @@ export type GrantRejectionReason =
 
 export type GrantVerification =
   | { readonly ok: true; readonly claims: DeviceRelayGrantClaims }
+  | { readonly ok: false; readonly reason: GrantRejectionReason }
+
+export type DeviceClaimVerification =
+  | { readonly ok: true; readonly claim: DeviceClaim }
   | { readonly ok: false; readonly reason: GrantRejectionReason }
 
 const decodeBase64Url = (value: string): Uint8Array<ArrayBuffer> => {
@@ -88,6 +97,57 @@ export const verifyDeviceRelayGrant = async (
     if (windowRejection) return { ok: false, reason: windowRejection }
     if (!isValidDeviceRelayGrantScope(claims)) return { ok: false, reason: "invalid-scope" }
     return { ok: true, claims }
+  } catch {
+    return { ok: false, reason: "malformed" }
+  }
+}
+
+export const verifyDeviceClaim = async (
+  token: string | null,
+  secret: string,
+  nowSeconds = Math.floor(Date.now() / 1_000)
+): Promise<DeviceClaimVerification> => {
+  if (!token) return { ok: false, reason: "missing" }
+  const parts = token.split(".")
+  const headerPart = parts[0]
+  const payloadPart = parts[1]
+  const signaturePart = parts[2]
+  if (!headerPart || !payloadPart || !signaturePart || parts.length !== 3 || secret.length === 0) {
+    return { ok: false, reason: "malformed" }
+  }
+  try {
+    const signed = `${headerPart}.${payloadPart}`
+    const signatureValid = await crypto.subtle.verify(
+      "HMAC",
+      await hmacKey(secret),
+      decodeBase64Url(signaturePart),
+      encoder.encode(signed)
+    )
+    if (!signatureValid) return { ok: false, reason: "invalid-signature" }
+    const header: unknown = JSON.parse(decoder.decode(decodeBase64Url(headerPart)))
+    if (!header || typeof header !== "object" || Array.isArray(header)) {
+      return { ok: false, reason: "malformed" }
+    }
+    const fields = Object.fromEntries(Object.entries(header))
+    if (
+      fields.alg !== "HS256" ||
+      fields.typ !== "JinglerDeviceClaim" ||
+      fields.version !== 1
+    ) {
+      return { ok: false, reason: "malformed" }
+    }
+    const decoded = Schema.decodeUnknownEither(DeviceClaimSchema)(
+      JSON.parse(decoder.decode(decodeBase64Url(payloadPart))),
+      { onExcessProperty: "error" }
+    )
+    if (Either.isLeft(decoded)) return { ok: false, reason: "invalid-claims" }
+    const claim = decoded.right
+    if (claim.expiresAt <= nowSeconds) return { ok: false, reason: "expired" }
+    if (claim.expiresAt - claim.issuedAt > 15 * 60)
+      return { ok: false, reason: "overlong" }
+    if (claim.issuedAt > nowSeconds + 60)
+      return { ok: false, reason: "future-issued" }
+    return { ok: true, claim }
   } catch {
     return { ok: false, reason: "malformed" }
   }

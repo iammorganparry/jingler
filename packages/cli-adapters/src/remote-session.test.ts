@@ -1,19 +1,158 @@
 import { createPublicKey, diffieHellman, generateKeyPairSync, randomBytes } from "node:crypto"
 import { once } from "node:events"
-import type { DeviceRelayGrantResponse, RemoteDevice } from "@jingler/core"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import type {
+  DeviceRelayGrantResponse,
+  RemoteDevice,
+  RemoteSessionEvent,
+  SessionCommand,
+  SessionEventEnvelope,
+  SessionReplay
+} from "@jingler/core"
 import { afterEach, describe, expect, it } from "vitest"
 import { Chunk, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { WebSocketServer } from "ws"
 import { EnvironmentService } from "./environment.js"
 import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
-import { decryptRemotePayload, deriveDeviceSessionKey, encryptRemotePayload, establishDesktopSessionKey, makeRemoteSessionStateRepository, openRemoteTunnel, RemoteSessionService, requestSessionIdForEnvironment, restoreDesktopSessionKey } from "./remote-session.js"
+import {
+  admitSessionReplay,
+  decryptRemotePayload,
+  deriveDeviceSessionKey,
+  encryptRemotePayload,
+  establishDesktopSessionKey,
+  makeRemoteSessionStateRepository,
+  openRemoteTunnel,
+  openSshRemoteTunnel,
+  RemoteSessionService,
+  requestSessionIdForEnvironment,
+  restoreDesktopSessionKey,
+  unwrapSessionCommand,
+  unwrapSessionEventEnvelope,
+  wrapSessionCommand
+} from "./remote-session.js"
 
 const servers: WebSocketServer[] = []
+const temporaryDirectories: string[] = []
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))))
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
 describe("RemoteSessionService envelopes", () => {
+  it("carries typed session commands inside the legacy encrypted command boundary", () => {
+    const typed: SessionCommand = {
+      version: 1,
+      commandId: "command_typed_1",
+      sessionId: "session_typed_1",
+      expectedRevision: 2,
+      controllerGeneration: 3,
+      command: { _tag: "Prompt", text: "hello", attachments: [] }
+    }
+
+    const wrapped = wrapSessionCommand(typed)
+
+    expect(wrapped).toMatchObject({
+      commandId: typed.commandId,
+      sessionId: typed.sessionId,
+      operation: "Session.command"
+    })
+    expect(unwrapSessionCommand(wrapped)).toEqual(typed)
+    expect(unwrapSessionCommand({ ...wrapped, commandId: "command_other_1" })).toBeNull()
+  })
+
+  it("extracts typed event envelopes from legacy remote event payloads", () => {
+    const envelope: SessionEventEnvelope = {
+      version: 1,
+      eventId: "event_typed_1",
+      sessionId: "session_typed_1",
+      sequence: 1,
+      revision: 2,
+      occurredAt: 123,
+      event: { _tag: "Stream", event: { _tag: "Assistant", text: "hello" } }
+    }
+    const remote: RemoteSessionEvent = {
+      version: 1,
+      commandId: "command_typed_1",
+      sessionId: envelope.sessionId,
+      eventSequence: 1,
+      kind: "event",
+      payload: envelope
+    }
+
+    expect(unwrapSessionEventEnvelope(remote)).toEqual(envelope)
+    expect(unwrapSessionEventEnvelope({ ...remote, sessionId: "session_other_1" })).toBeNull()
+    expect(unwrapSessionEventEnvelope({ ...remote, kind: "complete" })).toBeNull()
+  })
+
+  it("admits replay pages through the live event sequence and revision fence", () => {
+    const event = (sequence: number, revision = 4): SessionEventEnvelope => ({
+      version: 1,
+      eventId: `event_replay_${sequence}`,
+      sessionId: "session_replay_1",
+      sequence,
+      revision,
+      occurredAt: sequence,
+      event: { _tag: "Stream", event: { _tag: "Assistant", text: `${sequence}` } }
+    })
+    const replay: SessionReplay = {
+      version: 1,
+      sessionId: "session_replay_1",
+      afterSequence: 2,
+      events: [event(3), event(4)],
+      snapshot: null
+    }
+
+    const admitted = admitSessionReplay(
+      { sequence: 2, revision: 3, eventIds: ["event_replay_2"] },
+      replay
+    )
+
+    expect(admitted).toMatchObject({
+      status: "accepted",
+      cursor: { sequence: 4, revision: 4 },
+      events: replay.events
+    })
+    expect(admitSessionReplay(
+      { sequence: 1, revision: 3, eventIds: [] },
+      replay
+    )).toEqual({ status: "sequence-gap", expectedSequence: 2 })
+  })
+
+  it("uses a replay snapshot as the compacted sequence baseline", () => {
+    const replay: SessionReplay = {
+      version: 1,
+      sessionId: "session_replay_1",
+      afterSequence: 0,
+      snapshot: {
+        version: 1,
+        sessionId: "session_replay_1",
+        revision: 7,
+        throughSequence: 10,
+        status: "idle",
+        messages: []
+      },
+      events: [{
+        version: 1,
+        eventId: "event_replay_11",
+        sessionId: "session_replay_1",
+        sequence: 11,
+        revision: 8,
+        occurredAt: 11,
+        event: { _tag: "StatusChanged", status: "running" }
+      }]
+    }
+
+    expect(admitSessionReplay(
+      { sequence: 3, revision: 2, eventIds: ["event_old_3"] },
+      replay
+    )).toMatchObject({
+      status: "accepted",
+      cursor: { sequence: 11, revision: 8, eventIds: ["event_replay_11"] }
+    })
+  })
+
   it("derives the same key without sending it through the relay", () => {
     const device = generateKeyPairSync("x25519"); const jwk = device.publicKey.export({ format: "jwk" }); if (!jwk.x) throw new Error("missing x")
     const desktop = establishDesktopSessionKey({ subject: "user", deviceId: "buildbox", sessionId: "session", devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: jwk.x } })
@@ -98,6 +237,89 @@ describe("RemoteSessionService envelopes", () => {
       acknowledgedSequence: 0
     }))
     await expect(resumed).resolves.toBe(256)
+    await Effect.runPromise(tunnel.close)
+  })
+  it("coalesces cumulative acknowledgements before sending them to the relay", async () => {
+    const server = new WebSocketServer({ port: 0 })
+    servers.push(server)
+    await once(server, "listening")
+    const address = server.address()
+    if (!address || typeof address === "string") throw new Error("missing relay address")
+    const acknowledgements: number[] = []
+    const received = new Promise<void>((resolve) => {
+      server.once("connection", (socket) => {
+        socket.send(JSON.stringify({ type: "hello", nextSequence: 1, acknowledgedSequence: 0 }))
+        socket.on("message", (raw) => {
+          const message = JSON.parse(raw.toString("utf8"))
+          if (message.type !== "ack") return
+          acknowledgements.push(message.acknowledgement.acknowledgedSequence)
+          resolve()
+        })
+      })
+    })
+    const tunnel = await Effect.runPromise(openRemoteTunnel({
+      relayUrl: `http://127.0.0.1:${address.port}`,
+      grant: "grant_ack_abcdefghijklmnop",
+      sessionId: "session_ack_abcdefgh",
+      endpoint: "desktop",
+      acknowledgedSequence: 0
+    }))
+
+    await Effect.runPromise(Effect.all([
+      tunnel.acknowledge(1),
+      tunnel.acknowledge(2),
+      tunnel.acknowledge(3)
+    ]))
+    await received
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(acknowledgements).toEqual([3])
+    await Effect.runPromise(tunnel.close)
+  })
+  it("opens the shared tunnel protocol through BatchMode SSH", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "jingler-fake-ssh-"))
+    temporaryDirectories.push(directory)
+    const executable = join(directory, "ssh")
+    await writeFile(executable, `#!/usr/bin/env node
+process.stdin.setEncoding("utf8")
+let buffer = ""
+process.stdin.on("data", (chunk) => {
+  buffer += chunk
+  while (buffer.includes("\\n")) {
+    const index = buffer.indexOf("\\n")
+    const line = buffer.slice(0, index)
+    buffer = buffer.slice(index + 1)
+    if (!line) continue
+    const message = JSON.parse(line)
+    if (message.type === "direct-open") process.stdout.write(JSON.stringify({ type: "hello", nextSequence: 1, acknowledgedSequence: 0 }) + "\\n")
+    if (message.type === "envelope") process.stdout.write(JSON.stringify({ type: "envelope-result", status: "inserted", sequence: message.envelope.sequence }) + "\\n")
+  }
+})
+`, { mode: 0o700 })
+    await chmod(executable, 0o700)
+    const pair = generateKeyPairSync("x25519")
+    const publicKey = pair.publicKey.export({ format: "jwk" })
+    if (!publicKey.x) throw new Error("missing direct test key")
+    const established = establishDesktopSessionKey({
+      subject: "user-one",
+      deviceId: "device_direct",
+      sessionId: "session_direct",
+      devicePublicKey: { algorithm: "X25519", encoding: "base64url", value: publicKey.x }
+    })
+    const tunnel = await Effect.runPromise(openSshRemoteTunnel({
+      target: { host: "buildbox" },
+      sessionId: "session_direct",
+      acknowledgedSequence: 0,
+      keyOffer: established.offer,
+      clientInstanceId: "client_direct",
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 1,
+      sshBinary: executable
+    }))
+    await expect(Effect.runPromise(tunnel.nextOutgoingSequence)).resolves.toBe(1)
+    await expect(Effect.runPromise(tunnel.send(
+      encryptRemotePayload(established.key, "session_direct", 1, "desktop", { ok: true })
+    ))).resolves.toBeUndefined()
     await Effect.runPromise(tunnel.close)
   })
   it("restores key inputs sequences cursors and pending command after process restart", async () => {
@@ -194,11 +416,14 @@ describe("RemoteSessionService envelopes", () => {
           version: 1, relayUrl, grant: `grant_${grants}_abcdefghijklmnop`,
           claims: { version: 1, issuer: "jingler", audience: "session-tunnel",
             subject: "user_subject", deviceId: "device_buildbox", sessionId: "session_restart_abcdefgh",
+            clientInstanceId: "client_abcdefghijklmnop", attachmentGeneration: 1,
+            controllerLeaseGeneration: 1,
             deviceGeneration: 1, issuedAt: 1, expiresAt: 9999999999, grantId: `grant_${grants}_abcdefghijklmnop` }
         }
         return Effect.succeed(response)
       },
       discovery: () => Effect.never,
+      directSsh: () => Effect.succeed(null),
       pairSsh: () => Effect.never,
       rename: () => Effect.never,
       revoke: () => Effect.never
@@ -291,9 +516,11 @@ describe("RemoteSessionService envelopes", () => {
         version: 1 as const, relayUrl, grant: "grant_concurrent_abcdefghijklmnop",
         claims: { version: 1 as const, issuer: "jingler" as const, audience: "session-tunnel" as const,
           subject: "user_subject", deviceId: "device_buildbox", sessionId,
+          clientInstanceId: "client_abcdefghijklmnop", attachmentGeneration: 1,
+          controllerLeaseGeneration: 1,
           deviceGeneration: 1, issuedAt: 1, expiresAt: 9999999999, grantId: "grant_concurrent_abcdefghijklmnop" }
       }),
-      discovery: () => Effect.never, pairSsh: () => Effect.never,
+      discovery: () => Effect.never, directSsh: () => Effect.succeed(null), pairSsh: () => Effect.never,
       rename: () => Effect.never, revoke: () => Effect.never
     }
     const services = RemoteSessionService.Default.pipe(Layer.provide(Layer.mergeAll(

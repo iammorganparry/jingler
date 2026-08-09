@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import {
   activateRemoteDevice,
   bootstrapRemoteDevice,
+  installAndEnrollOwnedDevice,
   installAndBootstrapRemoteDevice,
   parseSshHostSuggestions,
   type SpawnResult,
@@ -18,6 +19,22 @@ const pairing = {
   expiresAt: 2_000_000_000
 } as const
 
+const enrollmentCredential = {
+  version: 1,
+  claim: {
+    version: 1,
+    claimId: "claim_test",
+    subject: "user_test",
+    deviceId: "device_test",
+    clientInstanceId: "desktop_test",
+    audience: "device-claim",
+    oneTimeSecret: "s".repeat(32),
+    issuedAt: 1_000,
+    expiresAt: 2_000
+  },
+  token: "opaque.enrollment.token"
+} as const
+
 const runner = (result: SpawnResult, calls: Array<unknown>): SshProcessRunner => ({
   run: async (binary, args, options) => {
     calls.push({ binary, args, options })
@@ -26,6 +43,68 @@ const runner = (result: SpawnResult, calls: Array<unknown>): SshProcessRunner =>
 })
 
 describe("remote agent installation", () => {
+  it("delivers the enrollment credential over SSH stdin without exposing it in argv", async () => {
+    const calls: Array<unknown> = []
+    const results: Array<SpawnResult> = [
+      { exitCode: 0, stdout: "", stderr: "" },
+      {
+        exitCode: 0,
+        stdout: `${JSON.stringify({ version: 1, deviceId: "device_test", displayName: "Build machine" })}\n`,
+        stderr: ""
+      }
+    ]
+    const result = await Effect.runPromise(
+      installAndEnrollOwnedDevice(
+        {
+          host: "buildbox",
+          serverUrl: "https://api.example.test",
+          credential: enrollmentCredential,
+          displayName: "Build machine",
+          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
+        },
+        {
+          run: async (binary, args, options) => {
+            calls.push({ binary, args, options })
+            return results.shift() ?? { exitCode: 1, stdout: "", stderr: "unexpected" }
+          }
+        }
+      )
+    )
+
+    expect(result.deviceId).toBe("device_test")
+    const sshCall = calls[1] as {
+      readonly args: ReadonlyArray<string>
+      readonly options: { readonly stdin?: string }
+    }
+    expect(sshCall.args.join(" ")).toContain("enroll")
+    expect(sshCall.args.join(" ")).toContain("--install-service")
+    expect(sshCall.args.join(" ")).not.toContain(enrollmentCredential.token)
+    expect(sshCall.options.stdin).toBe(`${JSON.stringify(enrollmentCredential)}\n`)
+  })
+
+  it("reports enrollment failures without credential material", async () => {
+    const result = Effect.runPromiseExit(
+      installAndEnrollOwnedDevice(
+        {
+          host: "buildbox",
+          serverUrl: "https://api.example.test",
+          credential: enrollmentCredential,
+          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
+        },
+        {
+          run: async (binary) =>
+            binary === "scp"
+              ? { exitCode: 0, stdout: "", stderr: "" }
+              : { exitCode: 1, stdout: "", stderr: "Device enrollment credential expired" }
+        }
+      )
+    )
+
+    const exit = await result
+    expect(Exit.isFailure(exit) && exit.cause.toString()).toContain("enrollment exchange failed")
+    expect(Exit.isFailure(exit) && exit.cause.toString()).not.toContain(enrollmentCredential.token)
+  })
+
   it("uploads and installs the shipped bundle before pairing", async () => {
     const calls: Array<unknown> = []
     const results: Array<SpawnResult> = [

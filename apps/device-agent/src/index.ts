@@ -1,13 +1,14 @@
 import {
   deviceAgentPaths,
   deviceStatus,
+  enrollOwnedDevice,
   persistEnrollment,
-  registerPendingDevice,
   revokeLocalDevice,
   rotateLocalDeviceKey,
   serveDevice
 } from "./runtime.js"
 import { installDeviceService, removeDeviceService } from "./device-service.js"
+import { createConnection } from "node:net"
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -22,16 +23,54 @@ const print = (value: unknown): void => {
 }
 
 const usage = (): never => {
-  process.stderr.write("Usage: jingler-device <pair|serve|install-service|status|rotate-key|revoke-local> [options]\n")
+  process.stderr.write("Usage: jingler-device <enroll|serve|install-service|status|rotate-key|revoke-local> [options]\n")
   process.exit(2)
+}
+
+const readCredentialStdin = async (): Promise<unknown> => {
+  const chunks: Array<Buffer> = []
+  let length = 0
+  for await (const chunk of process.stdin) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    length += bytes.byteLength
+    if (length > 128 * 1_024) throw new Error("Device enrollment credential is too large")
+    chunks.push(bytes)
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"))
+  } catch {
+    throw new Error("Device enrollment credential is invalid")
+  }
 }
 
 const main = async (): Promise<void> => {
   switch (command) {
-    case "pair": {
-      const relayUrl = option("--relay") ?? process.env.JINGLER_DEVICE_RELAY_URL
-      if (!relayUrl) throw new Error("pair requires --relay or JINGLER_DEVICE_RELAY_URL")
-      print(await registerPendingDevice(relayUrl, deviceAgentPaths(), option("--name")))
+    case "direct-session": {
+      const socket = createConnection(deviceAgentPaths().directSessionSocket)
+      socket.once("connect", () => {
+        process.stdin.pipe(socket)
+        socket.pipe(process.stdout)
+      })
+      await new Promise<void>((resolve, reject) => {
+        socket.once("error", reject)
+        socket.once("close", () => resolve())
+      })
+      return
+    }
+    case "enroll": {
+      const serverUrl = option("--server")
+      if (!serverUrl) throw new Error("enroll requires --server")
+      const result = await enrollOwnedDevice({
+        serverUrl,
+        credential: await readCredentialStdin(),
+        displayName: option("--name")
+      })
+      if (args.includes("--install-service")) {
+        await installDeviceService({
+          ...(process.env.JINGLER_HOME ? { jinglerHome: process.env.JINGLER_HOME } : {})
+        })
+      }
+      print(result)
       return
     }
     case "serve": {

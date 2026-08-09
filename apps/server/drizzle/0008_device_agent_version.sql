@@ -1,0 +1,1 @@
+ALTER TABLE "owned_device" ADD COLUMN "agent_version" text;

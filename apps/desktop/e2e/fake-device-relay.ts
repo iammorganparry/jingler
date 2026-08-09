@@ -24,6 +24,9 @@ type Tunnel = {
   device?: WebSocket
   readonly envelopes: Array<Record<string, unknown>>
   keyOffer?: unknown
+  clientInstanceId?: string
+  attachmentGeneration?: number
+  controllerLeaseGeneration?: number
 }
 
 export interface FakeDeviceRelayOptions {
@@ -70,13 +73,23 @@ const json = (response: ServerResponse, status: number, value: unknown): void =>
 }
 
 const now = () => Math.floor(Date.now() / 1000)
-const claims = (audience: string, sessionId: string | null = null) => ({
+const claims = (
+  audience: string,
+  sessionId: string | null = null,
+  clientInstanceId: string | null = null
+) => ({
   version: 1,
   issuer: "jingler",
   audience,
   subject: SUBJECT,
   deviceId: audience === "device-control" ? null : DEVICE_ID,
   sessionId,
+  clientInstanceId:
+    audience === "session-tunnel" || audience === "device-control"
+      ? (clientInstanceId ?? "client_e2e_abcdefghijkl")
+      : null,
+  attachmentGeneration: audience === "session-tunnel" ? 1 : null,
+  controllerLeaseGeneration: audience === "session-tunnel" ? 1 : null,
   deviceGeneration: audience === "device-control" ? null : 1,
   issuedAt: now(),
   expiresAt: now() + 300,
@@ -95,13 +108,52 @@ export const startFakeDeviceRelay = async (
   let bearerForwarded = false
   let agent: ChildProcess | null = null
   let control: WebSocket | null = null
+  let baseUrl = ""
   const tunnels = new Map<string, Tunnel>()
+
+  const startAgent = (): void => {
+    if (options.spawnAgentOnClaim === false || (agent && agent.exitCode === null)) return
+    mkdirSync(join(options.deviceHome, "jingler"), { recursive: true })
+    agent = spawn(
+      process.execPath,
+      [
+        options.deviceAgentBundle,
+        "serve",
+        "--subject",
+        SUBJECT,
+        "--device-id",
+        DEVICE_ID,
+        "--server",
+        baseUrl
+      ],
+      {
+        env: {
+          ...process.env,
+          HOME: options.deviceHome,
+          JINGLER_HOME: options.deviceHome,
+          JINGLER_DEVICE_RELAY_URL: baseUrl,
+          JINGLER_SCRIPTED_AGENT: "1",
+          JINGLER_E2E: "1",
+          JINGLER_DISCOVERY_BIN_DIR: options.deviceBinDir,
+          PATH: `${options.deviceBinDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
+        },
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    )
+    agent.stderr?.on("data", (chunk) => {
+      if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
+        process.stderr.write(`[device-agent] ${chunk.toString()}`)
+      }
+    })
+  }
 
   const device = () => {
     const effectiveState = forcedState ?? state
     return {
       version: 1,
       deviceId: DEVICE_ID,
+      accountId: SUBJECT,
+      identityFingerprint: "f".repeat(43),
       displayName: registration?.displayName ?? "buildbox",
       platform: registration?.platform ?? { os: "darwin", arch: "arm64" },
       publicKey: registration?.publicKey,
@@ -123,10 +175,13 @@ export const startFakeDeviceRelay = async (
           : null,
       state: "active",
       generation: 1,
+      enrolledAt: now() - 10,
       createdAt: now() - 10,
       updatedAt: now(),
+      revokedAt: null,
       presence: {
         version: 1,
+        deviceId: DEVICE_ID,
         state: effectiveState === "online" ? "online" : "offline",
         connectedAt: effectiveState === "online" ? now() - 5 : null,
         lastSeenAt: now(),
@@ -153,6 +208,52 @@ export const startFakeDeviceRelay = async (
     if (url.pathname === "/api/auth/sign-out" && request.method === "POST")
       return json(response, 200, {})
 
+    if (
+      url.pathname === "/api/devices/enrollment-credentials" &&
+      request.method === "POST"
+    ) {
+      bearerForwarded ||= request.headers.authorization !== `Bearer ${TOKEN}`
+      const body = await readBody(request)
+      return json(response, 201, {
+        version: 1,
+        claim: {
+          version: 1,
+          claimId: "claim_enrollment_abcdefgh",
+          subject: SUBJECT,
+          deviceId: DEVICE_ID,
+          clientInstanceId:
+            typeof body.clientInstanceId === "string"
+              ? body.clientInstanceId
+              : "client_e2e_abcdefghijkl",
+          audience: "device-claim",
+          oneTimeSecret: "s".repeat(32),
+          issuedAt: now(),
+          expiresAt: now() + 300
+        },
+        token: "e2e-enrollment-token"
+      })
+    }
+    if (
+      url.pathname === "/api/devices/enrollments/exchange" &&
+      request.method === "POST"
+    ) {
+      if (request.headers.authorization !== "Bearer e2e-enrollment-token") {
+        return json(response, 401, { error: "invalid enrollment" })
+      }
+      const body = await readBody(request)
+      if (!body.registration || typeof body.registration !== "object") {
+        return json(response, 400, { error: "invalid registration" })
+      }
+      registration = body.registration as unknown as Registration
+      paired = true
+      forcedState = null
+      state = "offline"
+      claimCount += 1
+      startAgent()
+      const { presence: _presence, ...record } = device()
+      return json(response, 201, { version: 1, device: record })
+    }
+
     if (url.pathname === "/v1/pending-devices" && request.method === "POST") {
       registration = (await readBody(request)) as unknown as Registration
       return json(response, 201, {
@@ -176,42 +277,7 @@ export const startFakeDeviceRelay = async (
       // and session creation waits forever.
       state = "offline"
       claimCount += 1
-      mkdirSync(join(options.deviceHome, "jingler"), { recursive: true })
-      if (options.spawnAgentOnClaim !== false)
-        agent = spawn(
-          process.execPath,
-          [
-            options.deviceAgentBundle,
-            "serve",
-            "--subject",
-            SUBJECT,
-            "--device-id",
-            DEVICE_ID,
-            "--server",
-            baseUrl
-          ],
-          {
-            env: {
-              ...process.env,
-              HOME: options.deviceHome,
-              JINGLER_HOME: options.deviceHome,
-              JINGLER_DEVICE_RELAY_URL: baseUrl,
-              JINGLER_SCRIPTED_AGENT: "1",
-              JINGLER_E2E: "1",
-              JINGLER_DISCOVERY_BIN_DIR: options.deviceBinDir,
-              // The fake harness scripts use `#!/usr/bin/env node`; keep the exact
-              // Node running the built agent discoverable without inheriting the
-              // developer's wider PATH (which could expose real coding CLIs).
-              PATH: `${options.deviceBinDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
-            },
-            stdio: ["ignore", "pipe", "pipe"]
-          }
-        )
-      agent?.stderr?.on("data", (chunk) => {
-        if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
-          process.stderr.write(`[device-agent] ${chunk.toString()}`)
-        }
-      })
+      startAgent()
       return json(response, 200, {
         version: 1,
         subject: SUBJECT,
@@ -235,11 +301,24 @@ export const startFakeDeviceRelay = async (
     if (url.pathname === "/api/devices/grants" && request.method === "POST") {
       const body = await readBody(request)
       const sessionId = typeof body.sessionId === "string" ? body.sessionId : null
+      const clientInstanceId =
+        typeof body.clientInstanceId === "string" ? body.clientInstanceId : null
+      if (sessionId) {
+        const tunnel = tunnels.get(sessionId) ?? { envelopes: [] }
+        tunnel.clientInstanceId = clientInstanceId ?? "client_e2e_abcdefghijkl"
+        tunnel.attachmentGeneration =
+          typeof body.attachmentGeneration === "number" ? body.attachmentGeneration : 1
+        tunnel.controllerLeaseGeneration =
+          typeof body.controllerLeaseGeneration === "number"
+            ? body.controllerLeaseGeneration
+            : 1
+        tunnels.set(sessionId, tunnel)
+      }
       return json(response, 200, {
         version: 1,
         relayUrl: baseUrl,
         grant: `session-${sessionId}`,
-        claims: claims("session-tunnel", sessionId)
+        claims: claims("session-tunnel", sessionId, clientInstanceId)
       })
     }
     if (url.pathname === "/api/devices/challenges" && request.method === "POST") {
@@ -281,7 +360,6 @@ export const startFakeDeviceRelay = async (
   })
 
   const sockets = new WebSocketServer({ noServer: true })
-  let baseUrl = ""
   server.on("upgrade", (request, socket, head) => {
     sockets.handleUpgrade(request, socket, head, (websocket) => {
       const url = new URL(request.url ?? "/", baseUrl)
@@ -347,7 +425,11 @@ export const startFakeDeviceRelay = async (
               relayUrl: baseUrl,
               sessionId,
               grant: `device-${sessionId}`,
-              keyOffer: tunnel.keyOffer
+              keyOffer: tunnel.keyOffer,
+              clientInstanceId:
+                tunnel.clientInstanceId ?? "client_e2e_abcdefghijkl",
+              attachmentGeneration: tunnel.attachmentGeneration ?? 1,
+              controllerLeaseGeneration: tunnel.controllerLeaseGeneration ?? 1
             })
           )
         })

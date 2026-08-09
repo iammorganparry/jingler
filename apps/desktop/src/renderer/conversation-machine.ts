@@ -26,6 +26,8 @@ import type {
   ReasoningSetting,
   ReviewPhase,
   Session,
+  SessionEventCursor,
+  SessionEventEnvelope,
   SessionStatus,
   SettledSessionStatus,
   Skill,
@@ -34,6 +36,7 @@ import type {
 } from "@jingler/core"
 import {
   activityOf,
+  admitSessionEvent,
   addPlanComment,
   applyReviewEvent,
   applyStreamEvent,
@@ -59,6 +62,7 @@ import {
   assign,
   fromCallback,
   fromPromise,
+  raise,
   setup,
   spawnChild,
   stopChild
@@ -146,6 +150,8 @@ export interface ConversationContext {
   readonly session: Session
   readonly chatId: string
   readonly messages: ReadonlyArray<Message>
+  /** Ordered remote-event fence; local STREAM_EVENT delivery bypasses it unchanged. */
+  readonly sessionEventCursor: SessionEventCursor
   readonly mode: PermissionMode
   /** Last concrete harness permission mode, retained while Plan is selected. */
   readonly executionMode: ExecutionMode
@@ -322,6 +328,7 @@ type ConversationEvent =
    */
   | { type: "STEER_RESULT"; queued: QueuedMessage; result: SteerResult; auto?: boolean }
   | { type: "STREAM_EVENT"; event: StreamEvent }
+  | { type: "SESSION_EVENT_ENVELOPE"; envelope: SessionEventEnvelope }
   | { type: "PATCH_UPDATED"; patch: string }
   | { type: "FILES_UPDATED"; files: ReadonlyArray<string> }
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
@@ -739,6 +746,15 @@ export const conversationMachine = setup({
     isTerminal: ({ event }) =>
       event.type === "STREAM_EVENT" &&
       (event.event._tag === "Done" || event.event._tag === "Failed"),
+    isAcceptedStreamEnvelope: ({ context, event }) =>
+      event.type === "SESSION_EVENT_ENVELOPE" &&
+      event.envelope.sessionId === context.session.id &&
+      event.envelope.event._tag === "Stream" &&
+      admitSessionEvent(context.sessionEventCursor, event.envelope).status === "accepted",
+    isAcceptedSessionEnvelope: ({ context, event }) =>
+      event.type === "SESSION_EVENT_ENVELOPE" &&
+      event.envelope.sessionId === context.session.id &&
+      admitSessionEvent(context.sessionEventCursor, event.envelope).status === "accepted",
     hasQueued: ({ context }) => context.queued.length > 0,
     /**
      * Ready to start the next queued turn — nothing queued is still in flight.
@@ -808,6 +824,22 @@ export const conversationMachine = setup({
       !context.loadingHistory,
   },
   actions: {
+    admitSessionEnvelope: assign(({ context, event }) => {
+      if (event.type !== "SESSION_EVENT_ENVELOPE") return {}
+      const admission = admitSessionEvent(context.sessionEventCursor, event.envelope)
+      return admission.status === "accepted"
+        ? { sessionEventCursor: admission.cursor }
+        : {}
+    }),
+    raiseSessionStream: raise(({ event }) => {
+      if (
+        event.type !== "SESSION_EVENT_ENVELOPE" ||
+        event.envelope.event._tag !== "Stream"
+      ) {
+        throw new Error("Only stream session envelopes can be folded into a conversation")
+      }
+      return { type: "STREAM_EVENT", event: event.envelope.event.event }
+    }),
     appendTurns: assign(({ context, event }) => {
       if (event.type !== "SEND") return {}
       const text = event.text
@@ -1727,6 +1759,13 @@ export const conversationMachine = setup({
   // fetched out of band, its reply can arrive while the transcript is still
   // loading, and a per-state handler would drop it on the floor.
   on: {
+    SESSION_EVENT_ENVELOPE: [
+      {
+        guard: "isAcceptedStreamEnvelope",
+        actions: ["admitSessionEnvelope", "raiseSessionStream"]
+      },
+      { guard: "isAcceptedSessionEnvelope", actions: "admitSessionEnvelope" }
+    ],
     CATALOG_LOADED: { actions: "applyCatalog" },
     SKILLS_LOADED: { actions: "applySkills" },
     REVIEW_EVENT: { actions: "applyReview" },
@@ -1785,6 +1824,7 @@ export const conversationMachine = setup({
       session: input.session,
       chatId: chat.id,
       messages: [],
+      sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] },
       mode: chat.mode ?? defaultModeFor(input.session.cli),
       executionMode:
         chat.mode && isExecutionMode(chat.mode)

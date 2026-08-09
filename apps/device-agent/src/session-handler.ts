@@ -2,9 +2,16 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import type { EncryptedTunnelEnvelope, RemoteSessionCommand, RemoteSessionEvent } from "@jingler/core"
 
+export interface ControllerExecutionScope {
+  readonly clientInstanceId: string
+  readonly attachmentGeneration: number
+  readonly controllerLeaseGeneration: number
+}
+
 interface PersistedCommand {
   readonly command: RemoteSessionCommand
   readonly receivedSequence?: number
+  readonly controllerScope?: ControllerExecutionScope
   readonly status: "admitted" | "complete" | "failed"
   /** Cleared once ciphertext has been persisted, avoiding duplicate plaintext history. */
   readonly events: ReadonlyArray<RemoteSessionEvent>
@@ -14,6 +21,7 @@ interface PersistedCommand {
 interface Ledger {
   readonly version: 1
   readonly commands: Record<string, PersistedCommand>
+  controllerScope?: ControllerExecutionScope
   transport: {
     readonly nextOutgoingSequence: number
     /** Contiguous desktop commands whose response ciphertext is durable. */
@@ -75,6 +83,14 @@ const terminalRestartEvent = (
 const commandLastOutgoingSequence = (command: PersistedCommand): number | null =>
   command.outgoingEnvelopes?.at(-1)?.sequence ?? null
 
+const sameControllerScope = (
+  left: ControllerExecutionScope | undefined,
+  right: ControllerExecutionScope | undefined
+): boolean =>
+  left?.clientInstanceId === right?.clientInstanceId &&
+  left?.attachmentGeneration === right?.attachmentGeneration &&
+  left?.controllerLeaseGeneration === right?.controllerLeaseGeneration
+
 /** Device-side exactly-once boundary. Admission and response ciphertext precede acknowledgement. */
 export class SessionCommandHandler {
   readonly #file: string
@@ -85,6 +101,7 @@ export class SessionCommandHandler {
   readonly #inFlight = new Map<string, {
     readonly command: RemoteSessionCommand
     readonly receivedSequence?: number
+    readonly controllerScope?: ControllerExecutionScope
     readonly result: Promise<ReadonlyArray<RemoteSessionEvent>>
   }>()
 
@@ -187,6 +204,37 @@ export class SessionCommandHandler {
     ledger.transport = { ...ledger.transport, acknowledgedDesktopSequence: cursor }
   }
 
+  /**
+   * Advances the device's execution fence before a replacement tunnel can
+   * dispatch. The fence is durable so a daemon restart cannot revive an older
+   * controller generation.
+   */
+  adoptControllerScope(scope: ControllerExecutionScope): Promise<void> {
+    return this.#initialize().then(() => this.#withLedger(async (ledger) => {
+      const current = ledger.controllerScope
+      if (current) {
+        if (scope.controllerLeaseGeneration < current.controllerLeaseGeneration) {
+          throw new Error("Stale controller lease generation.")
+        }
+        if (
+          scope.controllerLeaseGeneration === current.controllerLeaseGeneration &&
+          scope.clientInstanceId !== current.clientInstanceId
+        ) {
+          throw new Error("Controller identity changed without a new lease generation.")
+        }
+        if (
+          scope.controllerLeaseGeneration === current.controllerLeaseGeneration &&
+          scope.attachmentGeneration < current.attachmentGeneration
+        ) {
+          throw new Error("Stale client attachment generation.")
+        }
+      }
+      if (sameControllerScope(current, scope)) return
+      ledger.controllerScope = scope
+      await this.#write(ledger)
+    }))
+  }
+
   transportState(): Promise<Ledger["transport"]> {
     return this.#initialize().then(() => this.#withLedger((ledger) => ledger.transport))
   }
@@ -238,14 +286,16 @@ export class SessionCommandHandler {
   handle(
     command: RemoteSessionCommand,
     receivedSequence?: number,
-    onEventPersisted?: PersistedEventCallback
+    onEventPersisted?: PersistedEventCallback,
+    controllerScope?: ControllerExecutionScope
   ): Promise<ReadonlyArray<RemoteSessionEvent>> {
     const active = this.#inFlight.get(command.commandId)
     if (active) {
       const sequence = receivedSequence ?? active.receivedSequence
       if (
         JSON.stringify(active.command) !== JSON.stringify(command) ||
-        (active.receivedSequence !== undefined && sequence !== active.receivedSequence)
+        (active.receivedSequence !== undefined && sequence !== active.receivedSequence) ||
+        !sameControllerScope(active.controllerScope, controllerScope)
       ) {
         return Promise.reject(new Error(`Command ${command.commandId} conflicts with its active admission.`))
       }
@@ -254,11 +304,15 @@ export class SessionCommandHandler {
 
     const result = this.#initialize().then(async () => {
       const admission = await this.#withLedger(async (ledger) => {
+        if (controllerScope && !sameControllerScope(ledger.controllerScope, controllerScope)) {
+          throw new Error("Stale controller execution scope.")
+        }
         const sequence = receivedSequence ?? ledger.transport.highestReceivedDesktopSequence + 1
         const previous = ledger.commands[command.commandId]
         if (previous && (
           JSON.stringify(previous.command) !== JSON.stringify(command) ||
-          (previous.receivedSequence !== undefined && previous.receivedSequence !== sequence)
+          (previous.receivedSequence !== undefined && previous.receivedSequence !== sequence) ||
+          !sameControllerScope(previous.controllerScope, controllerScope)
         )) {
           throw new Error(`Command ${command.commandId} conflicts with its persisted admission.`)
         }
@@ -280,6 +334,7 @@ export class SessionCommandHandler {
         ledger.commands[command.commandId] = {
           command,
           receivedSequence: sequence,
+          controllerScope,
           status: "admitted",
           events: []
         }
@@ -319,7 +374,12 @@ export class SessionCommandHandler {
       return events
     })
 
-    this.#inFlight.set(command.commandId, { command, receivedSequence, result })
+    this.#inFlight.set(command.commandId, {
+      command,
+      receivedSequence,
+      controllerScope,
+      result
+    })
     result.finally(() => {
       if (this.#inFlight.get(command.commandId)?.result === result) {
         this.#inFlight.delete(command.commandId)
@@ -352,6 +412,16 @@ export class SessionCommandHandler {
       await this.#write(ledger)
       return outgoingEnvelopes
     }))
+  }
+
+  /** Returns durable ciphertext for reconnect replay without re-encrypting plaintext events. */
+  pendingOutgoingEnvelopes(afterSequence: number): Promise<ReadonlyArray<EncryptedTunnelEnvelope>> {
+    return this.#initialize().then(() => this.#withLedger((ledger) =>
+      Object.values(ledger.commands)
+        .flatMap((command) => command.outgoingEnvelopes ?? [])
+        .filter((envelope) => envelope.sequence > afterSequence)
+        .sort((left, right) => left.sequence - right.sequence)
+    ))
   }
 
   /** Prunes only responses the relay confirms the desktop has consumed. */

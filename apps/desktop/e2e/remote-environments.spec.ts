@@ -32,10 +32,10 @@ const openDevices = async (window: Page): Promise<void> => {
   await expect(window.getByRole("heading", { name: "Devices" })).toBeVisible()
 }
 
-const pairBuildbox = async (app: LaunchedApp): Promise<void> => {
+const enrollBuildbox = async (app: LaunchedApp): Promise<void> => {
   await expect(appShell(app.window)).toBeVisible()
   await openDevices(app.window)
-  await app.window.getByRole("button", { name: "Add environment" }).click()
+  await app.window.getByRole("button", { name: "Add owned machine" }).click()
   await expect(app.window.getByRole("button", { name: /Remote link/i })).toHaveCount(0)
   await expect(app.window.getByLabel("SSH host or alias")).toBeVisible()
   await expect(app.window.getByText("buildbox", { exact: true })).toBeVisible()
@@ -68,9 +68,9 @@ const createRemoteSession = async (window: Page, title: string): Promise<string>
   return testId.slice("session-row-".length)
 }
 
-test("pairs buildbox through SSH without a remote Jingler login", async ({ launchApp }) => {
+test("enrolls an account-owned buildbox through SSH without sharing codes", async ({ launchApp }) => {
   const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true })
-  await pairBuildbox(app)
+  await enrollBuildbox(app)
   expect(app.deviceRelay?.sshClaims()).toBe(1)
   expect(app.deviceRelay?.desktopBearerForwarded()).toBe(false)
   const sshArgv = readFileSync(join(app.home, "ssh-invocations.jsonl"), "utf8")
@@ -80,22 +80,22 @@ test("pairs buildbox through SSH without a remote Jingler login", async ({ launc
   expect(sshArgv).not.toContain('"-p"')
 })
 
-test("selects a paired environment from the composer and reflects it in the sidebar", async ({ launchApp }) => {
+test("selects an account-owned environment from the composer and reflects it in the sidebar", async ({ launchApp }) => {
   const app = await launchApp({
     configured: true,
     withRepo: true,
     remoteEnvironment: true,
     sessions: ({ repoPath }) => [localSession(repoPath)]
   })
-  await pairBuildbox(app)
+  await enrollBuildbox(app)
   await selectComposerEnvironment(app.window)
   await expect(app.window.getByTestId("session-environment-session_local_abcdefgh")).toHaveText("buildbox")
   await expect(app.window.getByRole("button", { name: "Execution environment" })).toContainText("buildbox")
 })
 
-test("creates and runs a session on a paired environment", async ({ launchApp }) => {
+test("creates and runs a session on an account-owned environment", async ({ launchApp }) => {
   const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true })
-  await pairBuildbox(app)
+  await enrollBuildbox(app)
   const sessionId = await createRemoteSession(app.window, "Remote scripted task")
   const composer = app.window.getByPlaceholder("Message Claude…")
   await composer.fill("Reply from buildbox")
@@ -111,7 +111,7 @@ test("prevents changing environment during an active turn", async ({ launchApp }
     remoteEnvironment: true,
     sessions: ({ repoPath }) => [localSession(repoPath)]
   })
-  await pairBuildbox(app)
+  await enrollBuildbox(app)
   const composer = app.window.getByPlaceholder("Message Claude…")
   await composer.fill("Hold the environment while this runs")
   await composer.press("Enter")
@@ -126,7 +126,7 @@ test("continues an existing session on another environment without mutating the 
     remoteEnvironment: true,
     sessions: ({ repoPath }) => [localSession(repoPath, { diff: { added: 1, removed: 0 }, tokens: 10 })]
   })
-  await pairBuildbox(app)
+  await enrollBuildbox(app)
   await selectComposerEnvironment(app.window)
   await expect(app.window.getByRole("alert")).toContainText("Continue it as a new session")
   await app.window.getByRole("button", { name: "Continue there" }).click()
@@ -137,7 +137,7 @@ test("continues an existing session on another environment without mutating the 
 
 test("resumes a remote turn after relay interruption without duplicate execution", async ({ launchApp }) => {
   const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true })
-  await pairBuildbox(app)
+  await enrollBuildbox(app)
   const sessionId = await createRemoteSession(app.window, "Reconnect exactly once")
   const composer = app.window.getByPlaceholder("Message Claude…")
   await composer.fill("Complete once after reconnect")
@@ -148,9 +148,9 @@ test("resumes a remote turn after relay interruption without duplicate execution
   expect(app.deviceRelay?.commandAdmissions(sessionId, "Agent.run")).toBe(1)
 })
 
-test("shows offline and incompatible paired environments", async ({ launchApp }) => {
+test("shows offline and incompatible account-owned environments", async ({ launchApp }) => {
   const app = await launchApp({ configured: true, withRepo: true, remoteEnvironment: true })
-  await pairBuildbox(app)
+  await enrollBuildbox(app)
   app.deviceRelay?.setDeviceState("offline")
   await openDevices(app.window)
   await app.window.getByRole("button", { name: "Refresh" }).click()
@@ -160,18 +160,18 @@ test("shows offline and incompatible paired environments", async ({ launchApp })
   await expect(app.window.getByText("incompatible", { exact: true })).toBeVisible()
 })
 
-test("revokes a paired environment while preserving local sessions", async ({ launchApp }) => {
+test("revokes an account-owned environment while preserving local sessions", async ({ launchApp }) => {
   const app = await launchApp({
     configured: true,
     withRepo: true,
     remoteEnvironment: true,
     sessions: ({ repoPath }) => [localSession(repoPath)]
   })
-  await pairBuildbox(app)
+  await enrollBuildbox(app)
   await openDevices(app.window)
   app.window.once("dialog", (dialog) => dialog.accept())
   await app.window.getByRole("button", { name: "Revoke" }).click()
-  await expect(app.window.getByText("No paired devices yet.")).toBeVisible()
+  await expect(app.window.getByText("No owned machines yet.")).toBeVisible()
   await app.window.getByRole("button", { name: "Close settings" }).click()
   await expect(sessionRow(app.window, "Local session")).toBeVisible()
   await app.window.getByRole("button", { name: "Execution environment" }).click()

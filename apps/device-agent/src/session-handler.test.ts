@@ -246,6 +246,40 @@ describe("device session command handler", () => {
     await expect(handler.handle(command("delete"), 1)).rejects.toThrow("conflicts with its persisted admission")
   })
 
+  it("durably rejects commands from a stale controller generation", async () => {
+    const file = join(root, "ledger.json")
+    const execute = vi.fn(async () => "ok")
+    const firstScope = {
+      clientInstanceId: "client_first_abcdefgh",
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 1
+    }
+    const takeoverScope = {
+      clientInstanceId: "client_takeover_abcdefgh",
+      attachmentGeneration: 1,
+      controllerLeaseGeneration: 2
+    }
+    const handler = new SessionCommandHandler(file, { execute })
+    await handler.adoptControllerScope(firstScope)
+    await handler.handle(command("run", "command_first"), 1, undefined, firstScope)
+    await handler.adoptControllerScope(takeoverScope)
+    await expect(
+      handler.handle(command("delete", "command_delayed"), 2, undefined, firstScope)
+    ).rejects.toThrow("Stale controller execution scope")
+
+    const restarted = new SessionCommandHandler(file, { execute })
+    await expect(restarted.adoptControllerScope(firstScope)).rejects.toThrow(
+      "Stale controller lease generation"
+    )
+    await restarted.handle(
+      command("delete", "command_takeover"),
+      2,
+      undefined,
+      takeoverScope
+    )
+    expect(execute).toHaveBeenCalledTimes(2)
+  })
+
   it("rejects a sequence gap without advancing persisted cursors", async () => {
     const handler = new SessionCommandHandler(join(root, "ledger.json"), { execute: async () => "ok" })
     await expect(handler.handle(command(), 2)).rejects.toThrow("expected 1")

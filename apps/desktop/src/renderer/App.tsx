@@ -1385,7 +1385,7 @@ function AuthedApp({
             state: String(environmentController.snapshot.value) as
               | "discovering"
               | "configuring"
-              | "claiming"
+              | "enrolling"
               | "connected"
               | "failed",
             values: {

@@ -50,6 +50,20 @@
       "when": 1785949062667,
       "tag": "0006_github_route_generations",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786261752827,
+      "tag": "0007_account_owned_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786261864323,
+      "tag": "0008_device_agent_version",
+      "breakpoints": true
     }
   ]
 }

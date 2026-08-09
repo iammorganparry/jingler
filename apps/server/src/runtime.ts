@@ -13,12 +13,14 @@ import { PersonalAccessTokenRepository } from "./db/repositories/personal-access
 import { GitHubConnectionRepository } from "./db/repositories/github-connection-repository.js"
 import { GitHubSessionRouteRepository } from "./db/repositories/github-session-route-repository.js"
 import { UserRepository } from "./db/repositories/user-repository.js"
+import { DeviceRepository } from "./db/repositories/device-repository.js"
 
 const AppLayer = Layer.mergeAll(
   UserRepository.Default,
   PersonalAccessTokenRepository.Default,
   GitHubConnectionRepository.Default,
-  GitHubSessionRouteRepository.Default
+  GitHubSessionRouteRepository.Default,
+  DeviceRepository.Default
 ).pipe(Layer.provideMerge(Database.Default))
 
 export const runtime = ManagedRuntime.make(AppLayer)

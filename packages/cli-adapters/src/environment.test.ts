@@ -1,10 +1,17 @@
-import type { PendingDeviceRegistrationResponse, RemoteDevice } from "@jingler/core"
+import type {
+  AccountDevice,
+  DeviceEnrollmentCredentialResponse,
+  PendingDeviceRegistrationResponse,
+  RemoteDevice
+} from "@jingler/core"
 import { Effect, Layer } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { EnvironmentService, environmentFromRemoteDevice } from "./environment.js"
 import {
   type ActivateRemoteDeviceInput,
   type BootstrapSshInput,
+  type EnrolledOwnedDevice,
+  type InstallAndEnrollOwnedDeviceInput,
   type InstallAndBootstrapSshInput,
   RemoteBootstrapService,
   SshBootstrapError
@@ -49,6 +56,47 @@ const pending = {
   expiresAt: 2_000_000_000
 } as const
 
+const accountDevice: AccountDevice = {
+  version: 1,
+  deviceId: device.deviceId,
+  accountId: "user-one",
+  identityFingerprint: "F".repeat(43),
+  displayName: device.displayName,
+  platform: device.platform,
+  publicKey: device.publicKey,
+  capabilities: device.capabilities,
+  state: "active",
+  generation: device.generation,
+  enrolledAt: 100,
+  createdAt: 100,
+  updatedAt: 200,
+  revokedAt: null,
+  presence: {
+    version: 1,
+    deviceId: device.deviceId,
+    state: "online",
+    connectedAt: 150,
+    lastSeenAt: 200,
+    activeSessionIds: []
+  }
+}
+
+const enrollmentCredential: DeviceEnrollmentCredentialResponse = {
+  version: 1,
+  claim: {
+    version: 1,
+    claimId: "claim_abcdefghijklmnop",
+    subject: "user-one",
+    deviceId: device.deviceId,
+    clientInstanceId: "client_abcdefghijklmnop",
+    audience: "device-claim",
+    oneTimeSecret: "S".repeat(32),
+    issuedAt: 100,
+    expiresAt: 200
+  },
+  token: "signed-enrollment-token"
+}
+
 const environmentLayer = (bootstrap: {
   readonly bootstrap: (
     input: BootstrapSshInput
@@ -57,6 +105,9 @@ const environmentLayer = (bootstrap: {
     input: InstallAndBootstrapSshInput
   ) => Effect.Effect<PendingDeviceRegistrationResponse, SshBootstrapError>
   readonly activate?: (input: ActivateRemoteDeviceInput) => Effect.Effect<void, SshBootstrapError>
+  readonly installAndEnroll?: (
+    input: InstallAndEnrollOwnedDeviceInput
+  ) => Effect.Effect<EnrolledOwnedDevice, SshBootstrapError>
 }) =>
   EnvironmentService.Default.pipe(
     Layer.provide(
@@ -64,6 +115,12 @@ const environmentLayer = (bootstrap: {
         _tag: "@jingler/RemoteBootstrapService",
         discoverHosts: () => Effect.succeed([]),
         activate: () => Effect.void,
+        installAndEnroll: () =>
+          Effect.succeed({
+            version: 1,
+            deviceId: device.deviceId,
+            displayName: device.displayName
+          }),
         ...bootstrap
       })
     ),
@@ -110,7 +167,7 @@ describe("environment device API", () => {
     const urls: Array<string> = []
     vi.stubGlobal("fetch", async (input: string | URL | Request) => {
       urls.push(String(input))
-      return Response.json({ version: 1, devices: [device] })
+      return Response.json({ version: 1, devices: [accountDevice] })
     })
     process.env.JINGLER_AUTH_URL = "https://server.test"
     const layer = environmentLayer({
@@ -126,35 +183,29 @@ describe("environment device API", () => {
     expect(environments.map((environment) => environment.id)).toStrictEqual([device.deviceId])
   })
 
-  it("installs the packaged agent when the remote binary is missing", async () => {
-    const bootstrapCalls: Array<unknown> = []
-    const installCalls: Array<unknown> = []
-    const activateCalls: Array<unknown> = []
+  it("enrolls an owned machine with an invisible account credential", async () => {
+    const installCalls: Array<InstallAndEnrollOwnedDeviceInput> = []
     vi.stubGlobal("fetch", async (input: string | URL | Request) => {
-      expect(String(input)).toBe("https://server.test/api/devices/pairing/claim")
-      return Response.json({ version: 1, subject: "user-one", device })
+      const url = String(input)
+      if (url.endsWith("/enrollment-credentials")) {
+        return Response.json(enrollmentCredential, { status: 201 })
+      }
+      expect(url).toBe("https://server.test/api/devices")
+      return Response.json({ version: 1, devices: [accountDevice] })
     })
     process.env.JINGLER_AUTH_URL = "https://server.test"
-    process.env.JINGLER_DEVICE_RELAY_URL = "https://relay.test"
     process.env.JINGLER_DEVICE_AGENT_BUNDLE =
       "/Applications/Jingler.app/Contents/Resources/device-agent/jingler-device.mjs"
     const layer = environmentLayer({
-      bootstrap: (input) => {
-        bootstrapCalls.push(input)
-        return Effect.fail(
-          new SshBootstrapError({
-            kind: "incompatible",
-            message: "The remote Jingler device agent is missing or incompatible"
-          })
-        )
-      },
-      installAndBootstrap: (input) => {
+      bootstrap: () => Effect.succeed(pending),
+      installAndBootstrap: () => Effect.succeed(pending),
+      installAndEnroll: (input) => {
         installCalls.push(input)
-        return Effect.succeed(pending)
-      },
-      activate: (input) => {
-        activateCalls.push(input)
-        return Effect.void
+        return Effect.succeed({
+          version: 1,
+          deviceId: device.deviceId,
+          displayName: device.displayName
+        })
       }
     })
 
@@ -166,51 +217,40 @@ describe("environment device API", () => {
       }).pipe(Effect.provide(layer))
     )
 
-    expect(bootstrapCalls).toStrictEqual([
-      {
-        host: "buildbox",
-        username: "morgan",
-        port: 22,
-        relayUrl: "https://relay.test"
-      }
-    ])
-    expect(installCalls).toStrictEqual([
-      {
-        host: "buildbox",
-        username: "morgan",
-        port: 22,
-        relayUrl: "https://relay.test",
-        agentBundlePath:
-          "/Applications/Jingler.app/Contents/Resources/device-agent/jingler-device.mjs"
-      }
-    ])
-    expect(activateCalls).toStrictEqual([
-      {
-        host: "buildbox",
-        username: "morgan",
-        port: 22,
-        relayUrl: "https://relay.test",
-        subject: "user-one",
-        deviceId: device.deviceId,
-        serverUrl: "https://server.test"
-      }
-    ])
+    expect(installCalls).toHaveLength(1)
+    expect(installCalls[0]).toMatchObject({
+      host: "buildbox",
+      username: "morgan",
+      port: 22,
+      serverUrl: "https://server.test",
+      credential: enrollmentCredential,
+      agentBundlePath:
+        "/Applications/Jingler.app/Contents/Resources/device-agent/jingler-device.mjs"
+    })
     expect(environment.id).toBe(device.deviceId)
   })
 
-  it("uses an already-installed compatible agent without uploading", async () => {
-    const install = vi.fn(() => Effect.succeed(pending))
-    vi.stubGlobal("fetch", async () => Response.json({ version: 1, subject: "user-one", device }))
+  it("fails before SSH when the packaged agent is unavailable", async () => {
+    const install = vi.fn(() =>
+      Effect.succeed({
+        version: 1 as const,
+        deviceId: device.deviceId,
+        displayName: device.displayName
+      })
+    )
+    vi.stubGlobal("fetch", async () => Response.json(enrollmentCredential))
     process.env.JINGLER_AUTH_URL = "https://server.test"
-    process.env.JINGLER_DEVICE_AGENT_BUNDLE = "/bundle/jingler-device.mjs"
     const layer = environmentLayer({
       bootstrap: () => Effect.succeed(pending),
-      installAndBootstrap: install
+      installAndBootstrap: () => Effect.succeed(pending),
+      installAndEnroll: install
     })
 
-    await Effect.runPromise(
-      EnvironmentService.pairSsh({ host: "buildbox" }).pipe(Effect.provide(layer))
-    )
+    await expect(
+      Effect.runPromise(
+        EnvironmentService.pairSsh({ host: "buildbox" }).pipe(Effect.provide(layer))
+      )
+    ).rejects.toMatchObject({ message: "The device agent bundle is unavailable." })
 
     expect(install).not.toHaveBeenCalled()
   })

@@ -1,4 +1,11 @@
-import type { Message, Plan, PlanDocument, Session, StreamEvent } from "@jingler/core"
+import type {
+  Message,
+  Plan,
+  PlanDocument,
+  Session,
+  SessionEventEnvelope,
+  StreamEvent
+} from "@jingler/core"
 import {
   applyStreamEvent,
   assistantMessage,
@@ -218,6 +225,19 @@ const session = {
 
 const emit = (event: StreamEvent) => h.streamCb?.(event)
 const start = () => createActor(conversationMachine, { input: { session } }).start()
+const remoteEnvelope = (
+  sequence: number,
+  event: StreamEvent,
+  eventId = `event_remote_${sequence}`
+): SessionEventEnvelope => ({
+  version: 1,
+  eventId,
+  sessionId: session.id,
+  sequence,
+  revision: 1,
+  occurredAt: 1,
+  event: { _tag: "Stream", event }
+})
 /**
  * The id of the nth queued message, read off the live snapshot — exactly what the
  * view does. Queue actions address a message by id, never by position: the queue
@@ -261,6 +281,68 @@ beforeEach(() => {
   h.reviewCb = null
   h.reasoningCalls.length = 0
   h.resumeCalls.length = 0
+})
+
+describe("conversationMachine — remote session envelopes", () => {
+  it("folds admitted stream envelopes through the existing conversation reducer", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "run remotely" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: remoteEnvelope(1, { _tag: "Assistant", text: "remote output" })
+    })
+
+    const context = actor.getSnapshot().context
+    expect(context.sessionEventCursor).toMatchObject({ sequence: 1, revision: 1 })
+    expect(context.messages.at(-1)?.parts).toContainEqual({
+      _tag: "Text",
+      text: "remote output"
+    })
+    actor.stop()
+  })
+
+  it("ignores duplicate and out-of-order envelopes without changing local delivery", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "run remotely" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    const first = remoteEnvelope(1, { _tag: "Assistant", text: "once" })
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: first })
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: first })
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: remoteEnvelope(3, { _tag: "Assistant", text: "gap" })
+    })
+    emit({ _tag: "Assistant", text: " local" })
+
+    const text = actor.getSnapshot().context.messages.at(-1)?.parts
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("")
+    expect(text).toBe("once local")
+    expect(actor.getSnapshot().context.sessionEventCursor.sequence).toBe(1)
+    actor.stop()
+  })
+
+  it("settles a remote terminal stream event through the normal state transition", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "run remotely" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: remoteEnvelope(1, { _tag: "Done", costUsd: 0, tokens: 10 })
+    })
+
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(actor.getSnapshot().context.lastOutcome).toBe("done")
+    actor.stop()
+  })
 })
 
 describe("conversationMachine — context size", () => {
