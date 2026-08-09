@@ -441,6 +441,10 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
+  const modelCapabilitiesQuery = useQuery({
+    queryKey: ["model-capabilities"],
+    queryFn: () => rpc.modelsCapabilities(),
+  });
   const usageQuery = useQuery({
     queryKey: ["usage"],
     queryFn: () => rpc.usageGet(),
@@ -1294,6 +1298,7 @@ function AuthedApp({
       )}
       <JinglerApp
         clis={clis}
+        modelCapabilities={modelCapabilitiesQuery.data ?? []}
         tabContributions={pluginTabs}
         paneContributions={pluginPanes}
         pluginCommands={pluginCommands}

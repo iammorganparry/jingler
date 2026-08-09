@@ -1,4 +1,4 @@
-import type { CreateSessionInput, Project } from "@jingler/core"
+import type { CreateSessionInput, HarnessCapability, Project } from "@jingler/core"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
 import { newWorkspaceMachine } from "./new-workspace-machine.js"
@@ -8,6 +8,18 @@ const projects: ReadonlyArray<Project> = [
   { id: "p-remote", environmentId: "device-1", name: "remote", path: "/repos/remote", availability: "available", createdAt: "now", updatedAt: "now" }
 ]
 
+const capabilities: ReadonlyArray<HarnessCapability> = [
+  {
+    cli: "codex",
+    label: "Codex CLI",
+    modes: [{ id: "auto", label: "Auto", kind: "execute" }],
+    models: [
+      { id: "gpt-5.6-sol", label: "gpt-5.6-sol" },
+      { id: "gpt-5.6-luna", label: "gpt-5.6-luna" }
+    ]
+  }
+]
+
 const actorFor = (
   onCreate: (input: CreateSessionInput) => Promise<void> = vi.fn(async () => undefined)
 ) => createActor(newWorkspaceMachine, {
@@ -15,7 +27,9 @@ const actorFor = (
     getDeps: () => ({
       projects,
       clis: [{ kind: "codex", label: "Codex", available: true, binPath: "/bin/codex", version: null, authStatus: "authenticated" }],
+      capabilities,
       defaultCli: "codex",
+      defaultModel: "gpt-5.6-sol",
       prepareProject: async (projectId, environmentId) => {
         const project = projects.find((candidate) => candidate.id === projectId)!
         return environmentId === undefined
@@ -86,8 +100,24 @@ describe("newWorkspaceMachine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("closed"))
 
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
-      initialPrompt: "Refine the empty-state transitions"
+      initialPrompt: "Refine the empty-state transitions",
+      model: "gpt-5.6-sol"
     }))
     expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("title")
+  })
+
+  it("persists an explicitly selected harness model", async () => {
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-luna" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      cli: "codex",
+      model: "gpt-5.6-luna"
+    }))
   })
 })

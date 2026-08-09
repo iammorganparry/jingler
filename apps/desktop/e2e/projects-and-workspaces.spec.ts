@@ -39,13 +39,18 @@ const addProject = async (window: Page, projectPath: string) => {
 
 const createWorkspace = async (
   window: Page,
-  input: { checkout: "Host checkout" | "New worktree"; task?: string }
+  input: { checkout: "Local" | "Worktree"; task?: string; baseBranch?: string }
 ) => {
   if (!(await window.getByTestId("new-session-view").isVisible())) {
     await window.getByTestId("new-session").click()
   }
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
-  await window.getByRole("combobox", { name: "Checkout" }).click()
+  if (input.baseBranch) {
+    await window.getByRole("button", { name: "Base branch" }).click()
+    await window.getByPlaceholder("Search branches…").fill(input.baseBranch)
+    await window.getByRole("option", { name: new RegExp(input.baseBranch) }).click()
+  }
+  await window.getByRole("button", { name: "Checkout" }).click()
   await window.getByRole("option", { name: input.checkout }).click()
   if (input.task) {
     await window.getByPlaceholder(/Message the agent/).fill(input.task)
@@ -65,7 +70,7 @@ test("adds an existing directory as a project without creating a workspace", asy
   await expect(launched.window.getByTestId("project-list")).toHaveCount(0)
   await expect(launched.window.getByTestId("new-session-view")).toBeVisible()
   await expect(launched.window.getByRole("dialog")).toHaveCount(0)
-  await expect(launched.window.getByRole("combobox", { name: "Project" })).toContainText("sample-project")
+  await expect(launched.window.getByRole("button", { name: "Project", exact: true })).toContainText("sample-project")
   await expect(launched.window.getByTestId("composer")).toBeVisible()
   await launched.window.getByRole("button", { name: "Close new session" }).click()
   const projects = JSON.parse(readFileSync(join(launched.home, "jingler", "projects.json"), "utf8"))
@@ -88,7 +93,7 @@ test("Browse opens the native file browser and registers its selected repository
   await expect(launched.window.getByRole("textbox", { name: "Project directory" })).toHaveValue(projectPath)
   await launched.window.getByRole("button", { name: "Add project" }).click()
 
-  await expect(launched.window.getByRole("combobox", { name: "Project" })).toContainText("native-browse-project")
+  await expect(launched.window.getByRole("button", { name: "Project", exact: true })).toContainText("native-browse-project")
 })
 
 test("Clone from GitHub loads installation repositories and clones with GitHub credentials", async ({ launchApp }) => {
@@ -122,7 +127,7 @@ test("Clone from GitHub loads installation repositories and clones with GitHub c
     await expect(launched.window.getByText(join(cloneParent, "widget"))).toBeVisible()
     await launched.window.getByRole("button", { name: "Clone project" }).click()
 
-    await expect(launched.window.getByRole("combobox", { name: "Project" })).toContainText("widget")
+    await expect(launched.window.getByRole("button", { name: "Project", exact: true })).toContainText("widget")
     expect(existsSync(join(cloneParent, "widget", ".git"))).toBe(true)
     expect(launched.githubServer.credentialRequests).toContainEqual({
       repository: "acme/widget",
@@ -139,7 +144,7 @@ test("creates a direct workspace from a registered project", async ({ launchApp 
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
   await createWorkspace(launched.window, {
-    checkout: "Host checkout"
+    checkout: "Local"
   })
 
   const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
@@ -157,15 +162,17 @@ test("creates a direct workspace from a registered project", async ({ launchApp 
 test("creates an isolated worktree workspace from a selected base branch", async ({ launchApp }) => {
   const launched = await launchApp({ configured: true })
   const projectPath = makeProject(launched.home, "isolated-project")
+  execFileSync("git", ["branch", "release/searchable"], { cwd: projectPath })
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
   await createWorkspace(launched.window, {
-    checkout: "New worktree"
+    checkout: "Worktree",
+    baseBranch: "release/searchable"
   })
 
   const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
   expect(persisted.workspaceMode).toBe("worktree")
-  expect(persisted.baseBranch).toBe("main")
+  expect(persisted.baseBranch).toBe("release/searchable")
   expect(persisted.worktreePath).not.toBe(projectPath)
   expect(existsSync(persisted.worktreePath)).toBe(true)
 })
@@ -215,10 +222,19 @@ test("adds a project creates a workspace selects capabilities and completes an e
   const projectPath = makeProject(launched.home, "journey-project")
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
+  await launched.window.getByRole("button", { name: /^Model:/ }).click()
+  await expect(launched.window.getByRole("option", { name: /^Claude Code\b/ })).toBeVisible()
+  await launched.window.getByRole("option", { name: /^Codex CLI\b/ }).click()
+  await launched.window.getByRole("option", { name: /^GPT-5\.6 Luna\b/ }).click()
   await createWorkspace(launched.window, {
-    checkout: "New worktree",
+    checkout: "Worktree",
     task: "[[plan]] refactor auth to a TokenStore"
   })
+
+  await expect.poll(() => {
+    const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
+    return persisted.chats[0].model
+  }).toBe("gpt-5.6-luna")
 
   await expect(launched.window.getByRole("button", { name: /^Model:/ })).toBeVisible()
   await launched.window.getByPlaceholder(/Message .+…/).press("Enter")

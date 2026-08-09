@@ -19,6 +19,7 @@ import type {
   DiffStat,
   Environment,
   EnvironmentDiscovery,
+  HarnessCapability,
   ModelOption,
   SessionPrStatus,
   ProviderConfig,
@@ -32,7 +33,7 @@ import type {
   Usage,
   User,
 } from "@jingler/core"
-import { UNTITLED_SESSION } from "@jingler/core"
+import { newSessionCli, UNTITLED_SESSION } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
 import { AddProjectDialog } from "../composites/add-project-dialog.js"
@@ -113,6 +114,8 @@ const GITHUB_DISCONNECTED: GitHubConnection = {
 
 export interface JinglerAppProps {
   clis: ReadonlyArray<CliInfo>
+  /** Live harness, model, mode, and reasoning options for the shared composer. */
+  modelCapabilities?: ReadonlyArray<HarnessCapability>
   /**
    * The harness new sessions start on (Settings · Providers). The New Session
    * dialog reads it instead of asking; absent falls back to the first installed.
@@ -390,6 +393,7 @@ const noBranches = async (): Promise<ReadonlyArray<string>> => []
  */
 export function JinglerApp({
   clis,
+  modelCapabilities = [],
   defaultCli,
   onSaveDefaultCli,
   sessions,
@@ -1003,6 +1007,7 @@ export function JinglerApp({
     },
     [onCreateSession, setSelected]
   )
+  const initialNewSessionCli = newSessionCli(clis, defaultCli)
 
   return (
     // No layout picker in the title bar any more: the shape of the split is a
@@ -1114,9 +1119,15 @@ export function JinglerApp({
               }
               projects={projects}
               environments={environments}
+              capabilities={modelCapabilities}
               defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
               clis={clis}
               defaultCli={defaultCli}
+              defaultModel={
+                initialNewSessionCli === null
+                  ? null
+                  : providersConfig?.[initialNewSessionCli]?.defaultModel
+              }
               loadBranches={loadBranches}
               prepareProject={async (projectId, environmentId) => {
                 const project = projects.find((candidate) => candidate.id === projectId)

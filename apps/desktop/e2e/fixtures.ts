@@ -120,8 +120,8 @@ export const createWorkspace = async (
   await window.getByTestId("new-session").click()
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
   if (checkout === "direct") {
-    await window.getByRole("combobox", { name: "Checkout" }).click()
-    await window.getByRole("option", { name: "Host checkout" }).click()
+    await window.getByRole("button", { name: "Checkout" }).click()
+    await window.getByRole("option", { name: "Local" }).click()
   }
   const create = window.getByRole("button", { name: "Create workspace" })
   await expect(create).toBeEnabled()

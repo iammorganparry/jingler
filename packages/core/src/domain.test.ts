@@ -520,11 +520,13 @@ describe("CreateSessionInput", () => {
       repoName: "trigify-app",
       title: "Refactor auth",
       cli: "codex",
+      model: "gpt-5.6-sol",
       baseBranch: "main"
     })
     expect(Either.isRight(result)).toBe(true)
     if (Either.isRight(result))
       expect(result.right.useWorktree ?? true).toBe(true)
+    if (Either.isRight(result)) expect(result.right.model).toBe("gpt-5.6-sol")
   })
 
   it("decodes an explicit direct-checkout request", () => {

@@ -1,5 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CreateSessionInput, Environment, GitHubCloneRepository, Project, Session, SessionActivity } from "@jingler/core"
+import type {
+  CreateSessionInput,
+  Environment,
+  GitHubCloneRepository,
+  HarnessCapability,
+  Project,
+  Session,
+  SessionActivity
+} from "@jingler/core"
 import { useRef, useState } from "react"
 import { expect, fireEvent, fn, userEvent, waitFor, within } from "storybook/test"
 import { SessionConversation } from "../screens/session-conversation.js"
@@ -102,6 +110,27 @@ const clis = [
     binPath: "/usr/local/bin/codex",
     version: "0.144.1",
     available: true
+  }
+]
+
+const CAPABILITIES: ReadonlyArray<HarnessCapability> = [
+  {
+    cli: "claude",
+    label: "Claude Code",
+    modes: [{ id: "ask", label: "Ask", kind: "execute" }],
+    models: [
+      { id: "opus", label: "Opus 5", description: "Deep reasoning" },
+      { id: "haiku", label: "Haiku 4.5", description: "Fast tasks" }
+    ]
+  },
+  {
+    cli: "codex",
+    label: "Codex CLI",
+    modes: [{ id: "auto", label: "Auto", kind: "execute" }],
+    models: [
+      { id: "gpt-5.6-sol", label: "gpt-5.6-sol", description: "Frontier coding" },
+      { id: "gpt-5.6-luna", label: "gpt-5.6-luna", description: "Fast coding" }
+    ]
   }
 ]
 
@@ -292,7 +321,9 @@ const meta = {
     projects: PROJECTS,
     environments: [BUILDBOX],
     clis,
+    capabilities: CAPABILITIES,
     defaultCli: "codex",
+    defaultModel: "gpt-5.6-sol",
     defaultProjectId: "project-jingler",
     prepareProject: (projectId, environmentId) =>
       projectForHost(PROJECTS, projectId, environmentId),
@@ -350,10 +381,10 @@ export const AddProjectFlow: Story = {
     await userEvent.click(dialog.getByRole("button", { name: "Add project" }))
 
     await waitFor(() =>
-      expect(canvas.getByRole("combobox", { name: "Project" })).toHaveTextContent("storybook-project")
+      expect(canvas.getByRole("button", { name: "Project" })).toHaveTextContent("storybook-project")
     )
     await waitFor(() =>
-      expect(canvas.getByRole("combobox", { name: "Base branch" })).toHaveTextContent("main")
+      expect(canvas.getByRole("button", { name: "Base branch" })).toHaveTextContent("main")
     )
     expect(body.queryByRole("dialog")).not.toBeInTheDocument()
   }
@@ -378,7 +409,7 @@ export const BrowseProjectFlow: Story = {
     await userEvent.click(await addProject.findByRole("button", { name: "Add project" }))
 
     await waitFor(() =>
-      expect(canvas.getByRole("combobox", { name: "Project" })).toHaveTextContent("storybook-project")
+      expect(canvas.getByRole("button", { name: "Project" })).toHaveTextContent("storybook-project")
     )
   }
 }
@@ -403,7 +434,7 @@ export const CloneFromGitHubFlow: Story = {
     await userEvent.click(await addProject.findByRole("button", { name: "Clone project" }))
 
     await waitFor(() =>
-      expect(canvas.getByRole("combobox", { name: "Project" })).toHaveTextContent("widget")
+      expect(canvas.getByRole("button", { name: "Project" })).toHaveTextContent("widget")
     )
   }
 }
@@ -415,19 +446,24 @@ export const DirectSessionFlow: Story = {
     const canvas = within(canvasElement)
     const body = within(canvasElement.ownerDocument.body)
 
-    await userEvent.click(canvas.getByRole("combobox", { name: "Project" }))
-    await userEvent.click(body.getByRole("option", { name: "device-relay" }))
+    await userEvent.click(canvas.getByRole("button", { name: "Project" }))
+    await userEvent.type(body.getByPlaceholderText("Search projects…"), "relay")
+    await userEvent.click(body.getByRole("option", { name: /device-relay/ }))
     await waitFor(() =>
-      expect(canvas.getByRole("combobox", { name: "Base branch" })).toHaveTextContent("main")
+      expect(canvas.getByRole("button", { name: "Base branch" })).toHaveTextContent("main")
     )
-    await userEvent.click(canvas.getByRole("combobox", { name: "Checkout" }))
-    await userEvent.click(body.getByRole("option", { name: "Host checkout" }))
+    await userEvent.click(canvas.getByRole("button", { name: "Base branch" }))
+    await userEvent.type(body.getByPlaceholderText("Search branches…"), "release")
+    await userEvent.click(body.getByRole("option", { name: /release\/2\.0/ }))
+    await userEvent.click(canvas.getByRole("button", { name: "Checkout" }))
+    await userEvent.click(body.getByRole("option", { name: /Local/ }))
     await userEvent.click(canvas.getByRole("button", { name: "Create workspace" }))
 
     await waitFor(() =>
       expect(args.onCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: "project-relay",
+          baseBranch: "release/2.0",
           useWorktree: false
         })
       )
@@ -440,11 +476,16 @@ export const FirstPromptFlow: Story = {
   args: { onCreate: fn(async () => {}) },
   play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement)
+    const body = within(canvasElement.ownerDocument.body)
     const composer = await canvas.findByPlaceholderText(FIRST_MESSAGE)
 
     await waitFor(() =>
-      expect(canvas.getByRole("combobox", { name: "Base branch" })).toHaveTextContent("main")
+      expect(canvas.getByRole("button", { name: "Base branch" })).toHaveTextContent("main")
     )
+    await userEvent.click(canvas.getByRole("button", { name: /^Model:/ }))
+    expect(body.getByRole("option", { name: /Claude Code.*2 models/i })).toBeVisible()
+    await userEvent.click(body.getByRole("option", { name: /Claude Code.*2 models/i }))
+    await userEvent.click(body.getByRole("option", { name: /Opus 5/i }))
     fireEvent.change(composer, { target: { value: "Refine the empty-state transitions" } })
     fireEvent.keyDown(composer, { key: "Enter", code: "Enter" })
 
@@ -452,6 +493,8 @@ export const FirstPromptFlow: Story = {
       expect(args.onCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: "project-jingler",
+          cli: "claude",
+          model: "opus",
           initialPrompt: "Refine the empty-state transitions",
           useWorktree: true
         })

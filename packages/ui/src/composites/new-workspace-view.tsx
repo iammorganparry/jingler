@@ -1,18 +1,133 @@
 import * as React from "react"
-import type { CliInfo, CliKind, CreateSessionInput, Environment, Project } from "@jingler/core"
+import type {
+  CliInfo,
+  CliKind,
+  CreateSessionInput,
+  Environment,
+  HarnessCapability,
+  Project
+} from "@jingler/core"
 import { useMachine } from "@xstate/react"
-import { FolderGit2, GitBranch, GitFork, MessageCircle, X } from "lucide-react"
+import {
+  Check,
+  ChevronDown,
+  FolderGit2,
+  GitBranch,
+  GitFork,
+  MessageCircle,
+  Monitor,
+  X
+} from "lucide-react"
 import { Button } from "../components/button.js"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select.js"
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList
+} from "../components/command.js"
+import { Popover, PopoverContent, PopoverTrigger } from "../components/popover.js"
+import { cn } from "../lib/cn.js"
 import { Composer } from "./composer.js"
 import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
+
+interface PickerOption<T extends string> {
+  value: T
+  label: string
+  description?: string
+  keywords?: string
+  disabled?: boolean
+  icon: React.ReactNode
+}
+
+function SearchPicker<T extends string>({
+  value,
+  options,
+  onValueChange,
+  ariaLabel,
+  placeholder,
+  searchPlaceholder,
+  emptyLabel,
+  disabled,
+  triggerClassName,
+  contentClassName = "w-[380px]"
+}: {
+  value: T | ""
+  options: ReadonlyArray<PickerOption<T>>
+  onValueChange: (value: T) => void
+  ariaLabel: string
+  placeholder: string
+  searchPlaceholder: string
+  emptyLabel: string
+  disabled?: boolean
+  triggerClassName?: string
+  contentClassName?: string
+}) {
+  const [open, setOpen] = React.useState(false)
+  const selected = options.find((option) => option.value === value)
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={ariaLabel}
+          disabled={disabled}
+          className={cn(
+            "flex h-10 min-w-0 items-center gap-2 rounded-md px-2 text-left text-[13px] text-text outline-none transition-[background-color,color,transform] hover:bg-surface active:scale-[0.96] disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring",
+            triggerClassName
+          )}
+        >
+          {selected?.icon}
+          <span className={cn("min-w-0 flex-1 truncate", selected ? "text-text-bright" : "text-dim")}>
+            {selected?.label ?? placeholder}
+          </span>
+          <ChevronDown size={13} className="flex-none text-dim" aria-hidden />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className={cn("overflow-hidden p-0", contentClassName)}>
+        <Command loop>
+          <CommandInput autoFocus placeholder={searchPlaceholder} />
+          <CommandList className="max-h-[360px]">
+            <CommandEmpty>{emptyLabel}</CommandEmpty>
+            {options.map((option) => (
+              <CommandItem
+                key={option.value}
+                value={`${option.label} ${option.keywords ?? ""}`}
+                disabled={option.disabled}
+                onSelect={() => {
+                  onValueChange(option.value)
+                  setOpen(false)
+                }}
+                className="min-h-11 gap-2.5"
+              >
+                {option.icon}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium">{option.label}</span>
+                  {option.description && (
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {option.description}
+                    </span>
+                  )}
+                </span>
+                {option.value === value && <Check size={15} className="flex-none text-blue" aria-hidden />}
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 export interface NewWorkspaceViewProps {
   open: boolean
   projects: ReadonlyArray<Project>
   environments?: ReadonlyArray<Environment>
   clis: ReadonlyArray<CliInfo>
+  capabilities: ReadonlyArray<HarnessCapability>
   defaultCli?: CliKind | null
+  defaultModel?: string | null
   defaultProjectId?: string | null
   requestedProjectId?: string | null
   prepareProject: NewWorkspaceDeps["prepareProject"]
@@ -39,7 +154,11 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     if (project) send({ type: "SET_PROJECT", projectId: project.id })
   }, [props.open, props.projects, send, state.context.projectId])
 
-  const { projectId, environmentId, isolation, baseBranch, branches, draft, cli, error } = state.context
+  React.useEffect(() => {
+    if (props.open) send({ type: "SYNC_HARNESSES" })
+  }, [props.open, props.capabilities, props.defaultCli, props.defaultModel, send])
+
+  const { projectId, environmentId, isolation, baseBranch, branches, draft, cli, model, error } = state.context
   const selectedProject = props.projects.find((project) => project.id === projectId)
   const submitting = state.matches("submitting")
   const loading = state.matches("loading")
@@ -49,9 +168,42 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       ? environmentId === "local" ? "Loading branches…" : "Preparing project on host…"
       : props.projects.length === 0
         ? "Add a project before starting a session."
-        : !projectId || !baseBranch || !cli
-          ? "Choose a project and branch before starting."
-          : undefined
+        : props.capabilities.length === 0
+          ? "No harnesses are available. Check Settings → Providers."
+          : !projectId || !baseBranch || !cli || !model
+            ? "Choose a project and branch before starting."
+            : undefined
+
+  const projectOptions: ReadonlyArray<PickerOption<string>> = props.projects.map((project) => ({
+    value: project.id,
+    label: project.name,
+    description: project.availability === "available" ? project.path : "Unavailable on this host",
+    keywords: project.path,
+    disabled: project.availability !== "available",
+    icon: <FolderGit2 size={16} className="flex-none text-blue" aria-hidden />
+  }))
+  const checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">> = [
+    {
+      value: "worktree",
+      label: "Worktree",
+      description: "Create an isolated Git worktree",
+      keywords: "new isolated branch",
+      icon: <GitFork size={16} className="flex-none text-purple" aria-hidden />
+    },
+    {
+      value: "direct",
+      label: "Local",
+      description: "Use the existing project checkout",
+      keywords: "host direct checkout",
+      icon: <Monitor size={16} className="flex-none text-muted-foreground" aria-hidden />
+    }
+  ]
+  const branchOptions: ReadonlyArray<PickerOption<string>> = branches.map((branch) => ({
+    value: branch,
+    label: branch,
+    keywords: branch.replaceAll("/", " "),
+    icon: <GitBranch size={16} className="flex-none text-cyan" aria-hidden />
+  }))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="new-session-view">
@@ -76,56 +228,48 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
               </Button>
             )}
           </div>
-          <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
+          <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
             <div className="flex flex-col gap-0.5">
               <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">Project</span>
-              <Select value={projectId} onValueChange={(value) => send({ type: "SET_PROJECT", projectId: value })} disabled={loading}>
-                <SelectTrigger
-                  aria-label="Project"
-                  className="h-10 w-auto min-w-[120px] justify-start border-transparent bg-transparent px-2 hover:bg-surface focus:border-transparent"
-                >
-                  <FolderGit2 size={15} className="flex-none text-blue" aria-hidden="true" />
-                  <SelectValue placeholder="Choose project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {props.projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id} disabled={project.availability !== "available"}>
-                      {project.name}{project.availability !== "available" ? " (unavailable)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchPicker
+                value={projectId}
+                options={projectOptions}
+                onValueChange={(value) => send({ type: "SET_PROJECT", projectId: value })}
+                ariaLabel="Project"
+                placeholder="Choose project"
+                searchPlaceholder="Search projects…"
+                emptyLabel="No projects match."
+                disabled={loading}
+                triggerClassName="w-[240px]"
+              />
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">Checkout mode</span>
-              <Select value={isolation} onValueChange={(value) => send({ type: "SET_ISOLATION", isolation: value as "worktree" | "direct" })} disabled={loading}>
-                <SelectTrigger
-                  aria-label="Checkout"
-                  className="h-10 w-auto min-w-[140px] justify-start border-transparent bg-transparent px-2 hover:bg-surface focus:border-transparent"
-                >
-                  <GitFork size={15} className="flex-none text-muted-foreground" aria-hidden="true" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="worktree">New worktree</SelectItem>
-                  <SelectItem value="direct">Host checkout</SelectItem>
-                </SelectContent>
-              </Select>
+              <SearchPicker
+                value={isolation}
+                options={checkoutOptions}
+                onValueChange={(value) => send({ type: "SET_ISOLATION", isolation: value })}
+                ariaLabel="Checkout"
+                placeholder="Choose checkout"
+                searchPlaceholder="Search checkout modes…"
+                emptyLabel="No checkout modes match."
+                disabled={loading}
+                triggerClassName="w-[190px]"
+              />
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">Base branch</span>
-              <Select value={baseBranch} onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })} disabled={loading}>
-                <SelectTrigger
-                  aria-label="Base branch"
-                  className="h-10 w-auto min-w-[110px] justify-start border-transparent bg-transparent px-2 hover:bg-surface focus:border-transparent"
-                >
-                  <GitBranch size={15} className="flex-none text-cyan" aria-hidden="true" />
-                  <SelectValue placeholder={loading ? (environmentId === "local" ? "Loading branches…" : "Preparing on host…") : "Base branch"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((branch) => <SelectItem key={branch} value={branch}>{branch}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchPicker
+                value={baseBranch}
+                options={branchOptions}
+                onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })}
+                ariaLabel="Base branch"
+                placeholder={loading ? (environmentId === "local" ? "Loading branches…" : "Preparing on host…") : "Choose branch"}
+                searchPlaceholder="Search branches…"
+                emptyLabel="No branches match."
+                disabled={loading}
+                triggerClassName="w-[250px]"
+              />
             </div>
           </div>
 
@@ -143,6 +287,10 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             environmentPending={loading}
             onSetEnvironment={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" })}
             cli={cli || undefined}
+            model={model || undefined}
+            capabilities={props.capabilities}
+            onSetHarness={(nextCli, nextModel) =>
+              send({ type: "SET_HARNESS", cli: nextCli, model: nextModel })}
             disabledReason={unavailableReason}
           />
           {draft.trim().length === 0 && unavailableReason === undefined && (

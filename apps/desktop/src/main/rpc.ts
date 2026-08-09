@@ -833,6 +833,7 @@ const providerReasoning = (
 export const sessionCreationDefaults = (
   requestedCli: CliKind,
   config: WorkspaceConfig | null,
+  requestedModel?: string,
 ) => {
   const cli = requestedCli;
   const provider = config?.providers?.[cli];
@@ -840,7 +841,7 @@ export const sessionCreationDefaults = (
     cli,
     options: {
       defaultMode: defaultModeFor(cli, provider?.defaultMode),
-      defaultModel: provider?.defaultModel,
+      defaultModel: requestedModel ?? provider?.defaultModel,
       defaultReasoning: providerReasoning(provider),
     },
   };
@@ -1110,7 +1111,11 @@ export const createSession = (input: CreateSessionInput) =>
     const config = yield* ConfigService.get().pipe(
       Effect.orElseSucceed(() => null),
     );
-    const route = sessionCreationDefaults(resolvedInput.cli, config);
+    const route = sessionCreationDefaults(
+      resolvedInput.cli,
+      config,
+      resolvedInput.model,
+    );
     return yield* SessionStore.create(
       { ...resolvedInput, cli: route.cli },
       route.options,
