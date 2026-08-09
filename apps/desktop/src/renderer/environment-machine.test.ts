@@ -18,6 +18,13 @@ const environment: Environment = {
   lastSeenAt: 100
 }
 
+const secondEnvironment: Environment = {
+  ...environment,
+  id: "device_laptop",
+  name: "laptop",
+  lastSeenAt: 200
+}
+
 const api = () => ({
   list: vi.fn(async () => [] as ReadonlyArray<Environment>),
   refresh: vi.fn(async () => [] as ReadonlyArray<Environment>),
@@ -96,6 +103,24 @@ describe("environment machine", () => {
     actor.stop()
   })
 
+  it("preserves device order when an environment is renamed", async () => {
+    const services = api()
+    services.list.mockResolvedValueOnce([environment, secondEnvironment])
+    const actor = createActor(createEnvironmentMachine(services)).start()
+    await waitFor(actor, (snapshot) => !snapshot.context.loading)
+
+    actor.send({ type: "RENAME", id: environment.id, name: "builder" })
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.context.environments[0]?.name === "builder"
+    )
+
+    expect(actor.getSnapshot().context.environments.map(({ id }) => id)).toEqual(
+      [environment.id, secondEnvironment.id]
+    )
+    actor.stop()
+  })
+
   it("discovers SSH hosts when opened", async () => {
     const services = api()
     const actor = createActor(createEnvironmentMachine(services)).start()
@@ -123,6 +148,33 @@ describe("environment machine", () => {
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("connected"))
     expect(actor.getSnapshot().context.environments).toContainEqual(environment)
+    actor.stop()
+  })
+
+  it("preserves device order when SSH pairing updates an existing device", async () => {
+    const services = api()
+    services.list.mockResolvedValueOnce([environment, secondEnvironment])
+    services.pairSsh.mockResolvedValueOnce({
+      ...environment,
+      name: "updated-buildbox"
+    })
+    const actor = createActor(createEnvironmentMachine(services)).start()
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches("configuring") && !snapshot.context.loading
+    )
+
+    actor.send({ type: "EDIT", field: "host", value: "buildbox" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("connected"))
+
+    expect(actor.getSnapshot().context.environments.map(({ id }) => id)).toEqual(
+      [environment.id, secondEnvironment.id]
+    )
+    expect(actor.getSnapshot().context.environments[0]?.name).toBe(
+      "updated-buildbox"
+    )
     actor.stop()
   })
 
