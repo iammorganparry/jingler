@@ -30,6 +30,9 @@ const actorFor = (
       capabilities,
       defaultCli: "codex",
       defaultModel: "gpt-5.6-sol",
+      providers: {
+        codex: { enabled: true, defaultMode: "auto", reasoningEffort: "minimal" }
+      },
       prepareProject: async (projectId, environmentId) => {
         const project = projects.find((candidate) => candidate.id === projectId)!
         return environmentId === undefined
@@ -88,6 +91,66 @@ describe("newWorkspaceMachine", () => {
         path: "/remote/local"
       }
     })
+  })
+
+  it("can switch back to local while remote preparation is still pending", async () => {
+    let releaseRemote: (() => void) | undefined
+    const actor = createActor(newWorkspaceMachine, {
+      input: {
+        getDeps: () => ({
+          projects,
+          clis: [{ kind: "codex", label: "Codex", available: true, binPath: "/bin/codex", version: null, authStatus: "authenticated" }],
+          capabilities,
+          defaultCli: "codex",
+          defaultModel: "gpt-5.6-sol",
+          prepareProject: async (projectId, environmentId) => {
+            const project = projects.find((candidate) => candidate.id === projectId)!
+            if (environmentId !== undefined) {
+              await new Promise<void>((resolve) => { releaseRemote = resolve })
+              return { ...project, environmentId, path: `/remote/${project.name}` }
+            }
+            return project
+          },
+          loadBranches: async () => ["main"],
+          onCreate: async () => undefined,
+          onClose: vi.fn()
+        })
+      }
+    }).start()
+
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-1" })
+    expect(actor.getSnapshot().matches("loading")).toBe(true)
+    actor.send({ type: "SET_MODE", mode: "ask" })
+    actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "high" } })
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+
+    expect(actor.getSnapshot().context).toMatchObject({
+      environmentId: "local",
+      baseBranch: "main",
+      mode: "ask",
+      reasoning: { enabled: true, effort: "high" },
+      resolvedProject: { id: "p-local", path: "/repos/local" }
+    })
+    releaseRemote?.()
+  })
+
+  it("submits selected mode and reasoning with the new session", async () => {
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_MODE", mode: "ask" })
+    actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "high" } })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "ask",
+      reasoning: { enabled: true, effort: "high" }
+    }))
   })
 
   it("leaves naming to automatic title generation", async () => {

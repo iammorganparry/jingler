@@ -124,6 +124,32 @@ test("clones a missing project and creates a workspace on an account-owned envir
   await expect.poll(() => app.deviceRelay?.commandAdmissions(sessionId, "Agent.run") ?? 0).toBe(1)
 })
 
+test("returns a new session to Local while remote project preparation is pending", async ({ launchApp }) => {
+  const app = await launchApp({
+    configured: true,
+    withRepo: true,
+    remoteEnvironment: true
+  })
+  await enrollBuildbox(app)
+  await app.window.getByTestId("new-session").click()
+  await selectComposerEnvironment(app.window)
+
+  const environment = app.window.getByRole("button", { name: "Execution environment" })
+  await app.window.getByText("Full Access", { exact: true }).click()
+  await app.window.getByRole("option", { name: /^Default\b/ }).click()
+  await app.window.getByRole("button", { name: "Thinking strength" }).click()
+  await app.window.getByRole("option", { name: "High", exact: true }).click()
+  await expect(environment).toBeEnabled()
+  await environment.click()
+  await app.window.getByRole("option", { name: "Local" }).click()
+
+  await expect(environment).toContainText("Local")
+  await expect(app.window.getByText("Default", { exact: true })).toBeVisible()
+  await expect(app.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
+  await expect(app.window.getByRole("button", { name: "Base branch" })).toContainText("main")
+  await expect(app.window.getByRole("button", { name: "Create workspace" })).toBeEnabled()
+})
+
 test("prevents changing environment during an active turn", async ({ launchApp }) => {
   const app = await launchApp({
     configured: true,

@@ -5,8 +5,10 @@ import type {
   CreateSessionInput,
   Environment,
   HarnessCapability,
+  ProvidersConfig,
   Project
 } from "@jingler/core"
+import { supportsPlanMode } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import {
   Check,
@@ -128,6 +130,7 @@ export interface NewWorkspaceViewProps {
   capabilities: ReadonlyArray<HarnessCapability>
   defaultCli?: CliKind | null
   defaultModel?: string | null
+  providers?: ProvidersConfig | null
   defaultProjectId?: string | null
   requestedProjectId?: string | null
   prepareProject: NewWorkspaceDeps["prepareProject"]
@@ -158,7 +161,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     if (props.open) send({ type: "SYNC_HARNESSES" })
   }, [props.open, props.capabilities, props.defaultCli, props.defaultModel, send])
 
-  const { projectId, environmentId, isolation, baseBranch, branches, draft, cli, model, error } = state.context
+  const { projectId, environmentId, isolation, baseBranch, branches, draft, cli, model, mode, reasoning, error } = state.context
   const selectedProject = props.projects.find((project) => project.id === projectId)
   const submitting = state.matches("submitting")
   const loading = state.matches("loading")
@@ -254,7 +257,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 searchPlaceholder="Search checkout modes…"
                 emptyLabel="No checkout modes match."
                 disabled={loading}
-                triggerClassName="w-[190px]"
+                triggerClassName="w-[240px]"
               />
             </div>
             <div className="flex flex-col gap-0.5">
@@ -268,7 +271,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 searchPlaceholder="Search branches…"
                 emptyLabel="No branches match."
                 disabled={loading}
-                triggerClassName="w-[250px]"
+                triggerClassName="w-[240px]"
               />
             </div>
           </div>
@@ -284,13 +287,18 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             branch={baseBranch}
             environments={props.environments}
             environmentId={environmentId === "local" ? undefined : environmentId}
-            environmentPending={loading}
             onSetEnvironment={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" })}
             cli={cli || undefined}
             model={model || undefined}
             capabilities={props.capabilities}
             onSetHarness={(nextCli, nextModel) =>
               send({ type: "SET_HARNESS", cli: nextCli, model: nextModel })}
+            mode={mode}
+            onSetMode={(value) => send({ type: "SET_MODE", mode: value })}
+            reasoningEffort={reasoning?.effort}
+            thinkingEnabled={reasoning?.enabled}
+            onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })}
+            allowPlan={cli !== "" && supportsPlanMode(cli)}
             disabledReason={unavailableReason}
           />
           {draft.trim().length === 0 && unavailableReason === undefined && (

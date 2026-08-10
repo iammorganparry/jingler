@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   appShell,
@@ -128,6 +128,47 @@ test("persists provider model mode and reasoning selections across restart", asy
   await expect(reopened.window.getByRole("button", { name: "Model: GPT-5.6 Sol" })).toBeVisible()
   await expect(reopened.window.getByText("Full Access", { exact: true })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
+})
+
+test("configures mode and reasoning before creating a session", async ({ launchApp }) => {
+  const launched = await launchApp({ configured: true, withRepo: true })
+  await expect(appShell(launched.window)).toBeVisible()
+  await launched.window.getByTestId("new-session").click()
+
+  const selectorWidths = await Promise.all(
+    [
+      launched.window.getByRole("button", { name: "Project", exact: true }),
+      launched.window.getByRole("button", { name: "Checkout", exact: true }),
+      launched.window.getByRole("button", { name: "Base branch", exact: true })
+    ].map(async (selector) => (await selector.boundingBox())?.width)
+  )
+  expect(selectorWidths).toEqual([240, 240, 240])
+
+  await selectModel(launched.window, "Codex CLI", "GPT-5.6 Sol")
+  await launched.window.getByText("Full Access", { exact: true }).click()
+  await launched.window.getByRole("option", { name: /^Read Only\b/ }).click()
+  await launched.window.getByRole("button", { name: "Thinking strength" }).click()
+  await launched.window.getByRole("option", { name: "High", exact: true }).click()
+  await launched.window.getByRole("button", { name: "Checkout" }).click()
+  await launched.window.getByRole("option", { name: "Local" }).click()
+  await launched.window.getByRole("button", { name: "Create workspace" }).click()
+
+  await expect.poll(() => {
+    const sessionsPath = join(launched.home, "jingler", "sessions.json")
+    if (!existsSync(sessionsPath)) return null
+    const persisted = JSON.parse(readFileSync(sessionsPath, "utf8"))[0]
+    return {
+      cli: persisted?.cli,
+      model: persisted?.chats?.[0]?.model,
+      mode: persisted?.chats?.[0]?.mode,
+      reasoning: persisted?.reasoning
+    }
+  }).toEqual({
+    cli: "codex",
+    model: "gpt-5.6-sol",
+    mode: "ask",
+    reasoning: { codex: { enabled: true, effort: "high" } }
+  })
 })
 
 test("blocks sending when the workspace harness is unavailable and offers recovery", async ({

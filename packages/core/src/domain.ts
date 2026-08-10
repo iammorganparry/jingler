@@ -1979,6 +1979,14 @@ export const CreateSessionInput = Schema.Struct({
   cli: CliKind,
   /** Optional model selected from that CLI's live capability catalogue. */
   model: Schema.optional(Schema.String),
+  /** Optional permission mode selected in the new-session composer. */
+  mode: Schema.optional(PermissionMode),
+  /**
+   * Optional reasoning override selected in the new-session composer. `null`
+   * explicitly preserves the harness default; omission keeps compatibility with
+   * callers that expect the configured provider default to be applied.
+   */
+  reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
   /** The branch to fork the worktree from, or check out for a direct session. */
   baseBranch: Schema.String,
   /**

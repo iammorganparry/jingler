@@ -1128,6 +1128,7 @@ export function JinglerApp({
                   ? null
                   : providersConfig?.[initialNewSessionCli]?.defaultModel
               }
+              providers={providersConfig}
               loadBranches={loadBranches}
               prepareProject={async (projectId, environmentId) => {
                 const project = projects.find((candidate) => candidate.id === projectId)

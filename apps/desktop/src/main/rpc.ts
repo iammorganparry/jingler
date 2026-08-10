@@ -122,6 +122,7 @@ import type {
   PlanCommentMessageDeliveryState,
   PlanDocument,
   PlanMentionDelivery,
+  PermissionMode,
   PluginCatalog,
   LoadedPlugin,
   PluginSettingValue,
@@ -834,15 +835,20 @@ export const sessionCreationDefaults = (
   requestedCli: CliKind,
   config: WorkspaceConfig | null,
   requestedModel?: string,
+  requestedMode?: PermissionMode,
+  requestedReasoning?: ReasoningSetting | null,
 ) => {
   const cli = requestedCli;
   const provider = config?.providers?.[cli];
   return {
     cli,
     options: {
-      defaultMode: defaultModeFor(cli, provider?.defaultMode),
+      defaultMode: requestedMode ?? defaultModeFor(cli, provider?.defaultMode),
       defaultModel: requestedModel ?? provider?.defaultModel,
-      defaultReasoning: providerReasoning(provider),
+      defaultReasoning:
+        requestedReasoning === undefined
+          ? providerReasoning(provider)
+          : (requestedReasoning ?? undefined),
     },
   };
 };
@@ -1115,6 +1121,8 @@ export const createSession = (input: CreateSessionInput) =>
       resolvedInput.cli,
       config,
       resolvedInput.model,
+      resolvedInput.mode,
+      resolvedInput.reasoning,
     );
     return yield* SessionStore.create(
       { ...resolvedInput, cli: route.cli },

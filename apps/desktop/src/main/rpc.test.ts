@@ -415,6 +415,39 @@ describe("RPC handlers", () => {
     });
   });
 
+  it("prefers mode and reasoning selected in New Session over provider defaults", () => {
+    expect(
+      sessionCreationDefaults(
+        "codex",
+        {
+          reposDir: null,
+          createdAt: "2026-08-09T00:00:00.000Z",
+          providers: {
+            codex: {
+              enabled: true,
+              defaultMode: "auto",
+              thinkingEnabled: false,
+              reasoningEffort: "minimal",
+            },
+          },
+        },
+        "gpt-5.6-sol",
+        "ask",
+        { enabled: true, effort: "high" },
+      ),
+    ).toMatchObject({
+      options: {
+        defaultMode: "ask",
+        defaultReasoning: { enabled: true, effort: "high" },
+      },
+    });
+
+    expect(
+      sessionCreationDefaults("codex", null, undefined, undefined, null).options
+        .defaultReasoning,
+    ).toBeUndefined();
+  });
+
   it("Sessions.setPersistent returns and persists the updated session", async () => {
     const now = "2026-07-30T10:00:00.000Z";
     mkdirSync(root, { recursive: true });

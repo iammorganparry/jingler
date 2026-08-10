@@ -3,9 +3,12 @@ import type {
   CliKind,
   CreateSessionInput,
   HarnessCapability,
+  PermissionMode,
+  ProvidersConfig,
   Project
 } from "@jingler/core"
-import { newSessionCli } from "@jingler/core"
+import type { ReasoningSetting } from "@jingler/core"
+import { defaultModeFor, newSessionCli } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
 
 export interface NewWorkspaceDeps {
@@ -14,6 +17,7 @@ export interface NewWorkspaceDeps {
   capabilities: ReadonlyArray<HarnessCapability>
   defaultCli?: CliKind | null
   defaultModel?: string | null
+  providers?: ProvidersConfig | null
   defaultProjectId?: string | null
   loadBranches: (path: string, environmentId?: string) => Promise<ReadonlyArray<string>>
   prepareProject: (projectId: string, environmentId?: string) => Promise<Project>
@@ -32,6 +36,8 @@ export interface NewWorkspaceContext {
   draft: string
   cli: CliKind | ""
   model: string
+  mode: PermissionMode
+  reasoning?: ReasoningSetting
   error: string | null
 }
 
@@ -44,6 +50,8 @@ type NewWorkspaceEvent =
   | { type: "SET_BASE"; baseBranch: string }
   | { type: "SET_DRAFT"; draft: string }
   | { type: "SET_HARNESS"; cli: CliKind; model: string }
+  | { type: "SET_MODE"; mode: PermissionMode }
+  | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
   | { type: "SYNC_HARNESSES" }
   | { type: "SUBMIT" }
 
@@ -76,6 +84,25 @@ const harnessSelection = (
     model: preservedModel ?? configuredModel ?? capability.models[0]?.id ?? ""
   }
 }
+
+const providerReasoning = (
+  deps: NewWorkspaceDeps,
+  cli: CliKind | ""
+): ReasoningSetting | undefined => {
+  if (cli === "") return
+  const provider = deps.providers?.[cli]
+  if (
+    provider === undefined ||
+    (provider.thinkingEnabled === undefined && provider.reasoningEffort === undefined)
+  ) return
+  return {
+    enabled: provider.thinkingEnabled ?? true,
+    ...(provider.reasoningEffort === undefined ? {} : { effort: provider.reasoningEffort })
+  }
+}
+
+const selectionMode = (deps: NewWorkspaceDeps, cli: CliKind | ""): PermissionMode =>
+  cli === "" ? "accept-edits" : defaultModeFor(cli, deps.providers?.[cli]?.defaultMode)
 
 const errorText = (cause: unknown, fallback: string): string =>
   cause instanceof Error ? cause.message : fallback
@@ -127,11 +154,28 @@ export const newWorkspaceMachine = setup({
         branches: [] as ReadonlyArray<string>,
         draft: "",
         ...harness,
+        mode: selectionMode(deps, harness.cli),
+        reasoning: providerReasoning(deps, harness.cli),
         error: null
       }
     }),
     syncHarnesses: assign(({ context }) =>
       harnessSelection(context.getDeps(), context.cli, context.model)),
+    setHarness: assign(({ context, event }) => {
+      if (event.type !== "SET_HARNESS") return {}
+      if (event.cli === context.cli) return { cli: event.cli, model: event.model }
+      const deps = context.getDeps()
+      return {
+        cli: event.cli,
+        model: event.model,
+        mode: selectionMode(deps, event.cli),
+        reasoning: providerReasoning(deps, event.cli)
+      }
+    }),
+    setMode: assign(({ event }) =>
+      event.type === "SET_MODE" ? { mode: event.mode } : {}),
+    setReasoning: assign(({ event }) =>
+      event.type === "SET_REASONING" ? { reasoning: event.reasoning } : {}),
     applyBranches: assign(({ event }) => {
       const output = (event as unknown as { output: { project: Project | null; branches: ReadonlyArray<string> } }).output
       return { resolvedProject: output.project, branches: output.branches, baseBranch: preferredBranch(output.branches), error: null }
@@ -161,6 +205,8 @@ export const newWorkspaceMachine = setup({
     draft: "",
     cli: "",
     model: "",
+    mode: "accept-edits",
+    reasoning: undefined,
     error: null
   }),
   on: {
@@ -180,7 +226,23 @@ export const newWorkspaceMachine = setup({
         onDone: { target: "editing", actions: "applyBranches" },
         onError: { target: "editing", actions: "setLoadError" }
       },
-      on: { CLOSE: { target: "closed", actions: "close" } }
+      on: {
+        CLOSE: { target: "closed", actions: "close" },
+        SET_ENVIRONMENT: {
+          target: "loading",
+          reenter: true,
+          actions: assign(({ event }) => ({
+            environmentId: event.environmentId,
+            branches: [],
+            baseBranch: "",
+            resolvedProject: null,
+            error: null
+          }))
+        },
+        SET_HARNESS: { actions: "setHarness" },
+        SET_MODE: { actions: "setMode" },
+        SET_REASONING: { actions: "setReasoning" }
+      }
     },
     editing: {
       on: {
@@ -208,9 +270,9 @@ export const newWorkspaceMachine = setup({
         SET_ISOLATION: { actions: assign(({ event }) => ({ isolation: event.isolation })) },
         SET_BASE: { actions: assign(({ event }) => ({ baseBranch: event.baseBranch })) },
         SET_DRAFT: { actions: assign(({ event }) => ({ draft: event.draft })) },
-        SET_HARNESS: {
-          actions: assign(({ event }) => ({ cli: event.cli, model: event.model }))
-        },
+        SET_HARNESS: { actions: "setHarness" },
+        SET_MODE: { actions: "setMode" },
+        SET_REASONING: { actions: "setReasoning" },
         SUBMIT: { guard: "canSubmit", target: "submitting" }
       }
     },
@@ -231,6 +293,8 @@ export const newWorkspaceMachine = setup({
               ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}),
               cli,
               model: context.model,
+              mode: context.mode,
+              reasoning: context.reasoning ?? null,
               baseBranch: context.baseBranch,
               useWorktree: context.isolation === "worktree"
             })
