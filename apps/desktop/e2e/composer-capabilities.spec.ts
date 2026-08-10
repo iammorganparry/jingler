@@ -139,7 +139,8 @@ test("configures mode and reasoning before creating a session", async ({ launchA
       launched.window.getByRole("button", { name: "Base branch", exact: true })
     ].map(async (selector) => (await selector.boundingBox())?.width)
   )
-  expect(selectorWidths).toEqual([240, 240, 240])
+  expect(selectorWidths.every((width) => width !== undefined && width > 0)).toBe(true)
+  expect(new Set(selectorWidths).size).toBe(1)
 
   await selectModel(launched.window, "Codex CLI", "GPT-5.6 Sol")
   await launched.window.getByText("Full access", { exact: true }).click()

@@ -49,6 +49,8 @@ export interface PiSessionFactoryOptions {
     | ((context: AgentRuntimeContext) => ToolRegistry)
   readonly promptTokenBudget?: number
   readonly terminalTracker?: FileChangeTracker
+  /** Internal extension point for deterministic providers; production leaves it unset. */
+  readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
   readonly createSession?: (
     options: CreateAgentSessionOptions
   ) => Promise<CreateAgentSessionResult>
@@ -169,6 +171,7 @@ const createEmbeddedSession = (
         modelsPath: null,
         refreshOnCreate: false
       })
+      await options.configureModelRuntime?.(modelRuntime)
       const rawModelId = modelIdForProvider(spec, connection)
       const model = modelRuntime.getModel(connection.providerId, rawModelId)
       if (!model) {

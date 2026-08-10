@@ -1,58 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { CURRENT_RUNTIME_CONTRACTS, type EvalResult } from "@jingler/core"
-import type { EvalObservation, EvalTrace } from "./behavior-contract.js"
+import { Schema } from "effect"
+import { EvalTrace } from "./behavior-contract.js"
 import { redactReport, scoreScenario } from "./pi-eval.js"
 import { CORE_PI_SCENARIOS, scenarioById } from "./pi-scenarios.js"
+import { runDeterministicScenario } from "./deterministic-runtime.js"
 
-const observationsByScenario: Readonly<Record<string, ReadonlyArray<EvalObservation>>> = {
-  "lifecycle.complete": [
-    { kind: "event", tag: "Started" },
-    { kind: "event", tag: "Done" }
-  ],
-  "permission.denied-edit": [
-    { kind: "permission", tool: "workspace.edit", decision: "deny" },
-    { kind: "event", tag: "Done" }
-  ],
-  "auth.codex-subscription-pinned": [
-    { kind: "auth-route", route: "openai-codex-oauth" },
-    { kind: "event", tag: "Done" }
-  ],
-  "auth.claude-subscription-pinned": [
-    { kind: "auth-route", route: "claude-setup-token" },
-    { kind: "event", tag: "Done" }
-  ],
-  "diff.create-edit-delete-rename": [
-    { kind: "file-change", status: "A", path: "src/new.ts", oldPath: null },
-    { kind: "file-change", status: "M", path: "src/edit.ts", oldPath: null },
-    { kind: "file-change", status: "D", path: "src/delete.ts", oldPath: null },
-    { kind: "file-change", status: "R", path: "src/renamed.ts", oldPath: "src/old.ts" },
-    { kind: "event", tag: "Done" }
-  ],
-  "resource.cleanup": [
-    { kind: "resource", name: "managed-mcp", state: "opened" },
-    { kind: "resource", name: "managed-mcp", state: "closed" },
-    { kind: "event", tag: "Done" }
-  ],
-  "structured.question-plan": [
-    { kind: "event", tag: "QuestionRequested" },
-    { kind: "event", tag: "PlanProposed" },
-    { kind: "event", tag: "Done" }
-  ],
-  "remote.contract-compatible": [
-    { kind: "event", tag: "RemoteContractAccepted" },
-    { kind: "event", tag: "Done" }
-  ]
-}
-
-const deterministicTraces = (): ReadonlyArray<EvalTrace> =>
-  CORE_PI_SCENARIOS.map((scenario) => ({
-    scenarioId: scenario.id,
-    observations: observationsByScenario[scenario.id] ?? [],
-    durationMs: 1,
-    tokens: 0,
-    costUsd: 0,
-    versions: CURRENT_RUNTIME_CONTRACTS
-  }))
+const deterministicTraces = (): Promise<ReadonlyArray<EvalTrace>> =>
+  Promise.all(CORE_PI_SCENARIOS.map((scenario) => runDeterministicScenario(scenario.id)))
 
 const secretValues = (): ReadonlyArray<string> =>
   (process.env.JINGLER_EVAL_SECRET_NAMES ?? "")
@@ -75,12 +30,14 @@ if (mode !== "deterministic" && mode !== "live" && mode !== "replay") {
 }
 
 const traces = mode === "deterministic"
-  ? deterministicTraces()
+  ? await deterministicTraces()
   : await (async () => {
       if (mode === "live" && process.env.JINGLER_EVAL !== "1") throw new Error("live eval requires JINGLER_EVAL=1")
       const path = mode === "live" ? process.env.JINGLER_LIVE_EVAL_TRACE : process.env.JINGLER_REPLAY_TRACE
       if (!path) throw new Error(`${mode} eval requires a sanitized trace path`)
-      return JSON.parse(await readFile(path, "utf8")) as ReadonlyArray<EvalTrace>
+      return Schema.decodeUnknownSync(Schema.Array(EvalTrace))(
+        JSON.parse(await readFile(path, "utf8"))
+      )
     })()
 
 const results = traces.map((trace) => {

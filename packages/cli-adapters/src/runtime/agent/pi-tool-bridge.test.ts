@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { ToolRegistry } from "../tools/tool-registry.js"
+import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 
 const spec = {
@@ -12,7 +13,7 @@ const spec = {
 const mutationRegistry = (execute: () => Promise<unknown>): ToolRegistry => {
   const registry = new ToolRegistry({
     observer: {
-      started: () => Effect.succeed(null),
+      started: () => Effect.succeed({ cwd: "/workspace", tree: "tree-before" }),
       settled: (_request, _risk, _state, _result) =>
         Effect.succeed({
           id: "set-1",
@@ -44,14 +45,15 @@ const mutationRegistry = (execute: () => Promise<unknown>): ToolRegistry => {
 describe("pi tool bridge", () => {
   it("gates mutation tools and executes through the Effect registry", async () => {
     const execute = vi.fn(async () => ({ changed: true }))
-    const canUseTool = vi.fn(() => Effect.succeed(true))
+    const canUseTool = vi.fn(() => Effect.succeed("allow" as const))
     const registry = mutationRegistry(execute)
-    const [tool] = createPiTools(registry, spec, {
+    const context: AgentRuntimeContext = {
       canUseTool,
-      askQuestion: () => Effect.succeed(null),
+      askQuestion: () => Effect.succeed([]),
       saveDraftPlan: () => Effect.void,
-      proposePlan: () => Effect.succeed(null)
-    })
+      proposePlan: () => Effect.succeed({ _tag: "Reject" })
+    }
+    const [tool] = createPiTools(registry, spec, context)
 
     const result = await tool?.execute(
       "call-1",
@@ -61,7 +63,7 @@ describe("pi tool bridge", () => {
       {} as never
     )
     expect(canUseTool).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "workspace.edit", risk: "mutate" })
+      { toolId: "workspace.edit", risk: "mutate" }
     )
     expect(execute).toHaveBeenCalledOnce()
     expect(result?.details).toMatchObject({ status: "success" })
@@ -73,12 +75,13 @@ describe("pi tool permission denial", () => {
   it("does not execute a denied mutation", async () => {
     const execute = vi.fn(async () => null)
     const registry = mutationRegistry(execute)
-    const [tool] = createPiTools(registry, spec, {
-      canUseTool: () => Effect.succeed(false),
-      askQuestion: () => Effect.succeed(null),
+    const context: AgentRuntimeContext = {
+      canUseTool: () => Effect.succeed("deny"),
+      askQuestion: () => Effect.succeed([]),
       saveDraftPlan: () => Effect.void,
-      proposePlan: () => Effect.succeed(null)
-    })
+      proposePlan: () => Effect.succeed({ _tag: "Reject" })
+    }
+    const [tool] = createPiTools(registry, spec, context)
 
     const result = await tool?.execute(
       "call-1",

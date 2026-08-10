@@ -1,17 +1,42 @@
-import type { AuthRouteKind, RuntimeContractVersions } from "@jingler/core"
+import {
+  AuthRouteKind,
+  RuntimeContractVersions,
+  type RuntimeContractVersions as RuntimeContractVersionsType
+} from "@jingler/core"
+import { Schema } from "effect"
 
-export type FileChangeStatus = "A" | "M" | "D" | "R"
+export const EvalFileChangeStatus = Schema.Literal("A", "M", "D", "R")
+export type EvalFileChangeStatus = Schema.Schema.Type<typeof EvalFileChangeStatus>
 
-export type EvalObservation =
-  | { readonly kind: "event"; readonly tag: string }
-  | { readonly kind: "tool-call"; readonly tool: string; readonly risk: string }
-  | { readonly kind: "tool-effect"; readonly tool: string }
-  | { readonly kind: "permission"; readonly tool: string; readonly decision: "allow" | "deny" }
-  | { readonly kind: "file-change"; readonly status: FileChangeStatus; readonly path: string; readonly oldPath: string | null }
-  | { readonly kind: "auth-route"; readonly route: AuthRouteKind }
-  | { readonly kind: "auth-fallback"; readonly from: AuthRouteKind; readonly to: AuthRouteKind }
-  | { readonly kind: "resource"; readonly name: string; readonly state: "opened" | "closed" }
-  | { readonly kind: "report-text"; readonly text: string }
+export const EvalObservation = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("event"), tag: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("tool-call"), tool: Schema.String, risk: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("tool-effect"), tool: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("permission"),
+    tool: Schema.String,
+    decision: Schema.Literal("allow", "deny")
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("file-change"),
+    status: EvalFileChangeStatus,
+    path: Schema.String,
+    oldPath: Schema.NullOr(Schema.String)
+  }),
+  Schema.Struct({ kind: Schema.Literal("auth-route"), route: AuthRouteKind }),
+  Schema.Struct({
+    kind: Schema.Literal("auth-fallback"),
+    from: AuthRouteKind,
+    to: AuthRouteKind
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("resource"),
+    name: Schema.String,
+    state: Schema.Literal("opened", "closed")
+  }),
+  Schema.Struct({ kind: Schema.Literal("report-text"), text: Schema.String })
+)
+export type EvalObservation = Schema.Schema.Type<typeof EvalObservation>
 
 export interface EvalMatcher {
   readonly description: string
@@ -30,17 +55,18 @@ export interface EvalScenario {
   readonly forbidden: ReadonlyArray<EvalMatcher>
   readonly ordering: ReadonlyArray<EvalOrdering>
   readonly timeoutMs: number
-  readonly requiredVersions: RuntimeContractVersions
+  readonly requiredVersions: RuntimeContractVersionsType
 }
 
-export interface EvalTrace {
-  readonly scenarioId: string
-  readonly observations: ReadonlyArray<EvalObservation>
-  readonly durationMs: number
-  readonly tokens: number
-  readonly costUsd: number
-  readonly versions: RuntimeContractVersions
-}
+export const EvalTrace = Schema.Struct({
+  scenarioId: Schema.String,
+  observations: Schema.Array(EvalObservation),
+  durationMs: Schema.Number,
+  tokens: Schema.Number,
+  costUsd: Schema.Number,
+  versions: RuntimeContractVersions
+})
+export type EvalTrace = Schema.Schema.Type<typeof EvalTrace>
 
 export const event = (tag: string): EvalMatcher => ({
   description: `event:${tag}`,
@@ -60,7 +86,7 @@ export const permission = (tool: string, decision: "allow" | "deny"): EvalMatche
     observation.decision === decision
 })
 
-export const fileChange = (status: FileChangeStatus, path: string): EvalMatcher => ({
+export const fileChange = (status: EvalFileChangeStatus, path: string): EvalMatcher => ({
   description: `file-change:${status}:${path}`,
   matches: (observation) =>
     observation.kind === "file-change" && observation.status === status && observation.path === path

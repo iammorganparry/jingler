@@ -1,5 +1,6 @@
 import type { AgentRole, FileChangeSet, RuntimeMode } from "@jingler/core"
 import type { PromptToolCapability } from "../prompt/prompt-compiler.js"
+import type { WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { Effect, Either, Schema } from "effect"
 
 export type ToolRisk = "read" | "network" | "mutate" | "execute"
@@ -88,11 +89,11 @@ export interface ToolExecutionObserver {
   readonly started: (
     request: ToolExecutionRequest,
     risk: ToolRisk
-  ) => Effect.Effect<unknown, ToolError>
+  ) => Effect.Effect<WorktreeSnapshot, ToolError>
   readonly settled: (
     request: ToolExecutionRequest,
     risk: ToolRisk,
-    state: unknown,
+    state: WorktreeSnapshot,
     result: ToolResultEnvelope
   ) => Effect.Effect<FileChangeSet, ToolError>
 }
@@ -137,7 +138,7 @@ const startObservation = async (
   options: ToolRegistryOptions,
   input: ToolExecutionRequest,
   tool: AnyToolDefinition
-): Promise<unknown> => {
+): Promise<WorktreeSnapshot | null> => {
   if (!(options.observer && mutatingRisk(tool.risk))) return null
   return Effect.runPromise(options.observer.started(input, tool.risk))
 }
@@ -146,7 +147,7 @@ interface SettleObservationInput {
   readonly options: ToolRegistryOptions
   readonly request: ToolExecutionRequest
   readonly tool: AnyToolDefinition
-  readonly state: unknown
+  readonly state: WorktreeSnapshot | null
   readonly result: ToolResultEnvelope
 }
 
@@ -155,6 +156,9 @@ const settleObservation = async (
 ): Promise<ToolResultEnvelope> => {
   const { options, request, tool, state, result } = input
   if (!(options.observer && mutatingRisk(tool.risk))) return result
+  if (state === null) {
+    throw new ToolError("execution-failed", "Mutation receipt state is missing")
+  }
   const changes = await Effect.runPromise(
     options.observer.settled(request, tool.risk, state, result)
   )

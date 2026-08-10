@@ -1,5 +1,12 @@
-import type { PiRunSpec, StreamEvent } from "@jingler/core"
-import { Context, Data, Effect, Stream } from "effect"
+import type {
+  PermissionMode,
+  PiRunSpec,
+  Plan,
+  QuestionAnswer,
+  QuestionRequest,
+  StreamEvent
+} from "@jingler/core"
+import { Context, Data, type Effect, type Stream } from "effect"
 
 export class AgentRuntimeError extends Data.TaggedError("AgentRuntimeError")<{
   readonly reason:
@@ -13,11 +20,27 @@ export class AgentRuntimeError extends Data.TaggedError("AgentRuntimeError")<{
   readonly cause?: unknown
 }> {}
 
+export interface RuntimePermissionRequest {
+  readonly toolId: string
+  readonly risk: "network" | "mutate" | "execute"
+}
+
+export type RuntimePermissionDecision = "allow" | "deny"
+
+export type RuntimePlanDecision =
+  | { readonly _tag: "Approve"; readonly mode: PermissionMode; readonly plan?: Plan }
+  | { readonly _tag: "Revise"; readonly feedback: string }
+  | { readonly _tag: "Reject" }
+
 export interface AgentRuntimeContext {
-  readonly canUseTool: (request: unknown) => Effect.Effect<boolean>
-  readonly askQuestion: (request: unknown) => Effect.Effect<unknown>
-  readonly saveDraftPlan: (plan: unknown) => Effect.Effect<void>
-  readonly proposePlan: (plan: unknown) => Effect.Effect<unknown>
+  readonly canUseTool: (
+    request: RuntimePermissionRequest
+  ) => Effect.Effect<RuntimePermissionDecision>
+  readonly askQuestion: (
+    request: QuestionRequest
+  ) => Effect.Effect<ReadonlyArray<QuestionAnswer>>
+  readonly saveDraftPlan: (plan: Plan) => Effect.Effect<void>
+  readonly proposePlan: (plan: Plan) => Effect.Effect<RuntimePlanDecision>
 }
 
 export interface AgentRuntimeShape {

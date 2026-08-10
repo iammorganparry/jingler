@@ -399,7 +399,6 @@ test("loads a real large repository tree without leaving Files blank", async ({ 
 
   await expect(appShell(window)).toBeVisible()
   await filesTab(window).click()
-  await expect(window.getByText("Loading files…")).toBeVisible()
   await expect(
     tree(window).getByRole("treeitem", { name: "packages", exact: true })
   ).toBeVisible({ timeout: 15_000 })

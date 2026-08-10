@@ -2,6 +2,7 @@ import { CURRENT_RUNTIME_CONTRACTS, ProviderConnectionId, ProviderModelId, type 
 import { Effect, Schema, Stream } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
+import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { makePiAgentRuntime, type PiSessionHandle } from "./pi-agent-runtime.js"
 
 const spec: PiRunSpec = {
@@ -17,11 +18,11 @@ const spec: PiRunSpec = {
   targetCapabilities: { versions: CURRENT_RUNTIME_CONTRACTS, toolIds: [], resourceIds: [], targetId: "desktop" }
 }
 
-const context = {
-  canUseTool: () => Effect.succeed(true),
-  askQuestion: () => Effect.succeed(null),
+const context: AgentRuntimeContext = {
+  canUseTool: () => Effect.succeed("allow"),
+  askQuestion: () => Effect.succeed([]),
   saveDraftPlan: () => Effect.void,
-  proposePlan: () => Effect.succeed(null)
+  proposePlan: () => Effect.succeed({ _tag: "Reject" })
 }
 
 describe("PiAgentRuntime", () => {

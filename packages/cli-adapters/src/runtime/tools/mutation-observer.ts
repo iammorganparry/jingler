@@ -61,18 +61,18 @@ const startMutation = (
 const settleMutation = (
   options: MutationObserverOptions,
   request: ToolExecutionRequest,
-  state: unknown,
+  state: WorktreeSnapshot,
   result: ToolResultEnvelope
 ) =>
   Effect.gen(function* () {
     const callId = callIdFor(request)
-    if (!(callId && state)) {
+    if (!callId) {
       return yield* Effect.fail(
         new ToolError("execution-failed", "Mutation receipt state is missing")
       )
     }
     const changes = yield* options.tracker
-      .compare(state as WorktreeSnapshot, options.cwd, callId)
+      .compare(state, options.cwd, callId)
       .pipe(
         Effect.mapError(
           (cause) => new ToolError("execution-failed", cause.message, false)

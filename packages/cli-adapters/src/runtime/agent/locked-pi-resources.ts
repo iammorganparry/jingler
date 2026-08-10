@@ -63,22 +63,22 @@ export const createLockedPiResources = (
 export const assertLockedPiResources = (
   loader: ResourceLoader,
   expectedPrompt: string
-): Effect.Effect<void, PiResourceError> =>
-  Effect.gen(function* () {
-    const violations = [
-      loader.getSystemPrompt() === expectedPrompt ? null : "system prompt",
-      loader.getAppendSystemPrompt().length === 0 ? null : "appended prompt",
-      loader.getExtensions().extensions.length === 0 ? null : "extension",
-      loader.getSkills().skills.length === 0 ? null : "skill",
-      loader.getPrompts().prompts.length === 0 ? null : "prompt template",
-      loader.getThemes().themes.length === 0 ? null : "theme",
-      loader.getAgentsFiles().agentsFiles.length === 0 ? null : "context file"
-    ].filter((value): value is string => value !== null)
-    if (violations.length > 0) {
-      return yield* Effect.fail(
+): Effect.Effect<void, PiResourceError> => {
+  const inventory: ReadonlyArray<readonly [string, boolean]> = [
+    ["system prompt", loader.getSystemPrompt() === expectedPrompt],
+    ["appended prompt", loader.getAppendSystemPrompt().length === 0],
+    ["extension", loader.getExtensions().extensions.length === 0],
+    ["skill", loader.getSkills().skills.length === 0],
+    ["prompt template", loader.getPrompts().prompts.length === 0],
+    ["theme", loader.getThemes().themes.length === 0],
+    ["context file", loader.getAgentsFiles().agentsFiles.length === 0]
+  ]
+  const violations = inventory.flatMap(([name, valid]) => valid ? [] : [name])
+  return violations.length === 0
+    ? Effect.void
+    : Effect.fail(
         new PiResourceError({
           message: `Ambient pi resources escaped containment: ${violations.join(", ")}`
         })
       )
-    }
-  })
+}

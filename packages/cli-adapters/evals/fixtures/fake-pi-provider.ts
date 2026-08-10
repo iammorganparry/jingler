@@ -1,36 +1,68 @@
-import type { EvalObservation } from "../behavior-contract.js"
+import {
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxToolCall,
+  type FauxResponseStep,
+  type Provider
+} from "@earendil-works/pi-ai"
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
 
-export type FakePiStep =
-  | { readonly kind: "observation"; readonly value: EvalObservation }
-  | { readonly kind: "invalid-tool-arguments"; readonly tool: string }
-  | { readonly kind: "failure"; readonly message: string }
-  | { readonly kind: "wait-for-abort" }
+export { fauxAssistantMessage, fauxToolCall }
+export type FakePiResponse = FauxResponseStep
 
-/** Scriptable model transport fixture. Pi adapters consume its steps; no network API exists. */
+/** Deterministic in-memory pi-ai provider installed into the real ModelRuntime. */
 export class FakePiProvider {
-  readonly #steps: ReadonlyArray<FakePiStep>
-  readonly #observations: Array<EvalObservation> = []
-  #cursor = 0
+  readonly #provider
+  readonly #runtimeProvider: Provider
 
-  constructor(steps: ReadonlyArray<FakePiStep>) {
-    this.#steps = steps
+  constructor(input?: {
+    readonly providerId?: string
+    readonly modelId?: string
+    readonly oauth?: boolean
+  }) {
+    const providerId = input?.providerId ?? "jingler-fake"
+    this.#provider = fauxProvider({
+      provider: providerId,
+      api: `${providerId}-api`,
+      models: [{ id: input?.modelId ?? "eval-model" }],
+      tokensPerSecond: 0
+    })
+    this.#runtimeProvider = input?.oauth
+      ? {
+          ...this.#provider.provider,
+          auth: {
+            ...this.#provider.provider.auth,
+            oauth: {
+              name: "Deterministic subscription",
+              isSubscription: true,
+              login: async () => {
+                throw new Error("Deterministic login is supplied by AuthBroker")
+              },
+              refresh: async (credential) => credential,
+              toAuth: async (credential) => ({ apiKey: credential.access })
+            }
+          }
+        }
+      : this.#provider.provider
   }
 
-  get observations(): ReadonlyArray<EvalObservation> {
-    return this.#observations
+  get providerId(): string {
+    return this.#provider.provider.id
   }
 
-  async next(signal?: AbortSignal): Promise<FakePiStep | null> {
-    const step = this.#steps[this.#cursor] ?? null
-    if (step === null) return null
-    this.#cursor += 1
-    if (step.kind === "failure") throw new Error(step.message)
-    if (step.kind === "wait-for-abort") {
-      if (signal?.aborted) return step
-      await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }))
-      return step
-    }
-    if (step.kind === "observation") this.#observations.push(step.value)
-    return step
+  get modelId(): string {
+    return this.#provider.getModel().id
+  }
+
+  get callCount(): number {
+    return this.#provider.state.callCount
+  }
+
+  setResponses(responses: ReadonlyArray<FakePiResponse>): void {
+    this.#provider.setResponses([...responses])
+  }
+
+  install(runtime: ModelRuntime): void {
+    runtime.registerNativeProvider(this.#runtimeProvider)
   }
 }

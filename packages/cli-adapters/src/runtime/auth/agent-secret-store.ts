@@ -7,33 +7,25 @@ import type {
   ProviderCredentialStore,
   StoredProviderCredential
 } from "./credential-store.js"
-import { Effect } from "effect"
+import { AuthKind } from "@jingler/core"
+import { Effect, Either, Schema } from "effect"
 import { ProviderCredentialStoreError as CredentialStoreError } from "./credential-store.js"
+
+const StoredCredentialPayload = Schema.Struct({
+  authKind: AuthKind,
+  access: Schema.String,
+  refresh: Schema.NullOr(Schema.String),
+  expiresAt: Schema.NullOr(Schema.Number)
+})
 
 const decodeCredential = (
   connectionId: StoredProviderCredential["connectionId"],
   value: unknown
 ): StoredProviderCredential | null => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null
-  const candidate = value as Record<string, unknown>
-  const authKind = candidate.authKind
-  const access = candidate.access
-  const refresh = candidate.refresh
-  const expiresAt = candidate.expiresAt
-
-  if (
-    (authKind !== "claude-setup-token" &&
-      authKind !== "openai-codex-oauth" &&
-      authKind !== "api-key" &&
-      authKind !== "device-environment") ||
-    typeof access !== "string" ||
-    (refresh !== null && typeof refresh !== "string") ||
-    (expiresAt !== null && typeof expiresAt !== "number")
-  ) {
-    return null
-  }
-
-  return { connectionId, authKind, access, refresh, expiresAt }
+  const decoded = Schema.decodeUnknownEither(StoredCredentialPayload)(value)
+  return Either.isLeft(decoded)
+    ? null
+    : { connectionId, ...decoded.right }
 }
 
 /**

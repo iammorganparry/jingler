@@ -93,42 +93,48 @@ export class ProviderCatalogService extends Context.Tag(
   "@jingler/ProviderCatalogService"
 )<ProviderCatalogService, ProviderCatalogShape>() {}
 
-export const makeProviderCatalogService = (
+const loadCatalog = (
   options: ProviderCatalogOptions
-): Effect.Effect<ProviderCatalogShape> =>
-  Effect.gen(function* () {
-    const lastGood = yield* Ref.make<ProviderCatalog | null>(null)
-
-    const load = Effect.gen(function* () {
-    const controller = new AbortController()
-    const certifications = yield* Effect.tryPromise({
-      try: () => options.certifications.list(),
-      catch: (cause) =>
-        new ProviderCatalogError({
-          message: "Failed to read model certifications",
-          cause
+): Effect.Effect<ProviderCatalog, ProviderCatalogError> =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => new AbortController()),
+    (controller) =>
+      Effect.gen(function* () {
+        const certifications = yield* Effect.tryPromise({
+          try: () => options.certifications.list(),
+          catch: (cause) =>
+            new ProviderCatalogError({
+              message: "Failed to read model certifications",
+              cause
+            })
         })
-    })
-    const connections = yield* options.connections
-    const catalogConnections = yield* Effect.forEach(
-      connections,
-      (connection) =>
-        options.discover(connection, controller.signal).pipe(
-          Effect.map((models) => ({
-            connection,
-            models: models.map((model) =>
-              decorate(model, connection, certifications, options.targetAvailable)
-            )
-          }))
-        ),
-      { concurrency: "unbounded" }
-    )
-    return {
-      connections: catalogConnections,
-      refreshedAt: new Date(options.now?.() ?? Date.now()).toISOString(),
-      stale: false
-    }
-  }).pipe(
+        const connections = yield* options.connections
+        const catalogConnections = yield* Effect.forEach(
+          connections,
+          (connection) =>
+            options.discover(connection, controller.signal).pipe(
+              Effect.map((models) => ({
+                connection,
+                models: models.map((model) =>
+                  decorate(
+                    model,
+                    connection,
+                    certifications,
+                    options.targetAvailable
+                  )
+                )
+              }))
+            ),
+          { concurrency: "unbounded" }
+        )
+        return {
+          connections: catalogConnections,
+          refreshedAt: new Date(options.now?.() ?? Date.now()).toISOString(),
+          stale: false
+        }
+      }),
+    (controller) => Effect.sync(() => controller.abort())
+  ).pipe(
     Effect.timeoutFail({
       duration: Duration.millis(options.timeoutMs ?? 5_000),
       onTimeout: () =>
@@ -138,7 +144,12 @@ export const makeProviderCatalogService = (
     })
   )
 
-    const refresh = load.pipe(
+export const makeProviderCatalogService = (
+  options: ProviderCatalogOptions
+): Effect.Effect<ProviderCatalogShape> =>
+  Effect.gen(function* () {
+    const lastGood = yield* Ref.make<ProviderCatalog | null>(null)
+    const refresh = loadCatalog(options).pipe(
       Effect.tap((catalog) => Ref.set(lastGood, catalog)),
       Effect.catchAll((error) =>
         Ref.get(lastGood).pipe(

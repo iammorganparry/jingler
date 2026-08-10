@@ -58,14 +58,17 @@ const certification = (overrides: Partial<ModelCertification> = {}): ModelCertif
 const make = async (input?: {
   readonly targetAvailable?: boolean
   readonly timeoutMs?: number
-  readonly discover?: () => Promise<ReadonlyArray<typeof model>>
+  readonly discover?: (
+    signal: AbortSignal
+  ) => Promise<ReadonlyArray<typeof model>>
 }) => {
   const certifications = new InMemoryModelCertificationStore()
   await certifications.put(certification())
   return Effect.runPromise(makeProviderCatalogService({
     connections: Effect.succeed([connection]),
     certifications,
-    discover: () => Effect.promise(input?.discover ?? (async () => [model])),
+    discover: (_connection, signal) =>
+      Effect.promise(() => input?.discover?.(signal) ?? Promise.resolve([model])),
     targetAvailable: () => input?.targetAvailable ?? true,
     timeoutMs: input?.timeoutMs,
     now: () => Date.parse("2026-08-10T00:00:00.000Z")
@@ -74,7 +77,7 @@ const make = async (input?: {
 
 describe("ProviderCatalogService", () => {
   it("lists certified pi models without consulting executable discovery", async () => {
-    const discover = vi.fn(async () => [model])
+    const discover = vi.fn(async (_signal: AbortSignal) => [model])
     const catalog = await Effect.runPromise((await make({ discover })).refresh)
     expect(discover).toHaveBeenCalledOnce()
     expect(catalog.connections[0]?.models[0]).toMatchObject({
@@ -107,12 +110,20 @@ describe("ProviderCatalogService", () => {
 
   it("returns the last good catalog as stale after a bounded refresh timeout", async () => {
     let hang = false
+    let discoveryAborted = false
     const service = await make({
       timeoutMs: 5,
-      discover: () => hang ? new Promise(() => undefined) : Promise.resolve([model])
+      discover: (signal) => {
+        if (!hang) return Promise.resolve([model])
+        signal.addEventListener("abort", () => {
+          discoveryAborted = true
+        })
+        return new Promise(() => undefined)
+      }
     })
     await Effect.runPromise(service.refresh)
     hang = true
     expect((await Effect.runPromise(service.refresh)).stale).toBe(true)
+    expect(discoveryAborted).toBe(true)
   })
 })

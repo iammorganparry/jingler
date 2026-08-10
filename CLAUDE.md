@@ -8,7 +8,7 @@ Jingler is a desktop **agent harness**: an Electron app that registers durable p
 
 ## Commands
 
-Requires Node ≥22 and pnpm 10.7.0. Run from the repo root unless noted.
+Requires Node ≥24 and pnpm 10.7.0. Run from the repo root unless noted.
 
 ```bash
 pnpm dev            # turbo run dev — starts all apps (electron-vite + server watch)

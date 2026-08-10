@@ -37,10 +37,10 @@ const executeTool = async (
   const requiresPermission = risk !== null && risk !== "read"
   const permitted = requiresPermission
     ? await Effect.runPromise(
-        context.canUseTool({ id, risk, arguments: parameters })
+        context.canUseTool({ toolId: id, risk })
       )
-    : true
-  if (!permitted) {
+    : "allow"
+  if (permitted !== "allow") {
     const denied: ToolResultEnvelope = {
       status: "error",
       value: null,

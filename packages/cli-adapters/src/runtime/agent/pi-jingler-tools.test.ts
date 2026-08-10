@@ -1,12 +1,15 @@
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
+import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { createJinglerControlTools } from "./pi-jingler-tools.js"
 
-const runtimeContext = (overrides: Record<string, unknown> = {}) => ({
-  canUseTool: () => Effect.succeed(true),
-  askQuestion: () => Effect.succeed(null),
+const runtimeContext = (
+  overrides: Partial<AgentRuntimeContext> = {}
+): AgentRuntimeContext => ({
+  canUseTool: () => Effect.succeed("allow"),
+  askQuestion: () => Effect.succeed([]),
   saveDraftPlan: () => Effect.void,
-  proposePlan: () => Effect.succeed(null),
+  proposePlan: () => Effect.succeed({ _tag: "Reject" }),
   ...overrides
 })
 
@@ -15,9 +18,7 @@ describe("Jingler pi control tools", () => {
     const askQuestion = vi.fn(() =>
       Effect.succeed([{ selected: ["Yes"], other: null }])
     )
-    const registry = createJinglerControlTools(
-      runtimeContext({ askQuestion }) as never
-    )
+    const registry = createJinglerControlTools(runtimeContext({ askQuestion }))
     const request = {
       id: "question-1",
       questions: [
@@ -47,10 +48,8 @@ describe("Jingler pi control tools", () => {
 
 describe("Jingler plan tool containment", () => {
   it("keeps plan submission unavailable outside the plan role", async () => {
-    const proposePlan = vi.fn(() => Effect.succeed(null))
-    const registry = createJinglerControlTools(
-      runtimeContext({ proposePlan }) as never
-    )
+    const proposePlan = vi.fn(() => Effect.succeed({ _tag: "Reject" } as const))
+    const registry = createJinglerControlTools(runtimeContext({ proposePlan }))
     const result = await Effect.runPromise(
       registry.execute({
         id: "jingler_submit_plan",
