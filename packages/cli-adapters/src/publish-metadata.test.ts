@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 import type { Message, Session } from "@jingler/core"
-import { fallbackPublishMetadata, parsePublishMetadata, type PublishMetadataInput } from "./publish-metadata.js"
+import { ProviderConnectionId, ProviderModelId } from "@jingler/core"
+import { Effect, Schema, Stream } from "effect"
+import {
+  fallbackPublishMetadata,
+  makeAgentRuntimePublishMetadataGenerator,
+  parsePublishMetadata,
+  type PublishMetadataInput
+} from "./publish-metadata.js"
 
 const input: PublishMetadataInput = {
   session: {
@@ -16,6 +23,44 @@ const input: PublishMetadataInput = {
 }
 
 describe("publish metadata", () => {
+  it("generates metadata through the session's canonical pi connection", async () => {
+    let role: string | undefined
+    const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+    const modelId = Schema.decodeUnknownSync(ProviderModelId)("openai/gpt-5")
+    const generator = makeAgentRuntimePublishMetadataGenerator({
+      run: (spec) => {
+        role = spec.role
+        return Stream.succeed({
+          _tag: "Assistant",
+          text: JSON.stringify({
+            commitMessage: "feat: route publishing through pi",
+            prTitle: "Route publishing through pi",
+            prBody: "## Summary\n\nUses the canonical runtime."
+          })
+        })
+      },
+      steer: () => Effect.void,
+      interrupt: () => Effect.void
+    })
+    const metadata = await Effect.runPromise(generator.generate({
+      ...input,
+      session: {
+        ...input.session,
+        chats: [{
+          id: "chat-1",
+          title: null,
+          createdAt: "2026-08-10T00:00:00.000Z",
+          updatedAt: "2026-08-10T00:00:00.000Z",
+          connectionId,
+          modelId
+        }]
+      }
+    }))
+
+    expect(role).toBe("background")
+    expect(metadata.commitMessage).toBe("feat: route publishing through pi")
+  })
+
   it("accepts bounded Conventional Commit metadata", () => {
     expect(parsePublishMetadata(JSON.stringify({
       commitMessage: "feat(publish): add secure PR workflow",

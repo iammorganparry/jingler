@@ -14,13 +14,14 @@
  */
 import {
   AgentRunner,
+  AgentRuntime,
   AppPaths,
   AssetService,
   AuthService,
   BrowserControlMcpService,
   type CliAdapter,
   ConfigService,
-  claudeTitleGenerator,
+  makeAgentRuntimeTitleGenerator,
   DiscoveryService,
   EnvironmentService,
   RemoteSessionService,
@@ -66,7 +67,7 @@ import {
   ThemeService,
   BackgroundTaskStore,
   TranscriptStore,
-  claudePublishMetadataGenerator,
+  makeAgentRuntimePublishMetadataGenerator,
   isCommitSubjectSafe,
   isSessionPublishBranchReady,
   runPublishMachineExclusive,
@@ -2439,6 +2440,7 @@ export const githubPublish = (sessionId: string) =>
   Stream.unwrapScoped(
     Effect.gen(function* () {
       const mailbox = yield* Mailbox.make<PublishCheckpoint>();
+      const agentRuntime = yield* AgentRuntime;
       const runtime = yield* Effect.runtime<
         | GitService
         | GitHubApi
@@ -2530,7 +2532,7 @@ export const githubPublish = (sessionId: string) =>
                   },
                   generateMetadata: (inspection) =>
                     run(
-                      claudePublishMetadataGenerator.generate({
+                      makeAgentRuntimePublishMetadataGenerator(agentRuntime).generate({
                         session,
                         messages,
                         changedPaths: inspection.changedPaths,
@@ -3959,7 +3961,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     archiveSessionRouted(sessionId, reason),
   "Sessions.restore": ({ sessionId }) => restoreSession(sessionId),
   "Sessions.retitle": ({ sessionId }) =>
-    retitleSession(sessionId, claudeTitleGenerator),
+    Effect.gen(function* () {
+      const runtime = yield* AgentRuntime;
+      return yield* retitleSession(
+        sessionId,
+        makeAgentRuntimeTitleGenerator(runtime),
+      );
+    }),
   "Sessions.rename": ({ sessionId, title }) => renameSession(sessionId, title),
   "Sessions.setStatus": ({ sessionId, status }) =>
     setSessionStatus(sessionId, status),
@@ -5064,6 +5072,7 @@ const RpcServerLayer = RpcServer.layer(JinglerRpcs).pipe(
 // superset of every handler requirement.
 export type RpcServerRequirements =
   | AgentRunner
+  | AgentRuntime
   | AppPaths
   | AssetService
   | AuthService

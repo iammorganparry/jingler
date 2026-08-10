@@ -1,11 +1,21 @@
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
 import type { CreateSessionInput } from "@jingler/core"
-import { fallbackTitle, userMessage } from "@jingler/core"
-import { Effect, Layer } from "effect"
+import {
+  fallbackTitle,
+  ProviderConnectionId,
+  ProviderModelId,
+  userMessage
+} from "@jingler/core"
+import { Effect, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { GitService } from "./git.js"
-import { parseSessionMetadata, retitleSession, type TitleGenerator } from "./session-title-service.js"
+import {
+  makeAgentRuntimeTitleGenerator,
+  parseSessionMetadata,
+  retitleSession,
+  type TitleGenerator
+} from "./session-title-service.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { failureOf, initGitRepo, mkTemp, runExit, withTempRoot } from "./test-support.js"
@@ -46,6 +56,47 @@ describe("retitleSession", () => {
     generate: () => Effect.succeed({
       title,
       branch: { type, slug: title.toLowerCase().replace(/[^a-z0-9]+/g, "-") }
+    })
+  })
+
+  it("generates titles through the session's canonical pi connection", async () => {
+    let runtimeSpec: Parameters<Parameters<typeof makeAgentRuntimeTitleGenerator>[0]["run"]>[0] | undefined
+    const generator = makeAgentRuntimeTitleGenerator({
+      run: (spec) => {
+        runtimeSpec = spec
+        return Stream.fromIterable([
+          { _tag: "Assistant" as const, text: '{"title":"Use pi titles","branch":{"type":"feat","slug":"pi-titles"}}' },
+          { _tag: "Done" as const, costUsd: 0, tokens: 1 }
+        ])
+      },
+      steer: () => Effect.void,
+      interrupt: () => Effect.void
+    })
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.create(input())
+        const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+        const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
+        const canonical = {
+          ...session,
+          chats: session.chats.map((chat) =>
+            chat.id === session.activeChatId ? { ...chat, connectionId, modelId } : chat
+          )
+        }
+        return yield* generator.generate(
+          [userMessage("u1", "Use pi for titles", "2026-07-13T00:00:00.000Z")],
+          canonical
+        )
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(runtimeSpec).toMatchObject({ role: "title", mode: "read-only" })
+    expect(exit.value).toStrictEqual({
+      title: "Use pi titles",
+      branch: { type: "feat", slug: "pi-titles" }
     })
   })
 

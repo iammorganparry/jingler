@@ -1,6 +1,8 @@
 import type { Message, PublishMetadata, Session } from "@jingler/core"
 import { Effect } from "effect"
 import { isScriptedEnv } from "./scripted.js"
+import type { AgentRuntimeShape } from "./runtime/agent/agent-runtime.js"
+import { runReadOnlyRoleText } from "./runtime/agent/read-only-role.js"
 
 const TYPES = "feat|fix|refactor|docs|test|chore|perf|build|ci|style|revert"
 const COMMIT = new RegExp(`^(?:${TYPES})(?:\\([a-z0-9][a-z0-9._/-]{0,40}\\))?!?: [^\\r\\n]+$`)
@@ -119,13 +121,35 @@ export const parsePublishMetadata = (
   }
 }
 
-const textFromAssistant = (message: unknown): string => {
-  const content = (message as { message?: { content?: unknown } }).message?.content
-  return Array.isArray(content)
-    ? content.filter((part) => (part as { type?: unknown }).type === "text")
-        .map((part) => String((part as { text?: unknown }).text ?? "")).join("\n")
-    : ""
+const publishPrompt = (input: PublishMetadataInput): string => {
+  const transcript = input.messages.slice(-12).map((message) => JSON.stringify(message)).join("\n")
+  return [
+    "Return JSON only with commitMessage, prTitle, and prBody.",
+    "commitMessage must be a Conventional Commit subject under 73 characters using feat, fix, refactor, docs, test, chore, perf, build, ci, style, or revert.",
+    "Describe only the supplied work. Do not include commands, credentials, or markdown fences.",
+    `Session: ${input.session.title}`,
+    `Branch: ${input.session.branch}`,
+    `Changed paths: ${input.changedPaths.join(", ")}`,
+    `Diff summary:\n${input.diffSummary.slice(0, 8_000)}`,
+    `Recent transcript:\n${transcript.slice(0, 12_000)}`
+  ].join("\n\n")
 }
+
+export const makeAgentRuntimePublishMetadataGenerator = (
+  runtime: AgentRuntimeShape
+): PublishMetadataGenerator => ({
+  generate: (input) =>
+    runReadOnlyRoleText(
+      runtime,
+      input.session,
+      "background",
+      publishPrompt(input),
+      "20 seconds"
+    ).pipe(
+      Effect.map((output) => parsePublishMetadata(output, input)),
+      Effect.orElseSucceed(() => fallbackPublishMetadata(input))
+    )
+})
 
 export const claudePublishMetadataGenerator: PublishMetadataGenerator = {
   generate: (input) =>
@@ -133,24 +157,18 @@ export const claudePublishMetadataGenerator: PublishMetadataGenerator = {
       ? Effect.succeed(fallbackPublishMetadata(input))
       : Effect.tryPromise(async () => {
           const { query } = await import("@anthropic-ai/claude-agent-sdk")
-          const transcript = input.messages.slice(-12).map((message) => JSON.stringify(message)).join("\n")
-          const prompt = [
-            "Return JSON only with commitMessage, prTitle, and prBody.",
-            "commitMessage must be a Conventional Commit subject under 73 characters using feat, fix, refactor, docs, test, chore, perf, build, ci, style, or revert.",
-            "Describe only the supplied work. Do not include commands, credentials, or markdown fences.",
-            `Session: ${input.session.title}`,
-            `Branch: ${input.session.branch}`,
-            `Changed paths: ${input.changedPaths.join(", ")}`,
-            `Diff summary:\n${input.diffSummary.slice(0, 8_000)}`,
-            `Recent transcript:\n${transcript.slice(0, 12_000)}`
-          ].join("\n\n")
+          const prompt = publishPrompt(input)
           let output = ""
           for await (const message of query({
             prompt,
             options: { model: "haiku", allowedTools: [], maxTurns: 1, includePartialMessages: false }
           })) {
-            if ((message as { type?: string }).type === "assistant") output += textFromAssistant(message)
-            if ((message as { type?: string }).type === "result") break
+            if (message.type === "assistant") {
+              output += message.message.content.flatMap((part) =>
+                part.type === "text" ? [part.text] : []
+              ).join("\n")
+            }
+            if (message.type === "result") break
           }
           return parsePublishMetadata(output, input)
         }).pipe(

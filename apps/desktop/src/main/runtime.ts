@@ -8,6 +8,7 @@
  */
 import {
   AgentRunner,
+  AgentRuntimeAdapterLive,
   AssetService,
   AuthService,
   BrowserControlMcpServiceLive,
@@ -22,8 +23,10 @@ import {
   GitHubEventStore,
   GitService,
   HarnessCliAdapterLive,
+  isScriptedEnv,
   ModelsService,
   MemoryServiceLive,
+  PiAgentRuntimeLive,
   PlanStore,
   PluginRegistry,
   PluginHost,
@@ -100,6 +103,18 @@ const HarnessLayers = Layer.mergeAll(
 
 const AssetLayer: Layer.Layer<AssetService, never, never> =
   AssetService.Default.pipe(Layer.provide(NodeContext.layer))
+
+const PiRuntimeLayer = PiAgentRuntimeLive.pipe(
+  Layer.provide(AssetLayer),
+  Layer.provide(ProviderConnectionsLive),
+  Layer.provide(SecretStoreLayer)
+)
+
+// Scripted mode remains an explicit hermetic test transport. Every production
+// conversation and background role reaches the same embedded pi runtime.
+const AgentExecutionLayer = isScriptedEnv()
+  ? Layer.mergeAll(HarnessCliAdapterLive, PiRuntimeLayer)
+  : AgentRuntimeAdapterLive.pipe(Layer.provideMerge(PiRuntimeLayer))
 
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
 // dependencies (paths, dialog, Node platform) come last.
@@ -199,7 +214,7 @@ const AppServicesLayer = RpcServicesLayer.pipe(
   // exists.
   Layer.provideMerge(ConfigService.Default),
   Layer.provide(GitService.Default),
-  Layer.provide(HarnessCliAdapterLive)
+  Layer.provide(AgentExecutionLayer)
 )
 
 // Split from the service graph above so TypeScript does not collapse the input
