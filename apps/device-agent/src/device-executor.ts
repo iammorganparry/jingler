@@ -13,7 +13,6 @@ import { BackgroundTaskStore } from "@jingler/cli-adapters/background-tasks"
 import { BrowserControlMcpService } from "@jingler/cli-adapters/browser-control-mcp-service"
 import { ConfigService } from "@jingler/cli-adapters/config"
 import { ContextManager } from "@jingler/cli-adapters/context-manager"
-import { DiscoveryService } from "@jingler/cli-adapters/discovery"
 import { GitService } from "@jingler/cli-adapters/git"
 import { GitHubApi, parseGitHubRemote } from "@jingler/cli-adapters/github-api"
 import { GitHubAuth } from "@jingler/cli-adapters/github-auth"
@@ -341,7 +340,6 @@ const deviceRuntime = (root: string, targetId: string) => {
     PlanStore.Default,
     ProjectService.Default,
     ContextManager.Default,
-    DiscoveryService.Default,
     ConfigService.Default,
     GitHubApi.Default.pipe(Layer.provideMerge(GitHubAuth.Default)),
     GitService.Default,

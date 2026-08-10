@@ -12,10 +12,8 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import {
-  DiscoveryService,
   killAllChildren,
   killAllPtysSync,
-  ModelsService,
   PlanStore,
   PluginHost,
   SecretStore,
@@ -76,24 +74,6 @@ const enableCodexDiagnostics = (): void => {
     `[codex-diagnostics] redacted traces: ${process.env.JINGLER_CODEX_DIAGNOSTICS_DIR}`
   )
 }
-
-/**
- * Warm `ModelsService`'s cache before anything asks for it.
- *
- * Discovering models is the slowest read the app makes: it probes for each CLI
- * and then asks the Codex CLI for its catalogue over its app-server protocol.
- * Doing that lazily means the first session's model chip fills in a beat late.
- * Doing it here means it happens while the window paints and the user signs in —
- * by the time anyone opens a session, `Models.catalog` is a cache hit.
- *
- * Deliberately fire-and-forget: it must never delay the window or fail the boot.
- * A cold cache is only ever a slower chip, never a broken app, so nothing waits
- * on this and every error is swallowed.
- */
-const prefetchModels = Effect.gen(function* () {
-  const clis = yield* DiscoveryService.list()
-  yield* ModelsService.catalog(clis)
-}).pipe(Effect.ignore)
 
 const recoverInterruptedPlans = (updatedBefore: string) => Effect.gen(function* () {
   const sessions = yield* SessionStore.list()
@@ -455,9 +435,6 @@ if (!gotPrimaryLock) {
         )
       )
     )
-    // Not awaited — the catalogue warms in the background while the window opens.
-    void runtime.runPromise(prefetchModels)
-
     // Themes, before the window. Both of these have to happen ahead of
     // `createWindow` or the first frame is painted in the wrong theme: the
     // background colour is read by `BrowserWindow` at construction, and the

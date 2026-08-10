@@ -22,17 +22,14 @@ import {
   type CliAdapter,
   ConfigService,
   makeAgentRuntimeTitleGenerator,
-  DiscoveryService,
   EnvironmentService,
   RemoteSessionService,
   routeSessionOperation,
-  filterVisible,
   GitHubApi,
   GitHubAuth,
   githubPushPermissions,
   GitHubEventStore,
   GitService,
-  ModelsService,
   MemoryService,
   type MemoryServiceEnvironment,
   attachMemoryToSessionSpec,
@@ -41,11 +38,6 @@ import {
   type SecretStore,
   SecretStoreUnavailable,
   planDraftPost,
-  billingPath,
-  subscriptionProbeFailed,
-  hasSubscriptionAuth,
-  resetSubscriptionCache,
-  METERED_ENV_KEYS,
   PlanStore,
   PluginRegistry,
   PluginSecretStore,
@@ -1221,72 +1213,6 @@ export const createSessionRouted = (input: CreateSessionInput) =>
       });
 
 /**
- * Every model a harness offers — the WHOLE catalogue, deliberately uncurated.
- *
- * This feeds Settings' default-model picker, which is where a provider is
- * CONFIGURED. Curation (`visibleModels`) is defined as what shows in the
- * composer's model menu, so applying it here too would let it hide models from
- * the one surface you'd use to change it: curate down to three, and the fourth
- * can never be chosen as your default again — from inside the app there'd be no
- * way back. Configuration surfaces show what exists; `Models.catalog` is where
- * the operator's own choice is honoured.
- *
- * Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
- * app has a threadbare PATH, so Codex's and opencode's own model lists are only
- * reachable via the absolute path discovery found. Exported for tests.
- */
-export const modelsList = (cli: CliKind) =>
-  Effect.gen(function* () {
-    const clis = yield* DiscoveryService.list();
-    return yield* ModelsService.list(
-      cli,
-      clis.find((c) => c.kind === cli)?.binPath,
-    );
-  });
-
-/**
- * Every installed harness's models, each narrowed by its own curation — the
- * composer's model menu.
- *
- * This is the surface curation exists for: opencode's catalogue is resolved from
- * the user's own credentials, and a single OpenRouter key resolves ~342 models,
- * which is not a menu anyone can use. Applied HERE rather than inside
- * `ModelsService` so that service stays free of a config dependency (and
- * hermetically testable). Exported for tests.
- */
-export const modelsCatalog = () =>
-  Effect.gen(function* () {
-    const clis = yield* DiscoveryService.list();
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const catalog = yield* ModelsService.catalog(clis);
-    return catalog.map((section) => ({
-      ...section,
-      models: filterVisible(
-        section.models,
-        config?.providers?.[section.cli]?.visibleModels,
-      ),
-    }));
-  });
-
-export const modelsCapabilities = () =>
-  Effect.gen(function* () {
-    const clis = yield* DiscoveryService.list();
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const capabilities = yield* ModelsService.capabilities(clis);
-    return capabilities.map((capability) => ({
-      ...capability,
-      models: filterVisible(
-        capability.models,
-        config?.providers?.[capability.cli]?.visibleModels,
-      ),
-    }));
-  });
-
-/**
  * `Sessions.createFromIssue` handler. Like `createSession` (fresh branch, same
  * provider-default seeding) but links the issue + automations and seeds the task
  * from the issue. Exported for tests.
@@ -1910,33 +1836,6 @@ export const reviewGet = (sessionId: string) =>
  * own (opencode), so the pane can be read as a complete picture rather than a
  * list of exceptions.
  */
-export const billingPaths = Effect.gen(function* () {
-  // Re-probe rather than trust the memo. Signing in happens in a terminal and
-  // does not restart the app, so a cached "not signed in" would outlive the fact
-  // — on the one screen whose whole job is to report it accurately.
-  resetSubscriptionCache();
-  const clis = yield* DiscoveryService.list();
-  return clis
-    .filter((c) => c.available)
-    .map((c) => {
-      const subscription = hasSubscriptionAuth(c.kind);
-      const keys = METERED_ENV_KEYS[c.kind] ?? [];
-      return {
-        cli: c.kind,
-        path: billingPath(
-          c.kind,
-          process.env,
-          subscription,
-          subscriptionProbeFailed(c.kind),
-        ),
-        // A key WAS present and we withheld it — the case worth naming, because
-        // it is the one that silently cost money before.
-        keyWithheld:
-          subscription && keys.some((k) => (process.env[k] ?? "").length > 0),
-      };
-    });
-});
-
 /**
  * Strip image payload bytes from transcripts before they cross into the
  * renderer. Metadata stays intact so the renderer can fetch each attachment
@@ -3711,12 +3610,7 @@ const issueProviderOperation = <A, I>(
     return decoded;
   });
 
-/**
- * Handlers for every procedure in the group. Each one delegates straight to an
- * Effect service, so the group remains the sole contract. `Discovery.list`
- * pulls in a `CommandExecutor` requirement (via `DiscoveryService.list()`) that
- * `AppLayer` satisfies with the Node platform layer.
- */
+/** Handlers for every procedure in the group, delegated to Effect services. */
 let failGitHubFeedbackMarkOnce =
   process.env.JINGLER_E2E_GITHUB_FAIL_MARK_ONCE === "1";
 
@@ -3909,8 +3803,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       Stream.mapEffect(() => resourceList),
       Stream.catchAll(() => Stream.empty),
     ),
-  "Billing.paths": () => billingPaths,
-  "Discovery.list": () => DiscoveryService.list(),
   "Environment.list": () => EnvironmentService.list,
   "Environment.refresh": () => EnvironmentService.refresh,
   "Environment.discovery": ({ deviceId }) => EnvironmentService.discovery(deviceId),
@@ -4471,10 +4363,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         runner.resumePlan(sessionId, chatId, planId, revision),
       ),
     ),
-  "Agent.setHarness": ({ sessionId, chatId, cli, model }) =>
-    SessionStore.setHarness(sessionId, chatId, cli, model).pipe(
-      Effect.andThen(SessionStore.get(sessionId)),
-    ),
   "Agent.setModel": ({
     sessionId,
     chatId,
@@ -4560,20 +4448,11 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via
   // the absolute path discovery found.
-  "Models.list": ({ cli }) => modelsList(cli),
-  "Models.catalog": () => modelsCatalog(),
-  "Models.capabilities": () => modelsCapabilities(),
   "Usage.get": () =>
     ProviderConnections.pipe(
       Effect.flatMap((service) => service.list),
       Effect.flatMap(UsageService.fromProviderCatalog),
-      // Decoder-era fallback only. Stage 7 removes CLI usage probing with the
-      // remaining harness discovery graph.
-      Effect.catchAll(() =>
-        Effect.flatMap(DiscoveryService.list(), (clis) =>
-          UsageService.get(clis),
-        ),
-      ),
+      Effect.catchAll(() => Effect.succeed({ providers: [], fetchedAt: null })),
     ),
   "Context.state": ({ sessionId, chatId }) =>
     ContextManager.bindContext(chatId, sessionId).pipe(
@@ -4614,7 +4493,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
   "Config.setFontScale": ({ fontScale }) =>
     ConfigService.setFontScale(fontScale),
-  "Config.setDefaultCli": ({ cli }) => ConfigService.setDefaultCli(cli),
   "Config.setDefaultProviderModel": ({ connectionId, providerId, modelId }) =>
     ConfigService.setDefaultProviderModel(connectionId, providerId, modelId),
   /**
@@ -5251,8 +5129,7 @@ const ServerProtocolLive = Layer.effect(
 /**
  * The running RPC server: the group's handlers served over the IPC protocol.
  * Building this layer forks the server daemon and registers the `ipcMain`
- * listener; it still requires `CommandExecutor | DiscoveryService | SessionStore
- * | ContextManager`, which `AppLayer` provides.
+ * listener; `AppLayer` provides its Effect service requirements.
  *
  * `ContextManager` must be imported as a VALUE here even though this file never
  * calls it: it appears in the inferred requirement set via the handlers, and
@@ -5282,7 +5159,6 @@ export type RpcServerRequirements =
   | ConfigService
   | ContextManager
   | DialogService
-  | DiscoveryService
   | EnvironmentService
   | FileSystem.FileSystem
   | GitHubApi
@@ -5290,7 +5166,6 @@ export type RpcServerRequirements =
   | GitHubEventStore
   | GitService
   | MemoryService
-  | ModelsService
   | OpenConnectorApi
   | OpenConnectorService
   | Path.Path

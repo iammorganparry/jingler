@@ -15,7 +15,6 @@ import {
   BrowserControlMcpServiceLive,
   ConfigService,
   ContextManager,
-  DiscoveryService,
   EnvironmentService,
   RemoteBootstrapService,
   RemoteSessionService,
@@ -23,7 +22,6 @@ import {
   GitHubAuth,
   GitHubEventStore,
   GitService,
-  ModelsService,
   MemoryServiceLive,
   makePiAgentRuntimeLive,
   PiAgentRuntimeLive,
@@ -133,9 +131,6 @@ const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(RuntimeRecoveryService.Default),
   Layer.provideMerge(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
-  // provideMerge: the RPC handlers consume DiscoveryService AND the main process
-  // reaches the same instance to warm the model cache at startup (index.ts).
-  Layer.provideMerge(DiscoveryService.Default),
   Layer.provide(
     RemoteSessionService.Default.pipe(
       Layer.provideMerge(
@@ -186,10 +181,7 @@ const AppServicesLayer = RpcServicesLayer.pipe(
       OpenConnectorApi.Default
     )
   ),
-  // provideMerge: the `Models.*` handlers consume ModelsService AND the startup
-  // prefetch reaches the very same instance — a different one would warm a cache
-  // nobody reads, so the merge is what makes the prefetch actually count. The
-  // PluginHost joins this group for two reasons. It needs provideMerge — main
+  // PluginHost needs provideMerge because main
   // installs the Electron-backed process factory into it at startup, so the RPC
   // handlers must later reach the SAME instance rather than a second one with
   // no way to spawn. And `.pipe` tops out at 20 arguments, which a separate
@@ -197,7 +189,6 @@ const AppServicesLayer = RpcServicesLayer.pipe(
   // merging changes nothing but the argument count.
   Layer.provideMerge(
     Layer.mergeAll(
-      ModelsService.Default,
       PluginHost.Default,
       // provideMerge for the same reason as PluginHost: main installs the
       // native consent prompt and the built-in github provider into it at
@@ -245,8 +236,7 @@ const AppLayer = AppServicesLayer.pipe(
   // directly (boot theme), not only from inside an RPC handler.
   Layer.provideMerge(AppPathsLive),
   // NodeContext bundles CommandExecutor + FileSystem + Path used by git, API,
-  // discovery/config/workspace/session services. Merged (not just provided) so
-  // the startup prefetch can run `DiscoveryService.list`, which needs the executor.
+  // config/workspace/session services.
   Layer.provideMerge(NodeContext.layer)
 )
 

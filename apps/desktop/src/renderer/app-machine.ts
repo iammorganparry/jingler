@@ -56,11 +56,11 @@ export interface ChosenRepositoryDirectory {
  * has its own machine; first-run coordinates with it through explicit events.
  */
 const initialLoad = fromPromise<InitialData>(async () => {
-  const [config, providerCatalog, clis] = await Promise.all([
+  const [config, providerCatalog] = await Promise.all([
     rpc.configGet(),
-    rpc.providerList(),
-    rpc.discoveryList()
+    rpc.providerList()
   ])
+  const clis: ReadonlyArray<CliInfo> = []
   if (config?.reposDir) {
     const [repos, sessions] = await Promise.all([rpc.workspaceRepos(), rpc.sessionsList()])
     return { configured: true, reposDir: config.reposDir, clis, repos, sessions, providerCatalog }

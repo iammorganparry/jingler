@@ -1,6 +1,5 @@
 import type {
   BackgroundTask,
-  CliInfo,
   ContextDigest,
   ContextSnapshot,
   Message,
@@ -18,7 +17,6 @@ import {
   triggerAt
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
-import type { CommandExecutor } from "@effect/platform"
 import { Effect, Fiber, Ref } from "effect"
 import { AppPaths } from "./app-paths.js"
 import type { AgentContext, SessionSpec } from "./adapter.js"
@@ -26,7 +24,6 @@ import { BackgroundTaskStore } from "./background-tasks.js"
 import { CliAdapter, PlanDecision } from "./adapter.js"
 import { ConfigService } from "./config.js"
 import { digestPrompt, lastMessageId, parseDigest, renderTranscript } from "./context-digest.js"
-import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 
@@ -135,10 +132,6 @@ export type DigestEnv =
   | SessionStore
   | TranscriptStore
   | ConfigService
-  | DiscoveryService
-  // `DiscoveryService.list()` shells out to probe for harness binaries, which is
-  // how the digest learns which one the session is authenticated against.
-  | CommandExecutor.CommandExecutor
   | FileSystem.FileSystem
   | Path.Path
   | AppPaths
@@ -179,42 +172,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
       const ownerOf = (contextId: string): Effect.Effect<string> =>
         Effect.map(Ref.get(owners), (map) => map.get(contextId) ?? contextId)
 
-      /**
-       * Harness discovery, memoised for 30s.
-       *
-       * `DiscoveryService.list()` shells out `which` + `--version` for every
-       * harness — roughly eight processes per call — and does not cache. This
-       * service needs it on EVERY `snapshot`, which the meter polls once a second
-       * and a half while a turn runs, so calling straight through meant spawning
-       * eight processes a second per open session just to draw a progress bar.
-       *
-       * Hand-rolled rather than `Effect.cachedWithTTL` because that resolves the
-       * effect at CONSTRUCTION time, which would turn discovery into a layer
-       * dependency of this service and force every consumer to rewire. Keeping it
-       * per-call leaves the service's shape unchanged.
-       *
-       * A TTL rather than a permanent cache so installing or upgrading a harness
-       * takes effect within half a minute, without a restart.
-       */
-      const cliCache = yield* Ref.make<{ at: number; value: ReadonlyArray<CliInfo> } | null>(null)
-      const CLI_TTL_MS = 30_000
-
-      const listClis = (): Effect.Effect<
-        ReadonlyArray<CliInfo>,
-        never,
-        DiscoveryService | CommandExecutor.CommandExecutor
-      > =>
-        Effect.gen(function* () {
-          const now = yield* Effect.sync(() => Date.now())
-          const cached = yield* Ref.get(cliCache)
-          if (cached !== null && now - cached.at < CLI_TTL_MS) return cached.value
-          const fresh = yield* DiscoveryService.list().pipe(
-            Effect.orElseSucceed(() => [] as ReadonlyArray<CliInfo>)
-          )
-          yield* Ref.set(cliCache, { at: now, value: fresh })
-          return fresh
-        })
-
       const stateOf = (sessionId: string): Effect.Effect<SessionContext> =>
         Effect.map(Ref.get(states), (m) => m.get(sessionId) ?? EMPTY)
 
@@ -251,17 +208,13 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
           const ctx = config?.context ?? DEFAULT_CONTEXT_CONFIG
           const provider = config?.providers?.[session.cli]
-          const canonical = chat.connectionId !== undefined && chat.modelId !== undefined
-          const cli = canonical
-            ? undefined
-            : (yield* listClis()).find((candidate) => candidate.kind === session.cli)
           const selectedModel = chat.modelId ?? chat.model ?? null
           const inferredWindow = contextWindowFor(session.cli, selectedModel)
           const measuredWindow = resolveWindow(inferredWindow, reported)
 
           // A harness that reports no usage gives us nothing to measure, so it is
           // left alone rather than compacted against a fabricated number.
-          const reporting = canonical || (cli?.contextReporting ?? false)
+          const reporting = true
           // The per-session switch overrides the global one in both directions,
           // so a user can pin one long-running session open (or force it on).
           const auto = (session.autoCompact ?? ctx.auto) && reporting
@@ -290,7 +243,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
                 : measuredWindow,
               peak
             ),
-            binPath: cli?.binPath ?? null,
+            binPath: null,
             digestModel: chat.modelId ?? digestModelFor(session.cli, provider?.backgroundModel)
           }
         })

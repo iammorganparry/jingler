@@ -24,9 +24,7 @@ export const compatibleEnvironment = (
   const chat = session.chats.find((candidate) => candidate.id === session.activeChatId)
   const connectionId = chat?.connectionId ?? session.connectionId
   const modelId = chat?.modelId ?? session.modelId
-  if (connectionId === undefined || modelId === undefined) {
-    return environment.capabilities.harnesses.includes(session.cli)
-  }
+  if (connectionId === undefined || modelId === undefined) return false
   const runtime = environment.capabilities.runtime
   const connection = environment.capabilities.providerConnections?.find(
     (candidate) => candidate.id === connectionId

@@ -378,10 +378,6 @@ export function ConversationPane({
     [effectivePlanSplitRatio, planSplitRowWidth]
   )
 
-  // Background tasks. Gated on the HARNESS's capability, read from discovery —
-  // only Claude reports a live task set and accepts a per-task stop, so the dock
-  // stays hidden elsewhere rather than offering a button with nothing to aim at.
-  const clisQuery = useQuery({ queryKey: ["clis"], queryFn: () => rpc.discoveryList() })
   /**
    * The model a handed-off message runs on: the operator's own default for this
    * harness (Settings · Providers), NOT this chat's pinned model — the point of
@@ -389,10 +385,6 @@ export function ConversationPane({
    * which means "leave the new chat on whatever it starts with".
    */
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
-  const capabilitiesQuery = useQuery({
-    queryKey: ["model-capabilities"],
-    queryFn: () => rpc.modelsCapabilities()
-  })
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
   const providerRecovery = providerCatalog
@@ -402,7 +394,7 @@ export function ConversationPane({
         modelSelectionRequired: session.modelSelectionRequired,
         targetId: session.environmentId ?? "desktop"
       })
-    : harnessUnavailableMessage(capabilitiesQuery.data, convo)
+    : undefined
   const composerDisabledReason = typeof providerRecovery === "string"
     ? providerRecovery
     : providerRecovery?.message
@@ -419,8 +411,7 @@ export function ConversationPane({
   // this wrapper never see the var, so their calc() falls back to 1×.
   const fontScale = clampFontScale(providersQuery.data?.fontScale)
   const handoffModel = providersQuery.data?.providers?.[convo.cli]?.defaultModel ?? null
-  const backgroundTasksSupported =
-    clisQuery.data?.find((c) => c.kind === convo.cli)?.backgroundTasks ?? false
+  const backgroundTasksSupported = false
   const bgTasks = useBackgroundTasks(session.id, backgroundTasksSupported)
 
   /**
@@ -432,8 +423,7 @@ export function ConversationPane({
    * the harness reporting context at all — the meter renders nothing when
    * `triggerAt` is null, and asking for a snapshot we would not draw is waste.
    */
-  const contextReporting =
-    clisQuery.data?.find((c) => c.kind === convo.cli)?.contextReporting ?? false
+  const contextReporting = true
   /**
    * The session's context accounting.
    *
@@ -581,12 +571,6 @@ export function ConversationPane({
         publishSessionUpdate(updated)
         if (item === undefined) return
         const actor = getConversationActor(updated, updated.activeChatId)
-        // `createChat` activates the new chat, so this is the chat the operator is
-        // now looking at. Put it on the default model before the send, so the very
-        // first turn runs on the intended harness rather than switching under it.
-        if (handoffModel !== null && handoffModel !== convo.model) {
-          actor.send({ type: "SET_HARNESS", cli: convo.cli, model: handoffModel })
-        }
         actor.send({
           type: "SEND",
           text: item.text,
@@ -1045,13 +1029,13 @@ export function ConversationPane({
           }
           model={convo.model}
           catalog={convo.catalog}
-          capabilities={capabilitiesQuery.data}
+          capabilities={[]}
           providerCatalog={providerCatalog}
           connectionId={convo.connectionId}
           providerId={convo.providerId}
           modelId={convo.modelId}
           composerDisabledReason={composerDisabledReason}
-          onSetHarness={convo.setHarness}
+          onSetHarness={() => {}}
           onSetModel={({ connectionId, providerId, modelId }) =>
             convo.setModel(connectionId, providerId, modelId)
           }

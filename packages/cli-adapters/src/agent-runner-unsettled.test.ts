@@ -10,7 +10,6 @@ import { InMemorySecretStoreLive } from "./secret-store.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { AgentRunner } from "./agent-runner.js"
 import { ContextManager } from "./context-manager.js"
-import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
@@ -107,7 +106,6 @@ const run = (adapter: Layer.Layer<CliAdapter>) => {
     BackgroundTaskStore.Default,
     PlanStore.Default,
     adapter,
-    DiscoveryService.Default,
     ContextManager.Default,
     temp.layer
   )

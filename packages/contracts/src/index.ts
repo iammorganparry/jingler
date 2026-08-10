@@ -589,15 +589,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * exported API key overriding a paid subscription, with nothing on screen to
    * say so.
    */
-  Rpc.make("Billing.paths", {
-    success: Schema.Array(HarnessBilling)
-  }),
-
-  Rpc.make("Discovery.list", {
-    success: Schema.Array(CliInfo),
-    error: DiscoveryError
-  }),
-
   Rpc.make("Environment.list", {
     success: Schema.Array(Environment),
     error: EnvironmentError
@@ -1149,17 +1140,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * also drops the session's `resumeId` (a Codex thread id is meaningless to
    * Claude) so the new harness starts a fresh thread.
    */
-  Rpc.make("Agent.setHarness", {
-    success: Session,
-    error: Schema.Union(GitError, SessionNotFoundError),
-    payload: {
-      sessionId: Schema.String,
-      chatId: Schema.String,
-      cli: CliKind,
-      model: Schema.String
-    }
-  }),
-
   /** Change one conversation's certified provider connection/model atomically. */
   Rpc.make("Agent.setModel", {
     success: Session,
@@ -1374,24 +1354,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   }),
 
   /** List the models a harness supports (live from the provider; for the chip). */
-  Rpc.make("Models.list", {
-    success: Schema.Array(ModelOption),
-    payload: { cli: CliKind }
-  }),
-
   /**
    * Every installed harness with its models — the composer's model menu, which
    * lets the user switch provider by picking a model under its section. One
    * round trip instead of one per harness.
    */
-  Rpc.make("Models.catalog", {
-    success: Schema.Array(ProviderModels)
-  }),
-
-  Rpc.make("Models.capabilities", {
-    success: Schema.Array(HarnessCapability)
-  }),
-
   /** Provider usage / rate-limit windows for the Usage & limits modal. */
   Rpc.make("Usage.get", {
     success: Usage
@@ -1604,12 +1571,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * Persist which harness NEW sessions start on. One standing answer, set in
    * Settings · Providers, in place of the New Session dialog's old select.
    */
-  Rpc.make("Config.setDefaultCli", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: Schema.Struct({ cli: CliKind })
-  }),
-
   /** Persist the certified provider connection and model as one canonical selection. */
   Rpc.make("Config.setDefaultProviderModel", {
     success: WorkspaceConfig,

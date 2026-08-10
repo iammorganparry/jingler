@@ -1,18 +1,8 @@
-import type { CliInfo, Repo } from "@jingler/core"
+import type { Repo } from "@jingler/core"
 import { ProviderConnection, ProviderConnectionId } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { discoverDeviceCapabilities, ensureDeviceWorkspaceConfig } from "./capabilities.js"
-
-const cli = (kind: CliInfo["kind"], available: boolean): CliInfo => ({
-  kind,
-  label: kind,
-  binPath: available ? `/bin/${kind}` : null,
-  version: available ? "1.0.0" : null,
-  available,
-  backgroundTasks: false,
-  contextReporting: false
-})
 
 const repo: Repo = {
   name: "jingler",
@@ -35,7 +25,7 @@ describe("device capabilities", () => {
       reposDir: join(home, "repos")
     })
   })
-  it("discovers installed harnesses repositories and branches", async () => {
+  it("discovers provider connections repositories and branches", async () => {
     const connection = Schema.decodeUnknownSync(ProviderConnection)({
       id: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
       providerId: "anthropic",
@@ -57,7 +47,6 @@ describe("device capabilities", () => {
     const result = await Effect.runPromise(
       discoverDeviceCapabilities(
         {
-          harnesses: () => Effect.succeed([cli("codex", true), cli("claude", false)]),
           repositories: () => Effect.succeed([repo]),
           branches: () => Effect.succeed(["main", "feat/device-agent"]),
           providerConnections: () => Effect.succeed([connection]),
@@ -66,7 +55,6 @@ describe("device capabilities", () => {
         "2.0.3"
       )
     )
-    expect(result.capabilities.harnesses).toStrictEqual(["codex"])
     expect(result.capabilities).toMatchObject({
       runtime: { versions: expect.any(Object), targetId: "device" },
       providerConnections: [{
@@ -88,7 +76,6 @@ describe("device capabilities", () => {
     const result = await Effect.runPromise(
       discoverDeviceCapabilities(
         {
-          harnesses: () => Effect.succeed([cli("codex", true)]),
           repositories: () => Effect.succeed([repo]),
           branches: () => Effect.fail("git unavailable"),
           platform: () => ({ os: "linux", arch: "x64" })
@@ -103,7 +90,6 @@ describe("device capabilities", () => {
     const result = await Effect.runPromise(
       discoverDeviceCapabilities(
         {
-          harnesses: () => Effect.succeed([cli("claude", true)]),
           repositories: () =>
             Effect.succeed([
               { ...repo, defaultBranch: "HEAD", currentBranch: "HEAD" }

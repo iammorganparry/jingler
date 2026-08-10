@@ -8,7 +8,6 @@ import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { DiscoveryService } from "./discovery.js"
 import { ReviewService, extractJsonBlock, parseFindings } from "./review.js"
 import { adversarialPrompt, fenceFor } from "./review-prompt.js"
 import type { ReviewEnv, ReviewInput } from "./review.js"
@@ -86,7 +85,6 @@ const env = (
   Layer.mergeAll(
     ReviewService.Default,
     adapter,
-    DiscoveryService.Default,
     store,
     // A review is owned by the session's active chat, so the service reads it
     // from the real store over the temp `~/jingler`. Sessions that were never
@@ -292,32 +290,6 @@ describe("ReviewService — spec", () => {
     await runReview(adapter)
     expect(spec?.prompt).toContain("const x = 1")
     expect(spec?.prompt).toContain("#42")
-  })
-
-  /**
-   * The scripted-stub trap. `selectHarness` routes to the deterministic SCRIPTED
-   * adapter whenever `binPath === null` (or for cursor, which has no adapter).
-   * The stub emits canned prose about an unrelated task — which would parse to
-   * "no findings", succeed, and get CACHED against the real PR head. The user
-   * would read fiction as a review of their code, and the de-dupe would never
-   * let it retry. It must fail loudly instead.
-   */
-  it("refuses to run when the harness isn't installed, rather than reviewing with the stub", async () => {
-    const { layer, spawns } = countingStub()
-    const exit = await Effect.runPromiseExit(
-      ReviewService.run(INPUT).pipe(Effect.provide(env(layer, noHarnesses)))
-    )
-    expect(exit._tag).toBe("Failure")
-    expect(spawns).toBe(0)
-  })
-
-  it("refuses cursor, which has no headless adapter to review with", async () => {
-    const { layer, spawns } = countingStub()
-    const exit = await Effect.runPromiseExit(
-      ReviewService.run({ ...INPUT, cli: "cursor" }).pipe(Effect.provide(env(layer)))
-    )
-    expect(exit._tag).toBe("Failure")
-    expect(spawns).toBe(0)
   })
 
   /**

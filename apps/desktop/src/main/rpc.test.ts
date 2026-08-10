@@ -15,13 +15,11 @@ import {
   AssetService,
   CliAdapter,
   ConfigService,
-  DiscoveryService,
   GitHubApi,
   GitService,
   InMemorySecretStoreLive,
   MemoryService,
   makeAgentResourceService,
-  ModelsService,
   PlanStore,
   PluginAuth,
   PluginHost,
@@ -87,8 +85,6 @@ import {
   githubDetectPr,
   githubSubmitReview,
   githubPr,
-  modelsCatalog,
-  modelsList,
   mismatchedIssueProviderId,
   planAppendMessage,
   planDispatchExistingMessage,
@@ -695,77 +691,6 @@ describe("RPC handlers", () => {
     });
   });
 
-  /**
-   * No harness discovered — which keeps this hermetic. The real DiscoveryService
-   * would find the operator's actual `claude` binary, and listing skills asks the
-   * harness what it offers, so the test would spawn a CLI.
-   */
-  const noHarnesses = Layer.succeed(
-    DiscoveryService,
-    new DiscoveryService({ list: () => Effect.succeed([]) }),
-  );
-
-  /**
-   * `visibleModels` narrows the COMPOSER's menu. Letting it narrow Settings'
-   * default-model picker too would make it a one-way door: curate down to a few
-   * models and the rest can never be chosen as your default again, from the very
-   * screen you'd use to un-curate. Configuration surfaces show what exists.
-   *
-   * It matters more than it looks: no UI writes `visibleModels` yet, so today the
-   * only writer is a hand-edited `config.json` — which is exactly the user who
-   * would get stuck.
-   */
-  describe("Models.list / Models.catalog — curation", () => {
-    const CLAUDE_MODELS = [
-      { id: "opus", label: "opus" },
-      { id: "sonnet", label: "sonnet" },
-      { id: "haiku", label: "haiku" },
-    ];
-    const models = Layer.succeed(
-      ModelsService,
-      new ModelsService({
-        list: () => Effect.succeed(CLAUDE_MODELS),
-        catalog: () =>
-          Effect.succeed([
-            {
-              cli: "claude" as const,
-              label: "Claude Code",
-              models: CLAUDE_MODELS,
-            },
-          ]),
-        capabilities: () => Effect.succeed([]),
-      }),
-    );
-    const env = () => Layer.mergeAll(base, noHarnesses, models);
-
-    /** Curate this session's harness down to a single model. */
-    const curate = ConfigService.setProvider("claude", {
-      enabled: true,
-      defaultMode: "accept-edits",
-      visibleModels: ["opus"],
-    });
-
-    it("honours curation in the composer's menu — the surface it's for", async () => {
-      const catalog = await Effect.runPromise(
-        Effect.gen(function* () {
-          yield* curate;
-          return yield* modelsCatalog();
-        }).pipe(Effect.provide(env())),
-      );
-      expect(catalog[0]?.models.map((m) => m.id)).toStrictEqual(["opus"]);
-    });
-
-    it("NEVER narrows the Settings picker, so curation stays reversible", async () => {
-      const list = await Effect.runPromise(
-        Effect.gen(function* () {
-          yield* curate;
-          return yield* modelsList("claude");
-        }).pipe(Effect.provide(env())),
-      );
-      expect(list.map((m) => m.id)).toStrictEqual(["opus", "sonnet", "haiku"]);
-    });
-  });
-
   describe("Skills.list", () => {
     // An unknown session must not error — the `/` menu just has nothing to add.
     it("resolves for an unknown session, rather than failing", async () => {
@@ -779,7 +704,6 @@ describe("RPC handlers", () => {
                 AgentResourceService,
                 makeAgentResourceService({ managedRoot: join(root, "agent-resources") }),
               ),
-              noHarnesses,
             ),
           ),
         ),
@@ -1413,7 +1337,6 @@ describe("RPC handlers", () => {
           SessionStore.Default,
           ReviewStore.Default,
           ReviewService.Default,
-          DiscoveryService.Default,
           adapter,
         ).pipe(Layer.provideMerge(leaf)),
       );
@@ -1503,7 +1426,6 @@ describe("RPC handlers", () => {
             GitService.Default,
             ReviewStore.Default,
             ReviewService.Default,
-            DiscoveryService.Default,
             adapter,
           ).pipe(Layer.provideMerge(leaf)),
         );
@@ -1764,7 +1686,6 @@ describe("RPC handlers", () => {
             SessionStore.Default,
             ReviewStore.Default,
             ReviewService.Default,
-            DiscoveryService.Default,
             adapter,
           ).pipe(Layer.provideMerge(leaf)),
         );
@@ -1917,7 +1838,6 @@ describe("RPC handlers", () => {
             SessionStore.Default,
             ReviewStore.Default,
             ReviewService.Default,
-            DiscoveryService.Default,
             countingAdapter().layer,
           ).pipe(Layer.provideMerge(leaf)),
         );

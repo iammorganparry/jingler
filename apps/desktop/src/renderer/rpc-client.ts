@@ -382,10 +382,6 @@ export const rpc = {
     }
   },
   /** What each installed harness will actually be billed to. */
-  billingPaths: (): Promise<ReadonlyArray<HarnessBilling>> =>
-    run((c) => c.Billing.paths()),
-  discoveryList: (): Promise<ReadonlyArray<CliInfo>> =>
-    run((c) => c.Discovery.list()),
   configGet: (): Promise<WorkspaceConfig | null> => run((c) => c.Config.get()),
   memoryAccess: (): Promise<MemoryAccess> =>
     run((c) => c.Memory.request({ operation: "access" })).then((value) =>
@@ -752,12 +748,6 @@ export const rpc = {
     connectionName?: string
   ): Promise<ConnectorActionResult> =>
     run((c) => c.Connector.startOauth({ service, connectionName })),
-  modelsList: (cli: CliKind): Promise<ReadonlyArray<ModelOption>> =>
-    run((c) => c.Models.list({ cli })),
-  modelsCatalog: (): Promise<ReadonlyArray<ProviderModels>> =>
-    run((c) => c.Models.catalog()),
-  modelsCapabilities: (): Promise<ReadonlyArray<HarnessCapability>> =>
-    run((c) => c.Models.capabilities()),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),
   /** A session's context accounting — drives the meter and the Settings list. */
   contextState: (sessionId: string, chatId: string): Promise<ContextSnapshot> =>
@@ -869,13 +859,6 @@ export const rpc = {
     run((c) =>
       c.Agent.approvePlan({ sessionId, planId, executionMode, revision })
     ),
-  agentSetHarness: (
-    sessionId: string,
-    chatId: string,
-    cli: CliKind,
-    model: string
-  ): Promise<Session> =>
-    run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
   agentSetModel: (
     sessionId: string,
     chatId: string,
@@ -918,8 +901,6 @@ export const rpc = {
   configSetFontScale: (fontScale: number): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setFontScale({ fontScale })),
   /** Which harness new sessions start on (Settings · Providers). */
-  configSetDefaultCli: (cli: CliKind): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setDefaultCli({ cli })),
   /** Persist a certified connection/model identity atomically. */
   configSetDefaultProviderModel: (
     connectionId: ProviderConnectionId,

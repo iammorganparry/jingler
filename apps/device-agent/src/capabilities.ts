@@ -4,10 +4,8 @@ import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { AppPaths, type AppPathsShape } from "@jingler/cli-adapters/app-paths"
 import { ConfigService } from "@jingler/cli-adapters/config"
-import { DiscoveryService } from "@jingler/cli-adapters/discovery"
 import { WorkspaceService } from "@jingler/cli-adapters/workspace"
 import type {
-  CliInfo,
   ProviderConnection,
   RemoteDeviceDiscovery,
   RemoteRepositoryCapability,
@@ -18,7 +16,6 @@ import { Effect, Layer } from "effect"
 import { makeDeviceProviderLayers } from "./provider-runtime.js"
 
 export interface CapabilitySources {
-  readonly harnesses: () => Effect.Effect<ReadonlyArray<CliInfo>, unknown>
   readonly repositories: () => Effect.Effect<ReadonlyArray<Repo>, unknown>
   readonly branches: (repoPath: string) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly providerConnections?: () => Effect.Effect<ReadonlyArray<ProviderConnection>, unknown>
@@ -71,7 +68,6 @@ export const discoverDeviceCapabilities = (
   agentVersion: string
 ): Effect.Effect<RemoteDeviceDiscovery> =>
   Effect.gen(function* () {
-    const harnesses = yield* sources.harnesses().pipe(Effect.orElseSucceed(() => []))
     const repositories = yield* sources.repositories().pipe(Effect.orElseSucceed(() => []))
     const providerConnections = yield* (sources.providerConnections?.() ?? Effect.succeed([])).pipe(
       Effect.orElseSucceed(() => [])
@@ -105,7 +101,6 @@ export const discoverDeviceCapabilities = (
           "session.observe",
           "project.manage"
         ],
-        harnesses: harnesses.filter((item) => item.available).map((item) => item.kind),
         maxConcurrentSessions: 4,
         runtime: {
           versions: CURRENT_RUNTIME_CONTRACTS,
@@ -158,7 +153,6 @@ export const discoverLiveDeviceCapabilities = (
 ): Effect.Effect<RemoteDeviceDiscovery> => {
   const deviceProviders = makeDeviceProviderLayers(targetId)
   const layer = Layer.mergeAll(
-    DiscoveryService.Default,
     WorkspaceService.Default,
     ConfigService.Default,
     NodeContext.layer,
@@ -168,7 +162,6 @@ export const discoverLiveDeviceCapabilities = (
     Effect.flatMap(() =>
       discoverDeviceCapabilities(
         {
-          harnesses: () => DiscoveryService.list().pipe(Effect.provide(layer)),
           repositories: () => WorkspaceService.listRepos().pipe(Effect.provide(layer)),
           branches: (repoPath) =>
             WorkspaceService.branches(repoPath).pipe(Effect.provide(layer)),

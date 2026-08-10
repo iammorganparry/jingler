@@ -89,7 +89,6 @@ export const Environment = Schema.Struct({
   capabilities: Schema.Struct({
     version: Schema.Number,
     capabilities: Schema.Array(Schema.String),
-    harnesses: Schema.Array(CliKind),
     maxConcurrentSessions: Schema.Number,
     runtime: Schema.optional(RuntimeCapabilityManifest),
     providerConnections: Schema.optional(
@@ -857,9 +856,8 @@ export const ProviderConfig = Schema.Struct({
    * key alone yields ~342 models, which is unusable as a flat menu. Ids are
    * harness-native (for opencode, `provider/model`).
    *
-   * The composer's menu ONLY (`Models.catalog`). It must never narrow a
-   * CONFIGURATION surface such as Settings' default-model picker
-   * (`Models.list`): a curation that could hide models from the screen you'd use
+   * The composer's menu only. It must never narrow a configuration surface such
+   * as Settings' default-model picker: a curation that could hide models from the screen you'd use
    * to change it is a one-way door — pick three, and the fourth can never be
    * chosen again from inside the app.
    *

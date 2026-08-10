@@ -142,8 +142,6 @@ export interface Conversation {
   readonly decideGate: (gateId: string, decision: GateDecision) => void
   readonly setMode: (mode: PermissionMode) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
-  /** Picking a model implies its harness, so both are set together. */
-  readonly setHarness: (cli: CliKind, model: string) => void
   readonly setModel: (
     connectionId: ProviderConnectionId,
     providerId: ProviderId,
@@ -256,7 +254,6 @@ export function useConversation(
     answerQuestion: (requestId, answers) => send({ type: "ANSWER_QUESTION", requestId, answers }),
     setMode: (m) => send({ type: "SET_MODE", mode: m }),
     setReasoning: (value) => send({ type: "SET_REASONING", reasoning: value }),
-    setHarness: (c, m) => send({ type: "SET_HARNESS", cli: c, model: m }),
     setModel: (connection, provider, selectedModel) => send({
       type: "SET_MODEL",
       connectionId: connection,

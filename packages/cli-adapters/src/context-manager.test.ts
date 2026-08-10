@@ -9,7 +9,6 @@ import type { CliAdapterShape, SessionSpec } from "./adapter.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { ConfigService } from "./config.js"
 import { ContextManager } from "./context-manager.js"
-import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { fakeCommandExecutor, withTempRoot } from "./test-support.js"
@@ -125,7 +124,6 @@ const layersFor = (adapter: Layer.Layer<CliAdapter>) =>
     // clearest possible "this session is mid-flow".
     BackgroundTaskStore.Default,
     ConfigService.Default,
-    DiscoveryService.Default,
     adapter,
     fakeCommandExecutor(installed),
     temp.layer
@@ -375,40 +373,17 @@ describe("ContextManager.observe", () => {
     expect(digest!.digest.goal).toBe("Add rate limiting to the refund route")
   })
 
-  /**
-   * The no-extra-cost guarantee, asserted at the only place it can be: the spec
-   * handed to the adapter. The summary must run through the session's OWN
-   * harness binary — the CLI the user has already logged into — on the cheapest
-   * model that harness offers. No API client is constructed anywhere in this
-   * path, so there is no second credential and no surprise bill.
-   */
-  it("summarises through the session's own authenticated harness, on the cheap tier", async () => {
+  it("summarises through the runtime without a harness binary", async () => {
     const rec = recorder()
-    const discovered = await run(
+    await run(
       Effect.gen(function* () {
         yield* seed()
         yield* observeAndSettle(180_000, rec)
-        const clis = yield* DiscoveryService.list()
-        return clis.find((c) => c.kind === "claude")?.binPath ?? null
       }),
       recordingAdapter(GOOD_REPLY, rec)
     )
     const spec = rec.specs[0]!
-    expect(spec.cli).toBe("claude")
-    /**
-     * The digest must go to whatever binary DISCOVERY resolved for this
-     * session's harness — that it is the user's own authenticated CLI is the
-     * whole no-extra-cost claim.
-     *
-     * Compared against discovery's own answer rather than asserted non-null: on
-     * a machine with Claude installed the absolute-candidate probe finds a real
-     * path, and on a clean CI runner it finds nothing. Asserting non-null passed
-     * locally and failed in CI while the code was correct in both cases — null
-     * simply means "fall through to the scripted adapter", exactly as any other
-     * run would.
-     */
-    expect(spec.binPath).toBe(discovered)
-    // haiku, not the session's sonnet — `DEFAULT_DIGEST_MODEL`.
+    expect(spec.binPath).toBeNull()
     expect(spec.model).toBe("haiku")
     expect(spec.model).not.toBe("sonnet")
   })

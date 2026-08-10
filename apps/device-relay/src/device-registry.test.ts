@@ -57,7 +57,6 @@ const registration = (
       "session.cancel",
       "session.observe"
     ],
-    harnesses: ["codex"],
     maxConcurrentSessions: 2
   }
 })

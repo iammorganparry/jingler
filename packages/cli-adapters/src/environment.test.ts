@@ -31,7 +31,6 @@ const device: RemoteDevice = {
   capabilities: {
     version: 1,
     capabilities: ["session.start"],
-    harnesses: ["codex"],
     maxConcurrentSessions: 2
   },
   agentVersion: "2.0.3",

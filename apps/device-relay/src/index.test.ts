@@ -124,7 +124,6 @@ const registerAndClaim = async (
       capabilities: {
         version: 1,
         capabilities: ["session.start", "session.input", "session.cancel", "session.observe"],
-        harnesses: ["codex"],
         maxConcurrentSessions: 2
       }
     })
@@ -179,7 +178,6 @@ describe("device relay HTTP authorization", () => {
       capabilities: {
         version: 1,
         capabilities: ["session.start"],
-        harnesses: ["codex"],
         maxConcurrentSessions: 1
       }
     }
@@ -217,7 +215,6 @@ describe("device relay HTTP authorization", () => {
       capabilities: {
         version: 1,
         capabilities: ["session.start"],
-        harnesses: ["codex"],
         maxConcurrentSessions: 1
       }
     }
@@ -267,7 +264,6 @@ describe("device relay HTTP authorization", () => {
         capabilities: {
           version: 1,
           capabilities: ["session.start"],
-          harnesses: ["codex"],
           maxConcurrentSessions: 1
         }
       })
@@ -561,7 +557,6 @@ describe("device relay HTTP authorization", () => {
           capabilities: {
             version: 1,
             capabilities: ["session.start", "session.input"],
-            harnesses: ["claude"],
             maxConcurrentSessions: 4
           },
           repositories: [
@@ -586,7 +581,7 @@ describe("device relay HTTP authorization", () => {
     expect(listing.devices.find((device) => device.deviceId === paired.device.deviceId)).toMatchObject({
       deviceId: paired.device.deviceId,
       platform: { os: "darwin", arch: "arm64" },
-      capabilities: { harnesses: ["claude"], maxConcurrentSessions: 4 }
+      capabilities: { maxConcurrentSessions: 4 }
     })
     socket.close()
   })

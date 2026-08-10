@@ -20,7 +20,7 @@ export class CliExecError extends Data.TaggedError("CliExecError")<{
 /**
  * Raised when the overall discovery scan cannot run (e.g. no command executor).
  * A `Schema.TaggedError` (not `Data.TaggedError`) because it crosses the RPC
- * boundary as the `Discovery.list` error — RPC error channels must be schemas.
+ * boundary through typed RPC error channels.
  */
 export class DiscoveryError extends Schema.TaggedError<DiscoveryError>()(
   "DiscoveryError",

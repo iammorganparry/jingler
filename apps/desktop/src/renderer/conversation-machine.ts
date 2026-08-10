@@ -58,7 +58,6 @@ import {
   settleLoaded,
   settleStreaming,
   STOPPED_NOTE,
-  supportsPlanMode,
   supportsSteer,
   userMessage
 } from "@jingler/core"
@@ -76,40 +75,6 @@ import { publishSessionUpdate } from "./session-updates.js"
 
 const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
-
-/**
- * Mirror `SessionStore.setHarness` while its RPC is in flight.
- *
- * The conversation actor outlives the mounted chat. If its local session stays
- * on the old harness, revisiting the tab sends that stale record back through
- * `SESSION_UPDATED` and snaps the model chip to the old global default. Keeping
- * the complete session mirror current closes that window; the RPC response is
- * still published as the authoritative record once disk persistence completes.
- */
-const withHarness = (
-  session: Session,
-  chatId: string,
-  cli: CliKind,
-  model: string,
-  switched: boolean
-): Session => ({
-  ...session,
-  cli,
-  model,
-  ...(switched ? { resumeId: undefined } : {}),
-  chats: (session.chats ?? []).map((chat) =>
-    switched
-      ? {
-          ...chat,
-          model: chat.id === chatId ? model : undefined,
-          resumeId: undefined,
-          mode: chat.mode === "plan" && !supportsPlanMode(cli) ? "ask" : chat.mode
-        }
-      : chat.id === chatId
-        ? { ...chat, model }
-        : chat
-  )
-})
 
 /** Optimistic mirror of SessionStore.setProviderModel while its RPC persists. */
 const withProviderModel = (
@@ -368,7 +333,6 @@ type ConversationEvent =
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
-  | { type: "SET_HARNESS"; cli: CliKind; model: string }
   | {
       type: "SET_MODEL"
       connectionId: ProviderConnectionId
@@ -379,7 +343,6 @@ type ConversationEvent =
   | { type: "SESSION_UPDATED"; session: Session }
   | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
-  | { type: "CATALOG_LOADED"; catalog: ReadonlyArray<ProviderModels> }
   | { type: "REVIEW_EVENT"; event: StreamEvent }
   | {
       type: "COMMENT_PLAN_STEP"
@@ -1715,57 +1678,6 @@ export const conversationMachine = setup({
         )
       }
     }),
-    /**
-     * Apply a harness/model pick. Picking a model under another provider's
-     * heading switches harness, which has consequences beyond the chip:
-     *  - `resumeId` is dropped (main does the authoritative write) — the new
-     *    harness starts a fresh thread, so the transcript stays on screen but the
-     *    agent won't recall earlier turns;
-     *  - `plan` mode degrades to `ask` on a harness that can't hold it
-     *    (`supportsPlanMode`) — cursor;
-     *  - skills are per-harness, so the `/` menu is refetched.
-     */
-    persistHarness: assign(({ context, event, self }) => {
-      if (event.type !== "SET_HARNESS") return {}
-      const switched = event.cli !== context.cli
-      const session = withHarness(
-        context.session,
-        context.chatId,
-        event.cli,
-        event.model,
-        switched
-      )
-      void rpc.agentSetHarness(
-        context.session.id,
-        context.chatId,
-        event.cli,
-        event.model
-      ).then(publishSessionUpdate).catch(() => {})
-      if (!switched) return { model: event.model, session }
-
-      void rpc
-        .skillsList(context.session.id)
-        .then((skills) => self.send({ type: "SKILLS_LOADED", skills }))
-        .catch(() => {})
-
-      const mode = context.mode === "plan" && !supportsPlanMode(event.cli) ? "ask" : context.mode
-      const reasoning =
-        event.cli === "claude" || event.cli === "codex"
-          ? context.session.reasoning?.[event.cli]
-          : undefined
-      return {
-        cli: event.cli,
-        model: event.model,
-        // Mirror main's write so the UI doesn't lie until the next load.
-        session,
-        mode,
-        reasoning,
-        executionMode: isExecutionMode(mode) ? mode : context.executionMode,
-        // Empty until the refetch lands — better a bare `/` menu than one
-        // offering the old harness's skills.
-        skills: []
-      }
-    }),
     persistProviderModel: assign(({ context, event }) => {
       if (event.type !== "SET_MODEL") return {}
       const session = withProviderModel(
@@ -1792,21 +1704,6 @@ export const conversationMachine = setup({
     }),
     applySkills: assign(({ event }) => (event.type === "SKILLS_LOADED" ? { skills: event.skills } : {})),
     /**
-     * Fetch the model catalogue OUT OF BAND, not as part of `loadConversation`.
-     * It reaches `DiscoveryService` and probes the Codex CLI for its models —
-     * hundreds of ms to seconds. `loading` has no event handlers, so anything the
-     * operator does before it settles (typing a message, Shift+Tab) is silently
-     * dropped; gating the transcript on a CLI probe would widen that hole from
-     * imperceptible to seconds. The chip just fills itself in a beat later.
-     */
-    loadCatalog: ({ self }) => {
-      void rpc
-        .modelsCatalog()
-        .then((catalog) => self.send({ type: "CATALOG_LOADED", catalog }))
-        .catch(() => {})
-    },
-
-    /**
      * The `/` menu's contents, fetched out of band for the same reason as the
      * catalogue above: `Skills.list` asks the HARNESS what commands it has,
      * which means spawning it — seconds, in the worst case. Awaiting it inside
@@ -1820,9 +1717,6 @@ export const conversationMachine = setup({
         .then((skills) => self.send({ type: "SKILLS_LOADED", skills }))
         .catch(() => {})
     },
-    applyCatalog: assign(({ event }) =>
-      event.type === "CATALOG_LOADED" ? { catalog: event.catalog } : {}
-    ),
     /** Fold one reviewer event into its tab + the PR button's phase/timer. */
     applyReview: assign(({ context, event }) => {
       if (event.type !== "REVIEW_EVENT") return {}
@@ -1905,7 +1799,7 @@ export const conversationMachine = setup({
   initial: "loading",
   // Kick the (slow, out-of-band) model catalogue + `/` menu fetches off once, at
   // start. Both probe a CLI, so neither may gate the transcript — see below.
-  entry: ["loadCatalog", "loadSkills"],
+  entry: ["loadSkills"],
   // Watch the reviewer for the machine's whole life — a review is not part of a
   // turn, so it can start, run and finish in any state.
   invoke: {
@@ -1921,7 +1815,6 @@ export const conversationMachine = setup({
       guard: "isAcceptedSessionEnvelope",
       actions: "applySessionEnvelope"
     },
-    CATALOG_LOADED: { actions: "applyCatalog" },
     SKILLS_LOADED: { actions: "applySkills" },
     REVIEW_EVENT: { actions: "applyReview" },
     SET_REASONING: { actions: "persistReasoning" },
@@ -2043,7 +1936,6 @@ export const conversationMachine = setup({
        */
       on: {
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" },
         // The composer is enabled from the first paint, so a prompt can be sent
         // before the transcript lands — and a dropped one is invisible: the box
         // clears and the operator believes they sent it. Hold it and run it the
@@ -2144,7 +2036,6 @@ export const conversationMachine = setup({
         APPROVE_PLAN: { target: "running", actions: "startResumePlan" },
         RESUME_PLAN: { target: "running", actions: "startResumePlan" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" },
         // Re-read the worktree diff on demand (e.g. after a revert from the rail).
         REFRESH_DIFF: { target: "refreshingDiff" }
       }
@@ -2241,7 +2132,6 @@ export const conversationMachine = setup({
         REVISE_PLAN: { actions: "optimisticPlanRevise" },
         APPROVE_PLAN: { actions: "optimisticPlanApprove" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" },
         // Stopping abandons the queue too — the operator asked the agent to halt.
         // Live sub-agent tabs go with it (no completion events will arrive).
         STOP: {
@@ -2271,7 +2161,6 @@ export const conversationMachine = setup({
         PATCH_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" }
       }
     },
     /**
@@ -2315,7 +2204,6 @@ export const conversationMachine = setup({
         PATCH_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" }
       }
     },
     // After a turn ends, re-read the worktree diff so the Changes rail reflects
@@ -2358,7 +2246,6 @@ export const conversationMachine = setup({
         PATCH_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" }
       }
     }
   }

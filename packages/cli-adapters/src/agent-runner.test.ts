@@ -40,7 +40,6 @@ import {
 } from "./agent-runner.js"
 import { composeRemoteMcpServers } from "./mcp-config.js"
 import { ContextManager } from "./context-manager.js"
-import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
@@ -184,7 +183,6 @@ const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
     BackgroundTaskStore.Default,
     PlanStore.Default,
     makeScriptedCliAdapter(0),
-    DiscoveryService.Default,
     ContextManager.Default,
     temp.layer
   )
@@ -308,7 +306,6 @@ describe("AgentRunner saveDraftPlan", () => {
             BackgroundTaskStore.Default,
             PlanStore.Default,
             adapter,
-            DiscoveryService.Default,
             ContextManager.Default,
             temp.layer
           )
@@ -449,7 +446,6 @@ describe("AgentRunner remote MCP attachments", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -515,7 +511,6 @@ describe("AgentRunner remote MCP attachments", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -636,7 +631,6 @@ describe("AgentRunner team memory", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -691,7 +685,6 @@ describe("AgentRunner team memory", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       failedAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -730,7 +723,6 @@ describe("AgentRunner team memory", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       pendingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -824,7 +816,6 @@ describe("AgentRunner HITL gating", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       probeAdapter(out),
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -947,7 +938,6 @@ describe("AgentRunner sub-agents", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       adapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1019,7 +1009,6 @@ describe("AgentRunner image attachments", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1055,7 +1044,6 @@ describe("AgentRunner hidden prompt context", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -1100,7 +1088,6 @@ describe("AgentRunner AskUserQuestion", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1156,7 +1143,6 @@ describe("AgentRunner ids", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1198,7 +1184,6 @@ describe("AgentRunner allowlist", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       makeScriptedCliAdapter(0),
-    DiscoveryService.Default,
     ContextManager.Default,
     ConfigService.Default,
       temp.layer
@@ -1242,7 +1227,6 @@ describe("AgentRunner plan mode", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1356,7 +1340,6 @@ describe("AgentRunner plan mode", () => {
       BackgroundTaskStore.Default,
       planStoreWithImmediateWatcher,
       makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -1868,7 +1851,6 @@ describe("AgentRunner model", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       modelReportingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1947,7 +1929,6 @@ describe("AgentRunner plan library", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       adapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -2185,7 +2166,6 @@ describe("AgentRunner plan library", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2375,7 +2355,6 @@ describe("AgentRunner plan library", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter(captured),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2426,7 +2405,6 @@ describe("AgentRunner plan library", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter(captured),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2459,7 +2437,6 @@ describe("AgentRunner plan library", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter(captured),
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -2547,7 +2524,6 @@ describe("AgentRunner resume across restarts", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       resumeAdapter(captured, "sdk-123"),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2659,7 +2635,6 @@ describe("AgentRunner plan progress across turns", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       twoTurnAdapter(edit, plan),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2728,20 +2703,6 @@ describe("AgentRunner plan progress across turns", () => {
   })
 })
 
-/**
- * No harness discovered.
- *
- * The real DiscoveryService shells out (`which claude`, filesystem probes) as
- * part of every `prompt` setup. These tests wait on the run actually starting, so
- * that probe sits inside the window they measure — and under load it blew the
- * budget and made them flake. The runner doesn't need a real binary here: the
- * adapter is injected.
- */
-const noHarnesses: Layer.Layer<DiscoveryService> = Layer.succeed(
-  DiscoveryService,
-  new DiscoveryService({ list: () => Effect.succeed([]) })
-)
-
 describe("AgentRunner failures", () => {
   it("refuses a direct turn after the shared checkout moves to another branch", async () => {
     const repoPath = initGitRepo(join(temp.root, "direct-repo"), {
@@ -2796,7 +2757,6 @@ describe("AgentRunner failures", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       unusedAdapter,
-      noHarnesses,
       temp.layer
     )
 
@@ -2865,7 +2825,6 @@ describe("AgentRunner failures", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       switchingAdapter,
-      noHarnesses,
       temp.layer
     )
 
@@ -2932,7 +2891,6 @@ describe("AgentRunner failures", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       failingAdapter,
-      noHarnesses,
       temp.layer
     )
 
@@ -3063,7 +3021,6 @@ describe("AgentRunner stop", () => {
         ContextManager.Default,
         ConfigService.Default,
         hangingAdapter(started, interrupted, opts.gate),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3121,7 +3078,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         hangingAdapter(started, interrupted),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3178,7 +3134,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3229,7 +3184,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3284,7 +3238,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3344,7 +3297,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         makeScriptedCliAdapter(0),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3424,7 +3376,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         slowAdapter,
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3495,7 +3446,6 @@ describe("AgentRunner first-event watchdog", () => {
         PlanStore.Default,
         ContextManager.Default,
         muteAdapter,
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3547,7 +3497,6 @@ describe("AgentRunner first-event watchdog", () => {
         PlanStore.Default,
         ContextManager.Default,
         chattyAdapter,
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3598,7 +3547,6 @@ describe("AgentRunner live tool output", () => {
     BackgroundTaskStore.Default,
       PlanStore.Default,
       deltaAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -3650,7 +3598,6 @@ describe("AgentRunner usage accrual", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       makeScriptedCliAdapter(0),
-      noHarnesses,
       temp.layer
     )
     const totals = await Effect.gen(function* () {

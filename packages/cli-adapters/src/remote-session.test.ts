@@ -281,7 +281,7 @@ process.stdin.on("data", (chunk) => {
       platform: { os: "darwin", arch: "arm64" },
       publicKey: { algorithm: "Ed25519", encoding: "base64url", value: "A".repeat(43) },
       encryptionPublicKey: { algorithm: "X25519", encoding: "base64url", value: deviceEncryptionPublicKey },
-      capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["codex"], maxConcurrentSessions: 1 },
+      capabilities: { version: 1, capabilities: ["session.start"], maxConcurrentSessions: 1 },
       state: "active", generation: 1, createdAt: 1, updatedAt: 1,
       presence: { version: 1, state: "online", connectedAt: 1, lastSeenAt: 1, activeSessionIds: [] }
     }
@@ -385,7 +385,7 @@ process.stdin.on("data", (chunk) => {
       platform: { os: "darwin", arch: "arm64" },
       publicKey: { algorithm: "Ed25519", encoding: "base64url", value: "A".repeat(43) },
       encryptionPublicKey: { algorithm: "X25519", encoding: "base64url", value: encryptionJwk.x },
-      capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["codex"], maxConcurrentSessions: 1 },
+      capabilities: { version: 1, capabilities: ["session.start"], maxConcurrentSessions: 1 },
       state: "active", generation: 1, createdAt: 1, updatedAt: 1,
       presence: { version: 1, state: "online", connectedAt: 1, lastSeenAt: 1, activeSessionIds: [] }
     }

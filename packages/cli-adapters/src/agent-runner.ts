@@ -80,7 +80,6 @@ import type {
 import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { readDefaultMode } from "./default-mode.js"
-import { DiscoveryService } from "./discovery.js"
 import { healedWorktreePath } from "./cli-project-dir.js"
 import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
@@ -280,7 +279,6 @@ type PromptEnv =
   | TranscriptStore
   | BackgroundTaskStore
   | PlanStore
-  | DiscoveryService
   | ContextManager
   | OpenConnectorService
   | BrowserControlMcpService
@@ -870,9 +868,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           ])
           const sessionCli = session.cli
           const workspaceConfig = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-          const discoveredClis = yield* DiscoveryService.list().pipe(
-            Effect.orElseSucceed(() => [])
-          )
           // Read once per turn: plan mode's commands run unattended unless the
           // operator switched that off in Settings.
           const planAutoRun = workspaceConfig?.planAutoRun ?? PLAN_AUTO_RUN_DEFAULT
@@ -884,9 +879,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // restore it.
           const execDefault = yield* resolveExecMode(sessionId)
           yield* Ref.update(execDefaults, (m) => new Map(m).set(chatId, execDefault))
-          // Resolve the harness binary; null → the dispatcher uses the scripted
-          // fallback (also the path when the CLI isn't installed).
-          const binPath = discoveredClis.find((c) => c.kind === cli)?.binPath ?? null
+          const binPath = null
           // The agent always runs in the session's recorded working checkout.
           //
           // This comment used to claim an empty value "would fail loudly on a
@@ -1175,14 +1168,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             | PlanStore
             | BackgroundTaskStore
             // `emit` hands every context reading to the manager, which may fork a
-            // digest run — so the manager's own dependencies (the adapter it
-            // summarises through, the config holding the budget, the discovery
-            // that finds the binary) have to be captured here too, or `emit`
+            // digest run — so the manager's own dependencies have to be captured
+            // here too, or `emit`
             // stops being `R = never` and the whole fold fails to type.
             | ContextManager
             | ConfigService
             | CliAdapter
-            | DiscoveryService
             | CommandExecutor.CommandExecutor
             | FileSystem.FileSystem
             | Path.Path

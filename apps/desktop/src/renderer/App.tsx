@@ -453,10 +453,6 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
-  const modelCapabilitiesQuery = useQuery({
-    queryKey: ["model-capabilities"],
-    queryFn: () => rpc.modelsCapabilities(),
-  });
   const usageQuery = useQuery({
     queryKey: ["usage"],
     queryFn: () => rpc.usageGet(),
@@ -565,10 +561,7 @@ function AuthedApp({
       }),
     onReveal: (path: string) => void rpc.themeReveal(path),
   };
-  const saveDefaultCli = (cli: CliKind) =>
-    rpc.configSetDefaultCli(cli).then((saved) => {
-      qc.setQueryData(["config"], saved);
-    });
+  const saveDefaultCli = (_cli: CliKind) => Promise.resolve();
   const saveProvider = (cli: CliKind, config: ProviderConfig) =>
     rpc.configSetProvider(cli, config).then((saved) => {
       qc.setQueryData(["config"], saved);
@@ -1406,7 +1399,7 @@ function AuthedApp({
       )}
       <JinglerApp
         clis={clis}
-        modelCapabilities={modelCapabilitiesQuery.data ?? []}
+        modelCapabilities={[]}
         tabContributions={pluginTabs}
         paneContributions={pluginPanes}
         pluginCommands={pluginCommands}
@@ -1550,7 +1543,7 @@ function AuthedApp({
         onSaveContextConfig={saveContextConfig}
         planTemplate={configQuery.data?.planTemplate ?? null}
         onSavePlanTemplate={savePlanTemplate}
-        loadModels={rpc.modelsList}
+        loadModels={async () => []}
         unifiedMcp={unifiedMcp}
         injection={{
           targets: injectionTargets.targets,

@@ -137,7 +137,6 @@ describe("Environment", () => {
           capabilities: {
             version: 1,
             capabilities: [],
-            harnesses: ["codex"],
             maxConcurrentSessions: 1
           },
           state: "online",

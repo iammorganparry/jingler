@@ -1324,43 +1324,6 @@ describe("conversationMachine — image attachments", () => {
     actor.stop()
   })
 
-  it("loads the model catalogue into context", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.context.catalog.length > 0)
-    expect(actor.getSnapshot().context.catalog).toStrictEqual(h.catalog)
-    expect(actor.getSnapshot().context.cli).toBe("claude")
-    actor.stop()
-  })
-
-  /**
-   * REGRESSION: the catalogue must NOT be part of `loadConversation`.
-   *
-   * `loading` has no event handlers, so anything the operator does before the
-   * load settles is dropped on the floor. Fetching the catalogue inline reaches
-   * DiscoveryService + probes the Codex CLI for models — seconds — which widened
-   * that window enough that an immediate Shift+Tab or send was silently ignored
-   * (it broke four e2e tests). The transcript must not wait on the model chip.
-   */
-  it("reaches idle without waiting for the model catalogue", async () => {
-    let releaseCatalog = () => {}
-    h.catalogGate = new Promise<void>((resolve) => {
-      releaseCatalog = resolve
-    })
-
-    const actor = start()
-    // Idle while the catalogue is still in flight — so events aren't dropped.
-    await waitFor(actor, (s) => s.matches(idle))
-    expect(actor.getSnapshot().context.catalog).toStrictEqual([])
-
-    // The operator can act immediately, and it takes effect.
-    actor.send({ type: "SET_MODE", mode: "auto" })
-    expect(actor.getSnapshot().context.mode).toBe("auto")
-
-    releaseCatalog()
-    await waitFor(actor, (s) => s.context.catalog.length > 0)
-    actor.stop()
-  })
-
   describe("SET_MODEL", () => {
     it("updates canonical identity and clears incompatible continuation state", async () => {
       const actor = start()
@@ -1382,133 +1345,16 @@ describe("conversationMachine — image attachments", () => {
     })
   })
 
-  describe("SET_HARNESS", () => {
-    it("changes only the model when staying on the same harness", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-      // Skills land OUT OF BAND now (the fetch probes the harness, so gating the
-      // transcript on it would freeze the composer) — wait for the first one
-      // before asserting that a same-harness switch doesn't trigger a second.
-      await waitFor(actor, (s) => s.context.skills.length > 0)
-      const skillsBefore = h.skillsListCalls
+  it("honours a mode change made while the conversation is still loading", async () => {
+    const actor = start()
+    expect(actor.getSnapshot().matches("loading")).toBe(true)
 
-      actor.send({ type: "SET_HARNESS", cli: "claude", model: "haiku" })
+    actor.send({ type: "SET_MODE", mode: "auto" })
 
-      const { context } = actor.getSnapshot()
-      expect(context.model).toBe("haiku")
-      expect(context.cli).toBe("claude")
-      expect(context.session.chats[0]?.model).toBe("haiku")
-      expect(h.setHarnessCalls).toStrictEqual([{ sessionId: "s1", cli: "claude", model: "haiku" }])
-      // Same harness → same skills; refetching would be pointless work.
-      expect(h.skillsListCalls).toBe(skillsBefore)
-      expect(context.skills.length).toBeGreaterThan(0)
-      actor.stop()
-    })
-
-    /**
-     * The composer's chips are live while the conversation loads, and loading is
-     * NOT instant — it asks the harness for its command list, which means
-     * spawning it. A switch made in that window used to be swallowed: the menu
-     * closed, the chip snapped back, nothing happened.
-     *
-     * Every other test here waits for `idle` first, which is exactly why none of
-     * them caught it — this one deliberately does not.
-     */
-    it("honours a switch made while the conversation is still loading", async () => {
-      const actor = start()
-      expect(actor.getSnapshot().matches("loading")).toBe(true)
-
-      actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
-
-      expect(actor.getSnapshot().context.cli).toBe("codex")
-      expect(actor.getSnapshot().context.session).toMatchObject({
-        cli: "codex",
-        model: "gpt-5.6-sol",
-        chats: [{ id: "s1", model: "gpt-5.6-sol" }]
-      })
-      expect(h.setHarnessCalls).toStrictEqual([
-        { sessionId: "s1", cli: "codex", model: "gpt-5.6-sol" }
-      ])
-
-      // …and the load completing must not clobber the choice: `onDone` assigns
-      // transcript state only.
-      await waitFor(actor, (s) => s.matches(idle))
-      expect(actor.getSnapshot().context.cli).toBe("codex")
-      expect(actor.getSnapshot().context.model).toBe("gpt-5.6-sol")
-      actor.stop()
-    })
-
-    it("honours a mode change made while the conversation is still loading", async () => {
-      const actor = start()
-      expect(actor.getSnapshot().matches("loading")).toBe(true)
-
-      actor.send({ type: "SET_MODE", mode: "auto" })
-
-      expect(actor.getSnapshot().context.mode).toBe("auto")
-      await waitFor(actor, (s) => s.matches(idle))
-      expect(actor.getSnapshot().context.mode).toBe("auto")
-      actor.stop()
-    })
-
-    it("switches harness and refetches the harness-specific skills", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-      // As above — count from AFTER the out-of-band initial fetch, or the
-      // "+1 refetch" assertion below races it.
-      await waitFor(actor, (s) => s.context.skills.length > 0)
-      const skillsBefore = h.skillsListCalls
-
-      actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
-
-      expect(actor.getSnapshot().context.cli).toBe("codex")
-      expect(actor.getSnapshot().context.model).toBe("gpt-5.6-sol")
-      // The old harness's `/` menu must not linger.
-      expect(h.skillsListCalls).toBe(skillsBefore + 1)
-      await waitFor(actor, (s) => s.context.skills.length > 0)
-      actor.stop()
-    })
-
-    // The runner reads `session.cli`; if the mirror lagged, the chip would say
-    // "codex" while the next turn still ran on Claude.
-    it("mirrors the switch onto the session and drops the stale resume id", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-
-      actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
-
-      const { session: updated } = actor.getSnapshot().context
-      expect(updated.cli).toBe("codex")
-      expect(updated.resumeId).toBeUndefined()
-      actor.stop()
-    })
-
-    it("keeps plan mode when the new harness can plan too", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-      actor.send({ type: "SET_MODE", mode: "plan" })
-      expect(actor.getSnapshot().context.mode).toBe("plan")
-
-      actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
-
-      // Codex submits its plan as a fenced block instead of `ExitPlanMode`, so
-      // there is nothing to downgrade — dropping the mode would have discarded
-      // the operator's in-flight planning session for no reason.
-      expect(actor.getSnapshot().context.mode).toBe("plan")
-      actor.stop()
-    })
-
-    it("degrades plan mode to ask on a harness that cannot plan", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-      actor.send({ type: "SET_MODE", mode: "plan" })
-
-      actor.send({ type: "SET_HARNESS", cli: "cursor", model: "composer-1" })
-
-      // Cursor falls through to the scripted stub, so its "plan" would be
-      // fabricated. Better to say `ask` than to invent one.
-      expect(actor.getSnapshot().context.mode).toBe("ask")
-      actor.stop()
-    })
+    expect(actor.getSnapshot().context.mode).toBe("auto")
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(actor.getSnapshot().context.mode).toBe("auto")
+    actor.stop()
   })
 })
 

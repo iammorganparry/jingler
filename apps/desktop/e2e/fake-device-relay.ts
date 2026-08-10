@@ -165,7 +165,6 @@ export const startFakeDeviceRelay = async (
           ? {
               version: 1,
               capabilities: ["session.observe"],
-              harnesses: [],
               maxConcurrentSessions: 1
             }
           : registration?.capabilities,

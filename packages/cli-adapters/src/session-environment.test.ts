@@ -9,12 +9,17 @@ import {
 } from "@jingler/core"
 import { continueSessionOnEnvironment, setSessionEnvironment } from "./session-environment.js"
 
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
+
 const source = (patch: Partial<Session> = {}): Session => ({
   id: "s_source", repo: "acme/app", branch: "main", title: "Source", status: "idle", cli: "claude",
   diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0, tokens: 0,
-  updatedAt: "2026-08-08T00:00:00.000Z", chats: [{ id: "c_source", title: null, createdAt: "2026-08-08T00:00:00.000Z", updatedAt: "2026-08-08T00:00:00.000Z" }], activeChatId: "c_source", ...patch
+  connectionId, providerId, modelId,
+  updatedAt: "2026-08-08T00:00:00.000Z", chats: [{ id: "c_source", title: null, connectionId, providerId, modelId, createdAt: "2026-08-08T00:00:00.000Z", updatedAt: "2026-08-08T00:00:00.000Z" }], activeChatId: "c_source", ...patch
 })
-const target: Environment = { id: "buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" }, capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["claude"], maxConcurrentSessions: 4 }, state: "online", agentVersion: "2.0.3", lastSeenAt: 1 }
+const target: Environment = { id: "buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" }, capabilities: { version: 1, capabilities: ["session.start"], maxConcurrentSessions: 4, runtime: { versions: CURRENT_RUNTIME_CONTRACTS, toolIds: [], resourceIds: [], targetId: "buildbox" }, providerConnections: [{ id: connectionId, providerId, authKind: "claude-setup-token", status: "authenticated" }] }, state: "online", agentVersion: "2.0.3", lastSeenAt: 1 }
 
 describe("session environment handoff", () => {
   const deps = () => {
@@ -31,19 +36,15 @@ describe("session environment handoff", () => {
   it("preserves the source session when handoff fails", async () => {
     const base = deps(); const d = { ...base, continueSession: vi.fn(() => Effect.fail(new Error("provision failed"))) }; const exit = await Effect.runPromiseExit(continueSessionOnEnvironment(source({ tokens: 1 }), "buildbox", d)); expect(Exit.isFailure(exit)).toBe(true); expect(base.persist).not.toHaveBeenCalled()
   })
-  it("rejects a target missing the required repository or harness", async () => {
-    const d = deps(); d.environments = () => Effect.succeed([{ ...target, capabilities: { ...target.capabilities, harnesses: ["codex" as const] } }]); const exit = await Effect.runPromiseExit(continueSessionOnEnvironment(source(), "buildbox", d)); expect(Exit.isFailure(exit)).toBe(true); expect(d.continueSession).not.toHaveBeenCalled()
+  it("rejects a target missing the authenticated connection", async () => {
+    const d = deps(); d.environments = () => Effect.succeed([{ ...target, capabilities: { ...target.capabilities, providerConnections: [] } }]); const exit = await Effect.runPromiseExit(continueSessionOnEnvironment(source(), "buildbox", d)); expect(Exit.isFailure(exit)).toBe(true); expect(d.continueSession).not.toHaveBeenCalled()
   })
   it("requires the exact authenticated connection for a canonical pi session", async () => {
-    const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
-    const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
-    const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
     const canonical = source({ connectionId, providerId, modelId })
     const piTarget: Environment = {
       ...target,
       capabilities: {
         ...target.capabilities,
-        harnesses: [],
         runtime: {
           versions: CURRENT_RUNTIME_CONTRACTS,
           toolIds: [],

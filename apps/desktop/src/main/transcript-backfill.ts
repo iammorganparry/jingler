@@ -2,7 +2,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { Message, StreamEvent } from "@jingler/core"
 import { applyStreamEvent, assistantMessage, userMessage } from "@jingler/core"
-import { streamEventsFor } from "@jingler/cli-adapters"
+import { Either, Schema } from "effect"
 
 /**
  * Rebuild a Jingler transcript from the Claude harness's own JSONL log.
@@ -20,23 +20,98 @@ import { streamEventsFor } from "@jingler/cli-adapters"
  * match a live run without duplicating any of that logic.
  */
 
-type Json = Record<string, unknown>
-type Block = Json & { type?: string }
+const TextBlock = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String })
+const ThinkingBlock = Schema.Struct({
+  type: Schema.Literal("thinking"),
+  thinking: Schema.String,
+  signature: Schema.optional(Schema.String)
+})
+const ToolUseBlock = Schema.Struct({
+  type: Schema.Literal("tool_use"),
+  id: Schema.String,
+  name: Schema.String,
+  input: Schema.Record({ key: Schema.String, value: Schema.Unknown })
+})
+const ToolResultBlock = Schema.Struct({
+  type: Schema.Literal("tool_result"),
+  tool_use_id: Schema.String,
+  content: Schema.String,
+  is_error: Schema.optional(Schema.Boolean)
+})
+const TranscriptBlock = Schema.Union(TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock)
+type Block = Schema.Schema.Type<typeof TranscriptBlock>
 
-const blocksOf = (line: Json): Block[] => {
-  const content = (line.message as Json | undefined)?.content
+const TranscriptLine = Schema.Struct({
+  type: Schema.String,
+  timestamp: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.Struct({
+    role: Schema.optional(Schema.String),
+    content: Schema.Union(Schema.String, Schema.Array(TranscriptBlock))
+  }))
+})
+type TranscriptLine = Schema.Schema.Type<typeof TranscriptLine>
+
+type ToolMemo = { readonly name: string; readonly input: Readonly<Record<string, unknown>> }
+
+const blocksOf = (line: TranscriptLine): ReadonlyArray<Block> => {
+  const content = line.message?.content
   if (typeof content === "string") return content.length > 0 ? [{ type: "text", text: content }] : []
-  return Array.isArray(content) ? (content.filter((b) => typeof b === "object" && b !== null) as Block[]) : []
+  return content ?? []
 }
 
 /** A user line is a real PROMPT (a turn boundary) only if it carries text, not just tool results. */
-const promptTextOf = (line: Json): string | null => {
+const promptTextOf = (line: TranscriptLine): string | null => {
   const text = blocksOf(line)
     .filter((b) => b.type === "text")
     .map((b) => String(b.text ?? ""))
     .join("\n")
     .trim()
   return text.length > 0 ? text : null
+}
+
+const toolTarget = (memo: ToolMemo): string => {
+  const value = memo.name === "Bash"
+    ? memo.input.command
+    : memo.input.file_path ?? memo.input.path
+  return typeof value === "string" ? value : memo.name
+}
+
+const eventsFor = (
+  line: TranscriptLine,
+  tools: Map<string, ToolMemo>
+): ReadonlyArray<StreamEvent> => {
+  const events: StreamEvent[] = []
+  for (const block of blocksOf(line)) {
+    if (block.type === "thinking") {
+      if (block.thinking.length > 0) {
+        events.push({ _tag: "Thinking", text: block.thinking, seconds: null, done: true })
+      }
+      continue
+    }
+    if (block.type === "tool_use") {
+      const memo = { name: block.name, input: block.input }
+      tools.set(block.id, memo)
+      events.push({
+        _tag: "ToolStart",
+        id: block.id,
+        name: block.name,
+        target: toolTarget(memo)
+      })
+      continue
+    }
+    if (block.type === "tool_result") {
+      events.push({
+        _tag: "ToolEnd",
+        id: block.tool_use_id,
+        status: block.is_error === true ? "error" : "success",
+        meta: null,
+        diff: null,
+        preview: null,
+        output: block.content
+      })
+    }
+  }
+  return events
 }
 
 /** Where Claude keeps a session's log: the cwd with every "/" replaced by "-". */
@@ -56,7 +131,8 @@ export const rebuildTranscript = (sessionId: string, jsonl: string): Message[] =
     .filter((l) => l.trim().length > 0)
     .flatMap((l) => {
       try {
-        return [JSON.parse(l) as Json]
+        const decoded = Schema.decodeUnknownEither(TranscriptLine)(JSON.parse(l))
+        return Either.isRight(decoded) ? [decoded.right] : []
       } catch {
         return []
       }
@@ -68,7 +144,7 @@ export const rebuildTranscript = (sessionId: string, jsonl: string): Message[] =
   // that exactly, or the next real run re-emits ids colliding with these and the
   // virtualized list stacks rows keyed by them.
   let counter = 0
-  const tools = new Map<string, { name: string; input: Record<string, unknown> }>()
+  const tools = new Map<string, ToolMemo>()
   let current: Message | null = null
 
   const closeAssistant = () => {
@@ -100,8 +176,7 @@ export const rebuildTranscript = (sessionId: string, jsonl: string): Message[] =
           if (text.length > 0) fold([{ _tag: "Assistant", text }], at)
           continue
         }
-        const synthetic = { ...line, message: { ...(line.message as Json), content: [block] } }
-        fold(streamEventsFor(synthetic as never, tools), at)
+        fold(eventsFor({ ...line, message: { ...line.message!, content: [block] } }, tools), at)
       }
       continue
     }
@@ -114,7 +189,7 @@ export const rebuildTranscript = (sessionId: string, jsonl: string): Message[] =
         out.push(userMessage(`u_${sessionId}_${++counter}`, prompt, at, []))
         continue
       }
-      fold(streamEventsFor(line as never, tools), at)
+      fold(eventsFor(line, tools), at)
     }
     // `attachment` / `last-prompt` / `mode` / `queue-operation` / `summary` lines
     // are harness bookkeeping with no transcript content.

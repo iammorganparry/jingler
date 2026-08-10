@@ -8,11 +8,10 @@ import type {
   StreamEvent
 } from "@jingler/core"
 import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
-import type { CommandExecutor, FileSystem, Path } from "@effect/platform"
+import type { FileSystem, Path } from "@effect/platform"
 import { Effect, PubSub, Ref, Schema, Stream } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
 import { CliAdapter, PlanDecision } from "./adapter.js"
-import { DiscoveryService } from "./discovery.js"
 import type { AppPaths } from "./app-paths.js"
 import { ReviewStore } from "./review-store.js"
 import { SessionStore } from "./sessions.js"
@@ -150,13 +149,10 @@ export const parseFindings = (text: string): ReadonlyArray<ReviewFinding> | null
 }
 
 /**
- * What a review run needs from its environment: the harness adapter, CLI
- * discovery, and the executor discovery shells out through.
+ * What a review run needs from its environment.
  */
 export type ReviewEnv =
   | CliAdapter
-  | DiscoveryService
-  | CommandExecutor.CommandExecutor
   | ReviewStore
   // A review is owned by ONE chat — the session's `activeChatId` at the moment it
   // starts — so `ReviewService` needs the store to read that owner. See `watch`.
@@ -368,32 +364,6 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
       Effect.gen(function* () {
         const adapter = yield* CliAdapter
 
-        // A harness with no binary — or one with no real adapter (cursor) — is
-        // dispatched to the deterministic SCRIPTED stub, which emits canned prose
-        // about an unrelated task. That would sail through as a successful review
-        // and get cached against this PR head, so the user reads fiction and the
-        // de-dupe never lets it retry. Fail loudly instead.
-        const hasRuntimeIdentity =
-          input.connectionId !== undefined && input.modelId !== undefined
-        if (!hasRuntimeIdentity && input.cli === "cursor") {
-          return yield* Effect.fail(
-            new ReviewError({
-              message:
-                "Cursor can't run an adversarial review yet — choose Claude, Codex or opencode in Settings · GitHub."
-            })
-          )
-        }
-        const binPath =
-          (yield* DiscoveryService.list().pipe(Effect.orElseSucceed(() => [])))
-            .find((c) => c.kind === input.cli)?.binPath ?? null
-        if (!hasRuntimeIdentity && binPath === null) {
-          return yield* Effect.fail(
-            new ReviewError({
-              message: `The ${input.cli} CLI isn't installed or couldn't be found, so there is nothing to run the review with.`
-            })
-          )
-        }
-
         // A failed diff fetch must not fold to "". Reviewing "" produces a confident
         // "found nothing", which then gets cached against the real head SHA — so a
         // transient API failure becomes a permanent false all-clear that only a
@@ -440,7 +410,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
             baseBranch: input.baseBranch
           }),
           images: [],
-          binPath,
+          binPath: null,
           // Paired with the deny-all gate below. "ask" (not "plan") on purpose:
           // plan mode drives the harness toward ExitPlanMode, and a reviewer that
           // proposes a plan instead of reporting findings is useless.

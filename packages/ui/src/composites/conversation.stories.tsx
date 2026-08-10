@@ -192,7 +192,6 @@ export const ComposerWithMenus: Story = {
             capabilities: {
               version: 1,
               capabilities: ["session.start"],
-              harnesses: ["claude", "codex"],
               maxConcurrentSessions: 4
             },
             state: "online",

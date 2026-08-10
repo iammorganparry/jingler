@@ -155,7 +155,6 @@ export type RemoteDeviceCapability = Schema.Schema.Type<
 export const RemoteDeviceCapabilities = Schema.Struct({
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   capabilities: Schema.Array(RemoteDeviceCapability).pipe(Schema.maxItems(16)),
-  harnesses: Schema.Array(CliKind).pipe(Schema.maxItems(16)),
   maxConcurrentSessions: Schema.Int.pipe(Schema.between(1, 64)),
   /** Present on pi-capable agents; absent only on legacy device records. */
   runtime: Schema.optional(RuntimeCapabilityManifest),

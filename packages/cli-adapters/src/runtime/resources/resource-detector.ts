@@ -9,7 +9,7 @@ import type {
 } from "@jingler/core"
 import { ManagedResourceId } from "@jingler/core"
 import { Effect, Schema } from "effect"
-import { skillMetadataFromContent } from "../../skills.js"
+import { skillMetadataFromContent } from "./skill-metadata.js"
 
 const MAX_RESOURCE_BYTES = 256 * 1024
 

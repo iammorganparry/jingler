@@ -1,6 +1,5 @@
 import type { Message, PublishMetadata, Session } from "@jingler/core"
 import { Effect } from "effect"
-import { isScriptedEnv } from "./scripted.js"
 import type { AgentRuntimeShape } from "./runtime/agent/agent-runtime.js"
 import { runReadOnlyRoleText } from "./runtime/agent/read-only-role.js"
 
@@ -150,29 +149,3 @@ export const makeAgentRuntimePublishMetadataGenerator = (
       Effect.orElseSucceed(() => fallbackPublishMetadata(input))
     )
 })
-
-export const claudePublishMetadataGenerator: PublishMetadataGenerator = {
-  generate: (input) =>
-    isScriptedEnv()
-      ? Effect.succeed(fallbackPublishMetadata(input))
-      : Effect.tryPromise(async () => {
-          const { query } = await import("@anthropic-ai/claude-agent-sdk")
-          const prompt = publishPrompt(input)
-          let output = ""
-          for await (const message of query({
-            prompt,
-            options: { model: "haiku", allowedTools: [], maxTurns: 1, includePartialMessages: false }
-          })) {
-            if (message.type === "assistant") {
-              output += message.message.content.flatMap((part) =>
-                part.type === "text" ? [part.text] : []
-              ).join("\n")
-            }
-            if (message.type === "result") break
-          }
-          return parsePublishMetadata(output, input)
-        }).pipe(
-          Effect.timeout("20 seconds"),
-          Effect.orElseSucceed(() => fallbackPublishMetadata(input))
-        )
-}
