@@ -10,9 +10,13 @@ import {
   applyStreamEvent,
   assistantMessage,
   latestPlan,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   STOPPED_NOTE,
   userMessage
 } from "@jingler/core"
+import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { conversationMachine } from "./conversation-machine.js"
@@ -64,6 +68,12 @@ const h = vi.hoisted(() => ({
   transcriptPageCalls: [] as Array<{ before: string | undefined; limit: number }>,
   currentPlan: null as PlanDocument | null,
   setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
+  setModelCalls: [] as Array<{
+    sessionId: string
+    connectionId: string
+    providerId: string
+    modelId: string
+  }>,
   planCommentCalls: [] as Array<{ planId: string; stepId: string; body: string }>,
   planReviseCalls: [] as Array<string>,
   reasoningCalls: [] as Array<unknown>,
@@ -162,6 +172,15 @@ vi.mock("./rpc-client.js", () => ({
     ) => {
       h.setHarnessCalls.push({ sessionId, cli, model })
     },
+    agentSetModel: async (
+      sessionId: string,
+      _chatId: string,
+      connectionId: string,
+      providerId: string,
+      modelId: string
+    ) => {
+      h.setModelCalls.push({ sessionId, connectionId, providerId, modelId })
+    },
     agentCommentPlanStep: async (
       _sessionId: string,
       planId: string,
@@ -225,6 +244,9 @@ const session = {
 
 const emit = (event: StreamEvent) => h.streamCb?.(event)
 const start = () => createActor(conversationMachine, { input: { session } }).start()
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
 const remoteEnvelope = (
   sequence: number,
   event: StreamEvent,
@@ -270,6 +292,7 @@ beforeEach(() => {
   h.steerGate = Promise.resolve()
   h.stopFails = false
   h.setHarnessCalls.length = 0
+  h.setModelCalls.length = 0
   h.catalogGate = Promise.resolve()
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
@@ -1271,6 +1294,27 @@ describe("conversationMachine — image attachments", () => {
     releaseCatalog()
     await waitFor(actor, (s) => s.context.catalog.length > 0)
     actor.stop()
+  })
+
+  describe("SET_MODEL", () => {
+    it("updates canonical identity and clears incompatible continuation state", async () => {
+      const actor = start()
+      await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+      actor.send({ type: "SET_MODEL", connectionId, providerId, modelId })
+
+      expect(actor.getSnapshot().context).toMatchObject({ connectionId, providerId, modelId })
+      expect(actor.getSnapshot().context.session).toMatchObject({
+        connectionId,
+        providerId,
+        modelId,
+        chats: [{ id: "s1", connectionId, providerId, modelId }]
+      })
+      expect(h.setModelCalls).toStrictEqual([
+        { sessionId: "s1", connectionId, providerId, modelId }
+      ])
+      actor.stop()
+    })
   })
 
   describe("SET_HARNESS", () => {

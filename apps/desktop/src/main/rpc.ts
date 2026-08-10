@@ -855,6 +855,50 @@ export const sessionCreationDefaults = (
   };
 };
 
+/** Remove once Session.cli and the legacy defaults are deleted in stage 7. */
+const compatibilityCliForProvider = (
+  providerId: string | undefined,
+  requestedCli: CliKind | undefined,
+): CliKind =>
+  requestedCli ??
+  (providerId === "anthropic"
+    ? "claude"
+    : providerId === "openai" || providerId === "openai-codex"
+      ? "codex"
+      : "opencode");
+
+const withCanonicalSessionDefaults = <
+  T extends {
+    readonly connectionId?: CreateSessionInput["connectionId"];
+    readonly providerId?: CreateSessionInput["providerId"];
+    readonly modelId?: CreateSessionInput["modelId"];
+  },
+>(
+  input: T,
+  config: WorkspaceConfig | null,
+): T => {
+  if (
+    input.connectionId !== undefined ||
+    input.providerId !== undefined ||
+    input.modelId !== undefined
+  ) {
+    return input;
+  }
+  if (
+    config?.defaultConnectionId === undefined ||
+    config.defaultProviderId === undefined ||
+    config.defaultModelId === undefined
+  ) {
+    return input;
+  }
+  return {
+    ...input,
+    connectionId: config.defaultConnectionId,
+    providerId: config.defaultProviderId,
+    modelId: config.defaultModelId,
+  };
+};
+
 const planMutationConflict = (message: string): PlanConflictError =>
   new PlanConflictError({
     message,
@@ -1086,15 +1130,16 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
       Effect.orElseSucceed(() => null),
     );
     const allowSharedCheckout = config?.git?.shareCheckedOutBranches ?? true;
+    const resolvedInput = withCanonicalSessionDefaults(input, config);
     const route = sessionCreationDefaults(
-      input.cli,
+      compatibilityCliForProvider(resolvedInput.providerId, resolvedInput.cli),
       config,
-      input.model,
-      input.mode,
-      input.reasoning,
+      resolvedInput.model ?? resolvedInput.modelId,
+      resolvedInput.mode,
+      resolvedInput.reasoning,
     );
     return yield* SessionStore.createFromPr(
-      { ...input, cli: route.cli },
+      { ...resolvedInput, cli: route.cli },
       {
         allowSharedCheckout,
         ...route.options,
@@ -1125,15 +1170,19 @@ export const createSession = (input: CreateSessionInput) =>
     const config = yield* ConfigService.get().pipe(
       Effect.orElseSucceed(() => null),
     );
+    const canonicalInput = withCanonicalSessionDefaults(resolvedInput, config);
     const route = sessionCreationDefaults(
-      resolvedInput.cli,
+      compatibilityCliForProvider(
+        canonicalInput.providerId,
+        canonicalInput.cli,
+      ),
       config,
-      resolvedInput.model,
-      resolvedInput.mode,
-      resolvedInput.reasoning,
+      canonicalInput.model ?? canonicalInput.modelId,
+      canonicalInput.mode,
+      canonicalInput.reasoning,
     );
     return yield* SessionStore.create(
-      { ...resolvedInput, cli: route.cli },
+      { ...canonicalInput, cli: route.cli },
       route.options,
     );
   });
@@ -1246,15 +1295,16 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
     const config = yield* ConfigService.get().pipe(
       Effect.orElseSucceed(() => null),
     );
+    const resolvedInput = withCanonicalSessionDefaults(input, config);
     const route = sessionCreationDefaults(
-      input.cli,
+      compatibilityCliForProvider(resolvedInput.providerId, resolvedInput.cli),
       config,
-      input.model,
-      input.mode,
-      input.reasoning,
+      resolvedInput.model ?? resolvedInput.modelId,
+      resolvedInput.mode,
+      resolvedInput.reasoning,
     );
     return yield* SessionStore.createFromIssue(
-      { ...input, cli: route.cli },
+      { ...resolvedInput, cli: route.cli },
       route.options,
     );
   });
@@ -2014,11 +2064,8 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       return prior;
     }
 
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const cli = config?.github?.reviewCli ?? "claude";
-    const model = reviewModelFor(cli, config?.github?.reviewModel);
+    const cli = session.cli;
+    const model = session.modelId ?? session.model ?? reviewModelFor(cli);
 
     const diff = yield* GitHubApi.prDiff(
       session.worktreePath,
@@ -4415,6 +4462,20 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     SessionStore.setHarness(sessionId, chatId, cli, model).pipe(
       Effect.andThen(SessionStore.get(sessionId)),
     ),
+  "Agent.setModel": ({
+    sessionId,
+    chatId,
+    connectionId,
+    providerId,
+    modelId,
+  }) =>
+    SessionStore.setProviderModel(
+      sessionId,
+      chatId,
+      connectionId,
+      providerId,
+      modelId,
+    ).pipe(Effect.andThen(SessionStore.get(sessionId))),
   "Agent.stop": ({ sessionId, chatId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
@@ -4490,7 +4551,17 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Models.catalog": () => modelsCatalog(),
   "Models.capabilities": () => modelsCapabilities(),
   "Usage.get": () =>
-    Effect.flatMap(DiscoveryService.list(), (clis) => UsageService.get(clis)),
+    ProviderConnections.pipe(
+      Effect.flatMap((service) => service.list),
+      Effect.flatMap(UsageService.fromProviderCatalog),
+      // Decoder-era fallback only. Stage 7 removes CLI usage probing with the
+      // remaining harness discovery graph.
+      Effect.catchAll(() =>
+        Effect.flatMap(DiscoveryService.list(), (clis) =>
+          UsageService.get(clis),
+        ),
+      ),
+    ),
   "Context.state": ({ sessionId, chatId }) =>
     ContextManager.bindContext(chatId, sessionId).pipe(
       Effect.zipRight(ContextManager.snapshot(chatId)),

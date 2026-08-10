@@ -11,6 +11,10 @@ import type {
   Plan,
   PlanDocument,
   PlanStatus,
+  ProviderCatalog,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   QuestionAnswer,
   QuestionRequest,
   ReasoningEffort,
@@ -110,6 +114,15 @@ export interface ConversationViewProps {
   catalog?: ReadonlyArray<ProviderModels>
   capabilities?: ReadonlyArray<HarnessCapability>
   onSetHarness?: (cli: CliKind, model: string) => void
+  providerCatalog?: ProviderCatalog | null
+  connectionId?: ProviderConnectionId | null
+  providerId?: ProviderId | null
+  modelId?: ProviderModelId | null
+  onSetModel?: (selection: {
+    connectionId: ProviderConnectionId
+    providerId: ProviderId
+    modelId: ProviderModelId
+  }) => void
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void
   /** Halt the running agent — the Stop button, and Escape outside the composer. */
   onStop?: () => void
@@ -262,6 +275,11 @@ export function ConversationView({
   catalog = [],
   capabilities,
   onSetHarness,
+  providerCatalog,
+  connectionId = null,
+  providerId = null,
+  modelId = null,
+  onSetModel,
   onSend,
   onStop,
   busy = false,
@@ -331,7 +349,9 @@ export function ConversationView({
   // mounts one ConversationView per pane, and an unscoped document-level binding
   // fires in EVERY mounted pane at once — so a single Shift+Tab cycled every
   // composer's mode, not just the focused one's.
-  const cycle = cycleFor(cli)
+  const cycle: ReadonlyArray<PermissionMode> = providerCatalog
+    ? [...MODE_CYCLE, "plan"]
+    : cycleFor(cli)
   const modeHotkeyRef = useHotkeys<HTMLDivElement>(
     "shift+tab",
     () => {
@@ -514,6 +534,7 @@ export function ConversationView({
                     <MessageTurn
                       message={m}
                       cli={cli}
+                      providerId={providerId}
                       onDecideGate={onDecideGate}
                       onApprovePlan={onApprovePlan}
                       onResumePlan={onResumePlan}
@@ -667,6 +688,10 @@ export function ConversationView({
                 capabilities={capabilities}
                 disabledReason={composerDisabledReason}
                 onSetHarness={onSetHarness}
+                providerCatalog={providerCatalog}
+                connectionId={connectionId}
+                modelId={modelId}
+                onSetModel={onSetModel}
                 mode={mode}
                 onSetMode={onSetMode}
                 useJinglerTools={useJinglerTools}
@@ -675,7 +700,7 @@ export function ConversationView({
                 reasoningEffort={reasoningEffort}
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}
-                allowPlan={supportsPlanMode(cli)}
+                allowPlan={providerCatalog != null || supportsPlanMode(cli)}
                 onSend={onSend}
                 onStop={onStop}
                 initialValue={initialDraft}

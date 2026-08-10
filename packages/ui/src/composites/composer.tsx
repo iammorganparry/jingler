@@ -5,6 +5,9 @@ import type {
   Environment,
   HarnessCapability,
   PermissionMode,
+  ProviderCatalog,
+  ProviderConnectionId,
+  ProviderModelId,
   ProviderModels,
   ReasoningEffort,
   ReasoningSetting,
@@ -43,6 +46,10 @@ import { StatusDot } from "../components/status-dot.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
 import { ModelBrowser } from "./model-browser.js";
+import {
+  ProviderModelBrowser,
+  type ProviderModelSelection,
+} from "./provider-model-browser.js";
 
 /** Cap the number of attached images so the prompt payload stays sane. */
 const MAX_ATTACHMENTS = 8;
@@ -156,6 +163,10 @@ export function Composer({
   catalog = [],
   capabilities,
   onSetHarness,
+  providerCatalog,
+  connectionId = null,
+  modelId = null,
+  onSetModel,
   mode = "accept-edits",
   onSetMode,
   useJinglerTools = true,
@@ -225,6 +236,11 @@ export function Composer({
   capabilities?: ReadonlyArray<HarnessCapability>;
   /** Picking a model implies its harness, so both travel together. */
   onSetHarness?: (cli: CliKind, model: string) => void;
+  /** Canonical certified model surface; present in production during the pi cutover. */
+  providerCatalog?: ProviderCatalog | null;
+  connectionId?: ProviderConnectionId | null;
+  modelId?: ProviderModelId | null;
+  onSetModel?: (selection: ProviderModelSelection) => void;
   /** Current HITL mode (shown in the mode chip; Shift+Tab cycles it). */
   mode?: PermissionMode;
   onSetMode?: (mode: PermissionMode) => void;
@@ -287,8 +303,23 @@ export function Composer({
   const selectedModel = selectedCapability?.models.find(
     (candidate) => candidate.id === model,
   );
+  const canonicalModes: ReadonlyArray<{
+    readonly id: PermissionMode;
+    readonly label: string;
+    readonly kind: "execute" | "plan";
+    readonly description?: string;
+  }> = providerCatalog
+    ? [
+        ...MODE_OPTIONS.map((option) => ({
+          id: option.value,
+          label: String(option.label),
+          kind: "execute" as const,
+        })),
+        { id: "plan" as const, label: "Plan", kind: "plan" as const },
+      ]
+    : [];
   const modeOptions: ReadonlyArray<ChipOption<PermissionMode>> = (
-    selectedCapability?.modes ?? []
+    selectedCapability?.modes ?? canonicalModes
   )
     .filter((option) => allowPlan || option.kind !== "plan")
     .map((option) => ({
@@ -807,13 +838,23 @@ export function Composer({
               className="max-w-[150px]"
             />
           )}
-          <ModelBrowser
-            cli={cli}
-            model={model}
-            capabilities={resolvedCapabilities}
-            onSelect={onSetHarness}
-            className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
-          />
+          {providerCatalog ? (
+            <ProviderModelBrowser
+              catalog={providerCatalog}
+              connectionId={connectionId}
+              modelId={modelId}
+              onSelect={onSetModel}
+              className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
+            />
+          ) : (
+            <ModelBrowser
+              cli={cli}
+              model={model}
+              capabilities={resolvedCapabilities}
+              onSelect={onSetHarness}
+              className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
+            />
+          )}
           <ChipMenu
             value={mode}
             options={modeOptions}

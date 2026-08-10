@@ -1559,6 +1559,7 @@ function AuthedApp({
           <ConversationPane
             session={session}
             environments={environmentController.environments}
+            providerCatalog={providerCatalog.catalog}
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}

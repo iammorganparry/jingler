@@ -443,10 +443,10 @@ export function SessionRow({
             {executionLocation === "cloud" ? <Cloud size={12} /> : <Monitor size={12} />}
           </span>
           <span
-            title={`${PROVIDER_LABEL[session.cli]} harness`}
+            title={session.providerId ?? PROVIDER_LABEL[session.cli]}
             className="flex size-4 flex-none items-center justify-center"
           >
-            <ProviderIcon cli={session.cli} size={12} />
+            <ProviderIcon cli={session.cli} providerId={session.providerId ?? undefined} size={12} />
           </span>
         </div>
       </div>

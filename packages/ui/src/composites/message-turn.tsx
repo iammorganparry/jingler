@@ -1,13 +1,13 @@
 import { type ReactNode, useState } from "react"
 import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
-import type { CliKind, ContentPart, ExecutionMode, GateDecision, Message, ToolCall as ToolCallModel } from "@jingler/core"
+import type { CliKind, ContentPart, ExecutionMode, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { DiffPeek } from "../components/diff-peek.js"
 import { Markdown } from "../components/markdown.js"
-import { PROVIDER_COLOR, PROVIDER_LABEL, ProviderIcon } from "../components/provider-icon.js"
+import { providerColor, providerLabel, ProviderIcon } from "../components/provider-icon.js"
 import { ApprovalGate } from "./approval-gate.js"
 import { ContextDivider } from "./context-divider.js"
 import { PlanCard } from "./plan-card.js"
@@ -344,6 +344,7 @@ function renderParts(
 export function MessageTurn({
   message,
   cli = "claude",
+  providerId,
   onDecideGate,
   onApprovePlan,
   onResumePlan,
@@ -352,6 +353,8 @@ export function MessageTurn({
   message: Message
   /** The harness that produced assistant turns — sets the eyebrow logo + name. */
   cli?: CliKind
+  /** Canonical provider identity. Takes precedence over the decoder-era CLI. */
+  providerId?: ProviderId | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   /** Approve a proposed plan inline (from the transcript's plan card). */
   onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
@@ -365,8 +368,11 @@ export function MessageTurn({
     <div className="flex flex-col gap-3">
       {isAssistant ? (
         // Provider-branded eyebrow: logo + name in the provider's brand colour.
-        <Eyebrow icon={<ProviderIcon cli={cli} mono />} style={{ color: PROVIDER_COLOR[cli] }}>
-          {PROVIDER_LABEL[cli]}
+        <Eyebrow
+          icon={<ProviderIcon cli={cli} providerId={providerId ?? undefined} mono />}
+          style={{ color: providerColor(providerId, cli) }}
+        >
+          {providerLabel(providerId, cli)}
         </Eyebrow>
       ) : (
         <Eyebrow>You</Eyebrow>

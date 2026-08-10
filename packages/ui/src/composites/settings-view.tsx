@@ -20,7 +20,6 @@ import type {
 import {
   BUDGET_RANGE,
   DEFAULT_CONTEXT_CONFIG,
-  DEFAULT_REVIEW_MODEL,
   NOTIFICATIONS_DEFAULT,
   clampFontScale,
   contextWindowFor,
@@ -28,7 +27,6 @@ import {
   digestModelFor,
   newSessionCli,
   providerReasoningCapabilitiesFor,
-  reviewModelFor,
   startableClis,
   triggerAt
 } from "@jingler/core"
@@ -545,7 +543,6 @@ export function SettingsView({
           busy={githubBusy}
           github={github}
           git={git}
-          loadModels={loadModels}
           onConnect={onGithubConnect}
           onManage={onGithubManage}
           onRefresh={onGithubRefresh}
@@ -1412,17 +1409,6 @@ const DEFAULT_GITHUB: GithubConfig = {
 }
 const DEFAULT_GIT: GitConfig = { shareCheckedOutBranches: true }
 
-/**
- * Harnesses that can run an adversarial review. Cursor has no headless path yet.
- *
- * NOT a `Record<CliKind, …>`, so adding a harness won't break the build here —
- * a new kind must be added by hand or it silently never appears as a reviewer.
- */
-const REVIEW_CLIS: ReadonlyArray<{ id: CliKind; label: string }> = [
-  { id: "claude", label: "Claude" },
-  { id: "codex", label: "Codex" }
-]
-
 function ToggleRow({
   label,
   description,
@@ -1673,7 +1659,6 @@ function GithubSection({
   busy,
   github,
   git,
-  loadModels,
   onConnect,
   onManage,
   onRefresh,
@@ -1685,7 +1670,6 @@ function GithubSection({
   busy?: boolean
   github?: GithubConfig | null
   git?: GitConfig | null
-  loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   onConnect?: () => void
   onManage?: () => void
   onRefresh?: () => void
@@ -1697,42 +1681,11 @@ function GithubSection({
     github ?? DEFAULT_GITHUB
   )
   const [gitDraft, setGitDraft] = React.useState<GitConfig>(git ?? DEFAULT_GIT)
-  const [reviewModels, setReviewModels] = React.useState<
-    ReadonlyArray<ModelOption>
-  >([])
 
   React.useEffect(() => setDraft(github ?? DEFAULT_GITHUB), [github])
   React.useEffect(() => setGitDraft(git ?? DEFAULT_GIT), [git])
 
   const connected = connection.connected && connection.user !== null
-  const reviewCli: CliKind = draft.reviewCli ?? "claude"
-  const reviewModel = reviewModelFor(reviewCli, draft.reviewModel)
-
-  // Live model discovery for the chosen review harness; falls back to the
-  // curated list offline. Guarded so a late response for a harness the user has
-  // since switched away from can't overwrite the current list.
-  React.useEffect(() => {
-    if (!loadModels) return
-    let stale = false
-    void loadModels(reviewCli)
-      .then((models) => {
-        if (!stale) setReviewModels(models)
-      })
-      .catch(() => {
-        if (!stale) setReviewModels([])
-      })
-    return () => {
-      stale = true
-    }
-  }, [reviewCli, loadModels])
-
-  // The Select renders blank unless an option matches its value, and discovery
-  // may not surface the default (offline / no API key) — so always include it.
-  const modelOptions: ReadonlyArray<ModelOption> = reviewModels.some(
-    (m) => m.id === reviewModel
-  )
-    ? reviewModels
-    : [{ id: reviewModel, label: reviewModel }, ...reviewModels]
   // Persist each toggle immediately so this section needs no separate Save.
   const setGithub = (next: GithubConfig) => {
     setDraft(next)
@@ -1922,67 +1875,12 @@ function GithubSection({
             }
           />
         </div>
-        <div className="flex flex-col gap-2">
-          <div className="text-[12.5px] font-medium text-text-body">
-            Reviewer
-          </div>
-          <div className="text-[11px] leading-[1.5] text-muted-foreground">
-            The harness and model that argue against your pull requests. Reviews
-            run read-only in the session&apos;s worktree and never modify the
-            branch. Kept separate from Providers on purpose — reviewing a diff
-            with a stronger model than the one that wrote it is the point.
-          </div>
-          <div className="flex gap-2 pt-0.5">
-            <div className="w-[132px] flex-none">
-              <Select
-                value={reviewCli}
-                disabled={!draft.enabled}
-                onValueChange={(value) =>
-                  // Drop the model id: it is meaningless on a different harness,
-                  // so the new harness's default applies instead.
-                  setGithub({
-                    ...draft,
-                    reviewCli: value as CliKind,
-                    reviewModel: undefined
-                  })
-                }
-              >
-                <SelectTrigger aria-label="Review harness">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {REVIEW_CLIS.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="min-w-0 flex-1">
-              <Select
-                value={reviewModel}
-                disabled={!draft.enabled}
-                onValueChange={(value) =>
-                  setGithub({ ...draft, reviewModel: value })
-                }
-              >
-                <SelectTrigger aria-label="Review model">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelOptions.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.id === DEFAULT_REVIEW_MODEL[reviewCli]
-                        ? `${m.label} · default`
-                        : m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
+        <p className="text-[11px] leading-[1.6] text-muted-foreground">
+          Reviews run read-only through the session&apos;s pinned provider
+          connection and certified model. Changing the conversation model also
+          changes future reviews; Jingler never falls through to another account
+          or billing route.
+        </p>
 
         <div className="mt-1 flex items-center gap-2 border-b border-hairline pb-2.5">
           <span className="text-[13px] font-semibold text-text-bright">

@@ -4,6 +4,9 @@ import type {
   CliKind,
   Environment,
   HarnessCapability,
+  ProviderCatalog,
+  ProviderConnectionId,
+  ProviderModelId,
   ProvidersConfig,
   Project
 } from "@jingler/core"
@@ -138,6 +141,9 @@ export interface NewWorkspaceViewProps {
   defaultCli?: CliKind | null
   defaultModel?: string | null
   providers?: ProvidersConfig | null
+  providerCatalog?: ProviderCatalog | null
+  defaultConnectionId?: ProviderConnectionId | null
+  defaultModelId?: ProviderModelId | null
   defaultProjectId?: string | null
   requestedProjectId?: string | null
   prepareProject: NewWorkspaceDeps["prepareProject"]
@@ -172,32 +178,48 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
 
   React.useEffect(() => {
     if (props.open) send({ type: "SYNC_HARNESSES" })
-  }, [props.open, props.capabilities, props.defaultCli, props.defaultModel, send])
+  }, [
+    props.open,
+    props.capabilities,
+    props.defaultCli,
+    props.defaultModel,
+    props.providerCatalog,
+    props.defaultConnectionId,
+    props.defaultModelId,
+    send
+  ])
 
   const {
     projectId, environmentId, isolation, baseBranch, branches, source, search, mine,
     pullRequests, issues, selectedPr, selectedIssue, draft, attachments, cli, model,
-    mode, reasoning, error
+    mode, reasoning, connectionId, providerId, modelId, error
   } = state.context
   const selectedProject = props.projects.find((project) => project.id === projectId)
   const submitting = state.matches("submitting")
   const loading = state.matches("loading")
   const sourceLoading = state.matches("sourceLoading")
+  const modelUnavailableReason = props.providerCatalog
+    ? connectionId === null || providerId === null || modelId === null
+      ? "Choose a certified provider connection and model."
+      : undefined
+    : props.capabilities.length === 0
+      ? "No provider models are available. Check Settings → Providers."
+      : !cli || !model
+        ? "Choose a certified provider model."
+        : undefined
   const unavailableReason = submitting
     ? "Creating session…"
     : loading
       ? environmentId === "local" ? "Loading branches…" : "Preparing project on host…"
       : props.projects.length === 0
         ? "Add a project before starting a session."
-        : props.capabilities.length === 0
-          ? "No harnesses are available. Check Settings → Providers."
-          : source === "pr" && selectedPr === null
+        : modelUnavailableReason ?? (source === "pr" && selectedPr === null
             ? "Choose a pull request before starting."
             : (source === "github" || source.startsWith("provider:")) && selectedIssue === null
               ? "Choose an issue before starting."
-          : !projectId || !baseBranch || !cli || !model
+          : !projectId || !baseBranch
             ? "Choose a project and branch before starting."
-            : undefined
+            : undefined)
 
   const projectOptions: ReadonlyArray<PickerOption<string>> = props.projects.map((project) => ({
     value: project.id,
@@ -420,6 +442,17 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             cli={cli || undefined}
             model={model || undefined}
             capabilities={props.capabilities}
+            providerCatalog={props.providerCatalog}
+            connectionId={connectionId}
+            modelId={modelId}
+            onSetModel={({ connectionId: nextConnection, providerId: nextProvider, modelId: nextModel }) =>
+              send({
+                type: "SET_MODEL",
+                connectionId: nextConnection,
+                providerId: nextProvider,
+                modelId: nextModel
+              })
+            }
             onSetHarness={(nextCli, nextModel) =>
               send({ type: "SET_HARNESS", cli: nextCli, model: nextModel })}
             mode={mode}
@@ -427,7 +460,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             reasoningEffort={reasoning?.effort}
             thinkingEnabled={reasoning?.enabled}
             onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })}
-            allowPlan={cli !== "" && supportsPlanMode(cli)}
+            allowPlan={props.providerCatalog !== undefined && props.providerCatalog !== null || cli !== "" && supportsPlanMode(cli)}
             disabledReason={unavailableReason}
           />
           {draft.trim().length === 0 && unavailableReason === undefined && (

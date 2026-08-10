@@ -251,14 +251,17 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
           const ctx = config?.context ?? DEFAULT_CONTEXT_CONFIG
           const provider = config?.providers?.[session.cli]
-
-          const cli = (yield* listClis()).find((c) => c.kind === session.cli)
-          const inferredWindow = contextWindowFor(session.cli, chat.model ?? null)
+          const canonical = chat.connectionId !== undefined && chat.modelId !== undefined
+          const cli = canonical
+            ? undefined
+            : (yield* listClis()).find((candidate) => candidate.kind === session.cli)
+          const selectedModel = chat.modelId ?? chat.model ?? null
+          const inferredWindow = contextWindowFor(session.cli, selectedModel)
           const measuredWindow = resolveWindow(inferredWindow, reported)
 
           // A harness that reports no usage gives us nothing to measure, so it is
           // left alone rather than compacted against a fabricated number.
-          const reporting = cli?.contextReporting ?? false
+          const reporting = canonical || (cli?.contextReporting ?? false)
           // The per-session switch overrides the global one in both directions,
           // so a user can pin one long-running session open (or force it on).
           const auto = (session.autoCompact ?? ctx.auto) && reporting
@@ -283,12 +286,12 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             // every single turn while the harness is perfectly comfortable.
             window: reconcileWindow(
               provider?.contextWindow !== undefined && provider.contextWindow !== null
-                ? contextWindowFor(session.cli, chat.model ?? null, provider.contextWindow)
+                ? contextWindowFor(session.cli, selectedModel, provider.contextWindow)
                 : measuredWindow,
               peak
             ),
             binPath: cli?.binPath ?? null,
-            digestModel: digestModelFor(session.cli, provider?.backgroundModel)
+            digestModel: chat.modelId ?? digestModelFor(session.cli, provider?.backgroundModel)
           }
         })
 

@@ -138,6 +138,18 @@ export type SetDefaultProviderModelInput = Schema.Schema.Type<
   typeof SetDefaultProviderModelInput
 >
 
+/** Switch one conversation to an exact certified connection/model pair. */
+export const SetSessionProviderModelInput = Schema.Struct({
+  sessionId: Schema.String,
+  chatId: Schema.String,
+  connectionId: ProviderConnectionId,
+  providerId: ProviderId,
+  modelId: ProviderModelId
+})
+export type SetSessionProviderModelInput = Schema.Schema.Type<
+  typeof SetSessionProviderModelInput
+>
+
 export const SessionRuntimeIdentity = Schema.Struct({
   connectionId: Schema.NullOr(ProviderConnectionId),
   providerId: Schema.NullOr(ProviderId),

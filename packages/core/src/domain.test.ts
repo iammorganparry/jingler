@@ -514,6 +514,29 @@ describe("Repo", () => {
 })
 
 describe("CreateSessionInput", () => {
+  it("decodes a canonical provider connection without a legacy cli", () => {
+    const result = decode(CreateSessionInput, {
+      repoPath: "/Users/me/repos/trigify-app",
+      repoName: "trigify-app",
+      connectionId: "claude-max",
+      providerId: "anthropic",
+      modelId: "anthropic/claude-sonnet",
+      baseBranch: "main"
+    })
+    expect(Either.isRight(result)).toBe(true)
+  })
+
+  it("rejects a partial provider connection identity", () => {
+    const result = decode(CreateSessionInput, {
+      repoPath: "/Users/me/repos/trigify-app",
+      repoName: "trigify-app",
+      connectionId: "claude-max",
+      modelId: "anthropic/claude-sonnet",
+      baseBranch: "main"
+    })
+    expect(Either.isLeft(result)).toBe(true)
+  })
+
   it("decodes a legacy create request with worktree creation defaulting on", () => {
     const result = decode(CreateSessionInput, {
       repoPath: "/Users/me/repos/trigify-app",

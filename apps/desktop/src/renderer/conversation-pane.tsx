@@ -12,6 +12,7 @@ import type {
   Environment,
   HarnessCapability,
   PermissionMode,
+  ProviderCatalog,
   Session
 } from "@jingler/core"
 import {
@@ -90,6 +91,28 @@ const harnessUnavailableMessage = (
   return undefined
 }
 
+const providerUnavailableMessage = (
+  catalog: ProviderCatalog,
+  selection: {
+    connectionId: Session["connectionId"] | null
+    modelId: Session["modelId"] | null
+  }
+): string | undefined => {
+  if (selection.connectionId == null || selection.modelId == null) {
+    return "Choose a certified provider connection and model to continue."
+  }
+  const connection = catalog.connections.find(
+    (candidate) => candidate.connection.id === selection.connectionId
+  )
+  if (connection === undefined || connection.connection.status !== "authenticated") {
+    return "This provider connection is unavailable. Reconnect or choose another connection."
+  }
+  const model = connection.models.find((candidate) => candidate.id === selection.modelId)
+  return model?.selectable === true
+    ? undefined
+    : "This model is unavailable or its certification is stale. Verify or choose another model."
+}
+
 const initialPlanSplitRatio = (): number => {
   try {
     const stored = Number(localStorage.getItem(PLAN_SPLIT_RATIO_KEY))
@@ -113,12 +136,15 @@ export function ConversationPane({
   onInitialPromptConsumed,
   onOpenFile,
   environments,
+  providerCatalog,
   onSelectFiles,
   paneFocused = true
 }: {
   session: Session
   /** Live paired-device catalogue owned by the app-level environment controller. */
   environments: ReadonlyArray<Environment>
+  /** Certified provider connections available on this execution target. */
+  providerCatalog?: ProviderCatalog | null
   /**
    * Which face of the session to show: the transcript, the Plan Review, or both
    * side by side. `split` renders the SAME Plan Review beside the transcript
@@ -321,7 +347,9 @@ export function ConversationPane({
   })
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
-  const composerDisabledReason = harnessUnavailableMessage(capabilitiesQuery.data, convo)
+  const composerDisabledReason = providerCatalog
+    ? providerUnavailableMessage(providerCatalog, convo)
+    : harnessUnavailableMessage(capabilitiesQuery.data, convo)
   // Conversation text-size multiplier, scoped to the transcript wrapper below via
   // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
   // on purpose: the shared `.sb-md` calc() rules must only scale inside the
@@ -945,8 +973,15 @@ export function ConversationPane({
           model={convo.model}
           catalog={convo.catalog}
           capabilities={capabilitiesQuery.data}
+          providerCatalog={providerCatalog}
+          connectionId={convo.connectionId}
+          providerId={convo.providerId}
+          modelId={convo.modelId}
           composerDisabledReason={composerDisabledReason}
           onSetHarness={convo.setHarness}
+          onSetModel={({ connectionId, providerId, modelId }) =>
+            convo.setModel(connectionId, providerId, modelId)
+          }
           onSend={sendPrompt}
           onStop={convo.stop}
           onDecideGate={convo.decideGate}

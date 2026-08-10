@@ -11,6 +11,9 @@ import type {
   IssueAutomations,
   IssueReference,
   PermissionMode,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   ReasoningEffort,
   ReasoningSetting,
   Session,
@@ -67,7 +70,12 @@ const persistedMode = (value: unknown): PermissionMode | undefined =>
 const initialChat = (
   sessionId: string,
   now: string,
-  legacy: JsonRecord = {}
+  legacy: JsonRecord = {},
+  runtime: {
+    readonly connectionId?: ProviderConnectionId
+    readonly providerId?: ProviderId
+    readonly modelId?: ProviderModelId
+  } = {}
 ): Chat => ({
   id: chatIdFor(sessionId, "1"),
   title: null,
@@ -84,7 +92,30 @@ const initialChat = (
   Number.isFinite(legacy.contextTokens) &&
   legacy.contextTokens >= 0
     ? { contextTokens: legacy.contextTokens }
-    : {})
+    : {}),
+  ...runtime
+})
+
+/** Temporary persisted compatibility value until Session.cli is deleted in stage 7. */
+const compatibilityCli = (input: {
+  readonly cli?: CliKind
+  readonly providerId?: ProviderId
+}): CliKind =>
+  input.cli ??
+  (input.providerId === "anthropic"
+    ? "claude"
+    : input.providerId === "openai" || input.providerId === "openai-codex"
+      ? "codex"
+      : "opencode")
+
+const runtimeSelection = (input: {
+  readonly connectionId?: ProviderConnectionId
+  readonly providerId?: ProviderId
+  readonly modelId?: ProviderModelId
+}) => ({
+  ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
+  ...(input.providerId === undefined ? {} : { providerId: input.providerId }),
+  ...(input.modelId === undefined ? {} : { modelId: input.modelId })
 })
 
 const migrateReasoning = (value: unknown): ReasoningSetting | undefined => {
@@ -558,11 +589,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             slug = freeCreativeName(usedSlugs, seed, `${taskSlug(title)}-${stamp}`)
           }
           const id = `s_${slug}`
+          const selection = runtimeSelection(input)
+          const cli = compatibilityCli(input)
           const chat = initialChat(id, now, {
             mode: options.defaultMode,
             model: options.defaultModel
-          })
-          const providerKey = reasoningKey(input.cli)
+          }, selection)
+          const providerKey = reasoningKey(cli)
           const makeSession = (
             workspace: { path: string; branch: string; repoPath: string },
             workspaceMode: WorkspaceMode
@@ -581,7 +614,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               : {}),
             autoTitle: explicit.length === 0,
             status: "idle",
-            cli: input.cli,
+            cli,
+            ...selection,
             diff: { added: 0, removed: 0 },
             prNumber: null,
             costUsd: 0,
@@ -783,11 +817,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
           const id = `s_${slug}_${stamp}`
+          const selection = runtimeSelection(input)
+          const cli = compatibilityCli(input)
           const chat = initialChat(id, now, {
             mode: opts.defaultMode,
             model: opts.defaultModel
-          })
-          const providerKey = reasoningKey(input.cli)
+          }, selection)
+          const providerKey = reasoningKey(cli)
           const session: Session = {
             id,
             ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
@@ -799,7 +835,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               ? { initialPrompt: input.initialPrompt.trim() }
               : {}),
             status: "idle",
-            cli: input.cli,
+            cli,
+            ...selection,
             diff: { added: 0, removed: 0 },
             prNumber: input.pr.number,
             githubInstallationId: repository.installationId,
@@ -899,11 +936,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               .filter((s) => s.length > 0)
               .join("\n\n")
           const id = `s_${slug}_${stamp}`
+          const selection = runtimeSelection(input)
+          const cli = compatibilityCli(input)
           const chat = initialChat(id, now, {
             mode: options.defaultMode,
             model: options.defaultModel
-          })
-          const providerKey = reasoningKey(input.cli)
+          }, selection)
+          const providerKey = reasoningKey(cli)
           const session: Session = {
             // Stamp the id (like `createFromPr`) so a delete-then-recreate of the
             // same issue can't collide with the old session's persisted data; the
@@ -918,7 +957,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             title: input.issue.title,
             autoTitle: false,
             status: "idle",
-            cli: input.cli,
+            cli,
+            ...selection,
             diff: { added: 0, removed: 0 },
             prNumber: null,
             linkedIssue: {
@@ -1000,6 +1040,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               updatedAt: now,
               ...(source?.mode === undefined ? {} : { mode: source.mode }),
               ...(source?.model === undefined ? {} : { model: source.model }),
+              ...(source?.connectionId === undefined ? {} : { connectionId: source.connectionId }),
+              ...(source?.providerId === undefined ? {} : { providerId: source.providerId }),
+              ...(source?.modelId === undefined ? {} : { modelId: source.modelId }),
               ...(source?.allowlist === undefined ? {} : { allowlist: source.allowlist })
             }
             return {
@@ -1119,6 +1162,45 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             model,
             chats: session.chats.map((chat) =>
               chat.id === chatId ? { ...chat, model } : chat
+            )
+          }
+        })
+
+      /** Persist one exact provider connection/model and force a fresh pi seed boundary. */
+      const setProviderModel = (
+        id: string,
+        chatId: string,
+        connectionId: ProviderConnectionId,
+        providerId: ProviderId,
+        modelId: ProviderModelId
+      ) =>
+        update(id, (session) => {
+          const target = session.chats.find((chat) => chat.id === chatId)
+          if (target === undefined) return session
+          const changed =
+            target.connectionId !== connectionId ||
+            target.providerId !== providerId ||
+            target.modelId !== modelId
+          return {
+            ...session,
+            connectionId,
+            providerId,
+            modelId,
+            connectionSelectionRequired: false,
+            modelSelectionRequired: false,
+            ...(changed ? { piSessionId: undefined, resumeId: undefined } : {}),
+            chats: session.chats.map((chat) =>
+              chat.id !== chatId
+                ? chat
+                : {
+                    ...chat,
+                    connectionId,
+                    providerId,
+                    modelId,
+                    connectionSelectionRequired: false,
+                    modelSelectionRequired: false,
+                    ...(changed ? { piSessionId: undefined, resumeId: undefined } : {})
+                  }
             )
           }
         })
@@ -1740,6 +1822,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         reopenChat,
         setMode,
         setModel,
+        setProviderModel,
         setReasoning,
         setReasoningEffort,
         addUsage,

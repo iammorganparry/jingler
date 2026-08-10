@@ -7,7 +7,7 @@ import {
   writeFileSync
 } from "node:fs"
 import { basename, join } from "node:path"
-import { Cause, Effect, Layer } from "effect"
+import { Cause, Effect, Layer, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type {
   CreateSessionFromIssueInput,
@@ -16,7 +16,13 @@ import type {
   GitHubRelayEvent,
   Session
 } from "@jingler/core"
-import { GitHubApiError, workspaceModeOf } from "@jingler/core"
+import {
+  GitHubApiError,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
+  workspaceModeOf
+} from "@jingler/core"
 import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
 import {
@@ -37,6 +43,10 @@ import type { FakeCommandHandler } from "./test-support.js"
 
 const activeChat = (session: Session) =>
   session.chats.find((chat) => chat.id === session.activeChatId)!
+
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
 
 const feedbackEvent = (patch: Partial<GitHubRelayEvent> = {}): GitHubRelayEvent => ({
   version: 1,
@@ -104,6 +114,23 @@ describe("SessionStore", () => {
     cli: "claude",
     baseBranch: "main",
     ...over
+  })
+
+  it("persists canonical provider identity on a new session and chat", async () => {
+    const result = await runExit(
+      SessionStore.create(input({
+        cli: undefined,
+        connectionId,
+        providerId,
+        modelId
+      })).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value).toMatchObject({ connectionId, providerId, modelId })
+    expect(activeChat(result.value)).toMatchObject({ connectionId, providerId, modelId })
   })
 
   /**
@@ -1094,6 +1121,81 @@ describe("SessionStore", () => {
       // The session itself is otherwise intact — only the thread pointer went.
       expect(exit.value.title).toBe("Reseeded")
       expect(exit.value.cli).toBe("claude")
+    })
+  })
+
+  describe("setProviderModel", () => {
+    it("switches identity atomically and clears incompatible continuation state", async () => {
+      const nextConnection = Schema.decodeUnknownSync(ProviderConnectionId)("codex-pro")
+      const nextProvider = Schema.decodeUnknownSync(ProviderId)("openai-codex")
+      const nextModel = Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5")
+      const exit = await runExit(
+        Effect.gen(function* () {
+          const created = yield* SessionStore.create(input({
+            title: "Provider switch",
+            connectionId,
+            providerId,
+            modelId
+          }))
+          yield* SessionStore.setResumeId(created.id, created.activeChatId, "native-thread")
+          yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+          yield* SessionStore.setProviderModel(
+            created.id,
+            created.activeChatId,
+            nextConnection,
+            nextProvider,
+            nextModel
+          )
+          return yield* SessionStore.get(created.id)
+        }).pipe(Effect.provide(services)),
+        temp.layer
+      )
+
+      expect(exit._tag).toBe("Success")
+      if (exit._tag !== "Success") return
+      expect(exit.value).toMatchObject({
+        connectionId: nextConnection,
+        providerId: nextProvider,
+        modelId: nextModel,
+        connectionSelectionRequired: false,
+        modelSelectionRequired: false
+      })
+      expect(exit.value.piSessionId).toBeUndefined()
+      expect(exit.value.resumeId).toBeUndefined()
+      expect(activeChat(exit.value)).toMatchObject({
+        connectionId: nextConnection,
+        providerId: nextProvider,
+        modelId: nextModel
+      })
+      expect(activeChat(exit.value).piSessionId).toBeUndefined()
+      expect(activeChat(exit.value).resumeId).toBeUndefined()
+    })
+
+    it("keeps an existing pi session when the exact selection is re-applied", async () => {
+      const exit = await runExit(
+        Effect.gen(function* () {
+          const created = yield* SessionStore.create(input({
+            title: "Same provider",
+            connectionId,
+            providerId,
+            modelId
+          }))
+          yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+          yield* SessionStore.setProviderModel(
+            created.id,
+            created.activeChatId,
+            connectionId,
+            providerId,
+            modelId
+          )
+          return yield* SessionStore.get(created.id)
+        }).pipe(Effect.provide(services)),
+        temp.layer
+      )
+
+      expect(exit._tag).toBe("Success")
+      if (exit._tag !== "Success") return
+      expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
     })
   })
 

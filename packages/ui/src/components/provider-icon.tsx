@@ -1,4 +1,4 @@
-import type { CliKind } from "@jingler/core"
+import type { CliKind, ProviderId } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 
 /**
@@ -56,26 +56,61 @@ export const PROVIDER_COLOR: Record<CliKind, string> = {
   opencode: "var(--sb-text-bright)"
 }
 
+const iconKindForProvider = (providerId: ProviderId): CliKind =>
+  providerId === "anthropic"
+    ? "claude"
+    : providerId === "openai" || providerId === "openai-codex"
+      ? "codex"
+      : "opencode"
+
+export const providerLabel = (
+  providerId: ProviderId | null | undefined,
+  cli: CliKind = "claude"
+): string => {
+  if (providerId == null) return PROVIDER_LABEL[cli]
+  switch (providerId) {
+    case "anthropic":
+      return "Anthropic"
+    case "openai":
+    case "openai-codex":
+      return "OpenAI"
+    case "google":
+      return "Google"
+    case "openrouter":
+      return "OpenRouter"
+    default:
+      return providerId
+  }
+}
+
+export const providerColor = (
+  providerId: ProviderId | null | undefined,
+  cli: CliKind = "claude"
+): string => PROVIDER_COLOR[providerId == null ? cli : iconKindForProvider(providerId)]
+
 export function ProviderIcon({
   cli,
+  providerId,
   size = 14,
   mono = false,
   className
 }: {
-  cli: CliKind
+  cli?: CliKind
+  providerId?: ProviderId
   size?: number
   /** Inherit the surrounding `currentColor` instead of the brand colour. */
   mono?: boolean
   className?: string
 }) {
-  const icon = ICONS[cli]
+  const kind = cli ?? (providerId === undefined ? "opencode" : iconKindForProvider(providerId))
+  const icon = ICONS[kind]
   return (
     <svg
       width={size}
       height={size}
       viewBox={icon.viewBox}
       fill="currentColor"
-      style={mono ? undefined : { color: PROVIDER_COLOR[cli] }}
+      style={mono ? undefined : { color: PROVIDER_COLOR[kind] }}
       className={cn("shrink-0", className)}
       aria-hidden
     >

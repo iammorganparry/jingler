@@ -1,4 +1,6 @@
-import type { CreateSessionInput, HarnessCapability, Project } from "@jingler/core"
+import type { CreateSessionInput, HarnessCapability, Project, ProviderCatalog } from "@jingler/core"
+import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
 import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
@@ -19,6 +21,43 @@ const capabilities: ReadonlyArray<HarnessCapability> = [
     ]
   }
 ]
+
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
+const providerCatalog: ProviderCatalog = {
+  refreshedAt: "2026-08-10T00:00:00.000Z",
+  stale: false,
+  connections: [{
+    connection: {
+      id: connectionId,
+      providerId,
+      authKind: "claude-setup-token",
+      account: null,
+      targetId: "local",
+      status: "authenticated",
+      subscription: {
+        entitlement: "active",
+        planLabel: "Max",
+        expiresAt: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        confirmedBillingRoute: "subscription"
+      },
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    },
+    models: [{
+      providerId,
+      id: modelId,
+      label: "Claude Sonnet",
+      capabilities: { contextWindow: 200_000, reasoning: [], vision: false },
+      verification: "certified",
+      selectable: true,
+      certificationKey: "certified"
+    }]
+  }]
+}
 
 const actorFor = (
   onCreate: (input: CreateSessionInput) => Promise<void> = vi.fn(async () => undefined),
@@ -153,6 +192,28 @@ describe("newWorkspaceMachine", () => {
       mode: "ask",
       reasoning: { enabled: true, effort: "high" }
     }), [])
+  })
+
+  it("submits the certified provider connection without a legacy harness", async () => {
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate, {
+      providerCatalog,
+      defaultConnectionId: connectionId,
+      defaultModelId: modelId
+    }).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId,
+      providerId,
+      modelId
+    }), [])
+    const input = onCreate.mock.calls[0]?.[0]
+    expect(input).not.toHaveProperty("cli")
+    expect(input).not.toHaveProperty("model")
   })
 
   it("leaves naming to automatic title generation", async () => {

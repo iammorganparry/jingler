@@ -1170,6 +1170,9 @@ export function JinglerApp({
                   : providersConfig?.[initialNewSessionCli]?.defaultModel
               }
               providers={providersConfig}
+              providerCatalog={providerConnections?.catalog}
+              defaultConnectionId={providerConnections?.defaultConnectionId}
+              defaultModelId={providerConnections?.defaultModelId}
               issueProviders={issueProviders}
               loadPullRequests={loadPullRequests}
               loadGithubIssues={loadGithubIssues}

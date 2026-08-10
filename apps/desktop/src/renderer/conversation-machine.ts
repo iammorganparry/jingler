@@ -21,6 +21,9 @@ import type {
   PlanApprovalResult,
   PlanComment,
   PlanDraft,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   ProviderModels,
   QuestionAnswer,
   ReasoningSetting,
@@ -107,6 +110,43 @@ const withHarness = (
   )
 })
 
+/** Optimistic mirror of SessionStore.setProviderModel while its RPC persists. */
+const withProviderModel = (
+  session: Session,
+  chatId: string,
+  connectionId: ProviderConnectionId,
+  providerId: ProviderId,
+  modelId: ProviderModelId
+): Session => {
+  const current = session.chats.find((chat) => chat.id === chatId)
+  const changed =
+    current?.connectionId !== connectionId ||
+    current?.providerId !== providerId ||
+    current?.modelId !== modelId
+  return {
+    ...session,
+    connectionId,
+    providerId,
+    modelId,
+    connectionSelectionRequired: false,
+    modelSelectionRequired: false,
+    ...(changed ? { piSessionId: undefined, resumeId: undefined } : {}),
+    chats: session.chats.map((chat) =>
+      chat.id !== chatId
+        ? chat
+        : {
+            ...chat,
+            connectionId,
+            providerId,
+            modelId,
+            connectionSelectionRequired: false,
+            modelSelectionRequired: false,
+            ...(changed ? { piSessionId: undefined, resumeId: undefined } : {})
+          }
+    )
+  }
+}
+
 /**
  * Tools that can change which worktree paths exist even when their provider
  * cannot calculate a diff. Codex file-change events have historically emitted
@@ -169,6 +209,9 @@ export interface ConversationContext {
   readonly cli: CliKind
   readonly model: string
   readonly catalog: ReadonlyArray<ProviderModels>
+  readonly connectionId: ProviderConnectionId | null
+  readonly providerId: ProviderId | null
+  readonly modelId: ProviderModelId | null
   /** The worktree's current unified diff, for the Changes rail. */
   readonly patch: string
   /** Operator-visible text for the running turn. */
@@ -339,6 +382,12 @@ type ConversationEvent =
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
   | { type: "SET_HARNESS"; cli: CliKind; model: string }
+  | {
+      type: "SET_MODEL"
+      connectionId: ProviderConnectionId
+      providerId: ProviderId
+      modelId: ProviderModelId
+    }
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
   | { type: "SESSION_UPDATED"; session: Session }
   | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
@@ -1545,6 +1594,9 @@ export const conversationMachine = setup({
         session: event.session,
         cli: event.session.cli,
         model: chat.model ?? defaultModel(event.session.cli),
+        connectionId: chat.connectionId ?? event.session.connectionId ?? null,
+        providerId: chat.providerId ?? event.session.providerId ?? null,
+        modelId: chat.modelId ?? event.session.modelId ?? null,
         mode,
         executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
         reasoning,
@@ -1721,6 +1773,30 @@ export const conversationMachine = setup({
         skills: []
       }
     }),
+    persistProviderModel: assign(({ context, event }) => {
+      if (event.type !== "SET_MODEL") return {}
+      const session = withProviderModel(
+        context.session,
+        context.chatId,
+        event.connectionId,
+        event.providerId,
+        event.modelId
+      )
+      void rpc.agentSetModel(
+        context.session.id,
+        context.chatId,
+        event.connectionId,
+        event.providerId,
+        event.modelId
+      ).then(publishSessionUpdate).catch(() => {})
+      return {
+        connectionId: event.connectionId,
+        providerId: event.providerId,
+        modelId: event.modelId,
+        model: event.modelId,
+        session
+      }
+    }),
     applySkills: assign(({ event }) => (event.type === "SKILLS_LOADED" ? { skills: event.skills } : {})),
     /**
      * Fetch the model catalogue OUT OF BAND, not as part of `loadConversation`.
@@ -1856,6 +1932,7 @@ export const conversationMachine = setup({
     SKILLS_LOADED: { actions: "applySkills" },
     REVIEW_EVENT: { actions: "applyReview" },
     SET_REASONING: { actions: "persistReasoning" },
+    SET_MODEL: { actions: "persistProviderModel" },
     SESSION_UPDATED: { actions: "reconcileSession" },
     SHARED_PLAN_UPDATED: { actions: "applySharedPlan" },
     // Root-level for the same reason: a sub-agent's tab outlives the turn that
@@ -1920,6 +1997,9 @@ export const conversationMachine = setup({
       cli: input.session.cli,
       model: chat.model ?? defaultModel(input.session.cli),
       catalog: [],
+      connectionId: chat.connectionId ?? input.session.connectionId ?? null,
+      providerId: chat.providerId ?? input.session.providerId ?? null,
+      modelId: chat.modelId ?? input.session.modelId ?? null,
       patch: "",
       pendingText: "",
       pendingAgentContext: "",

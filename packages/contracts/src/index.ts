@@ -113,6 +113,7 @@ import {
   ProviderConnectionInput,
   SetProviderApiKeyInput,
   SetDefaultProviderModelInput,
+  SetSessionProviderModelInput,
   VerifyProviderModelInput,
   AgentResourceRpcError,
   ManagedMcpImportInput,
@@ -1141,6 +1142,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       cli: CliKind,
       model: Schema.String
     }
+  }),
+
+  /** Change one conversation's certified provider connection/model atomically. */
+  Rpc.make("Agent.setModel", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError),
+    payload: SetSessionProviderModelInput
   }),
 
   /** Stop a running agent (denies any pending gate). */

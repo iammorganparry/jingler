@@ -24,6 +24,9 @@ import type {
   PlanDocument,
   PlanDraft,
   PlanMentionDelivery,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   QuestionAnswer,
   QuestionRequest,
   ReasoningSetting,
@@ -58,6 +61,9 @@ export interface Conversation {
   readonly cli: CliKind
   readonly model: string
   readonly catalog: ReadonlyArray<ProviderModels>
+  readonly connectionId: ProviderConnectionId | null
+  readonly providerId: ProviderId | null
+  readonly modelId: ProviderModelId | null
   /** The worktree's current unified diff, for the Changes rail. */
   readonly patch: string
   /** The agent is producing a turn (or paused at a gate). */
@@ -138,6 +144,11 @@ export interface Conversation {
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
   /** Picking a model implies its harness, so both are set together. */
   readonly setHarness: (cli: CliKind, model: string) => void
+  readonly setModel: (
+    connectionId: ProviderConnectionId,
+    providerId: ProviderId,
+    modelId: ProviderModelId
+  ) => void
   /**
    * The adversarial reviewer as a watch-only agent tab (null until one runs),
    * plus where it has got to and when it started — the PR button's live label.
@@ -168,7 +179,8 @@ export function useConversation(
   const state = useSelector(actor, (s) => s)
   const send = actor.send
   const {
-    messages, mode, reasoning, skills, files, cli, model, catalog, patch, queued, steeringId,
+    messages, mode, reasoning, skills, files, cli, model, catalog,
+    connectionId, providerId, modelId, patch, queued, steeringId,
     subagents, tokens, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt,
     planDraft, planDraftPresentationNonce
@@ -208,6 +220,9 @@ export function useConversation(
     cli,
     model,
     catalog,
+    connectionId,
+    providerId,
+    modelId,
     patch,
     busy,
     paused,
@@ -242,6 +257,12 @@ export function useConversation(
     setMode: (m) => send({ type: "SET_MODE", mode: m }),
     setReasoning: (value) => send({ type: "SET_REASONING", reasoning: value }),
     setHarness: (c, m) => send({ type: "SET_HARNESS", cli: c, model: m }),
+    setModel: (connection, provider, selectedModel) => send({
+      type: "SET_MODEL",
+      connectionId: connection,
+      providerId: provider,
+      modelId: selectedModel
+    }),
     stop: () => send({ type: "STOP" }),
     stopSubagent: (agentId) => send({ type: "STOP_SUBAGENT", agentId }),
     closeSubagent: (agentId) => send({ type: "CLOSE_SUBAGENT", agentId }),
