@@ -2037,6 +2037,11 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       baseBranch: session.baseBranch ?? null,
       cli,
       model,
+      ...(session.connectionId === undefined
+        ? {}
+        : { connectionId: session.connectionId }),
+      ...(session.modelId === undefined ? {} : { modelId: session.modelId }),
+      targetId: session.environmentId ?? "desktop",
       diff,
     });
 

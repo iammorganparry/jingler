@@ -7,6 +7,7 @@ import type {
   StreamEvent
 } from "@jingler/core"
 import {
+  CURRENT_RUNTIME_CONTRACTS,
   DEFAULT_CONTEXT_CONFIG,
   contextPhase,
   contextWindowFor,
@@ -327,6 +328,24 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           const collected = yield* Ref.make<ReadonlyArray<string>>([])
 
           const spec: SessionSpec = {
+            ...(settings.chat.connectionId && settings.chat.modelId
+              ? {
+                  runtime: {
+                    connectionId: settings.chat.connectionId,
+                    modelId: settings.chat.modelId,
+                    role: "context-digest" as const,
+                    priorMessages: [],
+                    piSessionId: null,
+                    seed: null,
+                    targetCapabilities: {
+                      versions: CURRENT_RUNTIME_CONTRACTS,
+                      toolIds: [],
+                      resourceIds: [],
+                      targetId: settings.session.environmentId ?? "desktop"
+                    }
+                  }
+                }
+              : {}),
             cli: settings.session.cli,
             repo: settings.session.repo,
             branch: settings.session.branch,

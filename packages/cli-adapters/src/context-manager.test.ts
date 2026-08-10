@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Session, StreamEvent } from "@jingler/core"
-import { Effect, Layer, Ref } from "effect"
+import { ProviderConnectionId, ProviderModelId } from "@jingler/core"
+import { Effect, Layer, Ref, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliAdapter } from "./adapter.js"
 import type { CliAdapterShape, SessionSpec } from "./adapter.js"
@@ -312,6 +313,34 @@ describe("ContextManager.observe", () => {
     expect(digest!.digest.goal).toContain("rate limiting")
     // The digest covers the transcript as it stood when it was built.
     expect(digest!.digest.throughMessageId).toBe("m2")
+  })
+
+  it("uses the active chat's canonical runtime identity for its digest", async () => {
+    const rec = recorder()
+    await run(
+      Effect.gen(function* () {
+        const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+        const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
+        yield* seed({
+          chats: [{
+            id: SESSION,
+            title: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            connectionId,
+            modelId,
+            model: "claude-opus-4-1"
+          }]
+        })
+        yield* observeAndSettle(180_000, rec)
+      }),
+      recordingAdapter(GOOD_REPLY, rec)
+    )
+
+    expect(rec.specs[0]?.runtime).toMatchObject({
+      role: "context-digest",
+      targetCapabilities: { targetId: "desktop" }
+    })
   })
 
   /**

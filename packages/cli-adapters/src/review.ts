@@ -1,5 +1,13 @@
-import type { AdversarialReview, CliKind, ReviewFinding, ReviewSeverity, StreamEvent } from "@jingler/core"
-import { ReviewError } from "@jingler/core"
+import type {
+  AdversarialReview,
+  CliKind,
+  ProviderConnectionId,
+  ProviderModelId,
+  ReviewFinding,
+  ReviewSeverity,
+  StreamEvent
+} from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
 import type { CommandExecutor, FileSystem, Path } from "@effect/platform"
 import { Effect, PubSub, Ref, Schema, Stream } from "effect"
 import type { AgentContext, SessionSpec } from "./adapter.js"
@@ -168,6 +176,9 @@ export interface ReviewInput {
   readonly baseBranch: string | null
   readonly cli: CliKind
   readonly model: string
+  readonly connectionId?: ProviderConnectionId
+  readonly modelId?: ProviderModelId
+  readonly targetId?: string
   readonly diff: string
 }
 
@@ -362,7 +373,9 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
         // about an unrelated task. That would sail through as a successful review
         // and get cached against this PR head, so the user reads fiction and the
         // de-dupe never lets it retry. Fail loudly instead.
-        if (input.cli === "cursor") {
+        const hasRuntimeIdentity =
+          input.connectionId !== undefined && input.modelId !== undefined
+        if (!hasRuntimeIdentity && input.cli === "cursor") {
           return yield* Effect.fail(
             new ReviewError({
               message:
@@ -373,7 +386,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
         const binPath =
           (yield* DiscoveryService.list().pipe(Effect.orElseSucceed(() => [])))
             .find((c) => c.kind === input.cli)?.binPath ?? null
-        if (binPath === null) {
+        if (!hasRuntimeIdentity && binPath === null) {
           return yield* Effect.fail(
             new ReviewError({
               message: `The ${input.cli} CLI isn't installed or couldn't be found, so there is nothing to run the review with.`
@@ -396,6 +409,24 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
         const collected = yield* Ref.make<ReadonlyArray<string>>([])
 
         const spec: SessionSpec = {
+          ...(input.connectionId && input.modelId
+            ? {
+                runtime: {
+                  connectionId: input.connectionId,
+                  modelId: input.modelId,
+                  role: "review" as const,
+                  priorMessages: [],
+                  piSessionId: null,
+                  seed: null,
+                  targetCapabilities: {
+                    versions: CURRENT_RUNTIME_CONTRACTS,
+                    toolIds: [],
+                    resourceIds: [],
+                    targetId: input.targetId ?? "desktop"
+                  }
+                }
+              }
+            : {}),
           cli: input.cli,
           repo: input.repo,
           branch: input.branch,

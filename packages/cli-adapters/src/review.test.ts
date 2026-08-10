@@ -1,10 +1,10 @@
 import type { StreamEvent } from "@jingler/core"
-import { CliExecError } from "@jingler/core"
+import { CliExecError, ProviderConnectionId, ProviderModelId } from "@jingler/core"
 import type { PermissionDecision } from "./adapter.js"
 import { CliAdapter } from "./adapter.js"
 import type { AgentContext, CliAdapterShape, SessionSpec } from "./adapter.js"
 import { CommandExecutor } from "@effect/platform"
-import { Effect, Fiber, Layer, Stream } from "effect"
+import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -212,6 +212,29 @@ describe("ReviewService — never parks", () => {
 })
 
 describe("ReviewService — spec", () => {
+  it("uses canonical runtime identity without probing for a legacy CLI", async () => {
+    let spec: SessionSpec | undefined
+    const adapter = stubAdapter((_id, captured, ctx) =>
+      Effect.gen(function* () {
+        spec = captured
+        yield* emitJson(ctx, '{"findings":[]}')
+      })
+    )
+    await Effect.runPromise(
+      ReviewService.run({
+        ...INPUT,
+        connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
+        modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
+        targetId: "desktop"
+      }).pipe(Effect.provide(env(adapter, noHarnesses)))
+    )
+
+    expect(spec?.runtime).toMatchObject({
+      role: "review",
+      targetCapabilities: { targetId: "desktop" }
+    })
+  })
+
   it("runs on the configured review model, not the session's", async () => {
     let spec: SessionSpec | undefined
     const adapter = stubAdapter((_id, s, ctx) =>

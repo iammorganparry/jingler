@@ -49,10 +49,13 @@ export interface PiSessionFactoryOptions {
     | ((context: AgentRuntimeContext) => ToolRegistry)
   readonly createToolRegistry?: (
     spec: PiRunSpec,
-    context: AgentRuntimeContext
+    context: AgentRuntimeContext,
+    tracker: FileChangeTracker | undefined
   ) => Effect.Effect<ToolRegistry, AgentRuntimeError>
   readonly promptTokenBudget?: number
-  readonly terminalTracker?: FileChangeTracker
+  readonly terminalTracker?:
+    | FileChangeTracker
+    | ((spec: PiRunSpec) => FileChangeTracker)
   /** Internal extension point for deterministic providers; production leaves it unset. */
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
   readonly createSession?: (
@@ -253,14 +256,17 @@ export const makePiSessionFactory = (
     Effect.gen(function* () {
       const connection = yield* options.resolveConnection(spec)
       yield* validateConnection(spec, connection)
+      const tracker = typeof options.terminalTracker === "function"
+        ? options.terminalTracker(spec)
+        : options.terminalTracker
       const registry = options.createToolRegistry
-        ? yield* options.createToolRegistry(spec, context)
+        ? yield* options.createToolRegistry(spec, context, tracker)
         : typeof options.toolRegistry === "function"
           ? options.toolRegistry(context)
           : (options.toolRegistry ?? createJinglerControlTools(context))
       if (
         registry.hasMutatingTools(spec.role, spec.mode) &&
-        !options.terminalTracker
+        !tracker
       ) {
         return yield* Effect.fail(
           new AgentRuntimeError({
@@ -270,8 +276,8 @@ export const makePiSessionFactory = (
         )
       }
       const resources = yield* createResources(options, spec, registry)
-      const terminalSnapshot = options.terminalTracker
-        ? yield* options.terminalTracker.capture(spec.cwd).pipe(
+      const terminalSnapshot = tracker
+        ? yield* tracker.capture(spec.cwd).pipe(
             Effect.mapError(
               (cause) =>
                 new AgentRuntimeError({
@@ -293,7 +299,7 @@ export const makePiSessionFactory = (
       return toHandle(
         result,
         spec,
-        options.terminalTracker,
+        tracker,
         terminalSnapshot
       )
     })
