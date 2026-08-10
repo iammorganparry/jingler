@@ -2,7 +2,7 @@ import { CURRENT_RUNTIME_CONTRACTS, ProviderConnectionId, ProviderModelId, type 
 import { Effect, Schema, Stream } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
-import type { AgentRuntimeContext } from "./agent-runtime.js"
+import { AgentRuntimeError, type AgentRuntimeContext } from "./agent-runtime.js"
 import { makePiAgentRuntime, type PiSessionHandle } from "./pi-agent-runtime.js"
 
 const spec: PiRunSpec = {
@@ -26,6 +26,22 @@ const context: AgentRuntimeContext = {
 }
 
 describe("PiAgentRuntime", () => {
+  it("normalizes session construction failure as one terminal event", async () => {
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({
+        create: () =>
+          Effect.fail(
+            new AgentRuntimeError({
+              reason: "certification",
+              message: "model certification is stale"
+            })
+          )
+      })
+    )
+    const events = [...await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))]
+    expect(events).toEqual([{ _tag: "Failed", message: "model certification is stale" }])
+  })
+
   it("streams one terminal event and disposes the pi session", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const dispose = vi.fn()

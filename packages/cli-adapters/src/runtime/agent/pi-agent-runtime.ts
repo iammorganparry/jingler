@@ -154,7 +154,13 @@ const runSession = (
           )
         )
       )
-    })
+    }).pipe(
+      Effect.catchAll((error) =>
+        Effect.succeed(
+          Stream.succeed<StreamEvent>({ _tag: "Failed", message: error.message })
+        )
+      )
+    )
   )
 
 export const makePiAgentRuntime = (

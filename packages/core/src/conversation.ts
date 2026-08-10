@@ -771,6 +771,29 @@ export const StreamEvent = Schema.Union(
     tokens: Schema.Number,
     window: Schema.optional(Schema.Number)
   }),
+  Schema.TaggedStruct("RetryScheduled", {
+    operation: Schema.Literal("provider", "summarization"),
+    attempt: Schema.Number,
+    maxAttempts: Schema.Number,
+    delayMs: Schema.Number,
+    message: Schema.String
+  }),
+  Schema.TaggedStruct("RetryFinished", {
+    operation: Schema.Literal("provider", "summarization"),
+    attempt: Schema.Number,
+    success: Schema.Boolean,
+    message: Schema.NullOr(Schema.String)
+  }),
+  Schema.TaggedStruct("CompactionStarted", {
+    reason: Schema.Literal("manual", "threshold", "overflow")
+  }),
+  Schema.TaggedStruct("CompactionFinished", {
+    reason: Schema.Literal("manual", "threshold", "overflow"),
+    status: Schema.Literal("success", "failed", "aborted"),
+    tokensBefore: Schema.NullOr(Schema.Number),
+    tokensAfter: Schema.NullOr(Schema.Number),
+    message: Schema.NullOr(Schema.String)
+  }),
   /**
    * The harness conversation was reseeded from a summary to keep the working set
    * inside the quality band. Emitted at the START of the turn that applies it, so
@@ -1090,7 +1113,14 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
 
     // Live usage is run-level analytics (tracked in the machine/session), not part
     // of the transcript — no-op in the per-message fold.
-    Match.tag("Usage", () => msg),
+    Match.tag(
+      "Usage",
+      "RetryScheduled",
+      "RetryFinished",
+      "CompactionStarted",
+      "CompactionFinished",
+      () => msg
+    ),
 
     // A compaction IS part of the transcript: it is the only visible trace that
     // the model's memory was rebuilt, and the only place the user can check what

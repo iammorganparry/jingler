@@ -36,6 +36,44 @@ describe("pi event normalization", () => {
   })
 })
 
+describe("pi retry and compaction events", () => {
+  it("normalizes retry and compaction lifecycle", () => {
+    expect(normalizePiEvent({
+      type: "auto_retry_start",
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 500,
+      errorMessage: "rate limited"
+    })).toEqual({
+      _tag: "RetryScheduled",
+      operation: "provider",
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 500,
+      message: "rate limited"
+    })
+    expect(normalizePiEvent({
+      type: "compaction_end",
+      reason: "threshold",
+      result: {
+        summary: "redacted from the event",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 9_000,
+        estimatedTokensAfter: 3_000
+      },
+      aborted: false,
+      willRetry: false
+    })).toEqual({
+      _tag: "CompactionFinished",
+      reason: "threshold",
+      status: "success",
+      tokensBefore: 9_000,
+      tokensAfter: 3_000,
+      message: null
+    })
+  })
+})
+
 describe("pi file-change events", () => {
   it("normalizes authoritative file-change evidence from tool details", () => {
     const fileChanges = {
