@@ -1,8 +1,13 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Effect } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  ProviderConnectionId,
+  ProviderModelId
+} from "@jingler/core"
+import { Effect, Schema } from "effect"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { makeAuthBroker } from "../auth/auth-broker.js"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
 import { makeProviderConnections } from "./provider-connections.js"
@@ -58,5 +63,113 @@ describe("ProviderConnections", () => {
     const raw = await readFile(file, "utf8")
     expect(raw).toContain('"authKind": "api-key"')
     expect(raw).not.toContain("super-secret-api-key")
+  })
+
+  it("exposes every typed connection operation through one Effect service", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-connections-"))
+    roots.push(root)
+    const credentials = new InMemoryProviderCredentialStore()
+    const refresh = vi.fn(async (credential: {
+      readonly access: string
+      readonly refresh: string
+      readonly expires: number
+    }) => ({ ...credential, expires: Date.now() + 60_000 }))
+    const broker = await Effect.runPromise(makeAuthBroker({
+      credentials,
+      codexOAuth: {
+        login: async () => ({
+          access: "oauth-access",
+          refresh: "oauth-refresh",
+          expires: Date.now() + 60_000
+        }),
+        refresh
+      },
+      probe: async ({ authKind }) => ({
+        entitlement: "active",
+        planLabel: authKind === "api-key" ? "API" : "Subscription",
+        quotaLabel: null,
+        rateLimitLabel: null,
+        billingRoute: authKind === "api-key" ? "api" : "subscription"
+      })
+    }))
+    const certification = {
+      providerId: "anthropic",
+      modelId: "anthropic:test",
+      authRoute: {
+        kind: "claude-setup-token" as const,
+        observedRoute: "claude-setup-token",
+        subscription: true,
+        entitlementConfirmed: true,
+        apiBillingFallbackObserved: false
+      },
+      versions: CURRENT_RUNTIME_CONTRACTS,
+      provenance: "local" as const,
+      capabilityProfiles: [],
+      results: [],
+      certifiedAt: new Date().toISOString()
+    }
+    const verifyModel = vi.fn(() => Effect.succeed(certification))
+    const service = await Effect.runPromise(
+      makeProviderConnections({
+        file: join(root, "connections.json"),
+        broker,
+        catalog: {
+          list: Effect.succeed({ connections: [], refreshedAt: "now", stale: false }),
+          refresh: Effect.succeed({ connections: [], refreshedAt: "now", stale: false }),
+          selectable: Effect.succeed([])
+        },
+        codexInteraction: () => ({ prompt: async () => "browser", notify: () => undefined }),
+        verifyModel
+      })
+    )
+
+    const claude = await Effect.runPromise(service.connectClaudeToken({
+      id: "claude-1",
+      token: "sk-ant-oat-fixture-value",
+      targetId: "desktop"
+    }))
+    const codex = await Effect.runPromise(service.startCodexLogin({
+      id: "codex-1",
+      targetId: "desktop",
+      method: "browser"
+    }))
+    const api = await Effect.runPromise(service.setApiKey({
+      id: "api-1",
+      providerId: "anthropic",
+      apiKey: "api-secret",
+      targetId: "desktop"
+    }))
+
+    expect(claude.authKind).toBe("claude-setup-token")
+    expect(codex.authKind).toBe("openai-codex-oauth")
+    expect(api.authKind).toBe("api-key")
+    expect(await Effect.runPromise(service.status)).toHaveLength(3)
+    expect(await Effect.runPromise(service.list)).toEqual({
+      connections: [],
+      refreshedAt: "now",
+      stale: false
+    })
+
+    await Effect.runPromise(service.cancelLogin(claude.id))
+    expect((await Effect.runPromise(service.refresh(claude.id))).id).toBe(claude.id)
+    expect(
+      await Effect.runPromise(service.verifyModel({
+        connectionId: claude.id,
+        modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic:test")
+      }))
+    ).toBe(certification)
+    expect(verifyModel).toHaveBeenCalledOnce()
+
+    await Effect.runPromise(service.logout(codex.id))
+    const codexId = Schema.decodeUnknownSync(ProviderConnectionId)("codex-1")
+    expect(await Effect.runPromise(credentials.read(codexId))).toBeNull()
+    expect(await Effect.runPromise(service.status)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: codex.id, status: "disconnected" })])
+    )
+
+    const persisted = await readFile(join(root, "connections.json"), "utf8")
+    expect(persisted).not.toContain("oauth-access")
+    expect(persisted).not.toContain("oauth-refresh")
+    expect(persisted).not.toContain("api-secret")
   })
 })
