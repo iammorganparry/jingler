@@ -7,6 +7,7 @@ import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
 import { ProviderConnections } from "../providers/provider-connections.js"
+import { makeImportedMcpService } from "../resources/imported-mcp-service.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
 import { AgentRuntime, AgentRuntimeError } from "./agent-runtime.js"
@@ -26,6 +27,10 @@ export const PiAgentRuntimeLive = Layer.effect(
     const providers = yield* ProviderConnections
     const workspace = yield* makeWorkspaceInspectionPort
     const credentials = new AgentSecretStore(secretStore)
+    const importedMcp = yield* makeImportedMcpService({
+      metadataFile: paths.importedMcpFile,
+      secrets: credentials
+    })
     const runIds = new WeakMap<FileChangeTracker, string>()
 
     const factory = makePiSessionFactory({
@@ -109,21 +114,36 @@ export const PiAgentRuntimeLive = Layer.effect(
             })
           )
         }
-        return createJinglerTools({
-          context,
-          cwd: spec.cwd,
-          workspace,
-          registryOptions: {
-            observer: createMutationObserver({
-              cwd: spec.cwd,
-              runId,
-              tracker,
-              journal: new RunJournal({
-                file: join(paths.runJournalsDir, `${runId}.json`)
-              })
+        return importedMcp.resolveForTarget(spec.targetCapabilities.targetId).pipe(
+          Effect.mapError((cause) =>
+            new AgentRuntimeError({
+              reason: "runtime",
+              message: cause.message,
+              cause
             })
-          }
-        }).pipe(
+          ),
+          Effect.flatMap((managedMcp) => createJinglerTools({
+            context,
+            cwd: spec.cwd,
+            workspace,
+            mcp: {
+              imported: managedMcp.map((server) =>
+                server.transport === "stdio"
+                  ? { ...server, cwd: spec.cwd }
+                  : server
+              )
+            },
+            registryOptions: {
+              observer: createMutationObserver({
+                cwd: spec.cwd,
+                runId,
+                tracker,
+                journal: new RunJournal({
+                  file: join(paths.runJournalsDir, `${runId}.json`)
+                })
+              })
+            }
+          })),
           Effect.mapError((cause) =>
             new AgentRuntimeError({
               reason: "runtime",

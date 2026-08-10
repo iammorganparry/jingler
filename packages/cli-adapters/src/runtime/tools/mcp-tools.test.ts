@@ -1,7 +1,14 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js"
+import { execFileSync } from "node:child_process"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { Effect } from "effect"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
+import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
+import { RunJournal } from "../journal/run-journal.js"
 import {
   McpToolBridgeError,
   jinglerMcpSources,
@@ -9,7 +16,16 @@ import {
   type McpToolClient,
   type McpToolClientFactory
 } from "./mcp-tools.js"
+import { createMutationObserver } from "./mutation-observer.js"
 import { ToolRegistry } from "./tool-registry.js"
+
+const roots: string[] = []
+const temporary = async () => {
+  const root = await mkdtemp(join(tmpdir(), "jingler-mcp-tools-"))
+  roots.push(root)
+  return root
+}
+afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
 
 const server: RuntimeMcpServer = {
   name: "jingler-browser",
@@ -170,4 +186,90 @@ it("turns MCP error results into structured tool failures", async () => {
     message: "remote failure"
   })
   expect(state.closes).toBe(2)
+})
+
+it("connects to target-local stdio servers and supplies only resolved launch values", async () => {
+  const fixture = fileURLToPath(new URL("./fixtures/stdio-mcp-server.mjs", import.meta.url))
+  const stdio: RuntimeMcpServer = {
+    name: "local",
+    transport: "stdio",
+    command: process.execPath,
+    args: [fixture],
+    env: { JINGLER_MCP_FIXTURE: "available" }
+  }
+  const registry = new ToolRegistry()
+  await Effect.runPromise(registerMcpTools(registry, [{ server: stdio, risk: "network" }]))
+
+  const result = await Effect.runPromise(registry.execute({
+    id: "mcp__local__read_fixture_env",
+    arguments: { prefix: "target" },
+    role: "conversation",
+    mode: "ask"
+  }))
+
+  expect(result).toMatchObject({
+    status: "success",
+    value: { content: [{ type: "text", text: "target:available" }] }
+  })
+})
+
+it("reconciles actual file changes made by mutating MCP tools", async () => {
+  const root = await temporary()
+  execFileSync("git", ["init", "-q"], { cwd: root })
+  const state: FakeClientState = { calls: [], closes: 0 }
+  const output = join(root, "created-by-mcp.txt")
+  const mutatingFactory: McpToolClientFactory = () => Effect.succeed({
+    listTools: () => Effect.succeed({ tools: [tool] }),
+    callTool: () => Effect.promise(async () => {
+      await mkdir(dirname(output), { recursive: true })
+      await writeFile(output, "created")
+      return { content: [{ type: "text", text: "written" }] }
+    }),
+    close: Effect.sync(() => { state.closes += 1 })
+  })
+  const registry = new ToolRegistry({
+    observer: createMutationObserver({
+      cwd: root,
+      runId: "run-mcp",
+      tracker: new FileChangeTracker({ artifactDir: join(root, ".artifacts"), sessionId: "session-mcp" }),
+      journal: new RunJournal({ file: join(root, ".journal", "run-mcp.json") })
+    })
+  })
+  await Effect.runPromise(registerMcpTools(
+    registry,
+    [{ server, risk: "execute" }],
+    mutatingFactory
+  ))
+
+  const result = await Effect.runPromise(registry.execute({
+    id: "mcp__jingler-browser__navigate",
+    arguments: { url: "https://example.com" },
+    role: "conversation",
+    mode: "ask",
+    callId: "mcp-call",
+    idempotencyKey: "mcp-call"
+  }))
+
+  expect(result.status, JSON.stringify(result)).toBe("success")
+  expect(result.fileChanges?.changes).toEqual(expect.arrayContaining([
+    expect.objectContaining({ status: "A", path: "created-by-mcp.txt" })
+  ]))
+  expect(state.closes).toBe(2)
+})
+
+it("rejects sanitized duplicate MCP tool ids deterministically", async () => {
+  const duplicate = { ...server, name: "jingler.browser" }
+  const registry = new ToolRegistry()
+  const state: FakeClientState = { calls: [], closes: 0 }
+  const result = await Effect.runPromise(Effect.either(registerMcpTools(
+    registry,
+    [
+      { server: { ...server, name: "jingler-browser" }, risk: "network" },
+      { server: duplicate, risk: "network" }
+    ],
+    (requested) => fakeFactory(state)({ ...server, name: requested.name })
+  )))
+
+  expect(result._tag).toBe("Left")
+  expect(registry.capabilitiesFor("conversation", "ask")).toEqual([])
 })

@@ -1,4 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
+import {
+  getDefaultEnvironment,
+  StdioClientTransport
+} from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js"
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
@@ -91,17 +96,11 @@ const closeClient = (client: Client): Effect.Effect<void> =>
     catch: () => null
   }).pipe(Effect.ignore)
 
-export const makeHttpMcpToolClient: McpToolClientFactory = (server) =>
+export const makeMcpToolClient: McpToolClientFactory = (server) =>
   Effect.tryPromise({
       try: async () => {
         const client = new Client({ name: "jingler-pi-runtime", version: "1.0.0" })
-        const url = new URL(server.url)
-        if (url.protocol !== "http:" && url.protocol !== "https:") {
-          throw new Error("MCP URL must use http or https")
-        }
-        const transport = new StreamableHTTPClientTransport(url, {
-          requestInit: { headers: server.headers }
-        })
+        const transport = transportFor(server)
         await client.connect(transport)
         return client
       },
@@ -135,6 +134,38 @@ export const makeHttpMcpToolClient: McpToolClientFactory = (server) =>
       close: closeClient(client)
     }))
   )
+
+const authenticatedFetch = (
+  headers: Readonly<Record<string, string>>
+) => (url: string | URL, init: RequestInit): Promise<Response> => {
+  const merged = new Headers(init.headers)
+  for (const [key, value] of Object.entries(headers)) merged.set(key, value)
+  return fetch(url, { ...init, headers: merged })
+}
+
+const transportFor = (server: RuntimeMcpServer) => {
+  if (server.transport === "stdio") {
+    return new StdioClientTransport({
+      command: server.command,
+      args: [...server.args],
+      env: { ...getDefaultEnvironment(), ...server.env },
+      cwd: server.cwd,
+      stderr: "pipe"
+    })
+  }
+  const url = new URL(server.url)
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("MCP URL must use http or https")
+  }
+  return server.transport === "sse"
+    ? new SSEClientTransport(url, {
+        eventSourceInit: { fetch: authenticatedFetch(server.headers) },
+        requestInit: { headers: server.headers }
+      })
+    : new StreamableHTTPClientTransport(url, {
+        requestInit: { headers: server.headers }
+      })
+}
 
 const withClient = <A>(
   factory: McpToolClientFactory,
@@ -237,25 +268,31 @@ const registerTool = (
 export const registerMcpTools = (
   registry: ToolRegistry,
   sources: ReadonlyArray<McpToolSource>,
-  factory: McpToolClientFactory = makeHttpMcpToolClient
+  factory: McpToolClientFactory = makeMcpToolClient
 ): Effect.Effect<void, McpToolBridgeError> =>
   Effect.forEach(
     sources,
-    (source) =>
-      discoverTools(factory, source.server).pipe(
-        Effect.flatMap((tools) =>
-          Effect.try({
-            try: () => {
-              for (const tool of tools) registerTool(registry, source, tool, factory)
-            },
-            catch: (cause) =>
-              clientFailure(
-                source.server.name,
-                `Could not register tools from ${source.server.name}`,
-                cause
-              )
-          })
-        )
-      ),
-    { concurrency: 4, discard: true }
+    (source) => discoverTools(factory, source.server).pipe(
+      Effect.map((tools) => ({ source, tools }))
+    ),
+    { concurrency: 4 }
+  ).pipe(
+    Effect.flatMap((discovered) => Effect.try({
+      try: () => {
+        const names = new Set<string>()
+        for (const { source, tools } of discovered) {
+          for (const tool of tools) {
+            const name = registeredName(source.server.name, tool.name)
+            if (names.has(name)) throw new Error(`duplicate MCP tool id: ${name}`)
+            names.add(name)
+            registerTool(registry, source, tool, factory)
+          }
+        }
+      },
+      catch: (cause) => clientFailure(
+        "managed-mcp",
+        "Could not register the managed MCP tool catalog",
+        cause
+      )
+    }))
   )
