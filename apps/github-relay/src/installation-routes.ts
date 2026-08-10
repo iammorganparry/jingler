@@ -333,6 +333,13 @@ export class InstallationRoutesObject extends DurableObject<Env> {
     return this.currentRoute(repositoryId, pullRequestNumber)
   }
 
+  /** Purge retained review feedback without unlinking the session's reusable route. */
+  async flushPullRequestEvents(repositoryId: string, pullRequestNumber: number): Promise<number> {
+    const route = this.currentRoute(repositoryId, pullRequestNumber)
+    if (!route) return 0
+    return this.env.SESSION_EVENTS.getByName(route.relaySessionId).flush()
+  }
+
   async routeEvent(
     event: NormalizedGitHubEvent
   ): Promise<{

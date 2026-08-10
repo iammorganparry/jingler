@@ -98,6 +98,7 @@ import {
   reviewReconcile,
   reviewRun,
   removeRemoteSessionMirror,
+  resolvePublishSessionBranch,
   selectContinuationRepository,
   setReasoning,
   setSessionPersistent,
@@ -111,6 +112,63 @@ import {
   withoutAttachmentData,
   workspaceRevertLines,
 } from "./rpc.js";
+
+describe("publish branch verification", () => {
+  const session = (branch: string, semanticBranchPending = false): Session => ({
+    id: "publish-session",
+    repo: "jingler",
+    branch,
+    baseBranch: "main",
+    title: "Publish session",
+    status: "idle",
+    cli: "claude",
+    diff: { added: 0, removed: 0 },
+    prNumber: null,
+    costUsd: 0,
+    tokens: 0,
+    updatedAt: "2026-08-10T00:00:00.000Z",
+    worktreePath: "/tmp/publish-session",
+    workspaceMode: "worktree",
+    semanticBranchPending,
+    semanticBranchProposal: { type: "fix", slug: "create-session-race" },
+    chats: [{
+      id: "publish-chat",
+      title: null,
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z",
+    }],
+    activeChatId: "publish-chat",
+  });
+
+  it("refreshes a session whose semantic branch persisted after publishing started", async () => {
+    const refreshed = vi.fn(async () => session("fix/create-session-race"));
+
+    await expect(
+      resolvePublishSessionBranch(
+        session("main", true),
+        "fix/create-session-race",
+        refreshed,
+      ),
+    ).resolves.toMatchObject({
+      branch: "fix/create-session-race",
+      session: {
+        branch: "fix/create-session-race",
+        semanticBranchPending: false,
+      },
+    });
+    expect(refreshed).toHaveBeenCalledOnce();
+  });
+
+  it("still rejects a live branch that does not belong to the refreshed session", async () => {
+    await expect(
+      resolvePublishSessionBranch(
+        session("main"),
+        "fix/unrelated",
+        async () => session("fix/create-session-race"),
+      ),
+    ).rejects.toThrow("The worktree branch changed to fix/unrelated");
+  });
+});
 
 describe("issue provider identity", () => {
   it("accepts only data owned by the routed provider", () => {
