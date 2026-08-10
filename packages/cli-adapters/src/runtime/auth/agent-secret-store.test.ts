@@ -49,12 +49,20 @@ describe("AgentSecretStore", () => {
 
     await Promise.all([
       Effect.runPromise(store.write({ connectionId: id("one"), authKind: "api-key", access: "one", refresh: null, expiresAt: null })),
-      Effect.runPromise(store.write({ connectionId: id("two"), authKind: "claude-setup-token", access: "two", refresh: null, expiresAt: null }))
+      Effect.runPromise(store.write({ connectionId: id("two"), authKind: "claude-setup-token", access: "two", refresh: null, expiresAt: null })),
+      Effect.runPromise(store.writeMcp("docs", "desktop", {
+        headers: { Authorization: "private" },
+        env: {}
+      }))
     ])
 
     expect((await readDeviceSecretDocument(backing)).clientInstanceId).toBe("client-1")
     expect(await Effect.runPromise(store.read(id("one")))).not.toBeNull()
     expect(await Effect.runPromise(store.read(id("two")))).not.toBeNull()
+    expect(await Effect.runPromise(store.readMcp("docs", "desktop"))).toEqual({
+      headers: { Authorization: "private" },
+      env: {}
+    })
   })
 
   it("deletes one connection without disturbing another", async () => {

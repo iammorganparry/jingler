@@ -96,6 +96,37 @@ export const ManagedMcpServer = Schema.Union(
 )
 export type ManagedMcpServer = Schema.Schema.Type<typeof ManagedMcpServer>
 
+const SecretValues = Schema.Record({
+  key: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  value: Schema.String
+})
+
+const ManagedMcpImportBase = {
+  id: ManagedResourceId,
+  name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160)),
+  scope: ManagedResourceScope,
+  targetId: Schema.String.pipe(Schema.minLength(1)),
+  provenance: ManagedResourceProvenance
+}
+
+/** Explicit, short-lived input. Secret values are removed before metadata persistence. */
+export const ManagedMcpImportInput = Schema.Union(
+  Schema.Struct({
+    ...ManagedMcpImportBase,
+    transport: Schema.Literal("http", "sse"),
+    url: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192)),
+    headers: SecretValues
+  }),
+  Schema.Struct({
+    ...ManagedMcpImportBase,
+    transport: Schema.Literal("stdio"),
+    command: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+    args: Schema.Array(Schema.String.pipe(Schema.maxLength(8_192))).pipe(Schema.maxItems(256)),
+    env: SecretValues
+  })
+)
+export type ManagedMcpImportInput = Schema.Schema.Type<typeof ManagedMcpImportInput>
+
 export const ManagedResource = Schema.Union(ManagedFileResource, ManagedMcpServer)
 export type ManagedResource = Schema.Schema.Type<typeof ManagedResource>
 

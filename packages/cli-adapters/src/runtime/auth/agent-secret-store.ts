@@ -18,6 +18,15 @@ const StoredCredentialPayload = Schema.Struct({
   expiresAt: Schema.NullOr(Schema.Number)
 })
 
+const ManagedMcpSecretPayload = Schema.Struct({
+  headers: Schema.Record({ key: Schema.String, value: Schema.String }),
+  env: Schema.Record({ key: Schema.String, value: Schema.String })
+})
+export type ManagedMcpSecretPayload = Schema.Schema.Type<typeof ManagedMcpSecretPayload>
+
+const mcpSecretKey = (resourceId: string, targetId: string): string =>
+  `${encodeURIComponent(targetId)}:${encodeURIComponent(resourceId)}`
+
 const decodeCredential = (
   connectionId: StoredProviderCredential["connectionId"],
   value: unknown
@@ -93,5 +102,43 @@ export class AgentSecretStore implements ProviderCredentialStore {
           message: "Failed to delete provider credential",
           cause
         })
+    })
+
+  readMcp = (resourceId: string, targetId: string) =>
+    Effect.tryPromise({
+      try: async () => {
+        const document = await readDeviceSecretDocument(this.#store)
+        const value = document.managedMcpSecrets?.[mcpSecretKey(resourceId, targetId)]
+        const decoded = Schema.decodeUnknownEither(ManagedMcpSecretPayload)(value)
+        return Either.isLeft(decoded) ? null : decoded.right
+      },
+      catch: (cause) => new CredentialStoreError({ message: "Failed to read MCP secrets", cause })
+    })
+
+  writeMcp = (resourceId: string, targetId: string, value: ManagedMcpSecretPayload) =>
+    Effect.tryPromise({
+      try: async () => {
+        const payload = Schema.decodeUnknownSync(ManagedMcpSecretPayload)(value)
+        await updateDeviceSecretDocument(this.#store, (document) => ({
+          ...document,
+          managedMcpSecrets: {
+            ...document.managedMcpSecrets,
+            [mcpSecretKey(resourceId, targetId)]: payload
+          }
+        }))
+      },
+      catch: (cause) => new CredentialStoreError({ message: "Failed to persist MCP secrets", cause })
+    })
+
+  deleteMcp = (resourceId: string, targetId: string) =>
+    Effect.tryPromise({
+      try: async () => {
+        await updateDeviceSecretDocument(this.#store, (document) => {
+          const secrets = { ...document.managedMcpSecrets }
+          delete secrets[mcpSecretKey(resourceId, targetId)]
+          return { ...document, managedMcpSecrets: secrets }
+        })
+      },
+      catch: (cause) => new CredentialStoreError({ message: "Failed to delete MCP secrets", cause })
     })
 }
