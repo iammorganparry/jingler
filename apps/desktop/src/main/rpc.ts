@@ -3765,6 +3765,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.export": ({ runId }) => RuntimeDiagnostics.export(runId),
   "Provider.list": () => providerOperation((service) => service.list),
   "Provider.status": () => providerOperation((service) => service.status),
+  "Provider.loginEvents": () =>
+    Stream.unwrap(ProviderConnections.pipe(Effect.map((service) => service.loginEvents))),
   "Provider.connectClaudeToken": (input) =>
     providerOperation((service) => service.connectClaudeToken(input)),
   "Provider.startCodexLogin": (input) =>
@@ -4529,6 +4531,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setFontScale": ({ fontScale }) =>
     ConfigService.setFontScale(fontScale),
   "Config.setDefaultCli": ({ cli }) => ConfigService.setDefaultCli(cli),
+  "Config.setDefaultProviderModel": ({ connectionId, providerId, modelId }) =>
+    ConfigService.setDefaultProviderModel(connectionId, providerId, modelId),
   /**
    * Deliver an OS notification. Main decides whether to actually show it: it
    * owns the window's focus state, which the renderer cannot observe reliably,

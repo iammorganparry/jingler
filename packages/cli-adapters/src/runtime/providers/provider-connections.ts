@@ -3,12 +3,13 @@ import {
   type ModelCertification,
   ProviderConnection,
   type ProviderCatalog,
-  type ProviderConnectionId,
+  ProviderConnectionId,
+  type ProviderLoginEvent,
   type SetProviderApiKeyInput,
   type StartCodexLoginInput,
   type VerifyProviderModelInput
 } from "@jingler/core"
-import { Context, Data, Effect, Schema } from "effect"
+import { Context, Data, Effect, PubSub, Schema, Stream } from "effect"
 import type {
   AuthBrokerShape,
   OAuthInteraction
@@ -33,6 +34,7 @@ export interface ProviderConnectionsOptions {
 }
 
 export interface ProviderConnectionsShape {
+  readonly loginEvents: Stream.Stream<ProviderLoginEvent>
   readonly list: Effect.Effect<ProviderCatalog, ProviderConnectionsError>
   readonly status: Effect.Effect<ReadonlyArray<ProviderConnection>, ProviderConnectionsError>
   readonly connectClaudeToken: (
@@ -96,6 +98,7 @@ export const makeProviderConnections = (
   options: ProviderConnectionsOptions
 ): Effect.Effect<ProviderConnectionsShape, ProviderConnectionsError> =>
   Effect.gen(function* () {
+    const loginEvents = yield* PubSub.unbounded<ProviderLoginEvent>()
     const document = connectionDocument(options.file)
     const restored = yield* Effect.tryPromise({
       try: () => document.read(),
@@ -105,6 +108,7 @@ export const makeProviderConnections = (
 
     const persist = persistConnection(document)
     return {
+      loginEvents: Stream.fromPubSub(loginEvents),
       list: options.catalog.list.pipe(
         Effect.mapError(serviceError("Failed to list providers"))
       ),
@@ -114,13 +118,43 @@ export const makeProviderConnections = (
           Effect.flatMap(persist)
         ),
       startCodexLogin: (input) =>
-        brokerCall(
-          options.broker.startCodexLogin({
-            id: input.id,
-            targetId: input.targetId,
-            ...options.codexInteraction(input.method)
-          })
-        ).pipe(Effect.flatMap(persist)),
+        Effect.gen(function* () {
+          const connectionId = yield* Schema.decodeUnknown(ProviderConnectionId)(input.id).pipe(
+            Effect.mapError(serviceError("Invalid provider connection id"))
+          )
+          const interaction = options.codexInteraction(input.method)
+          return yield* brokerCall(
+            options.broker.startCodexLogin({
+              id: input.id,
+              targetId: input.targetId,
+              prompt: interaction.prompt,
+              notify: (event) => {
+                interaction.notify(event)
+                const normalized: ProviderLoginEvent = event.type === "auth_url"
+                  ? {
+                      type: "auth-url",
+                      connectionId,
+                      url: event.url,
+                      instructions: event.instructions ?? null
+                    }
+                  : event.type === "device_code"
+                    ? {
+                        type: "device-code",
+                        connectionId,
+                        userCode: event.userCode,
+                        verificationUri: event.verificationUri,
+                        expiresInSeconds: event.expiresInSeconds ?? null
+                      }
+                    : {
+                        type: event.type,
+                        connectionId,
+                        message: event.message
+                      }
+                Effect.runFork(PubSub.publish(loginEvents, normalized))
+              }
+            })
+          ).pipe(Effect.flatMap(persist))
+        }),
       cancelLogin: (id) => options.broker.cancelLogin(id),
       setApiKey: (input) =>
         brokerCall(

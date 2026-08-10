@@ -7,7 +7,10 @@ import type {
   NotificationsConfig,
   OpenConnectorConfig,
   PlanTemplateConfig,
+  ProviderConnectionId,
   ProviderConfig,
+  ProviderId,
+  ProviderModelId,
 } from "@jingler/core"
 import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
@@ -188,6 +191,19 @@ export class ConfigService extends Effect.Service<ConfigService>()(
        */
       const setDefaultCli = (defaultCli: CliKind) => patch({ defaultCli })
 
+      /** Persist the canonical runtime selection as one indivisible config update. */
+      const setDefaultProviderModel = (
+        defaultConnectionId: ProviderConnectionId,
+        defaultProviderId: ProviderId,
+        defaultModelId: ProviderModelId
+      ) =>
+        patch({
+          defaultConnectionId,
+          defaultProviderId,
+          defaultModelId,
+          connectionSelectionRequired: false
+        })
+
       /**
        * Switch the active colour theme, preserving any `colorCustomizations`
        * the operator has layered on top.
@@ -271,6 +287,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setLastRepoPath,
         setContext,
         setDefaultCli,
+        setDefaultProviderModel,
         setProvider,
         setPlanTemplate,
         setActiveTheme,

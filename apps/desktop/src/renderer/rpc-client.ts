@@ -103,6 +103,8 @@ import type {
   ProviderCatalog,
   ProviderConnection,
   ProviderConnectionId,
+  ProviderLoginEvent,
+  ProviderId,
   ProviderModelId,
   CodexLoginMethod,
   DetectedResourceCandidate,
@@ -288,6 +290,24 @@ export const rpc = {
   providerList: (): Promise<ProviderCatalog> => run((c) => c.Provider.list()),
   providerStatus: (): Promise<ReadonlyArray<ProviderConnection>> =>
     run((c) => c.Provider.status()),
+  providerLoginEvents: (
+    onEvent: (event: ProviderLoginEvent) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = coreRuntime.runFork(
+        client.Provider.loginEvents().pipe(
+          Stream.runForEach((event) => Effect.sync(() => onEvent(event)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   providerConnectClaudeToken: (input: {
     id: string
     token: string
@@ -884,6 +904,13 @@ export const rpc = {
   /** Which harness new sessions start on (Settings · Providers). */
   configSetDefaultCli: (cli: CliKind): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setDefaultCli({ cli })),
+  /** Persist a certified connection/model identity atomically. */
+  configSetDefaultProviderModel: (
+    connectionId: ProviderConnectionId,
+    providerId: ProviderId,
+    modelId: ProviderModelId
+  ): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setDefaultProviderModel({ connectionId, providerId, modelId })),
   /**
    * Ask main to raise an OS notification. Main decides whether it actually
    * surfaces — it owns window focus and the stored prefs.

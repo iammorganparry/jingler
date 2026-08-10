@@ -6,7 +6,7 @@ import {
   ProviderConnectionId,
   ProviderModelId
 } from "@jingler/core"
-import { Effect, Schema } from "effect"
+import { Effect, Fiber, Option, Schema, Stream } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { makeAuthBroker } from "../auth/auth-broker.js"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
@@ -77,11 +77,18 @@ describe("ProviderConnections", () => {
     const broker = await Effect.runPromise(makeAuthBroker({
       credentials,
       codexOAuth: {
-        login: async () => ({
-          access: "oauth-access",
-          refresh: "oauth-refresh",
-          expires: Date.now() + 60_000
-        }),
+        login: async (interaction) => {
+          interaction.notify({
+            type: "device_code",
+            userCode: "ABCD-EFGH",
+            verificationUri: "https://example.test/device"
+          })
+          return {
+            access: "oauth-access",
+            refresh: "oauth-refresh",
+            expires: Date.now() + 60_000
+          }
+        },
         refresh
       },
       probe: async ({ authKind }) => ({
@@ -128,11 +135,19 @@ describe("ProviderConnections", () => {
       token: "sk-ant-oat-fixture-value",
       targetId: "desktop"
     }))
-    const codex = await Effect.runPromise(service.startCodexLogin({
-      id: "codex-1",
-      targetId: "desktop",
-      method: "browser"
-    }))
+    const { codex, loginEvent } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const loginEventFiber = yield* Effect.fork(Stream.runHead(service.loginEvents))
+        yield* Effect.yieldNow()
+        const codex = yield* service.startCodexLogin({
+          id: "codex-1",
+          targetId: "desktop",
+          method: "browser"
+        })
+        const loginEvent = Option.getOrNull(yield* Fiber.join(loginEventFiber))
+        return { codex, loginEvent }
+      })
+    )
     const api = await Effect.runPromise(service.setApiKey({
       id: "api-1",
       providerId: "anthropic",
@@ -142,6 +157,11 @@ describe("ProviderConnections", () => {
 
     expect(claude.authKind).toBe("claude-setup-token")
     expect(codex.authKind).toBe("openai-codex-oauth")
+    expect(loginEvent).toMatchObject({
+      type: "device-code",
+      connectionId: "codex-1",
+      userCode: "ABCD-EFGH"
+    })
     expect(api.authKind).toBe("api-key")
     expect(await Effect.runPromise(service.status)).toHaveLength(3)
     expect(await Effect.runPromise(service.list)).toEqual({

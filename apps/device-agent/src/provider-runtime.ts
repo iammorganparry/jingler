@@ -11,7 +11,7 @@ import { discoverPiModels } from "@jingler/cli-adapters/runtime/providers/pi-pro
 import {
   ProviderConnection
 } from "@jingler/core"
-import { Effect, Layer, Ref, Schema } from "effect"
+import { Effect, Layer, Ref, Schema, Stream } from "effect"
 
 const OptionalCredential = Schema.Union(
   Schema.String.pipe(Schema.minLength(1)),
@@ -169,6 +169,7 @@ export const makeDeviceProviderLayers = (
         targetAvailable: (provider) => provider.targetId === targetId
       })
       return ProviderConnections.of({
+        loginEvents: Stream.empty,
         list: catalog.list.pipe(
           Effect.mapError((cause) => new ProviderConnectionsError({ message: cause.message, cause }))
         ),

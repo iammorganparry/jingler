@@ -16,6 +16,29 @@ export type AuthKind = Schema.Schema.Type<typeof AuthKind>
 export const CodexLoginMethod = Schema.Literal("browser", "device-code")
 export type CodexLoginMethod = Schema.Schema.Type<typeof CodexLoginMethod>
 
+/** Renderer-safe OAuth progress. Access and refresh credentials are never events. */
+export const ProviderLoginEvent = Schema.Union(
+  Schema.Struct({
+    type: Schema.Literal("info", "progress"),
+    connectionId: ProviderConnectionId,
+    message: Schema.String
+  }),
+  Schema.Struct({
+    type: Schema.Literal("auth-url"),
+    connectionId: ProviderConnectionId,
+    url: Schema.String,
+    instructions: Schema.NullOr(Schema.String)
+  }),
+  Schema.Struct({
+    type: Schema.Literal("device-code"),
+    connectionId: ProviderConnectionId,
+    userCode: Schema.String,
+    verificationUri: Schema.String,
+    expiresInSeconds: Schema.NullOr(Schema.Number)
+  })
+)
+export type ProviderLoginEvent = Schema.Schema.Type<typeof ProviderLoginEvent>
+
 export const AuthStatus = Schema.Literal(
   "disconnected",
   "connecting",
@@ -103,6 +126,16 @@ export const VerifyProviderModelInput = Schema.Struct({
 })
 export type VerifyProviderModelInput = Schema.Schema.Type<
   typeof VerifyProviderModelInput
+>
+
+/** Persist one fully-qualified, certified default without a partial identity write. */
+export const SetDefaultProviderModelInput = Schema.Struct({
+  connectionId: ProviderConnectionId,
+  providerId: ProviderId,
+  modelId: ProviderModelId
+})
+export type SetDefaultProviderModelInput = Schema.Schema.Type<
+  typeof SetDefaultProviderModelInput
 >
 
 export const SessionRuntimeIdentity = Schema.Struct({

@@ -98,6 +98,7 @@ import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useConnectorCenter } from "./use-connector-center.js";
 import { useOpenConnector } from "./use-open-connector.js";
+import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useInjectionTargets } from "./use-injection-targets.js";
 import { useEnvironments } from "./use-environments.js";
 import { useProjects } from "./use-projects.js";
@@ -437,6 +438,7 @@ function AuthedApp({
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
   const connector = useConnectorCenter();
   const unifiedMcp = useOpenConnector();
+  const providerCatalog = useProviderCatalog();
   const injectionTargets = useInjectionTargets(unifiedMcp.config);
   const environmentController = useEnvironments();
   const projectController = useProjects();
@@ -1303,15 +1305,35 @@ function AuthedApp({
   }
 
   if (state.matches("setup")) {
+    const setupStep = state.matches({ setup: "github" })
+      ? "github"
+      : state.matches({ setup: "provider" })
+        ? "provider"
+        : state.matches({ setup: "resources" })
+          ? "resources"
+          : "workspace";
+    const providerBusy =
+      state.matches({ setup: { provider: "refreshing" } }) ||
+      state.matches({ setup: { provider: "authenticating" } }) ||
+      state.matches({ setup: { provider: "verifying" } });
+    const resourcesBusy =
+      state.matches({ setup: { resources: "detecting" } }) ||
+      state.matches({ setup: { resources: "importing" } });
     return (
       <SetupScreen
-        step={state.matches({ setup: "github" }) ? "github" : "workspace"}
-        clis={clis}
+        step={setupStep}
         github={github.connection}
+        providerCatalog={state.context.providerCatalog}
+        providerLoginEvent={state.context.providerLoginEvent}
+        resourceDetection={state.context.resourceDetection}
+        error={state.context.error}
         repos={repos}
         reposDir={reposDir}
         busy={
-          state.matches({ setup: { workspace: "choosing" } }) || github.busy
+          state.matches({ setup: { workspace: "choosing" } }) ||
+          github.busy ||
+          providerBusy ||
+          resourcesBusy
         }
         onChooseDir={() => send({ type: "CHOOSE" })}
         onContinue={() => send({ type: "CONTINUE" })}
@@ -1319,6 +1341,51 @@ function AuthedApp({
           github.connection.connected ? github.manage : github.connect
         }
         onSkipGithub={() => send({ type: "SKIP_GITHUB" })}
+        onConnectClaude={(token) =>
+          send({
+            type: "CONNECT_CLAUDE",
+            kind: "claude-setup-token",
+            id: crypto.randomUUID(),
+            token,
+            targetId: "local",
+          })
+        }
+        onStartCodex={(method) =>
+          send({
+            type: "START_CODEX",
+            kind: "openai-codex-oauth",
+            id: crypto.randomUUID(),
+            method,
+            targetId: "local",
+          })
+        }
+        onConnectApi={(providerId, apiKey) =>
+          send({
+            type: "CONNECT_API",
+            kind: "api-key",
+            id: crypto.randomUUID(),
+            providerId,
+            apiKey,
+            targetId: "local",
+          })
+        }
+        onSelectModel={(selection) => send({ type: "SELECT_MODEL", ...selection })}
+        onCancelAuth={() => send({ type: "CANCEL_AUTH" })}
+        onRetryProvider={() => {
+          if (state.matches({ setup: { provider: "authFailed" } })) {
+            send({ type: "RETRY_AUTH" });
+          } else if (state.matches({ setup: { provider: "verificationFailed" } })) {
+            send({ type: "RETRY_VERIFICATION" });
+          } else {
+            send({ type: "RETRY_PROVIDER" });
+          }
+        }}
+        onImportResources={(candidates) =>
+          send({ type: "IMPORT_RESOURCES", candidates })
+        }
+        onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
+        onCancelResourceImport={() => send({ type: "CANCEL_RESOURCE_IMPORT" })}
+        onRetryResources={() => send({ type: "RETRY_RESOURCES" })}
       />
     );
   }
@@ -1430,6 +1497,17 @@ function AuthedApp({
           },
         }}
         providersConfig={providersConfig}
+        providerConnections={{
+          catalog: providerCatalog.catalog,
+          defaultConnectionId: configQuery.data?.defaultConnectionId ?? null,
+          defaultModelId: configQuery.data?.defaultModelId ?? null,
+          busy: providerCatalog.busy,
+          error: providerCatalog.error,
+          onRefresh: providerCatalog.refresh,
+          onVerify: providerCatalog.verify,
+          onMakeDefault: providerCatalog.makeDefault,
+          onLogout: providerCatalog.logout,
+        }}
         onSaveProvider={saveProvider}
         defaultCli={defaultCli}
         onSaveDefaultCli={saveDefaultCli}

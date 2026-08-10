@@ -107,10 +107,12 @@ import {
   ProviderCatalog,
   ProviderConnection,
   ProviderConnectionError,
+  ProviderLoginEvent,
   ConnectClaudeTokenInput,
   StartCodexLoginInput,
   ProviderConnectionInput,
   SetProviderApiKeyInput,
+  SetDefaultProviderModelInput,
   VerifyProviderModelInput,
   AgentResourceRpcError,
   ManagedMcpImportInput,
@@ -471,6 +473,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Provider.status", {
     success: Schema.Array(ProviderConnection),
     error: ProviderConnectionError
+  }),
+
+  Rpc.make("Provider.loginEvents", {
+    success: ProviderLoginEvent,
+    stream: true
   }),
 
   Rpc.make("Provider.connectClaudeToken", {
@@ -1577,6 +1584,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: Schema.Struct({ cli: CliKind })
+  }),
+
+  /** Persist the certified provider connection and model as one canonical selection. */
+  Rpc.make("Config.setDefaultProviderModel", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: SetDefaultProviderModelInput
   }),
 
   /**

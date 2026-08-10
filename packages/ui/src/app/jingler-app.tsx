@@ -217,6 +217,7 @@ export interface JinglerAppProps {
   /** Everything Settings › Plugins needs. Absent renders the stub. */
   plugins?: PluginsSettingsProps
   devices?: SettingsViewProps["devices"]
+  providerConnections?: SettingsViewProps["providerConnections"]
   /** Persisted per-CLI provider defaults (Settings · Providers view). */
   providersConfig?: ProvidersConfig | null
   /** Persist one CLI's provider defaults; presence wires the Settings gear. */
@@ -455,6 +456,7 @@ export function JinglerApp({
   themes,
   plugins,
   devices,
+  providerConnections,
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
@@ -1192,6 +1194,7 @@ export function JinglerApp({
               key={settingsSection}
               initialSection={settingsSection}
               clis={clis}
+              providerConnections={providerConnections}
               providers={providersConfig}
               onSaveProvider={onSaveProvider}
               defaultCli={defaultCli}

@@ -4,23 +4,46 @@
  * pick + scan, session load) inside declarative `fromPromise` actors — no
  * data-fetching `useEffect`s, minimal `useState`.
  */
-import type { CliInfo, PublishCheckpoint, Repo, Session } from "@jingler/core"
-import { assign, fromPromise, setup } from "xstate"
+import type {
+  CodexLoginMethod,
+  CliInfo,
+  DetectedResourceCandidate,
+  ProviderCatalog,
+  ProviderConnection,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderLoginEvent,
+  ProviderModelId,
+  PublishCheckpoint,
+  Repo,
+  ResourceDetectionResult,
+  ResourceImportResult,
+  Session
+} from "@jingler/core"
+import { assign, fromCallback, fromPromise, setup } from "xstate"
 import { rpc } from "./rpc-client.js"
 
 export interface AppContext {
+  /** Temporary ready-shell compatibility; first-run no longer presents harnesses. */
   readonly clis: ReadonlyArray<CliInfo>
   readonly reposDir: string | null
   readonly repos: ReadonlyArray<Repo>
   readonly sessions: ReadonlyArray<Session>
+  readonly providerCatalog: ProviderCatalog | null
+  readonly providerLoginEvent: ProviderLoginEvent | null
+  readonly selectedProviderModel: SelectedProviderModel | null
+  readonly resourceDetection: ResourceDetectionResult | null
+  readonly selectedResourceCandidates: ReadonlyArray<DetectedResourceCandidate>
   readonly error: string | null
 }
 
 export interface InitialData {
   readonly configured: boolean
   readonly clis: ReadonlyArray<CliInfo>
+  readonly reposDir: string | null
   readonly repos: ReadonlyArray<Repo>
   readonly sessions: ReadonlyArray<Session>
+  readonly providerCatalog: ProviderCatalog
 }
 
 export interface ChosenRepositoryDirectory {
@@ -29,16 +52,20 @@ export interface ChosenRepositoryDirectory {
 }
 
 /**
- * Initial load: config + discovered CLIs decide setup vs. app. GitHub App state
+ * Initial load: config + provider catalog decide setup vs. app. GitHub App state
  * has its own machine; first-run coordinates with it through explicit events.
  */
 const initialLoad = fromPromise<InitialData>(async () => {
-  const [config, clis] = await Promise.all([rpc.configGet(), rpc.discoveryList()])
+  const [config, providerCatalog, clis] = await Promise.all([
+    rpc.configGet(),
+    rpc.providerList(),
+    rpc.discoveryList()
+  ])
   if (config?.reposDir) {
     const [repos, sessions] = await Promise.all([rpc.workspaceRepos(), rpc.sessionsList()])
-    return { configured: true, clis, repos, sessions }
+    return { configured: true, reposDir: config.reposDir, clis, repos, sessions, providerCatalog }
   }
-  return { configured: false, clis, repos: [], sessions: [] }
+  return { configured: false, reposDir: null, clis, repos: [], sessions: [], providerCatalog }
 })
 
 /** Open the native picker, persist, and scan; null when the user cancels. */
@@ -54,6 +81,89 @@ const chooseDir = fromPromise<ChosenRepositoryDirectory | null>(
 /** Load the persisted session list before entering the app. */
 const loadSessions = fromPromise<ReadonlyArray<Session>>(async () => rpc.sessionsList())
 
+export type ProviderAuthInput =
+  | { readonly kind: "claude-setup-token"; readonly id: string; readonly token: string; readonly targetId: string }
+  | { readonly kind: "openai-codex-oauth"; readonly id: string; readonly method: CodexLoginMethod; readonly targetId: string }
+  | { readonly kind: "api-key"; readonly id: string; readonly providerId: string; readonly apiKey: string; readonly targetId: string }
+
+export interface SelectedProviderModel {
+  readonly connectionId: ProviderConnectionId
+  readonly providerId: ProviderId
+  readonly modelId: ProviderModelId
+}
+
+const loadProviderCatalog = fromPromise<ProviderCatalog>(async () => rpc.providerList())
+
+const watchProviderLoginEvents = fromCallback<
+  { readonly type: "PROVIDER_LOGIN_EVENT"; readonly event: ProviderLoginEvent }
+>(({ sendBack }) =>
+  rpc.providerLoginEvents((event) => sendBack({ type: "PROVIDER_LOGIN_EVENT", event }))
+)
+
+/** Credentials are actor inputs only: XState never assigns them into persistent context. */
+const connectProvider = fromPromise<ProviderConnection, ProviderAuthInput>(
+  async ({ input, signal }) => {
+    if (input.kind === "claude-setup-token") {
+      return rpc.providerConnectClaudeToken(input)
+    }
+    if (input.kind === "api-key") return rpc.providerSetApiKey(input)
+
+    let settled = false
+    const cancel = () => {
+      if (!settled) void rpc.providerCancelLogin(input.id as ProviderConnectionId)
+    }
+    signal.addEventListener("abort", cancel, { once: true })
+    try {
+      const connection = await rpc.providerStartCodexLogin(input)
+      settled = true
+      return connection
+    } finally {
+      signal.removeEventListener("abort", cancel)
+    }
+  }
+)
+
+const verifyProviderModel = fromPromise<ProviderCatalog, SelectedProviderModel>(
+  async ({ input }) => {
+    const current = await rpc.providerList()
+    const currentConnection = current.connections.find(
+      ({ connection }) => connection.id === input.connectionId
+    )
+    const currentModel = currentConnection?.models.find(({ id }) => id === input.modelId)
+    if (!currentModel?.selectable) {
+      await rpc.providerVerifyModel(input.connectionId, input.modelId)
+    }
+    const catalog = currentModel?.selectable ? current : await rpc.providerList()
+    const connection = catalog.connections.find(
+      ({ connection }) => connection.id === input.connectionId
+    )
+    const model = connection?.models.find(({ id }) => id === input.modelId)
+    if (!(connection && model?.selectable)) {
+      throw new Error("The model did not produce a current selectable certification.")
+    }
+    await rpc.configSetDefaultProviderModel(
+      input.connectionId,
+      input.providerId,
+      input.modelId
+    )
+    return catalog
+  }
+)
+
+const detectResources = fromPromise<ResourceDetectionResult>(async () =>
+  rpc.agentResourcesDetect(null)
+)
+
+const importResources = fromPromise<
+  ResourceImportResult,
+  ReadonlyArray<DetectedResourceCandidate>
+>(async ({ input }) =>
+  rpc.agentResourcesImportFiles(null, input, {
+    kind: "portable",
+    allowedTargets: []
+  })
+)
+
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 export const appMachine = setup({
@@ -64,6 +174,20 @@ export const appMachine = setup({
       | { type: "CONTINUE" }
       | { type: "SKIP_GITHUB" }
       | { type: "GITHUB_CONNECTED" }
+      | ({ type: "CONNECT_CLAUDE" } & Extract<ProviderAuthInput, { kind: "claude-setup-token" }>)
+      | ({ type: "START_CODEX" } & Extract<ProviderAuthInput, { kind: "openai-codex-oauth" }>)
+      | ({ type: "CONNECT_API" } & Extract<ProviderAuthInput, { kind: "api-key" }>)
+      | ({ type: "SELECT_MODEL" } & SelectedProviderModel)
+      | { type: "CANCEL_AUTH" }
+      | { type: "RETRY_AUTH" }
+      | { type: "RETRY_PROVIDER" }
+      | { type: "RETRY_VERIFICATION" }
+      | { type: "PROVIDER_LOGIN_EVENT"; event: ProviderLoginEvent }
+      | { type: "CHANGE_MODEL" }
+      | { type: "IMPORT_RESOURCES"; candidates: ReadonlyArray<DetectedResourceCandidate> }
+      | { type: "SKIP_RESOURCES" }
+      | { type: "CANCEL_RESOURCE_IMPORT" }
+      | { type: "RETRY_RESOURCES" }
       | { type: "SESSION_CREATED"; session: Session }
       | { type: "SESSION_PR_LINKED"; sessionId: string; prNumber: number }
       | { type: "SESSION_PUBLISH_UPDATED"; sessionId: string; checkpoint: PublishCheckpoint }
@@ -71,7 +195,17 @@ export const appMachine = setup({
       | { type: "SESSION_DELETED"; sessionId: string }
       | { type: "RETRY" }
   },
-  actors: { initialLoad, chooseDir, loadSessions }
+  actors: {
+    initialLoad,
+    chooseDir,
+    loadSessions,
+    loadProviderCatalog,
+    watchProviderLoginEvents,
+    connectProvider,
+    verifyProviderModel,
+    detectResources,
+    importResources
+  }
 }).createMachine({
   id: "app",
   initial: "loading",
@@ -80,6 +214,11 @@ export const appMachine = setup({
     reposDir: null,
     repos: [],
     sessions: [],
+    providerCatalog: null,
+    providerLoginEvent: null,
+    selectedProviderModel: null,
+    resourceDetection: null,
+    selectedResourceCandidates: [],
     error: null
   },
   states: {
@@ -91,15 +230,18 @@ export const appMachine = setup({
             guard: ({ event }) => event.output.configured,
             target: "ready",
             actions: assign(({ event }) => ({
+              reposDir: event.output.reposDir,
               clis: event.output.clis,
               repos: event.output.repos,
-              sessions: event.output.sessions
+              sessions: event.output.sessions,
+              providerCatalog: event.output.providerCatalog
             }))
           },
           {
             target: "setup",
             actions: assign(({ event }) => ({
-              clis: event.output.clis
+              clis: event.output.clis,
+              providerCatalog: event.output.providerCatalog
             }))
           }
         ],
@@ -145,8 +287,190 @@ export const appMachine = setup({
         },
         github: {
           on: {
-            GITHUB_CONNECTED: "#app.starting",
-            SKIP_GITHUB: "#app.starting"
+            GITHUB_CONNECTED: "#app.setup.provider",
+            SKIP_GITHUB: "#app.setup.provider"
+          }
+        },
+        provider: {
+          initial: "refreshing",
+          invoke: { src: "watchProviderLoginEvents" },
+          on: {
+            PROVIDER_LOGIN_EVENT: {
+              actions: assign(({ event }) => ({ providerLoginEvent: event.event }))
+            }
+          },
+          states: {
+            refreshing: {
+              invoke: {
+                src: "loadProviderCatalog",
+                onDone: {
+                  target: "idle",
+                  actions: assign(({ event }) => ({
+                    providerCatalog: event.output,
+                    error: null
+                  }))
+                },
+                onError: {
+                  target: "loadFailed",
+                  actions: assign(({ event }) => ({ error: messageOf(event.error) }))
+                }
+              }
+            },
+            loadFailed: { on: { RETRY_PROVIDER: "refreshing" } },
+            idle: {
+              on: {
+                CONNECT_CLAUDE: {
+                  target: "authenticating",
+                  actions: assign({ providerLoginEvent: null, error: null })
+                },
+                START_CODEX: {
+                  target: "authenticating",
+                  actions: assign({ providerLoginEvent: null, error: null })
+                },
+                CONNECT_API: {
+                  target: "authenticating",
+                  actions: assign({ providerLoginEvent: null, error: null })
+                },
+                SELECT_MODEL: {
+                  target: "verifying",
+                  actions: assign(({ event }) => ({
+                    selectedProviderModel: {
+                      connectionId: event.connectionId,
+                      providerId: event.providerId,
+                      modelId: event.modelId
+                    },
+                    error: null
+                  }))
+                }
+              }
+            },
+            authenticating: {
+              invoke: {
+                src: "connectProvider",
+                input: ({ event }) => {
+                  if (event.type === "CONNECT_CLAUDE") {
+                    return {
+                      kind: event.kind,
+                      id: event.id,
+                      token: event.token,
+                      targetId: event.targetId
+                    }
+                  }
+                  if (event.type === "START_CODEX") {
+                    return {
+                      kind: event.kind,
+                      id: event.id,
+                      method: event.method,
+                      targetId: event.targetId
+                    }
+                  }
+                  if (event.type === "CONNECT_API") {
+                    return {
+                      kind: event.kind,
+                      id: event.id,
+                      providerId: event.providerId,
+                      apiKey: event.apiKey,
+                      targetId: event.targetId
+                    }
+                  }
+                  throw new Error("Provider authentication requires a typed connection event.")
+                },
+                onDone: { target: "refreshing" },
+                onError: {
+                  target: "authFailed",
+                  actions: assign(({ event }) => ({ error: messageOf(event.error) }))
+                }
+              },
+              on: {
+                CANCEL_AUTH: {
+                  target: "idle",
+                  actions: assign({ providerLoginEvent: null })
+                }
+              }
+            },
+            authFailed: { on: { RETRY_AUTH: "idle" } },
+            verifying: {
+              invoke: {
+                src: "verifyProviderModel",
+                input: ({ context }) => {
+                  if (!context.selectedProviderModel) {
+                    throw new Error("Model verification requires a selected connection and model.")
+                  }
+                  return context.selectedProviderModel
+                },
+                onDone: {
+                  target: "#app.setup.resources",
+                  actions: assign(({ event }) => ({
+                    providerCatalog: event.output,
+                    error: null
+                  }))
+                },
+                onError: {
+                  target: "verificationFailed",
+                  actions: assign(({ event }) => ({ error: messageOf(event.error) }))
+                }
+              }
+            },
+            verificationFailed: {
+              on: {
+                RETRY_VERIFICATION: "verifying",
+                CHANGE_MODEL: "idle"
+              }
+            }
+          }
+        },
+        resources: {
+          initial: "detecting",
+          states: {
+            detecting: {
+              invoke: {
+                src: "detectResources",
+                onDone: {
+                  target: "reviewing",
+                  actions: assign(({ event }) => ({
+                    resourceDetection: event.output,
+                    selectedResourceCandidates: [],
+                    error: null
+                  }))
+                },
+                onError: {
+                  target: "detectFailed",
+                  actions: assign(({ event }) => ({ error: messageOf(event.error) }))
+                }
+              }
+            },
+            detectFailed: { on: { RETRY_RESOURCES: "detecting", SKIP_RESOURCES: "#app.starting" } },
+            reviewing: {
+              on: {
+                IMPORT_RESOURCES: {
+                  target: "importing",
+                  actions: assign(({ event }) => ({
+                    selectedResourceCandidates: event.candidates,
+                    error: null
+                  }))
+                },
+                SKIP_RESOURCES: "#app.starting"
+              }
+            },
+            importing: {
+              invoke: {
+                src: "importResources",
+                input: ({ context }) => context.selectedResourceCandidates,
+                onDone: "#app.starting",
+                onError: {
+                  target: "importFailed",
+                  actions: assign(({ event }) => ({ error: messageOf(event.error) }))
+                }
+              },
+              on: { CANCEL_RESOURCE_IMPORT: "reviewing" }
+            },
+            importFailed: {
+              on: {
+                RETRY_RESOURCES: "importing",
+                CANCEL_RESOURCE_IMPORT: "reviewing",
+                SKIP_RESOURCES: "#app.starting"
+              }
+            }
           }
         }
       }

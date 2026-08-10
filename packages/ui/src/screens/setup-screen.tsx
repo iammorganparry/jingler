@@ -1,6 +1,16 @@
-import type { CliInfo, GitHubConnection, Repo } from "@jingler/core"
+import type {
+  CodexLoginMethod,
+  DetectedResourceCandidate,
+  GitHubConnection,
+  ProviderCatalog,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderLoginEvent,
+  ProviderModelId,
+  Repo,
+  ResourceDetectionResult
+} from "@jingler/core"
 import { ArrowRight, FolderSearch, GitBranch } from "lucide-react"
-import { cn } from "../lib/cn.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
@@ -8,11 +18,16 @@ import { GithubMark } from "../components/github-mark.js"
 import { Spinner } from "../components/loading.js"
 import { StatusDot } from "../components/status-dot.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
+import { ProviderSetupStep } from "./setup/provider-setup-step.js"
+import { ResourceSetupStep } from "./setup/resource-setup-step.js"
 
 export interface SetupScreenProps {
-  step: "workspace" | "github"
-  clis: ReadonlyArray<CliInfo>
+  step: "workspace" | "github" | "provider" | "resources"
   github: GitHubConnection
+  providerCatalog?: ProviderCatalog | null
+  providerLoginEvent?: ProviderLoginEvent | null
+  resourceDetection?: ResourceDetectionResult | null
+  error?: string | null
   repos?: ReadonlyArray<Repo>
   busy?: boolean
   onChooseDir: () => void
@@ -20,6 +35,20 @@ export interface SetupScreenProps {
   reposDir?: string | null
   onConnectGithub: () => void
   onSkipGithub: () => void
+  onConnectClaude: (token: string) => void
+  onStartCodex: (method: CodexLoginMethod) => void
+  onConnectApi: (providerId: string, apiKey: string) => void
+  onSelectModel: (selection: {
+    connectionId: ProviderConnectionId
+    providerId: ProviderId
+    modelId: ProviderModelId
+  }) => void
+  onCancelAuth: () => void
+  onRetryProvider: () => void
+  onImportResources: (candidates: ReadonlyArray<DetectedResourceCandidate>) => void
+  onSkipResources: () => void
+  onCancelResourceImport: () => void
+  onRetryResources: () => void
 }
 
 const githubLabel = (github: GitHubConnection): string => {
@@ -42,15 +71,28 @@ const githubLabel = (github: GitHubConnection): string => {
 /** First-run welcome. Side effects stay in the renderer's coordinated machines. */
 export function SetupScreen({
   step,
-  clis,
   github,
+  providerCatalog = null,
+  providerLoginEvent = null,
+  resourceDetection = null,
+  error = null,
   repos = [],
   busy = false,
   onChooseDir,
   onContinue,
   reposDir = null,
   onConnectGithub,
-  onSkipGithub
+  onSkipGithub,
+  onConnectClaude,
+  onStartCodex,
+  onConnectApi,
+  onSelectModel,
+  onCancelAuth,
+  onRetryProvider,
+  onImportResources,
+  onSkipResources,
+  onCancelResourceImport,
+  onRetryResources
 }: SetupScreenProps) {
   const chosen = reposDir !== null
   const shownRepos = repos.slice(0, 6)
@@ -101,31 +143,8 @@ export function SetupScreen({
                 </div>
               </>
             )}
-
-            <div className="flex flex-col gap-2.5">
-              <span className="font-mono text-[9.5px] tracking-[0.4px] text-muted-foreground">
-                HARNESSES
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {clis.length === 0 && <span className="text-[11px] text-dim">Scanning…</span>}
-                {clis.map((cli) => (
-                  <span
-                    key={cli.kind}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-md border px-2 py-[3px] font-mono text-[10.5px]",
-                      cli.available
-                        ? "border-green/30 bg-green/10 text-text"
-                        : "border-line bg-hover text-dim opacity-60"
-                    )}
-                  >
-                    <StatusDot tone={cli.available ? "bg-green" : "bg-line-strong"} size={6} glow={false} />
-                    {cli.label}
-                  </span>
-                ))}
-              </div>
-            </div>
           </>
-        ) : (
+        ) : step === "github" ? (
           <>
             <div className="flex flex-col gap-2.5">
               <Eyebrow>Welcome · 2 of 2</Eyebrow>
@@ -182,6 +201,29 @@ export function SetupScreen({
               remain off until an active installation can access the repository.
             </p>
           </>
+        ) : step === "provider" ? (
+          <ProviderSetupStep
+            catalog={providerCatalog}
+            loginEvent={providerLoginEvent}
+            busy={busy}
+            error={error}
+            onConnectClaude={onConnectClaude}
+            onStartCodex={onStartCodex}
+            onConnectApi={onConnectApi}
+            onSelectModel={onSelectModel}
+            onCancel={onCancelAuth}
+            onRetry={onRetryProvider}
+          />
+        ) : (
+          <ResourceSetupStep
+            detection={resourceDetection}
+            busy={busy}
+            error={error}
+            onImport={onImportResources}
+            onSkip={onSkipResources}
+            onCancel={onCancelResourceImport}
+            onRetry={onRetryResources}
+          />
         )}
       </div>
     </div>

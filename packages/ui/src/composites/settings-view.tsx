@@ -34,6 +34,10 @@ import {
 } from "@jingler/core"
 import { ContextMeter } from "./context-meter.js"
 import {
+  ProviderConnectionsSettings,
+  type ProviderConnectionsSettingsProps
+} from "./provider-connections-settings.js"
+import {
   Boxes,
   ChevronRight,
   Cpu,
@@ -247,6 +251,8 @@ function summarize(
 export interface SettingsViewProps {
   /** Discovered CLIs — every one becomes a provider card. */
   clis: ReadonlyArray<CliInfo>
+  /** Canonical provider connections. When present, legacy CLI cards stay hidden. */
+  providerConnections?: ProviderConnectionsSettingsProps
   /**
    * Everything the Themes pane needs. Optional so Storybook and the component
    * gallery can mount Settings without standing up a theme catalog; absent
@@ -344,6 +350,7 @@ export interface SettingsViewProps {
  */
 export function SettingsView({
   clis,
+  providerConnections,
   themes,
   plugins,
   devices,
@@ -479,14 +486,18 @@ export function SettingsView({
           onSaveFontScale={onSaveFontScale}
         />
       ) : section === "providers" ? (
-        <ProvidersSection
-          clis={clis}
-          providers={providers ?? undefined}
-          onSaveProvider={onSaveProvider}
-          defaultCli={defaultCli}
-          onSaveDefaultCli={onSaveDefaultCli}
-          loadModels={loadModels}
-        />
+        providerConnections ? (
+          <ProviderConnectionsSettings {...providerConnections} />
+        ) : (
+          <ProvidersSection
+            clis={clis}
+            providers={providers ?? undefined}
+            onSaveProvider={onSaveProvider}
+            defaultCli={defaultCli}
+            onSaveDefaultCli={onSaveDefaultCli}
+            loadModels={loadModels}
+          />
+        )
       ) : section === "context" ? (
         <ContextSection
           clis={clis}
