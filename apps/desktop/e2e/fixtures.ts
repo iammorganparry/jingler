@@ -370,11 +370,12 @@ if (process.argv.includes("--version") || process.argv.includes("-v")) {
 if (!process.argv.includes("app-server")) process.exit(0)
 
 const fs = require("node:fs")
+const reasoning = ["low", "medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort }))
 const models = [
-  { id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", isDefault: true },
-  { id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra" },
-  { id: "gpt-5.6-luna", displayName: "GPT-5.6 Luna" },
-  { id: "gpt-5.5", displayName: "GPT-5.5" }
+  { id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", isDefault: true, supportedReasoningEfforts: reasoning, defaultReasoningEffort: "low" },
+  { id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra", supportedReasoningEfforts: reasoning, defaultReasoningEffort: "medium" },
+  { id: "gpt-5.6-luna", displayName: "GPT-5.6 Luna", supportedReasoningEfforts: reasoning, defaultReasoningEffort: "medium" },
+  { id: "gpt-5.5", displayName: "GPT-5.5", supportedReasoningEfforts: reasoning, defaultReasoningEffort: "medium" }
 ]
 const send = (message) =>
   process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\\n")

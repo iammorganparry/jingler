@@ -7,6 +7,40 @@ const API_KEY = "lin_api_e2e_linear_plugin"
 const LINKED_LINEAR_ISSUE = /Linked issue ENG-/
 const LINEAR_IDENTIFIER = /^ENG-/
 
+test("shows every new-session source and starts from a Linear issue", async ({
+  launchApp
+}) => {
+  const linear = await startFakeLinearServer()
+  try {
+    const launched = await launchApp({
+      configured: true,
+      withRepo: true,
+      e2eEnv: { JINGLER_LINEAR_API_URL: linear.url }
+    })
+    await configureLinear(launched.window)
+    await launched.window.getByTestId("new-session").click()
+
+    for (const label of ["Blank task", "Existing branch", "Pull request", "GitHub issue", "Linear issue"]) {
+      await expect(launched.window.getByRole("radio", { name: new RegExp(label) })).toBeVisible()
+    }
+
+    await launched.window.getByRole("radio", { name: /^Linear issue/ }).click()
+    const issue = launched.window.getByRole("button", { name: /Document retry policy/ })
+    await expect(issue).toBeVisible({ timeout: 20_000 })
+    await issue.click()
+    await expect(launched.window.getByPlaceholder(/Message the agent/)).toHaveValue(/Document retry policy/)
+    await launched.window.getByPlaceholder(/Message the agent/).press("Enter")
+    await expect(sessionRow(launched.window, "Document retry policy")).toBeVisible({ timeout: 20_000 })
+
+    const sessions = JSON.parse(
+      readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
+    ) as ReadonlyArray<{ readonly linkedIssue?: { readonly providerId: string; readonly identifier: string } }>
+    expect(sessions[0]?.linkedIssue).toMatchObject({ providerId: "linear", identifier: "ENG-124" })
+  } finally {
+    await linear.close()
+  }
+})
+
 const openPluginSettings = async (window: Page): Promise<void> => {
   await expect(appShell(window)).toBeVisible()
   await window.getByRole("button", { name: "Account menu" }).click()

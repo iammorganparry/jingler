@@ -60,12 +60,12 @@ test("updates modes when switching from Claude to Codex", async ({ launchApp }) 
 
   await launched.window.getByText("Accept Edits", { exact: true }).click()
   await expect(launched.window.getByRole("option", { name: /^Default\b/ })).toBeVisible()
-  await expect(launched.window.getByRole("option", { name: /^Read Only\b/ })).toHaveCount(0)
+  await expect(launched.window.getByRole("option", { name: /^Ask for approval\b/ })).toHaveCount(0)
   await launched.window.keyboard.press("Escape")
 
   await selectModel(launched.window, "Codex CLI", "GPT-5.6 Sol")
-  await launched.window.getByText("Workspace Write", { exact: true }).click()
-  await expect(launched.window.getByRole("option", { name: /^Read Only\b/ })).toBeVisible()
+  await launched.window.getByText("Approve for me", { exact: true }).click()
+  await expect(launched.window.getByRole("option", { name: /^Ask for approval\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Default\b/ })).toHaveCount(0)
 })
 
@@ -77,16 +77,13 @@ test("updates reasoning options when switching Codex models", async ({ launchApp
   })
   await expect(appShell(launched.window)).toBeVisible()
 
-  await selectModel(launched.window, "Codex CLI", "GPT-5.6 Luna")
+  await selectModel(launched.window, "Codex CLI", "GPT-5.5")
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
+  await expect(launched.window.getByRole("option", { name: "Light", exact: true })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: "Medium", exact: true })).toBeVisible()
-  await expect(launched.window.getByRole("option", { name: "High", exact: true })).toHaveCount(0)
-  await launched.window.keyboard.press("Escape")
-
-  await selectModel(launched.window, "Codex CLI", "GPT-5.6 Sol")
-  await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   await expect(launched.window.getByRole("option", { name: "High", exact: true })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: "Extra High", exact: true })).toBeVisible()
+  await expect(launched.window.getByRole("option", { name: "Off", exact: true })).toHaveCount(0)
 })
 
 test("persists provider model mode and reasoning selections across restart", async ({ launchApp }) => {
@@ -97,8 +94,8 @@ test("persists provider model mode and reasoning selections across restart", asy
   })
   await expect(appShell(first.window)).toBeVisible()
   await selectModel(first.window, "Codex CLI", "GPT-5.6 Sol")
-  await first.window.getByText("Workspace Write", { exact: true }).click()
-  await first.window.getByRole("option", { name: /^Full Access\b/ }).click()
+  await first.window.getByText("Approve for me", { exact: true }).click()
+  await first.window.getByRole("option", { name: /^Full access\b/ }).click()
   await first.window.getByRole("button", { name: "Thinking strength" }).click()
   await first.window.getByRole("option", { name: "High", exact: true }).click()
   await expect.poll(() => {
@@ -126,7 +123,7 @@ test("persists provider model mode and reasoning selections across restart", asy
   })
   await expect(appShell(reopened.window)).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Model: GPT-5.6 Sol" })).toBeVisible()
-  await expect(reopened.window.getByText("Full Access", { exact: true })).toBeVisible()
+  await expect(reopened.window.getByText("Full access", { exact: true })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
 })
 
@@ -145,8 +142,8 @@ test("configures mode and reasoning before creating a session", async ({ launchA
   expect(selectorWidths).toEqual([240, 240, 240])
 
   await selectModel(launched.window, "Codex CLI", "GPT-5.6 Sol")
-  await launched.window.getByText("Full Access", { exact: true }).click()
-  await launched.window.getByRole("option", { name: /^Read Only\b/ }).click()
+  await launched.window.getByText("Full access", { exact: true }).click()
+  await launched.window.getByRole("option", { name: /^Ask for approval\b/ }).click()
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   await launched.window.getByRole("option", { name: "High", exact: true }).click()
   await launched.window.getByRole("button", { name: "Checkout" }).click()

@@ -41,6 +41,7 @@ import {
   rehomeSharedPlan
 } from "./conversation-registry.js"
 import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
+import { takeFirstMessage } from "./first-message-store.js"
 import {
   codeReferenceDisplayLabel,
   serializeCodeReferences
@@ -409,14 +410,32 @@ export function ConversationPane({
     [draft.references]
   )
 
-  // The prefilled task is one-shot, but we clear it (backend + app state) only
-  // once the user actually SENDS — not on mount. Clearing on mount lost the draft
-  // when the user visited the Issue tab first (that unmounts this pane, discarding
-  // the composer's seeded text; on return `initialPrompt` was already gone).
-  // Consuming on send keeps the seed alive across those unmounts until it's used.
-  // It now seeds the DRAFT STORE (once ever, never over existing text), so the
-  // prefill survives the same unmounts the store was built for.
+  // A session's first turn takes one of two paths, forked by whether it was just
+  // created from the new-session composer (`first-message-store` holds a handoff
+  // for it) or arrived here some other way (e.g. a legacy prefilled task):
+  //
+  //  - New-session composer: auto-send the first turn NOW — the operator already
+  //    pressed send once; the `initialPrompt` text plus any attachments go
+  //    straight to the agent instead of sitting as a draft to send again.
+  //  - Otherwise: seed the DRAFT STORE (once ever, never over existing text).
+  //    The prefilled task is one-shot, but we clear it (backend + app state) only
+  //    once the user actually SENDS — not on mount. Clearing on mount lost the
+  //    draft when the user visited another tab first (that unmounts this pane,
+  //    discarding the composer's seeded text; on return `initialPrompt` was
+  //    already gone). Consuming on send keeps the seed alive across those
+  //    unmounts until it's used.
+  //
+  // `sendPrompt` (below) itself consumes `initialPrompt` and clears the draft, so
+  // the auto-send path never also leaves a stray seeded draft behind.
   useEffect(() => {
+    const firstTurnImages = takeFirstMessage(session.id)
+    if (firstTurnImages !== undefined) {
+      const text = session.initialPrompt ?? ""
+      if (text.trim() || firstTurnImages.length > 0) {
+        sendPrompt(text, firstTurnImages.length > 0 ? firstTurnImages : undefined)
+      }
+      return
+    }
     if (session.initialPrompt) {
       seedDraftOnce(activeChat.id, session.initialPrompt, session.id)
     }

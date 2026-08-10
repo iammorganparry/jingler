@@ -27,6 +27,7 @@ import {
   defaultModel,
   digestModelFor,
   newSessionCli,
+  providerReasoningCapabilitiesFor,
   reviewModelFor,
   startableClis,
   triggerAt
@@ -177,17 +178,30 @@ const modeItemsFor = (
   cli: CliKind
 ): ReadonlyArray<{ value: PermissionMode; label: string }> =>
   cli === "codex"
-    ? MODE_ITEMS.map((item) =>
-        item.value === "ask" ? { ...item, label: "Read only" } : item
-      )
+    ? [
+        { value: "ask", label: "Ask for approval" },
+        { value: "accept-edits", label: "Approve for me" },
+        { value: "plan", label: "Plan first" },
+        { value: "auto", label: "Full access" }
+      ]
     : MODE_ITEMS
 
 type ReasoningChoice = "off" | ReasoningEffort
 const reasoningItemsFor = (
   cli: CliKind
 ): ReadonlyArray<{ value: ReasoningChoice; label: string }> => [
-  { value: "off", label: "Off" },
-  ...reasoningEffortsFor(cli).map((value) => ({ value, label: value }))
+  ...(providerReasoningCapabilitiesFor(cli).explicitToggle
+    ? [{ value: "off" as const, label: "Off" }]
+    : []),
+  ...reasoningEffortsFor(cli).map((value) => ({
+    value,
+    label:
+      cli === "codex" && value === "low"
+        ? "Light"
+        : value === "xhigh"
+          ? "Extra High"
+          : value[0]!.toUpperCase() + value.slice(1)
+  }))
 ]
 
 const OUTPUT_ITEMS: ReadonlyArray<{ value: OutputStyle; label: string }> = [
@@ -912,7 +926,7 @@ function ProvidersSection({
             />
             <span className="text-[11px] leading-relaxed text-dim">
               {selected === "codex"
-                ? "Read only replaces Ask because Codex exec has no interactive approval callback. "
+                ? "Ask for approval gates external edits and internet access; Approve for me only interrupts for potentially unsafe actions. "
                 : ""}
               Plan first drafts a plan and waits for approval before running.{" "}
               <span className="text-yellow">

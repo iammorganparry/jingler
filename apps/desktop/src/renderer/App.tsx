@@ -7,9 +7,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
+  Attachment,
   ContextConfig,
   VsCodeTheme,
   CliKind,
+  CreateSessionFromIssueInput,
+  CreateSessionFromPrInput,
   CreateSessionInput,
   GitConfig,
   GithubConfig,
@@ -53,6 +56,7 @@ import {
 import { appMachine } from "./app-machine.js";
 import { authMachine } from "./auth-machine.js";
 import { ConversationPane } from "./conversation-pane.js";
+import { setFirstMessage } from "./first-message-store.js";
 import { SessionChatTabs } from "./session-chat-tabs.js";
 import { PullRequestPane } from "./pull-request-pane.js";
 import { ReviewPane } from "./review-pane.js";
@@ -100,6 +104,7 @@ import { useProjects } from "./use-projects.js";
 import {
   PluginProvider,
   usePluginCommands,
+  useIssueProviders,
   usePluginPanes,
   usePluginTabs,
 } from "./plugin-registry.js";
@@ -357,6 +362,7 @@ function AuthedApp({
   const pluginTabs = usePluginTabs();
   const pluginPanes = usePluginPanes();
   const pluginCommands = usePluginCommands();
+  const issueProviders = useIssueProviders();
   const plugins = usePlugins();
   const memory = useMemory();
 
@@ -598,9 +604,40 @@ function AuthedApp({
       qc.setQueryData(["config"], saved);
     });
 
-  const createSession = async (input: CreateSessionInput) => {
+  const createSession = async (
+    input: CreateSessionInput,
+    images: ReadonlyArray<Attachment> = [],
+  ) => {
     const session = await rpc.sessionsCreate(input);
     void rememberLastRepo(input.repoPath);
+    // A first message (typed text and/or attachments) means the operator wants
+    // the agent working now, not a pre-filled draft. Flag the session for
+    // first-turn auto-send BEFORE it becomes active, so the ConversationPane
+    // that mounts on SESSION_CREATED finds the handoff. "Create without a first
+    // message" leaves both empty, so no flag and no auto-send.
+    if (input.initialPrompt || images.length > 0) {
+      setFirstMessage(session.id, images);
+    }
+    send({ type: "SESSION_CREATED", session });
+    return session;
+  };
+  const createSessionFromPr = async (
+    input: CreateSessionFromPrInput,
+    images: ReadonlyArray<Attachment> = [],
+  ) => {
+    const session = await rpc.sessionsCreateFromPr(input);
+    void rememberLastRepo(input.repoPath);
+    if (input.initialPrompt || images.length > 0) setFirstMessage(session.id, images);
+    send({ type: "SESSION_CREATED", session });
+    return session;
+  };
+  const createSessionFromIssue = async (
+    input: CreateSessionFromIssueInput,
+    images: ReadonlyArray<Attachment> = [],
+  ) => {
+    const session = await rpc.sessionsCreateFromIssue(input);
+    void rememberLastRepo(input.repoPath);
+    if (input.task.trim() || images.length > 0) setFirstMessage(session.id, images);
     send({ type: "SESSION_CREATED", session });
     return session;
   };
@@ -1413,7 +1450,25 @@ function AuthedApp({
         loadBranches={async (repoPath, environmentId) => {
           return rpc.workspaceBranches(repoPath, environmentId)
         }}
+        issueProviders={issueProviders}
+        loadPullRequests={(project, search, mine) => {
+          const githubSlug = repos.find((repo) => repo.path === project.path)?.githubSlug ?? undefined;
+          return rpc.githubListPrs(project.path, { search, mine, ...(githubSlug ? { githubSlug } : {}) });
+        }}
+        loadGithubIssues={(project, search, mine) => {
+          const githubSlug = repos.find((repo) => repo.path === project.path)?.githubSlug ?? undefined;
+          return rpc.githubListIssues(project.path, { search, mine, ...(githubSlug ? { githubSlug } : {}) });
+        }}
+        loadProviderIssues={(providerId, project, search, mine) =>
+          rpc.pluginsIssueProviderList({
+            providerId,
+            repository: { name: project.name, path: project.path },
+            search,
+            mine,
+          })}
         onCreateSession={createSession}
+        onCreateSessionFromPr={createSessionFromPr}
+        onCreateSessionFromIssue={createSessionFromIssue}
         onRenameSession={renameSession}
         onSetSessionPersistent={setSessionPersistent}
         onArchiveSession={archiveSession}

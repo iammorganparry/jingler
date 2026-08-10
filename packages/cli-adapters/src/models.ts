@@ -59,13 +59,9 @@ const fetchFor = (
         ? fetchOpencodeModels(binPath)
         : Promise.resolve(null)
 
-const CODEX_MODEL_REASONING: Readonly<Record<string, ReadonlyArray<ReasoningEffort>>> = {
-  "gpt-5.6-luna": ["minimal", "low", "medium"]
-}
-
 const REASONING_LABEL: Record<ReasoningEffort, string> = {
   minimal: "Minimal",
-  low: "Low",
+  low: "Light",
   medium: "Medium",
   high: "High",
   xhigh: "Extra High",
@@ -76,9 +72,7 @@ const reasoning = (
   cli: CliKind,
   model: string
 ): { options: ReadonlyArray<{ id: ReasoningEffort; label: string }>; defaultId?: ReasoningEffort } => {
-  const ids = cli === "codex"
-    ? (CODEX_MODEL_REASONING[model] ?? providerReasoningCapabilitiesFor(cli).efforts)
-    : providerReasoningCapabilitiesFor(cli).efforts
+  const ids = providerReasoningCapabilitiesFor(cli).efforts
   return {
     options: ids.map((id) => ({ id, label: REASONING_LABEL[id] })),
     ...(ids.includes("medium") ? { defaultId: "medium" as const } : {})
@@ -93,9 +87,9 @@ const MODES: Record<"claude" | "codex", ReadonlyArray<HarnessModeOption>> = {
     { id: "plan", label: "Plan", description: "Use Claude Code's native planning mode", kind: "plan" }
   ],
   codex: [
-    { id: "ask", label: "Read Only", description: "Use Codex's read-only sandbox", kind: "execute" },
-    { id: "accept-edits", label: "Workspace Write", description: "Use Codex's workspace-write sandbox", kind: "execute" },
-    { id: "auto", label: "Full Access", description: "Use Codex's danger-full-access sandbox", kind: "execute" },
+    { id: "ask", label: "Ask for approval", description: "Always ask to edit external files and use the internet", kind: "execute" },
+    { id: "accept-edits", label: "Approve for me", description: "Only ask for actions detected as potentially unsafe", kind: "execute" },
+    { id: "auto", label: "Full access", description: "Unrestricted access to the internet and any file on your computer", kind: "execute" },
     { id: "plan", label: "Plan", description: "Use Codex's native planning mode", kind: "plan" }
   ]
 }
@@ -105,7 +99,10 @@ const capabilityModels = (
   models: ReadonlyArray<ModelOption>
 ): ReadonlyArray<ModelOption> =>
   models.map((model) => {
-    const supported = reasoning(cli, model.id)
+    const discovered = model.reasoning?.length
+      ? { options: model.reasoning, defaultId: model.defaultReasoningId }
+      : undefined
+    const supported = discovered ?? reasoning(cli, model.id)
     return {
       ...model,
       reasoning: supported.options,

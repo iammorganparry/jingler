@@ -12,9 +12,9 @@ const capabilities: ReadonlyArray<HarnessCapability> = [{
   models: [{
     id: "sol",
     label: "Sol",
-    reasoning: ["minimal", "low", "medium", "high", "xhigh"].map((id, index) => ({
-      id: id as "minimal" | "low" | "medium" | "high" | "xhigh",
-      label: ["Minimal", "Low", "Medium", "High", "Extra High"][index]!
+    reasoning: ["low", "medium", "high", "xhigh"].map((id, index) => ({
+      id: id as "low" | "medium" | "high" | "xhigh",
+      label: ["Light", "Medium", "High", "Extra High"][index]!
     }))
   }]
 }]
@@ -34,6 +34,8 @@ describe("Composer thinking strength", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Thinking strength" }))
+    expect(screen.getByRole("option", { name: "Light" })).toBeDefined()
+    expect(screen.queryByRole("option", { name: "Off" })).toBeNull()
     fireEvent.click(screen.getByRole("option", { name: "Extra High" }))
     expect(onSetReasoning).toHaveBeenCalledWith({ enabled: true, effort: "xhigh" })
 

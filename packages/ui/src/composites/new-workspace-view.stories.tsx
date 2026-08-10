@@ -4,21 +4,139 @@ import type {
   Environment,
   GitHubCloneRepository,
   HarnessCapability,
+  IssueSummary,
+  PrSummary,
   Project,
   Session,
   SessionActivity
 } from "@jingler/core"
 import { useRef, useState } from "react"
 import { expect, fireEvent, fn, userEvent, waitFor, within } from "storybook/test"
+import { CircleDot, GitBranch, GitPullRequest, Sparkles } from "lucide-react"
+import { Button } from "../components/button.js"
+import { GithubMark } from "../components/github-mark.js"
+import { SearchInput } from "../components/search-input.js"
 import { SessionConversation } from "../screens/session-conversation.js"
 import { AddProjectDialog } from "./add-project-dialog.js"
+import { Composer } from "./composer.js"
+import { IssuePickerList } from "./issue-picker-list.js"
 import { NewWorkspaceView, type NewWorkspaceViewProps } from "./new-workspace-view.js"
+import { PrPickerList } from "./pr-picker-list.js"
 
 const FIRST_MESSAGE = /Message the agent/
 const SEARCH_FOR_DIRECTORY = /Search for directory/
 const STORYBOOK_PROJECT = /storybook-project/
 const PREVIEW_PROJECT_PATH = "/Users/morgan/Code/storybook-project"
 const PREVIEW_CLONE_PATH = "/Users/morgan/Code/widget"
+
+type PreviewSource = "blank" | "branch" | "pr" | "github" | "linear"
+
+const PREVIEW_PRS: ReadonlyArray<PrSummary> = [
+  {
+    number: 182,
+    title: "Restore provider-aware session creation",
+    headRefName: "feat/session-sources",
+    baseRefName: "main",
+    author: { login: "morgan", avatarUrl: null },
+    state: "open",
+    isDraft: false,
+    additions: 284,
+    deletions: 61,
+    updatedAt: "2026-08-10T06:30:00.000Z"
+  },
+  {
+    number: 179,
+    title: "Fix remote project preparation",
+    headRefName: "fix/remote-projects",
+    baseRefName: "main",
+    author: { login: "alex", avatarUrl: null },
+    state: "open",
+    isDraft: true,
+    additions: 97,
+    deletions: 22,
+    updatedAt: "2026-08-09T15:20:00.000Z"
+  }
+]
+
+const issue = (
+  providerId: "github" | "linear",
+  id: string,
+  identifier: string,
+  title: string,
+  labels: IssueSummary["labels"]
+): IssueSummary => ({
+  providerId,
+  id,
+  identifier,
+  url: providerId === "github"
+    ? `https://github.com/acme/jingler/issues/${id}`
+    : `https://linear.app/acme/issue/${identifier}`,
+  title,
+  labels,
+  state: "open",
+  body: `Implement ${title.toLowerCase()} and preserve the existing session configuration controls.`,
+  author: { id: "author-1", name: "Morgan", avatarUrl: null },
+  assignees: [{ id: "assignee-1", name: "Morgan", avatarUrl: null }],
+  updatedAt: "2026-08-10T07:10:00.000Z"
+})
+
+const GITHUB_ISSUES: ReadonlyArray<IssueSummary> = [
+  issue("github", "241", "#241", "Restore sessions from GitHub issues", [
+    { name: "product", color: "6f42c1" },
+    { name: "desktop", color: "0e8a16" }
+  ]),
+  issue("github", "233", "#233", "Existing branch sessions lose their checkout", [
+    { name: "bug", color: "d73a4a" }
+  ])
+]
+
+const LINEAR_ISSUES: ReadonlyArray<IssueSummary> = [
+  issue("linear", "linear-eng-418", "ENG-418", "Unify the new session entry points", [
+    { name: "Feature", color: "5e6ad2" },
+    { name: "Desktop", color: "0e8a16" }
+  ]),
+  issue("linear", "linear-eng-403", "ENG-403", "Show Linear issues in session creation", [
+    { name: "Integration", color: "f9d0c4" }
+  ])
+]
+
+const SOURCE_OPTIONS: ReadonlyArray<{
+  value: PreviewSource
+  label: string
+  description: string
+  icon: React.ReactNode
+}> = [
+  {
+    value: "blank",
+    label: "Blank task",
+    description: "Start from a base branch",
+    icon: <Sparkles size={15} className="text-blue" />
+  },
+  {
+    value: "branch",
+    label: "Existing branch",
+    description: "Continue work already started",
+    icon: <GitBranch size={15} className="text-cyan" />
+  },
+  {
+    value: "pr",
+    label: "Pull request",
+    description: "Work on an open GitHub PR",
+    icon: <GitPullRequest size={15} className="text-green" />
+  },
+  {
+    value: "github",
+    label: "GitHub issue",
+    description: "Link and prefill from GitHub",
+    icon: <GithubMark className="size-[15px] text-text" />
+  },
+  {
+    value: "linear",
+    label: "Linear issue",
+    description: "Link and prefill from Linear",
+    icon: <CircleDot size={15} className="text-purple" />
+  }
+]
 
 const GITHUB_REPOSITORIES: ReadonlyArray<GitHubCloneRepository> = [
   { installationId: "101", repositoryId: "301", fullName: "acme/widget" },
@@ -284,8 +402,8 @@ function NewSessionStory({
               }}
               prepareProject={(projectId, environmentId) =>
                 projectForHost(projects, projectId, environmentId)}
-              onCreate={async (input) => {
-                await args.onCreate(input)
+              onCreate={async (input, images) => {
+                await args.onCreate(input, images)
                 setCreated(input)
               }}
             />
@@ -307,6 +425,231 @@ function NewSessionStory({
           setProjects((current) => [...current.filter((item) => item.id !== project.id), project])
           setAddProjectOpen(false)
         }}
+      />
+    </div>
+  )
+}
+
+function PreviewField({
+  label,
+  value,
+  icon
+}: {
+  label: string
+  value: string
+  icon: React.ReactNode
+}) {
+  return (
+    <div className="flex w-[240px] flex-col gap-0.5">
+      <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
+        {label}
+      </span>
+      <button
+        type="button"
+        className="flex h-10 min-w-0 items-center gap-2 rounded-md px-2 text-left text-[13px] text-text-bright outline-none transition-[background-color,scale] hover:bg-surface active:scale-[0.96] focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {icon}
+        <span className="min-w-0 flex-1 truncate">{value}</span>
+        <span className="text-dim" aria-hidden>⌄</span>
+      </button>
+    </div>
+  )
+}
+
+function SessionSourcePrototype({ initialSource = "blank" }: { initialSource?: PreviewSource }) {
+  const [source, setSource] = useState<PreviewSource>(initialSource)
+  const [search, setSearch] = useState("")
+  const [selectedBranch, setSelectedBranch] = useState(
+    initialSource === "branch" ? "feat/session-sources" : ""
+  )
+  const [selectedPr, setSelectedPr] = useState<PrSummary | null>(
+    initialSource === "pr" ? PREVIEW_PRS[0]! : null
+  )
+  const initialIssues = initialSource === "linear" ? LINEAR_ISSUES : GITHUB_ISSUES
+  const [selectedIssue, setSelectedIssue] = useState<IssueSummary | null>(
+    initialSource === "github" || initialSource === "linear" ? initialIssues[0]! : null
+  )
+  const [draft, setDraft] = useState(
+    selectedIssue ? `${selectedIssue.title}\n\n${selectedIssue.body}` : ""
+  )
+
+  const chooseSource = (next: PreviewSource) => {
+    setSource(next)
+    setSearch("")
+    setSelectedBranch("")
+    setSelectedPr(null)
+    setSelectedIssue(null)
+    setDraft("")
+  }
+
+  const issues = source === "linear" ? LINEAR_ISSUES : GITHUB_ISSUES
+  const branch = source === "branch"
+    ? selectedBranch || "Choose a branch"
+    : source === "pr"
+      ? selectedPr?.headRefName ?? "Choose a pull request"
+      : "main"
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="session-source-prototype">
+      <div className="flex h-12 flex-none items-center border-b border-hairline px-5">
+        <h1 className="text-[13px] font-semibold text-text-bright">New session</h1>
+        <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-[0.4px] text-dim">
+          Layout preview
+        </span>
+      </div>
+      <div className="flex min-h-0 flex-1 overflow-auto px-6 py-8">
+        <div className="m-auto flex w-full max-w-[980px] flex-col gap-4">
+          <div>
+            <h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">
+              What are we working on?
+            </h2>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              Choose where the work starts, configure the checkout, then send the first message.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
+              Start from
+            </span>
+            <div className="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Session source">
+              {SOURCE_OPTIONS.map((option) => {
+                const selected = option.value === source
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => chooseSource(option.value)}
+                    className={`flex min-h-16 min-w-0 flex-col justify-center gap-1 rounded-lg border px-3 text-left outline-none transition-[background-color,border-color,scale] active:scale-[0.96] focus-visible:ring-2 focus-visible:ring-ring ${
+                      selected
+                        ? "border-blue/55 bg-blue/10"
+                        : "border-line bg-sunken hover:border-line-strong hover:bg-surface"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
+                      {option.icon}
+                      <span className="truncate">{option.label}</span>
+                    </span>
+                    <span className="truncate text-[10.5px] text-dim">{option.description}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <PreviewField
+              label="Project"
+              value="jingler"
+              icon={<GitBranch size={15} className="text-blue" />}
+            />
+            <PreviewField
+              label="Checkout mode"
+              value={source === "pr" ? "PR worktree" : "Worktree"}
+              icon={<GitPullRequest size={15} className="text-purple" />}
+            />
+            <PreviewField
+              label={source === "branch" || source === "pr" ? "Working branch" : "Base branch"}
+              value={branch}
+              icon={<GitBranch size={15} className="text-cyan" />}
+            />
+          </div>
+
+          {source !== "blank" && (
+            <section className="rounded-xl border border-line bg-panel p-3" aria-label="Source picker">
+              <div className="mb-3 flex items-center gap-2">
+                <SearchInput
+                  value={search}
+                  onChange={setSearch}
+                  placeholder={source === "branch"
+                    ? "Search branches…"
+                    : source === "pr"
+                      ? "Search pull requests…"
+                      : `Search ${source === "linear" ? "Linear" : "GitHub"} issues…`}
+                  className="flex-1"
+                />
+                {source !== "branch" && (
+                  <Button variant="secondary" className="h-[34px]">Just mine</Button>
+                )}
+              </div>
+
+              {source === "branch" ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {["feat/session-sources", "fix/linear-plugin-loading", "release/2.0", "main"]
+                    .filter((candidate) => candidate.includes(search))
+                    .map((candidate) => (
+                      <button
+                        key={candidate}
+                        type="button"
+                        aria-pressed={candidate === selectedBranch}
+                        onClick={() => setSelectedBranch(candidate)}
+                        className={`flex min-h-11 items-center gap-2 rounded-lg border px-3 text-left font-mono text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                          candidate === selectedBranch
+                            ? "border-blue/55 bg-blue/10 text-text-bright"
+                            : "border-line bg-sunken text-text hover:border-line-strong"
+                        }`}
+                      >
+                        <GitBranch size={14} className="text-cyan" />
+                        {candidate}
+                      </button>
+                    ))}
+                </div>
+              ) : source === "pr" ? (
+                <PrPickerList
+                  prs={PREVIEW_PRS.filter((pr) => pr.title.toLowerCase().includes(search.toLowerCase()))}
+                  selected={selectedPr?.number ?? null}
+                  onSelect={setSelectedPr}
+                />
+              ) : (
+                <IssuePickerList
+                  issues={issues.filter((candidate) =>
+                    `${candidate.identifier} ${candidate.title}`.toLowerCase().includes(search.toLowerCase()))}
+                  selected={selectedIssue?.id ?? null}
+                  onSelect={(next) => {
+                    setSelectedIssue(next)
+                    setDraft(`${next.title}\n\n${next.body}`)
+                  }}
+                />
+              )}
+            </section>
+          )}
+
+          <Composer
+            value={draft}
+            onValueChange={setDraft}
+            placeholder={source === "pr"
+              ? "Add an instruction for this pull request (optional)"
+              : source === "branch"
+                ? "What should the agent do on this branch?"
+                : "Message the agent, tag @files, or use /commands and /skills"}
+            repo="jingler"
+            branch={branch}
+            cli="codex"
+            model="gpt-5.6-sol"
+            capabilities={CAPABILITIES}
+            mode="auto"
+            onSend={() => {}}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SessionSourceStory({ initialSource }: { initialSource?: PreviewSource }) {
+  return (
+    <div className="flex h-screen w-full bg-panel">
+      <SessionConversation
+        sessions={SIDEBAR_SESSIONS}
+        clis={clis}
+        activeSessionId={null}
+        onSelectSession={() => {}}
+        onNewSession={() => {}}
+        showEmpty
+        version="2.0.3"
+        newSessionView={<SessionSourcePrototype initialSource={initialSource} />}
       />
     </div>
   )
@@ -340,6 +683,31 @@ type Story = StoryObj<typeof meta>
 
 /** Manual confirmation surface: sidebar stays fixed while creation owns the main pane. */
 export const Ready: Story = {}
+
+/** Approval surface: all source choices are interactive on the unified screen. */
+export const SessionSources: Story = {
+  render: () => <SessionSourceStory />
+}
+
+/** Approval surface: continuing work on an existing branch. */
+export const ExistingBranchSource: Story = {
+  render: () => <SessionSourceStory initialSource="branch" />
+}
+
+/** Approval surface: selecting a pull request checks out its head branch. */
+export const PullRequestSource: Story = {
+  render: () => <SessionSourceStory initialSource="pr" />
+}
+
+/** Approval surface: GitHub issue selection prefills the shared Composer. */
+export const GitHubIssueSource: Story = {
+  render: () => <SessionSourceStory initialSource="github" />
+}
+
+/** Approval surface: Linear uses the same normalized issue layout as GitHub. */
+export const LinearIssueSource: Story = {
+  render: () => <SessionSourceStory initialSource="linear" />
+}
 
 /** New Session remains in the main pane while existing work stays visible in the sidebar. */
 export const PopulatedSidebar: Story = {

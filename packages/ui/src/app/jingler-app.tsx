@@ -10,7 +10,10 @@ import type {
   ContextSnapshot,
   CliInfo,
   CliKind,
+  CreateSessionFromIssueInput,
+  CreateSessionFromPrInput,
   CreateSessionInput,
+  Attachment,
   GitHubCloneRepository,
   GitHubConnection,
   GitConfig,
@@ -20,6 +23,8 @@ import type {
   Environment,
   EnvironmentDiscovery,
   HarnessCapability,
+  IssueProviderDescriptor,
+  IssueSummary,
   ModelOption,
   SessionPrStatus,
   ProviderConfig,
@@ -28,6 +33,7 @@ import type {
   PlanTemplateConfig,
   ProvidersConfig,
   Repo,
+  PrSummary,
   Session,
   SessionActivity,
   Usage,
@@ -347,8 +353,17 @@ export interface JinglerAppProps {
   loadBranches?: (repoPath: string, environmentId?: string) => Promise<ReadonlyArray<string>>
   environments?: ReadonlyArray<Environment>
   loadEnvironmentDiscovery?: (environmentId: string) => Promise<EnvironmentDiscovery>
-  /** Create a session (forks a real worktree) and return it. */
-  onCreateSession?: (input: CreateSessionInput) => Promise<Session>
+  /**
+   * Create a session (forks a real worktree) and return it. `images` are the
+   * first turn's attachments, sent to the agent when the session opens.
+   */
+  onCreateSession?: (input: CreateSessionInput, images: ReadonlyArray<Attachment>) => Promise<Session>
+  issueProviders?: ReadonlyArray<IssueProviderDescriptor>
+  loadPullRequests?: (project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<PrSummary>>
+  loadGithubIssues?: (project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<IssueSummary>>
+  loadProviderIssues?: (providerId: string, project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<IssueSummary>>
+  onCreateSessionFromPr?: (input: CreateSessionFromPrInput, images: ReadonlyArray<Attachment>) => Promise<Session>
+  onCreateSessionFromIssue?: (input: CreateSessionFromIssueInput, images: ReadonlyArray<Attachment>) => Promise<Session>
   /** Manually rename a session (double-click its sidebar title) — pins the name. */
   onRenameSession?: (id: string, title: string) => void
   /** Persist or unpersist a session and return its updated record upstream. */
@@ -479,6 +494,12 @@ export function JinglerApp({
   environments = [],
   loadEnvironmentDiscovery,
   onCreateSession,
+  issueProviders = [],
+  loadPullRequests,
+  loadGithubIssues,
+  loadProviderIssues,
+  onCreateSessionFromPr,
+  onCreateSessionFromIssue,
   onRenameSession,
   onSetSessionPersistent,
   onArchiveSession,
@@ -999,13 +1020,31 @@ export function JinglerApp({
   ])
 
   const handleCreate = useCallback(
-    async (input: CreateSessionInput) => {
+    async (input: CreateSessionInput, images: ReadonlyArray<Attachment>) => {
       if (!onCreateSession) return
-      const session = await onCreateSession(input)
+      const session = await onCreateSession(input, images)
       setNewOpen(false)
       setSelected(session.id)
     },
     [onCreateSession, setSelected]
+  )
+  const handleCreateFromPr = useCallback(
+    async (input: CreateSessionFromPrInput, images: ReadonlyArray<Attachment>) => {
+      if (!onCreateSessionFromPr) return
+      const session = await onCreateSessionFromPr(input, images)
+      setNewOpen(false)
+      setSelected(session.id)
+    },
+    [onCreateSessionFromPr, setSelected]
+  )
+  const handleCreateFromIssue = useCallback(
+    async (input: CreateSessionFromIssueInput, images: ReadonlyArray<Attachment>) => {
+      if (!onCreateSessionFromIssue) return
+      const session = await onCreateSessionFromIssue(input, images)
+      setNewOpen(false)
+      setSelected(session.id)
+    },
+    [onCreateSessionFromIssue, setSelected]
   )
   const initialNewSessionCli = newSessionCli(clis, defaultCli)
 
@@ -1129,6 +1168,10 @@ export function JinglerApp({
                   : providersConfig?.[initialNewSessionCli]?.defaultModel
               }
               providers={providersConfig}
+              issueProviders={issueProviders}
+              loadPullRequests={loadPullRequests}
+              loadGithubIssues={loadGithubIssues}
+              loadProviderIssues={loadProviderIssues}
               loadBranches={loadBranches}
               prepareProject={async (projectId, environmentId) => {
                 const project = projects.find((candidate) => candidate.id === projectId)
@@ -1138,6 +1181,8 @@ export function JinglerApp({
                 return onEnsureProjectOnEnvironment(projectId, environmentId)
               }}
               onCreate={handleCreate}
+              onCreateFromPr={onCreateSessionFromPr ? handleCreateFromPr : undefined}
+              onCreateFromIssue={onCreateSessionFromIssue ? handleCreateFromIssue : undefined}
             />
           ) : undefined
         }

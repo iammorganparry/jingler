@@ -37,7 +37,7 @@ const capabilities: ReadonlyArray<HarnessCapability> = [
     models: [{
       id: "sol",
       label: "Sol",
-      reasoning: ["minimal", "low", "medium", "high", "xhigh"].map((id) => ({ id: id as "minimal" | "low" | "medium" | "high" | "xhigh", label: id }))
+      reasoning: ["low", "medium", "high", "xhigh"].map((id) => ({ id: id as "low" | "medium" | "high" | "xhigh", label: id }))
     }]
   }
 ]
@@ -84,10 +84,9 @@ describe("Composer send row", () => {
     const chip = () => screen.getByRole("button", { name: "Thinking strength" })
     expect(filledBars(chip())).toBe(3)
 
-    // Codex leads with "minimal", so the same word sits a rung higher there —
-    // the glyph follows the list the operator is picking from, not a fixed scale.
+    // Codex's native ladder has four rungs, and "high" is its third.
     rerender(<Composer cli="codex" model="sol" capabilities={capabilities} reasoningEffort="high" />)
-    expect(filledBars(chip())).toBe(4)
+    expect(filledBars(chip())).toBe(3)
   })
 
   it("fills nothing for the harness default or for thinking turned off", () => {

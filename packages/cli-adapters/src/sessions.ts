@@ -572,7 +572,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
             repo: input.repoName,
             branch: workspace.branch,
-            ...(workspaceMode === "worktree" ? { semanticBranchPending: true } : {}),
+            ...(workspaceMode === "worktree" && input.continueBranch !== true
+              ? { semanticBranchPending: true }
+              : {}),
             title,
             ...(input.initialPrompt?.trim()
               ? { initialPrompt: input.initialPrompt.trim() }
@@ -695,7 +697,15 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             slug,
             baseBranch: input.baseBranch
           })
-          const session = makeSession(worktree, "worktree")
+          if (input.continueBranch === true) {
+            yield* GitService.checkoutBranch(worktree.path, input.baseBranch)
+          }
+          const session = makeSession(
+            input.continueBranch === true
+              ? { ...worktree, branch: input.baseBranch }
+              : worktree,
+            "worktree"
+          )
           // `existing` was read above (for the friendly-name collision check).
           // Re-read INSIDE the lock rather than reusing the list read before
           // the worktree fork: that read is now seconds stale, and appending to
@@ -780,10 +790,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const providerKey = reasoningKey(input.cli)
           const session: Session = {
             id,
+            ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
             ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
             repo: input.repoName,
             branch,
             title: input.pr.title,
+            ...(input.initialPrompt?.trim()
+              ? { initialPrompt: input.initialPrompt.trim() }
+              : {}),
             status: "idle",
             cli: input.cli,
             diff: { added: 0, removed: 0 },
@@ -895,6 +909,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             // same issue can't collide with the old session's persisted data; the
             // worktree slug stays deterministic for the one-session-per-issue guard.
             id,
+            ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
             ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
             repo: input.repoName,
             branch: worktree.branch,

@@ -756,6 +756,7 @@ test("lists every official bundled plugin", async ({ launchApp }) => {
   await expect(window.getByTestId("plugin-row-github-issues")).toBeVisible({ timeout: 15_000 })
   await expect(window.getByTestId("plugin-row-linear")).toBeVisible()
   await expect(window.getByTestId("plugin-row-linear").locator("[data-plugin-asset-icon='ready']")).toBeVisible()
+  await expect(window.getByTestId("plugins-undecodable")).toHaveCount(0)
 })
 
 test("a plugin's dock pane mounts beside the session", async ({ launchApp }) => {

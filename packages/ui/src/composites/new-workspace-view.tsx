@@ -2,7 +2,6 @@ import * as React from "react"
 import type {
   CliInfo,
   CliKind,
-  CreateSessionInput,
   Environment,
   HarnessCapability,
   ProvidersConfig,
@@ -13,14 +12,19 @@ import { useMachine } from "@xstate/react"
 import {
   Check,
   ChevronDown,
+  CircleDot,
   FolderGit2,
   GitBranch,
   GitFork,
+  GitPullRequest,
   MessageCircle,
   Monitor,
+  Sparkles,
   X
 } from "lucide-react"
 import { Button } from "../components/button.js"
+import { GithubMark } from "../components/github-mark.js"
+import { SearchInput } from "../components/search-input.js"
 import {
   Command,
   CommandEmpty,
@@ -31,7 +35,9 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "../components/popover.js"
 import { cn } from "../lib/cn.js"
 import { Composer } from "./composer.js"
-import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
+import { IssuePickerList } from "./issue-picker-list.js"
+import { newWorkspaceMachine, type NewSessionSource, type NewWorkspaceDeps } from "./new-workspace-machine.js"
+import { PrPickerList } from "./pr-picker-list.js"
 
 interface PickerOption<T extends string> {
   value: T
@@ -135,7 +141,13 @@ export interface NewWorkspaceViewProps {
   requestedProjectId?: string | null
   prepareProject: NewWorkspaceDeps["prepareProject"]
   loadBranches: NewWorkspaceDeps["loadBranches"]
-  onCreate: (input: CreateSessionInput) => Promise<void>
+  issueProviders?: NewWorkspaceDeps["issueProviders"]
+  loadPullRequests?: NewWorkspaceDeps["loadPullRequests"]
+  loadGithubIssues?: NewWorkspaceDeps["loadGithubIssues"]
+  loadProviderIssues?: NewWorkspaceDeps["loadProviderIssues"]
+  onCreate: NewWorkspaceDeps["onCreate"]
+  onCreateFromPr?: NewWorkspaceDeps["onCreateFromPr"]
+  onCreateFromIssue?: NewWorkspaceDeps["onCreateFromIssue"]
   onAddProject?: () => void
   onClose: () => void
 }
@@ -161,10 +173,15 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     if (props.open) send({ type: "SYNC_HARNESSES" })
   }, [props.open, props.capabilities, props.defaultCli, props.defaultModel, send])
 
-  const { projectId, environmentId, isolation, baseBranch, branches, draft, cli, model, mode, reasoning, error } = state.context
+  const {
+    projectId, environmentId, isolation, baseBranch, branches, source, search, mine,
+    pullRequests, issues, selectedPr, selectedIssue, draft, attachments, cli, model,
+    mode, reasoning, error
+  } = state.context
   const selectedProject = props.projects.find((project) => project.id === projectId)
   const submitting = state.matches("submitting")
   const loading = state.matches("loading")
+  const sourceLoading = state.matches("sourceLoading")
   const unavailableReason = submitting
     ? "Creating session…"
     : loading
@@ -173,6 +190,10 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
         ? "Add a project before starting a session."
         : props.capabilities.length === 0
           ? "No harnesses are available. Check Settings → Providers."
+          : source === "pr" && selectedPr === null
+            ? "Choose a pull request before starting."
+            : (source === "github" || source.startsWith("provider:")) && selectedIssue === null
+              ? "Choose an issue before starting."
           : !projectId || !baseBranch || !cli || !model
             ? "Choose a project and branch before starting."
             : undefined
@@ -207,6 +228,25 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     keywords: branch.replaceAll("/", " "),
     icon: <GitBranch size={16} className="flex-none text-cyan" aria-hidden />
   }))
+  const sourceOptions: ReadonlyArray<{
+    value: NewSessionSource
+    label: string
+    description: string
+    icon: React.ReactNode
+  }> = [
+    { value: "blank", label: "Blank task", description: "Start from a base branch", icon: <Sparkles size={15} className="text-blue" /> },
+    { value: "branch", label: "Existing branch", description: "Continue work already started", icon: <GitBranch size={15} className="text-cyan" /> },
+    ...(props.loadPullRequests ? [{ value: "pr" as const, label: "Pull request", description: "Work on an open GitHub PR", icon: <GitPullRequest size={15} className="text-green" /> }] : []),
+    ...(props.loadGithubIssues ? [{ value: "github" as const, label: "GitHub issue", description: "Link and prefill from GitHub", icon: <GithubMark className="size-[15px] text-text" /> }] : []),
+    ...(props.issueProviders ?? []).map((provider) => ({
+      value: `provider:${provider.id}` as const,
+      label: `${provider.label} issue`,
+      description: `Link and prefill from ${provider.label}`,
+      icon: <CircleDot size={15} className="text-purple" />
+    }))
+  ]
+  const selectedSource = sourceOptions.find((option) => option.value === source)
+  const sourceLabel = selectedSource?.label ?? "issue"
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="new-session-view">
@@ -231,6 +271,48 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
               </Button>
             )}
           </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
+              Start from
+            </span>
+            <div
+              className={cn(
+                "grid gap-2",
+                sourceOptions.length >= 5
+                  ? "grid-cols-5"
+                  : sourceOptions.length === 4
+                    ? "grid-cols-4"
+                    : sourceOptions.length === 3
+                      ? "grid-cols-3"
+                      : "grid-cols-2"
+              )}
+              role="radiogroup"
+              aria-label="Session source"
+            >
+              {sourceOptions.map((option) => {
+                const selected = option.value === source
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => send({ type: "SET_SOURCE", source: option.value })}
+                    className={cn(
+                      "flex min-h-16 min-w-0 flex-col justify-center gap-1 rounded-lg border px-3 text-left outline-none transition-[background-color,border-color,transform] active:scale-[0.96] focus-visible:ring-2 focus-visible:ring-ring",
+                      selected ? "border-blue/55 bg-blue/10" : "border-line bg-sunken hover:border-line-strong hover:bg-surface"
+                    )}
+                  >
+                    <span className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
+                      {option.icon}<span className="truncate">{option.label}</span>
+                    </span>
+                    <span className="truncate text-[10.5px] text-dim">{option.description}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
             <div className="flex flex-col gap-0.5">
               <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">Project</span>
@@ -261,30 +343,76 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
               />
             </div>
             <div className="flex flex-col gap-0.5">
-              <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">Base branch</span>
+              <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
+                {source === "branch" || source === "pr" ? "Working branch" : "Base branch"}
+              </span>
               <SearchPicker
-                value={baseBranch}
+                value={source === "pr" ? selectedPr?.headRefName ?? "" : baseBranch}
                 options={branchOptions}
                 onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })}
                 ariaLabel="Base branch"
                 placeholder={loading ? (environmentId === "local" ? "Loading branches…" : "Preparing on host…") : "Choose branch"}
                 searchPlaceholder="Search branches…"
                 emptyLabel="No branches match."
-                disabled={loading}
+                disabled={loading || source === "pr"}
                 triggerClassName="w-[240px]"
               />
             </div>
           </div>
+
+          {source !== "blank" && source !== "branch" && (
+            <section className="rounded-xl border border-line bg-panel p-3" aria-label="Source picker">
+              <div className="mb-3 flex items-center gap-2">
+                <SearchInput
+                  value={search}
+                  onChange={(value) => send({ type: "SET_SEARCH", search: value })}
+                  placeholder={source === "pr" ? "Search pull requests…" : `Search ${sourceLabel.toLowerCase()}s…`}
+                  className="flex-1"
+                />
+                <Button
+                  variant={mine ? "primary" : "secondary"}
+                  className="h-[34px]"
+                  aria-pressed={mine}
+                  onClick={() => send({ type: "SET_MINE", mine: !mine })}
+                >
+                  Just mine
+                </Button>
+              </div>
+              {source === "pr" ? (
+                <PrPickerList
+                  prs={pullRequests}
+                  selected={selectedPr?.number ?? null}
+                  onSelect={(pr) => send({ type: "SELECT_PR", pr })}
+                  loading={sourceLoading}
+                />
+              ) : (
+                <IssuePickerList
+                  issues={issues}
+                  selected={selectedIssue?.id ?? null}
+                  onSelect={(issue) => send({ type: "SELECT_ISSUE", issue })}
+                  loading={sourceLoading}
+                />
+              )}
+            </section>
+          )}
+
+          {source === "branch" && (
+            <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">
+              The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.
+            </p>
+          )}
 
           <Composer
             autoFocus
             focusKey="new-session"
             value={draft}
             onValueChange={(value) => send({ type: "SET_DRAFT", draft: value })}
+            attachments={attachments}
+            onAttachmentsChange={(next) => send({ type: "SET_ATTACHMENTS", attachments: next })}
             onSend={() => send({ type: "SUBMIT" })}
-            placeholder="Message the agent, tag @files, or use /commands and /skills"
+            placeholder={source === "pr" ? "Add an instruction for this pull request (optional)" : source === "branch" ? "What should the agent do on this branch?" : "Message the agent, tag @files, or use /commands and /skills"}
             repo={selectedProject?.name}
-            branch={baseBranch}
+            branch={source === "pr" ? selectedPr?.headRefName ?? baseBranch : baseBranch}
             environments={props.environments}
             environmentId={environmentId === "local" ? undefined : environmentId}
             onSetEnvironment={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" })}

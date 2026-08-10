@@ -11,7 +11,7 @@
   },
   "homepage": "https://github.com/iammorganparry/jingler",
   "scripts": {
-    "dev": "pnpm run build:device-agent && electron-vite dev",
+    "dev": "pnpm run build:bundled-plugins && pnpm run build:device-agent && electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",

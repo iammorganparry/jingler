@@ -26,13 +26,13 @@ describe("device agent bundle path", () => {
     ).toBe("/repo/apps/device-agent/dist/jingler-device.mjs")
   })
 
-  it("builds the workspace device agent before starting the desktop dev server", () => {
+  it("builds bundled plugins and the device agent before starting the desktop dev server", () => {
     const packageJson = JSON.parse(
       readFileSync(join(import.meta.dirname, "../../package.json"), "utf8")
     ) as { scripts?: Record<string, string> }
 
     expect(packageJson.scripts?.dev).toBe(
-      "pnpm run build:device-agent && electron-vite dev"
+      "pnpm run build:bundled-plugins && pnpm run build:device-agent && electron-vite dev"
     )
   })
 })

@@ -10,6 +10,7 @@ import type {
   ReasoningSetting,
   Skill,
 } from "@jingler/core";
+import { providerReasoningCapabilitiesFor } from "@jingler/core";
 import {
   ArrowUp,
   FolderGit2,
@@ -300,7 +301,9 @@ export function Composer({
   );
   const reasoningOptions: ReadonlyArray<ChipOption<ReasoningChoice | "off">> = [
     { value: "default", label: "Default" },
-    { value: "off", label: "Off" },
+    ...(providerReasoningCapabilitiesFor(cli).explicitToggle
+      ? [{ value: "off" as const, label: "Off" }]
+      : []),
     ...(selectedModel?.reasoning ?? []).map((option) => ({
       value: option.id,
       label: option.label,
@@ -868,9 +871,9 @@ export function Composer({
                tests and screen readers both read. `title` carries the longer
                form the visible text used to. */
             <Button
-              variant="danger"
+              variant="primary"
               size="icon"
-              className="size-8"
+              className="size-7 rounded-full"
               aria-label="Stop"
               title="Stop the agent"
               onClick={onStop}

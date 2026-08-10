@@ -252,8 +252,8 @@ export interface ProviderReasoningCapabilities {
 }
 
 const CODEX_REASONING_CAPABILITIES: ProviderReasoningCapabilities = {
-  explicitToggle: true,
-  efforts: ["minimal", "low", "medium", "high", "xhigh"]
+  explicitToggle: false,
+  efforts: ["low", "medium", "high", "xhigh"]
 }
 
 /**

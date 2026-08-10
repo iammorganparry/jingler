@@ -98,9 +98,9 @@ describe("ModelsService", () => {
         "plan"
       ])
       expect(capabilities[0]?.modes.map((mode) => mode.label)).toStrictEqual([
-        "Read Only",
-        "Workspace Write",
-        "Full Access",
+        "Ask for approval",
+        "Approve for me",
+        "Full access",
         "Plan"
       ])
       expect(capabilities[0]?.models[0]?.reasoning?.map((option) => option.id)).toContain("xhigh")
@@ -109,7 +109,7 @@ describe("ModelsService", () => {
       ).toBe("Extra High")
     })
 
-    it("uses the shared Claude ladder and exact Codex model overrides", async () => {
+    it("uses the shared provider ladders when live discovery has no reasoning metadata", async () => {
       const capabilities = await run(
         ModelsService.capabilities([cli("claude", true), cli("codex", true)])
       )
@@ -131,7 +131,7 @@ describe("ModelsService", () => {
       ])
       expect(
         codex?.models.find(({ id }) => id === "gpt-5.6-luna")?.reasoning?.map(({ id }) => id)
-      ).toStrictEqual(["minimal", "low", "medium"])
+      ).toStrictEqual(["low", "medium", "high", "xhigh"])
     })
   })
 })

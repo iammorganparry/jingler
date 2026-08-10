@@ -1,4 +1,4 @@
-import type { ModelOption } from "@jingler/core"
+import type { ModelOption, ReasoningEffort } from "@jingler/core"
 import {
   type CodexAppServerProbeOptions,
   type CodexAppServerSession,
@@ -28,9 +28,27 @@ import {
 export interface CodexModel {
   readonly id: string
   readonly displayName?: string
+  readonly description?: string
   readonly hidden?: boolean
   readonly isDefault?: boolean
+  readonly supportedReasoningEfforts?: ReadonlyArray<{
+    readonly reasoningEffort: string
+    readonly description?: string
+  }>
+  readonly defaultReasoningEffort?: string
 }
+
+const REASONING_LABEL: Record<ReasoningEffort, string> = {
+  minimal: "Minimal",
+  low: "Light",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+  max: "Max"
+}
+
+const isReasoningEffort = (value: string): value is ReasoningEffort =>
+  value in REASONING_LABEL
 
 const MAX_MODEL_PAGES = 100
 
@@ -52,7 +70,25 @@ export const toModelOptions = (models: ReadonlyArray<CodexModel>): ReadonlyArray
       seen.add(m.id)
       return true
     })
-    .map((m) => ({ id: m.id, label: m.displayName ?? m.id }))
+    .map((m) => {
+      const reasoning = (m.supportedReasoningEfforts ?? [])
+        .map(({ reasoningEffort }) => reasoningEffort)
+        .filter(isReasoningEffort)
+        .map((id) => ({ id, label: REASONING_LABEL[id] }))
+      const defaultReasoningId =
+        m.defaultReasoningEffort !== undefined &&
+        isReasoningEffort(m.defaultReasoningEffort) &&
+        reasoning.some(({ id }) => id === m.defaultReasoningEffort)
+          ? m.defaultReasoningEffort
+          : undefined
+      return {
+        id: m.id,
+        label: m.displayName ?? m.id,
+        ...(m.description === undefined ? {} : { description: m.description }),
+        ...(reasoning.length === 0 ? {} : { reasoning }),
+        ...(defaultReasoningId === undefined ? {} : { defaultReasoningId })
+      }
+    })
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -63,8 +99,18 @@ const isCodexModel = (value: unknown): value is CodexModel =>
   typeof value.id === "string" &&
   value.id.length > 0 &&
   (value.displayName === undefined || typeof value.displayName === "string") &&
+  (value.description === undefined || typeof value.description === "string") &&
   (value.hidden === undefined || typeof value.hidden === "boolean") &&
-  (value.isDefault === undefined || typeof value.isDefault === "boolean")
+  (value.isDefault === undefined || typeof value.isDefault === "boolean") &&
+  (value.defaultReasoningEffort === undefined || typeof value.defaultReasoningEffort === "string") &&
+  (value.supportedReasoningEfforts === undefined || (
+    Array.isArray(value.supportedReasoningEfforts) &&
+    value.supportedReasoningEfforts.every((option) =>
+      isRecord(option) &&
+      typeof option.reasoningEffort === "string" &&
+      (option.description === undefined || typeof option.description === "string")
+    )
+  ))
 
 interface CodexModelPage {
   readonly data: ReadonlyArray<CodexModel>

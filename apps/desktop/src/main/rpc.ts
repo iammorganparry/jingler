@@ -1084,7 +1084,13 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
       Effect.orElseSucceed(() => null),
     );
     const allowSharedCheckout = config?.git?.shareCheckedOutBranches ?? true;
-    const route = sessionCreationDefaults(input.cli, config);
+    const route = sessionCreationDefaults(
+      input.cli,
+      config,
+      input.model,
+      input.mode,
+      input.reasoning,
+    );
     return yield* SessionStore.createFromPr(
       { ...input, cli: route.cli },
       {
@@ -1238,7 +1244,13 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
     const config = yield* ConfigService.get().pipe(
       Effect.orElseSucceed(() => null),
     );
-    const route = sessionCreationDefaults(input.cli, config);
+    const route = sessionCreationDefaults(
+      input.cli,
+      config,
+      input.model,
+      input.mode,
+      input.reasoning,
+    );
     return yield* SessionStore.createFromIssue(
       { ...input, cli: route.cli },
       route.options,

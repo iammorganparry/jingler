@@ -1993,7 +1993,9 @@ export const CreateSessionInput = Schema.Struct({
    * Whether to create an isolated linked worktree. Omitted defaults to true so
    * existing callers and persisted RPC requests retain the current behaviour.
    */
-  useWorktree: Schema.optional(Schema.Boolean)
+  useWorktree: Schema.optional(Schema.Boolean),
+  /** Continue the selected branch instead of creating a fresh semantic task branch. */
+  continueBranch: Schema.optional(Schema.Boolean)
 })
 export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>
 
@@ -2004,6 +2006,7 @@ export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>
  * update the PR directly. Title + base come from the PR itself.
  */
 export const CreateSessionFromPrInput = Schema.Struct({
+  projectId: Schema.optional(Schema.String),
   /** Paired execution device. Omitted means this desktop. */
   environmentId: Schema.optional(Schema.String),
   /** Absolute path to the origin repo. */
@@ -2012,6 +2015,10 @@ export const CreateSessionFromPrInput = Schema.Struct({
   repoName: Schema.String,
   /** Which CLI will drive the session. */
   cli: CliKind,
+  model: Schema.optional(Schema.String),
+  mode: Schema.optional(PermissionMode),
+  reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
+  initialPrompt: Schema.optional(Schema.String),
   /** The pull request to base the session on. */
   pr: Schema.Struct({
     number: Schema.Number,
@@ -2031,6 +2038,7 @@ export type CreateSessionFromPrInput = Schema.Schema.Type<
  * links the issue, and seeds the task from the issue title + body.
  */
 export const CreateSessionFromIssueInput = Schema.Struct({
+  projectId: Schema.optional(Schema.String),
   /** Paired execution device. Omitted means this desktop. */
   environmentId: Schema.optional(Schema.String),
   /** Absolute path to the origin repo. */
@@ -2039,6 +2047,9 @@ export const CreateSessionFromIssueInput = Schema.Struct({
   repoName: Schema.String,
   /** Which CLI will drive the session. */
   cli: CliKind,
+  model: Schema.optional(Schema.String),
+  mode: Schema.optional(PermissionMode),
+  reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
   /** The branch to fork the worktree from. */
   baseBranch: Schema.String,
   /** The issue to link + seed the task from. */

@@ -279,6 +279,29 @@ describe("SessionStore", () => {
     }).trim()).toBe("")
   })
 
+  it("checks out an existing branch in an isolated session without replacing it", async () => {
+    execFileSync("git", ["branch", "feature/existing"], { cwd: repoPath })
+    const exit = await runExit(
+      SessionStore.create(
+        input({
+          title: "Continue existing work",
+          baseBranch: "feature/existing",
+          continueBranch: true
+        })
+      ).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.branch).toBe("feature/existing")
+    expect(exit.value.semanticBranchPending).toBeUndefined()
+    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: exit.value.worktreePath,
+      encoding: "utf-8"
+    }).trim()).toBe("feature/existing")
+  })
+
   it("uses the selected branch in the primary checkout for a direct session", async () => {
     execFileSync("git", ["branch", "feature/direct"], { cwd: repoPath })
     const registeredPaths = () =>

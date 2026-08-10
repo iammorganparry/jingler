@@ -1,7 +1,7 @@
 import type { CreateSessionInput, HarnessCapability, Project } from "@jingler/core"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
-import { newWorkspaceMachine } from "./new-workspace-machine.js"
+import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
 
 const projects: ReadonlyArray<Project> = [
   { id: "p-local", name: "local", path: "/repos/local", availability: "available", createdAt: "now", updatedAt: "now" },
@@ -21,7 +21,8 @@ const capabilities: ReadonlyArray<HarnessCapability> = [
 ]
 
 const actorFor = (
-  onCreate: (input: CreateSessionInput) => Promise<void> = vi.fn(async () => undefined)
+  onCreate: (input: CreateSessionInput) => Promise<void> = vi.fn(async () => undefined),
+  overrides: Partial<NewWorkspaceDeps> = {}
 ) => createActor(newWorkspaceMachine, {
   input: {
     getDeps: () => ({
@@ -41,7 +42,8 @@ const actorFor = (
       },
       loadBranches: async (path) => path.endsWith("remote") ? ["develop"] : ["main", "feature"],
       onCreate,
-      onClose: vi.fn()
+      onClose: vi.fn(),
+      ...overrides
     })
   }
 })
@@ -150,7 +152,7 @@ describe("newWorkspaceMachine", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       mode: "ask",
       reasoning: { enabled: true, effort: "high" }
-    }))
+    }), [])
   })
 
   it("leaves naming to automatic title generation", async () => {
@@ -165,7 +167,7 @@ describe("newWorkspaceMachine", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       initialPrompt: "Refine the empty-state transitions",
       model: "gpt-5.6-sol"
-    }))
+    }), [])
     expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("title")
   })
 
@@ -181,6 +183,57 @@ describe("newWorkspaceMachine", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       cli: "codex",
       model: "gpt-5.6-luna"
-    }))
+    }), [])
+  })
+
+  it("continues an existing branch without requesting a replacement task branch", async () => {
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_SOURCE", source: "branch" })
+    actor.send({ type: "SET_BASE", baseBranch: "feature" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      baseBranch: "feature",
+      continueBranch: true
+    }), [])
+  })
+
+  it("loads and submits a selected pull request with composer settings", async () => {
+    const pr = {
+      number: 42,
+      title: "Restore session sources",
+      headRefName: "feat/session-sources",
+      baseRefName: "main",
+      author: { login: "morgan", avatarUrl: null },
+      state: "open" as const,
+      isDraft: false,
+      additions: 12,
+      deletions: 3,
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    }
+    const onCreateFromPr = vi.fn(async () => undefined)
+    const actor = actorFor(undefined, {
+      loadPullRequests: async () => [pr],
+      onCreateFromPr
+    }).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_SOURCE", source: "pr" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing") && snapshot.context.pullRequests.length === 1)
+    actor.send({ type: "SELECT_PR", pr })
+    actor.send({ type: "SET_DRAFT", draft: "Review the failing checks" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(onCreateFromPr).toHaveBeenCalledWith(expect.objectContaining({
+      pr,
+      initialPrompt: "Review the failing checks",
+      model: "gpt-5.6-sol",
+      mode: "auto"
+    }), [])
   })
 })

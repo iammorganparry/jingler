@@ -92,6 +92,31 @@ describe("toModelOptions", () => {
     ])
   })
 
+  it("preserves each model's native reasoning ladder and default", () => {
+    expect(toModelOptions([model({
+      id: "gpt-5.5",
+      displayName: "GPT-5.5",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "low" },
+        { reasoningEffort: "medium" },
+        { reasoningEffort: "high" },
+        { reasoningEffort: "xhigh" },
+        { reasoningEffort: "future-effort" }
+      ],
+      defaultReasoningEffort: "medium"
+    })])).toStrictEqual([{
+      id: "gpt-5.5",
+      label: "GPT-5.5",
+      reasoning: [
+        { id: "low", label: "Light" },
+        { id: "medium", label: "Medium" },
+        { id: "high", label: "High" },
+        { id: "xhigh", label: "Extra High" }
+      ],
+      defaultReasoningId: "medium"
+    }])
+  })
+
   it("falls back to the id when a display name is absent", () => {
     expect(toModelOptions([model({ id: "gpt-5.5" })])).toStrictEqual([{ id: "gpt-5.5", label: "gpt-5.5" }])
   })

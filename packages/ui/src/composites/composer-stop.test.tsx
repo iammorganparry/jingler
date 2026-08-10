@@ -21,9 +21,12 @@ describe("Composer stop button", () => {
   })
 
   it("swaps Send for Stop while the agent is busy", () => {
-    render(<Composer busy onStop={() => {}} />)
+    const { rerender } = render(<Composer onStop={() => {}} />)
+    const sendClassName = screen.getByRole("button", { name: /Send/ }).className
+    rerender(<Composer busy onStop={() => {}} />)
     const stop = screen.getByRole("button", { name: /^Stop$/ })
     expect(stop).toBeDefined()
+    expect(stop.className).toBe(sendClassName)
     expect(stop.className).not.toContain("min-h-10")
     expect(screen.queryByRole("button", { name: /Send/ })).toBeNull()
   })
