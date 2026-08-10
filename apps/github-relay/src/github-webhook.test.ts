@@ -102,7 +102,7 @@ describe("GitHub webhook normalization", () => {
     })
   })
 
-  it("routes Devin review feedback on both GitHub review surfaces but ignores unrelated bot chatter", async () => {
+  it("routes bot feedback on the review surface but ignores unrelated bot chatter", async () => {
     const reviewPayload = (overrides: Record<string, unknown> = {}) => ({
       action: "submitted",
       sender: { id: 8, login: "devin-ai-integration[bot]", type: "Bot" },
@@ -137,27 +137,6 @@ describe("GitHub webhook normalization", () => {
       feedback: { kind: "review", body: "This needs a null check." }
     })
 
-    const devinConversationFinding = await normalizeGitHubWebhook({
-      deliveryId: "d-devin-issue",
-      eventName: "issue_comment",
-      ourAppId: "424242",
-      payload: githubPayload({
-        sender: { id: 8, login: "devin-ai-integration[bot]", type: "Bot" },
-        comment: {
-          id: 501,
-          body: "Potential bug: this refresh can use an expired token.",
-          created_at: "2026-08-05T10:01:00Z"
-        }
-      })
-    })
-    expect(devinConversationFinding).toMatchObject({
-      actionable: true,
-      feedback: {
-        kind: "issue-comment",
-        body: "Potential bug: this refresh can use an expired token."
-      }
-    })
-
     // An unrelated bot's build/deploy chatter arrives as an issue_comment — ignored.
     const noise = await normalizeGitHubWebhook({
       deliveryId: "d-bot-issue",
@@ -182,6 +161,32 @@ describe("GitHub webhook normalization", () => {
     })
     expect(own).toMatchObject({ actionable: false })
   })
+
+  it.each(["devin-ai-integration[bot]", "coderabbitai[bot]"])(
+    "routes trusted review-agent conversation findings from %s",
+    async (login) => {
+      const conversationFinding = await normalizeGitHubWebhook({
+        deliveryId: `d-${login}`,
+        eventName: "issue_comment",
+        ourAppId: "424242",
+        payload: githubPayload({
+          sender: { id: 8, login, type: "Bot" },
+          comment: {
+            id: `comment-${login}`,
+            body: "Potential bug: this refresh can use an expired token.",
+            created_at: "2026-08-05T10:01:00Z"
+          }
+        })
+      })
+      expect(conversationFinding).toMatchObject({
+        actionable: true,
+        feedback: {
+          kind: "issue-comment",
+          body: "Potential bug: this refresh can use an expired token."
+        }
+      })
+    }
+  )
 
   it("extracts pull-request routing identity from check run and check suite payloads", async () => {
     for (const [eventName, checkField] of [
