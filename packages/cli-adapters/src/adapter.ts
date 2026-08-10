@@ -1,13 +1,19 @@
 import type {
   Attachment,
+  AgentRole,
   CliKind,
+  Message,
   PermissionMode,
   Plan,
   PlanPrd,
+  ProviderConnectionId,
+  ProviderModelId,
   QuestionAnswer,
   QuestionRequest,
   ReasoningEffort,
-  StreamEvent
+  RuntimeCapabilityManifest,
+  StreamEvent,
+  TranscriptSeed
 } from "@jingler/core"
 import type { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
@@ -24,8 +30,21 @@ import { isE2eEnv } from "./scripted.js"
  */
 export type RemoteMcpServer = RuntimeMcpServer
 
+/** Canonical pi identity and context carried through the temporary adapter seam. */
+export interface RuntimeSessionSpec {
+  readonly connectionId: ProviderConnectionId
+  readonly modelId: ProviderModelId
+  readonly role: AgentRole
+  readonly priorMessages: ReadonlyArray<Message>
+  readonly piSessionId: string | null
+  readonly seed: TranscriptSeed | null
+  readonly targetCapabilities: RuntimeCapabilityManifest
+}
+
 /** Parameters for starting a new agent turn against a CLI. */
 export interface SessionSpec {
+  /** Canonical runtime identity. Required by the production pi adapter. */
+  readonly runtime?: RuntimeSessionSpec
   readonly cli: CliKind
   readonly repo: string
   readonly branch: string

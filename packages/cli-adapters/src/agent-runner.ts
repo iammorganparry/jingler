@@ -24,6 +24,7 @@ import {
   applyStreamEvent,
   assistantMessage,
   CliExecError,
+  CURRENT_RUNTIME_CONTRACTS,
   defaultModeFor,
   defaultModel,
   findApprovedPlan,
@@ -1073,6 +1074,32 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           )
 
           const spec: SessionSpec = {
+            ...(chat.connectionId && chat.modelId
+              ? {
+                  runtime: {
+                    connectionId: chat.connectionId,
+                    modelId: chat.modelId,
+                    role:
+                      mode === "plan"
+                        ? "plan" as const
+                        : planExecutionId
+                          ? "plan-execution" as const
+                          : "conversation" as const,
+                    priorMessages,
+                    piSessionId: chat.piSessionId ?? null,
+                    seed:
+                      chat.piSessionId === undefined && priorMessages.length > 0
+                        ? { reason: "migration" as const, messages: priorMessages }
+                        : null,
+                    targetCapabilities: {
+                      versions: CURRENT_RUNTIME_CONTRACTS,
+                      toolIds: [],
+                      resourceIds: [],
+                      targetId: session.environmentId ?? "desktop"
+                    }
+                  }
+                }
+              : {}),
             cli,
             repo: session?.repo ?? "",
             branch: session?.branch ?? "",
@@ -1592,9 +1619,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // the adapter's in-memory resume map. `event.sessionId` is the
               // harness's own id, not our `sessionId` (the Jingler session key).
               if (event._tag === "Started" && event.sessionId.length > 0) {
-                yield* SessionStore.setResumeId(sessionId, chatId, event.sessionId).pipe(
-                  Effect.ignore
-                )
+                yield* (spec.runtime
+                  ? SessionStore.setPiSessionId(sessionId, chatId, event.sessionId)
+                  : SessionStore.setResumeId(sessionId, chatId, event.sessionId)
+                ).pipe(Effect.ignore)
               }
               // Remember an edit's target path so its ToolEnd can tie back to a step.
               if (event._tag === "ToolStart" && isFileMutationTool(event.name) && event.target) {

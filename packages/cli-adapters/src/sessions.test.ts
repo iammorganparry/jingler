@@ -686,6 +686,25 @@ describe("SessionStore", () => {
     expect(exit.value.cleared.reasoning?.claude).toBeUndefined()
   })
 
+  it("persists pi continuation identity on the owning chat", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Pi thread" }))
+        yield* SessionStore.setPiSessionId(
+          created.id,
+          created.activeChatId,
+          "pi-session.jsonl"
+        )
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.piSessionId).toBe("pi-session.jsonl")
+    expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
+  })
+
   it("falls back to the 'session' slug when the title has no alphanumerics", async () => {
     const exit = await runExit(
       SessionStore.create(input({ title: "!!!" })).pipe(Effect.provide(services)),

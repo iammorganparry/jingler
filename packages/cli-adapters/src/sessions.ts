@@ -1253,6 +1253,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
         })
 
+      /** Persist one chat's canonical pi continuation identity. */
+      const setPiSessionId = (id: string, chatId: string, piSessionId: string) =>
+        update(id, (session) => ({
+          ...session,
+          piSessionId,
+          chats: session.chats.map((chat) =>
+            chat.id === chatId ? { ...chat, piSessionId } : chat
+          )
+        }))
+
       /**
        * Drop the harness session id so the NEXT turn starts a fresh conversation.
        *
@@ -1735,6 +1745,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         addUsage,
         setHarness,
         setResumeId,
+        setPiSessionId,
         clearResumeId,
         setContextTokens,
         setChatContextTokens,

@@ -2,6 +2,7 @@ import type {
   PermissionMode,
   PiRunSpec,
   Plan,
+  PlanPrd,
   QuestionAnswer,
   QuestionRequest,
   StreamEvent
@@ -39,8 +40,8 @@ export interface AgentRuntimeContext {
   readonly askQuestion: (
     request: QuestionRequest
   ) => Effect.Effect<ReadonlyArray<QuestionAnswer>>
-  readonly saveDraftPlan: (plan: Plan) => Effect.Effect<void>
-  readonly proposePlan: (plan: Plan) => Effect.Effect<RuntimePlanDecision>
+  readonly saveDraftPlan: (plan: PlanPrd) => Effect.Effect<void>
+  readonly proposePlan: (plan: PlanPrd) => Effect.Effect<RuntimePlanDecision>
 }
 
 export interface AgentRuntimeShape {

@@ -1,4 +1,4 @@
-import { Plan, QuestionRequest } from "@jingler/core"
+import { PlanPrd, QuestionRequest } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import {
   type McpToolBridgeError,
@@ -56,7 +56,7 @@ export const createJinglerControlTools = (
       id: "jingler_save_draft_plan",
       description:
         "Save the current structured plan draft without requesting approval.",
-      input: Schema.Struct({ plan: Plan }),
+      input: Schema.Struct({ plan: PlanPrd }),
       roles: ["plan"],
       execute: ({ plan }) => Effect.runPromise(context.saveDraftPlan(plan))
     })
@@ -65,7 +65,7 @@ export const createJinglerControlTools = (
     controlTool({
       id: "jingler_submit_plan",
       description: "Submit the structured plan for operator review and approval.",
-      input: Schema.Struct({ plan: Plan }),
+      input: Schema.Struct({ plan: PlanPrd }),
       roles: ["plan"],
       execute: ({ plan }) => Effect.runPromise(context.proposePlan(plan))
     })

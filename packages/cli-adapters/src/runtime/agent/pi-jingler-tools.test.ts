@@ -1,3 +1,4 @@
+import { defaultPlan } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
@@ -47,6 +48,22 @@ describe("Jingler pi control tools", () => {
 })
 
 describe("Jingler plan tool containment", () => {
+  it("submits the canonical PlanPrd contract in plan mode", async () => {
+    const proposePlan = vi.fn(() => Effect.succeed({ _tag: "Reject" } as const))
+    const registry = createJinglerControlTools(runtimeContext({ proposePlan }))
+    const plan = defaultPlan("Runtime cutover")
+    const result = await Effect.runPromise(
+      registry.execute({
+        id: "jingler_submit_plan",
+        arguments: { plan },
+        role: "plan",
+        mode: "plan"
+      })
+    )
+    expect(result.status).toBe("success")
+    expect(proposePlan).toHaveBeenCalledWith(plan)
+  })
+
   it("keeps plan submission unavailable outside the plan role", async () => {
     const proposePlan = vi.fn(() => Effect.succeed({ _tag: "Reject" } as const))
     const registry = createJinglerControlTools(runtimeContext({ proposePlan }))
