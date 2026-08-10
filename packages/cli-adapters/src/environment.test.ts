@@ -170,7 +170,10 @@ describe("environment device API", () => {
     const clientIds: string[] = []
     vi.stubGlobal("fetch", async (_input: string | URL | Request, init?: RequestInit) => {
       clientIds.push(new Headers(init?.headers).get("x-jingler-client-instance-id") ?? "")
-      return Response.json({ version: 1, devices: [accountDevice] })
+      return Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
     })
     process.env.JINGLER_AUTH_URL = "https://server.test"
     const store = await Effect.runPromise(makeInMemorySecretStore("desktop-bearer"))
@@ -187,11 +190,14 @@ describe("environment device API", () => {
     expect(clientIds[1]).toBe(clientIds[0])
   })
 
-  it("uses the server's /api/devices mount for desktop requests", async () => {
+  it("uses the unified server environment inventory for desktop requests", async () => {
     const urls: Array<string> = []
     vi.stubGlobal("fetch", async (input: string | URL | Request) => {
       urls.push(String(input))
-      return Response.json({ version: 1, devices: [accountDevice] })
+      return Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
     })
     process.env.JINGLER_AUTH_URL = "https://server.test"
     const layer = environmentLayer({
@@ -203,7 +209,7 @@ describe("environment device API", () => {
       EnvironmentService.list.pipe(Effect.provide(layer))
     )
 
-    expect(urls).toStrictEqual(["https://server.test/api/devices"])
+    expect(urls).toStrictEqual(["https://server.test/api/environments"])
     expect(environments.map((environment) => environment.id)).toStrictEqual([device.deviceId])
   })
 

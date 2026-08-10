@@ -557,7 +557,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             const seed = yield* Effect.sync(() => Date.now() + nextOpId() * 7919)
             slug = freeCreativeName(usedSlugs, seed, `${taskSlug(title)}-${stamp}`)
           }
-          const id = `s_${slug}`
+          const id = input.requestedSessionId ?? `s_${slug}`
           const chat = initialChat(id, now, {
             mode: options.defaultMode,
             model: options.defaultModel
@@ -782,7 +782,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const branch = (yield* GitService.branchAt(worktree.path)) ?? input.pr.headRefName
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
-          const id = `s_${slug}_${stamp}`
+          const id = input.requestedSessionId ?? `s_${slug}_${stamp}`
           const chat = initialChat(id, now, {
             mode: opts.defaultMode,
             model: opts.defaultModel
@@ -898,7 +898,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               .map((s) => s.trim())
               .filter((s) => s.length > 0)
               .join("\n\n")
-          const id = `s_${slug}_${stamp}`
+          const id = input.requestedSessionId ?? `s_${slug}_${stamp}`
           const chat = initialChat(id, now, {
             mode: options.defaultMode,
             model: options.defaultModel

@@ -72,22 +72,157 @@ export type EnvironmentConnectionState = Schema.Schema.Type<
   typeof EnvironmentConnectionState
 >
 
-/** Renderer-safe metadata for one execution device. No grant or key can inhabit this shape. */
-export const Environment = Schema.Struct({
+export const ManagedEnvironmentState = Schema.Literal(
+  "provisioning",
+  "online",
+  "sleeping",
+  "restoring",
+  "paused",
+  "failed",
+  "revoked"
+)
+export type ManagedEnvironmentState = Schema.Schema.Type<
+  typeof ManagedEnvironmentState
+>
+
+export const ManagedEnvironmentInstanceType = Schema.Literal(
+  "basic",
+  "standard-1"
+)
+export type ManagedEnvironmentInstanceType = Schema.Schema.Type<
+  typeof ManagedEnvironmentInstanceType
+>
+
+export const EnvironmentCapabilities = Schema.Struct({
+  version: Schema.Number,
+  capabilities: Schema.Array(Schema.String),
+  harnesses: Schema.Array(CliKind),
+  maxConcurrentSessions: Schema.Number
+})
+export type EnvironmentCapabilities = Schema.Schema.Type<
+  typeof EnvironmentCapabilities
+>
+
+/**
+ * Renderer-safe metadata for an account-owned execution device.
+ *
+ * `kind` defaults while decoding so persisted and in-flight payloads written
+ * before managed environments existed remain valid. New encodes always carry
+ * the discriminator, making provider selection explicit at every new boundary.
+ */
+export const OwnedEnvironment = Schema.Struct({
+  kind: Schema.optionalWith(Schema.Literal("owned"), {
+    default: () => "owned" as const
+  }),
   id: Schema.String,
   name: Schema.String,
   platform: Schema.Struct({ os: Schema.String, arch: Schema.String }),
-  capabilities: Schema.Struct({
-    version: Schema.Number,
-    capabilities: Schema.Array(Schema.String),
-    harnesses: Schema.Array(CliKind),
-    maxConcurrentSessions: Schema.Number
-  }),
+  capabilities: EnvironmentCapabilities,
   state: EnvironmentConnectionState,
   agentVersion: Schema.NullOr(Schema.String),
   lastSeenAt: Schema.NullOr(Schema.Number)
 })
+export type OwnedEnvironment = Schema.Schema.Type<typeof OwnedEnvironment>
+
+/** Renderer-safe metadata for Cloudflare-managed compute. Grants never inhabit this shape. */
+export const ManagedEnvironment = Schema.Struct({
+  kind: Schema.Literal("managed"),
+  id: Schema.String,
+  name: Schema.String,
+  platform: Schema.Struct({ os: Schema.String, arch: Schema.String }),
+  capabilities: EnvironmentCapabilities,
+  state: ManagedEnvironmentState,
+  agentVersion: Schema.Null,
+  lastSeenAt: Schema.NullOr(Schema.Number),
+  region: Schema.NullOr(Schema.String),
+  instanceType: ManagedEnvironmentInstanceType,
+  generation: Schema.Int.pipe(Schema.positive()),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number
+})
+export type ManagedEnvironment = Schema.Schema.Type<typeof ManagedEnvironment>
+
+/** One provider-neutral execution inventory. No grant, key, or provider token is allowed. */
+export const Environment = Schema.Union(OwnedEnvironment, ManagedEnvironment)
 export type Environment = Schema.Schema.Type<typeof Environment>
+
+export const EnvironmentInventoryResponse = Schema.Struct({
+  version: Schema.Literal(1),
+  environments: Schema.Array(Environment).pipe(Schema.maxItems(384))
+})
+export type EnvironmentInventoryResponse = Schema.Schema.Type<
+  typeof EnvironmentInventoryResponse
+>
+
+export const CreateManagedEnvironmentRequest = Schema.Struct({
+  version: Schema.Literal(1),
+  name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(120)),
+  region: Schema.NullOr(
+    Schema.String.pipe(Schema.minLength(1), Schema.maxLength(32))
+  ),
+  instanceType: ManagedEnvironmentInstanceType,
+  idempotencyKey: Schema.String.pipe(
+    Schema.minLength(8),
+    Schema.maxLength(128),
+    Schema.pattern(/^[A-Za-z0-9_-]+$/u)
+  )
+})
+export type CreateManagedEnvironmentRequest = Schema.Schema.Type<
+  typeof CreateManagedEnvironmentRequest
+>
+
+export const RenameManagedEnvironmentRequest = Schema.Struct({
+  version: Schema.Literal(1),
+  name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(120))
+})
+export type RenameManagedEnvironmentRequest = Schema.Schema.Type<
+  typeof RenameManagedEnvironmentRequest
+>
+
+export const ManagedEnvironmentLifecycleRequest = Schema.Struct({
+  version: Schema.Literal(1),
+  action: Schema.Literal("start", "pause", "restore"),
+  expectedGeneration: Schema.Int.pipe(Schema.positive()),
+  idempotencyKey: Schema.String.pipe(
+    Schema.minLength(8),
+    Schema.maxLength(128),
+    Schema.pattern(/^[A-Za-z0-9_-]+$/u)
+  )
+})
+export type ManagedEnvironmentLifecycleRequest = Schema.Schema.Type<
+  typeof ManagedEnvironmentLifecycleRequest
+>
+
+export const DeleteManagedEnvironmentRequest = Schema.Struct({
+  version: Schema.Literal(1),
+  expectedGeneration: Schema.Int.pipe(Schema.positive())
+})
+export type DeleteManagedEnvironmentRequest = Schema.Schema.Type<
+  typeof DeleteManagedEnvironmentRequest
+>
+
+export const ManagedEnvironmentGrantRequest = Schema.Struct({
+  version: Schema.Literal(1),
+  sessionId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  usageIntervalId: Schema.String.pipe(Schema.minLength(8), Schema.maxLength(128)),
+  expectedGeneration: Schema.Int.pipe(Schema.positive()),
+  actions: Schema.Array(
+    Schema.Literal("session.start", "session.input", "session.cancel", "session.observe")
+  ).pipe(Schema.minItems(1), Schema.maxItems(4))
+})
+export type ManagedEnvironmentGrantRequest = Schema.Schema.Type<
+  typeof ManagedEnvironmentGrantRequest
+>
+
+export const ManagedEnvironmentGrantResponse = Schema.Struct({
+  version: Schema.Literal(1),
+  runtimeUrl: Schema.String.pipe(Schema.minLength(1)),
+  grant: Schema.String.pipe(Schema.minLength(1)),
+  expiresAt: Schema.Int.pipe(Schema.nonNegative())
+})
+export type ManagedEnvironmentGrantResponse = Schema.Schema.Type<
+  typeof ManagedEnvironmentGrantResponse
+>
 
 export const SshHost = Schema.Struct({
   alias: Schema.String,
@@ -1958,6 +2093,10 @@ export type AdversarialReview = Schema.Schema.Type<typeof AdversarialReview>
 
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
+  /** Internal remote provision fence; omitted by renderer-originated requests. */
+  requestedSessionId: Schema.optional(
+    Schema.String.pipe(Schema.pattern(/^s_[A-Za-z0-9_-]{8,120}$/u))
+  ),
   /** Paired execution device. Omitted means this desktop. */
   environmentId: Schema.optional(Schema.String),
   /** Registered project to resolve at the execution boundary. */
@@ -2007,6 +2146,9 @@ export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>
  */
 export const CreateSessionFromPrInput = Schema.Struct({
   projectId: Schema.optional(Schema.String),
+  requestedSessionId: Schema.optional(
+    Schema.String.pipe(Schema.pattern(/^s_[A-Za-z0-9_-]{8,120}$/u))
+  ),
   /** Paired execution device. Omitted means this desktop. */
   environmentId: Schema.optional(Schema.String),
   /** Absolute path to the origin repo. */
@@ -2039,6 +2181,9 @@ export type CreateSessionFromPrInput = Schema.Schema.Type<
  */
 export const CreateSessionFromIssueInput = Schema.Struct({
   projectId: Schema.optional(Schema.String),
+  requestedSessionId: Schema.optional(
+    Schema.String.pipe(Schema.pattern(/^s_[A-Za-z0-9_-]{8,120}$/u))
+  ),
   /** Paired execution device. Omitted means this desktop. */
   environmentId: Schema.optional(Schema.String),
   /** Absolute path to the origin repo. */

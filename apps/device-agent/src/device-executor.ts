@@ -20,6 +20,10 @@ import { SessionStore } from "@jingler/cli-adapters/sessions"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
 import { WorkspaceService } from "@jingler/cli-adapters/workspace"
 import {
+  exportWorkspaceHandoff,
+  importWorkspaceHandoff
+} from "@jingler/cli-adapters/workspace-handoff"
+import {
   claudePublishMetadataGenerator,
   isCommitSubjectSafe
 } from "@jingler/cli-adapters/publish-metadata"
@@ -39,7 +43,8 @@ import {
   RemotePublishCompleteInput,
   RemotePublishPrepared,
   Session,
-  StreamEvent
+  StreamEvent,
+  WorkspaceTransferCheckpoint
 } from "@jingler/core"
 import type {
   CreateSessionFromIssueInput as CreateSessionFromIssueInputValue,
@@ -141,7 +146,10 @@ const stripTranscriptAttachmentData = (
 })
 const ArchivePayload = Schema.Struct({ reason: ArchiveReason })
 const RepoPathPayload = Schema.Struct({ repoPath: Schema.optional(Schema.String) })
-const ContinuationPayload = Schema.Struct({ sourceSession: Session })
+const ContinuationPayload = Schema.Struct({
+  sourceSession: Session,
+  requestedSessionId: Schema.optional(Schema.String)
+})
 const ProjectRegisterPayload = Schema.Struct({
   path: Schema.String,
   name: Schema.optional(Schema.String)
@@ -156,12 +164,20 @@ const ProjectEnsurePayload = Schema.Struct({
   name: Schema.String
 })
 const ProjectIdPayload = Schema.Struct({ id: Schema.String })
+const ExportHandoffPayload = Schema.Struct({
+  eventCursor: Schema.Int.pipe(Schema.nonNegative())
+})
+const ImportHandoffPayload = Schema.Struct({ checkpoint: WorkspaceTransferCheckpoint })
+const ImportConversationPayload = Schema.Struct({ messages: Schema.Array(Message) })
 
 export interface DeviceExecutorServices {
   readonly create: (input: CreateSessionInputValue) => Promise<SessionValue>
   readonly createFromPr: (input: CreateSessionFromPrInputValue) => Promise<SessionValue>
   readonly createFromIssue: (input: CreateSessionFromIssueInputValue) => Promise<SessionValue>
-  readonly continuation: (source: SessionValue) => Promise<SessionValue>
+  readonly continuation: (
+    source: SessionValue,
+    requestedSessionId?: string
+  ) => Promise<SessionValue>
   readonly listProjects: () => Promise<ReadonlyArray<ProjectValue>>
   readonly registerProject: (input: Schema.Schema.Type<typeof ProjectRegisterPayload>) => Promise<ProjectValue>
   readonly createProjectDirectory: (input: Schema.Schema.Type<typeof ProjectRegisterPayload>) => Promise<ProjectValue>
@@ -192,6 +208,9 @@ export interface DeviceExecutorServices {
   readonly diff: (sessionId: string) => Promise<string>
   readonly files: (sessionId: string, repoPath?: string) => Promise<ReadonlyArray<string>>
   readonly branches: (sessionId: string, repoPath?: string) => Promise<ReadonlyArray<string>>
+  readonly exportHandoff: (sessionId: string, eventCursor: number) => Promise<unknown>
+  readonly importHandoff: (sessionId: string, checkpoint: unknown) => Promise<void>
+  readonly importConversation: (sessionId: string, messages: ReadonlyArray<unknown>) => Promise<void>
   readonly archive: (sessionId: string, reason: "merged" | "closed") => Promise<SessionValue>
   readonly remove: (sessionId: string) => Promise<void>
   readonly preparePublish: (sessionId: string) => Promise<RemotePublishPreparedValue>
@@ -213,8 +232,10 @@ export const makeDeviceSessionCommandExecutor = (
         return services.createFromPr(decodePayload(command, CreateSessionFromPrInput))
       case "Sessions.createFromIssue":
         return services.createFromIssue(decodePayload(command, CreateSessionFromIssueInput))
-      case "Sessions.continueOnEnvironment":
-        return services.continuation(decodePayload(command, ContinuationPayload).sourceSession)
+      case "Sessions.continueOnEnvironment": {
+        const input = decodePayload(command, ContinuationPayload)
+        return services.continuation(input.sourceSession, input.requestedSessionId)
+      }
       case "Projects.list":
         payloadRecord(command)
         return services.listProjects()
@@ -260,6 +281,21 @@ export const makeDeviceSessionCommandExecutor = (
         const input = decodePayload(command, RepoPathPayload)
         return services.branches(command.sessionId, input.repoPath)
       }
+      case "Workspace.exportHandoff":
+        return services.exportHandoff(
+          command.sessionId,
+          decodePayload(command, ExportHandoffPayload).eventCursor
+        )
+      case "Workspace.importHandoff":
+        return services.importHandoff(
+          command.sessionId,
+          decodePayload(command, ImportHandoffPayload).checkpoint
+        )
+      case "Sessions.importConversation":
+        return services.importConversation(
+          command.sessionId,
+          decodePayload(command, ImportConversationPayload).messages
+        )
       case "Sessions.archive":
         return services.archive(command.sessionId, decodePayload(command, ArchivePayload).reason)
       case "Sessions.delete":
@@ -380,8 +416,9 @@ export const makeLiveDeviceSessionCommandExecutor = (
     create: (input) => run(SessionStore.create(input)),
     createFromPr: (input) => run(SessionStore.createFromPr(input)),
     createFromIssue: (input) => run(SessionStore.createFromIssue(input)),
-    continuation: (source) => run(SessionStore.create({
+    continuation: (source, requestedSessionId) => run(SessionStore.create({
       ...(source.environmentId === undefined ? {} : { environmentId: source.environmentId }),
+      ...(requestedSessionId === undefined ? {} : { requestedSessionId }),
       repoPath: source.repoPath ?? source.worktreePath ?? "",
       repoName: source.repo,
       title: source.title,
@@ -460,6 +497,36 @@ export const makeLiveDeviceSessionCommandExecutor = (
     ),
     branches: (sessionId, explicit) => run(
       repoPath(sessionId, explicit).pipe(Effect.flatMap((path) => WorkspaceService.branches(path)))
+    ),
+    exportHandoff: (sessionId, eventCursor) => run(
+      repoPath(sessionId).pipe(
+        Effect.flatMap((path) => Effect.promise(() => exportWorkspaceHandoff({
+          workspacePath: path,
+          sourceSessionId: sessionId,
+          eventCursor
+        })))
+      )
+    ),
+    importHandoff: (sessionId, checkpoint) => run(
+      repoPath(sessionId).pipe(
+        Effect.flatMap((path) => Effect.promise(() => importWorkspaceHandoff(
+          path,
+          Schema.decodeUnknownSync(WorkspaceTransferCheckpoint)(checkpoint, {
+            onExcessProperty: "error"
+          })
+        )))
+      )
+    ),
+    importConversation: (sessionId, messages) => run(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.get(sessionId)
+        for (const message of messages) {
+          yield* TranscriptStore.append(
+            session.activeChatId,
+            Schema.decodeUnknownSync(Message)(message, { onExcessProperty: "error" })
+          )
+        }
+      })
     ),
     archive: (sessionId, reason) => run(
       SessionStore.archive(sessionId, reason).pipe(Effect.andThen(SessionStore.get(sessionId)))

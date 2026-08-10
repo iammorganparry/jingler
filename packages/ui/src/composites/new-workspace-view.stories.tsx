@@ -200,6 +200,7 @@ const SIDEBAR_ACTIVITY: Record<string, SessionActivity> = {
 }
 
 const BUILDBOX: Environment = {
+  kind: "owned",
   id: "buildbox",
   name: "Buildbox",
   platform: { os: "linux", arch: "arm64" },

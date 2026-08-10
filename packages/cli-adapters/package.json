@@ -25,6 +25,7 @@
     "./sessions": "./src/sessions.ts",
     "./workspace": "./src/workspace.ts",
     "./transcripts": "./src/transcripts.ts",
+    "./workspace-handoff": "./src/workspace-handoff.ts",
     "./test-support": "./src/test-support.ts"
   },
   "scripts": {

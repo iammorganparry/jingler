@@ -1369,8 +1369,10 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     try {
       const key = await crypto.subtle.importKey(
         "raw",
-        fromBase64Url(
-          decodeJson(DevicePublicKeySchema, device.public_key_json).value
+        new Uint8Array(
+          fromBase64Url(
+            decodeJson(DevicePublicKeySchema, device.public_key_json).value
+          )
         ),
         { name: "Ed25519" },
         false,
@@ -1379,8 +1381,8 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       verified = await crypto.subtle.verify(
         "Ed25519",
         key,
-        fromBase64Url(signature),
-        deviceChallengePayload(challenge, newPublicKey)
+        new Uint8Array(fromBase64Url(signature)),
+        new Uint8Array(deviceChallengePayload(challenge, newPublicKey))
       )
     } catch {
       verified = false

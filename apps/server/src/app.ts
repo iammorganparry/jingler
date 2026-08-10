@@ -12,6 +12,11 @@ import { UserRepository } from "./db/repositories/user-repository.js"
 import { env } from "./env.js"
 import { createGitHubRoutes, isLoopbackRedirect, withQuery } from "./github-routes.js"
 import { createDeviceRoutes } from "./device-routes.js"
+import { createEnvironmentRoutes } from "./environment-routes.js"
+import {
+  basicInstanceCeilingMicrousd,
+  ManagedUsageRepository
+} from "./db/repositories/managed-usage-repository.js"
 import { proxyGitHubWebhook } from "./github-webhook-proxy.js"
 import { runtime } from "./runtime.js"
 
@@ -46,6 +51,41 @@ app.route("/api/github", createGitHubRoutes())
 
 /** Remote-device control. BetterAuth remains the desktop identity provider. */
 app.route("/api/devices", createDeviceRoutes())
+
+/** Unified account inventory and managed-compute lifecycle. */
+app.route("/api/environments", createEnvironmentRoutes())
+
+/** Internal, idempotent settlement callback from the managed-runtime Worker. */
+app.post("/api/internal/managed-usage/settle", async (c) => {
+  if (
+    c.req.header("x-jingler-service-secret") !==
+    env.managedRuntimeServiceSecret
+  ) {
+    return c.json({ error: "Unauthorized" }, 401)
+  }
+  const body: unknown = await c.req.json().catch(() => null)
+  const fields =
+    typeof body === "object" && body !== null
+      ? Object.fromEntries(Object.entries(body))
+      : null
+  if (
+    typeof fields?.userId !== "string" ||
+    typeof fields.reservationId !== "string" ||
+    typeof fields.activeSeconds !== "number" ||
+    !Number.isSafeInteger(fields.activeSeconds) ||
+    fields.activeSeconds < 0 ||
+    fields.activeSeconds > env.managedMaxActiveSeconds
+  ) {
+    return c.json({ error: "Invalid managed usage settlement" }, 400)
+  }
+  await runtime.runPromise(ManagedUsageRepository.settle({
+    userId: fields.userId,
+    reservationId: fields.reservationId,
+    settledMicrousd: basicInstanceCeilingMicrousd(fields.activeSeconds),
+    now: new Date()
+  }))
+  return c.json({ settled: true })
+})
 
 /**
  * The signed-in user's profile. BetterAuth validates the bearer session; the user

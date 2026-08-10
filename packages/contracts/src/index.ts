@@ -485,6 +485,21 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: PairSshEnvironmentInput
   }),
 
+  Rpc.make("Environment.createManaged", {
+    success: Environment,
+    error: EnvironmentError,
+    payload: { name: Schema.String }
+  }),
+
+  Rpc.make("Environment.managedLifecycle", {
+    success: Environment,
+    error: EnvironmentError,
+    payload: {
+      environment: Environment,
+      action: Schema.Literal("start", "pause", "restore")
+    }
+  }),
+
   Rpc.make("Environment.rename", {
     success: Environment,
     error: EnvironmentError,
@@ -608,7 +623,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Workspace.files", {
     success: Schema.Array(Schema.String),
     error: GitError,
-    payload: { repoPath: Schema.String, environmentId: Schema.optional(Schema.String) }
+    payload: {
+      repoPath: Schema.String,
+      environmentId: Schema.optional(Schema.String),
+      sessionId: Schema.optional(Schema.String)
+    }
   }),
 
   /** Discard ALL uncommitted changes to a file in a session's worktree. */

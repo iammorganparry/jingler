@@ -442,6 +442,13 @@ function AuthedApp({
   const projectController = useProjects();
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
 
+  // Provider capabilities are versioned by the auth Durable Object. Refresh the
+  // unified inventory after every GitHub auth refresh so managed harness choices
+  // change without restarting the desktop; active turns are fenced server-side.
+  useEffect(() => {
+    environmentController.send({ type: "REFRESH" });
+  }, [environmentController.send, github.connection.lastRefreshedAt]);
+
   // Renderer-side rpc reads, via react-query.
   const configQuery = useQuery({
     queryKey: ["config"],
@@ -1400,6 +1407,8 @@ function AuthedApp({
             environmentController.send({ type: "RESET" });
             setEnvironmentDialogOpen(true);
           },
+          onCreateManaged: environmentController.createManaged,
+          onManagedLifecycle: environmentController.managedLifecycle,
           onRefresh: environmentController.refresh,
           onRename: environmentController.rename,
           onRevoke: environmentController.revoke,

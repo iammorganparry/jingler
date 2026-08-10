@@ -11,7 +11,7 @@ import type {
 import { afterEach, describe, expect, it } from "vitest"
 import { Chunk, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { WebSocketServer } from "ws"
-import { EnvironmentService } from "./environment.js"
+import { EnvironmentService, environmentFromRemoteDevice } from "./environment.js"
 import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
 import {
   decryptRemotePayload,
@@ -288,6 +288,7 @@ process.stdin.on("data", (chunk) => {
     const environment = {
       _tag: "@jingler/EnvironmentService" as const,
       list: Effect.succeed([]),
+      environment: () => Effect.succeed(environmentFromRemoteDevice(fakeDevice)),
       refresh: Effect.succeed([]),
       suggestHosts: () => Effect.succeed([]),
       device: () => Effect.succeed(fakeDevice),
@@ -303,9 +304,13 @@ process.stdin.on("data", (chunk) => {
         }
         return Effect.succeed(response)
       },
+      managedSessionGrant: () => Effect.never,
       discovery: () => Effect.never,
       directSsh: () => Effect.succeed(null),
       pairSsh: () => Effect.never,
+      createManaged: () => Effect.never,
+      managedLifecycle: () => Effect.never,
+      hydrateManagedWorkspace: () => Effect.never,
       rename: () => Effect.never,
       revoke: () => Effect.never
     }
@@ -392,6 +397,7 @@ process.stdin.on("data", (chunk) => {
     const environment = {
       _tag: "@jingler/EnvironmentService" as const,
       list: Effect.succeed([]), refresh: Effect.succeed([]), suggestHosts: () => Effect.succeed([]),
+      environment: () => Effect.succeed(environmentFromRemoteDevice(fakeDevice)),
       device: () => Effect.succeed(fakeDevice),
       sessionGrant: (_deviceId: string, sessionId: string) => Effect.succeed({
         version: 1 as const, relayUrl, grant: "grant_concurrent_abcdefghijklmnop",
@@ -401,7 +407,10 @@ process.stdin.on("data", (chunk) => {
           controllerLeaseGeneration: 1,
           deviceGeneration: 1, issuedAt: 1, expiresAt: 9999999999, grantId: "grant_concurrent_abcdefghijklmnop" }
       }),
+      managedSessionGrant: () => Effect.never,
       discovery: () => Effect.never, directSsh: () => Effect.succeed(null), pairSsh: () => Effect.never,
+      createManaged: () => Effect.never, managedLifecycle: () => Effect.never,
+      hydrateManagedWorkspace: () => Effect.never,
       rename: () => Effect.never, revoke: () => Effect.never
     }
     const services = RemoteSessionService.Default.pipe(Layer.provide(Layer.mergeAll(

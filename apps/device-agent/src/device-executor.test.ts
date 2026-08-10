@@ -49,6 +49,9 @@ const services = (): DeviceExecutorServices => ({
   diff: vi.fn(async () => "diff --git"),
   files: vi.fn(async () => ["src/index.ts"]),
   branches: vi.fn(async () => ["main"]),
+  exportHandoff: vi.fn(async () => ({ version: 1 })),
+  importHandoff: vi.fn(async () => undefined),
+  importConversation: vi.fn(async () => undefined),
   archive: vi.fn(async () => resultSession),
   remove: vi.fn(async () => undefined),
   preparePublish: vi.fn(async () => ({

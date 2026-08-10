@@ -6,8 +6,7 @@ import type {
   EncryptedTunnelEnvelope,
   RemoteSessionCommand,
   RemoteSessionEvent,
-  RemoteSessionKeyOffer,
-  Session
+  RemoteSessionKeyOffer
 } from "@jingler/core"
 import {
   EncryptedTunnelEnvelope as EncryptedTunnelEnvelopeSchema,
@@ -21,6 +20,8 @@ import {
 } from "./device-secret-document.js"
 import { EnvironmentService } from "./environment.js"
 import type { DirectSshTarget } from "./device-secret-document.js"
+import { makeManagedSessionTransport } from "./managed-session-transport.js"
+import type { RemoteSessionResource } from "./remote-environment-transport.js"
 import { SecretStore, type SecretStoreShape } from "./secret-store.js"
 
 export class RemoteSessionError extends Data.TaggedError("RemoteSessionError")<{
@@ -599,8 +600,6 @@ interface ActiveRemoteSession {
   readonly subscribers: Map<string, Queue.Queue<Output>>
   readonly backlog: Map<string, RemoteSessionEvent[]>
 }
-type RemoteSessionResource = Pick<Session, "id" | "environmentId">
-
 export const requestSessionIdForEnvironment = (
   environmentId: string,
   desktopNamespace: string
@@ -846,7 +845,7 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
         return pendingCommand
       })
 
-      const execute = (
+      const ownedExecute = (
         session: RemoteSessionResource,
         operation: string,
         payload: unknown,
@@ -954,6 +953,59 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
               Stream.mapEffect((item) => item._tag === "event" ? Effect.succeed(item.event) : Effect.fail(item.error))
             )
           })
+        )
+
+      const managedTransport = makeManagedSessionTransport({
+        environment: (environmentId) =>
+          environments.environment(environmentId).pipe(
+            Effect.flatMap((environment) =>
+              environment.kind === "managed"
+                ? Effect.succeed(environment)
+                : Effect.fail(
+                    new RemoteSessionError({ message: "Selected environment is not managed." })
+                  )
+            ),
+            Effect.mapError((cause) =>
+              cause instanceof RemoteSessionError
+                ? cause
+                : new RemoteSessionError({ message: cause.message, cause })
+            )
+          ),
+        grant: (environment, sessionId, usageIntervalId) =>
+          environments.managedSessionGrant(
+            environment,
+            sessionId,
+            usageIntervalId
+          ).pipe(
+            Effect.mapError(
+              (cause) => new RemoteSessionError({ message: cause.message, cause })
+            )
+          )
+      })
+
+      const execute = (
+        session: RemoteSessionResource,
+        operation: string,
+        payload: unknown,
+        commandId?: string
+      ) =>
+        Stream.unwrap(
+          session.environmentId
+            ? environments.environment(session.environmentId).pipe(
+                Effect.mapError(
+                  (cause) => new RemoteSessionError({ message: cause.message, cause })
+                ),
+                Effect.map((environment) =>
+                  environment.kind === "managed"
+                    ? managedTransport.execute(session, operation, payload, commandId)
+                    : ownedExecute(session, operation, payload, commandId)
+                )
+              )
+            : Effect.fail(
+                new RemoteSessionError({
+                  message: "Remote session has no environment identity."
+                })
+              )
         )
 
       const request = (session: RemoteSessionResource, operation: string, payload: unknown) =>
