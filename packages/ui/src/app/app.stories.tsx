@@ -91,7 +91,6 @@ const liveActivity: Record<string, SessionActivity> = {
 
 const App = () => (
   <JinglerApp
-    clis={clis}
     sessions={sessions}
     repos={repos}
     liveActivity={liveActivity}

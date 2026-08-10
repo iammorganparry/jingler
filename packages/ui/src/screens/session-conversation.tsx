@@ -1,6 +1,5 @@
 import type { ReactNode } from "react"
 import type {
-  CliInfo,
   DiffStat,
   Environment,
   SessionPrStatus,
@@ -25,7 +24,6 @@ export type { ConversationPaneCtx } from "./session-pane.js"
 export interface SessionConversationProps {
   sessions: ReadonlyArray<Session>
   environments?: ReadonlyArray<Environment>
-  clis: ReadonlyArray<CliInfo>
   activeSessionId: string | null
   onSelectSession: (id: string) => void
   /**
@@ -271,7 +269,6 @@ export function SessionConversation(props: SessionConversationProps) {
           props.settingsView
         ) : props.showEmpty ? (
           <EmptyConversation
-            clis={props.clis}
             version={props.version}
             onNewSession={props.onNewSession}
           />

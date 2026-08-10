@@ -6,7 +6,6 @@
  */
 import type {
   CodexLoginMethod,
-  CliInfo,
   DetectedResourceCandidate,
   ProviderCatalog,
   ProviderConnection,
@@ -24,8 +23,6 @@ import { assign, fromCallback, fromPromise, setup } from "xstate"
 import { rpc } from "./rpc-client.js"
 
 export interface AppContext {
-  /** Temporary ready-shell compatibility; first-run no longer presents harnesses. */
-  readonly clis: ReadonlyArray<CliInfo>
   readonly reposDir: string | null
   readonly repos: ReadonlyArray<Repo>
   readonly sessions: ReadonlyArray<Session>
@@ -39,7 +36,6 @@ export interface AppContext {
 
 export interface InitialData {
   readonly configured: boolean
-  readonly clis: ReadonlyArray<CliInfo>
   readonly reposDir: string | null
   readonly repos: ReadonlyArray<Repo>
   readonly sessions: ReadonlyArray<Session>
@@ -60,12 +56,11 @@ const initialLoad = fromPromise<InitialData>(async () => {
     rpc.configGet(),
     rpc.providerList()
   ])
-  const clis: ReadonlyArray<CliInfo> = []
   if (config?.reposDir) {
     const [repos, sessions] = await Promise.all([rpc.workspaceRepos(), rpc.sessionsList()])
-    return { configured: true, reposDir: config.reposDir, clis, repos, sessions, providerCatalog }
+    return { configured: true, reposDir: config.reposDir, repos, sessions, providerCatalog }
   }
-  return { configured: false, reposDir: null, clis, repos: [], sessions: [], providerCatalog }
+  return { configured: false, reposDir: null, repos: [], sessions: [], providerCatalog }
 })
 
 /** Open the native picker, persist, and scan; null when the user cancels. */
@@ -210,7 +205,6 @@ export const appMachine = setup({
   id: "app",
   initial: "loading",
   context: {
-    clis: [],
     reposDir: null,
     repos: [],
     sessions: [],
@@ -231,7 +225,6 @@ export const appMachine = setup({
             target: "ready",
             actions: assign(({ event }) => ({
               reposDir: event.output.reposDir,
-              clis: event.output.clis,
               repos: event.output.repos,
               sessions: event.output.sessions,
               providerCatalog: event.output.providerCatalog
@@ -240,7 +233,6 @@ export const appMachine = setup({
           {
             target: "setup",
             actions: assign(({ event }) => ({
-              clis: event.output.clis,
               providerCatalog: event.output.providerCatalog
             }))
           }

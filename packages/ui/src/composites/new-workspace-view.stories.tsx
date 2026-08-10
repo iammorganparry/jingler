@@ -10,6 +10,8 @@ import type {
   Session,
   SessionActivity
 } from "@jingler/core"
+import { ProviderCatalog } from "@jingler/core"
+import { Schema } from "effect"
 import { useRef, useState } from "react"
 import { expect, fireEvent, fn, userEvent, waitFor, within } from "storybook/test"
 import { CircleDot, GitBranch, GitPullRequest, Sparkles } from "lucide-react"
@@ -251,6 +253,40 @@ const CAPABILITIES: ReadonlyArray<HarnessCapability> = [
   }
 ]
 
+const PROVIDER_CATALOG = Schema.decodeSync(ProviderCatalog)({
+  refreshedAt: "2026-08-10T00:00:00.000Z",
+  stale: false,
+  connections: [{
+    connection: {
+      id: "openai-codex-local",
+      providerId: "openai-codex",
+      authKind: "openai-codex-oauth",
+      account: { fingerprint: "storybook", displayLabel: "Storybook account" },
+      targetId: "local",
+      status: "authenticated",
+      subscription: {
+        entitlement: "active",
+        planLabel: "Plus",
+        expiresAt: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        confirmedBillingRoute: "subscription"
+      },
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    },
+    models: [{
+      providerId: "openai-codex",
+      id: "openai-codex/gpt-5.6-sol",
+      label: "GPT-5.6 Sol",
+      capabilities: { contextWindow: 400_000, reasoning: ["low", "medium", "high"], vision: true },
+      verification: "certified",
+      selectable: true,
+      certificationKey: "storybook-certification"
+    }]
+  }]
+})
+
 const projectForHost = (
   projects: ReadonlyArray<Project>,
   projectId: string,
@@ -378,7 +414,6 @@ function NewSessionStory({
       <SessionConversation
         sessions={sidebarSessions}
         environments={args.environments}
-        clis={args.clis}
         activeSessionId={null}
         onSelectSession={() => {}}
         liveActivity={sidebarActivity}
@@ -642,7 +677,6 @@ function SessionSourceStory({ initialSource }: { initialSource?: PreviewSource }
     <div className="flex h-screen w-full bg-panel">
       <SessionConversation
         sessions={SIDEBAR_SESSIONS}
-        clis={clis}
         activeSessionId={null}
         onSelectSession={() => {}}
         onNewSession={() => {}}
@@ -662,10 +696,9 @@ const meta = {
     open: true,
     projects: PROJECTS,
     environments: [BUILDBOX],
-    clis,
-    capabilities: CAPABILITIES,
-    defaultCli: "codex",
-    defaultModel: "gpt-5.6-sol",
+    providerCatalog: PROVIDER_CATALOG,
+    defaultConnectionId: PROVIDER_CATALOG.connections[0]!.connection.id,
+    defaultModelId: PROVIDER_CATALOG.connections[0]!.models[0]!.id,
     defaultProjectId: "project-jingler",
     prepareProject: (projectId, environmentId) =>
       projectForHost(PROJECTS, projectId, environmentId),

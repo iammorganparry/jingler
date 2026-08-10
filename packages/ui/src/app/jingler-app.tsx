@@ -8,7 +8,6 @@ import {
 import type {
   ContextConfig,
   ContextSnapshot,
-  CliInfo,
   CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -22,16 +21,12 @@ import type {
   DiffStat,
   Environment,
   EnvironmentDiscovery,
-  HarnessCapability,
   IssueProviderDescriptor,
   IssueSummary,
-  ModelOption,
   SessionPrStatus,
-  ProviderConfig,
   Project,
   ProjectDirectoryListing,
   PlanTemplateConfig,
-  ProvidersConfig,
   Repo,
   PrSummary,
   Session,
@@ -39,7 +34,7 @@ import type {
   Usage,
   User,
 } from "@jingler/core"
-import { newSessionCli, UNTITLED_SESSION } from "@jingler/core"
+import { UNTITLED_SESSION } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
 import { AddProjectDialog } from "../composites/add-project-dialog.js"
@@ -119,16 +114,6 @@ const GITHUB_DISCONNECTED: GitHubConnection = {
 }
 
 export interface JinglerAppProps {
-  clis: ReadonlyArray<CliInfo>
-  /** Live harness, model, mode, and reasoning options for the shared composer. */
-  modelCapabilities?: ReadonlyArray<HarnessCapability>
-  /**
-   * The harness new sessions start on (Settings · Providers). The New Session
-   * dialog reads it instead of asking; absent falls back to the first installed.
-   */
-  defaultCli?: CliKind | null
-  /** Persist the default harness for new sessions. */
-  onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
@@ -220,17 +205,8 @@ export interface JinglerAppProps {
   providerConnections?: SettingsViewProps["providerConnections"]
   agents?: SettingsViewProps["agents"]
   runtimeInspector?: SettingsViewProps["runtimeInspector"]
-  /** Persisted per-CLI provider defaults (Settings · Providers view). */
-  providersConfig?: ProvidersConfig | null
-  /** Persist one CLI's provider defaults; presence wires the Settings gear. */
-  onSaveProvider?: (
-    cli: CliKind,
-    config: ProviderConfig
-  ) => Promise<void> | void
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => void
-  /** Load the selectable models for a CLI (Settings · Providers). */
-  loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   /** Unified MCP (OpenConnector) connection settings (Settings → Connectors). */
   unifiedMcp?: OpenConnectorSectionProps
   /** MCP Connector Center data + actions (Settings → Connector Center). */
@@ -406,14 +382,10 @@ const noBranches = async (): Promise<ReadonlyArray<string>> => []
 
 /**
  * The product shell — the whole Jingler window, data-driven. The desktop
- * renderer feeds it discovered `clis`/`repos`, live GitHub App state, and the session list
+ * renderer feeds it repositories, provider connections, live GitHub App state, and the session list
  * over Effect RPC, plus the callbacks that create real worktrees.
  */
 export function JinglerApp({
-  clis,
-  modelCapabilities = [],
-  defaultCli,
-  onSaveDefaultCli,
   sessions,
   user,
   onSignOut,
@@ -464,11 +436,8 @@ export function JinglerApp({
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
-  providersConfig,
-  onSaveProvider,
   planTemplate,
   onSavePlanTemplate,
-  loadModels,
   unifiedMcp,
   connector,
   injection,
@@ -934,9 +903,9 @@ export function JinglerApp({
       })
     }
 
-    // Gated on `onSaveProvider` for the same reason the sidebar's menu item is:
+    // Gated on provider connections for the same reason the sidebar's menu item is:
     // that prop is what makes the Settings view renderable at all.
-    if (onSaveProvider) {
+    if (providerConnections) {
       items.push({
         id: "action:open-settings",
         kind: "action",
@@ -1025,7 +994,7 @@ export function JinglerApp({
     isBrowserActive,
     onArchiveSession,
     onRestoreSession,
-    onSaveProvider,
+    providerConnections,
     onSignOut,
     planSessions,
     liveDiff,
@@ -1062,8 +1031,6 @@ export function JinglerApp({
     },
     [onCreateSessionFromIssue, setSelected]
   )
-  const initialNewSessionCli = newSessionCli(clis, defaultCli)
-
   return (
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
@@ -1074,7 +1041,6 @@ export function JinglerApp({
       <SessionConversation
         sessions={sessions}
         environments={environments}
-        clis={clis}
         activeSessionId={selected}
         onSelectSession={selectSession}
         group={group}
@@ -1131,15 +1097,15 @@ export function JinglerApp({
         onSignOut={onSignOut}
         onOpenUsage={onLoadUsage ? openUsage : undefined}
         onOpenSettings={
-          onSaveProvider
+          providerConnections
             ? () => openSettings("providers")
             : undefined
         }
         onOpenProviderSettings={
-          onSaveProvider ? () => openSettings("providers") : undefined
+          providerConnections ? () => openSettings("providers") : undefined
         }
         onOpenGithubSettings={
-          onSaveProvider ? () => openSettings("github") : undefined
+          providerConnections ? () => openSettings("github") : undefined
         }
         memoryEligible={memory?.eligible}
         memoryActive={memory?.active}
@@ -1165,16 +1131,7 @@ export function JinglerApp({
               }
               projects={projects}
               environments={environments}
-              capabilities={modelCapabilities}
               defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
-              clis={clis}
-              defaultCli={defaultCli}
-              defaultModel={
-                initialNewSessionCli === null
-                  ? null
-                  : providersConfig?.[initialNewSessionCli]?.defaultModel
-              }
-              providers={providersConfig}
               providerCatalog={providerConnections?.catalog}
               defaultConnectionId={providerConnections?.defaultConnectionId}
               defaultModelId={providerConnections?.defaultModelId}
@@ -1197,21 +1154,15 @@ export function JinglerApp({
           ) : undefined
         }
         settingsView={
-          settingsOpen && onSaveProvider ? (
+          settingsOpen && providerConnections ? (
             <SettingsView
               key={settingsSection}
               initialSection={settingsSection}
-              clis={clis}
               providerConnections={providerConnections}
               agents={agents}
               runtimeInspector={runtimeInspector}
-              providers={providersConfig}
-              onSaveProvider={onSaveProvider}
-              defaultCli={defaultCli}
-              onSaveDefaultCli={onSaveDefaultCli}
               planTemplate={planTemplate}
               onSavePlanTemplate={onSavePlanTemplate}
-              loadModels={loadModels ?? (async () => [])}
               unifiedMcp={unifiedMcp}
               connector={connector}
               injection={injection}

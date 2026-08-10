@@ -1,11 +1,8 @@
 import type {
   Attachment,
-  CliInfo,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
-  HarnessCapability,
   IssueProviderDescriptor,
   IssueSummary,
   PermissionMode,
@@ -14,23 +11,16 @@ import type {
   ProviderId,
   ProviderModelId,
   PrSummary,
-  ProvidersConfig,
   Project,
   ReasoningSetting
 } from "@jingler/core"
-import { defaultModeFor, newSessionCli } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
 
 export type NewSessionSource = "blank" | "branch" | "pr" | "github" | `provider:${string}`
 
 export interface NewWorkspaceDeps {
   projects: ReadonlyArray<Project>
-  clis: ReadonlyArray<CliInfo>
-  capabilities: ReadonlyArray<HarnessCapability>
   issueProviders?: ReadonlyArray<IssueProviderDescriptor>
-  defaultCli?: CliKind | null
-  defaultModel?: string | null
-  providers?: ProvidersConfig | null
   providerCatalog?: ProviderCatalog | null
   defaultConnectionId?: ProviderConnectionId | null
   defaultModelId?: ProviderModelId | null
@@ -63,8 +53,6 @@ export interface NewWorkspaceContext {
   selectedIssue: IssueSummary | null
   draft: string
   attachments: ReadonlyArray<Attachment>
-  cli: CliKind | ""
-  model: string
   mode: PermissionMode
   reasoning?: ReasoningSetting
   connectionId: ProviderConnectionId | null
@@ -87,7 +75,6 @@ type NewWorkspaceEvent =
   | { type: "SELECT_ISSUE"; issue: IssueSummary }
   | { type: "SET_DRAFT"; draft: string }
   | { type: "SET_ATTACHMENTS"; attachments: ReadonlyArray<Attachment> }
-  | { type: "SET_HARNESS"; cli: CliKind; model: string }
   | {
       type: "SET_MODEL"
       connectionId: ProviderConnectionId
@@ -96,7 +83,7 @@ type NewWorkspaceEvent =
     }
   | { type: "SET_MODE"; mode: PermissionMode }
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
-  | { type: "SYNC_HARNESSES" }
+  | { type: "SYNC_MODELS" }
   | { type: "SUBMIT" }
 
 const projectFor = (context: NewWorkspaceContext): Project | undefined =>
@@ -106,28 +93,6 @@ const preferredBranch = (branches: ReadonlyArray<string>): string =>
   branches.find((branch) => branch === "main") ??
   branches.find((branch) => branch === "master") ??
   branches[0] ?? ""
-
-const harnessSelection = (
-  deps: NewWorkspaceDeps,
-  currentCli: CliKind | "" = "",
-  currentModel = ""
-): { cli: CliKind | ""; model: string } => {
-  const preferredCli = newSessionCli(deps.clis, deps.defaultCli)
-  const capability =
-    deps.capabilities.find((candidate) => candidate.cli === currentCli) ??
-    deps.capabilities.find((candidate) => candidate.cli === preferredCli) ??
-    deps.capabilities[0]
-  if (capability === undefined) return { cli: preferredCli ?? "", model: "" }
-  return {
-    cli: capability.cli,
-    model:
-      capability.models.find((candidate) => candidate.id === currentModel)?.id ??
-      (capability.cli === preferredCli
-        ? capability.models.find((candidate) => candidate.id === deps.defaultModel)?.id
-        : undefined) ??
-      capability.models[0]?.id ?? ""
-  }
-}
 
 const providerSelection = (
   deps: NewWorkspaceDeps,
@@ -157,19 +122,6 @@ const providerSelection = (
     choices[0]
   return selected ?? { connectionId: null, providerId: null, modelId: null }
 }
-
-const providerReasoning = (deps: NewWorkspaceDeps, cli: CliKind | ""): ReasoningSetting | undefined => {
-  if (cli === "") return
-  const provider = deps.providers?.[cli]
-  if (provider === undefined || (provider.thinkingEnabled === undefined && provider.reasoningEffort === undefined)) return
-  return {
-    enabled: provider.thinkingEnabled ?? true,
-    ...(provider.reasoningEffort === undefined ? {} : { effort: provider.reasoningEffort })
-  }
-}
-
-const selectionMode = (deps: NewWorkspaceDeps, cli: CliKind | ""): PermissionMode =>
-  cli === "" ? "accept-edits" : defaultModeFor(cli, deps.providers?.[cli]?.defaultMode)
 
 const errorText = (cause: unknown, fallback: string): string =>
   cause instanceof Error ? cause.message : fallback
@@ -231,9 +183,9 @@ export const newWorkspaceMachine = setup({
     canSubmit: ({ context }) =>
       context.resolvedProject !== null &&
       context.baseBranch.length > 0 &&
-      (context.getDeps().providerCatalog
-        ? context.connectionId !== null && context.providerId !== null && context.modelId !== null
-        : context.cli !== "" && context.model !== "") &&
+      context.connectionId !== null &&
+      context.providerId !== null &&
+      context.modelId !== null &&
       (context.source === "pr" ? context.selectedPr !== null :
         context.source === "github" || context.source.startsWith("provider:") ? context.selectedIssue !== null : true)
   },
@@ -244,7 +196,6 @@ export const newWorkspaceMachine = setup({
       const selected = deps.projects.find((project) => project.id === requested) ??
         deps.projects.find((project) => project.id === deps.defaultProjectId) ??
         deps.projects.find((project) => project.availability === "available")
-      const harness = harnessSelection(deps)
       const provider = providerSelection(deps)
       return {
         projectId: selected?.id ?? "",
@@ -256,23 +207,15 @@ export const newWorkspaceMachine = setup({
         ...resetSource,
         draft: "",
         attachments: [] as ReadonlyArray<Attachment>,
-        ...harness,
         ...provider,
-        mode: selectionMode(deps, harness.cli),
-        reasoning: providerReasoning(deps, harness.cli),
+        mode: "accept-edits" as const,
+        reasoning: undefined,
         error: null
       }
     }),
-    syncHarnesses: assign(({ context }) => harnessSelection(context.getDeps(), context.cli, context.model)),
     syncProviderModels: assign(({ context }) =>
       providerSelection(context.getDeps(), context.connectionId, context.modelId)
     ),
-    setHarness: assign(({ context, event }) => {
-      if (event.type !== "SET_HARNESS") return {}
-      if (event.cli === context.cli) return { cli: event.cli, model: event.model }
-      const deps = context.getDeps()
-      return { cli: event.cli, model: event.model, mode: selectionMode(deps, event.cli), reasoning: providerReasoning(deps, event.cli) }
-    }),
     setProviderModel: assign(({ event }) =>
       event.type === "SET_MODEL"
         ? {
@@ -312,8 +255,6 @@ export const newWorkspaceMachine = setup({
     ...resetSource,
     draft: "",
     attachments: [],
-    cli: "",
-    model: "",
     mode: "accept-edits",
     reasoning: undefined,
     connectionId: null,
@@ -322,7 +263,7 @@ export const newWorkspaceMachine = setup({
     error: null
   }),
   on: {
-    SYNC_HARNESSES: { actions: ["syncHarnesses", "syncProviderModels"] },
+    SYNC_MODELS: { actions: "syncProviderModels" },
     SET_MODEL: { actions: "setProviderModel" }
   },
   states: {
@@ -353,7 +294,6 @@ export const newWorkspaceMachine = setup({
             error: null
           }))
         },
-        SET_HARNESS: { actions: "setHarness" },
         SET_MODE: { actions: "setMode" },
         SET_REASONING: { actions: "setReasoning" }
       }
@@ -375,7 +315,6 @@ export const newWorkspaceMachine = setup({
         SELECT_ISSUE: { actions: assign(({ event }) => ({ selectedIssue: event.issue, draft: [event.issue.title, event.issue.body].filter(Boolean).join("\n\n") })) },
         SET_DRAFT: { actions: assign(({ event }) => ({ draft: event.draft })) },
         SET_ATTACHMENTS: { actions: assign(({ event }) => ({ attachments: event.attachments })) },
-        SET_HARNESS: { actions: "setHarness" },
         SET_MODE: { actions: "setMode" },
         SET_REASONING: { actions: "setReasoning" },
         SUBMIT: { guard: "canSubmit", target: "submitting" }
@@ -415,11 +354,7 @@ export const newWorkspaceMachine = setup({
                     modelId: context.modelId
                 }
                 : null
-            const legacy = context.cli === ""
-              ? null
-              : { cli: context.cli, model: context.model }
-            const runtime = canonical ?? legacy
-            if (runtime === null) {
+            if (canonical === null) {
               return Promise.reject(new Error("Select a certified provider model."))
             }
             const common = {
@@ -427,7 +362,7 @@ export const newWorkspaceMachine = setup({
               ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
               repoPath: project.path,
               repoName: project.name,
-              ...runtime,
+              ...canonical,
               mode: context.mode,
               reasoning: context.reasoning ?? null
             }

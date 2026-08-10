@@ -1,6 +1,4 @@
-import type { CliInfo } from "@jingler/core"
 import { FolderOpen, Plus } from "lucide-react"
-import { StatusDot } from "../components/status-dot.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
 
 /**
@@ -10,17 +8,14 @@ import { JinglerMark } from "../brand/jingler-mark.js"
  * bar. Replaces the Storybook-only seeded demo so a fresh install lands clean.
  */
 export function EmptyConversation({
-  clis = [],
   version,
   onNewSession,
   onOpenRepo
 }: {
-  clis?: ReadonlyArray<CliInfo>
   version?: string
   onNewSession?: () => void
   onOpenRepo?: () => void
 }) {
-  const available = clis.filter((c) => c.available)
   return (
     <div className="flex flex-1 flex-col bg-editor">
       <div className="flex flex-1 flex-col items-center justify-center px-10">
@@ -61,25 +56,6 @@ export function EmptyConversation({
             )}
           </div>
 
-          {available.length > 0 && (
-            <div className="mt-11 flex w-full flex-col items-center gap-3.5 border-t border-hairline pt-[26px]">
-              <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground">
-                Agents detected on this machine
-              </span>
-              <div className="flex flex-wrap justify-center gap-2.5">
-                {available.map((cli) => (
-                  <span
-                    key={cli.kind}
-                    title={`${cli.binPath ?? ""}${cli.version ? ` · ${cli.version}` : ""}`}
-                    className="flex items-center gap-[7px] rounded-md border border-line bg-panel px-2.5 py-[5px] font-mono text-[11px] text-text-body"
-                  >
-                    <StatusDot tone="bg-green" size={6} glow={false} />
-                    {cli.label}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 

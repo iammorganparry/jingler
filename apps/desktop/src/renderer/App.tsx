@@ -10,14 +10,12 @@ import type {
   Attachment,
   ContextConfig,
   VsCodeTheme,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
-  ProviderConfig,
   PublishCheckpoint,
   Session,
   SessionActivity,
@@ -359,7 +357,7 @@ function AuthedApp({
   // has persisted past this window, and clear it the instant a session recovers.
   const relayGraceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relayBannerVisible = useRef(false);
-  const { clis, repos, reposDir, sessions } = state.context;
+  const { repos, reposDir, sessions } = state.context;
   // Merged with the built-ins inside `SessionPane`, through the same registry —
   // a plugin tab is not a separate region of the tab bar.
   const pluginTabs = usePluginTabs();
@@ -471,11 +469,6 @@ function AuthedApp({
   // feeds the Settings control's active preset — the transcript reads the var
   // set in conversation-pane.tsx, so scaling stays scoped there.
   const fontScale = clampFontScale(configQuery.data?.fontScale);
-  const providersConfig = configQuery.data?.providers ?? null;
-  // Absent means "the first installed harness" — resolved downstream by
-  // `newSessionCli`, so a fresh install creates sessions without a visit to
-  // Settings.
-  const defaultCli = configQuery.data?.defaultCli ?? null;
   const contextConfig = configQuery.data?.context ?? null;
   const starredRepos = configQuery.data?.starredRepos ?? [];
   const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
@@ -561,11 +554,6 @@ function AuthedApp({
       }),
     onReveal: (path: string) => void rpc.themeReveal(path),
   };
-  const saveDefaultCli = (_cli: CliKind) => Promise.resolve();
-  const saveProvider = (cli: CliKind, config: ProviderConfig) =>
-    rpc.configSetProvider(cli, config).then((saved) => {
-      qc.setQueryData(["config"], saved);
-    });
   const saveContextConfig = (config: ContextConfig) =>
     rpc.configSetContext(config).then((saved) => {
       qc.setQueryData(["config"], saved);
@@ -1398,8 +1386,6 @@ function AuthedApp({
         </div>
       )}
       <JinglerApp
-        clis={clis}
-        modelCapabilities={[]}
         tabContributions={pluginTabs}
         paneContributions={pluginPanes}
         pluginCommands={pluginCommands}
@@ -1493,7 +1479,6 @@ function AuthedApp({
             onRetry: () => environmentController.send({ type: "RETRY" }),
           },
         }}
-        providersConfig={providersConfig}
         providerConnections={{
           catalog: providerCatalog.catalog,
           defaultConnectionId: configQuery.data?.defaultConnectionId ?? null,
@@ -1536,14 +1521,10 @@ function AuthedApp({
           onRefresh: () => runtimeInspector.send({ type: "REFRESH" }),
           onExport: () => runtimeInspector.send({ type: "EXPORT" }),
         }}
-        onSaveProvider={saveProvider}
-        defaultCli={defaultCli}
-        onSaveDefaultCli={saveDefaultCli}
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
         planTemplate={configQuery.data?.planTemplate ?? null}
         onSavePlanTemplate={savePlanTemplate}
-        loadModels={async () => []}
         unifiedMcp={unifiedMcp}
         injection={{
           targets: injectionTargets.targets,

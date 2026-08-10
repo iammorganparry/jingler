@@ -1,16 +1,11 @@
 import * as React from "react"
 import type {
-  CliInfo,
-  CliKind,
   Environment,
-  HarnessCapability,
   ProviderCatalog,
   ProviderConnectionId,
   ProviderModelId,
-  ProvidersConfig,
   Project
 } from "@jingler/core"
-import { supportsPlanMode } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import {
   Check,
@@ -136,11 +131,6 @@ export interface NewWorkspaceViewProps {
   open: boolean
   projects: ReadonlyArray<Project>
   environments?: ReadonlyArray<Environment>
-  clis: ReadonlyArray<CliInfo>
-  capabilities: ReadonlyArray<HarnessCapability>
-  defaultCli?: CliKind | null
-  defaultModel?: string | null
-  providers?: ProvidersConfig | null
   providerCatalog?: ProviderCatalog | null
   defaultConnectionId?: ProviderConnectionId | null
   defaultModelId?: ProviderModelId | null
@@ -177,12 +167,9 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
   }, [props.open, props.projects, send, state.context.projectId])
 
   React.useEffect(() => {
-    if (props.open) send({ type: "SYNC_HARNESSES" })
+    if (props.open) send({ type: "SYNC_MODELS" })
   }, [
     props.open,
-    props.capabilities,
-    props.defaultCli,
-    props.defaultModel,
     props.providerCatalog,
     props.defaultConnectionId,
     props.defaultModelId,
@@ -191,22 +178,16 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
 
   const {
     projectId, environmentId, isolation, baseBranch, branches, source, search, mine,
-    pullRequests, issues, selectedPr, selectedIssue, draft, attachments, cli, model,
+    pullRequests, issues, selectedPr, selectedIssue, draft, attachments,
     mode, reasoning, connectionId, providerId, modelId, error
   } = state.context
   const selectedProject = props.projects.find((project) => project.id === projectId)
   const submitting = state.matches("submitting")
   const loading = state.matches("loading")
   const sourceLoading = state.matches("sourceLoading")
-  const modelUnavailableReason = props.providerCatalog
-    ? connectionId === null || providerId === null || modelId === null
-      ? "Choose a certified provider connection and model."
-      : undefined
-    : props.capabilities.length === 0
-      ? "No provider models are available. Check Settings → Providers."
-      : !cli || !model
-        ? "Choose a certified provider model."
-        : undefined
+  const modelUnavailableReason = connectionId === null || providerId === null || modelId === null
+    ? "Choose a certified provider connection and model."
+    : undefined
   const unavailableReason = submitting
     ? "Creating session…"
     : loading
@@ -439,9 +420,6 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             environments={props.environments}
             environmentId={environmentId === "local" ? undefined : environmentId}
             onSetEnvironment={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" })}
-            cli={cli || undefined}
-            model={model || undefined}
-            capabilities={props.capabilities}
             providerCatalog={props.providerCatalog}
             connectionId={connectionId}
             modelId={modelId}
@@ -453,14 +431,12 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 modelId: nextModel
               })
             }
-            onSetHarness={(nextCli, nextModel) =>
-              send({ type: "SET_HARNESS", cli: nextCli, model: nextModel })}
             mode={mode}
             onSetMode={(value) => send({ type: "SET_MODE", mode: value })}
             reasoningEffort={reasoning?.effort}
             thinkingEnabled={reasoning?.enabled}
             onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })}
-            allowPlan={props.providerCatalog !== undefined && props.providerCatalog !== null || cli !== "" && supportsPlanMode(cli)}
+            allowPlan
             disabledReason={unavailableReason}
           />
           {draft.trim().length === 0 && unavailableReason === undefined && (

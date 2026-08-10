@@ -256,8 +256,8 @@ function summarize(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SettingsViewProps {
-  /** Discovered CLIs — every one becomes a provider card. */
-  clis: ReadonlyArray<CliInfo>
+  /** Legacy decoder fixtures may still supply discovered CLIs in stories. */
+  clis?: ReadonlyArray<CliInfo>
   /** Canonical provider connections. When present, legacy CLI cards stay hidden. */
   providerConnections?: ProviderConnectionsSettingsProps
   /** Operator-controlled skills, prompts, and MCP resources. */
@@ -289,7 +289,7 @@ export interface SettingsViewProps {
   /** Persisted per-CLI provider defaults. */
   providers?: ProvidersConfig | null
   /** Persist one CLI's provider config. */
-  onSaveProvider: (cli: CliKind, config: ProviderConfig) => Promise<void> | void
+  onSaveProvider?: (cli: CliKind, config: ProviderConfig) => Promise<void> | void
   /**
    * The harness NEW sessions start on. Absent means "the first installed one" —
    * the New Session dialog no longer asks, so this is where the answer lives.
@@ -301,7 +301,7 @@ export interface SettingsViewProps {
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
   /** Load the selectable models for a CLI (live discovery). */
-  loadModels: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
+  loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   /** Unified MCP (OpenConnector) connection settings (from `useOpenConnector`). */
   unifiedMcp?: OpenConnectorSectionProps
   /**
@@ -468,7 +468,7 @@ export function SettingsView({
             {!compact && <span className="flex-1 text-left">{item.label}</span>}
             {!compact && item.key === "providers" && (
               <span className="rounded bg-hover px-1.5 py-px font-mono text-[9px] text-muted-foreground">
-                {clis.length}
+                {providerConnections?.catalog?.connections.length ?? 0}
               </span>
             )}
           </button>
@@ -507,18 +507,11 @@ export function SettingsView({
         providerConnections ? (
           <ProviderConnectionsSettings {...providerConnections} />
         ) : (
-          <ProvidersSection
-            clis={clis}
-            providers={providers ?? undefined}
-            onSaveProvider={onSaveProvider}
-            defaultCli={defaultCli}
-            onSaveDefaultCli={onSaveDefaultCli}
-            loadModels={loadModels}
-          />
+          <StubSection label="Providers" />
         )
       ) : section === "context" ? (
         <ContextSection
-          clis={clis}
+          clis={clis ?? []}
           context={context}
           providers={providers ?? undefined}
           sessions={contextSessions}

@@ -1,4 +1,4 @@
-import type { CreateSessionInput, HarnessCapability, Project, ProviderCatalog } from "@jingler/core"
+import type { CreateSessionInput, Project, ProviderCatalog } from "@jingler/core"
 import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
@@ -8,18 +8,6 @@ import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-mach
 const projects: ReadonlyArray<Project> = [
   { id: "p-local", name: "local", path: "/repos/local", availability: "available", createdAt: "now", updatedAt: "now" },
   { id: "p-remote", environmentId: "device-1", name: "remote", path: "/repos/remote", availability: "available", createdAt: "now", updatedAt: "now" }
-]
-
-const capabilities: ReadonlyArray<HarnessCapability> = [
-  {
-    cli: "codex",
-    label: "Codex CLI",
-    modes: [{ id: "auto", label: "Auto", kind: "execute" }],
-    models: [
-      { id: "gpt-5.6-sol", label: "gpt-5.6-sol" },
-      { id: "gpt-5.6-luna", label: "gpt-5.6-luna" }
-    ]
-  }
 ]
 
 const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
@@ -55,6 +43,14 @@ const providerCatalog: ProviderCatalog = {
       verification: "certified",
       selectable: true,
       certificationKey: "certified"
+    }, {
+      providerId,
+      id: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus"),
+      label: "Claude Opus",
+      capabilities: { contextWindow: 200_000, reasoning: [], vision: false },
+      verification: "certified",
+      selectable: true,
+      certificationKey: "certified-opus"
     }]
   }]
 }
@@ -66,13 +62,9 @@ const actorFor = (
   input: {
     getDeps: () => ({
       projects,
-      clis: [{ kind: "codex", label: "Codex", available: true, binPath: "/bin/codex", version: null, authStatus: "authenticated" }],
-      capabilities,
-      defaultCli: "codex",
-      defaultModel: "gpt-5.6-sol",
-      providers: {
-        codex: { enabled: true, defaultMode: "auto", reasoningEffort: "minimal" }
-      },
+      providerCatalog,
+      defaultConnectionId: connectionId,
+      defaultModelId: modelId,
       prepareProject: async (projectId, environmentId) => {
         const project = projects.find((candidate) => candidate.id === projectId)!
         return environmentId === undefined
@@ -140,10 +132,9 @@ describe("newWorkspaceMachine", () => {
       input: {
         getDeps: () => ({
           projects,
-          clis: [{ kind: "codex", label: "Codex", available: true, binPath: "/bin/codex", version: null, authStatus: "authenticated" }],
-          capabilities,
-          defaultCli: "codex",
-          defaultModel: "gpt-5.6-sol",
+          providerCatalog,
+          defaultConnectionId: connectionId,
+          defaultModelId: modelId,
           prepareProject: async (projectId, environmentId) => {
             const project = projects.find((candidate) => candidate.id === projectId)!
             if (environmentId !== undefined) {
@@ -227,23 +218,26 @@ describe("newWorkspaceMachine", () => {
 
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       initialPrompt: "Refine the empty-state transitions",
-      model: "gpt-5.6-sol"
+      connectionId,
+      modelId
     }), [])
     expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("title")
   })
 
-  it("persists an explicitly selected harness model", async () => {
+  it("persists an explicitly selected certified model", async () => {
     const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
     const actor = actorFor(onCreate).start()
     actor.send({ type: "OPEN", projectId: "p-local" })
     await waitFor(actor, (snapshot) => snapshot.matches("editing"))
-    actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-luna" })
+    const opusId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus")
+    actor.send({ type: "SET_MODEL", connectionId, providerId, modelId: opusId })
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("closed"))
 
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
-      cli: "codex",
-      model: "gpt-5.6-luna"
+      connectionId,
+      providerId,
+      modelId: opusId
     }), [])
   })
 
@@ -293,8 +287,10 @@ describe("newWorkspaceMachine", () => {
     expect(onCreateFromPr).toHaveBeenCalledWith(expect.objectContaining({
       pr,
       initialPrompt: "Review the failing checks",
-      model: "gpt-5.6-sol",
-      mode: "auto"
+      connectionId,
+      providerId,
+      modelId,
+      mode: "accept-edits"
     }), [])
   })
 })

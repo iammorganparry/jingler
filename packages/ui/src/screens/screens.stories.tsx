@@ -43,7 +43,6 @@ export const App: Story = {
   render: () => (
     <div className="h-screen w-full">
       <JinglerApp
-        clis={clis}
         sessions={sessions}
         user={{ id: "u1", name: "Morgan Parry", email: "morgan@trigify.io", image: null }}
         onSignOut={noop}
@@ -61,7 +60,6 @@ export const LiveActivity: Story = {
   render: () => (
     <div className="h-screen w-full">
       <JinglerApp
-        clis={clis}
         sessions={sessions}
         activeSessionId="s1"
         liveActivity={{
