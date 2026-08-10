@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { StreamEvent } from "./conversation.js"
 import { DiffStat, SessionStatus } from "./domain.js"
+import { FileChangeSet } from "./runtime/file-change.js"
 
 export const SESSION_PROTOCOL_VERSION = 1 as const
 
@@ -16,8 +17,16 @@ export const SessionEvent = Schema.Union(
   Schema.TaggedStruct("Stream", { event: StreamEvent }),
   Schema.TaggedStruct("StatusChanged", { status: SessionStatus }),
   Schema.TaggedStruct("DiffChanged", {
-    files: Schema.Record({ key: Schema.String, value: DiffStat })
-  }),
+    /** Legacy per-path totals retained while older remote devices drain. */
+    files: Schema.optional(Schema.Record({ key: Schema.String, value: DiffStat })),
+    /** Canonical actual-workspace evidence from the remote pi runtime. */
+    changes: Schema.optional(FileChangeSet)
+  }).pipe(
+    Schema.filter(
+      (event) => event.files !== undefined || event.changes !== undefined,
+      { message: () => "DiffChanged requires canonical changes or legacy file totals" }
+    )
+  ),
   Schema.TaggedStruct("PublishProgress", {
     phase: Schema.Literal("inspecting", "preparing", "publishing", "complete"),
     message: Schema.String

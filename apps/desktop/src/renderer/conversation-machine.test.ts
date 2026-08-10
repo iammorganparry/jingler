@@ -356,6 +356,36 @@ describe("conversationMachine — remote session envelopes", () => {
     actor.stop()
   })
 
+  it("uses canonical remote file-change totals for diff presence", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: {
+        version: 1,
+        eventId: "event_canonical_diff",
+        sessionId: session.id,
+        sequence: 1,
+        revision: 1,
+        occurredAt: 1,
+        event: {
+          _tag: "DiffChanged",
+          changes: {
+          id: "changes-remote",
+          callId: "remote-tool",
+          changes: [{ status: "R", path: "src/new.ts", oldPath: "src/old.ts", added: 1, removed: 1, binary: false, noNewlineAtEnd: false, beforeBytes: 10, afterBytes: 10, preview: null, patchArtifactId: "patch-remote" }],
+          totals: { added: 1, removed: 1 },
+          authoritative: true,
+          reconciledAt: "2026-08-10T12:00:00.000Z"
+          }
+        }
+      }
+    })
+
+    expect(actor.getSnapshot().context.session.diff).toEqual({ added: 1, removed: 1 })
+    actor.stop()
+  })
+
   it("folds admitted stream envelopes through the existing conversation reducer", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
@@ -1177,6 +1207,41 @@ describe("conversationMachine — nothing gates the transcript on a CLI probe", 
 })
 
 describe("conversationMachine — realtime Changes rail", () => {
+  it("re-reads diff and files for canonical changes from a generic mutating tool", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "run the generator" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    const beforeDiff = h.diffCalls
+    const beforeFiles = h.filesCalls
+    h.diffValue = "diff-after-generator"
+    h.filesValue = ["src/generated.ts"]
+    emit({ _tag: "ToolStart", id: "mcp-1", name: "mcp.generator", target: null })
+    emit({
+      _tag: "ToolEnd",
+      id: "mcp-1",
+      status: "success",
+      meta: null,
+      diff: { added: 1, removed: 0 },
+      preview: "+generated",
+      fileChanges: {
+        id: "changes-1",
+        callId: "mcp-1",
+        changes: [{ status: "A", path: "src/generated.ts", oldPath: null, added: 1, removed: 0, binary: false, noNewlineAtEnd: false, beforeBytes: 0, afterBytes: 10, preview: "+generated", patchArtifactId: "patch-1" }],
+        totals: { added: 1, removed: 0 },
+        authoritative: true,
+        reconciledAt: "2026-08-10T12:00:00.000Z"
+      }
+    })
+
+    await waitFor(actor, (s) => s.context.patch === "diff-after-generator", { timeout: 3000 })
+    await waitFor(actor, (s) => s.context.files.includes("src/generated.ts"), { timeout: 3000 })
+    expect(h.diffCalls).toBeGreaterThan(beforeDiff)
+    expect(h.filesCalls).toBeGreaterThan(beforeFiles)
+    actor.stop()
+  })
+
   it("re-reads the diff mid-run when an edit tool lands", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))

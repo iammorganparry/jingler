@@ -1640,20 +1640,28 @@ export const agentFileActivityOf = (
     lastTool(
       [currentTurn],
       (candidate) => candidate.status === "running" && isFileMutationTool(candidate.name)
-    ) ?? lastTool([currentTurn], (candidate) => isFileMutationTool(candidate.name))
+    ) ?? lastTool(
+      [currentTurn],
+      (candidate) =>
+        isFileMutationTool(candidate.name) ||
+        (candidate.fileChanges?.changes.length ?? 0) > 0
+    )
+  const change = tool?.fileChanges?.changes.at(-1)
+  const path = change?.path ?? tool?.target
   if (
     tool === null ||
-    tool.target === null ||
-    tool.target.trim() === "" ||
+    path === null ||
+    path === undefined ||
+    path.trim() === "" ||
     tool.status === "error"
   ) {
     return null
   }
   return {
     eventId: tool.id,
-    path: tool.target,
+    path,
     phase: tool.status === "running" ? "editing" : "completed",
-    preview: tool.preview
+    preview: change?.preview ?? tool.preview
   }
 }
 

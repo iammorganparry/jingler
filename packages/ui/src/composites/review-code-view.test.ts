@@ -119,6 +119,45 @@ describe("review CodeView model", () => {
     ])
   })
 
+  it("keeps deleted and renamed files distinct in the review model", () => {
+    const deleted = {
+      path: "src/gone.ts",
+      additions: 0,
+      deletions: 1,
+      commentCount: 0,
+      viewed: false
+    }
+    const renamed = {
+      path: "src/new-name.ts",
+      additions: 0,
+      deletions: 0,
+      commentCount: 0,
+      viewed: false
+    }
+    const deletedPatch = [
+      "diff --git a/src/gone.ts b/src/gone.ts",
+      "deleted file mode 100644",
+      "--- a/src/gone.ts",
+      "+++ /dev/null",
+      "@@ -1,1 +0,0 @@",
+      "-gone"
+    ].join("\n")
+    const renamedPatch = [
+      "diff --git a/src/old-name.ts b/src/new-name.ts",
+      "similarity index 100%",
+      "rename from src/old-name.ts",
+      "rename to src/new-name.ts"
+    ].join("\n")
+
+    const entries = createReviewCodeFiles([deleted, renamed], [
+      { path: deleted.path, diff: deletedPatch },
+      { path: renamed.path, diff: renamedPatch }
+    ])
+
+    expect(entries.map((entry) => entry.status)).toEqual(["deleted", "renamed"])
+    expect(entries[1]?.fileDiff.prevName).toBe("src/old-name.ts")
+  })
+
   it("derives viewport focus from CodeView item offsets", () => {
     const entries = createReviewCodeFiles(files, [
       { path: files[0]!.path, diff: modifiedPatch },

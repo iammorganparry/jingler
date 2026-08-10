@@ -143,8 +143,13 @@ describe("device session command executor", () => {
       ...services(),
       run: vi.fn(async (_sessionId, _input, emit) => {
         await emit({
-          _tag: "FileChanges",
-          changes: {
+          _tag: "ToolEnd",
+          id: "tool-call-1",
+          status: "success",
+          meta: null,
+          diff: { added: 1, removed: 1 },
+          preview: "rename",
+          fileChanges: {
             id: "change-set-1",
             callId: "tool-call-1",
             changes: [{
@@ -177,8 +182,8 @@ describe("device session command executor", () => {
     expect(emitted).toEqual([{
       kind: "event",
       payload: expect.objectContaining({
-        _tag: "FileChanges",
-        changes: expect.objectContaining({
+        _tag: "ToolEnd",
+        fileChanges: expect.objectContaining({
           authoritative: true,
           changes: [expect.objectContaining({ status: "R", oldPath: "src/old.ts" })]
         })

@@ -47,6 +47,7 @@ import {
   assistantMessage,
   defaultModeFor,
   defaultModel,
+  isFileMutationTool,
   nextReviewPhase,
   planDocumentToPlan,
   isSubagentEvent,
@@ -146,20 +147,6 @@ const withProviderModel = (
     )
   }
 }
-
-/**
- * Tools that can change which worktree paths exist even when their provider
- * cannot calculate a diff. Codex file-change events have historically emitted
- * a successful `Edit` with `diff: null`, so the diff alone is not a reliable
- * mutation signal.
- */
-const FILE_MUTATION_TOOLS: ReadonlySet<string> = new Set([
-  "Write",
-  "Edit",
-  "Update",
-  "MultiEdit",
-  "NotebookEdit"
-])
 
 const toolNameInMessage = (message: Message, id: string): string | null => {
   for (let i = message.parts.length - 1; i >= 0; i--) {
@@ -932,13 +919,14 @@ export const conversationMachine = setup({
         }
       }
       if (remote._tag === "DiffChanged") {
-        const diff = Object.values(remote.files).reduce(
-          (total, file) => ({
-            added: total.added + file.added,
-            removed: total.removed + file.removed
-          }),
-          { added: 0, removed: 0 }
-        )
+        const diff = remote.changes?.totals ??
+          Object.values(remote.files ?? {}).reduce(
+            (total, file) => ({
+              added: total.added + file.added,
+              removed: total.removed + file.removed
+            }),
+            { added: 0, removed: 0 }
+          )
         return {
           sessionEventCursor: admission.cursor,
           session: { ...context.session, diff }
@@ -1495,7 +1483,12 @@ export const conversationMachine = setup({
       const e = event.event
       if (e._tag !== "ToolEnd" || e.status !== "success") return
       const toolName = toolNameFor(context, e.id, e.agentId)
-      if (e.diff === null && (toolName === null || !FILE_MUTATION_TOOLS.has(toolName))) return
+      const hasCanonicalChanges = (e.fileChanges?.changes.length ?? 0) > 0
+      if (
+        !hasCanonicalChanges &&
+        e.diff === null &&
+        (toolName === null || !isFileMutationTool(toolName))
+      ) return
       void rpc
         .sessionsDiff(context.session.id)
         .then((patch) => self.send({ type: "PATCH_UPDATED", patch }))
