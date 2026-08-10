@@ -4,7 +4,7 @@ import {
   type ManagedMcpServer as ManagedMcpServerType,
   type ManagedResourceId
 } from "@jingler/core"
-import { Context, Data, Effect, Schema } from "effect"
+import { Context, Data, Effect, PubSub, Schema, Stream } from "effect"
 import type {
   AgentSecretStore,
   ManagedMcpSecretPayload
@@ -58,6 +58,7 @@ export interface ImportedMcpServiceShape {
   readonly resolveForTarget: (
     targetId: string
   ) => Effect.Effect<ReadonlyArray<ResolvedManagedMcp>, ImportedMcpError>
+  readonly watch: () => Stream.Stream<ReadonlyArray<ManagedMcpServerType>>
 }
 
 export class ImportedMcpService extends Context.Tag("@jingler/ImportedMcpService")<
@@ -156,7 +157,7 @@ const secretsFor = (input: ManagedMcpImportInput): ManagedMcpSecretPayload =>
 export const makeImportedMcpService = (
   options: ImportedMcpServiceOptions
 ): Effect.Effect<ImportedMcpServiceShape> =>
-  Effect.sync(() => {
+  Effect.gen(function* () {
     const catalog = new AtomicJsonFile<ReadonlyArray<ManagedMcpServerType>>({
       file: options.metadataFile,
       decode: decodeCatalog,
@@ -166,6 +167,11 @@ export const makeImportedMcpService = (
       try: () => catalog.read(),
       catch: () => error("list", "Could not read imported MCP metadata")
     })
+    const changes = yield* PubSub.unbounded<ReadonlyArray<ManagedMcpServerType>>()
+    const publishCatalog = list.pipe(
+      Effect.flatMap((servers) => PubSub.publish(changes, servers)),
+      Effect.asVoid
+    )
 
     const importServer = (
       input: ManagedMcpImportInput
@@ -188,6 +194,7 @@ export const makeImportedMcpService = (
             catch: (cause) => error("import", cause instanceof Error ? cause.message : "Could not persist MCP metadata")
           })
         ),
+        Effect.tap(() => publishCatalog),
         Effect.as(metadata),
         Effect.tapError(() => secretWritten
           ? options.secrets.deleteMcp(input.id, input.targetId).pipe(Effect.ignore)
@@ -208,7 +215,8 @@ export const makeImportedMcpService = (
               options.secrets.deleteMcp(id, server.availability.targetId).pipe(
                 Effect.mapError(() => error("remove", `Could not remove encrypted values for "${id}"`))
               )
-            )
+            ),
+            Effect.zipRight(publishCatalog)
           )
         })
       )
@@ -223,7 +231,7 @@ export const makeImportedMcpService = (
           return current.map((server) => server.id === id ? { ...server, enabled } : server)
         }),
         catch: () => error("enable", `Could not update MCP server "${id}"`)
-      })
+      }).pipe(Effect.zipRight(publishCatalog))
 
     const resolveForTarget = (
       targetId: string
@@ -260,5 +268,15 @@ export const makeImportedMcpService = (
         ))
       )
 
-    return { list, importServer, remove, setEnabled, resolveForTarget }
+    return {
+      list,
+      importServer,
+      remove,
+      setEnabled,
+      resolveForTarget,
+      watch: () => Stream.concat(
+        Stream.fromEffect(list.pipe(Effect.orElseSucceed(() => []))),
+        Stream.fromPubSub(changes)
+      )
+    }
   })

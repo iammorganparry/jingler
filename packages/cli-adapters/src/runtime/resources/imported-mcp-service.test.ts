@@ -6,7 +6,7 @@ import {
   ManagedResourceId,
   type ManagedMcpImportInput as ManagedMcpImportInputType
 } from "@jingler/core"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeInMemorySecretStore } from "../../secret-store.js"
 import { AgentSecretStore } from "../auth/agent-secret-store.js"
@@ -43,12 +43,14 @@ describe("ImportedMcpService", () => {
     const secrets = new AgentSecretStore(backing)
     const metadataFile = join(root, "mcp.json")
     const service = await Effect.runPromise(makeImportedMcpService({ metadataFile, secrets }))
+    const updates = Effect.runPromise(Stream.runCollect(Stream.take(service.watch(), 2)))
 
     await Effect.runPromise(service.importServer(input({
       transport: "http",
       url: "https://mcp.example.test/rpc",
       headers: { Authorization: "Bearer private-http" }
     })))
+    expect([...await updates].map((catalog) => catalog.length)).toEqual([0, 1])
     await Effect.runPromise(service.importServer(input({
       id: "events",
       name: "Events",

@@ -7,7 +7,7 @@ import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
 import { ProviderConnections } from "../providers/provider-connections.js"
-import { makeImportedMcpService } from "../resources/imported-mcp-service.js"
+import { ImportedMcpService } from "../resources/imported-mcp-service.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
 import { AgentRuntime, AgentRuntimeError } from "./agent-runtime.js"
@@ -25,12 +25,9 @@ export const PiAgentRuntimeLive = Layer.effect(
     const paths = yield* AppPaths
     const secretStore = yield* SecretStore
     const providers = yield* ProviderConnections
+    const importedMcp = yield* ImportedMcpService
     const workspace = yield* makeWorkspaceInspectionPort
     const credentials = new AgentSecretStore(secretStore)
-    const importedMcp = yield* makeImportedMcpService({
-      metadataFile: paths.importedMcpFile,
-      secrets: credentials
-    })
     const runIds = new WeakMap<FileChangeTracker, string>()
 
     const factory = makePiSessionFactory({

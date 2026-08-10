@@ -112,6 +112,14 @@ import {
   ProviderConnectionInput,
   SetProviderApiKeyInput,
   VerifyProviderModelInput,
+  AgentResourceRpcError,
+  ManagedMcpImportInput,
+  ManagedMcpServer,
+  ManagedResource,
+  ManagedResourceId,
+  ManagedResourceScope,
+  ResourceDetectionResult,
+  ResourceImportResult,
   FONT_SCALE_RANGE
 } from "@jingler/core"
 import {
@@ -505,6 +513,59 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: ModelCertification,
     error: ProviderConnectionError,
     payload: VerifyProviderModelInput
+  }),
+
+  Rpc.make("AgentResources.list", {
+    success: Schema.Array(ManagedResource),
+    error: AgentResourceRpcError
+  }),
+
+  Rpc.make("AgentResources.detect", {
+    success: ResourceDetectionResult,
+    error: AgentResourceRpcError,
+    payload: { sessionId: Schema.NullOr(Schema.String) }
+  }),
+
+  Rpc.make("AgentResources.importFiles", {
+    success: ResourceImportResult,
+    error: AgentResourceRpcError,
+    payload: {
+      sessionId: Schema.NullOr(Schema.String),
+      sourcePaths: Schema.Array(Schema.String),
+      scope: ManagedResourceScope
+    }
+  }),
+
+  Rpc.make("AgentResources.importMcp", {
+    success: ManagedMcpServer,
+    error: AgentResourceRpcError,
+    payload: ManagedMcpImportInput
+  }),
+
+  Rpc.make("AgentResources.remove", {
+    error: AgentResourceRpcError,
+    payload: { id: ManagedResourceId }
+  }),
+
+  Rpc.make("AgentResources.setEnabled", {
+    error: AgentResourceRpcError,
+    payload: { id: ManagedResourceId, enabled: Schema.Boolean }
+  }),
+
+  Rpc.make("AgentResources.reveal", {
+    error: AgentResourceRpcError,
+    payload: { id: ManagedResourceId }
+  }),
+
+  Rpc.make("AgentResources.enabledForTarget", {
+    success: Schema.Array(ManagedResource),
+    error: AgentResourceRpcError,
+    payload: { targetId: Schema.String }
+  }),
+
+  Rpc.make("AgentResources.watch", {
+    success: Schema.Array(ManagedResource),
+    stream: true
   }),
 
   /** List every known coding CLI and whether it is installed on this host. */

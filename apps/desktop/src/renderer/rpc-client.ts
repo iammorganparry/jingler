@@ -104,7 +104,15 @@ import type {
   ProviderConnection,
   ProviderConnectionId,
   ProviderModelId,
-  CodexLoginMethod
+  CodexLoginMethod,
+  DetectedResourceCandidate,
+  ManagedMcpImportInput,
+  ManagedMcpServer,
+  ManagedResource,
+  ManagedResourceId,
+  ManagedResourceScope,
+  ResourceDetectionResult,
+  ResourceImportResult
 } from "@jingler/core"
 import {
   AssetListRpcs,
@@ -308,6 +316,49 @@ export const rpc = {
     modelId: ProviderModelId
   ): Promise<ModelCertification> =>
     run((c) => c.Provider.verifyModel({ connectionId, modelId })),
+  agentResourcesList: (): Promise<ReadonlyArray<ManagedResource>> =>
+    run((c) => c.AgentResources.list()),
+  agentResourcesDetect: (sessionId: string | null): Promise<ResourceDetectionResult> =>
+    run((c) => c.AgentResources.detect({ sessionId })),
+  agentResourcesImportFiles: (
+    sessionId: string | null,
+    candidates: ReadonlyArray<DetectedResourceCandidate>,
+    scope: ManagedResourceScope
+  ): Promise<ResourceImportResult> =>
+    run((c) => c.AgentResources.importFiles({
+      sessionId,
+      sourcePaths: candidates.map((candidate) => candidate.provenance.sourcePath),
+      scope
+    })),
+  agentResourcesImportMcp: (
+    input: ManagedMcpImportInput
+  ): Promise<ManagedMcpServer> => run((c) => c.AgentResources.importMcp(input)),
+  agentResourcesRemove: (id: ManagedResourceId): Promise<void> =>
+    run((c) => c.AgentResources.remove({ id })),
+  agentResourcesSetEnabled: (id: ManagedResourceId, enabled: boolean): Promise<void> =>
+    run((c) => c.AgentResources.setEnabled({ id, enabled })),
+  agentResourcesReveal: (id: ManagedResourceId): Promise<void> =>
+    run((c) => c.AgentResources.reveal({ id })),
+  agentResourcesEnabledForTarget: (targetId: string): Promise<ReadonlyArray<ManagedResource>> =>
+    run((c) => c.AgentResources.enabledForTarget({ targetId })),
+  agentResourcesWatch: (
+    onResources: (resources: ReadonlyArray<ManagedResource>) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = coreRuntime.runFork(
+        client.AgentResources.watch().pipe(
+          Stream.runForEach((resources) => Effect.sync(() => onResources(resources)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   /** What each installed harness will actually be billed to. */
   billingPaths: (): Promise<ReadonlyArray<HarnessBilling>> =>
     run((c) => c.Billing.paths()),

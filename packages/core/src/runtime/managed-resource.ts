@@ -173,3 +173,11 @@ export const ResourceImportResult = Schema.Struct({
   skipped: Schema.Array(ResourceImportDiagnostic)
 })
 export type ResourceImportResult = Schema.Schema.Type<typeof ResourceImportResult>
+
+export class AgentResourceRpcError extends Schema.TaggedError<AgentResourceRpcError>()(
+  "AgentResourceRpcError",
+  {
+    operation: Schema.Literal("list", "detect", "import", "remove", "reveal", "enable", "resolve"),
+    message: Schema.String
+  }
+) {}

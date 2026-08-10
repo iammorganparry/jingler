@@ -62,7 +62,6 @@ import {
   setSessionEnvironment,
   continueSessionOnEnvironment,
   ContextManager,
-  SkillsService,
   TerminalService,
   ThemeService,
   BackgroundTaskStore,
@@ -76,6 +75,9 @@ import {
   RuntimeDiagnostics,
   ProviderConnections,
   type ProviderConnectionsShape,
+  AgentResourceService,
+  ImportedMcpService,
+  detectAgentResources,
 } from "@jingler/cli-adapters";
 import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -110,6 +112,7 @@ import {
   Project as ProjectSchema,
   RemotePublishPrepared as RemotePublishPreparedSchema,
   ProviderConnectionError,
+  AgentResourceRpcError,
 } from "@jingler/core";
 import type {
   BrowserBounds,
@@ -653,31 +656,25 @@ export const chooseReposDir = () =>
     return yield* ConfigService.setReposDir(dir);
   }).pipe(Effect.orElseSucceed(() => null));
 
-/**
- * `Skills.list` handler. Resolves the session's harness + worktree (best-effort;
- * an unknown session falls back to Claude with no worktree) so `SkillsService`
- * can report the harness-appropriate skills for the `/` menu. Exported for tests.
- */
+/** Managed skills and prompts are the only file-backed composer command source. */
 export const skillsList = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId).pipe(
       Effect.orElseSucceed(() => null),
     );
-    const cli = session?.cli ?? "claude";
-    // The harness announces its own command list, so we need the binary discovery
-    // resolved — a GUI-launched Electron app has a threadbare PATH, so the bare
-    // name often isn't runnable (same reason `Models.list` takes it).
-    const clis = yield* DiscoveryService.list().pipe(
-      Effect.orElseSucceed(() => []),
+    const service = yield* AgentResourceService;
+    const resources = yield* service
+      .enabledForTarget(session?.environmentId ?? "desktop")
+      .pipe(Effect.orElseSucceed(() => []));
+    return resources.flatMap((resource) =>
+      resource.kind === "mcp"
+        ? []
+        : [{
+            name: `/${resource.id}`,
+            description: resource.description,
+            source: resource.kind === "skill" ? "skill" as const : "command" as const,
+          }],
     );
-    return yield* SkillsService.list({
-      cli,
-      // The operator's global skills live under the real home (~/.claude/skills),
-      // never JINGLER_HOME.
-      homeDir: homedir(),
-      worktreePath: session?.worktreePath ?? null,
-      binPath: clis.find((c) => c.kind === cli)?.binPath ?? null,
-    });
   });
 
 /**
@@ -3719,6 +3716,50 @@ const providerOperation = <A, E extends { readonly message: string }>(
     ),
   );
 
+const agentResourceError = (
+  operation: AgentResourceRpcError["operation"],
+  cause: { readonly message: string },
+) => new AgentResourceRpcError({ operation, message: cause.message });
+
+const resourceWorktree = (sessionId: string | null) =>
+  sessionId === null
+    ? Effect.succeed(null)
+    : SessionStore.get(sessionId).pipe(
+        Effect.map((session) => session.worktreePath ?? null),
+        Effect.orElseSucceed(() => null),
+      );
+
+const resourceDetection = (sessionId: string | null) =>
+  resourceWorktree(sessionId).pipe(
+    Effect.flatMap((worktreePath) =>
+      detectAgentResources({ homeDir: homedir(), worktreePath }),
+    ),
+  );
+
+const resourceList = Effect.gen(function* () {
+  const files = yield* AgentResourceService;
+  const mcp = yield* ImportedMcpService;
+  return [...(yield* files.list), ...(yield* mcp.list)];
+}).pipe(
+  Effect.mapError((cause) => agentResourceError("list", cause)),
+);
+
+const resourceEnabledForTarget = (targetId: string) =>
+  Effect.gen(function* () {
+    const files = yield* AgentResourceService;
+    const mcp = yield* ImportedMcpService;
+    const managedFiles = yield* files.enabledForTarget(targetId);
+    const managedMcp = (yield* mcp.list).filter(
+      (server) =>
+        server.enabled &&
+        server.availability.state === "available" &&
+        server.availability.targetId === targetId,
+    );
+    return [...managedFiles, ...managedMcp];
+  }).pipe(
+    Effect.mapError((cause) => agentResourceError("resolve", cause)),
+  );
+
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
   "RuntimeDiagnostics.export": ({ runId }) => RuntimeDiagnostics.export(runId),
@@ -3738,6 +3779,76 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     providerOperation((service) => service.logout(connectionId)),
   "Provider.verifyModel": (input) =>
     providerOperation((service) => service.verifyModel(input)),
+  "AgentResources.list": () => resourceList,
+  "AgentResources.detect": ({ sessionId }) => resourceDetection(sessionId),
+  "AgentResources.importFiles": ({ sessionId, sourcePaths, scope }) =>
+    Effect.gen(function* () {
+      const service = yield* AgentResourceService;
+      const detected = yield* resourceDetection(sessionId);
+      const requested = new Set(sourcePaths);
+      const candidates = detected.candidates.filter(
+        (candidate) =>
+          candidate.kind !== "mcp" && requested.has(candidate.provenance.sourcePath),
+      );
+      const imported = yield* service.importResources(candidates, scope);
+      const found = new Set(candidates.map((candidate) => candidate.provenance.sourcePath));
+      return {
+        imported: imported.imported,
+        skipped: [
+          ...imported.skipped,
+          ...sourcePaths
+            .filter((sourcePath) => !found.has(sourcePath))
+            .map((sourcePath) => ({
+              sourcePath,
+              kind: null,
+              code: "malformed" as const,
+              message: "Resource is no longer present in the detected catalog",
+            })),
+        ],
+      };
+    }).pipe(
+      Effect.mapError((cause) => agentResourceError("import", cause)),
+    ),
+  "AgentResources.importMcp": (input) =>
+    Effect.flatMap(ImportedMcpService, (service) => service.importServer(input)).pipe(
+      Effect.mapError((cause) => agentResourceError("import", cause)),
+    ),
+  "AgentResources.remove": ({ id }) =>
+    Effect.gen(function* () {
+      const files = yield* AgentResourceService;
+      const mcp = yield* ImportedMcpService;
+      const isMcp = (yield* mcp.list).some((server) => server.id === id);
+      if (isMcp) return yield* mcp.remove(id);
+      return yield* files.remove(id);
+    }).pipe(
+      Effect.mapError((cause) => agentResourceError("remove", cause)),
+    ),
+  "AgentResources.setEnabled": ({ id, enabled }) =>
+    Effect.gen(function* () {
+      const files = yield* AgentResourceService;
+      const mcp = yield* ImportedMcpService;
+      const isMcp = (yield* mcp.list).some((server) => server.id === id);
+      if (isMcp) return yield* mcp.setEnabled(id, enabled);
+      return yield* files.setEnabled(id, enabled);
+    }).pipe(
+      Effect.mapError((cause) => agentResourceError("enable", cause)),
+    ),
+  "AgentResources.reveal": ({ id }) =>
+    Effect.flatMap(AgentResourceService, (service) => service.reveal(id)).pipe(
+      Effect.tap((path) => Effect.sync(() => shell.showItemInFolder(path))),
+      Effect.asVoid,
+      Effect.mapError((cause) => agentResourceError("reveal", cause)),
+    ),
+  "AgentResources.enabledForTarget": ({ targetId }) =>
+    resourceEnabledForTarget(targetId),
+  "AgentResources.watch": () =>
+    Stream.merge(
+      Stream.unwrap(Effect.map(AgentResourceService, (service) => service.watch())),
+      Stream.unwrap(Effect.map(ImportedMcpService, (service) => service.watch())),
+    ).pipe(
+      Stream.mapEffect(() => resourceList),
+      Stream.catchAll(() => Stream.empty),
+    ),
   "Billing.paths": () => billingPaths,
   "Discovery.list": () => DiscoveryService.list(),
   "Environment.list": () => EnvironmentService.list,
@@ -5107,7 +5218,8 @@ export type RpcServerRequirements =
   | RemoteSessionService
   | SecretStore
   | SessionStore
-  | SkillsService
+  | AgentResourceService
+  | ImportedMcpService
   | TerminalService
   | ThemeService
   | TranscriptStore

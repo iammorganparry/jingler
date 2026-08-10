@@ -37,7 +37,6 @@ import {
   SessionStore,
   OpenConnectorService,
   OpenConnectorApi,
-  SkillsService,
   TerminalService,
   ThemeService,
   TranscriptStore,
@@ -54,6 +53,7 @@ import { BrowserControlPortLive } from "./browser-control-port-live.js"
 import { DialogServiceLive } from "./dialog.js"
 import { RpcServerLive } from "./rpc.js"
 import { ProviderConnectionsLive } from "./provider-connections-live.js"
+import { AgentResourcesLive } from "./agent-resources-live.js"
 import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
 import {
   PlaintextPluginSecretStoreLive,
@@ -106,6 +106,7 @@ const AssetLayer: Layer.Layer<AssetService, never, never> =
 
 const PiRuntimeLayer = PiAgentRuntimeLive.pipe(
   Layer.provide(AssetLayer),
+  Layer.provide(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
   Layer.provide(SecretStoreLayer)
 )
@@ -120,6 +121,7 @@ const AgentExecutionLayer = isScriptedEnv()
 // dependencies (paths, dialog, Node platform) come last.
 const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(RuntimeDiagnostics.Default),
+  Layer.provideMerge(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
   // provideMerge: the RPC handlers consume DiscoveryService AND the main process
   // reaches the same instance to warm the model cache at startup (index.ts).
@@ -170,7 +172,6 @@ const AppServicesLayer = RpcServicesLayer.pipe(
   // neither depends on the other, so the composition is unchanged.
   Layer.provide(
     Layer.mergeAll(
-      SkillsService.Default,
       OpenConnectorService.Default,
       OpenConnectorApi.Default
     )

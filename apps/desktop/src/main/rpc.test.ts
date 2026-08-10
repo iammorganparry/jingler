@@ -11,6 +11,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AppPaths,
+  AgentResourceService,
   AssetService,
   CliAdapter,
   ConfigService,
@@ -19,6 +20,7 @@ import {
   GitService,
   InMemorySecretStoreLive,
   MemoryService,
+  makeAgentResourceService,
   ModelsService,
   PlanStore,
   PluginAuth,
@@ -30,7 +32,6 @@ import {
   ReviewStore,
   SessionStore,
   TranscriptStore,
-  SkillsService,
   TerminalService,
   WorkspaceService,
 } from "@jingler/cli-adapters";
@@ -51,6 +52,7 @@ import type {
 import {
   GitError,
   GitHubApiError,
+  DetectedResourceCandidate,
   planStageSemanticFingerprint,
 } from "@jingler/core";
 import {
@@ -67,6 +69,7 @@ import {
   Fiber,
   Layer,
   Logger,
+  Schema,
   Stream,
 } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -772,7 +775,10 @@ describe("RPC handlers", () => {
             Layer.mergeAll(
               base,
               SessionStore.Default,
-              SkillsService.Default,
+              Layer.effect(
+                AgentResourceService,
+                makeAgentResourceService({ managedRoot: join(root, "agent-resources") }),
+              ),
               noHarnesses,
             ),
           ),
@@ -787,6 +793,49 @@ describe("RPC handlers", () => {
       expect(skills.map((s) => s.name)).not.toContain("/plan");
       expect(skills.map((s) => s.name)).not.toContain("/test");
       expect(skills.map((s) => s.name)).not.toContain("/commit");
+    });
+
+    it("uses enabled Jingler-managed resources as the composer command surface", async () => {
+      const sourceRoot = join(dir, "detected", "prompts");
+      const sourcePath = join(sourceRoot, "review.md");
+      mkdirSync(sourceRoot, { recursive: true });
+      writeFileSync(sourcePath, "Review the current changes");
+      const service = await Effect.runPromise(
+        makeAgentResourceService({ managedRoot: join(root, "agent-resources") }),
+      );
+      const candidate = Schema.decodeUnknownSync(DetectedResourceCandidate)({
+        id: "review",
+        kind: "prompt",
+        name: "Review",
+        description: "Review current changes",
+        byteLength: 26,
+        provenance: {
+          origin: "jingler",
+          sourceRoot,
+          sourcePath,
+          importedAt: null,
+        },
+      });
+      await Effect.runPromise(service.importResources(
+        [candidate],
+        { kind: "portable", allowedTargets: [] },
+      ));
+
+      const skills = await Effect.runPromise(
+        skillsList("nope").pipe(
+          Effect.provide(Layer.mergeAll(
+            base,
+            SessionStore.Default,
+            Layer.succeed(AgentResourceService, service),
+          )),
+        ),
+      );
+
+      expect(skills).toEqual([{
+        name: "/review",
+        description: "Review current changes",
+        source: "command",
+      }]);
     });
   });
 
