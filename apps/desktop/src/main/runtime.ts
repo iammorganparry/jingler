@@ -23,8 +23,6 @@ import {
   GitHubAuth,
   GitHubEventStore,
   GitService,
-  HarnessCliAdapterLive,
-  isScriptedEnv,
   ModelsService,
   MemoryServiceLive,
   makePiAgentRuntimeLive,
@@ -125,11 +123,9 @@ const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(SecretStoreLayer)
 )
 
-// Scripted mode remains an explicit hermetic test transport. Every production
-// conversation and background role reaches the same embedded pi runtime.
-const AgentExecutionLayer = isScriptedEnv()
-  ? Layer.mergeAll(HarnessCliAdapterLive, PiRuntimeLayer)
-  : AgentRuntimeAdapterLive.pipe(Layer.provideMerge(PiRuntimeLayer))
+const AgentExecutionLayer = AgentRuntimeAdapterLive.pipe(
+  Layer.provideMerge(PiRuntimeLayer)
+)
 
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
 // dependencies (paths, dialog, Node platform) come last.
