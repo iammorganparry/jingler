@@ -81,6 +81,15 @@ const field = (content: string, key: string): string | null => {
 
 const baseName = (entry: string): string => entry.replace(/\.(md|skill)$/i, "")
 
+/** Shared parser for imported and legacy skill documents. */
+export const skillMetadataFromContent = (
+  content: string,
+  fallbackName: string
+): { readonly name: string; readonly description: string } => ({
+  name: field(content, "name") ?? baseName(fallbackName),
+  description: field(content, "description") ?? "Skill"
+})
+
 type ScanEnv = FileSystem.FileSystem | Path.Path
 
 /**
@@ -119,10 +128,10 @@ const scanSkillsDir = ({
           if (!isDir && !/\.(md|skill)$/i.test(entry)) return null
           const mdPath = isDir ? path.join(full, "SKILL.md") : full
           const content = yield* fs.readFileString(mdPath).pipe(Effect.orElseSucceed(() => ""))
-          const bareName = field(content, "name") ?? baseName(entry)
+          const metadata = skillMetadataFromContent(content, entry)
           const skill: Skill = {
-            name: `/${namespace ? `${namespace}:` : ""}${bareName}`,
-            description: field(content, "description") ?? "Skill",
+            name: `/${namespace ? `${namespace}:` : ""}${metadata.name}`,
+            description: metadata.description,
             source: "skill"
           }
           return skill

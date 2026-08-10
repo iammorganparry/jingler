@@ -117,6 +117,26 @@ export type ResourceImportDiagnostic = Schema.Schema.Type<
   typeof ResourceImportDiagnostic
 >
 
+export const DetectedResourceCandidate = Schema.Struct({
+  id: ManagedResourceId,
+  kind: ManagedResourceKind,
+  name: Schema.String,
+  description: Schema.String,
+  byteLength: Schema.Int.pipe(Schema.nonNegative()),
+  provenance: ManagedResourceProvenance
+})
+export type DetectedResourceCandidate = Schema.Schema.Type<
+  typeof DetectedResourceCandidate
+>
+
+export const ResourceDetectionResult = Schema.Struct({
+  candidates: Schema.Array(DetectedResourceCandidate),
+  skipped: Schema.Array(ResourceImportDiagnostic)
+})
+export type ResourceDetectionResult = Schema.Schema.Type<
+  typeof ResourceDetectionResult
+>
+
 export const ResourceImportResult = Schema.Struct({
   imported: Schema.Array(ManagedResourceId),
   skipped: Schema.Array(ResourceImportDiagnostic)
