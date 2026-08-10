@@ -20,6 +20,12 @@ import {
   type ModelCertification
 } from "@jingler/core"
 import { Effect, Layer } from "effect"
+import {
+  e2eCertification,
+  e2eDiscoveredModel,
+  e2eProviderConnection,
+  loadE2ePiFixture
+} from "./e2e/pi-fixture.js"
 
 const HTTP_URL = /^https?:\/\//i
 
@@ -99,6 +105,10 @@ export const ProviderConnectionsLive = Layer.effect(
     const paths = yield* AppPaths
     const secretStore = yield* SecretStore
     const credentials = new AgentSecretStore(secretStore)
+    const e2eFixture = loadE2ePiFixture()
+    const e2eConnection = e2eFixture === null
+      ? null
+      : e2eProviderConnection(e2eFixture)
     const broker = yield* makeAuthBroker({
       credentials,
       codexOAuth: makePiCodexOAuthFlow(),
@@ -107,11 +117,31 @@ export const ProviderConnectionsLive = Layer.effect(
     const certifications = new FileModelCertificationStore(
       paths.certificationsFile
     )
+    if (e2eFixture !== null && e2eConnection !== null) {
+      const connection = e2eConnection
+      yield* credentials.write({
+        connectionId: connection.id,
+        authKind: connection.authKind,
+        access: "e2e-provider-credential",
+        refresh: connection.authKind === "openai-codex-oauth" ? "e2e-refresh" : null,
+        expiresAt: null
+      })
+      yield* broker.restore([connection])
+      yield* Effect.tryPromise({
+        try: () => certifications.put(e2eCertification(e2eFixture)),
+        catch: (cause) => new ProviderConnectionsError({
+          message: "Failed to seed the e2e model certification",
+          cause
+        })
+      })
+    }
     const catalog = yield* makeProviderCatalogService({
       connections: broker.list,
       certifications,
       discover: (connection, signal) =>
-        discoverPiModels(credentials, connection, signal),
+        e2eConnection !== null && connection.id === e2eConnection.id
+          ? Effect.succeed([e2eDiscoveredModel()])
+          : discoverPiModels(credentials, connection, signal),
       targetAvailable: (connection) => connection.targetId === "desktop"
     })
     return yield* makeProviderConnections({
@@ -132,11 +162,14 @@ export const ProviderConnectionsLive = Layer.effect(
               })
             )
           }
-          const certification = incompleteCertification(
-            connection.providerId,
-            input.modelId,
-            connection.authKind
-          )
+          const certification = e2eFixture !== null && e2eConnection !== null &&
+              connection.id === e2eConnection.id
+            ? e2eCertification(e2eFixture)
+            : incompleteCertification(
+                connection.providerId,
+                input.modelId,
+                connection.authKind
+              )
           yield* Effect.tryPromise({
             try: () => certifications.put(certification),
             catch: (cause) =>

@@ -1,13 +1,15 @@
+import { Effect, Layer } from "effect"
+import { AppPaths } from "../../app-paths.js"
+import { SecretStore } from "../../secret-store.js"
+import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import {
   AgentResourceService,
-  AgentSecretStore,
-  AppPaths,
+  makeAgentResourceService
+} from "./agent-resource-service.js"
+import {
   ImportedMcpService,
-  makeAgentResourceService,
-  makeImportedMcpService,
-  SecretStore
-} from "@jingler/cli-adapters"
-import { Effect, Layer } from "effect"
+  makeImportedMcpService
+} from "./imported-mcp-service.js"
 
 const FileResourcesLive = Layer.effect(
   AgentResourceService,
@@ -28,5 +30,5 @@ const ImportedMcpLive = Layer.effect(
   })
 )
 
-/** Shared app-lifetime resource services for runtime composition and typed RPC. */
+/** Shared app-lifetime resource services for desktop and device pi runtimes. */
 export const AgentResourcesLive = Layer.merge(FileResourcesLive, ImportedMcpLive)

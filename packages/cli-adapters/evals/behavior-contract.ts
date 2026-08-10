@@ -78,6 +78,11 @@ export const toolEffect = (tool: string): EvalMatcher => ({
   matches: (observation) => observation.kind === "tool-effect" && observation.tool === tool
 })
 
+export const toolCall = (tool: string): EvalMatcher => ({
+  description: `tool-call:${tool}`,
+  matches: (observation) => observation.kind === "tool-call" && observation.tool === tool
+})
+
 export const permission = (tool: string, decision: "allow" | "deny"): EvalMatcher => ({
   description: `permission:${tool}:${decision}`,
   matches: (observation) =>

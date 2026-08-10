@@ -8,6 +8,7 @@
  */
 import {
   AgentRunner,
+  AgentResourcesLive,
   AgentRuntimeAdapterLive,
   AssetService,
   AuthService,
@@ -26,6 +27,7 @@ import {
   isScriptedEnv,
   ModelsService,
   MemoryServiceLive,
+  makePiAgentRuntimeLive,
   PiAgentRuntimeLive,
   PlanStore,
   PluginRegistry,
@@ -53,7 +55,10 @@ import { BrowserControlPortLive } from "./browser-control-port-live.js"
 import { DialogServiceLive } from "./dialog.js"
 import { RpcServerLive } from "./rpc.js"
 import { ProviderConnectionsLive } from "./provider-connections-live.js"
-import { AgentResourcesLive } from "./agent-resources-live.js"
+import {
+  configureE2ePiProvider,
+  loadE2ePiFixture
+} from "./e2e/pi-fixture.js"
 import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
 import {
   PlaintextPluginSecretStoreLive,
@@ -104,7 +109,14 @@ const HarnessLayers = Layer.mergeAll(
 const AssetLayer: Layer.Layer<AssetService, never, never> =
   AssetService.Default.pipe(Layer.provide(NodeContext.layer))
 
-const PiRuntimeLayer = PiAgentRuntimeLive.pipe(
+const e2ePiFixture = loadE2ePiFixture()
+const EmbeddedPiRuntimeLive = e2ePiFixture === null
+  ? PiAgentRuntimeLive
+  : makePiAgentRuntimeLive({
+      configureModelRuntime: configureE2ePiProvider(e2ePiFixture)
+    })
+
+const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(AssetLayer),
   Layer.provide(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),

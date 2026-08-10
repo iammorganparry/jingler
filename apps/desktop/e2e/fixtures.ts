@@ -25,7 +25,7 @@ import { startFakeGitHubRelay, type FakeGitHubRelay } from "./fake-github-relay.
 import { startFakeDeviceRelay, type FakeDeviceRelay } from "./fake-device-relay.js"
 import { installFakeSshHost } from "./fake-ssh-host.js"
 import { DEVICE_AGENT_ENTRY, MAIN_ENTRY } from "./global-setup.js"
-import { FALLBACK_MODELS } from "@jingler/core"
+import { FALLBACK_MODELS, type Chat } from "@jingler/core"
 
 /**
  * Model labels read from the catalogue rather than written out in each spec.
@@ -196,12 +196,20 @@ export interface SeedSession {
   readonly baseBranch?: string
   readonly model?: string
   readonly resumeId?: string
+  readonly connectionId?: string
+  readonly providerId?: string
+  readonly modelId?: string
+  readonly piSessionId?: string
+  readonly modelSelectionRequired?: boolean
+  readonly connectionSelectionRequired?: boolean
   readonly mode?: "ask" | "accept-edits" | "auto"
   readonly archived?: boolean
   readonly archiveReason?: "merged" | "closed"
   readonly archivedAt?: string
   readonly persistent?: boolean
   readonly workspaceMode?: "worktree" | "direct"
+  readonly chats?: ReadonlyArray<Chat>
+  readonly activeChatId?: string
 }
 
 export interface LaunchOptions {
@@ -218,7 +226,6 @@ export interface LaunchOptions {
   readonly piFixture?: {
     readonly scenarioId: string
     readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"
-    readonly observations: ReadonlyArray<Readonly<Record<string, unknown>>>
   }
   /**
    * Relaunch against an EXISTING `~/jingler` (a previous launch's `home`) —
@@ -267,7 +274,7 @@ export interface LaunchOptions {
    */
   readonly reviewTranscripts?: Record<string, ReadonlyArray<unknown>>
   /** Seed extra fixtures (e.g. project skills) after repo creation, before launch. */
-  readonly seed?: (ctx: { reposDir: string; repoPath: string }) => void
+  readonly seed?: (ctx: { home: string; reposDir: string; repoPath: string }) => void
   /**
    * Whether to boot past the sign-in wall (default true). When true the fixture
    * seeds a valid token so the app lands signed in; set false to assert the wall
@@ -965,7 +972,7 @@ export const test = base.extend<{
 
       // Seed extra fixtures (e.g. project skills) before launch, so they exist
       // when the app first scans them.
-      options.seed?.({ reposDir, repoPath })
+      options.seed?.({ home, reposDir, repoPath })
 
       const piFixtureFile = join(jinglerDir, "e2e-pi-fixture.json")
       if (options.piFixture) {

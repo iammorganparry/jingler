@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { promisify } from "node:util"
 import {
   CURRENT_RUNTIME_CONTRACTS,
+  defaultPlan,
   ProviderConnection,
   ProviderModelId,
   runtimeCapabilitiesMatch,
@@ -29,6 +30,14 @@ import { FileChangeTracker } from "../src/runtime/file-changes/file-change-track
 import { RunJournal } from "../src/runtime/journal/run-journal.js"
 import { createMutationObserver } from "../src/runtime/tools/mutation-observer.js"
 import { ToolRegistry } from "../src/runtime/tools/tool-registry.js"
+import { makeAgentResourceService } from "../src/runtime/resources/agent-resource-service.js"
+import { detectAgentResources } from "../src/runtime/resources/resource-detector.js"
+import { registerManagedFileTools } from "../src/runtime/resources/managed-file-tools.js"
+import {
+  registerMcpTools,
+  type McpToolClientFactory
+} from "../src/runtime/tools/mcp-tools.js"
+import type { RuntimeMcpServer } from "../src/runtime/mcp/attachment.js"
 
 const runFile = promisify(execFile)
 const ALL_ROLES = ["conversation", "plan", "plan-execution", "background"] as const
@@ -59,6 +68,14 @@ const responsesFor = (scenarioId: string): ReadonlyArray<FakePiResponse> => {
       fauxAssistantMessage("complete")
     ]
   }
+  if (scenarioId === "capability.managed-resources") {
+    return [
+      fauxAssistantMessage(fauxToolCall("resource__managed-skill", {}), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("resource__managed-prompt", {}), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("mcp__managed__write_file", {}), { stopReason: "toolUse" }),
+      fauxAssistantMessage("complete")
+    ]
+  }
   if (scenarioId === "structured.question-plan") {
     return [
       fauxAssistantMessage(
@@ -80,15 +97,7 @@ const responsesFor = (scenarioId: string): ReadonlyArray<FakePiResponse> => {
       ),
       fauxAssistantMessage(
         fauxToolCall("jingler_submit_plan", {
-          plan: {
-            id: "eval-plan",
-            summary: "Verify deterministic structured interaction.",
-            steps: [],
-            comments: [],
-            status: "proposed",
-            structured: true,
-            raw: "Verify deterministic structured interaction."
-          }
+          plan: defaultPlan("Verify deterministic structured interaction.")
         }),
         { stopReason: "toolUse" }
       ),
@@ -178,6 +187,69 @@ const resourceRegistry = (observations: Array<EvalObservation>): ToolRegistry =>
   return registry
 }
 
+const managedResourceRegistry = async (
+  root: string,
+  observations: Array<EvalObservation>
+): Promise<ToolRegistry> => {
+  const skillDir = join(root, ".agents", "skills", "managed-skill")
+  const promptDir = join(root, ".pi", "agent", "prompts")
+  await mkdir(skillDir, { recursive: true })
+  await mkdir(promptDir, { recursive: true })
+  await writeFile(join(skillDir, "SKILL.md"), "name: managed-skill\ndescription: Managed skill fixture\nUse the managed skill.")
+  await writeFile(join(promptDir, "managed-prompt.md"), "Use the managed prompt.")
+  const service = await Effect.runPromise(makeAgentResourceService({
+    managedRoot: join(root, ".jingler", "managed-resources")
+  }))
+  const detected = await Effect.runPromise(detectAgentResources({
+    homeDir: null,
+    worktreePath: root
+  }))
+  await Effect.runPromise(service.importResources(
+    detected.candidates.filter((candidate) => candidate.kind !== "mcp"),
+    { kind: "portable", allowedTargets: [] }
+  ))
+  const tracker = new FileChangeTracker({
+    artifactDir: join(root, ".jingler", "managed-diffs"),
+    sessionId: "eval-session"
+  })
+  const registry = new ToolRegistry({
+    observer: createMutationObserver({
+      cwd: root,
+      runId: "eval-managed-run",
+      tracker,
+      journal: new RunJournal({ file: join(root, ".jingler", "managed-run.json") })
+    })
+  })
+  registerManagedFileTools(
+    registry,
+    service,
+    await Effect.runPromise(service.enabledForTarget("desktop"))
+  )
+  const server: RuntimeMcpServer = {
+    name: "managed",
+    url: "https://managed.invalid/mcp",
+    headers: {}
+  }
+  const factory: McpToolClientFactory = () => {
+    observations.push({ kind: "resource", name: "managed-mcp", state: "opened" })
+    return Effect.succeed({
+      listTools: () => Effect.succeed({
+        tools: [{ name: "write_file", inputSchema: { type: "object", additionalProperties: false } }]
+      }),
+      callTool: () => Effect.promise(async () => {
+        observations.push({ kind: "tool-effect", tool: "mcp__managed__write_file" })
+        await writeFile(join(root, "src", "mcp-created.ts"), "export const managed = true\n")
+        return { content: [{ type: "text", text: "created" }] }
+      }),
+      close: Effect.sync(() => {
+        observations.push({ kind: "resource", name: "managed-mcp", state: "closed" })
+      })
+    })
+  }
+  await Effect.runPromise(registerMcpTools(registry, [{ server, risk: "execute" }], factory))
+  return registry
+}
+
 const observeStreamEvent = (
   event: StreamEvent,
   registry: ToolRegistry | undefined
@@ -250,12 +322,15 @@ const credentialsFor = async (
   return credentials
 }
 
-const registryFor = (
+const registryFor = async (
   scenarioId: string,
   root: string,
   observations: Array<EvalObservation>
-): ToolRegistry | undefined => {
+): Promise<ToolRegistry | undefined> => {
   if (scenarioId === "resource.cleanup") return resourceRegistry(observations)
+  if (scenarioId === "capability.managed-resources") {
+    return managedResourceRegistry(root, observations)
+  }
   return scenarioId === "permission.denied-edit" ||
     scenarioId === "diff.create-edit-delete-rename"
     ? fileChangeRegistry(root, observations)
@@ -396,7 +471,7 @@ export const runDeterministicScenario = async (
   fake.setResponses(responsesFor(scenarioId))
   const connection = connectionFor(fake, authKind)
   const credentials = await credentialsFor(connection, authKind)
-  const registry = registryFor(scenarioId, root, observations)
+  const registry = await registryFor(scenarioId, root, observations)
   const spec = specFor({ scenarioId, root, connection, fake, registry })
   const context = contextFor(scenarioId, observations)
 

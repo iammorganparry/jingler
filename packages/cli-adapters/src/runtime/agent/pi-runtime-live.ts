@@ -8,24 +8,35 @@ import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
 import { ProviderConnections } from "../providers/provider-connections.js"
 import { ImportedMcpService } from "../resources/imported-mcp-service.js"
+import { AgentResourceService } from "../resources/agent-resource-service.js"
+import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
 import { AgentRuntime, AgentRuntimeError } from "./agent-runtime.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
+import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
 
 const connectionFailure = (message: string, cause?: unknown) =>
   new AgentRuntimeError({ reason: "authentication", message, cause })
 
-/** Production composition for the embedded pi runtime and Jingler-owned tools. */
-export const PiAgentRuntimeLive = Layer.effect(
+export interface PiAgentRuntimeLiveOptions {
+  /** Explicit test transport seam. Production must leave this unset. */
+  readonly configureModelRuntime?: PiSessionFactoryOptions["configureModelRuntime"]
+}
+
+/** Composition for the embedded pi runtime and Jingler-owned tools. */
+export const makePiAgentRuntimeLive = (
+  options: PiAgentRuntimeLiveOptions = {}
+) => Layer.effect(
   AgentRuntime,
   Effect.gen(function* () {
     const paths = yield* AppPaths
     const secretStore = yield* SecretStore
     const providers = yield* ProviderConnections
     const importedMcp = yield* ImportedMcpService
+    const managedResources = yield* AgentResourceService
     const workspace = yield* makeWorkspaceInspectionPort
     const credentials = new AgentSecretStore(secretStore)
     const runIds = new WeakMap<FileChangeTracker, string>()
@@ -111,7 +122,10 @@ export const PiAgentRuntimeLive = Layer.effect(
             })
           )
         }
-        return importedMcp.resolveForTarget(spec.targetCapabilities.targetId).pipe(
+        return Effect.all({
+          managedMcp: importedMcp.resolveForTarget(spec.targetCapabilities.targetId),
+          managedFiles: managedResources.enabledForTarget(spec.targetCapabilities.targetId)
+        }).pipe(
           Effect.mapError((cause) =>
             new AgentRuntimeError({
               reason: "runtime",
@@ -119,7 +133,7 @@ export const PiAgentRuntimeLive = Layer.effect(
               cause
             })
           ),
-          Effect.flatMap((managedMcp) => createJinglerTools({
+          Effect.flatMap(({ managedMcp, managedFiles }) => createJinglerTools({
             context,
             cwd: spec.cwd,
             workspace,
@@ -140,7 +154,11 @@ export const PiAgentRuntimeLive = Layer.effect(
                 })
               })
             }
-          })),
+          }).pipe(
+            Effect.tap((registry) => Effect.sync(() =>
+              registerManagedFileTools(registry, managedResources, managedFiles)
+            ))
+          )),
           Effect.mapError((cause) =>
             new AgentRuntimeError({
               reason: "runtime",
@@ -149,9 +167,15 @@ export const PiAgentRuntimeLive = Layer.effect(
             })
           )
         )
-      }
+      },
+      ...(options.configureModelRuntime
+        ? { configureModelRuntime: options.configureModelRuntime }
+        : {})
     })
 
     return yield* makePiAgentRuntime(factory)
   })
 )
+
+/** Production composition: no alternate provider transport is installed. */
+export const PiAgentRuntimeLive = makePiAgentRuntimeLive()

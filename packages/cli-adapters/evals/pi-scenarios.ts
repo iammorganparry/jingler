@@ -9,6 +9,7 @@ import {
   resourceClosed,
   resourceOpened,
   toolEffect,
+  toolCall,
   type EvalScenario
 } from "./behavior-contract.js"
 
@@ -66,6 +67,21 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
     id: "resource.cleanup",
     capability: "resources",
     required: [resourceOpened("managed-mcp"), resourceClosed("managed-mcp"), event("Done")],
+    forbidden: [],
+    ordering: [before(resourceOpened("managed-mcp"), resourceClosed("managed-mcp"))]
+  }),
+  scenario({
+    id: "capability.managed-resources",
+    capability: "resources",
+    required: [
+      toolCall("resource__managed-skill"),
+      toolCall("resource__managed-prompt"),
+      toolCall("mcp__managed__write_file"),
+      fileChange("A", "src/mcp-created.ts"),
+      resourceOpened("managed-mcp"),
+      resourceClosed("managed-mcp"),
+      event("Done")
+    ],
     forbidden: [],
     ordering: [before(resourceOpened("managed-mcp"), resourceClosed("managed-mcp"))]
   }),
