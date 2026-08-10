@@ -257,6 +257,10 @@ export class ToolRegistry {
     return this.#tools.get(id)?.risk ?? null
   }
 
+  inputSchemaFor(id: string): Schema.Schema<unknown, unknown> | null {
+    return this.#tools.get(id)?.input ?? null
+  }
+
   hasMutatingTools(role: AgentRole, mode: RuntimeMode): boolean {
     return [...this.#tools.values()].some(
       (tool) => allowed(tool, role, mode) && mutatingRisk(tool.risk)

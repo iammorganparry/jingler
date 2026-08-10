@@ -8,7 +8,7 @@ import { createPiTools } from "./pi-tool-bridge.js"
 const spec = {
   role: "conversation",
   mode: "ask"
-} as never
+} as const
 
 const mutationRegistry = (execute: () => Promise<unknown>): ToolRegistry => {
   const registry = new ToolRegistry({
@@ -54,6 +54,12 @@ describe("pi tool bridge", () => {
       proposePlan: () => Effect.succeed({ _tag: "Reject" })
     }
     const [tool] = createPiTools(registry, spec, context)
+
+    expect(tool?.parameters).toMatchObject({
+      type: "object",
+      required: ["path"],
+      properties: { path: { type: "string" } }
+    })
 
     const result = await tool?.execute(
       "call-1",

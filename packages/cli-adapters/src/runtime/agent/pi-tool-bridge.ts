@@ -5,7 +5,7 @@ import {
   type ToolDefinition as PiToolDefinition
 } from "@earendil-works/pi-coding-agent"
 import type { PiRunSpec } from "@jingler/core"
-import { Effect } from "effect"
+import { Effect, JSONSchema } from "effect"
 import type { ToolRegistry, ToolResultEnvelope } from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 
@@ -17,7 +17,7 @@ const renderResult = (result: ToolResultEnvelope): string => {
 
 interface PiToolExecution {
   readonly registry: ToolRegistry
-  readonly spec: PiRunSpec
+  readonly spec: Pick<PiRunSpec, "role" | "mode">
   readonly context: AgentRuntimeContext
   readonly id: string
   readonly toolCallId: string
@@ -78,16 +78,20 @@ const executeTool = async (
 /** Adapt the exact active Jingler registry into pi custom tools. */
 export const createPiTools = (
   registry: ToolRegistry,
-  spec: PiRunSpec,
+  spec: Pick<PiRunSpec, "role" | "mode">,
   context: AgentRuntimeContext
 ): ReadonlyArray<PiToolDefinition> =>
-  registry.capabilitiesFor(spec.role, spec.mode).map((capability) =>
-    defineTool({
+  registry.capabilitiesFor(spec.role, spec.mode).map((capability) => {
+    const input = registry.inputSchemaFor(capability.id)
+    if (input === null) {
+      throw new Error(`Active tool has no input schema: ${capability.id}`)
+    }
+    return defineTool({
       name: capability.id,
       label: capability.id,
       description: capability.description,
       promptSnippet: capability.description,
-      parameters: Type.Record(Type.String(), Type.Unknown()),
+      parameters: Type.Unsafe(JSONSchema.make(input)),
       execute: (toolCallId, parameters, signal, onUpdate) =>
         executeTool({
           registry,
@@ -100,4 +104,4 @@ export const createPiTools = (
           onUpdate
         })
     })
-  )
+  })

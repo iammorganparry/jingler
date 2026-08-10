@@ -12,6 +12,7 @@ import type {
 import type { CliExecError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
 import { planTaskProgressFingerprint } from "./plan-task-progress.js"
+import type { RuntimeMcpServer } from "./runtime/mcp/attachment.js"
 import { isE2eEnv } from "./scripted.js"
 
 /**
@@ -21,17 +22,7 @@ import { isE2eEnv } from "./scripted.js"
  * this source-neutral shape immediately before a run; adapters consume it
  * in-memory and never persist or expose it through RPC.
  */
-export interface RemoteMcpServer {
-  readonly name: string
-  readonly url: string
-  readonly headers: Readonly<Record<string, string>>
-  /**
-   * Optional header-to-environment-name map for harnesses that can resolve
-   * secret headers from their launch environment instead of exposing values in
-   * command-line arguments.
-   */
-  readonly headerEnvironment?: Readonly<Record<string, string>>
-}
+export type RemoteMcpServer = RuntimeMcpServer
 
 /** Parameters for starting a new agent turn against a CLI. */
 export interface SessionSpec {

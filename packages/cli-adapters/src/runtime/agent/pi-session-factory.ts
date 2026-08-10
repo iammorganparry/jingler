@@ -47,6 +47,10 @@ export interface PiSessionFactoryOptions {
   readonly toolRegistry?:
     | ToolRegistry
     | ((context: AgentRuntimeContext) => ToolRegistry)
+  readonly createToolRegistry?: (
+    spec: PiRunSpec,
+    context: AgentRuntimeContext
+  ) => Effect.Effect<ToolRegistry, AgentRuntimeError>
   readonly promptTokenBudget?: number
   readonly terminalTracker?: FileChangeTracker
   /** Internal extension point for deterministic providers; production leaves it unset. */
@@ -249,8 +253,9 @@ export const makePiSessionFactory = (
     Effect.gen(function* () {
       const connection = yield* options.resolveConnection(spec)
       yield* validateConnection(spec, connection)
-      const registry =
-        typeof options.toolRegistry === "function"
+      const registry = options.createToolRegistry
+        ? yield* options.createToolRegistry(spec, context)
+        : typeof options.toolRegistry === "function"
           ? options.toolRegistry(context)
           : (options.toolRegistry ?? createJinglerControlTools(context))
       if (
