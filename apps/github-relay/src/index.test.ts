@@ -1,6 +1,6 @@
 import { env, introspectWorkflow, SELF } from "cloudflare:test"
 import { describe, expect, it } from "vitest"
-import { githubPayload, hmacHex, issueTestRelayGrant } from "./test-support.js"
+import { githubPayload, hmacHex, issueTestRelayGrant, normalizedEvent } from "./test-support.js"
 
 const signedWebhook = async (
   deliveryId: string,
@@ -129,6 +129,57 @@ describe("GitHub relay HTTP boundary", () => {
     }
   })
 
+  it("delivers a Devin bot finding posted in the pull-request conversation", async () => {
+    const relaySessionId = "relay-session-devin-conversation"
+    const installationId = "9912"
+    const repositoryId = "1012"
+    const pullRequestNumber = 52
+    await registerRouteDirectly(
+      relaySessionId,
+      pullRequestNumber,
+      installationId,
+      repositoryId
+    )
+    const introspector = await introspectWorkflow(env.GITHUB_DELIVERY_WORKFLOW)
+    try {
+      const response = await signedWebhook(
+        "devin-conversation-finding",
+        githubPayload({
+          installation: { id: Number(installationId) },
+          repository: {
+            id: Number(repositoryId),
+            name: "jingler",
+            full_name: "acme/jingler",
+            owner: { login: "acme" }
+          },
+          issue: {
+            id: 252,
+            number: pullRequestNumber,
+            title: "Improve relay",
+            html_url: `https://github.com/acme/jingler/pull/${pullRequestNumber}`,
+            pull_request: {
+              url: `https://api.github.com/repos/acme/jingler/pulls/${pullRequestNumber}`
+            }
+          },
+          sender: { id: 8, login: "devin-ai-integration[bot]", type: "Bot" },
+          comment: {
+            id: 901,
+            body: "Potential bug: this refresh can use an expired token.",
+            created_at: "2026-08-10T09:00:00Z"
+          }
+        })
+      )
+
+      expect(response.status).toBe(202)
+      const [instance] = await introspector.get()
+      expect(instance).toBeDefined()
+      await instance!.waitForStatus("complete")
+      await expect(env.SESSION_EVENTS.getByName(relaySessionId).eventCount()).resolves.toBe(1)
+    } finally {
+      await introspector.dispose()
+    }
+  })
+
   it("drops non-actionable CI state before creating a delivery Workflow", async () => {
     const introspector = await introspectWorkflow(env.GITHUB_DELIVERY_WORKFLOW)
     try {
@@ -163,6 +214,59 @@ describe("GitHub relay HTTP boundary", () => {
     } finally {
       await introspector.dispose()
     }
+  })
+
+  it("flushes retained review feedback when GitHub reports the pull request merged", async () => {
+    const relaySessionId = "relay-session-merged-webhook"
+    const installationId = "9913"
+    const repositoryId = "1013"
+    const pullRequestNumber = 53
+    await registerRouteDirectly(
+      relaySessionId,
+      pullRequestNumber,
+      installationId,
+      repositoryId
+    )
+    const stream = env.SESSION_EVENTS.getByName(relaySessionId)
+    await stream.publish(normalizedEvent({
+      deliveryId: "stale-review",
+      semanticKey: "stale-review"
+    }))
+
+    const response = await signedWebhook(
+      "merged-pull-request",
+      githubPayload({
+        action: "closed",
+        installation: { id: Number(installationId) },
+        repository: {
+          id: Number(repositoryId),
+          name: "jingler",
+          full_name: "acme/jingler",
+          owner: { login: "acme" }
+        },
+        pull_request: {
+          id: 200,
+          number: pullRequestNumber,
+          title: "Improve relay",
+          html_url: `https://github.com/acme/jingler/pull/${pullRequestNumber}`,
+          updated_at: "2026-08-10T10:00:00Z",
+          merged: true,
+          merged_at: "2026-08-10T10:00:00Z",
+          head: { sha: "head" },
+          base: { sha: "base" }
+        }
+      }),
+      "pull_request"
+    )
+
+    expect(response.status).toBe(202)
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      ignored: true,
+      reason: "pull_request_merged",
+      flushedEvents: 1
+    })
+    await expect(stream.eventCount()).resolves.toBe(0)
   })
 
   it("accepts signed session route registration through a deterministic Workflow", async () => {

@@ -127,6 +127,18 @@ export class SessionEventsObject extends DurableObject<Env> {
     return closed
   }
 
+  /** Drop feedback retained for a PR that has reached its terminal merged state. */
+  async flush(reason = "Pull request merged"): Promise<number> {
+    const closed = await this.closeSockets(reason)
+    const events = this.ctx.storage.sql.exec("DELETE FROM events")
+    relayTelemetry("session_stream_flushed", {
+      closedSockets: closed,
+      rowsRead: events.rowsRead,
+      rowsWritten: events.rowsWritten
+    })
+    return events.rowsWritten
+  }
+
   /** Permanently remove an unlinked/replaced stream while retaining its schema. */
   async retire(reason = "Session route removed"): Promise<number> {
     const closed = await this.closeSockets(reason)

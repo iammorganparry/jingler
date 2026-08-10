@@ -72,6 +72,14 @@ describe("session event persistence", () => {
     await expect(stream.eventCount()).resolves.toBe(0)
   })
 
+  it("flushes retained review events when the linked pull request merges", async () => {
+    const stream = env.SESSION_EVENTS.getByName("relay-session-merged")
+    await stream.publish(normalizedEvent({ deliveryId: "merged", semanticKey: "merged" }))
+
+    await expect(stream.flush()).resolves.toBe(1)
+    await expect(stream.eventCount()).resolves.toBe(0)
+  })
+
   it("replays only unacknowledged session events after an offline reconnect", async () => {
     const relaySessionId = "relay-session-offline-replay"
     const stream = env.SESSION_EVENTS.getByName(relaySessionId)

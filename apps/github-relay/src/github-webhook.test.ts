@@ -102,7 +102,7 @@ describe("GitHub webhook normalization", () => {
     })
   })
 
-  it("routes a bot's submitted review to the agent but ignores a bot's issue comment", async () => {
+  it("routes Devin review feedback on both GitHub review surfaces but ignores unrelated bot chatter", async () => {
     const reviewPayload = (overrides: Record<string, unknown> = {}) => ({
       action: "submitted",
       sender: { id: 8, login: "devin-ai-integration[bot]", type: "Bot" },
@@ -137,7 +137,28 @@ describe("GitHub webhook normalization", () => {
       feedback: { kind: "review", body: "This needs a null check." }
     })
 
-    // The same bot's build/deploy chatter arrives as an issue_comment — ignored.
+    const devinConversationFinding = await normalizeGitHubWebhook({
+      deliveryId: "d-devin-issue",
+      eventName: "issue_comment",
+      ourAppId: "424242",
+      payload: githubPayload({
+        sender: { id: 8, login: "devin-ai-integration[bot]", type: "Bot" },
+        comment: {
+          id: 501,
+          body: "Potential bug: this refresh can use an expired token.",
+          created_at: "2026-08-05T10:01:00Z"
+        }
+      })
+    })
+    expect(devinConversationFinding).toMatchObject({
+      actionable: true,
+      feedback: {
+        kind: "issue-comment",
+        body: "Potential bug: this refresh can use an expired token."
+      }
+    })
+
+    // An unrelated bot's build/deploy chatter arrives as an issue_comment — ignored.
     const noise = await normalizeGitHubWebhook({
       deliveryId: "d-bot-issue",
       eventName: "issue_comment",

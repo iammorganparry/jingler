@@ -270,12 +270,15 @@ export const normalizeGitHubWebhook = async (input: {
     ((event === "pull_request_review_comment" || event === "issue_comment") &&
       action === "created")
   // Which authors' feedback the agent acts on. Humans are trusted on every
-  // surface. Bots are trusted ONLY on the review surface — a submitted review
-  // or an inline diff comment — so a reviewer like Devin reaches the agent while
-  // an issue_comment bot (Vercel deploy notices, CI chatter) stays out. And a
+  // surface. Bots are trusted on the review surface, while Devin's documented
+  // review identity is also trusted for PR conversation comments: Devin emits
+  // findings there as well as inline comments. Other issue-comment bots (Vercel
+  // deploy notices, CI chatter) stay out. And a
   // review this very GitHub App posted (Jingler's own "submitReview") must never
   // route back into the session it came from, so exclude our own app's posts.
   const human = actorType.toLocaleLowerCase("en-US") === "user"
+  const trustedReviewBot =
+    actorLogin.toLocaleLowerCase("en-US") === "devin-ai-integration[bot]"
   const reviewSurface =
     event === "pull_request_review" || event === "pull_request_review_comment"
   const feedbackSource =
@@ -295,7 +298,7 @@ export const normalizeGitHubWebhook = async (input: {
     actionableAction &&
     feedback !== null &&
     !postedByOurApp &&
-    (human || reviewSurface)
+    (human || reviewSurface || trustedReviewBot)
   const occurrence =
     (event === "status"
       ? string(payload.updated_at) ?? string(payload.created_at)

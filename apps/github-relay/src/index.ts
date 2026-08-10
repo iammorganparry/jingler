@@ -178,6 +178,28 @@ const handleWebhook = async (request: Request, env: Env): Promise<Response> => {
     })
     return json({ accepted: true, ignored: true, reason: "no_pull_request_route" }, 202)
   }
+  const pullRequestPayload = record(record(payload)?.pull_request)
+  const pullRequestMerged =
+    event.event === "pull_request" &&
+    event.action === "closed" &&
+    (pullRequestPayload?.merged === true || typeof pullRequestPayload?.merged_at === "string")
+  if (pullRequestMerged) {
+    const routes = env.INSTALLATION_ROUTES.getByName(event.installationId)
+    const flushedEvents = await routes.flushPullRequestEvents(
+      event.repository.id,
+      event.pullRequest.number
+    )
+    relayTelemetry("pull_request_stream_flushed", {
+      installationId: event.installationId,
+      repositoryId: event.repository.id,
+      pullRequestNumber: event.pullRequest.number,
+      flushedEvents
+    })
+    return json(
+      { accepted: true, ignored: true, reason: "pull_request_merged", flushedEvents },
+      202
+    )
+  }
   // CI/check and pull-request state webhooks are useful for refreshing a PR
   // screen, but they are not feedback for an agent. Persisting them once per
   // linked session made busy repositories dominate the Durable Object budget.

@@ -2422,6 +2422,48 @@ const publishFailure = (
 });
 
 /**
+ * Re-read a session when semantic branch activation may have raced publication.
+ *
+ * Fresh sessions start detached and persist their semantic branch in a separate
+ * operation. Capturing the session before that write and comparing it with git
+ * afterwards used to reject the valid live branch as an external branch change.
+ */
+export const resolvePublishSessionBranch = async (
+  captured: Session,
+  liveBranch: string | null,
+  refresh: () => Promise<Session>,
+): Promise<{ readonly session: Session; readonly branch: string }> => {
+  const session =
+    captured.semanticBranchPending === true || liveBranch !== captured.branch
+      ? await refresh()
+      : captured;
+  if (session.semanticBranchPending === true) {
+    throw new Error(
+      "Finish creating the semantic task branch before publishing.",
+    );
+  }
+  if (!liveBranch) {
+    throw new Error(
+      "The task worktree is detached. Finish semantic branch creation before publishing.",
+    );
+  }
+  if (liveBranch !== session.branch) {
+    throw new Error(
+      `The worktree branch changed to ${liveBranch}. Refresh the session before publishing.`,
+    );
+  }
+  if (!isSessionPublishBranchReady(session, liveBranch)) {
+    if (workspaceModeOf(session) === "direct") {
+      throw new Error("Publishing requires an isolated session worktree.");
+    }
+    throw new Error(
+      "The worktree is not on a validated semantic task branch.",
+    );
+  }
+  return { session, branch: liveBranch };
+};
+
+/**
  * `Github.publish` is the sole mutation owner for publishing session work.
  * Installation credentials are captured only in this main-process scope and
  * cleared immediately after the authenticated push.
@@ -2449,7 +2491,7 @@ export const githubPublish = (sessionId: string) =>
       yield* Effect.forkScoped(
         Effect.tryPromise({
           try: async () => {
-            const session = await run(SessionStore.get(sessionId));
+            let session = await run(SessionStore.get(sessionId));
             if (!session.worktreePath) {
               const failure = publishFailure(
                 "This session has no worktree to publish.",
@@ -2490,34 +2532,13 @@ export const githubPublish = (sessionId: string) =>
                     return inspection;
                   },
                   verifyBranch: async (inspection) => {
-                    if (session.semanticBranchPending === true) {
-                      throw new Error(
-                        "Finish creating the semantic task branch before publishing.",
-                      );
-                    }
-                    if (!inspection.branch) {
-                      throw new Error(
-                        "The task worktree is detached. Finish semantic branch creation before publishing.",
-                      );
-                    }
-                    if (inspection.branch !== session.branch) {
-                      throw new Error(
-                        `The worktree branch changed to ${inspection.branch}. Refresh the session before publishing.`,
-                      );
-                    }
-                    if (
-                      !isSessionPublishBranchReady(session, inspection.branch)
-                    ) {
-                      if (workspaceModeOf(session) === "direct") {
-                        throw new Error(
-                          "Publishing requires an isolated session worktree.",
-                        );
-                      }
-                      throw new Error(
-                        "The worktree is not on a validated semantic task branch.",
-                      );
-                    }
-                    return inspection.branch;
+                    const resolved = await resolvePublishSessionBranch(
+                      session,
+                      inspection.branch,
+                      () => run(SessionStore.get(sessionId)),
+                    );
+                    session = resolved.session;
+                    return resolved.branch;
                   },
                   generateMetadata: (inspection) =>
                     run(
