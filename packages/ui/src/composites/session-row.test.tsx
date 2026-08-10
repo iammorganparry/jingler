@@ -6,6 +6,21 @@ import { SessionRow } from "./session-row.js"
 afterEach(cleanup)
 
 describe("SessionRow linked issue badge", () => {
+  it("does not present the base branch as the live branch while semantic naming is pending", () => {
+    render(
+      <SessionRow
+        session={testSession({
+          id: "pending-branch",
+          branch: "main",
+          semanticBranchPending: true
+        })}
+      />
+    )
+
+    expect(screen.getByText("Naming branch…")).toBeDefined()
+    expect(screen.queryByText("main")).toBeNull()
+  })
+
   it("preserves the historical GitHub number as a #identifier", () => {
     render(
       <SessionRow

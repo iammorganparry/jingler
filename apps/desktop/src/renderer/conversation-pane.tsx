@@ -909,6 +909,7 @@ export function ConversationPane({
           files={convo.files}
           paused={convo.paused}
           branch={session.branch}
+          branchPending={session.semanticBranchPending === true}
           repo={session.repo}
           environments={environments}
           environmentId={session.environmentId}

@@ -45,7 +45,7 @@ export function IssuePickerList({
   }
 
   return (
-    <div className="flex max-h-[248px] flex-col gap-[5px] overflow-auto pr-1">
+    <div className="flex max-h-[280px] flex-col gap-1.5 overflow-auto pr-1">
       {issues.map((issue) => {
         const on = issue.id === selected
         const assignee = issue.assignees[0]
@@ -56,40 +56,41 @@ export function IssuePickerList({
             onClick={() => onSelect(issue)}
             aria-pressed={on}
             className={cn(
-              "flex w-full flex-col gap-1.5 rounded-[7px] border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              on ? "border-blue/55 bg-blue/10" : "border-line bg-sunken hover:border-line-strong"
+              "flex w-full flex-col gap-2 rounded-lg border px-3.5 py-3 text-left outline-none transition-[background-color,border-color,transform] active:translate-y-px focus-visible:ring-2 focus-visible:ring-ring",
+              on ? "border-brand/60 bg-selection" : "border-line bg-sunken hover:border-line-strong hover:bg-surface"
             )}
           >
             <div className="flex min-w-0 items-center gap-2">
               <CircleDot size={14} className="flex-none text-green" />
               <span
                 className={cn(
-                  "min-w-0 flex-1 truncate text-[13px] font-medium",
+                  "min-w-0 flex-1 truncate text-[13px] font-semibold",
                   on ? "text-text-bright" : "text-text"
                 )}
               >
                 {issue.title}
               </span>
-              <span className="font-mono text-[11px] text-dim">{issue.identifier}</span>
+              <span className="rounded bg-surface px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums text-muted-foreground">{issue.identifier}</span>
             </div>
             {(issue.labels.length > 0 || assignee) && (
-              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-6 font-mono text-[10.5px] text-muted-foreground">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-[22px] text-[10.5px] text-muted-foreground">
                 {issue.labels.slice(0, 4).map((l) => (
                   <IssueLabelChip key={l.name} name={l.name} color={l.color} />
                 ))}
                 <span className="flex-1" />
                 {assignee && (
-                  <span className="flex items-center gap-1.5 text-dim">
+                  <span className="flex items-center gap-2 text-muted-foreground">
                     <Avatar
                       initial={(assignee.name[0] ?? "?").toUpperCase()}
                       src={assignee.avatarUrl}
-                      size={15}
+                      size={20}
+                      className="ring-1 ring-line"
                     />
-                    {assignee.name}
+                    <span className="font-medium text-text">{assignee.name}</span>
                   </span>
                 )}
                 {issue.updatedAt && <span className="text-line">·</span>}
-                {issue.updatedAt && <span className="text-dim">{relativeTime(issue.updatedAt)}</span>}
+                {issue.updatedAt && <span className="font-mono text-dim">{relativeTime(issue.updatedAt)}</span>}
               </div>
             )}
           </button>

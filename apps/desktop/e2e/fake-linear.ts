@@ -32,7 +32,7 @@ const actor = {
   id: "user-1",
   name: "Morgan",
   displayName: "Morgan",
-  avatarUrl: null
+  avatarUrl: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%236faef6'/%3E%3Ccircle cx='24' cy='18' r='8' fill='%23f4f1f1'/%3E%3Cpath d='M10 43c1-10 6-15 14-15s13 5 14 15' fill='%23f4f1f1'/%3E%3C/svg%3E"
 }
 const state = { id: "state-1", name: "In Progress", type: "started" }
 const labels = { nodes: [{ id: "label-1", name: "Bug", color: "#5E6AD2" }] }

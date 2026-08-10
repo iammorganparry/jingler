@@ -45,6 +45,12 @@ describe("renderer CSP", () => {
     expect(imgSrc).toContain("https://*.githubusercontent.com")
   })
 
+  it("allows Linear-hosted avatar images", () => {
+    const imgSrc = directive("img-src")
+    expect(imgSrc).toContain("https://linear.app")
+    expect(imgSrc).toContain("https://*.linear.app")
+  })
+
   it("allows blob: images, which the brand shader cannot render without", () => {
     // The launch splash runs the mark through a Paper Design shader, and that
     // shader rasterises its source image to a canvas, calls `toBlob`, and loads

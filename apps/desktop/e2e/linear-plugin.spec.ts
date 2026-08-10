@@ -25,8 +25,12 @@ test("shows every new-session source and starts from a Linear issue", async ({
     }
 
     await launched.window.getByRole("radio", { name: /^Linear issue/ }).click()
+    const linearSource = launched.window.getByRole("radio", { name: /^Linear issue/ })
+    await expect(linearSource.locator('[data-linear-mark="true"]')).toBeVisible()
+    await expect(launched.window.getByRole("heading", { name: "Linear issues" })).toBeVisible()
     const issue = launched.window.getByRole("button", { name: /Document retry policy/ })
     await expect(issue).toBeVisible({ timeout: 20_000 })
+    await expect(issue.locator("img")).toBeVisible()
     await issue.click()
     await expect(launched.window.getByPlaceholder(/Message the agent/)).toHaveValue(/Document retry policy/)
     await launched.window.getByPlaceholder(/Message the agent/).press("Enter")

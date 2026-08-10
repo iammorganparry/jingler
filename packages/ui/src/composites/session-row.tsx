@@ -402,8 +402,11 @@ export function SessionRow({
           {slotBadge}
         </div>
         <div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
-          <span className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}>
-            {session.branch}
+          <span
+            className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}
+            title={session.semanticBranchPending === true ? "Task branch will be named after task understanding" : undefined}
+          >
+            {session.semanticBranchPending === true ? "Naming branch…" : session.branch}
           </span>
           {linkedIssue && (
             <span
