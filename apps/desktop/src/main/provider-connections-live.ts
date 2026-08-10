@@ -3,13 +3,15 @@ import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai"
 import {
   AgentSecretStore,
   AppPaths,
+  type CodexOAuthFlow,
+  type EntitlementProbeResult,
   FileModelCertificationStore,
+  discoverPiModels,
   makeAuthBroker,
   makePiCodexOAuthFlow,
   makeProviderCatalogService,
   makeProviderConnections,
   probePiEntitlement,
-  discoverPiModels,
   ProviderConnections,
   ProviderConnectionsError,
   SecretStore
@@ -98,6 +100,35 @@ const incompleteCertification = (
   certifiedAt: new Date().toISOString()
 })
 
+const e2eCodexOAuth: CodexOAuthFlow = {
+  login: async ({ signal }) => {
+    if (signal.aborted) throw new Error("Login cancelled")
+    return {
+      access: "e2e-codex-access",
+      refresh: "e2e-codex-refresh",
+      expires: Date.now() + 3_600_000
+    }
+  },
+  refresh: async (_credential, signal) => {
+    if (signal.aborted) throw new Error("Refresh cancelled")
+    return {
+      access: "e2e-codex-access-rotated",
+      refresh: "e2e-codex-refresh-rotated",
+      expires: Date.now() + 3_600_000
+    }
+  }
+}
+
+const e2eEntitlementProbe = async (input: {
+  readonly authKind: ModelCertification["authRoute"]["kind"]
+}): Promise<EntitlementProbeResult> => ({
+  entitlement: "active",
+  planLabel: input.authKind === "api-key" ? null : "Test subscription",
+  quotaLabel: null,
+  rateLimitLabel: null,
+  billingRoute: input.authKind === "api-key" ? "api" : "subscription"
+})
+
 /** Desktop composition for explicit, encrypted, connection-pinned provider auth. */
 export const ProviderConnectionsLive = Layer.effect(
   ProviderConnections,
@@ -106,13 +137,13 @@ export const ProviderConnectionsLive = Layer.effect(
     const secretStore = yield* SecretStore
     const credentials = new AgentSecretStore(secretStore)
     const e2eFixture = loadE2ePiFixture()
-    const e2eConnection = e2eFixture === null
+    const e2eConnection = e2eFixture === null || !e2eFixture.seedConnection
       ? null
       : e2eProviderConnection(e2eFixture)
     const broker = yield* makeAuthBroker({
       credentials,
-      codexOAuth: makePiCodexOAuthFlow(),
-      probe: probePiEntitlement
+      codexOAuth: e2eFixture === null ? makePiCodexOAuthFlow() : e2eCodexOAuth,
+      probe: e2eFixture === null ? probePiEntitlement : e2eEntitlementProbe
     })
     const certifications = new FileModelCertificationStore(
       paths.certificationsFile
@@ -139,8 +170,8 @@ export const ProviderConnectionsLive = Layer.effect(
       connections: broker.list,
       certifications,
       discover: (connection, signal) =>
-        e2eConnection !== null && connection.id === e2eConnection.id
-          ? Effect.succeed([e2eDiscoveredModel()])
+        e2eFixture !== null
+          ? Effect.succeed([e2eDiscoveredModel(connection.providerId)])
           : discoverPiModels(credentials, connection, signal),
       targetAvailable: (connection) => connection.targetId === "desktop"
     })
@@ -162,9 +193,8 @@ export const ProviderConnectionsLive = Layer.effect(
               })
             )
           }
-          const certification = e2eFixture !== null && e2eConnection !== null &&
-              connection.id === e2eConnection.id
-            ? e2eCertification(e2eFixture)
+          const certification = e2eFixture !== null
+            ? e2eCertification(e2eFixture, connection.providerId, input.modelId)
             : incompleteCertification(
                 connection.providerId,
                 input.modelId,

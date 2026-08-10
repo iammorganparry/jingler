@@ -107,6 +107,14 @@ export const makeProviderConnections = (
     yield* options.broker.restore(restored)
 
     const persist = persistConnection(document)
+    const refreshCatalog = <A, E>(effect: Effect.Effect<A, E>) =>
+      effect.pipe(
+        Effect.tap(() =>
+          options.catalog.refresh.pipe(
+            Effect.mapError(serviceError("Failed to refresh provider catalog"))
+          )
+        )
+      )
     return {
       loginEvents: Stream.fromPubSub(loginEvents),
       list: options.catalog.list.pipe(
@@ -115,7 +123,8 @@ export const makeProviderConnections = (
       status: options.broker.list,
       connectClaudeToken: (input) =>
         brokerCall(options.broker.connectClaudeToken(input)).pipe(
-          Effect.flatMap(persist)
+          Effect.flatMap(persist),
+          refreshCatalog
         ),
       startCodexLogin: (input) =>
         Effect.gen(function* () {
@@ -153,7 +162,7 @@ export const makeProviderConnections = (
                 Effect.runFork(PubSub.publish(loginEvents, normalized))
               }
             })
-          ).pipe(Effect.flatMap(persist))
+          ).pipe(Effect.flatMap(persist), refreshCatalog)
         }),
       cancelLogin: (id) => options.broker.cancelLogin(id),
       setApiKey: (input) =>
@@ -164,13 +173,17 @@ export const makeProviderConnections = (
             apiKey: input.apiKey,
             targetId: input.targetId
           })
-        ).pipe(Effect.flatMap(persist)),
+        ).pipe(Effect.flatMap(persist), refreshCatalog),
       refresh: (id) =>
-        brokerCall(options.broker.refresh(id)).pipe(Effect.flatMap(persist)),
+        brokerCall(options.broker.refresh(id)).pipe(
+          Effect.flatMap(persist),
+          refreshCatalog
+        ),
       logout: (id) =>
         brokerCall(options.broker.logout(id)).pipe(
-          Effect.zipRight(removeConnection(document, id))
+          Effect.zipRight(removeConnection(document, id)),
+          refreshCatalog
         ),
-      verifyModel: options.verifyModel
+      verifyModel: (input) => options.verifyModel(input).pipe(refreshCatalog)
     }
   })

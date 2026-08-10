@@ -541,6 +541,17 @@ export function JinglerApp({
   const [settingsSection, setSettingsSection] = useState<
     "providers" | "github" | "agents" | "runtime"
   >("providers")
+  const openSettings = useCallback(
+    (section: typeof settingsSection = settingsSection) => {
+      memory?.onClose()
+      setNewOpen(false)
+      setSettingsSection(section)
+      if (section === "providers") providerConnections?.onReload?.()
+      if (section === "runtime") runtimeInspector?.onRefresh()
+      setSettingsOpen(true)
+    },
+    [memory, providerConnections, runtimeInspector, settingsSection]
+  )
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [fileQuickOpenSessionId, setFileQuickOpenSessionId] = useState<
     string | null
@@ -933,8 +944,7 @@ export function JinglerApp({
         group: PALETTE_GROUP.actions,
         icon: SettingsIcon,
         run: () => {
-          setNewOpen(false)
-          setSettingsOpen(true)
+          openSettings()
         }
       })
     }
@@ -1122,33 +1132,14 @@ export function JinglerApp({
         onOpenUsage={onLoadUsage ? openUsage : undefined}
         onOpenSettings={
           onSaveProvider
-            ? () => {
-              memory?.onClose()
-              setNewOpen(false)
-              setSettingsSection("providers")
-                setSettingsOpen(true)
-              }
+            ? () => openSettings("providers")
             : undefined
         }
         onOpenProviderSettings={
-          onSaveProvider
-            ? () => {
-              memory?.onClose()
-              setNewOpen(false)
-              setSettingsSection("providers")
-              setSettingsOpen(true)
-            }
-            : undefined
+          onSaveProvider ? () => openSettings("providers") : undefined
         }
         onOpenGithubSettings={
-          onSaveProvider
-            ? () => {
-              memory?.onClose()
-              setNewOpen(false)
-              setSettingsSection("github")
-                setSettingsOpen(true)
-              }
-            : undefined
+          onSaveProvider ? () => openSettings("github") : undefined
         }
         memoryEligible={memory?.eligible}
         memoryActive={memory?.active}

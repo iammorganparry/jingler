@@ -404,6 +404,7 @@ export function SettingsView({
   const [section, setSection] = React.useState<SectionKey>(initialSection)
   const selectSection = (next: SectionKey) => {
     setSection(next)
+    if (next === "providers") providerConnections?.onReload?.()
     if (next === "runtime") runtimeInspector?.onRefresh()
   }
 

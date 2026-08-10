@@ -53,6 +53,7 @@ export function useProviderCatalog() {
       : activeMutation?.error
         ? messageOf(activeMutation.error)
         : null,
+    reload: refreshCatalog,
     refresh: refresh.mutate,
     verify: (connectionId: ProviderConnectionId, modelId: ProviderModelId) =>
       verify.mutate({ connectionId, modelId }),

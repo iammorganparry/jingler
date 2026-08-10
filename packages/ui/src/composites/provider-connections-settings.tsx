@@ -19,6 +19,7 @@ export interface ProviderConnectionsSettingsProps {
   defaultModelId?: ProviderModelId | null
   busy?: boolean
   error?: string | null
+  onReload?: () => void
   onRefresh: (connectionId: ProviderConnectionId) => void
   onVerify: (connectionId: ProviderConnectionId, modelId: ProviderModelId) => void
   onMakeDefault: (selection: {

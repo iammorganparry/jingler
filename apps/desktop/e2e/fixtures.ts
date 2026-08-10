@@ -227,6 +227,7 @@ export interface LaunchOptions {
   readonly piFixture?: {
     readonly scenarioId: string
     readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"
+    readonly seedConnection?: boolean
   }
   /**
    * Relaunch against an EXISTING `~/jingler` (a previous launch's `home`) —

@@ -1351,7 +1351,7 @@ function AuthedApp({
             kind: "claude-setup-token",
             id: crypto.randomUUID(),
             token,
-            targetId: "local",
+            targetId: "desktop",
           })
         }
         onStartCodex={(method) =>
@@ -1360,7 +1360,7 @@ function AuthedApp({
             kind: "openai-codex-oauth",
             id: crypto.randomUUID(),
             method,
-            targetId: "local",
+            targetId: "desktop",
           })
         }
         onConnectApi={(providerId, apiKey) =>
@@ -1370,7 +1370,7 @@ function AuthedApp({
             id: crypto.randomUUID(),
             providerId,
             apiKey,
-            targetId: "local",
+            targetId: "desktop",
           })
         }
         onSelectModel={(selection) => send({ type: "SELECT_MODEL", ...selection })}
@@ -1507,6 +1507,7 @@ function AuthedApp({
           defaultModelId: configQuery.data?.defaultModelId ?? null,
           busy: providerCatalog.busy,
           error: providerCatalog.error,
+          onReload: providerCatalog.reload,
           onRefresh: providerCatalog.refresh,
           onVerify: providerCatalog.verify,
           onMakeDefault: providerCatalog.makeDefault,

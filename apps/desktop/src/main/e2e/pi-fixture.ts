@@ -19,7 +19,8 @@ import type { DiscoveredProviderModel } from "@jingler/cli-adapters"
 
 const E2ePiFixture = Schema.Struct({
   scenarioId: Schema.String,
-  authRoute: AuthKind
+  authRoute: AuthKind,
+  seedConnection: Schema.optionalWith(Schema.Boolean, { default: () => true })
 })
 
 export type E2ePiFixture = Schema.Schema.Type<typeof E2ePiFixture>
@@ -55,16 +56,22 @@ export const e2eProviderConnection = (fixture: E2ePiFixture) =>
     updatedAt: "2026-08-10T00:00:00.000Z"
   })
 
-export const e2eDiscoveredModel = (): DiscoveredProviderModel => ({
-  providerId: PROVIDER_ID,
-  id: MODEL_ID,
+export const e2eDiscoveredModel = (
+  providerId: ProviderId = PROVIDER_ID
+): DiscoveredProviderModel => ({
+  providerId,
+  id: Schema.decodeUnknownSync(ProviderModelId)(`${providerId}/eval-model`),
   label: "Deterministic pi model",
   capabilities: { contextWindow: 32_000, reasoning: [], vision: false }
 })
 
-export const e2eCertification = (fixture: E2ePiFixture): ModelCertification => ({
-  providerId: PROVIDER_ID,
-  modelId: MODEL_ID,
+export const e2eCertification = (
+  fixture: E2ePiFixture,
+  providerId: ProviderId = PROVIDER_ID,
+  modelId: ProviderModelId = MODEL_ID
+): ModelCertification => ({
+  providerId,
+  modelId,
   authRoute: {
     kind: fixture.authRoute,
     observedRoute: fixture.authRoute,
