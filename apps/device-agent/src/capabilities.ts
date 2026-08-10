@@ -8,16 +8,20 @@ import { DiscoveryService } from "@jingler/cli-adapters/discovery"
 import { WorkspaceService } from "@jingler/cli-adapters/workspace"
 import type {
   CliInfo,
+  ProviderConnection,
   RemoteDeviceDiscovery,
   RemoteRepositoryCapability,
   Repo
 } from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
 import { Effect, Layer } from "effect"
+import { makeDeviceProviderLayers } from "./provider-runtime.js"
 
 export interface CapabilitySources {
   readonly harnesses: () => Effect.Effect<ReadonlyArray<CliInfo>, unknown>
   readonly repositories: () => Effect.Effect<ReadonlyArray<Repo>, unknown>
   readonly branches: (repoPath: string) => Effect.Effect<ReadonlyArray<string>, unknown>
+  readonly providerConnections?: () => Effect.Effect<ReadonlyArray<ProviderConnection>, unknown>
   readonly platform: () => { readonly os: string; readonly arch: string }
 }
 
@@ -69,6 +73,9 @@ export const discoverDeviceCapabilities = (
   Effect.gen(function* () {
     const harnesses = yield* sources.harnesses().pipe(Effect.orElseSucceed(() => []))
     const repositories = yield* sources.repositories().pipe(Effect.orElseSucceed(() => []))
+    const providerConnections = yield* (sources.providerConnections?.() ?? Effect.succeed([])).pipe(
+      Effect.orElseSucceed(() => [])
+    )
     const remoteRepositories = yield* Effect.forEach(
       repositories.slice(0, 1_024),
       (repository): Effect.Effect<RemoteRepositoryCapability> =>
@@ -99,7 +106,19 @@ export const discoverDeviceCapabilities = (
           "project.manage"
         ],
         harnesses: harnesses.filter((item) => item.available).map((item) => item.kind),
-        maxConcurrentSessions: 4
+        maxConcurrentSessions: 4,
+        runtime: {
+          versions: CURRENT_RUNTIME_CONTRACTS,
+          toolIds: [],
+          resourceIds: [],
+          targetId: "device"
+        },
+        providerConnections: providerConnections.map((connection) => ({
+          id: connection.id,
+          providerId: connection.providerId,
+          authKind: connection.authKind,
+          status: connection.status
+        }))
       },
       repositories: remoteRepositories.filter(
         (repository) =>
@@ -134,8 +153,10 @@ const appPaths = (root: string): AppPathsShape => ({
 /** Live discovery deliberately reuses the same host services as Electron main. */
 export const discoverLiveDeviceCapabilities = (
   jinglerRoot: string,
-  agentVersion: string
+  agentVersion: string,
+  targetId = "device"
 ): Effect.Effect<RemoteDeviceDiscovery> => {
+  const deviceProviders = makeDeviceProviderLayers(targetId)
   const layer = Layer.mergeAll(
     DiscoveryService.Default,
     WorkspaceService.Default,
@@ -151,6 +172,7 @@ export const discoverLiveDeviceCapabilities = (
           repositories: () => WorkspaceService.listRepos().pipe(Effect.provide(layer)),
           branches: (repoPath) =>
             WorkspaceService.branches(repoPath).pipe(Effect.provide(layer)),
+          providerConnections: () => Effect.succeed(deviceProviders.connections),
           platform: () => ({ os: platform(), arch: arch() })
         },
         agentVersion

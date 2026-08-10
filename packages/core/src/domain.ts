@@ -4,10 +4,13 @@ import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js"
 import { PlanTemplateConfig } from "./plan-document.js"
 import { ThemeConfig } from "./theme.js"
 import {
+  AuthKind,
+  AuthStatus,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId
 } from "./runtime/provider-connection.js"
+import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js"
 
 /**
  * Domain schemas for Jingler. These are Effect `Schema`s so they can be reused
@@ -86,7 +89,16 @@ export const Environment = Schema.Struct({
     version: Schema.Number,
     capabilities: Schema.Array(Schema.String),
     harnesses: Schema.Array(CliKind),
-    maxConcurrentSessions: Schema.Number
+    maxConcurrentSessions: Schema.Number,
+    runtime: Schema.optional(RuntimeCapabilityManifest),
+    providerConnections: Schema.optional(
+      Schema.Array(Schema.Struct({
+        id: ProviderConnectionId,
+        providerId: ProviderId,
+        authKind: AuthKind,
+        status: AuthStatus
+      }))
+    )
   }),
   state: EnvironmentConnectionState,
   agentVersion: Schema.NullOr(Schema.String),

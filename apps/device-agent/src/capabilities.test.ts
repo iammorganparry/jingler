@@ -1,5 +1,6 @@
 import type { CliInfo, Repo } from "@jingler/core"
-import { Effect } from "effect"
+import { ProviderConnection, ProviderConnectionId } from "@jingler/core"
+import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { discoverDeviceCapabilities, ensureDeviceWorkspaceConfig } from "./capabilities.js"
 
@@ -35,18 +36,45 @@ describe("device capabilities", () => {
     })
   })
   it("discovers installed harnesses repositories and branches", async () => {
+    const connection = Schema.decodeUnknownSync(ProviderConnection)({
+      id: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
+      providerId: "anthropic",
+      authKind: "claude-setup-token",
+      account: null,
+      targetId: "device",
+      status: "authenticated",
+      subscription: {
+        entitlement: "active",
+        planLabel: "Max",
+        expiresAt: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        confirmedBillingRoute: "subscription"
+      },
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    })
     const result = await Effect.runPromise(
       discoverDeviceCapabilities(
         {
           harnesses: () => Effect.succeed([cli("codex", true), cli("claude", false)]),
           repositories: () => Effect.succeed([repo]),
           branches: () => Effect.succeed(["main", "feat/device-agent"]),
+          providerConnections: () => Effect.succeed([connection]),
           platform: () => ({ os: "darwin", arch: "arm64" })
         },
         "2.0.3"
       )
     )
     expect(result.capabilities.harnesses).toStrictEqual(["codex"])
+    expect(result.capabilities).toMatchObject({
+      runtime: { versions: expect.any(Object), targetId: "device" },
+      providerConnections: [{
+        id: "connection-1",
+        authKind: "claude-setup-token",
+        status: "authenticated"
+      }]
+    })
     expect(result.repositories).toStrictEqual([
       expect.objectContaining({
         name: "jingler",

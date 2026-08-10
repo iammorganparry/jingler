@@ -232,7 +232,7 @@ export const serveDevice = async (
   }
   const identity = await Effect.runPromise(loadOrCreateDeviceIdentity(paths.identityFile))
   const executor: SessionCommandExecutor =
-    input.sessionExecutor ?? makeLiveDeviceSessionCommandExecutor(paths.jinglerRoot)
+    input.sessionExecutor ?? makeLiveDeviceSessionCommandExecutor(paths.jinglerRoot, enrollment.deviceId)
   const sessionHandlers = new Map<string, SessionCommandHandler>()
   const sessionTasks = new DeviceSessionTasks()
   const handlerFor = (sessionId: string): SessionCommandHandler => {
@@ -261,7 +261,11 @@ export const serveDevice = async (
         connect: connectDeviceWebSocket,
         discover: () =>
           Effect.runPromise(
-            discoverLiveDeviceCapabilities(paths.jinglerRoot, DEVICE_AGENT_VERSION)
+            discoverLiveDeviceCapabilities(
+              paths.jinglerRoot,
+              DEVICE_AGENT_VERSION,
+              enrollment.deviceId
+            )
           ),
         sleep: abortableSleep,
         handleSessionRequest: (request) => {

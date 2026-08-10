@@ -4,7 +4,11 @@ import {
   ProviderConnectionId,
   ProviderModelId
 } from "./provider-connection.js"
-import { RuntimeContractVersions } from "./model-certification.js"
+import { RuntimeCapabilityManifest } from "./capability-manifest.js"
+export {
+  RuntimeCapabilityManifest,
+  runtimeCapabilitiesMatch
+} from "./capability-manifest.js"
 
 export const AgentRole = Schema.Literal(
   "conversation",
@@ -33,14 +37,6 @@ export const TranscriptSeedReason = Schema.Literal(
 )
 export type TranscriptSeedReason = Schema.Schema.Type<typeof TranscriptSeedReason>
 
-export const RuntimeCapabilityManifest = Schema.Struct({
-  versions: RuntimeContractVersions,
-  toolIds: Schema.Array(Schema.String),
-  resourceIds: Schema.Array(Schema.String),
-  targetId: Schema.String
-})
-export type RuntimeCapabilityManifest = Schema.Schema.Type<typeof RuntimeCapabilityManifest>
-
 export const TranscriptSeed = Schema.Struct({
   reason: TranscriptSeedReason,
   messages: Schema.Array(Message)
@@ -60,13 +56,3 @@ export const PiRunSpec = Schema.Struct({
   targetCapabilities: RuntimeCapabilityManifest
 })
 export type PiRunSpec = Schema.Schema.Type<typeof PiRunSpec>
-
-export const runtimeCapabilitiesMatch = (
-  expected: RuntimeCapabilityManifest,
-  target: RuntimeCapabilityManifest
-): boolean =>
-  Object.entries(expected.versions).every(
-    ([key, value]) => target.versions[key as keyof RuntimeContractVersions] === value
-  ) &&
-  expected.toolIds.every((id) => target.toolIds.includes(id)) &&
-  expected.resourceIds.every((id) => target.resourceIds.includes(id))

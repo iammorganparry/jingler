@@ -138,6 +138,54 @@ describe("device session command executor", () => {
     expect(result).toEqual({ status: "complete" })
   })
 
+  it("streams canonical file-change evidence from the target runtime", async () => {
+    const dependencies = {
+      ...services(),
+      run: vi.fn(async (_sessionId, _input, emit) => {
+        await emit({
+          _tag: "FileChanges",
+          changes: {
+            id: "change-set-1",
+            callId: "tool-call-1",
+            changes: [{
+              status: "R",
+              path: "src/new.ts",
+              oldPath: "src/old.ts",
+              added: 1,
+              removed: 1,
+              binary: false,
+              noNewlineAtEnd: false,
+              beforeBytes: 10,
+              afterBytes: 12,
+              preview: "rename",
+              patchArtifactId: "artifact-1"
+            }],
+            totals: { added: 1, removed: 1 },
+            authoritative: true,
+            reconciledAt: "2026-08-10T00:00:00.000Z"
+          }
+        })
+      })
+    } satisfies DeviceExecutorServices
+    const emitted: Array<unknown> = []
+
+    await makeDeviceSessionCommandExecutor(dependencies).execute(
+      command("Agent.run", { chatId: "chat_1", text: "rename it" }),
+      async (event) => { emitted.push(event) }
+    )
+
+    expect(emitted).toEqual([{
+      kind: "event",
+      payload: expect.objectContaining({
+        _tag: "FileChanges",
+        changes: expect.objectContaining({
+          authoritative: true,
+          changes: [expect.objectContaining({ status: "R", oldPath: "src/old.ts" })]
+        })
+      })
+    }])
+  })
+
   it("routes live control operations to the same session and chat", async () => {
     const dependencies = services()
     const executor = makeDeviceSessionCommandExecutor(dependencies)

@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
+import { AgentRuntime } from "@jingler/cli-adapters/runtime/agent/agent-runtime"
+import { AgentRuntimeAdapterLive } from "@jingler/cli-adapters/runtime/agent/agent-runtime-adapter"
+import { PiAgentRuntimeLive } from "@jingler/cli-adapters/runtime/agent/pi-runtime-live"
+import { AssetService } from "@jingler/cli-adapters/asset"
 import { AgentRunner } from "@jingler/cli-adapters/agent-runner"
 import { AppPaths } from "@jingler/cli-adapters/app-paths"
 import { BackgroundTaskStore } from "@jingler/cli-adapters/background-tasks"
@@ -11,17 +15,15 @@ import { DiscoveryService } from "@jingler/cli-adapters/discovery"
 import { GitService } from "@jingler/cli-adapters/git"
 import { GitHubApi, parseGitHubRemote } from "@jingler/cli-adapters/github-api"
 import { GitHubAuth } from "@jingler/cli-adapters/github-auth"
-import { HarnessCliAdapterLive } from "@jingler/cli-adapters/harness-adapter"
 import { OpenConnectorService } from "@jingler/cli-adapters/open-connector"
 import { PlanStore } from "@jingler/cli-adapters/plan-store"
 import { ProjectService } from "@jingler/cli-adapters/projects"
-import { InMemorySecretStoreLive } from "@jingler/cli-adapters/secret-store"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
 import { WorkspaceService } from "@jingler/cli-adapters/workspace"
 import {
-  claudePublishMetadataGenerator,
-  isCommitSubjectSafe
+  isCommitSubjectSafe,
+  makeAgentRuntimePublishMetadataGenerator
 } from "@jingler/cli-adapters/publish-metadata"
 import { isSessionPublishBranchReady } from "@jingler/cli-adapters/sessions"
 import {
@@ -53,6 +55,7 @@ import type {
 } from "@jingler/core"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
 import type { SessionCommandExecutor } from "./session-handler.js"
+import { makeDeviceProviderLayers } from "./provider-runtime.js"
 
 type JsonRecord = Readonly<Record<string, unknown>>
 
@@ -315,7 +318,17 @@ const HeadlessBrowserControlLive = Layer.succeed(
   })
 )
 
-const deviceRuntime = (root: string) => {
+const deviceRuntime = (root: string, targetId: string) => {
+  const providers = makeDeviceProviderLayers(targetId)
+  const assets = AssetService.Default.pipe(Layer.provide(NodeContext.layer))
+  const piRuntime = PiAgentRuntimeLive.pipe(
+    Layer.provide(assets),
+    Layer.provide(providers.ProviderConnectionsLive),
+    Layer.provide(providers.SecretStoreLive)
+  )
+  const agentExecution = AgentRuntimeAdapterLive.pipe(
+    Layer.provideMerge(piRuntime)
+  )
   const services = Layer.mergeAll(
     AgentRunner.Default,
     SessionStore.Default,
@@ -331,9 +344,9 @@ const deviceRuntime = (root: string) => {
     WorkspaceService.Default,
     OpenConnectorService.Default
   ).pipe(
-    Layer.provideMerge(HarnessCliAdapterLive),
+    Layer.provideMerge(agentExecution),
     Layer.provideMerge(HeadlessBrowserControlLive),
-    Layer.provideMerge(InMemorySecretStoreLive),
+    Layer.provideMerge(providers.SecretStoreLive),
     Layer.provideMerge(appPathsLayer(root)),
     Layer.provideMerge(NodeContext.layer)
   )
@@ -358,9 +371,10 @@ const safeProjectDirectory = (name: string): string => {
 
 /** Install the real cli-adapters runtime used by the `serve` command. */
 export const makeLiveDeviceSessionCommandExecutor = (
-  jinglerRoot: string
+  jinglerRoot: string,
+  targetId = "device"
 ): SessionCommandExecutor => {
-  const runtime = deviceRuntime(jinglerRoot)
+  const runtime = deviceRuntime(jinglerRoot, targetId)
   // ManagedRuntime has every service retained by `deviceRuntime`; preserve the
   // individual operation's error channel while closing its environment here.
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>): Promise<A> =>
@@ -499,7 +513,8 @@ export const makeLiveDeviceSessionCommandExecutor = (
           return yield* Effect.fail(new Error("The remote worktree is not on its validated session branch."))
         }
         const messages = yield* TranscriptStore.list(session.activeChatId)
-        const metadata = yield* claudePublishMetadataGenerator.generate({
+        const agentRuntime = yield* AgentRuntime
+        const metadata = yield* makeAgentRuntimePublishMetadataGenerator(agentRuntime).generate({
           session,
           messages,
           changedPaths: inspection.changedPaths,

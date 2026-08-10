@@ -1,6 +1,12 @@
-import { Effect, Exit } from "effect"
+import { Effect, Exit, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import type { Environment, Session } from "@jingler/core"
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId
+} from "@jingler/core"
 import { continueSessionOnEnvironment, setSessionEnvironment } from "./session-environment.js"
 
 const source = (patch: Partial<Session> = {}): Session => ({
@@ -27,5 +33,45 @@ describe("session environment handoff", () => {
   })
   it("rejects a target missing the required repository or harness", async () => {
     const d = deps(); d.environments = () => Effect.succeed([{ ...target, capabilities: { ...target.capabilities, harnesses: ["codex" as const] } }]); const exit = await Effect.runPromiseExit(continueSessionOnEnvironment(source(), "buildbox", d)); expect(Exit.isFailure(exit)).toBe(true); expect(d.continueSession).not.toHaveBeenCalled()
+  })
+  it("requires the exact authenticated connection for a canonical pi session", async () => {
+    const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+    const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+    const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
+    const canonical = source({ connectionId, providerId, modelId })
+    const piTarget: Environment = {
+      ...target,
+      capabilities: {
+        ...target.capabilities,
+        harnesses: [],
+        runtime: {
+          versions: CURRENT_RUNTIME_CONTRACTS,
+          toolIds: [],
+          resourceIds: [],
+          targetId: target.id
+        },
+        providerConnections: [{
+          id: connectionId,
+          providerId,
+          authKind: "claude-setup-token",
+          status: "authenticated"
+        }]
+      }
+    }
+    const d = deps()
+    d.environments = () => Effect.succeed([piTarget])
+
+    await expect(
+      Effect.runPromise(setSessionEnvironment(canonical, "buildbox", d))
+    ).resolves.toMatchObject({ environmentId: "buildbox" })
+
+    d.environments = () => Effect.succeed([{
+      ...piTarget,
+      capabilities: { ...piTarget.capabilities, providerConnections: [] }
+    }])
+    const exit = await Effect.runPromiseExit(
+      setSessionEnvironment(canonical, "buildbox", d)
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
   })
 })
