@@ -32,6 +32,8 @@ export type RemoteMcpServer = RuntimeRemoteMcpServer
 
 /** Canonical pi identity and context carried through the temporary adapter seam. */
 export interface RuntimeSessionSpec {
+  readonly sessionId: string
+  readonly chatId: string
   readonly connectionId: ProviderConnectionId
   readonly modelId: ProviderModelId
   readonly role: AgentRole

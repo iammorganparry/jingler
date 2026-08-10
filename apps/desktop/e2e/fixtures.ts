@@ -25,7 +25,7 @@ import { startFakeGitHubRelay, type FakeGitHubRelay } from "./fake-github-relay.
 import { startFakeDeviceRelay, type FakeDeviceRelay } from "./fake-device-relay.js"
 import { installFakeSshHost } from "./fake-ssh-host.js"
 import { DEVICE_AGENT_ENTRY, MAIN_ENTRY } from "./global-setup.js"
-import { FALLBACK_MODELS, type Chat } from "@jingler/core"
+import { FALLBACK_MODELS, type Chat, type RuntimeRecoveryState } from "@jingler/core"
 
 /**
  * Model labels read from the catalogue rather than written out in each spec.
@@ -202,6 +202,7 @@ export interface SeedSession {
   readonly piSessionId?: string
   readonly modelSelectionRequired?: boolean
   readonly connectionSelectionRequired?: boolean
+  readonly runtimeRecovery?: RuntimeRecoveryState
   readonly mode?: "ask" | "accept-edits" | "auto"
   readonly archived?: boolean
   readonly archiveReason?: "merged" | "closed"

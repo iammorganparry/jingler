@@ -28,6 +28,8 @@ const spec = (): SessionSpec => ({
   model: "claude-test",
   resumeId: null,
   runtime: {
+    sessionId: "session-1",
+    chatId: "chat-1",
     connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
     modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-test"),
     role: "conversation",

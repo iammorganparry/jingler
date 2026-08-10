@@ -11,6 +11,7 @@ import {
   ProviderModelId
 } from "./runtime/provider-connection.js"
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js"
+import { RuntimeRecoveryState } from "./runtime/runtime-recovery.js"
 
 /**
  * Domain schemas for Jingler. These are Effect `Schema`s so they can be reused
@@ -531,6 +532,8 @@ export const Session = Schema.Struct({
   legacyCli: Schema.optional(Schema.String),
   legacyModel: Schema.optional(Schema.String),
   legacyResumeId: Schema.optional(Schema.String),
+  /** Restart-safe mutation outcomes that require operator inspection. */
+  runtimeRecovery: Schema.optional(RuntimeRecoveryState),
   /**
    * Where the harness process runs. Desktop-created sessions are local; remote
    * session importers set `cloud`. Optional so older sessions decode as local.

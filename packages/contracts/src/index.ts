@@ -103,6 +103,7 @@ import {
   VsCodeTheme,
   WorkspaceConfig,
   RuntimeDiagnosticSnapshot,
+  RuntimeRecoveryError,
   ModelCertification,
   ProviderCatalog,
   ProviderConnection,
@@ -848,6 +849,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Session,
     error: GitError,
     payload: { sessionId: Schema.String }
+  }),
+
+  /** Confirm that an uncertain mutation has been inspected; the call is never replayed. */
+  Rpc.make("Sessions.resolveRuntimeRecovery", {
+    success: Session,
+    error: RuntimeRecoveryError,
+    payload: {
+      sessionId: Schema.String,
+      runId: Schema.String,
+      callId: Schema.String
+    }
   }),
 
   /** Regenerate an auto-titled session's title from its transcript; returns it. */

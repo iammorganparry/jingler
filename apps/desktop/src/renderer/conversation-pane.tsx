@@ -32,6 +32,7 @@ import {
   MAIN_AGENT,
   PlanReview,
   ResizeHandle,
+  RuntimeRecoveryCard,
   useContainerWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
@@ -91,26 +92,67 @@ const harnessUnavailableMessage = (
   return undefined
 }
 
-const providerUnavailableMessage = (
+interface ProviderRecovery {
+  readonly title: string
+  readonly message: string
+}
+
+const providerRecoveryOf = (
   catalog: ProviderCatalog,
   selection: {
     connectionId: Session["connectionId"] | null
     modelId: Session["modelId"] | null
+    connectionSelectionRequired?: boolean
+    modelSelectionRequired?: boolean
+    targetId: string
   }
-): string | undefined => {
+): ProviderRecovery | undefined => {
+  if (selection.connectionSelectionRequired || selection.modelSelectionRequired) {
+    return {
+      title: "Choose a runtime connection",
+      message: "This migrated conversation is readable, but needs a certified connection and model before it can continue."
+    }
+  }
   if (selection.connectionId == null || selection.modelId == null) {
-    return "Choose a certified provider connection and model to continue."
+    return {
+      title: "Runtime connection required",
+      message: "Choose a certified provider connection and model to continue."
+    }
   }
   const connection = catalog.connections.find(
     (candidate) => candidate.connection.id === selection.connectionId
   )
-  if (connection === undefined || connection.connection.status !== "authenticated") {
-    return "This provider connection is unavailable. Reconnect or choose another connection."
+  if (connection === undefined) {
+    return {
+      title: "Provider connection unavailable",
+      message: "Reconnect this account or choose another certified connection."
+    }
+  }
+  if (connection.connection.targetId !== selection.targetId) {
+    return {
+      title: "Connection unavailable on this device",
+      message: "Connect the same provider account on the selected execution device, or move the session to a compatible target."
+    }
+  }
+  if (connection.connection.status !== "authenticated") {
+    const reauthenticate = ["expired", "revoked", "reauthentication-required"].includes(
+      connection.connection.status
+    )
+    return {
+      title: reauthenticate ? "Provider authentication expired" : "Provider entitlement unavailable",
+      message: reauthenticate
+        ? "Reconnect the pinned billing route before continuing. Jingler will not fall back to another credential."
+        : "Refresh this connection and confirm its subscription or API entitlement before continuing."
+    }
   }
   const model = connection.models.find((candidate) => candidate.id === selection.modelId)
-  return model?.selectable === true
-    ? undefined
-    : "This model is unavailable or its certification is stale. Verify or choose another model."
+  if (model?.selectable === true) return undefined
+  return {
+    title: model?.verification === "stale" ? "Model certification is stale" : "Model unavailable",
+    message: model?.verification === "stale"
+      ? "Reverify this exact model and authentication route, or choose another certified model."
+      : "Choose a model certified for this connection and execution target."
+  }
 }
 
 const initialPlanSplitRatio = (): number => {
@@ -138,6 +180,8 @@ export function ConversationPane({
   environments,
   providerCatalog,
   onSelectFiles,
+  onSelectChanges,
+  onOpenProviderSettings,
   paneFocused = true
 }: {
   session: Session
@@ -177,6 +221,10 @@ export function ConversationPane({
   onOpenFile?: (sessionId: string, path: string) => void
   /** Present Files beside the conversation when follow mode is enabled here. */
   onSelectFiles?: () => void
+  /** Open the canonical Changes view from uncertain-mutation recovery. */
+  onSelectChanges?: () => void
+  /** Open provider settings for auth, target, migration, or certification recovery. */
+  onOpenProviderSettings?: () => void
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -347,9 +395,22 @@ export function ConversationPane({
   })
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
-  const composerDisabledReason = providerCatalog
-    ? providerUnavailableMessage(providerCatalog, convo)
+  const providerRecovery = providerCatalog
+    ? providerRecoveryOf(providerCatalog, {
+        ...convo,
+        connectionSelectionRequired: session.connectionSelectionRequired,
+        modelSelectionRequired: session.modelSelectionRequired,
+        targetId: session.environmentId ?? "desktop"
+      })
     : harnessUnavailableMessage(capabilitiesQuery.data, convo)
+  const composerDisabledReason = typeof providerRecovery === "string"
+    ? providerRecovery
+    : providerRecovery?.message
+  const mutationRecovery = useMutation({
+    mutationFn: (input: { readonly runId: string; readonly callId: string }) =>
+      rpc.sessionsResolveRuntimeRecovery(session.id, input.runId, input.callId),
+    onSuccess: publishSessionUpdate
+  })
   // Conversation text-size multiplier, scoped to the transcript wrapper below via
   // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
   // on purpose: the shared `.sb-md` calc() rules must only scale inside the
@@ -915,14 +976,26 @@ export function ConversationPane({
           </button>
         </div>
       )}
-      {composerDisabledReason !== undefined && (
-        <div
-          role="alert"
-          className="flex flex-none items-center border-b border-yellow/30 bg-yellow/5 px-3 py-2 text-[11px] text-yellow"
-        >
-          {composerDisabledReason}
-        </div>
+      {typeof providerRecovery !== "string" && providerRecovery !== undefined && (
+        <RuntimeRecoveryCard
+          title={providerRecovery.title}
+          message={providerRecovery.message}
+          actionLabel="Open providers"
+          onAction={() => onOpenProviderSettings?.()}
+        />
       )}
+      {session.runtimeRecovery?.uncertainMutations.map((mutation) => (
+        <RuntimeRecoveryCard
+          key={`${mutation.runId}:${mutation.callId}`}
+          title="Inspect an uncertain workspace mutation"
+          message="Jingler restarted before this tool settled. The call will not be replayed; inspect the workspace before continuing."
+          detail={`${mutation.toolId} · ${mutation.targetCategory ?? "workspace"} · ${mutation.startedAt}`}
+          actionLabel={mutationRecovery.isPending ? "Saving…" : "Mark inspected"}
+          actionDisabled={mutationRecovery.isPending}
+          onAction={() => mutationRecovery.mutate({ runId: mutation.runId, callId: mutation.callId })}
+          onInspect={() => onSelectChanges?.()}
+        />
+      ))}
       {activeAgentTranscript !== null ? (
         <AgentView agent={activeAgentTranscript} />
       ) : (

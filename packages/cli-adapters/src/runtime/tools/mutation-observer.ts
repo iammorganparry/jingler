@@ -15,6 +15,8 @@ import {
 export interface MutationObserverOptions {
   readonly cwd: string
   readonly runId: string
+  readonly sessionId: string
+  readonly chatId: string
   readonly tracker: FileChangeTracker
   readonly journal: RunJournal
 }
@@ -46,6 +48,8 @@ const startMutation = (
       .start({
         callId,
         runId: options.runId,
+        sessionId: options.sessionId,
+        chatId: options.chatId,
         toolId: request.id,
         risk,
         targetCategory: "workspace"

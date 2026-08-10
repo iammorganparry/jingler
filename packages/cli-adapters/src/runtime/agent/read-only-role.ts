@@ -34,6 +34,8 @@ export const runReadOnlyRoleText = (
 
   return runtime.run(
     {
+      sessionId: session.id,
+      chatId: session.activeChatId,
       connectionId: identity.connectionId,
       modelId: identity.modelId,
       role,

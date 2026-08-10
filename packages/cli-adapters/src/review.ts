@@ -407,11 +407,14 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
         }
 
         const collected = yield* Ref.make<ReadonlyArray<string>>([])
+        const reviewChatId = yield* ownerFor(input.sessionId)
 
         const spec: SessionSpec = {
           ...(input.connectionId && input.modelId
             ? {
                 runtime: {
+                  sessionId: input.sessionId,
+                  chatId: reviewChatId ?? input.sessionId,
                   connectionId: input.connectionId,
                   modelId: input.modelId,
                   role: "review" as const,

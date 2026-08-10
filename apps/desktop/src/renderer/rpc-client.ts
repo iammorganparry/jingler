@@ -574,6 +574,12 @@ export const rpc = {
   ): Promise<Session> => run((c) => c.Sessions.archive({ sessionId, reason })),
   sessionsRestore: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.restore({ sessionId })),
+  sessionsResolveRuntimeRecovery: (
+    sessionId: string,
+    runId: string,
+    callId: string
+  ): Promise<Session> =>
+    run((c) => c.Sessions.resolveRuntimeRecovery({ sessionId, runId, callId })),
   sessionsRetitle: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.retitle({ sessionId })),
   sessionsRename: (sessionId: string, title: string): Promise<Session> =>

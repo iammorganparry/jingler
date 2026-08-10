@@ -6,6 +6,8 @@ import { AgentRuntimeError, type AgentRuntimeContext } from "./agent-runtime.js"
 import { makePiAgentRuntime, type PiSessionHandle } from "./pi-agent-runtime.js"
 
 const spec: PiRunSpec = {
+  sessionId: "session-1",
+  chatId: "chat-1",
   connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
   modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
   role: "conversation",

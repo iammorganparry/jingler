@@ -1570,6 +1570,8 @@ function AuthedApp({
             onInitialPromptConsumed={consumeInitialPrompt}
             onOpenFile={(_sessionId, path) => ctx.onOpenFile(path)}
             onSelectFiles={ctx.onSelectFiles}
+            onSelectChanges={ctx.onSelectChanges}
+            onOpenProviderSettings={ctx.onOpenProviderSettings}
             paneFocused={ctx.paneFocused ?? true}
           />
         )}

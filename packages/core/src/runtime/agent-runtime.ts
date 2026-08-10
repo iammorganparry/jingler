@@ -44,6 +44,9 @@ export const TranscriptSeed = Schema.Struct({
 export type TranscriptSeed = Schema.Schema.Type<typeof TranscriptSeed>
 
 export const PiRunSpec = Schema.Struct({
+  /** Jingler-owned identity used for journals and restart recovery. */
+  sessionId: Schema.String,
+  chatId: Schema.String,
   connectionId: ProviderConnectionId,
   modelId: ProviderModelId,
   role: AgentRole,

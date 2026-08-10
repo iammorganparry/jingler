@@ -45,7 +45,8 @@ import {
   BackgroundTaskStore,
   UsageService,
   WorkspaceService,
-  RuntimeDiagnostics
+  RuntimeDiagnostics,
+  RuntimeRecoveryService
 } from "@jingler/cli-adapters"
 import { NodeContext } from "@effect/platform-node"
 import { Layer, ManagedRuntime } from "effect"
@@ -133,6 +134,7 @@ const AgentExecutionLayer = isScriptedEnv()
 // dependencies (paths, dialog, Node platform) come last.
 const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(RuntimeDiagnostics.Default),
+  Layer.provideMerge(RuntimeRecoveryService.Default),
   Layer.provideMerge(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
   // provideMerge: the RPC handlers consume DiscoveryService AND the main process

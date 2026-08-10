@@ -1077,6 +1077,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ...(chat.connectionId && chat.modelId
               ? {
                   runtime: {
+                    sessionId,
+                    chatId,
                     connectionId: chat.connectionId,
                     modelId: chat.modelId,
                     role:

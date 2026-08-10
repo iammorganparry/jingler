@@ -19,7 +19,8 @@ import {
   PlanStore,
   PluginHost,
   SecretStore,
-  SessionStore
+  SessionStore,
+  RuntimeRecoveryService
 } from "@jingler/cli-adapters"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { Effect } from "effect"
@@ -447,6 +448,13 @@ if (!gotPrimaryLock) {
     // recovery on the window-creation path: a corrupt artifact or unavailable
     // volume must not launch Jingler with no window.
     void runtime.runPromise(recoverInterruptedPlans(new Date().toISOString()))
+    void runtime.runPromise(
+      RuntimeRecoveryService.reconcile.pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.logError(`Could not recover interrupted runtime mutations: ${String(cause)}`)
+        )
+      )
+    )
     // Not awaited — the catalogue warms in the background while the window opens.
     void runtime.runPromise(prefetchModels)
 

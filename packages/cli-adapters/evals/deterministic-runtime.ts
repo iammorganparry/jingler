@@ -132,6 +132,8 @@ const fileChangeRegistry = (
     observer: createMutationObserver({
       cwd: root,
       runId: "eval-run",
+      sessionId: "eval-session",
+      chatId: "eval-chat",
       tracker,
       journal
     })
@@ -216,6 +218,8 @@ const managedResourceRegistry = async (
     observer: createMutationObserver({
       cwd: root,
       runId: "eval-managed-run",
+      sessionId: "eval-session",
+      chatId: "eval-chat",
       tracker,
       journal: new RunJournal({ file: join(root, ".jingler", "managed-run.json") })
     })
@@ -349,6 +353,8 @@ const specFor = (input: {
     `${fake.providerId}/${fake.modelId}`
   )
   return {
+    sessionId: "eval-session",
+    chatId: "eval-chat",
     connectionId: connection.id,
     modelId,
     role: scenarioId === "structured.question-plan" ? "plan" : "conversation",

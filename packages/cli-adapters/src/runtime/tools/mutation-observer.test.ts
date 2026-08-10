@@ -34,7 +34,14 @@ describe("mutation observer", () => {
       file: join(stateRoot, "journal", "run.json")
     })
     const registry = new ToolRegistry({
-      observer: createMutationObserver({ cwd, runId: "run-1", tracker, journal })
+      observer: createMutationObserver({
+        cwd,
+        runId: "run-1",
+        sessionId: "session-1",
+        chatId: "chat-1",
+        tracker,
+        journal
+      })
     })
     registry.register({
       id: "workspace.write",

@@ -73,6 +73,7 @@ import {
   UsageService,
   WorkspaceService,
   RuntimeDiagnostics,
+  RuntimeRecoveryService,
   ProviderConnections,
   type ProviderConnectionsShape,
   AgentResourceService,
@@ -4120,6 +4121,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Sessions.archive": ({ sessionId, reason }) =>
     archiveSessionRouted(sessionId, reason),
   "Sessions.restore": ({ sessionId }) => restoreSession(sessionId),
+  "Sessions.resolveRuntimeRecovery": ({ sessionId, runId, callId }) =>
+    RuntimeRecoveryService.resolve(sessionId, runId, callId),
   "Sessions.retitle": ({ sessionId }) =>
     Effect.gen(function* () {
       const runtime = yield* AgentRuntime;
@@ -5301,6 +5304,7 @@ export type RpcServerRequirements =
   | UsageService
   | WorkspaceService
   | RuntimeDiagnostics
+  | RuntimeRecoveryService
   | ProviderConnections;
 export const RpcServerLive: Layer.Layer<never, never, RpcServerRequirements> =
   RpcServerLayer;

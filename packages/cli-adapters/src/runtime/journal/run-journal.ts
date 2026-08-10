@@ -15,6 +15,9 @@ export type RunReceiptStatus = Schema.Schema.Type<typeof RunReceiptStatus>
 export const RunReceipt = Schema.Struct({
   callId: Schema.String,
   runId: Schema.String,
+  /** Optional only while journal files from before session association drain. */
+  sessionId: Schema.optional(Schema.String),
+  chatId: Schema.optional(Schema.String),
   toolId: Schema.String,
   risk: Schema.Literal("read", "network", "mutate", "execute"),
   targetCategory: Schema.NullOr(Schema.String),
@@ -64,6 +67,8 @@ export class RunJournal {
   start(input: {
     readonly callId: string
     readonly runId: string
+    readonly sessionId: string
+    readonly chatId: string
     readonly toolId: string
     readonly risk: ToolRisk
     readonly targetCategory?: string | null
@@ -137,5 +142,23 @@ export class RunJournal {
         (receipt) => receipt.status === "uncertain"
       )
     })
+  }
+
+  /** Record an operator inspection without making the uncertain call retryable. */
+  acknowledge(callId: string): Effect.Effect<void, RunJournalError> {
+    return journalEffect("Failed to acknowledge run receipt", () =>
+      this.#document.update((current) =>
+        current.map((receipt) =>
+          receipt.callId === callId && receipt.status === "uncertain"
+            ? {
+                ...receipt,
+                status: "failed" as const,
+                failureCode: "operator-reviewed-uncertain-mutation",
+                safeToRetry: false
+              }
+            : receipt
+        )
+      )
+    )
   }
 }

@@ -63,6 +63,7 @@ export interface SessionSplitProps {
   liveActivity?: Record<string, SessionActivity>
   liveDiff?: Record<string, DiffStat>
   onOpenSettings?: () => void
+  onOpenProviderSettings?: () => void
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
   tabContributions?: ReadonlyArray<TabContribution>
@@ -140,6 +141,7 @@ export function SessionSplit(props: SessionSplitProps) {
         liveActivity={props.liveActivity}
         liveDiff={props.liveDiff}
         onOpenSettings={props.onOpenSettings}
+        onOpenProviderSettings={props.onOpenProviderSettings}
         // Identity only where it disambiguates: a group of one needs no chip,
         // and `group` is non-null wherever a pane is being rendered at all.
         pane={single ? undefined : { index, focused: index === (group?.focused ?? 0) }}

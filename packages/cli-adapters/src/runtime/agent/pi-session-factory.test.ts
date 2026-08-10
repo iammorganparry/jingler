@@ -51,6 +51,8 @@ const message = {
 }
 
 const makeSpec = (cwd: string): PiRunSpec => ({
+  sessionId: "session-1",
+  chatId: "chat-1",
   connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-api"),
   modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-haiku-4-5"),
   role: "conversation",

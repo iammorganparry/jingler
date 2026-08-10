@@ -231,6 +231,8 @@ it("reconciles actual file changes made by mutating MCP tools", async () => {
     observer: createMutationObserver({
       cwd: root,
       runId: "run-mcp",
+      sessionId: "session-mcp",
+      chatId: "chat-mcp",
       tracker: new FileChangeTracker({ artifactDir: join(root, ".artifacts"), sessionId: "session-mcp" }),
       journal: new RunJournal({ file: join(root, ".journal", "run-mcp.json") })
     })

@@ -1205,6 +1205,27 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
         })
 
+      /** Persist restart recovery evidence without replaying the uncertain call. */
+      const setRuntimeRecovery = (
+        id: string,
+        runtimeRecovery: Session["runtimeRecovery"]
+      ) =>
+        update(id, (session) => ({ ...session, runtimeRecovery }))
+
+      const resolveRuntimeRecovery = (id: string, callId: string) =>
+        update(id, (session) => {
+          const remaining = session.runtimeRecovery?.uncertainMutations.filter(
+            (mutation) => mutation.callId !== callId
+          ) ?? []
+          return {
+            ...session,
+            runtimeRecovery:
+              remaining.length === 0
+                ? undefined
+                : { uncertainMutations: remaining }
+          }
+        })
+
       /** Persist a provider-native session reasoning choice. */
       const setReasoning = (
         id: string,
@@ -1823,6 +1844,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setMode,
         setModel,
         setProviderModel,
+        setRuntimeRecovery,
+        resolveRuntimeRecovery,
         setReasoning,
         setReasoningEffort,
         addUsage,

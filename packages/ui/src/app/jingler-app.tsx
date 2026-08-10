@@ -1126,6 +1126,16 @@ export function JinglerApp({
               }
             : undefined
         }
+        onOpenProviderSettings={
+          onSaveProvider
+            ? () => {
+              memory?.onClose()
+              setNewOpen(false)
+              setSettingsSection("providers")
+              setSettingsOpen(true)
+            }
+            : undefined
+        }
         onOpenGithubSettings={
           onSaveProvider
             ? () => {

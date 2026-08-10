@@ -334,6 +334,8 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             ...(settings.chat.connectionId && settings.chat.modelId
               ? {
                   runtime: {
+                    sessionId: settings.session.id,
+                    chatId: settings.chat.id,
                     connectionId: settings.chat.connectionId,
                     modelId: settings.chat.modelId,
                     role: "context-digest" as const,

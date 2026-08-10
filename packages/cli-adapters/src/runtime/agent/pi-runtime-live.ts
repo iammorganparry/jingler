@@ -148,6 +148,8 @@ export const makePiAgentRuntimeLive = (
               observer: createMutationObserver({
                 cwd: spec.cwd,
                 runId,
+                sessionId: spec.sessionId,
+                chatId: spec.chatId,
                 tracker,
                 journal: new RunJournal({
                   file: join(paths.runJournalsDir, `${runId}.json`)
