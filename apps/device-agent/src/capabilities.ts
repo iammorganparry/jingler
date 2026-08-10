@@ -121,7 +121,14 @@ const appPaths = (root: string): AppPathsShape => ({
   pluginsDir: join(root, "plugins"),
   pluginStorageDir: join(root, "plugin-storage"),
   authFile: join(root, "auth.enc"),
-  openConnectorFile: join(root, "open-connector.enc")
+  openConnectorFile: join(root, "open-connector.enc"),
+  piSessionsDir: join(root, "pi-sessions"),
+  managedResourcesDir: join(root, "agent-resources"),
+  importedMcpFile: join(root, "agent-resources", "mcp.json"),
+  certificationsFile: join(root, "runtime", "certifications.json"),
+  providerConnectionsFile: join(root, "runtime", "provider-connections.json"),
+  runJournalsDir: join(root, "runtime", "journals"),
+  diagnosticsDir: join(root, "runtime", "diagnostics")
 })
 
 /** Live discovery deliberately reuses the same host services as Electron main. */

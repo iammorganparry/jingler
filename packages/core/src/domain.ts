@@ -3,6 +3,11 @@ import { CLI_KINDS, CliKind } from "./cli.js"
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js"
 import { PlanTemplateConfig } from "./plan-document.js"
 import { ThemeConfig } from "./theme.js"
+import {
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId
+} from "./runtime/provider-connection.js"
 
 /**
  * Domain schemas for Jingler. These are Effect `Schema`s so they can be reused
@@ -370,7 +375,16 @@ export const Chat = Schema.Struct({
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
-  contextTokens: Schema.optional(Schema.Number)
+  contextTokens: Schema.optional(Schema.Number),
+  /** Canonical pi continuation identity; legacy resumeId is decoder-only migration input. */
+  connectionId: Schema.optional(ProviderConnectionId),
+  providerId: Schema.optional(ProviderId),
+  modelId: Schema.optional(ProviderModelId),
+  piSessionId: Schema.optional(Schema.String),
+  modelSelectionRequired: Schema.optional(Schema.Boolean),
+  connectionSelectionRequired: Schema.optional(Schema.Boolean),
+  legacyModel: Schema.optional(Schema.String),
+  legacyResumeId: Schema.optional(Schema.String)
 })
 export type Chat = Schema.Schema.Type<typeof Chat>
 export type ChatId = Chat["id"]
@@ -495,6 +509,16 @@ export const Session = Schema.Struct({
   status: SessionStatus,
   /** Which CLI is driving this session. */
   cli: CliKind,
+  /** Canonical execution identity during the rolling pi migration. */
+  connectionId: Schema.optional(ProviderConnectionId),
+  providerId: Schema.optional(ProviderId),
+  modelId: Schema.optional(ProviderModelId),
+  piSessionId: Schema.optional(Schema.String),
+  modelSelectionRequired: Schema.optional(Schema.Boolean),
+  connectionSelectionRequired: Schema.optional(Schema.Boolean),
+  legacyCli: Schema.optional(Schema.String),
+  legacyModel: Schema.optional(Schema.String),
+  legacyResumeId: Schema.optional(Schema.String),
   /**
    * Where the harness process runs. Desktop-created sessions are local; remote
    * session importers set `cloud`. Optional so older sessions decode as local.
@@ -1049,6 +1073,11 @@ export const WorkspaceConfig = Schema.Struct({
    * harness defaults).
    */
   providers: Schema.optional(ProvidersConfig),
+  /** Canonical provider defaults. Legacy CliKind settings remain decoder inputs until cutover. */
+  defaultConnectionId: Schema.optional(ProviderConnectionId),
+  defaultProviderId: Schema.optional(ProviderId),
+  defaultModelId: Schema.optional(ProviderModelId),
+  connectionSelectionRequired: Schema.optional(Schema.Boolean),
   /**
    * Which harness new sessions start on.
    *

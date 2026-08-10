@@ -63,7 +63,7 @@ extraResources:
       - jingler.plugin.json
       - dist/**
       - "!dist/**/*.map"
-  # Standalone Node 22 bundle copied to a paired host during SSH bootstrap.
+  # Standalone Node 24 bundle copied to a paired host during SSH bootstrap.
   # Keeping it outside app.asar lets Electron main stream the exact shipped
   # bytes to the host without unpacking or executing them locally.
   - from: ../device-agent/dist/jingler-device.mjs

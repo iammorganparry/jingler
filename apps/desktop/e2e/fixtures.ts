@@ -211,6 +211,16 @@ export interface LaunchOptions {
    */
   readonly scriptedAgent?: boolean
   /**
+   * Seed a deterministic pi transport script. The production PiAgentRuntime,
+   * auth broker, tool registry and diff tracker consume this transport; tests
+   * do not replace those layers with the legacy scripted adapter.
+   */
+  readonly piFixture?: {
+    readonly scenarioId: string
+    readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"
+    readonly observations: ReadonlyArray<Readonly<Record<string, unknown>>>
+  }
+  /**
    * Relaunch against an EXISTING `~/jingler` (a previous launch's `home`) —
    * i.e. a real app restart, reading whatever the last run persisted rather than
    * what the test seeded. Pass `reposDir` alongside it to keep the same repos.
@@ -957,6 +967,12 @@ export const test = base.extend<{
       // when the app first scans them.
       options.seed?.({ reposDir, repoPath })
 
+      const piFixtureFile = join(jinglerDir, "e2e-pi-fixture.json")
+      if (options.piFixture) {
+        mkdirSync(jinglerDir, { recursive: true })
+        writeFileSync(piFixtureFile, JSON.stringify(options.piFixture, null, 2))
+      }
+
       // A fake harness home for EVERY launch. Anything that reads the harness's own
       // config — now just the subscription-auth check behind the billing panel —
       // otherwise reads the developer's real `~` and reports whatever they happen to
@@ -1163,6 +1179,12 @@ export const test = base.extend<{
           JINGLER_GITHUB_URL: githubServer.url,
           JINGLER_GITHUB_API_URL: githubServer.url,
           JINGLER_SECRET_STORE: "memory",
+          ...(options.piFixture
+            ? {
+                JINGLER_E2E_PI_FIXTURE: piFixtureFile,
+                JINGLER_E2E_PI_AUTH_ROUTE: options.piFixture.authRoute
+              }
+            : {}),
           // Force the deterministic scripted agent so chat e2e never spawns a
           // real harness (no auth, no network, reproducible).
           JINGLER_SCRIPTED_AGENT: options.scriptedAgent === false ? "0" : "1",

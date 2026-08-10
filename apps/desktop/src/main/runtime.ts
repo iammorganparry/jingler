@@ -40,7 +40,8 @@ import {
   TranscriptStore,
   BackgroundTaskStore,
   UsageService,
-  WorkspaceService
+  WorkspaceService,
+  RuntimeDiagnostics
 } from "@jingler/cli-adapters"
 import { NodeContext } from "@effect/platform-node"
 import { Layer, ManagedRuntime } from "effect"
@@ -49,6 +50,7 @@ import { PreviewViewServiceLive } from "./preview-view.js"
 import { BrowserControlPortLive } from "./browser-control-port-live.js"
 import { DialogServiceLive } from "./dialog.js"
 import { RpcServerLive } from "./rpc.js"
+import { ProviderConnectionsLive } from "./provider-connections-live.js"
 import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
 import {
   PlaintextPluginSecretStoreLive,
@@ -102,6 +104,8 @@ const AssetLayer: Layer.Layer<AssetService, never, never> =
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
 // dependencies (paths, dialog, Node platform) come last.
 const RpcServicesLayer = RpcServerLive.pipe(
+  Layer.provideMerge(RuntimeDiagnostics.Default),
+  Layer.provide(ProviderConnectionsLive),
   // provideMerge: the RPC handlers consume DiscoveryService AND the main process
   // reaches the same instance to warm the model cache at startup (index.ts).
   Layer.provideMerge(DiscoveryService.Default),

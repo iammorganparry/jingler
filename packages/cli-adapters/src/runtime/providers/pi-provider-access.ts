@@ -1,0 +1,147 @@
+import { ModelRuntime } from "@earendil-works/pi-coding-agent"
+import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai"
+import {
+  ProviderId,
+  ProviderModelId,
+  type AuthKind,
+  type ProviderConnection
+} from "@jingler/core"
+import { Effect, Schema } from "effect"
+import type { ProviderCredentialStore } from "../auth/credential-store.js"
+import type { EntitlementProbeResult } from "../auth/auth-broker.js"
+import { makePiCredentialStore } from "../auth/pi-credential-store.js"
+import { ProviderCatalogError, type DiscoveredProviderModel } from "./provider-catalog.js"
+
+const credentialFor = (authKind: AuthKind, access: string): Credential =>
+  authKind === "openai-codex-oauth"
+    ? {
+        type: "oauth",
+        access,
+        refresh: "",
+        expires: Date.now() + 10 * 60_000
+      }
+    : { type: "api_key", key: access }
+
+/** A single explicit credential with no environment or unrelated-store fallback. */
+const isolatedCredentialStore = (
+  providerId: string,
+  initial: Credential
+): CredentialStore => {
+  let credential: Credential | undefined = initial
+  let pending: Promise<void> = Promise.resolve()
+  const serialize = <A>(operation: () => Promise<A>): Promise<A> => {
+    const result = pending.then(operation, operation)
+    pending = result.then(() => undefined, () => undefined)
+    return result
+  }
+  return {
+    read: async (requested) => requested === providerId ? credential : undefined,
+    list: async (): Promise<ReadonlyArray<CredentialInfo>> =>
+      credential === undefined
+        ? []
+        : [{ providerId, type: credential.type }],
+    modify: (requested, change) =>
+      serialize(async () => {
+        if (requested !== providerId) return
+        credential = await change(credential)
+        return credential
+      }),
+    delete: (requested) =>
+      serialize(async () => {
+        if (requested === providerId) credential = undefined
+      })
+  }
+}
+
+const firstAvailableModel = async (
+  runtime: ModelRuntime,
+  providerId: string,
+  signal: AbortSignal
+) => {
+  const models = await runtime.getAvailable(providerId, { signal })
+  const model = models[0]
+  if (!model) throw new Error("No authenticated model is available")
+  return model
+}
+
+/** Verify entitlement with a minimal request through only the selected auth route. */
+export const probePiEntitlement = async (input: {
+  readonly providerId: string
+  readonly authKind: AuthKind
+  readonly access: string
+  readonly signal: AbortSignal
+}): Promise<EntitlementProbeResult> => {
+  const runtime = await ModelRuntime.create({
+    credentials: isolatedCredentialStore(
+      input.providerId,
+      credentialFor(input.authKind, input.access)
+    ),
+    modelsPath: null,
+    refreshOnCreate: true,
+    signal: input.signal
+  })
+  const model = await firstAvailableModel(runtime, input.providerId, input.signal)
+  const response = await runtime.completeSimple(
+    model,
+    {
+      messages: [
+        { role: "user", content: "Reply with OK.", timestamp: Date.now() }
+      ]
+    },
+    { signal: input.signal }
+  )
+  if (response.stopReason === "error" || response.stopReason === "aborted") {
+    throw new Error(response.errorMessage ?? "Provider entitlement probe failed")
+  }
+  return {
+    entitlement: "active",
+    planLabel: null,
+    quotaLabel: null,
+    rateLimitLabel: null,
+    billingRoute:
+      input.authKind === "api-key"
+        ? "api"
+        : input.authKind === "device-environment"
+          ? "device-environment"
+          : "subscription"
+  }
+}
+
+const reasoningLevels = (enabled: boolean): ReadonlyArray<string> =>
+  enabled ? ["low", "medium", "high"] : []
+
+/** Discover models through the connection-pinned credential store, never PATH. */
+export const discoverPiModels = (
+  credentials: ProviderCredentialStore,
+  connection: ProviderConnection,
+  signal: AbortSignal
+): Effect.Effect<ReadonlyArray<DiscoveredProviderModel>, ProviderCatalogError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const runtime = await ModelRuntime.create({
+        credentials: makePiCredentialStore(connection, credentials),
+        modelsPath: null,
+        refreshOnCreate: true,
+        signal
+      })
+      return (await runtime.getAvailable(connection.providerId, { signal })).map(
+        (model) => ({
+          providerId: Schema.decodeUnknownSync(ProviderId)(model.provider),
+          id: Schema.decodeUnknownSync(ProviderModelId)(
+            `${model.provider}/${model.id}`
+          ),
+          label: model.name,
+          capabilities: {
+            contextWindow: model.contextWindow,
+            reasoning: reasoningLevels(model.reasoning),
+            vision: model.input.includes("image")
+          }
+        })
+      )
+    },
+    catch: (cause) =>
+      new ProviderCatalogError({
+        message: "Failed to discover provider models",
+        cause
+      })
+  })

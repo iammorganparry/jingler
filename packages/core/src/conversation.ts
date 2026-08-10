@@ -1,6 +1,7 @@
 import { Match, Schema } from "effect"
 import { CliKind, DiffStat } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
+import { FileChangeSet } from "./runtime/file-change.js"
 
 /**
  * Conversation domain — the transcript model plus the normalized `StreamEvent`
@@ -37,6 +38,8 @@ export const ToolCall = Schema.Struct({
   diff: Schema.NullOr(DiffStat),
   /** A compact unified-diff snippet shown inline under the card (Edit). */
   preview: Schema.NullOr(Schema.String),
+  /** Canonical actual-workspace evidence; absent on transcripts written before pi. */
+  fileChanges: Schema.optional(FileChangeSet),
   /**
    * What the tool printed — the expanded body of a non-edit card (a Bash
    * command's output, a Grep's hits). Capped upstream; edit tools use `preview`.
@@ -677,6 +680,8 @@ export const StreamEvent = Schema.Union(
     meta: Schema.NullOr(Schema.String),
     diff: Schema.NullOr(DiffStat),
     preview: Schema.NullOr(Schema.String),
+    /** Actual post-execution workspace evidence when the tool could mutate files. */
+    fileChanges: Schema.optional(FileChangeSet),
     /** What the tool printed (capped upstream). Optional — see `ToolCall.output`. */
     output: Schema.optional(Schema.String),
     agentId: AgentId
@@ -837,7 +842,7 @@ export const assistantMessage = (
  */
 export const settleStreaming = (msg: Message): Message => {
   const partStreaming = msg.parts.some((p) => p._tag === "Thinking" && p.streaming)
-  if (!msg.streaming && !partStreaming) return msg
+  if (!(msg.streaming || partStreaming)) return msg
   return {
     ...msg,
     streaming: false,
@@ -1004,6 +1009,9 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
                 meta: e.meta,
                 diff: e.diff,
                 preview: e.preview,
+                ...(e.fileChanges !== undefined
+                  ? { fileChanges: e.fileChanges }
+                  : {}),
                 // Spread so an event without output leaves the key ABSENT rather
                 // than present-and-undefined — the field is optional, and an
                 // explicit `undefined` re-encodes differently from "not there".

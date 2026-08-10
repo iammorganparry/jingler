@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/jingler-device.mjs --banner:js='#!/usr/bin/env node\nimport { createRequire as __jinglerCreateRequire } from \"node:module\"; const require = __jinglerCreateRequire(import.meta.url);'",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/jingler-device.mjs --banner:js='#!/usr/bin/env node\nimport { createRequire as __jinglerCreateRequire } from \"node:module\"; const require = __jinglerCreateRequire(import.meta.url);'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "@effect/platform-node": "^0.107.0",
     "@jingler/cli-adapters": "workspace:*",
     "@jingler/core": "workspace:*",
@@ -18,7 +20,7 @@
   },
   "devDependencies": {
     "@jingler/tsconfig": "workspace:*",
-    "@types/node": "^22.10.0",
+    "@types/node": "^24.0.0",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.0",
     "rimraf": "^6.0.1",

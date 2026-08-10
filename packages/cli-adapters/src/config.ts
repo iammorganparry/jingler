@@ -15,6 +15,7 @@ import { FileSystem } from "@effect/platform"
 import { Effect, Either, Schema } from "effect"
 import { PlanPrd } from "@jingler/core"
 import { AppPaths } from "./app-paths.js"
+import { migrateLegacyConfigIdentity } from "./runtime/migration/legacy-runtime-identity.js"
 
 const decodePlanTemplate = Schema.decodeUnknownEither(Schema.parseJson(PlanPrd))
 
@@ -40,7 +41,7 @@ const migrateProviderReasoning = (value: unknown): unknown => {
 }
 
 export const migrateConfigReasoning = (value: unknown): unknown => {
-  if (!isRecord(value) || !isRecord(value.providers)) return value
+  if (!(isRecord(value) && isRecord(value.providers))) return value
   return {
     ...value,
     providers: Object.fromEntries(
@@ -77,7 +78,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             Effect.mapError((cause) => new ConfigError({ message: "Config file is malformed", cause }))
           )
           return yield* Schema.decodeUnknown(WorkspaceConfig)(
-            migrateConfigReasoning(parsed)
+            migrateLegacyConfigIdentity(migrateConfigReasoning(parsed))
           ).pipe(
             Effect.mapError(
               (cause) => new ConfigError({ message: "Config file is malformed", cause })
@@ -107,6 +108,16 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.collapsedRepos ? { collapsedRepos: existing.collapsedRepos } : {}),
             ...(existing?.lastRepoPath ? { lastRepoPath: existing.lastRepoPath } : {}),
             ...(existing?.providers ? { providers: existing.providers } : {}),
+            ...(existing?.defaultConnectionId
+              ? { defaultConnectionId: existing.defaultConnectionId }
+              : {}),
+            ...(existing?.defaultProviderId
+              ? { defaultProviderId: existing.defaultProviderId }
+              : {}),
+            ...(existing?.defaultModelId ? { defaultModelId: existing.defaultModelId } : {}),
+            ...(existing?.connectionSelectionRequired !== undefined
+              ? { connectionSelectionRequired: existing.connectionSelectionRequired }
+              : {}),
             ...(existing?.defaultCli ? { defaultCli: existing.defaultCli } : {}),
             ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
             ...(existing?.notifications ? { notifications: existing.notifications } : {}),

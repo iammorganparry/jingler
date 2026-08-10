@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     name: "cli-adapters",
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "evals/**/*.test.ts"],
     // git/worktree/filesystem tests shell out to real `git` against temp dirs.
     testTimeout: 20_000,
     hookTimeout: 20_000

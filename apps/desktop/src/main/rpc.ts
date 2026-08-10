@@ -37,7 +37,7 @@ import {
   attachMemoryToSessionSpec,
   OpenConnectorService,
   OpenConnectorApi,
-  SecretStore,
+  type SecretStore,
   SecretStoreUnavailable,
   planDraftPost,
   billingPath,
@@ -72,6 +72,9 @@ import {
   runPublishMachineExclusive,
   UsageService,
   WorkspaceService,
+  RuntimeDiagnostics,
+  ProviderConnections,
+  type ProviderConnectionsShape,
 } from "@jingler/cli-adapters";
 import { appendFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -85,7 +88,7 @@ import {
   GitError,
   IssueComment,
   IssueDetail,
-  IssueReference,
+  type IssueReference,
   IssueSummary,
   issueReferenceOf,
   PlanConflictError,
@@ -105,6 +108,7 @@ import {
   PublishCheckpoint as PublishCheckpointSchema,
   Project as ProjectSchema,
   RemotePublishPrepared as RemotePublishPreparedSchema,
+  ProviderConnectionError,
 } from "@jingler/core";
 import type {
   BrowserBounds,
@@ -1518,7 +1522,7 @@ export const githubCloseIssue = (sessionId: string) =>
     const session = yield* resolveSession(sessionId);
     const issue = session ? issueReferenceOf(session) : undefined;
     const issueNumber = issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
-    if (!session?.worktreePath || !Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+    if (!(session?.worktreePath && Number.isSafeInteger(issueNumber) ) || issueNumber <= 0) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -1535,7 +1539,7 @@ export const githubIssue = (sessionId: string) =>
     const session = yield* resolveSession(sessionId);
     const issue = session ? issueReferenceOf(session) : undefined;
     const issueNumber = issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
-    if (!session?.worktreePath || !Number.isSafeInteger(issueNumber) || issueNumber <= 0) return null;
+    if (!(session?.worktreePath && Number.isSafeInteger(issueNumber) ) || issueNumber <= 0) return null;
     return yield* GitHubApi.issueView(
       session.worktreePath,
       issueNumber,
@@ -3699,7 +3703,34 @@ export const listProjectDirectories = (requestedPath?: string) =>
     ),
   );
 
+const providerOperation = <A, E extends { readonly message: string }>(
+  operation: (service: ProviderConnectionsShape) => Effect.Effect<A, E>,
+): Effect.Effect<A, ProviderConnectionError, ProviderConnections> =>
+  Effect.flatMap(ProviderConnections, operation).pipe(
+    Effect.mapError((error) =>
+      new ProviderConnectionError({ message: error.message }),
+    ),
+  );
+
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
+  "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
+  "RuntimeDiagnostics.export": ({ runId }) => RuntimeDiagnostics.export(runId),
+  "Provider.list": () => providerOperation((service) => service.list),
+  "Provider.status": () => providerOperation((service) => service.status),
+  "Provider.connectClaudeToken": (input) =>
+    providerOperation((service) => service.connectClaudeToken(input)),
+  "Provider.startCodexLogin": (input) =>
+    providerOperation((service) => service.startCodexLogin(input)),
+  "Provider.cancelLogin": ({ connectionId }) =>
+    providerOperation((service) => service.cancelLogin(connectionId)),
+  "Provider.setApiKey": (input) =>
+    providerOperation((service) => service.setApiKey(input)),
+  "Provider.refresh": ({ connectionId }) =>
+    providerOperation((service) => service.refresh(connectionId)),
+  "Provider.logout": ({ connectionId }) =>
+    providerOperation((service) => service.logout(connectionId)),
+  "Provider.verifyModel": (input) =>
+    providerOperation((service) => service.verifyModel(input)),
   "Billing.paths": () => billingPaths,
   "Discovery.list": () => DiscoveryService.list(),
   "Environment.list": () => EnvironmentService.list,
@@ -5067,6 +5098,8 @@ export type RpcServerRequirements =
   | ThemeService
   | TranscriptStore
   | UsageService
-  | WorkspaceService;
+  | WorkspaceService
+  | RuntimeDiagnostics
+  | ProviderConnections;
 export const RpcServerLive: Layer.Layer<never, never, RpcServerRequirements> =
   RpcServerLayer;

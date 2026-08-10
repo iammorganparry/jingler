@@ -1,4 +1,5 @@
 import type { DiffStat } from "@jingler/core"
+import { unifiedDiffStats } from "./runtime/file-changes/unified-diff.js"
 
 /**
  * Codex supplies a unified diff for each entry in a fileChange item's `changes`
@@ -8,9 +9,6 @@ import type { DiffStat } from "@jingler/core"
 interface CodexFileChange {
   readonly diff?: unknown
 }
-
-/** Keep persisted transcript cards compact even when Codex applies a large patch. */
-const MAX_PREVIEW_LINES = 120
 
 const diffOf = (change: unknown): string | null => {
   if (typeof change !== "object" || change === null || Array.isArray(change)) return null
@@ -32,44 +30,23 @@ export const codexFileChangeStats = (
   const previewLines: Array<string> = []
   let added = 0
   let removed = 0
-  let sawHunkLine = false
 
   for (const change of changes) {
     const unified = diffOf(change)
     if (unified === null) continue
-
-    const fileLines: Array<string> = []
-    let inHunk = false
-    for (const line of unified.split("\n")) {
-      if (line.startsWith("@@")) {
-        inHunk = true
-        continue
-      }
-      if (line.startsWith("diff --git ")) {
-        inHunk = false
-        continue
-      }
-      if (!inHunk || line === "\\ No newline at end of file") continue
-
-      const marker = line[0]
-      if (marker === "+") added++
-      else if (marker === "-") removed++
-      else if (marker !== " ") continue
-
-      sawHunkLine = true
-      fileLines.push(line)
-    }
-
-    if (fileLines.length > 0) {
+    const stats = unifiedDiffStats(unified)
+    added += stats.added
+    removed += stats.removed
+    if (stats.preview !== null) {
       if (previewLines.length > 0) previewLines.push(" ")
-      previewLines.push(...fileLines)
+      previewLines.push(...stats.preview.split("\n"))
     }
   }
 
-  if (!sawHunkLine) return { diff: null, preview: null }
+  if (previewLines.length === 0) return { diff: null, preview: null }
 
-  const hidden = Math.max(0, previewLines.length - MAX_PREVIEW_LINES)
-  const shown = previewLines.slice(0, MAX_PREVIEW_LINES)
+  const hidden = Math.max(0, previewLines.length - 120)
+  const shown = previewLines.slice(0, 120)
   if (hidden > 0) shown.push(`…${hidden} more diff line(s)`)
   return { diff: { added, removed }, preview: shown.join("\n") }
 }

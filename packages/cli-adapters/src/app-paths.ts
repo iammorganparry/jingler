@@ -83,6 +83,14 @@ export interface AppPathsShape {
    * signing out must not drop the instance credential. Only ciphertext is written.
    */
   readonly openConnectorFile: string
+  /** Persistent pi sessions and Jingler-owned runtime state. */
+  readonly piSessionsDir: string
+  readonly managedResourcesDir: string
+  readonly importedMcpFile: string
+  readonly certificationsFile: string
+  readonly providerConnectionsFile: string
+  readonly runJournalsDir: string
+  readonly diagnosticsDir: string
 }
 
 export class AppPaths extends Context.Tag("@jingler/AppPaths")<AppPaths, AppPathsShape>() {}

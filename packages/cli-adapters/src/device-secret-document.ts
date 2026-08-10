@@ -12,6 +12,8 @@ export interface DeviceSecretDocument {
   readonly remoteSessions?: Readonly<Record<string, unknown>>
   readonly remoteRequestNamespace?: string
   readonly directSshTargets?: Readonly<Record<string, DirectSshTarget>>
+  /** Provider credentials encrypted inside the existing device-secret vault. */
+  readonly agentCredentials?: Readonly<Record<string, unknown>>
   readonly [key: string]: unknown
 }
 

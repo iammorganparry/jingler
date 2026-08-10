@@ -102,6 +102,16 @@ import {
   Usage,
   VsCodeTheme,
   WorkspaceConfig,
+  RuntimeDiagnosticSnapshot,
+  ModelCertification,
+  ProviderCatalog,
+  ProviderConnection,
+  ProviderConnectionError,
+  ConnectClaudeTokenInput,
+  StartCodexLoginInput,
+  ProviderConnectionInput,
+  SetProviderApiKeyInput,
+  VerifyProviderModelInput,
   FONT_SCALE_RANGE
 } from "@jingler/core"
 import {
@@ -435,6 +445,68 @@ export class AssetListRpcs extends RpcGroup.make(
  * IPC; serialization is JSON. See `apps/desktop/src/main/rpc` for the wiring.
  */
 export class JinglerCoreRpcs extends RpcGroup.make(
+  Rpc.make("RuntimeDiagnostics.get", {
+    success: Schema.NullOr(RuntimeDiagnosticSnapshot),
+    payload: { runId: Schema.String }
+  }),
+
+  Rpc.make("RuntimeDiagnostics.export", {
+    success: Schema.String,
+    payload: { runId: Schema.String }
+  }),
+
+  Rpc.make("Provider.list", {
+    success: ProviderCatalog,
+    error: ProviderConnectionError
+  }),
+
+  Rpc.make("Provider.status", {
+    success: Schema.Array(ProviderConnection),
+    error: ProviderConnectionError
+  }),
+
+  Rpc.make("Provider.connectClaudeToken", {
+    success: ProviderConnection,
+    error: ProviderConnectionError,
+    payload: ConnectClaudeTokenInput
+  }),
+
+  Rpc.make("Provider.startCodexLogin", {
+    success: ProviderConnection,
+    error: ProviderConnectionError,
+    payload: StartCodexLoginInput
+  }),
+
+  Rpc.make("Provider.cancelLogin", {
+    success: Schema.Void,
+    error: ProviderConnectionError,
+    payload: ProviderConnectionInput
+  }),
+
+  Rpc.make("Provider.setApiKey", {
+    success: ProviderConnection,
+    error: ProviderConnectionError,
+    payload: SetProviderApiKeyInput
+  }),
+
+  Rpc.make("Provider.refresh", {
+    success: ProviderConnection,
+    error: ProviderConnectionError,
+    payload: ProviderConnectionInput
+  }),
+
+  Rpc.make("Provider.logout", {
+    success: Schema.Void,
+    error: ProviderConnectionError,
+    payload: ProviderConnectionInput
+  }),
+
+  Rpc.make("Provider.verifyModel", {
+    success: ModelCertification,
+    error: ProviderConnectionError,
+    payload: VerifyProviderModelInput
+  }),
+
   /** List every known coding CLI and whether it is installed on this host. */
   /**
    * What each installed harness will actually be billed to.

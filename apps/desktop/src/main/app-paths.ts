@@ -63,5 +63,12 @@ export const AppPathsLive = Layer.succeed(AppPaths, {
   builtinPluginsDir: builtinPluginsRoot(),
   pluginStorageDir: join(jinglerRoot, "plugin-storage"),
   authFile: join(jinglerRoot, "auth.enc"),
-  openConnectorFile: join(jinglerRoot, "open-connector.enc")
+  openConnectorFile: join(jinglerRoot, "open-connector.enc"),
+  piSessionsDir: join(jinglerRoot, "pi-sessions"),
+  managedResourcesDir: join(jinglerRoot, "agent-resources"),
+  importedMcpFile: join(jinglerRoot, "agent-resources", "mcp.json"),
+  certificationsFile: join(jinglerRoot, "runtime", "certifications.json"),
+  providerConnectionsFile: join(jinglerRoot, "runtime", "provider-connections.json"),
+  runJournalsDir: join(jinglerRoot, "runtime", "journals"),
+  diagnosticsDir: join(jinglerRoot, "runtime", "diagnostics")
 })

@@ -97,7 +97,14 @@ import type {
   ContextConfig,
   ContextSnapshot,
   Usage,
-  WorkspaceConfig
+  WorkspaceConfig,
+  RuntimeDiagnosticSnapshot,
+  ModelCertification,
+  ProviderCatalog,
+  ProviderConnection,
+  ProviderConnectionId,
+  ProviderModelId,
+  CodexLoginMethod
 } from "@jingler/core"
 import {
   AssetListRpcs,
@@ -266,6 +273,41 @@ const drainRun = (
 
 /** The typed calls the renderer consumes. */
 export const rpc = {
+  runtimeDiagnosticsGet: (runId: string): Promise<RuntimeDiagnosticSnapshot | null> =>
+    run((c) => c.RuntimeDiagnostics.get({ runId })),
+  runtimeDiagnosticsExport: (runId: string): Promise<string> =>
+    run((c) => c.RuntimeDiagnostics.export({ runId })),
+  providerList: (): Promise<ProviderCatalog> => run((c) => c.Provider.list()),
+  providerStatus: (): Promise<ReadonlyArray<ProviderConnection>> =>
+    run((c) => c.Provider.status()),
+  providerConnectClaudeToken: (input: {
+    id: string
+    token: string
+    targetId: string
+  }): Promise<ProviderConnection> =>
+    run((c) => c.Provider.connectClaudeToken(input)),
+  providerStartCodexLogin: (input: {
+    id: string
+    targetId: string
+    method: CodexLoginMethod
+  }): Promise<ProviderConnection> => run((c) => c.Provider.startCodexLogin(input)),
+  providerCancelLogin: (connectionId: ProviderConnectionId): Promise<void> =>
+    run((c) => c.Provider.cancelLogin({ connectionId })),
+  providerSetApiKey: (input: {
+    id: string
+    providerId: string
+    apiKey: string
+    targetId: string
+  }): Promise<ProviderConnection> => run((c) => c.Provider.setApiKey(input)),
+  providerRefresh: (connectionId: ProviderConnectionId): Promise<ProviderConnection> =>
+    run((c) => c.Provider.refresh({ connectionId })),
+  providerLogout: (connectionId: ProviderConnectionId): Promise<void> =>
+    run((c) => c.Provider.logout({ connectionId })),
+  providerVerifyModel: (
+    connectionId: ProviderConnectionId,
+    modelId: ProviderModelId
+  ): Promise<ModelCertification> =>
+    run((c) => c.Provider.verifyModel({ connectionId, modelId })),
   /** What each installed harness will actually be billed to. */
   billingPaths: (): Promise<ReadonlyArray<HarnessBilling>> =>
     run((c) => c.Billing.paths()),

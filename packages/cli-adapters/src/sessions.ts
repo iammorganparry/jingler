@@ -18,7 +18,7 @@ import type {
   WorkspaceMode
 } from "@jingler/core"
 import {
-  GitHubApiError,
+  type GitHubApiError,
   GitError,
   defaultModel,
   issueReferenceOf,
@@ -31,7 +31,7 @@ import {
 import { Session as SessionSchema } from "@jingler/core"
 import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
-import { FileSystem, Path } from "@effect/platform"
+import { FileSystem, type Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect, Either, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
