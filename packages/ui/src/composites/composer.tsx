@@ -145,6 +145,7 @@ export function Composer({
   onSend,
   onStop,
   branch,
+  branchPending = false,
   repo,
   environments = [],
   environmentId,
@@ -187,6 +188,8 @@ export function Composer({
   onStop?: () => void;
   /** Git branch backing this session's worktree. */
   branch?: string;
+  /** The detached task worktree is waiting for its semantic branch name. */
+  branchPending?: boolean;
   /** Repository name backing this session — shown at the composer's bottom-left. */
   repo?: string;
   environments?: ReadonlyArray<Environment>;
@@ -898,7 +901,7 @@ export function Composer({
             branch bottom-right on the same line — `justify-between` splits them.
             An empty span holds the left slot when there is no repo, so a lone
             branch still lands on the right. */}
-        {(repo || branch) && (
+        {(repo || branch || branchPending) && (
           <div className="flex items-center justify-between gap-2 px-1.5 pt-1 font-mono text-[10.5px] text-dim">
             {repo ? (
               <span
@@ -911,13 +914,16 @@ export function Composer({
             ) : (
               <span />
             )}
-            {branch && (
+            {(branch || branchPending) && (
               <span
-                title={`Working branch: ${branch}`}
+                title={branchPending ? "Task branch will be named after task understanding" : `Working branch: ${branch}`}
                 className="flex min-w-0 max-w-[180px] items-center gap-1"
+                data-testid="composer-branch"
+                aria-live="polite"
+                aria-atomic="true"
               >
                 <GitBranch size={12} className="flex-none" />
-                <span className="truncate">{branch}</span>
+                <span className="truncate">{branchPending ? "Naming branch…" : branch}</span>
               </span>
             )}
           </div>

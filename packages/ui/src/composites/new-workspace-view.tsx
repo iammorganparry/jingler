@@ -24,6 +24,7 @@ import {
 } from "lucide-react"
 import { Button } from "../components/button.js"
 import { GithubMark } from "../components/github-mark.js"
+import { LinearMark } from "../components/linear-mark.js"
 import { SearchInput } from "../components/search-input.js"
 import {
   Command,
@@ -242,7 +243,9 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       value: `provider:${provider.id}` as const,
       label: `${provider.label} issue`,
       description: `Link and prefill from ${provider.label}`,
-      icon: <CircleDot size={15} className="text-purple" />
+      icon: provider.id === "linear"
+        ? <LinearMark className="size-[15px] text-text-bright" />
+        : <CircleDot size={15} className="text-purple" />
     }))
   ]
   const selectedSource = sourceOptions.find((option) => option.value === source)
@@ -258,11 +261,11 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">
-        <div className="m-auto flex w-full max-w-[920px] flex-col gap-5">
+        <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
           <div className="flex items-center gap-3">
             <div>
               <h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">What are we working on?</h2>
-              <p className="mt-1 text-[12px] text-muted-foreground">Choose the checkout, then send the first message with the same composer used in a session.</p>
+              <p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Choose where the work starts, configure its checkout, then send the first message.</p>
             </div>
             <span className="flex-1" />
             {props.onAddProject && (
@@ -276,16 +279,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
               Start from
             </span>
             <div
-              className={cn(
-                "grid gap-2",
-                sourceOptions.length >= 5
-                  ? "grid-cols-5"
-                  : sourceOptions.length === 4
-                    ? "grid-cols-4"
-                    : sourceOptions.length === 3
-                      ? "grid-cols-3"
-                      : "grid-cols-2"
-              )}
+              className="grid grid-cols-[repeat(auto-fit,minmax(156px,1fr))] gap-2"
               role="radiogroup"
               aria-label="Session source"
             >
@@ -299,11 +293,11 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                     aria-checked={selected}
                     onClick={() => send({ type: "SET_SOURCE", source: option.value })}
                     className={cn(
-                      "flex min-h-16 min-w-0 flex-col justify-center gap-1 rounded-lg border px-3 text-left outline-none transition-[background-color,border-color,transform] active:scale-[0.96] focus-visible:ring-2 focus-visible:ring-ring",
-                      selected ? "border-blue/55 bg-blue/10" : "border-line bg-sunken hover:border-line-strong hover:bg-surface"
+                      "group flex min-h-[74px] min-w-0 flex-col justify-center gap-1.5 rounded-lg border px-3.5 text-left outline-none transition-[background-color,border-color,transform] active:translate-y-px focus-visible:ring-2 focus-visible:ring-ring",
+                      selected ? "border-brand/60 bg-selection" : "border-line bg-sunken hover:border-line-strong hover:bg-surface"
                     )}
                   >
-                    <span className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
+                    <span className="flex items-center gap-2 text-[12.5px] font-semibold text-text-bright">
                       {option.icon}<span className="truncate">{option.label}</span>
                     </span>
                     <span className="truncate text-[10.5px] text-dim">{option.description}</span>
@@ -313,7 +307,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] items-end gap-3">
             <div className="flex flex-col gap-0.5">
               <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">Project</span>
               <SearchPicker
@@ -325,7 +319,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 searchPlaceholder="Search projects…"
                 emptyLabel="No projects match."
                 disabled={loading}
-                triggerClassName="w-[240px]"
+                triggerClassName="w-full"
               />
             </div>
             <div className="flex flex-col gap-0.5">
@@ -339,7 +333,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 searchPlaceholder="Search checkout modes…"
                 emptyLabel="No checkout modes match."
                 disabled={loading}
-                triggerClassName="w-[240px]"
+                triggerClassName="w-full"
               />
             </div>
             <div className="flex flex-col gap-0.5">
@@ -355,14 +349,19 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 searchPlaceholder="Search branches…"
                 emptyLabel="No branches match."
                 disabled={loading || source === "pr"}
-                triggerClassName="w-[240px]"
+                triggerClassName="w-full"
               />
             </div>
           </div>
 
           {source !== "blank" && source !== "branch" && (
-            <section className="rounded-xl border border-line bg-panel p-3" aria-label="Source picker">
-              <div className="mb-3 flex items-center gap-2">
+            <section className="overflow-hidden rounded-xl border border-line bg-panel" aria-label="Source picker">
+              <header className="flex items-center gap-2 border-b border-line px-4 py-3">
+                <span className="text-text-bright">{selectedSource?.icon}</span>
+                <h3 className="text-[12px] font-semibold text-text-bright">{sourceLabel}s</h3>
+                <span className="text-[10.5px] text-dim">Choose one to prefill this session</span>
+              </header>
+              <div className="flex items-center gap-2 px-3 pt-3">
                 <SearchInput
                   value={search}
                   onChange={(value) => send({ type: "SET_SEARCH", search: value })}
@@ -378,21 +377,23 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                   Just mine
                 </Button>
               </div>
-              {source === "pr" ? (
-                <PrPickerList
-                  prs={pullRequests}
-                  selected={selectedPr?.number ?? null}
-                  onSelect={(pr) => send({ type: "SELECT_PR", pr })}
-                  loading={sourceLoading}
-                />
-              ) : (
-                <IssuePickerList
-                  issues={issues}
-                  selected={selectedIssue?.id ?? null}
-                  onSelect={(issue) => send({ type: "SELECT_ISSUE", issue })}
-                  loading={sourceLoading}
-                />
-              )}
+              <div className="p-3">
+                {source === "pr" ? (
+                  <PrPickerList
+                    prs={pullRequests}
+                    selected={selectedPr?.number ?? null}
+                    onSelect={(pr) => send({ type: "SELECT_PR", pr })}
+                    loading={sourceLoading}
+                  />
+                ) : (
+                  <IssuePickerList
+                    issues={issues}
+                    selected={selectedIssue?.id ?? null}
+                    onSelect={(issue) => send({ type: "SELECT_ISSUE", issue })}
+                    loading={sourceLoading}
+                  />
+                )}
+              </div>
             </section>
           )}
 

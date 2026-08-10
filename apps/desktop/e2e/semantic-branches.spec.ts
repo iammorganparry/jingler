@@ -41,6 +41,8 @@ test("a fresh task starts detached and becomes a visible collision-safe semantic
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Fix token refresh")
   await expect(sessionRow(window, "Untitled session")).toBeVisible()
+  const composerBranch = window.getByTestId("composer-branch")
+  await expect(composerBranch).toHaveText("Naming branch…")
 
   const staged = sessions(home)[0]!
   expect(staged).toMatchObject({
@@ -60,6 +62,9 @@ test("a fresh task starts detached and becomes a visible collision-safe semantic
   await composer.press("Enter")
   await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
 
+  await expect(composerBranch).toHaveText("chore/fix-token-refresh-2", {
+    timeout: 20_000
+  })
   await expect.poll(() => sessions(home)[0]?.branch).toBe("chore/fix-token-refresh-2")
   const named = sessions(home)[0]!
   expect(named).toMatchObject({

@@ -43,6 +43,25 @@ const capabilities: ReadonlyArray<HarnessCapability> = [
 ]
 
 describe("Composer send row", () => {
+  it("replaces the pending branch label as soon as the session branch settles", () => {
+    const { rerender } = render(
+      <Composer branch="main" branchPending repo="widget" />
+    )
+
+    const branch = () => screen.getByTestId("composer-branch")
+    expect(branch().textContent).toBe("Naming branch…")
+    expect(branch().getAttribute("aria-live")).toBe("polite")
+
+    rerender(
+      <Composer branch="fix/linear-session-styles" branchPending={false} repo="widget" />
+    )
+
+    expect(branch().textContent).toBe("fix/linear-session-styles")
+    expect(branch().getAttribute("title")).toBe(
+      "Working branch: fix/linear-session-styles"
+    )
+  })
+
   it("puts the branch on the lower row, after send and to the right of the repo", () => {
     render(<Composer branch="chore/wandering-watt" repo="widget" />)
     const branch = screen.getByTitle("Working branch: chore/wandering-watt")

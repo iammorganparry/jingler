@@ -97,6 +97,8 @@ export interface ConversationViewProps {
   paused?: boolean
   /** Git branch backing the session's worktree, shown in the composer. */
   branch?: string
+  /** The detached task worktree is waiting for its semantic branch name. */
+  branchPending?: boolean
   /** Repository backing the session, shown at the composer's bottom-left. */
   repo?: string
   environments?: ReadonlyArray<import("@jingler/core").Environment>
@@ -250,6 +252,7 @@ export function ConversationView({
   files = [],
   paused = false,
   branch,
+  branchPending = false,
   repo,
   environments,
   environmentId,
@@ -651,6 +654,7 @@ export function ConversationView({
                 files={files}
                 paused={paused}
                 branch={branch}
+                branchPending={branchPending}
                 repo={repo}
                 environments={environments}
                 environmentId={environmentId}
