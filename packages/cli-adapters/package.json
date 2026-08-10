@@ -27,6 +27,7 @@
     "./runtime/agent/pi-runtime-live": "./src/runtime/agent/pi-runtime-live.ts",
     "./runtime/auth/agent-secret-store": "./src/runtime/auth/agent-secret-store.ts",
     "./runtime/certification/model-certification-store": "./src/runtime/certification/model-certification-store.ts",
+    "./runtime/diagnostics/runtime-diagnostics": "./src/runtime/diagnostics/runtime-diagnostics.ts",
     "./runtime/providers/provider-catalog": "./src/runtime/providers/provider-catalog.ts",
     "./runtime/providers/provider-connections": "./src/runtime/providers/provider-connections.ts",
     "./runtime/providers/pi-provider-access": "./src/runtime/providers/pi-provider-access.ts",

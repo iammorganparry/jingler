@@ -462,6 +462,10 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { runId: Schema.String }
   }),
 
+  Rpc.make("RuntimeDiagnostics.latest", {
+    success: Schema.NullOr(RuntimeDiagnosticSnapshot)
+  }),
+
   Rpc.make("RuntimeDiagnostics.export", {
     success: Schema.String,
     payload: { runId: Schema.String }

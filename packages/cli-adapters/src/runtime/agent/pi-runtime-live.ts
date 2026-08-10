@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { Effect, Layer } from "effect"
 import { AppPaths } from "../../app-paths.js"
@@ -12,6 +11,7 @@ import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
+import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
 import { AgentRuntime, AgentRuntimeError } from "./agent-runtime.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
@@ -37,9 +37,9 @@ export const makePiAgentRuntimeLive = (
     const providers = yield* ProviderConnections
     const importedMcp = yield* ImportedMcpService
     const managedResources = yield* AgentResourceService
+    const diagnostics = yield* RuntimeDiagnostics
     const workspace = yield* makeWorkspaceInspectionPort
     const credentials = new AgentSecretStore(secretStore)
-    const runIds = new WeakMap<FileChangeTracker, string>()
 
     const factory = makePiSessionFactory({
       agentDir: paths.managedResourcesDir,
@@ -96,12 +96,10 @@ export const makePiAgentRuntimeLive = (
           return connection
         }),
       terminalTracker: (spec) => {
-        const runId = randomUUID()
         const tracker = new FileChangeTracker({
-          artifactDir: join(paths.runJournalsDir, "artifacts", runId),
-          sessionId: spec.piSessionId ?? runId
+          artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
+          sessionId: spec.piSessionId ?? spec.runId
         })
-        runIds.set(tracker, runId)
         return tracker
       },
       createToolRegistry: (spec, context, tracker) => {
@@ -110,15 +108,6 @@ export const makePiAgentRuntimeLive = (
             new AgentRuntimeError({
               reason: "runtime",
               message: "The pi runtime requires workspace reconciliation"
-            })
-          )
-        }
-        const runId = runIds.get(tracker)
-        if (!runId) {
-          return Effect.fail(
-            new AgentRuntimeError({
-              reason: "runtime",
-              message: "The pi runtime lost its run-scoped tracker"
             })
           )
         }
@@ -147,12 +136,12 @@ export const makePiAgentRuntimeLive = (
             registryOptions: {
               observer: createMutationObserver({
                 cwd: spec.cwd,
-                runId,
+                runId: spec.runId,
                 sessionId: spec.sessionId,
                 chatId: spec.chatId,
                 tracker,
                 journal: new RunJournal({
-                  file: join(paths.runJournalsDir, `${runId}.json`)
+                  file: join(paths.runJournalsDir, `${spec.runId}.json`)
                 })
               })
             }
@@ -170,6 +159,7 @@ export const makePiAgentRuntimeLive = (
           )
         )
       },
+      recordDiagnostic: diagnostics.record,
       ...(options.configureModelRuntime
         ? { configureModelRuntime: options.configureModelRuntime }
         : {})

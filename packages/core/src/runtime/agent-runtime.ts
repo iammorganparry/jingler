@@ -44,6 +44,8 @@ export const TranscriptSeed = Schema.Struct({
 export type TranscriptSeed = Schema.Schema.Type<typeof TranscriptSeed>
 
 export const PiRunSpec = Schema.Struct({
+  /** One runtime attempt; stable across its journal, diagnostics, and normalized events. */
+  runId: Schema.String,
   /** Jingler-owned identity used for journals and restart recovery. */
   sessionId: Schema.String,
   chatId: Schema.String,

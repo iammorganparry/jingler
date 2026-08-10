@@ -99,6 +99,8 @@ import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useConnectorCenter } from "./use-connector-center.js";
 import { useOpenConnector } from "./use-open-connector.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
+import { useAgentsSettings } from "./use-agents-settings.js";
+import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useInjectionTargets } from "./use-injection-targets.js";
 import { useEnvironments } from "./use-environments.js";
 import { useProjects } from "./use-projects.js";
@@ -439,6 +441,8 @@ function AuthedApp({
   const connector = useConnectorCenter();
   const unifiedMcp = useOpenConnector();
   const providerCatalog = useProviderCatalog();
+  const agentsSettings = useAgentsSettings();
+  const runtimeInspector = useRuntimeInspector();
   const injectionTargets = useInjectionTargets(unifiedMcp.config);
   const environmentController = useEnvironments();
   const projectController = useProjects();
@@ -1507,6 +1511,36 @@ function AuthedApp({
           onVerify: providerCatalog.verify,
           onMakeDefault: providerCatalog.makeDefault,
           onLogout: providerCatalog.logout,
+        }}
+        agents={{
+          resources: agentsSettings.snapshot.context.resources,
+          detection: agentsSettings.snapshot.context.detection,
+          selectedCandidateIds: agentsSettings.snapshot.context.selectedCandidateIds,
+          loading:
+            agentsSettings.snapshot.matches("loading") ||
+            agentsSettings.snapshot.matches("detecting") ||
+            agentsSettings.snapshot.matches("importing") ||
+            agentsSettings.snapshot.matches("mutating"),
+          reviewing: agentsSettings.snapshot.matches("reviewing"),
+          error: agentsSettings.snapshot.context.error,
+          onDetect: () => agentsSettings.send({ type: "DETECT" }),
+          onToggleCandidate: (id) => agentsSettings.send({ type: "TOGGLE_CANDIDATE", id }),
+          onImportSelected: () => agentsSettings.send({ type: "IMPORT_SELECTED" }),
+          onCancelDetection: () => agentsSettings.send({ type: "CANCEL_DETECTION" }),
+          onSetEnabled: (id, enabled) => agentsSettings.send({ type: "SET_ENABLED", id, enabled }),
+          onReveal: (id) => agentsSettings.send({ type: "REVEAL", id }),
+          onRemove: (id) => agentsSettings.send({ type: "REMOVE", id }),
+          onRetry: () => agentsSettings.send({ type: "RETRY" }),
+        }}
+        runtimeInspector={{
+          snapshot: runtimeInspector.snapshot.context.snapshot,
+          loading:
+            runtimeInspector.snapshot.matches("loading") ||
+            runtimeInspector.snapshot.matches("exporting"),
+          exported: runtimeInspector.snapshot.context.exported !== null,
+          error: runtimeInspector.snapshot.context.error,
+          onRefresh: () => runtimeInspector.send({ type: "REFRESH" }),
+          onExport: () => runtimeInspector.send({ type: "EXPORT" }),
         }}
         onSaveProvider={saveProvider}
         defaultCli={defaultCli}

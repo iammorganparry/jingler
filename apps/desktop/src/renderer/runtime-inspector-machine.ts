@@ -2,11 +2,11 @@ import type { RuntimeDiagnosticSnapshot } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
 
 export interface RuntimeInspectorApi {
-  readonly get: (runId: string) => Promise<RuntimeDiagnosticSnapshot | null>
+  readonly latest: () => Promise<RuntimeDiagnosticSnapshot | null>
   readonly export: (runId: string) => Promise<string>
 }
 
-interface RuntimeInspectorContext {
+export interface RuntimeInspectorContext {
   readonly runId: string
   readonly snapshot: RuntimeDiagnosticSnapshot | null
   readonly exported: string | null
@@ -14,7 +14,7 @@ interface RuntimeInspectorContext {
 }
 
 type RuntimeInspectorEvent =
-  | { readonly type: "LOAD"; readonly runId: string }
+  | { readonly type: "LOAD" }
   | { readonly type: "REFRESH" }
   | { readonly type: "EXPORT" }
   | { readonly type: "CLEAR" }
@@ -29,7 +29,7 @@ export const createRuntimeInspectorMachine = (api: RuntimeInspectorApi) =>
       events: {} as RuntimeInspectorEvent
     },
     actors: {
-      load: fromPromise(({ input }: { input: RuntimeInspectorContext }) => api.get(input.runId)),
+      load: fromPromise(() => api.latest()),
       export: fromPromise(({ input }: { input: RuntimeInspectorContext }) => api.export(input.runId))
     },
     guards: {
@@ -37,14 +37,14 @@ export const createRuntimeInspectorMachine = (api: RuntimeInspectorApi) =>
     }
   }).createMachine({
     id: "runtime-inspector",
-    initial: "idle",
+    initial: "loading",
     context: { runId: "", snapshot: null, exported: null, error: null },
     states: {
       idle: {
         on: {
           LOAD: {
             target: "loading",
-            actions: assign({ runId: ({ event }) => event.runId, error: null })
+            actions: assign({ error: null })
           }
         }
       },
@@ -52,13 +52,22 @@ export const createRuntimeInspectorMachine = (api: RuntimeInspectorApi) =>
         invoke: {
           src: "load",
           input: ({ context }) => context,
-          onDone: { target: "ready", actions: assign({ snapshot: ({ event }) => event.output, error: null }) },
+          onDone: {
+            target: "ready",
+            actions: assign({
+              runId: ({ event }) => event.output?.runId ?? "",
+              snapshot: ({ event }) => event.output,
+              exported: null,
+              error: null
+            })
+          },
           onError: { target: "failed", actions: assign({ error: ({ event }) => messageOf(event.error) }) }
         }
       },
       ready: {
         on: {
-          REFRESH: { target: "loading", guard: "hasRun" },
+          LOAD: { target: "loading" },
+          REFRESH: { target: "loading" },
           EXPORT: { target: "exporting", guard: "hasRun" },
           CLEAR: { target: "idle", actions: assign({ runId: "", snapshot: null, exported: null, error: null }) }
         }
@@ -73,7 +82,8 @@ export const createRuntimeInspectorMachine = (api: RuntimeInspectorApi) =>
       },
       failed: {
         on: {
-          REFRESH: { target: "loading", guard: "hasRun" },
+          LOAD: { target: "loading" },
+          REFRESH: { target: "loading" },
           CLEAR: { target: "idle", actions: assign({ runId: "", snapshot: null, exported: null, error: null }) }
         }
       }

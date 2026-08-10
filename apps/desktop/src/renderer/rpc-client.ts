@@ -285,6 +285,8 @@ const drainRun = (
 export const rpc = {
   runtimeDiagnosticsGet: (runId: string): Promise<RuntimeDiagnosticSnapshot | null> =>
     run((c) => c.RuntimeDiagnostics.get({ runId })),
+  runtimeDiagnosticsLatest: (): Promise<RuntimeDiagnosticSnapshot | null> =>
+    run((c) => c.RuntimeDiagnostics.latest()),
   runtimeDiagnosticsExport: (runId: string): Promise<string> =>
     run((c) => c.RuntimeDiagnostics.export({ runId })),
   providerList: (): Promise<ProviderCatalog> => run((c) => c.Provider.list()),

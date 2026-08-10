@@ -44,9 +44,10 @@ const runtimeContext = (context: AgentContext) => ({
     )
 })
 
-const piSpec = (spec: SessionSpec) => {
+const piSpec = (runId: string, spec: SessionSpec) => {
   if (!spec.runtime) return null
   return {
+    runId,
     ...spec.runtime,
     cwd: spec.cwd,
     prompt: spec.prompt,
@@ -66,7 +67,7 @@ export const AgentRuntimeAdapterLive = Layer.effect(
 
     return CliAdapter.of({
       run: (runId, spec, context) => {
-        const canonical = piSpec(spec)
+        const canonical = piSpec(runId, spec)
         if (canonical === null) return Effect.fail(missingRuntimeIdentity(spec))
 
         return runtime.run(canonical, runtimeContext(context)).pipe(

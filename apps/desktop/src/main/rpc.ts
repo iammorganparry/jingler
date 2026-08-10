@@ -2066,7 +2066,16 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     }
 
     const cli = session.cli;
-    const model = session.modelId ?? session.model ?? reviewModelFor(cli);
+    const config = yield* ConfigService.get().pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    const configuredReviewModel = config?.github?.reviewCli === cli
+      ? config.github.reviewModel
+      : undefined;
+    const model = session.modelId ?? session.model ?? reviewModelFor(
+      cli,
+      configuredReviewModel,
+    );
 
     const diff = yield* GitHubApi.prDiff(
       session.worktreePath,
@@ -3810,6 +3819,7 @@ const resourceEnabledForTarget = (targetId: string) =>
 
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
+  "RuntimeDiagnostics.latest": () => RuntimeDiagnostics.latest(),
   "RuntimeDiagnostics.export": ({ runId }) => RuntimeDiagnostics.export(runId),
   "Provider.list": () => providerOperation((service) => service.list),
   "Provider.status": () => providerOperation((service) => service.status),

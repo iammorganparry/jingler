@@ -109,6 +109,7 @@ const HarnessLayers = Layer.mergeAll(
 
 const AssetLayer: Layer.Layer<AssetService, never, never> =
   AssetService.Default.pipe(Layer.provide(NodeContext.layer))
+const RuntimeDiagnosticsLive = RuntimeDiagnostics.Default
 
 const e2ePiFixture = loadE2ePiFixture()
 const EmbeddedPiRuntimeLive = e2ePiFixture === null
@@ -133,7 +134,6 @@ const AgentExecutionLayer = isScriptedEnv()
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
 // dependencies (paths, dialog, Node platform) come last.
 const RpcServicesLayer = RpcServerLive.pipe(
-  Layer.provideMerge(RuntimeDiagnostics.Default),
   Layer.provideMerge(RuntimeRecoveryService.Default),
   Layer.provideMerge(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
@@ -235,6 +235,9 @@ const AppServicesLayer = RpcServicesLayer.pipe(
 // Split from the service graph above so TypeScript does not collapse the input
 // of this deeply nested layer pipeline to `any` at the ManagedRuntime boundary.
 const AppLayer = AppServicesLayer.pipe(
+  // Supply diagnostics at the composition root so the pi recorder and RPC
+  // inspector are structurally guaranteed to share one app-lifetime service.
+  Layer.provide(RuntimeDiagnosticsLive),
   // DialogService + the browser-control port, merged into ONE stage to stay
   // inside `pipe`'s 20-argument limit. They are peers (no interdependency); the
   // port's PreviewViewService requirement is satisfied by the NEXT stage. The

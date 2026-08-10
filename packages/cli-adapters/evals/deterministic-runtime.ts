@@ -353,6 +353,7 @@ const specFor = (input: {
     `${fake.providerId}/${fake.modelId}`
   )
   return {
+    runId: `eval-${scenarioId}`,
     sessionId: "eval-session",
     chatId: "eval-chat",
     connectionId: connection.id,

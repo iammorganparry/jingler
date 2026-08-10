@@ -93,6 +93,8 @@ import {
   EnvironmentDialog,
   type EnvironmentDialogProps
 } from "./environment-dialog.js"
+import { AgentsSettings, type AgentsSettingsProps } from "./agents-settings.js"
+import { RuntimeInspector, type RuntimeInspectorProps } from "./runtime-inspector.js"
 
 // ── Section registry ─────────────────────────────────────────────────────────
 
@@ -102,6 +104,7 @@ type SectionKey =
   | "context"
   | "plan"
   | "agents"
+  | "runtime"
   | "permissions"
   | "connectors"
   | "github"
@@ -138,7 +141,13 @@ const NAV: ReadonlyArray<NavItem> = [
     key: "agents",
     label: "Agents & skills",
     icon: <Sparkles size={14} />,
-    ready: false
+    ready: true
+  },
+  {
+    key: "runtime",
+    label: "Runtime",
+    icon: <Gauge size={14} />,
+    ready: true
   },
   {
     key: "permissions",
@@ -251,6 +260,10 @@ export interface SettingsViewProps {
   clis: ReadonlyArray<CliInfo>
   /** Canonical provider connections. When present, legacy CLI cards stay hidden. */
   providerConnections?: ProviderConnectionsSettingsProps
+  /** Operator-controlled skills, prompts, and MCP resources. */
+  agents?: AgentsSettingsProps
+  /** Redacted metadata for the latest embedded pi run. */
+  runtimeInspector?: RuntimeInspectorProps
   /**
    * Everything the Themes pane needs. Optional so Storybook and the component
    * gallery can mount Settings without standing up a theme catalog; absent
@@ -337,7 +350,7 @@ export interface SettingsViewProps {
   /** Close the view and return to the active session. */
   onClose?: () => void
   /** Recovery actions open directly on GitHub; ordinary Settings opens Providers. */
-  initialSection?: "providers" | "github" | "devices"
+  initialSection?: "providers" | "github" | "devices" | "agents" | "runtime"
 }
 
 /**
@@ -349,6 +362,8 @@ export interface SettingsViewProps {
 export function SettingsView({
   clis,
   providerConnections,
+  agents,
+  runtimeInspector,
   themes,
   plugins,
   devices,
@@ -387,6 +402,10 @@ export function SettingsView({
   initialSection = "providers"
 }: SettingsViewProps) {
   const [section, setSection] = React.useState<SectionKey>(initialSection)
+  const selectSection = (next: SectionKey) => {
+    setSection(next)
+    if (next === "runtime") runtimeInspector?.onRefresh()
+  }
 
   // Three `flex-none` columns (216 + 328 + detail) is ~544px of chrome before
   // the settings themselves get a pixel. Below `mid` the nav narrows to an icon
@@ -424,7 +443,7 @@ export function SettingsView({
           <button
             key={item.key}
             type="button"
-            onClick={() => setSection(item.key)}
+            onClick={() => selectSection(item.key)}
             aria-current={section === item.key}
             // The label is the accessible name in both modes — the compact rail
             // hides the TEXT, not the name, so a by-name lookup still finds it.
@@ -512,6 +531,10 @@ export function SettingsView({
             onSave={(source) => onSavePlanTemplate?.({ source })}
           />
         </div>
+      ) : section === "agents" ? (
+        agents ? <AgentsSettings {...agents} /> : <StubSection label="Agents & skills" />
+      ) : section === "runtime" ? (
+        runtimeInspector ? <RuntimeInspector {...runtimeInspector} /> : <StubSection label="Runtime" />
       ) : section === "connectors" ? (
         // Same wrapper every other section uses. Without `flex-1` this pane is a
         // shrink-to-fit child of the settings flex ROW, so the catalog sized to

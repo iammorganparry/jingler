@@ -17,6 +17,7 @@ export interface PiSessionHandle {
   readonly interrupt: () => Promise<void>
   readonly dispose: () => void
   readonly usage: () => { readonly costUsd: number; readonly tokens: number }
+  readonly observe?: (event: StreamEvent) => void
   readonly reconcile?: () => Promise<FileChangeSet | null>
 }
 
@@ -32,7 +33,10 @@ interface EventSink {
   readonly beginSettling: () => boolean
 }
 
-const makeEventSink = (queue: Queue.Queue<StreamEvent>): EventSink => {
+const makeEventSink = (
+  queue: Queue.Queue<StreamEvent>,
+  observe?: (event: StreamEvent) => void
+): EventSink => {
   let terminal = false
   let settling = false
   let emissions: Promise<void> = Promise.resolve()
@@ -41,6 +45,7 @@ const makeEventSink = (queue: Queue.Queue<StreamEvent>): EventSink => {
       if (terminal) return
       const isTerminal = event._tag === "Done" || event._tag === "Failed"
       if (isTerminal) terminal = true
+      observe?.(event)
       emissions = emissions.then(async () => {
         await Effect.runPromise(Queue.offer(queue, event))
         if (isTerminal) await Effect.runPromise(Queue.shutdown(queue))
@@ -134,7 +139,7 @@ const runSession = (
       yield* Ref.update(sessions, (current) =>
         new Map(current).set(handle.id, handle)
       )
-      const sink = makeEventSink(queue)
+      const sink = makeEventSink(queue, handle.observe)
       sink.emit({ _tag: "Started", sessionId: handle.id, model: handle.modelId })
       const unsubscribe = subscribeToSession(handle, sink)
       startPrompt(handle, spec.prompt, sink)

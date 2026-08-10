@@ -51,6 +51,7 @@ const message = {
 }
 
 const makeSpec = (cwd: string): PiRunSpec => ({
+  runId: "run-1",
   sessionId: "session-1",
   chatId: "chat-1",
   connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-api"),

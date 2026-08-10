@@ -4,6 +4,7 @@ import { NodeContext } from "@effect/platform-node"
 import { AgentRuntime } from "@jingler/cli-adapters/runtime/agent/agent-runtime"
 import { AgentRuntimeAdapterLive } from "@jingler/cli-adapters/runtime/agent/agent-runtime-adapter"
 import { PiAgentRuntimeLive } from "@jingler/cli-adapters/runtime/agent/pi-runtime-live"
+import { RuntimeDiagnostics } from "@jingler/cli-adapters/runtime/diagnostics/runtime-diagnostics"
 import { AgentResourcesLive } from "@jingler/cli-adapters/runtime/resources/resource-services-live"
 import { AssetService } from "@jingler/cli-adapters/asset"
 import { AgentRunner } from "@jingler/cli-adapters/agent-runner"
@@ -323,6 +324,7 @@ const deviceRuntime = (root: string, targetId: string) => {
   const providers = makeDeviceProviderLayers(targetId)
   const assets = AssetService.Default.pipe(Layer.provide(NodeContext.layer))
   const piRuntime = PiAgentRuntimeLive.pipe(
+    Layer.provide(RuntimeDiagnostics.Default),
     Layer.provide(assets),
     Layer.provide(AgentResourcesLive),
     Layer.provide(providers.ProviderConnectionsLive),

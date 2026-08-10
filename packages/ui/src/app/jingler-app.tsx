@@ -218,6 +218,8 @@ export interface JinglerAppProps {
   plugins?: PluginsSettingsProps
   devices?: SettingsViewProps["devices"]
   providerConnections?: SettingsViewProps["providerConnections"]
+  agents?: SettingsViewProps["agents"]
+  runtimeInspector?: SettingsViewProps["runtimeInspector"]
   /** Persisted per-CLI provider defaults (Settings · Providers view). */
   providersConfig?: ProvidersConfig | null
   /** Persist one CLI's provider defaults; presence wires the Settings gear. */
@@ -457,6 +459,8 @@ export function JinglerApp({
   plugins,
   devices,
   providerConnections,
+  agents,
+  runtimeInspector,
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
@@ -535,7 +539,7 @@ export function JinglerApp({
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<
-    "providers" | "github"
+    "providers" | "github" | "agents" | "runtime"
   >("providers")
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [fileQuickOpenSessionId, setFileQuickOpenSessionId] = useState<
@@ -1208,6 +1212,8 @@ export function JinglerApp({
               initialSection={settingsSection}
               clis={clis}
               providerConnections={providerConnections}
+              agents={agents}
+              runtimeInspector={runtimeInspector}
               providers={providersConfig}
               onSaveProvider={onSaveProvider}
               defaultCli={defaultCli}

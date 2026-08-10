@@ -10,7 +10,9 @@ import {
 import type {
   Message,
   PiRunSpec,
-  ProviderConnection
+  ProviderConnection,
+  RuntimeDiagnosticSnapshot,
+  StreamEvent
 } from "@jingler/core"
 import { Data, Effect } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
@@ -31,6 +33,7 @@ import {
 } from "./locked-pi-resources.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
+import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 
 export class PiSessionFactoryError extends Data.TaggedError(
   "PiSessionFactoryError"
@@ -61,6 +64,9 @@ export interface PiSessionFactoryOptions {
   readonly createSession?: (
     options: CreateAgentSessionOptions
   ) => Promise<CreateAgentSessionResult>
+  readonly recordDiagnostic?: (
+    snapshot: RuntimeDiagnosticSnapshot
+  ) => Effect.Effect<void>
 }
 
 const modelIdForProvider = (spec: PiRunSpec, connection: ProviderConnection) => {
@@ -144,7 +150,7 @@ const createResources = (
   }).pipe(
     Effect.flatMap((resources) =>
       assertLockedPiResources(resources, compiled.text).pipe(
-        Effect.as(resources)
+        Effect.as({ loader: resources, manifest: compiled.manifest })
       )
     ),
     Effect.mapError(
@@ -224,7 +230,8 @@ const toHandle = (
   result: CreateAgentSessionResult,
   spec: PiRunSpec,
   tracker: FileChangeTracker | undefined,
-  snapshot: WorktreeSnapshot | null
+  snapshot: WorktreeSnapshot | null,
+  observe?: (event: StreamEvent) => void
 ): PiSessionHandle => {
   const { session } = result
   return {
@@ -239,6 +246,7 @@ const toHandle = (
       const stats = session.getSessionStats()
       return { costUsd: stats.cost, tokens: stats.tokens.total }
     },
+    ...(observe ? { observe } : {}),
     ...(tracker && snapshot
       ? {
           reconcile: () =>
@@ -275,7 +283,7 @@ export const makePiSessionFactory = (
           })
         )
       }
-      const resources = yield* createResources(options, spec, registry)
+      const prepared = yield* createResources(options, spec, registry)
       const terminalSnapshot = tracker
         ? yield* tracker.capture(spec.cwd).pipe(
             Effect.mapError(
@@ -292,15 +300,31 @@ export const makePiSessionFactory = (
         options,
         spec,
         connection,
-        resources,
+        resources: prepared.loader,
         context,
         registry
       })
+      const diagnostic = makeRuntimeDiagnosticObserver({
+        runId: spec.runId,
+        sessionId: spec.sessionId,
+        connection,
+        mode: spec.mode,
+        manifest: prepared.manifest,
+        registry
+      })
+      const recordDiagnostic = options.recordDiagnostic
+      yield* recordDiagnostic?.(diagnostic.initial) ?? Effect.void
+      const observe = recordDiagnostic
+        ? (event: StreamEvent) => {
+            Effect.runFork(recordDiagnostic(diagnostic.observe(event)))
+          }
+        : undefined
       return toHandle(
         result,
         spec,
         tracker,
-        terminalSnapshot
+        terminalSnapshot,
+        observe
       )
     })
 })

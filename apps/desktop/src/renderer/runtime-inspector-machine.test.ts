@@ -21,13 +21,13 @@ const waitForState = (actor: ReturnType<typeof createActor>, state: string): Pro
 
 describe("runtime inspector machine", () => {
   it("loads, refreshes, and exports through explicit states", async () => {
-    const api = { get: vi.fn(async () => snapshot), export: vi.fn(async () => JSON.stringify(snapshot)) }
+    const api = { latest: vi.fn(async () => snapshot), export: vi.fn(async () => JSON.stringify(snapshot)) }
     const actor = createActor(createRuntimeInspectorMachine(api)).start()
-    actor.send({ type: "LOAD", runId: "run-1" })
     await waitForState(actor, "ready")
     expect(actor.getSnapshot().context.snapshot).toEqual(snapshot)
     actor.send({ type: "EXPORT" })
     await waitForState(actor, "ready")
     expect(actor.getSnapshot().context.exported).toContain("run-1")
+    expect(api.export).toHaveBeenCalledWith("run-1")
   })
 })

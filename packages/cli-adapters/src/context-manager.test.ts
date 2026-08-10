@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Session, StreamEvent } from "@jingler/core"
-import { ProviderConnectionId, ProviderModelId } from "@jingler/core"
+import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliAdapter } from "./adapter.js"
@@ -320,19 +320,24 @@ describe("ContextManager.observe", () => {
     await run(
       Effect.gen(function* () {
         const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+        const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
         const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
         yield* seed({
+          connectionId,
+          providerId,
+          modelId,
           chats: [{
             id: SESSION,
             title: null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             connectionId,
+            providerId,
             modelId,
             model: "claude-opus-4-1"
           }]
         })
-        yield* observeAndSettle(180_000, rec)
+        yield* observeAndSettle(900_000, rec)
       }),
       recordingAdapter(GOOD_REPLY, rec)
     )

@@ -34,6 +34,7 @@ export const runReadOnlyRoleText = (
 
   return runtime.run(
     {
+      runId: randomUUID(),
       sessionId: session.id,
       chatId: session.activeChatId,
       connectionId: identity.connectionId,
@@ -65,3 +66,4 @@ export const runReadOnlyRoleText = (
     Effect.timeout(timeout)
   )
 }
+import { randomUUID } from "node:crypto"
