@@ -46,6 +46,16 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await expect(app.window.getByRole("button", { name: "Delete" })).toHaveCount(0)
 
   await app.window.getByRole("button", { name: "Close settings" }).click()
+  await app.window.getByTestId("new-session").click()
+  await expect(app.window.getByRole("heading", { name: "New session" })).toBeVisible()
+  await app.window.getByRole("button", { name: "Execution environment" }).click()
+  const cloudOption = app.window.getByRole("option", { name: "Cloud" })
+  await expect(cloudOption.locator('[data-environment-icon="cloud"]')).toBeVisible()
+  await cloudOption.click()
+  await expect(app.window.getByText("harness unavailable")).toHaveCount(0)
+  await expect(app.window.getByRole("button", { name: "Create workspace" })).toBeEnabled()
+  await app.window.getByRole("button", { name: "Close new session" }).click()
+
   const prompt = app.window.getByRole("textbox", { name: MESSAGE_BOX })
   await prompt.fill("Keep this turn active while I move it to Cloud.")
   await prompt.press("Enter")

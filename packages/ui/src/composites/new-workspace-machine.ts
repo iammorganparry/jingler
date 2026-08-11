@@ -5,6 +5,7 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  Environment,
   HarnessCapability,
   IssueProviderDescriptor,
   IssueSummary,
@@ -21,6 +22,7 @@ export type NewSessionSource = "blank" | "branch" | "pr" | "github" | `provider:
 
 export interface NewWorkspaceDeps {
   projects: ReadonlyArray<Project>
+  environments?: ReadonlyArray<Environment>
   clis: ReadonlyArray<CliInfo>
   capabilities: ReadonlyArray<HarnessCapability>
   issueProviders?: ReadonlyArray<IssueProviderDescriptor>
@@ -154,10 +156,28 @@ export const newWorkspaceMachine = setup({
       loadBranches: NewWorkspaceDeps["loadBranches"]
       project?: Project
       environmentId?: string
+      environmentKind?: Environment["kind"]
     } }) => {
       if (input.project === undefined) return { project: null, branches: [] as ReadonlyArray<string> }
-      const project = await input.prepare(input.project.id, input.environmentId)
-      return { project, branches: await input.loadBranches(project.path, project.environmentId) }
+      // A managed sandbox is session-scoped. Selecting Cloud must not start one
+      // merely to populate this form; use the local checkout for Git metadata
+      // and carry the target id into session creation, where provisioning begins.
+      const deferProvisioning = input.environmentKind === "managed"
+      const project = await input.prepare(
+        input.project.id,
+        deferProvisioning ? undefined : input.environmentId
+      )
+      const resolvedProject =
+        deferProvisioning && input.environmentId !== undefined
+          ? { ...project, environmentId: input.environmentId }
+          : project
+      return {
+        project: resolvedProject,
+        branches: await input.loadBranches(
+          project.path,
+          deferProvisioning ? undefined : project.environmentId
+        )
+      }
     }),
     loadSource: fromPromise(async ({ input }: { input: {
       deps: NewWorkspaceDeps
@@ -268,7 +288,14 @@ export const newWorkspaceMachine = setup({
           prepare: context.getDeps().prepareProject,
           loadBranches: context.getDeps().loadBranches,
           project: projectFor(context),
-          ...(context.environmentId === "local" ? {} : { environmentId: context.environmentId })
+          ...(context.environmentId === "local"
+            ? {}
+            : {
+                environmentId: context.environmentId,
+                environmentKind: context.getDeps().environments?.find(
+                  (environment) => environment.id === context.environmentId
+                )?.kind
+              })
         }),
         onDone: { target: "editing", actions: "applyBranches" },
         onError: { target: "editing", actions: "setLoadError" }
