@@ -1462,13 +1462,31 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           readonly branch?: string
         }
       ) =>
-        update(id, (session) => ({
-          ...session,
-          ...(link.branch === undefined ? {} : { branch: link.branch }),
-          prNumber: link.prNumber,
-          githubInstallationId: link.installationId,
-          githubRepositoryId: link.repositoryId
-        }))
+        update(id, (session) => {
+          const linked = {
+            ...session,
+            prNumber: link.prNumber,
+            githubInstallationId: link.installationId,
+            githubRepositoryId: link.repositoryId
+          }
+          if (link.branch === undefined) return linked
+
+          // GitHub has proved that this PR belongs to the live branch. Replace
+          // proposal metadata from the session's previous task branch so an
+          // established name such as `backport/*` is not revalidated as though
+          // Jingler had just generated it.
+          const {
+            semanticBranchProposal: _previousProposal,
+            ...withoutPreviousProposal
+          } = linked
+          const proposal = semanticBranchProposalFromName(link.branch)
+          return {
+            ...withoutPreviousProposal,
+            branch: link.branch,
+            ...(proposal === null ? {} : { semanticBranchProposal: proposal }),
+            semanticBranchPending: false
+          }
+        })
 
       /**
        * Exactly-once claim, validated and persisted atomically before the
