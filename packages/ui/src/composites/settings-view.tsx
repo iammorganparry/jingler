@@ -36,6 +36,7 @@ import { ContextMeter } from "./context-meter.js"
 import {
   Boxes,
   ChevronRight,
+  Cloud,
   Cpu,
   Keyboard,
   Palette,
@@ -265,11 +266,6 @@ export interface SettingsViewProps {
     error?: string | null
     dialog: EnvironmentDialogProps
     onOpen: () => void
-    onCreateManaged: (name: string) => void | Promise<void>
-    onManagedLifecycle: (
-      environment: Environment,
-      action: "start" | "pause" | "restore"
-    ) => void | Promise<void>
     onRefresh: () => void | Promise<void>
     onRename: (id: string, name: string) => void | Promise<void>
     onRevoke: (id: string) => void | Promise<void>
@@ -562,8 +558,6 @@ export function DevicesSection({
   error,
   dialog,
   onOpen,
-  onCreateManaged,
-  onManagedLifecycle,
   onRefresh,
   onRename,
   onRevoke
@@ -573,9 +567,6 @@ export function DevicesSection({
   )
   const [renameValue, setRenameValue] = React.useState("")
   const [renamePending, setRenamePending] = React.useState(false)
-  const [cloudDialogOpen, setCloudDialogOpen] = React.useState(false)
-  const [cloudName, setCloudName] = React.useState("Cloud environment")
-  const [cloudPending, setCloudPending] = React.useState(false)
 
   const openRename = (environment: Environment): void => {
     setRenameTarget(environment)
@@ -598,18 +589,6 @@ export function DevicesSection({
     }
   }
 
-  const submitCloud = async (): Promise<void> => {
-    if (!cloudName.trim() || cloudPending) return
-    setCloudPending(true)
-    try {
-      await onCreateManaged(cloudName.trim())
-      setCloudDialogOpen(false)
-      setCloudName("Cloud environment")
-    } finally {
-      setCloudPending(false)
-    }
-  }
-
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
@@ -619,8 +598,9 @@ export function DevicesSection({
               Devices
             </h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              Your account-owned machines appear here automatically after SSH
-              setup.
+              {environments.some((environment) => environment.kind === "managed")
+                ? "Cloud is ready on demand. Account-owned machines appear here automatically after SSH setup."
+                : "Your account-owned machines appear here automatically after SSH setup."}
             </p>
           </div>
           <div className="flex gap-2">
@@ -634,9 +614,6 @@ export function DevicesSection({
             </Button>
             <Button size="sm" onClick={onOpen}>
               Add owned machine
-            </Button>
-            <Button size="sm" onClick={() => setCloudDialogOpen(true)}>
-              Add cloud environment
             </Button>
           </div>
         </div>
@@ -660,7 +637,11 @@ export function DevicesSection({
                 className="flex items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0"
               >
                 <span className="flex size-9 items-center justify-center rounded-md bg-sunken text-blue">
-                  <Server size={17} />
+                  {environment.kind === "managed" ? (
+                    <Cloud size={17} />
+                  ) : (
+                    <Server size={17} />
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
                   <strong className="block truncate text-[12px] text-text-bright">
@@ -669,7 +650,7 @@ export function DevicesSection({
                   <span className="text-[10px] text-muted-foreground">
                     {environment.platform.os} · {environment.platform.arch} ·{" "}
                     {environment.kind === "managed"
-                      ? `${environment.instanceType} · ${environment.region ?? "automatic region"}`
+                      ? "sandbox starts automatically per session"
                       : environment.agentVersion
                         ? `agent ${environment.agentVersion}`
                         : "agent version unknown"}
@@ -689,87 +670,37 @@ export function DevicesSection({
                 >
                   {environment.state}
                 </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => openRename(environment)}
-                >
-                  Rename
-                </Button>
-                {environment.kind === "managed" && (
+                {environment.kind === "owned" && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() =>
-                      void onManagedLifecycle(
-                        environment,
-                        environment.state === "paused" ? "restore" : "pause"
-                      )
-                    }
+                    onClick={() => openRename(environment)}
                   >
-                    {environment.state === "paused" ? "Restore" : "Pause"}
+                    Rename
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `${environment.kind === "managed" ? "Delete" : "Revoke"} ${environment.name}? Active remote sessions will disconnect.`
+                {environment.kind === "owned" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Revoke ${environment.name}? Active remote sessions will disconnect.`
+                        )
                       )
-                    )
-                      void onRevoke(environment.id)
-                  }}
-                >
-                  {environment.kind === "managed" ? "Delete" : "Revoke"}
-                </Button>
+                        void onRevoke(environment.id)
+                    }}
+                  >
+                    Revoke
+                  </Button>
+                )}
               </div>
             ))
           )}
         </div>
       </div>
       <EnvironmentDialog {...dialog} />
-      <Dialog open={cloudDialogOpen} onOpenChange={setCloudDialogOpen}>
-        <DialogContent className="w-[420px]">
-          <DialogHeader>
-            <DialogTitle>Add cloud environment</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <label
-              htmlFor="managed-environment-name"
-              className="flex flex-col gap-2 text-[11px] font-medium text-muted-foreground"
-            >
-              Name
-              <Input
-                id="managed-environment-name"
-                aria-label="Cloud environment name"
-                value={cloudName}
-                onChange={(event) => setCloudName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void submitCloud()
-                }}
-                disabled={cloudPending}
-              />
-            </label>
-          </DialogBody>
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setCloudDialogOpen(false)}
-              disabled={cloudPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => void submitCloud()}
-              disabled={!cloudName.trim() || cloudPending}
-            >
-              {cloudPending ? "Creating…" : "Create"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <Dialog
         open={renameTarget !== null}
         onOpenChange={(open) => {

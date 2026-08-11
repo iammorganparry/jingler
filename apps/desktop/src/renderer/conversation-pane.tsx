@@ -164,11 +164,15 @@ export function ConversationPane({
   const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
     string | undefined | null
   >(null)
+  const [handoffAfterStop, setHandoffAfterStop] = useState<{
+    environmentId: string | undefined
+  } | null>(null)
   const continueEnvironmentMutation = useMutation({
     mutationFn: (environmentId?: string) =>
       rpc.sessionsContinueOnEnvironment(session.id, environmentId),
     onSuccess: (continued) => {
       setContinuationEnvironmentId(null)
+      setHandoffAfterStop(null)
       publishSessionUpdate(continued)
     }
   })
@@ -185,6 +189,12 @@ export function ConversationPane({
       }
     }
   })
+  useEffect(() => {
+    if (handoffAfterStop === null || convo.busy) return
+    const { environmentId } = handoffAfterStop
+    setHandoffAfterStop(null)
+    continueEnvironmentMutation.mutate(environmentId)
+  }, [convo.busy, handoffAfterStop, continueEnvironmentMutation.mutate])
   const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   const toggleFollowAgent = useCallback(
     (enabled: boolean) => {
@@ -821,20 +831,36 @@ export function ConversationPane({
           className="flex flex-none items-center gap-2 border-b border-yellow/30 bg-yellow/[0.06] px-3 py-2 text-[11px] text-fg"
         >
           <span className="min-w-0 flex-1">
-            This session already has work. Continue it as a new session on the selected environment?
+            {convo.busy
+              ? "Stop the active turn, checkpoint its current work, and continue as a new session on the selected environment?"
+              : "This session already has work. Continue it as a new session on the selected environment?"}
           </span>
           <button
             type="button"
-            onClick={() => continueEnvironmentMutation.mutate(continuationEnvironmentId)}
-            disabled={continueEnvironmentMutation.isPending}
+            onClick={() => {
+              if (convo.busy) {
+                setHandoffAfterStop({
+                  environmentId: continuationEnvironmentId
+                })
+                convo.stop()
+                return
+              }
+              continueEnvironmentMutation.mutate(continuationEnvironmentId)
+            }}
+            disabled={
+              continueEnvironmentMutation.isPending || handoffAfterStop !== null
+            }
             className="flex-none rounded border border-border px-2 py-1 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
           >
-            Continue there
+            {convo.busy ? "Stop and continue there" : "Continue there"}
           </button>
           <button
             type="button"
             aria-label="Cancel environment continuation"
-            onClick={() => setContinuationEnvironmentId(null)}
+            onClick={() => {
+              setContinuationEnvironmentId(null)
+              setHandoffAfterStop(null)
+            }}
             className="flex-none rounded px-1 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
           >
             ×

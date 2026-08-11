@@ -19,7 +19,6 @@ import {
   EnvironmentError,
   EnvironmentDiscovery as EnvironmentDiscoverySchema,
   EnvironmentInventoryResponse as EnvironmentInventoryResponseSchema,
-  ManagedEnvironment as ManagedEnvironmentSchema,
   ManagedEnvironmentGrantResponse as ManagedEnvironmentGrantResponseSchema,
   REMOTE_PROTOCOL_VERSION
 } from "@jingler/core"
@@ -254,58 +253,6 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           }
         )
 
-      const managedEnvironmentResponse = Schema.Struct({
-        version: Schema.Literal(1),
-        environment: ManagedEnvironmentSchema
-      })
-
-      const createManaged = (
-        name: string
-      ): Effect.Effect<ManagedEnvironment, EnvironmentError> => {
-        const trimmed = name.trim()
-        if (!trimmed) {
-          return Effect.fail(
-            new EnvironmentError({
-              reason: "invalid-input",
-              message: "Enter an environment name."
-            })
-          )
-        }
-        return request(
-          `${ENVIRONMENT_API_ROOT}/managed`,
-          managedEnvironmentResponse,
-          {
-            method: "POST",
-            headers: managedAuthHeaders,
-            body: JSON.stringify({
-              version: 1,
-              name: trimmed,
-              region: null,
-              instanceType: "basic",
-              idempotencyKey: `create_${crypto.randomUUID().replaceAll("-", "")}`
-            })
-          }
-        ).pipe(Effect.map((response) => response.environment))
-      }
-
-      const managedLifecycle = (
-        environment: ManagedEnvironment,
-        action: "start" | "pause" | "restore"
-      ): Effect.Effect<ManagedEnvironment, EnvironmentError> =>
-        request(
-          `${ENVIRONMENT_API_ROOT}/managed/${encodeURIComponent(environment.id)}/lifecycle`,
-          managedEnvironmentResponse,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              version: 1,
-              action,
-              expectedGeneration: environment.generation,
-              idempotencyKey: `${action}_${crypto.randomUUID().replaceAll("-", "")}`
-            })
-          }
-        ).pipe(Effect.map((response) => response.environment))
-
       const hydrateManagedWorkspace = (
         environment: ManagedEnvironment,
         sessionId: string,
@@ -418,18 +365,6 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
               })
             )
           }
-          const selected = yield* environment(deviceId)
-          if (selected.kind === "managed") {
-            const response = yield* request(
-              `${ENVIRONMENT_API_ROOT}/managed/${encodeURIComponent(deviceId)}/rename`,
-              managedEnvironmentResponse,
-              {
-                method: "POST",
-                body: JSON.stringify({ version: 1, name: trimmed })
-              }
-            )
-            return response.environment
-          }
           const result = yield* request(
             `${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/rename`,
             Schema.Struct({
@@ -467,21 +402,6 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
 
       const revoke = (deviceId: string) =>
         Effect.gen(function* () {
-          const selected = yield* environment(deviceId)
-          if (selected.kind === "managed") {
-            yield* request(
-              `${ENVIRONMENT_API_ROOT}/managed/${encodeURIComponent(deviceId)}/delete`,
-              Schema.Unknown,
-              {
-                method: "POST",
-                body: JSON.stringify({
-                  version: 1,
-                  expectedGeneration: selected.generation
-                })
-              }
-            )
-            return
-          }
           yield* request(`${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/revoke`, Schema.Unknown, {
             method: "POST"
           })
@@ -513,8 +433,6 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
         refresh: list,
         suggestHosts: bootstrap.discoverHosts,
         pairSsh,
-        createManaged,
-        managedLifecycle,
         hydrateManagedWorkspace,
         directSsh,
         rename,

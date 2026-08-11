@@ -485,21 +485,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: PairSshEnvironmentInput
   }),
 
-  Rpc.make("Environment.createManaged", {
-    success: Environment,
-    error: EnvironmentError,
-    payload: { name: Schema.String }
-  }),
-
-  Rpc.make("Environment.managedLifecycle", {
-    success: Environment,
-    error: EnvironmentError,
-    payload: {
-      environment: Environment,
-      action: Schema.Literal("start", "pause", "restore")
-    }
-  }),
-
   Rpc.make("Environment.rename", {
     success: Environment,
     error: EnvironmentError,

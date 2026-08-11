@@ -37,6 +37,7 @@ import { decodeBoundedJson } from "./request-decoding.js"
 import { runtime } from "./runtime.js"
 
 const noStoreHeaders = { "cache-control": "no-store" } as const
+const MANAGED_CLOUD_IDEMPOTENCY_KEY = "account_cloud_v1"
 
 const json = (body: unknown, status = 200): Response =>
   Response.json(body, { status, headers: noStoreHeaders })
@@ -73,7 +74,6 @@ interface OwnedInventoryEntry {
 
 export interface ManagedEnvironmentStore {
   readonly create: (input: CreateManagedEnvironmentInput) => Promise<ManagedEnvironment>
-  readonly listForUser: (userId: string) => Promise<ReadonlyArray<ManagedEnvironment>>
   readonly findForUser: (
     userId: string,
     environmentId: string
@@ -141,8 +141,6 @@ export interface EnvironmentRoutesDependencies {
 
 const persistentStore: ManagedEnvironmentStore = {
   create: (input) => runtime.runPromise(ManagedEnvironmentRepository.create(input)),
-  listForUser: (userId) =>
-    runtime.runPromise(ManagedEnvironmentRepository.listForUser(userId)),
   findForUser: (userId, environmentId) =>
     runtime.runPromise(ManagedEnvironmentRepository.findForUser(userId, environmentId)),
   renameForUser: (input) =>
@@ -325,6 +323,80 @@ const codexApiKeyFrom = (request: Request): string | null => {
     : null
 }
 
+/**
+ * Cloud is an account-scoped execution target, not a user-managed machine.
+ * The stable opaque id keeps sessions and checkpoints addressable without
+ * exposing the account id or requiring an inventory row before first use.
+ */
+export const managedCloudIdForUser = (userId: string): string =>
+  `managed_cloud_${crypto.createHash("sha256").update(userId).digest("hex").slice(0, 32)}`
+
+const managedCloudCapabilities = (
+  harnesses: ReadonlyArray<"codex">
+): ManagedEnvironment["capabilities"] => ({
+  version: 1,
+  capabilities: [
+    "session.start",
+    "session.input",
+    "session.cancel",
+    "session.observe"
+  ],
+  harnesses: [...harnesses],
+  maxConcurrentSessions: 1
+})
+
+const managedCloudEnvironment = (
+  userId: string,
+  harnesses: ReadonlyArray<"codex">
+): ManagedEnvironment => ({
+  kind: "managed",
+  id: managedCloudIdForUser(userId),
+  name: "Cloud",
+  platform: { os: "linux", arch: "x64" },
+  capabilities: managedCloudCapabilities(harnesses),
+  state: "online",
+  agentVersion: null,
+  lastSeenAt: null,
+  region: null,
+  instanceType: "basic",
+  generation: 1,
+  createdAt: 0,
+  updatedAt: 0
+})
+
+const ensureManagedCloudEnvironment = async (
+  dependencies: EnvironmentRoutesDependencies,
+  userId: string,
+  harnesses: ReadonlyArray<"codex"> = []
+): Promise<ManagedEnvironment> => {
+  const environmentId = managedCloudIdForUser(userId)
+  const existing = await dependencies.store.findForUser(userId, environmentId)
+  if (existing) {
+    return {
+      ...existing,
+      name: "Cloud",
+      state: "online",
+      capabilities: managedCloudCapabilities(harnesses)
+    }
+  }
+  const created = await dependencies.store.create({
+    id: environmentId,
+    userId,
+    displayName: "Cloud",
+    region: null,
+    instanceType: "basic",
+    capabilities: managedCloudCapabilities(harnesses),
+    idempotencyKey: MANAGED_CLOUD_IDEMPOTENCY_KEY,
+    at: dependencies.now()
+  })
+  return {
+    ...created,
+    name: "Cloud",
+    state: "online",
+    capabilities: managedCloudCapabilities(harnesses)
+  }
+}
+
 const lifecycleState = (
   action: ManagedEnvironmentLifecycleRequestValue["action"]
 ): ManagedEnvironment["state"] => {
@@ -366,30 +438,15 @@ export const createEnvironmentRoutes = (
           })
         )
       }
-      const [owned, managed, managedHarnesses] = await Promise.all([
-        dependencies.listOwned(userId),
-        dependencies.store.listForUser(userId),
-        (dependencies.managedHarnesses?.(userId) ?? Promise.resolve([])).catch(() => [])
-      ])
+      const owned = await dependencies.listOwned(userId)
       const environments = [
-        ...owned,
-        ...managed.map((environment) => ({
-          environment: {
-            ...environment,
-            capabilities: {
-              ...environment.capabilities,
-              harnesses: [...managedHarnesses]
-            }
-          },
-          createdAt: environment.createdAt
-        }))
-      ]
-        .sort(
+        ...[...owned].sort(
           (left, right) =>
             left.createdAt - right.createdAt ||
             left.environment.id.localeCompare(right.environment.id)
-        )
-        .map((entry) => entry.environment)
+        ).map((entry) => entry.environment),
+        managedCloudEnvironment(userId, ["codex"])
+      ]
       return json(
         Schema.decodeUnknownSync(EnvironmentInventoryResponse)({
           version: 1,
@@ -420,27 +477,12 @@ export const createEnvironmentRoutes = (
           error: "Managed Codex requires an OPENAI_API_KEY and an active GitHub connection"
         }, 409)
       }
-      const environment = await dependencies.store.create({
-        id: `managed_${crypto.randomUUID().replaceAll("-", "")}`,
+      const environment = await ensureManagedCloudEnvironment(
+        dependencies,
         userId,
-        displayName: input.name.trim(),
-        region: input.region,
-        instanceType: input.instanceType,
-        capabilities: {
-          version: 1,
-          capabilities: [
-            "session.start",
-            "session.input",
-            "session.cancel",
-            "session.observe"
-          ],
-          harnesses,
-          maxConcurrentSessions: 1
-        },
-        idempotencyKey: input.idempotencyKey,
-        at: dependencies.now()
-      })
-      return json({ version: 1, environment }, 201)
+        harnesses
+      )
+      return json({ version: 1, environment })
     } catch {
       return json({ error: "Managed environment creation unavailable" }, 503)
     }
@@ -450,6 +492,9 @@ export const createEnvironmentRoutes = (
     const dependencies = dependenciesFactory()
     const userId = await authenticate(context.req.raw, dependencies)
     if (!userId) return json({ error: "Authentication required" }, 401)
+    if (context.req.param("environmentId") === managedCloudIdForUser(userId)) {
+      return json({ error: "Cloud is managed automatically" }, 409)
+    }
     const input = await decodeBoundedJson(context.req.raw, RenameManagedEnvironmentRequest)
     if (!input) return json({ error: "Invalid rename request" }, 400)
     const environment = await dependencies.store.renameForUser({
@@ -467,6 +512,9 @@ export const createEnvironmentRoutes = (
     const dependencies = dependenciesFactory()
     const userId = await authenticate(context.req.raw, dependencies)
     if (!userId) return json({ error: "Authentication required" }, 401)
+    if (context.req.param("environmentId") === managedCloudIdForUser(userId)) {
+      return json({ error: "Cloud sandboxes follow the session lifecycle" }, 409)
+    }
     const input = await decodeBoundedJson(
       context.req.raw,
       ManagedEnvironmentLifecycleRequest
@@ -503,8 +551,10 @@ export const createEnvironmentRoutes = (
     if (!userId) return json({ error: "Authentication required" }, 401)
     const input = await decodeBoundedJson(context.req.raw, ManagedWorkspaceRequest)
     if (!input) return json({ error: "Invalid workspace request" }, 400)
-    const environment = await dependencies.store
-      .findForUser(userId, context.req.param("environmentId"))
+    if (context.req.param("environmentId") !== managedCloudIdForUser(userId)) {
+      return json({ error: "Managed environment not found" }, 404)
+    }
+    const environment = await ensureManagedCloudEnvironment(dependencies, userId)
       .catch(() => null)
     if (!environment) return json({ error: "Managed environment not found" }, 404)
     if (environment.generation !== input.expectedGeneration) {
@@ -544,6 +594,9 @@ export const createEnvironmentRoutes = (
     const dependencies = dependenciesFactory()
     const userId = await authenticate(context.req.raw, dependencies)
     if (!userId) return json({ error: "Authentication required" }, 401)
+    if (context.req.param("environmentId") === managedCloudIdForUser(userId)) {
+      return json({ error: "Cloud is managed automatically" }, 409)
+    }
     const input = await decodeBoundedJson(context.req.raw, DeleteManagedEnvironmentRequest)
     if (!input) return json({ error: "Invalid delete request" }, 400)
     const current = await dependencies.store.findForUser(
@@ -582,8 +635,10 @@ export const createEnvironmentRoutes = (
     if (!userId) return json({ error: "Authentication required" }, 401)
     const request = await decodeBoundedJson(context.req.raw, ManagedEnvironmentGrantRequest)
     if (!request) return json({ error: "Invalid managed grant request" }, 400)
-    const environment = await dependencies.store
-      .findForUser(userId, context.req.param("environmentId"))
+    if (context.req.param("environmentId") !== managedCloudIdForUser(userId)) {
+      return json({ error: "Managed environment not found" }, 404)
+    }
+    const environment = await ensureManagedCloudEnvironment(dependencies, userId)
       .catch(() => null)
     if (!environment) return json({ error: "Managed environment not found" }, 404)
     if (environment.generation !== request.expectedGeneration) {

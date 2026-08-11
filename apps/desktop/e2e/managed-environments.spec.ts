@@ -1,5 +1,8 @@
 import { appShell, expect, test, type SeedSession } from "./fixtures.js"
 
+const DEVICES_SECTION = /^Devices/
+const MESSAGE_BOX = /Message/
+
 const localSession = (repoPath: string): SeedSession => ({
   id: "session_managed_environment_e2e",
   repo: "widget",
@@ -18,7 +21,7 @@ const localSession = (repoPath: string): SeedSession => ({
   mode: "auto"
 })
 
-test("creates, selects, and deletes an authenticated cloud environment", async ({
+test("selects the fixed authenticated Cloud execution target", async ({
   launchApp
 }) => {
   const app = await launchApp({
@@ -30,26 +33,32 @@ test("creates, selects, and deletes an authenticated cloud environment", async (
 
   await app.window.getByRole("button", { name: "Account menu" }).click()
   await app.window.getByRole("menuitem", { name: "Settings" }).click()
-  await app.window.getByRole("button", { name: /^Devices/ }).click()
+  await app.window.getByRole("button", { name: DEVICES_SECTION }).click()
 
-  await app.window.getByRole("button", { name: "Add cloud environment" }).click()
-  await app.window.getByLabel("Cloud environment name").fill("E2E cloud")
-  await app.window.getByRole("button", { name: "Create", exact: true }).click()
-
-  const environment = app.window.getByText("E2E cloud", { exact: true })
+  const environment = app.window.getByText("Cloud", { exact: true })
   await expect(environment).toBeVisible()
-  await expect(environment.locator("..").locator("..")).toContainText("basic")
-  await expect(environment.locator("..").locator("..")).toContainText("online")
+  await expect(environment.locator("..").locator("..")).toContainText(
+    "sandbox starts automatically per session"
+  )
+  await expect(
+    app.window.getByRole("button", { name: "Add cloud environment" })
+  ).toHaveCount(0)
+  await expect(app.window.getByRole("button", { name: "Delete" })).toHaveCount(0)
 
   await app.window.getByRole("button", { name: "Close settings" }).click()
+  const prompt = app.window.getByRole("textbox", { name: MESSAGE_BOX })
+  await prompt.fill("Keep this turn active while I move it to Cloud.")
+  await prompt.press("Enter")
+  await expect(
+    app.window.getByRole("button", { name: "Stop", exact: true })
+  ).toBeVisible()
   await app.window.getByRole("button", { name: "Execution environment" }).click()
-  await expect(app.window.getByRole("option", { name: "E2E cloud" })).toBeVisible()
-  await app.window.keyboard.press("Escape")
-
-  await app.window.getByRole("button", { name: "Account menu" }).click()
-  await app.window.getByRole("menuitem", { name: "Settings" }).click()
-  await app.window.getByRole("button", { name: /^Devices/ }).click()
-  app.window.once("dialog", (dialog) => dialog.accept())
-  await app.window.getByRole("button", { name: "Delete" }).click()
-  await expect(environment).toHaveCount(0)
+  await app.window.getByRole("option", { name: "Cloud" }).click()
+  await expect(app.window.getByRole("alert")).toContainText("Stop the active turn")
+  await expect(
+    app.window.getByRole("button", { name: "Stop and continue there" })
+  ).toBeVisible()
+  await app.window.getByRole("button", {
+    name: "Cancel environment continuation"
+  }).click()
 })

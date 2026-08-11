@@ -14,7 +14,7 @@ import {
   type InstallAndEnrollOwnedDeviceInput,
   type InstallAndBootstrapSshInput,
   RemoteBootstrapService,
-  SshBootstrapError
+  type SshBootstrapError
 } from "./remote-bootstrap.js"
 import { makeInMemorySecretStore, SecretStore, type SecretStoreShape } from "./secret-store.js"
 
@@ -173,35 +173,10 @@ describe("environment metadata", () => {
 })
 
 describe("environment device API", () => {
-  it("deletes a managed environment through the server lifecycle route", async () => {
+  it("revokes an owned device without fetching the environment inventory", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = []
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
-      if (url === "https://server.test/api/environments") {
-        return Response.json({
-          version: 1,
-          environments: [{
-            kind: "managed",
-            id: "managed_one",
-            name: "Cloud workspace",
-            platform: { os: "linux", arch: "x64" },
-            capabilities: {
-              version: 1,
-              capabilities: ["session.start"],
-              harnesses: ["codex"],
-              maxConcurrentSessions: 1
-            },
-            state: "paused",
-            agentVersion: null,
-            lastSeenAt: null,
-            region: "wnam",
-            instanceType: "basic",
-            generation: 7,
-            createdAt: 100,
-            updatedAt: 100
-          }]
-        })
-      }
       calls.push({
         url,
         method: init?.method ?? "GET",
@@ -216,13 +191,13 @@ describe("environment device API", () => {
     })
 
     await Effect.runPromise(
-      EnvironmentService.revoke("managed_one").pipe(Effect.provide(layer))
+      EnvironmentService.revoke(device.deviceId).pipe(Effect.provide(layer))
     )
 
     expect(calls).toEqual([{
-      url: "https://server.test/api/environments/managed/managed_one/delete",
+      url: `https://server.test/api/devices/${device.deviceId}/revoke`,
       method: "POST",
-      body: { version: 1, expectedGeneration: 7 }
+      body: null
     }])
   })
 

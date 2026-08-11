@@ -45,27 +45,6 @@ const api = () => ({
     }
   ]),
   pairSsh: vi.fn(async () => environment),
-  createManaged: vi.fn(async () => ({
-    kind: "managed" as const,
-    id: "managed_cloud",
-    name: "Cloud",
-    platform: { os: "linux", arch: "x64" },
-    capabilities: {
-      version: 1,
-      capabilities: ["session.start"],
-      harnesses: ["codex" as const],
-      maxConcurrentSessions: 1
-    },
-    state: "online" as const,
-    agentVersion: null,
-    lastSeenAt: null,
-    region: null,
-    instanceType: "basic" as const,
-    generation: 1,
-    createdAt: 1,
-    updatedAt: 1
-  })),
-  managedLifecycle: vi.fn(async (value: Environment) => value),
   rename: vi.fn(async (_id: string, name: string) => ({
     ...environment,
     name
@@ -197,43 +176,6 @@ describe("environment machine", () => {
     expect(actor.getSnapshot().context.environments[0]?.name).toBe(
       "updated-buildbox"
     )
-    actor.stop()
-  })
-
-  it("creates and pauses a managed environment through the inventory actor", async () => {
-    const services = api()
-    const created = vi.fn()
-    const paused = vi.fn()
-    const actor = createActor(createEnvironmentMachine(services)).start()
-    await waitFor(actor, (snapshot) => !snapshot.context.loading)
-
-    actor.send({ type: "CREATE_MANAGED", name: "Cloud build", resolve: created })
-    await waitFor(
-      actor,
-      (snapshot) => snapshot.context.environments[0]?.kind === "managed"
-    )
-    const managed = actor.getSnapshot().context.environments[0]!
-    if (managed.kind !== "managed") throw new Error("expected managed environment")
-    expect(services.createManaged).toHaveBeenCalledWith("Cloud build")
-    expect(created).toHaveBeenCalledOnce()
-
-    services.managedLifecycle.mockResolvedValueOnce({
-      ...managed,
-      state: "paused",
-      generation: managed.generation + 1
-    })
-    actor.send({
-      type: "MANAGED_LIFECYCLE",
-      environment: managed,
-      action: "pause",
-      resolve: paused
-    })
-    await waitFor(
-      actor,
-      (snapshot) => snapshot.context.environments[0]?.state === "paused"
-    )
-    expect(services.managedLifecycle).toHaveBeenCalledWith(managed, "pause")
-    expect(paused).toHaveBeenCalledOnce()
     actor.stop()
   })
 
