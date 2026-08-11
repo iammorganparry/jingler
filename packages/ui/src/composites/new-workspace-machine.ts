@@ -15,8 +15,9 @@ import type {
   Project,
   ReasoningSetting
 } from "@jingler/core"
+import type { SessionCreationPhase } from "@jingler/contracts"
 import { defaultModeFor, newSessionCli } from "@jingler/core"
-import { assign, fromPromise, setup } from "xstate"
+import { assign, fromCallback, fromPromise, setup } from "xstate"
 
 export type NewSessionSource = "blank" | "branch" | "pr" | "github" | `provider:${string}`
 
@@ -35,9 +36,9 @@ export interface NewWorkspaceDeps {
   loadPullRequests?: (project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<PrSummary>>
   loadGithubIssues?: (project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<IssueSummary>>
   loadProviderIssues?: (providerId: string, project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<IssueSummary>>
-  onCreate: (input: CreateSessionInput, images: ReadonlyArray<Attachment>) => Promise<void>
-  onCreateFromPr?: (input: CreateSessionFromPrInput, images: ReadonlyArray<Attachment>) => Promise<void>
-  onCreateFromIssue?: (input: CreateSessionFromIssueInput, images: ReadonlyArray<Attachment>) => Promise<void>
+  onCreate: (input: CreateSessionInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => Promise<void>
+  onCreateFromPr?: (input: CreateSessionFromPrInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => Promise<void>
+  onCreateFromIssue?: (input: CreateSessionFromIssueInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => Promise<void>
   onClose: () => void
 }
 
@@ -62,6 +63,7 @@ export interface NewWorkspaceContext {
   model: string
   mode: PermissionMode
   reasoning?: ReasoningSetting
+  provisioningPhase: SessionCreationPhase | null
   error: string | null
 }
 
@@ -84,6 +86,9 @@ type NewWorkspaceEvent =
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
   | { type: "SYNC_HARNESSES" }
   | { type: "SUBMIT" }
+  | { type: "PROVISION_PROGRESS"; phase: SessionCreationPhase }
+  | { type: "PROVISION_DONE" }
+  | { type: "PROVISION_FAILED"; error: unknown }
 
 const projectFor = (context: NewWorkspaceContext): Project | undefined =>
   context.getDeps().projects.find((project) => project.id === context.projectId)
@@ -199,7 +204,18 @@ export const newWorkspaceMachine = setup({
       if (!providerId || !input.deps.loadProviderIssues) throw new Error("This issue provider is unavailable.")
       return { pullRequests: [] as ReadonlyArray<PrSummary>, issues: await input.deps.loadProviderIssues(providerId, input.project, input.search, input.mine) }
     }),
-    submit: fromPromise(({ input }: { input: { run: () => Promise<void> } }) => input.run())
+    submit: fromCallback(({ input, sendBack }: { input: {
+      run: (onProgress: (phase: SessionCreationPhase) => void) => Promise<void>
+    }; sendBack: (event: NewWorkspaceEvent) => void }) => {
+      let active = true
+      void input.run((phase) => {
+        if (active) sendBack({ type: "PROVISION_PROGRESS", phase })
+      }).then(
+        () => { if (active) sendBack({ type: "PROVISION_DONE" }) },
+        (error) => { if (active) sendBack({ type: "PROVISION_FAILED", error }) }
+      )
+      return () => { active = false }
+    })
   },
   guards: {
     sourceNeedsLoading: ({ event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source),
@@ -232,6 +248,7 @@ export const newWorkspaceMachine = setup({
         ...harness,
         mode: selectionMode(deps, harness.cli),
         reasoning: providerReasoning(deps, harness.cli),
+        provisioningPhase: null,
         error: null
       }
     }),
@@ -255,7 +272,18 @@ export const newWorkspaceMachine = setup({
     }),
     setLoadError: assign(({ event }) => ({ branches: [], baseBranch: "", resolvedProject: null, error: errorText((event as unknown as { error: unknown }).error, "Could not load branches.") })),
     setSourceError: assign(({ event }) => ({ pullRequests: [], issues: [], error: errorText((event as unknown as { error: unknown }).error, "Could not load this source.") })),
-    setSubmitError: assign(({ event }) => ({ error: errorText((event as unknown as { error: unknown }).error, "Could not create the workspace.") })),
+    beginSubmit: assign(({ context }) => ({
+      provisioningPhase: (context.environmentId === "local"
+        ? "creating-session"
+        : "checking-access") as SessionCreationPhase,
+      error: null
+    })),
+    setProvisioningPhase: assign(({ event }) =>
+      event.type === "PROVISION_PROGRESS" ? { provisioningPhase: event.phase } : {}
+    ),
+    setSubmitError: assign(({ event }) => ({
+      error: errorText(event.type === "PROVISION_FAILED" ? event.error : event, "Could not create the workspace.")
+    })),
     close: ({ context }) => context.getDeps().onClose()
   }
 }).createMachine({
@@ -276,6 +304,7 @@ export const newWorkspaceMachine = setup({
     model: "",
     mode: "accept-edits",
     reasoning: undefined,
+    provisioningPhase: null,
     error: null
   }),
   on: { SYNC_HARNESSES: { actions: "syncHarnesses" } },
@@ -339,7 +368,7 @@ export const newWorkspaceMachine = setup({
         SET_HARNESS: { actions: "setHarness" },
         SET_MODE: { actions: "setMode" },
         SET_REASONING: { actions: "setReasoning" },
-        SUBMIT: { guard: "canSubmit", target: "submitting" }
+        SUBMIT: { guard: "canSubmit", target: "submitting", actions: "beginSubmit" }
       }
     },
     sourceLoading: {
@@ -363,7 +392,7 @@ export const newWorkspaceMachine = setup({
       invoke: {
         src: "submit",
         input: ({ context }) => ({
-          run: () => {
+          run: (onProgress) => {
             const project = context.resolvedProject
             if (project === null) return Promise.reject(new Error("Select a project."))
             if (context.cli === "") return Promise.reject(new Error("Select a harness."))
@@ -380,12 +409,12 @@ export const newWorkspaceMachine = setup({
             if (context.source === "pr") {
               const createFromPr = context.getDeps().onCreateFromPr
               if (!context.selectedPr || !createFromPr) return Promise.reject(new Error("Select a pull request."))
-              return createFromPr({ ...common, ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}), pr: context.selectedPr }, context.attachments)
+              return createFromPr({ ...common, ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}), pr: context.selectedPr }, context.attachments, onProgress)
             }
             if (context.source === "github" || context.source.startsWith("provider:")) {
               const createFromIssue = context.getDeps().onCreateFromIssue
               if (!context.selectedIssue || !createFromIssue) return Promise.reject(new Error("Select an issue."))
-              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments)
+              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
             }
             return context.getDeps().onCreate({
               ...common,
@@ -393,11 +422,15 @@ export const newWorkspaceMachine = setup({
               baseBranch: context.baseBranch,
               useWorktree: context.isolation === "worktree",
               ...(context.source === "branch" ? { continueBranch: true } : {})
-            }, context.attachments)
+            }, context.attachments, onProgress)
           }
-        }),
-        onDone: { target: "closed", actions: "close" },
-        onError: { target: "editing", actions: "setSubmitError" }
+        })
+      },
+      on: {
+        PROVISION_PROGRESS: { actions: "setProvisioningPhase" },
+        PROVISION_DONE: { target: "closed", actions: "close" },
+        PROVISION_FAILED: { target: "editing", actions: "setSubmitError" },
+        CLOSE: { target: "closed", actions: "close" }
       }
     }
   }

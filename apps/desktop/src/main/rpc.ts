@@ -149,6 +149,7 @@ import type {
   GitHubRelayStreamMessage,
   GitHubRelayEvent,
   GitHubFeedbackClaimStatus,
+  Environment,
   SettledSessionStatus,
   WorkspaceConfig,
   WorkspaceTransferCheckpoint,
@@ -169,6 +170,8 @@ import {
   MemoryPageDetail as MemoryPageDetailSchema,
   MemorySuggestionsView as MemorySuggestionsViewSchema,
   MemoryUiError,
+  type SessionCreationPhase,
+  type SessionCreationUpdate,
 } from "@jingler/contracts";
 import { FileSystem, Path } from "@effect/platform";
 import type { CommandExecutor } from "@effect/platform";
@@ -1147,36 +1150,87 @@ export const createSession = (input: CreateSessionInput) =>
   });
 
 /** Provision on the selected device and mirror only the returned metadata locally. */
-export const createSessionRouted = (input: CreateSessionInput) =>
-  input.environmentId === undefined
-    ? createSession(input)
-    : Effect.gen(function* () {
-        const resolvedInput = input.projectId === undefined
+type SessionCreationProgress = (phase: SessionCreationPhase) => Effect.Effect<void>
+
+const reportSessionCreation = (
+  progress: SessionCreationProgress | undefined,
+  phase: SessionCreationPhase,
+) => progress?.(phase) ?? Effect.void
+
+const sessionCreationStream = <E, R>(
+  create: (progress: SessionCreationProgress) => Effect.Effect<Session, E, R>,
+) =>
+  Stream.unwrapScoped(
+    Effect.gen(function* () {
+      const mailbox = yield* Mailbox.make<SessionCreationUpdate, E>(16)
+      yield* Effect.forkScoped(
+        create((phase) =>
+          Effect.sync(() => {
+            mailbox.unsafeOffer({ kind: "progress", phase })
+          })
+        ).pipe(
+          Effect.tap((session) =>
+            Effect.sync(() => {
+              mailbox.unsafeOffer({ kind: "complete", session })
+            })
+          ),
+          Effect.matchEffect({
+            onFailure: (error) => mailbox.fail(error).pipe(Effect.asVoid),
+            onSuccess: () => mailbox.end.pipe(Effect.asVoid),
+          }),
+        ),
+      )
+      return Mailbox.toStream(mailbox)
+    }),
+  )
+
+export const createSessionRouted = (
+  input: CreateSessionInput,
+  progress?: SessionCreationProgress,
+) =>
+  Effect.gen(function* () {
+      if (input.environmentId === undefined) {
+        yield* reportSessionCreation(progress, "creating-session")
+        const session = yield* createSession(input)
+        yield* reportSessionCreation(progress, "ready")
+        return session
+      }
+
+      yield* reportSessionCreation(progress, "checking-access")
+      const environmentService = yield* EnvironmentService
+      const environment = yield* environmentService.environment(input.environmentId).pipe(
+        Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+      )
+      const resolvedInput = input.projectId === undefined
+        ? input
+        : environment.kind === "managed"
           ? input
           : yield* RemoteSessionService.requestOnEnvironment(
-              input.environmentId!,
-              "Projects.list",
-              {}
-            ).pipe(
-              Effect.flatMap(Schema.decodeUnknown(Schema.Array(ProjectSchema))),
-              Effect.flatMap((projects) => {
-                const project = projects.find((candidate) => candidate.id === input.projectId)
-                return project === undefined
-                  ? Effect.fail(new GitError({ message: `Project not found: ${input.projectId}` }))
-                  : Effect.succeed({ ...input, repoPath: project.path, repoName: project.name })
-              }),
-              Effect.mapError((cause) =>
-                cause instanceof GitError
-                  ? cause
-                  : new GitError({ message: "Could not resolve the remote project", cause })
-              )
-            )
-        return yield* provisionRemoteSession(
-          input.environmentId!,
-          "Sessions.create",
-          resolvedInput
-        )
-      });
+            input.environmentId,
+            "Projects.list",
+            {},
+          ).pipe(
+            Effect.flatMap(Schema.decodeUnknown(Schema.Array(ProjectSchema))),
+            Effect.flatMap((projects) => {
+              const project = projects.find((candidate) => candidate.id === input.projectId)
+              return project === undefined
+                ? Effect.fail(new GitError({ message: `Project not found: ${input.projectId}` }))
+                : Effect.succeed({ ...input, repoPath: project.path, repoName: project.name })
+            }),
+            Effect.mapError((cause) =>
+              cause instanceof GitError
+                ? cause
+                : new GitError({ message: "Could not resolve the remote project", cause })
+            ),
+          )
+      return yield* provisionRemoteSession(
+        input.environmentId,
+        "Sessions.create",
+        resolvedInput,
+        progress,
+        environment,
+      )
+    });
 
 /**
  * Every model a harness offers — the WHOLE catalogue, deliberately uncurated.
@@ -1271,17 +1325,20 @@ const provisionRemoteSession = (
   environmentId: string,
   operation: "Sessions.create" | "Sessions.createFromPr" | "Sessions.createFromIssue",
   input: CreateSessionInput | CreateSessionFromPrInput | CreateSessionFromIssueInput,
+  progress?: SessionCreationProgress,
+  knownEnvironment?: Environment,
 ) =>
   Effect.gen(function* () {
     const remote = yield* RemoteSessionService;
     const sessions = yield* SessionStore;
     const environmentService = yield* EnvironmentService;
-    const environment = yield* environmentService.environment(environmentId).pipe(
+    const environment = knownEnvironment ?? (yield* environmentService.environment(environmentId).pipe(
       Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
-    );
+    ));
     let requestSession = { id: "", environmentId };
     let requestInput = input;
     if (environment.kind === "managed") {
+      yield* reportSessionCreation(progress, "resolving-repository")
       const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
       const remoteUrl = yield* GitService.remoteUrl(input.repoPath);
       const repository = remoteUrl ? parseGitHubRemote(remoteUrl) : null;
@@ -1312,6 +1369,7 @@ const provisionRemoteSession = (
             }
           : { kind: "new" },
       });
+      yield* reportSessionCreation(progress, "starting-sandbox")
       yield* environmentService.hydrateManagedWorkspace(
         environment,
         sessionId,
@@ -1326,6 +1384,7 @@ const provisionRemoteSession = (
         repoPath: "/workspace",
       };
     }
+    yield* reportSessionCreation(progress, "creating-session")
     const value = yield* (
       environment.kind === "managed"
         ? remote.request(requestSession, operation, requestInput)
@@ -1344,18 +1403,38 @@ const provisionRemoteSession = (
         message: "The remote device returned a session for a different environment",
       }));
     }
-    return yield* sessions.upsertRemote(created);
+    const persisted = yield* sessions.upsertRemote(created);
+    yield* reportSessionCreation(progress, "ready")
+    return persisted;
   });
 
-export const createSessionFromPrRouted = (input: CreateSessionFromPrInput) =>
-  input.environmentId === undefined
-    ? createSessionFromPr(input)
-    : provisionRemoteSession(input.environmentId, "Sessions.createFromPr", input);
+export const createSessionFromPrRouted = (
+  input: CreateSessionFromPrInput,
+  progress?: SessionCreationProgress,
+) => Effect.gen(function* () {
+  if (input.environmentId === undefined) {
+    yield* reportSessionCreation(progress, "creating-session")
+    const session = yield* createSessionFromPr(input)
+    yield* reportSessionCreation(progress, "ready")
+    return session
+  }
+  yield* reportSessionCreation(progress, "checking-access")
+  return yield* provisionRemoteSession(input.environmentId, "Sessions.createFromPr", input, progress)
+});
 
-export const createSessionFromIssueRouted = (input: CreateSessionFromIssueInput) =>
-  input.environmentId === undefined
-    ? createSessionFromIssue(input)
-    : provisionRemoteSession(input.environmentId, "Sessions.createFromIssue", input);
+export const createSessionFromIssueRouted = (
+  input: CreateSessionFromIssueInput,
+  progress?: SessionCreationProgress,
+) => Effect.gen(function* () {
+  if (input.environmentId === undefined) {
+    yield* reportSessionCreation(progress, "creating-session")
+    const session = yield* createSessionFromIssue(input)
+    yield* reportSessionCreation(progress, "ready")
+    return session
+  }
+  yield* reportSessionCreation(progress, "checking-access")
+  return yield* provisionRemoteSession(input.environmentId, "Sessions.createFromIssue", input, progress)
+});
 
 export const setEnvironment = (
   sessionId: string,
@@ -4168,10 +4247,16 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Sessions.get": ({ id }) => SessionStore.get(id),
   "Sessions.create": ({ requestedSessionId: _internalSessionId, ...input }) =>
     createSessionRouted(input),
+  "Sessions.createWithProgress": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    sessionCreationStream((progress) => createSessionRouted(input, progress)),
   "Sessions.createFromPr": ({ requestedSessionId: _internalSessionId, ...input }) =>
     createSessionFromPrRouted(input),
+  "Sessions.createFromPrWithProgress": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    sessionCreationStream((progress) => createSessionFromPrRouted(input, progress)),
   "Sessions.createFromIssue": ({ requestedSessionId: _internalSessionId, ...input }) =>
     createSessionFromIssueRouted(input),
+  "Sessions.createFromIssueWithProgress": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    sessionCreationStream((progress) => createSessionFromIssueRouted(input, progress)),
   "Sessions.linkIssue": (input) => linkIssue(input),
   "Sessions.unlinkIssue": ({ sessionId }) => unlinkIssue(sessionId),
   "Sessions.clearInitialPrompt": ({ sessionId }) =>
