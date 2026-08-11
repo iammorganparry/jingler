@@ -16,8 +16,6 @@ import type {
   ExecutionMode,
   GateDecision,
   Message,
-  CliKind,
-  ProviderModels,
   PermissionMode,
   Plan,
   PlanAnnotationAnchor,
@@ -53,14 +51,6 @@ export interface Conversation {
   readonly reasoning?: ReasoningSetting
   readonly skills: ReadonlyArray<Skill>
   readonly files: ReadonlyArray<string>
-  /**
-   * The session's live harness + model, and the catalogue of every installed
-   * harness's models. `cli` can change mid-session, so read it from here rather
-   * than off the `Session` the hook was called with.
-   */
-  readonly cli: CliKind
-  readonly model: string
-  readonly catalog: ReadonlyArray<ProviderModels>
   readonly connectionId: ProviderConnectionId | null
   readonly providerId: ProviderId | null
   readonly modelId: ProviderModelId | null
@@ -177,7 +167,7 @@ export function useConversation(
   const state = useSelector(actor, (s) => s)
   const send = actor.send
   const {
-    messages, mode, reasoning, skills, files, cli, model, catalog,
+    messages, mode, reasoning, skills, files,
     connectionId, providerId, modelId, patch, queued, steeringId,
     subagents, tokens, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt,
@@ -215,9 +205,6 @@ export function useConversation(
     reasoning,
     skills,
     files,
-    cli,
-    model,
-    catalog,
     connectionId,
     providerId,
     modelId,

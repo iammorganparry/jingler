@@ -6,6 +6,12 @@ import type {
   Project,
   Session
 } from "@jingler/core"
+import {
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId
+} from "@jingler/core"
+import { Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
   DeviceOperationError,
@@ -109,7 +115,9 @@ describe("device session command executor", () => {
     const input: CreateSessionInput = {
       repoPath: "/repos/jingler",
       repoName: "jingler",
-      cli: "codex",
+      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("codex-subscription"),
+      providerId: Schema.decodeUnknownSync(ProviderId)("openai-codex"),
+      modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5.6-sol"),
       baseBranch: "main"
     }
     const result = await makeDeviceSessionCommandExecutor(dependencies).execute(

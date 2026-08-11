@@ -3,7 +3,6 @@ import type {
   CreateSessionInput,
   Environment,
   GitHubCloneRepository,
-  HarnessCapability,
   IssueSummary,
   PrSummary,
   Project,
@@ -229,27 +228,6 @@ const clis = [
     binPath: "/usr/local/bin/codex",
     version: "0.144.1",
     available: true
-  }
-]
-
-const CAPABILITIES: ReadonlyArray<HarnessCapability> = [
-  {
-    cli: "claude",
-    label: "Claude Code",
-    modes: [{ id: "ask", label: "Ask", kind: "execute" }],
-    models: [
-      { id: "opus", label: "Opus 5", description: "Deep reasoning" },
-      { id: "haiku", label: "Haiku 4.5", description: "Fast tasks" }
-    ]
-  },
-  {
-    cli: "codex",
-    label: "Codex CLI",
-    modes: [{ id: "auto", label: "Auto", kind: "execute" }],
-    models: [
-      { id: "gpt-5.6-sol", label: "gpt-5.6-sol", description: "Frontier coding" },
-      { id: "gpt-5.6-luna", label: "gpt-5.6-luna", description: "Fast coding" }
-    ]
   }
 ]
 
@@ -660,9 +638,9 @@ function SessionSourcePrototype({ initialSource = "blank" }: { initialSource?: P
                 : "Message the agent, tag @files, or use /commands and /skills"}
             repo="jingler"
             branch={branch}
-            cli="codex"
-            model="gpt-5.6-sol"
-            capabilities={CAPABILITIES}
+            providerCatalog={PROVIDER_CATALOG}
+            connectionId={PROVIDER_CATALOG.connections[0]!.connection.id}
+            modelId={PROVIDER_CATALOG.connections[0]!.models[0]!.id}
             mode="auto"
             onSend={() => {}}
           />

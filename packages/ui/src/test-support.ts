@@ -1,4 +1,46 @@
-import type { Session } from "@jingler/core"
+import {
+  ProviderCatalog,
+  type ReasoningEffort,
+  type Session
+} from "@jingler/core"
+import { Schema } from "effect"
+
+/** One certified provider connection for component tests and stories. */
+export const testProviderCatalog = (
+  reasoning: ReadonlyArray<ReasoningEffort> = []
+) => Schema.decodeUnknownSync(ProviderCatalog)({
+  refreshedAt: "2026-08-10T00:00:00.000Z",
+  stale: false,
+  connections: [{
+    connection: {
+      id: "test-connection",
+      providerId: "openai-codex",
+      authKind: "openai-codex-oauth",
+      account: { fingerprint: "test-account", displayLabel: "Test account" },
+      targetId: "local",
+      status: "authenticated",
+      subscription: {
+        entitlement: "active",
+        planLabel: "Plus",
+        expiresAt: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        confirmedBillingRoute: "subscription"
+      },
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    },
+    models: [{
+      providerId: "openai-codex",
+      id: "openai-codex/gpt-test",
+      label: "GPT Test",
+      capabilities: { contextWindow: 200_000, reasoning, vision: false },
+      verification: "certified",
+      selectable: true,
+      certificationKey: "test-certification"
+    }]
+  }]
+})
 
 /**
  * A Session with sensible defaults, for tests and stories.

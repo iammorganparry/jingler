@@ -8,10 +8,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
-  CliKind,
   Environment,
-  HarnessCapability,
-  PermissionMode,
   ProviderCatalog,
   Session
 } from "@jingler/core"
@@ -71,26 +68,6 @@ import {
 } from "./rpc-failure.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
-
-const harnessUnavailableMessage = (
-  capabilities: ReadonlyArray<HarnessCapability> | undefined,
-  selection: { cli: CliKind; model: string; mode: PermissionMode }
-): string | undefined => {
-  if (capabilities === undefined) return undefined
-
-  const capability = capabilities.find(({ cli }) => cli === selection.cli)
-  if (capability === undefined) {
-    const label = selection.cli === "claude" ? "Claude Code" : "Codex CLI"
-    return `${label} is unavailable. Choose an installed harness to continue.`
-  }
-  if (!capability.models.some(({ id }) => id === selection.model)) {
-    return `Model ${selection.model} is unavailable. Choose a supported model to continue.`
-  }
-  if (!capability.modes.some(({ id }) => id === selection.mode)) {
-    return `Mode ${selection.mode} is unavailable. Choose a supported mode to continue.`
-  }
-  return undefined
-}
 
 interface ProviderRecovery {
   readonly title: string
@@ -378,12 +355,6 @@ export function ConversationPane({
     [effectivePlanSplitRatio, planSplitRowWidth]
   )
 
-  /**
-   * The model a handed-off message runs on: the operator's own default for this
-   * harness (Settings · Providers), NOT this chat's pinned model — the point of
-   * handing off is to escape this chat's setup. Null when they've never set one,
-   * which means "leave the new chat on whatever it starts with".
-   */
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
@@ -410,7 +381,9 @@ export function ConversationPane({
   // same markdown but stay put, per the setting's stated scope. Elements outside
   // this wrapper never see the var, so their calc() falls back to 1×.
   const fontScale = clampFontScale(providersQuery.data?.fontScale)
-  const handoffModel = providersQuery.data?.providers?.[convo.cli]?.defaultModel ?? null
+  const handoffModel = providerCatalog?.connections
+    .flatMap(({ models }) => models)
+    .find(({ id }) => id === convo.modelId)?.label ?? null
   const backgroundTasksSupported = false
   const bgTasks = useBackgroundTasks(session.id, backgroundTasksSupported)
 
@@ -434,17 +407,12 @@ export function ConversationPane({
    * appear at all. It also fired one RPC per token update. The live number comes
    * from `convo.tokens` instead.
    *
-   * It IS keyed on the harness and model, because the trigger point is derived
-   * from them: a session switched from Claude to Codex has a different window
-   * and therefore a different budget. Keyed on the session alone, the meter and
-   * the Compact now action would keep pointing at the old harness's numbers —
-   * and because a disabled query still serves its last data, switching to a
-   * harness that reports nothing (Cursor) would leave the previous harness's
-   * meter on screen rather than hiding it.
+   * It is keyed on the exact connection and model because their context windows
+   * can differ even within one provider.
    */
   const [requested, setRequested] = useState(false)
   const contextQuery = useQuery({
-    queryKey: ["context", session.id, activeChat.id, convo.cli, convo.model],
+    queryKey: ["context", session.id, activeChat.id, convo.connectionId, convo.modelId],
     queryFn: () => rpc.contextState(session.id, activeChat.id),
     enabled: contextReporting,
     /**
@@ -699,7 +667,7 @@ export function ConversationPane({
 
   const activeAgentTranscript = activeSubagent === null ? null : {
     message: activeSubagent.message,
-    cli: activeSubagent.cli ?? convo.cli
+    cli: activeSubagent.cli ?? session.cli
   }
 
   // Drilling into an agent shows its children AND its own transcript; a crumb
@@ -989,7 +957,6 @@ export function ConversationPane({
           loadingHistory={convo.loadingHistory}
           onLoadEarlier={convo.loadOlder}
           mode={convo.mode}
-          cli={convo.cli}
           skills={convo.skills}
           files={convo.files}
           paused={convo.paused}
@@ -1027,15 +994,11 @@ export function ConversationPane({
               ? `Hand off — run this in a new chat on ${handoffModel}`
               : "Hand off — run this in a new chat"
           }
-          model={convo.model}
-          catalog={convo.catalog}
-          capabilities={[]}
           providerCatalog={providerCatalog}
           connectionId={convo.connectionId}
           providerId={convo.providerId}
           modelId={convo.modelId}
           composerDisabledReason={composerDisabledReason}
-          onSetHarness={() => {}}
           onSetModel={({ connectionId, providerId, modelId }) =>
             convo.setModel(connectionId, providerId, modelId)
           }

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { ProviderModels } from "@jingler/core"
 import { BOUNDARY_WIDTHS, LookFor, WidthLadder } from "../story-support.js"
+import { testProviderCatalog } from "../test-support.js"
 import { Composer } from "./composer.js"
 
 const meta: Meta = { title: "Responsive/Composer", parameters: { layout: "fullscreen" } }
@@ -12,23 +12,15 @@ type Story = StoryObj
  * flex item with no `min-w-0` its floor was its min-content width, so the chip
  * refused to shrink and pushed everything after it past the composer's border.
  */
-const CATALOG: ReadonlyArray<ProviderModels> = [
-  {
-    cli: "claude",
-    label: "Claude Code",
-    models: [
-      { id: "claude-sonnet-4-5-20250929", label: "claude-sonnet-4-5-20250929" },
-      { id: "claude-opus-4-1-20250805", label: "claude-opus-4-1-20250805" }
-    ]
-  },
-  { cli: "codex", label: "Codex CLI", models: [{ id: "gpt-5-codex", label: "gpt-5-codex" }] }
-]
+const catalog = testProviderCatalog(["low", "medium", "high"])
+const { id: connectionId } = catalog.connections[0]!.connection
+const { id: modelId } = catalog.connections[0]!.models[0]!
 
 const loaded = {
-  cli: "claude" as const,
-  model: "claude-sonnet-4-5-20250929",
-  catalog: CATALOG,
-  onSetHarness: () => {},
+  providerCatalog: catalog,
+  connectionId,
+  modelId,
+  onSetModel: () => {},
   mode: "accept-edits" as const,
   onSetMode: () => {},
   allowPlan: true,

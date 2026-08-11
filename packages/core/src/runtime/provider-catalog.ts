@@ -1,9 +1,10 @@
 import { Schema } from "effect"
+import { ReasoningEffort } from "../domain.js"
 import { ProviderConnection, ProviderId, ProviderModelId } from "./provider-connection.js"
 
 export const ProviderModelCapabilities = Schema.Struct({
   contextWindow: Schema.NullOr(Schema.Number),
-  reasoning: Schema.Array(Schema.String),
+  reasoning: Schema.Array(ReasoningEffort),
   vision: Schema.Boolean
 })
 export type ProviderModelCapabilities = Schema.Schema.Type<typeof ProviderModelCapabilities>

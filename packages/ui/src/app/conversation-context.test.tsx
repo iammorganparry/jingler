@@ -5,12 +5,11 @@ import { ConversationView } from "./conversation-view.js"
 afterEach(cleanup)
 
 describe("ConversationView — live context", () => {
-  it("shows the latest context reading while Codex is still active", () => {
+  it("shows the latest context reading while the provider model is active", () => {
     render(
       <ConversationView
         messages={[]}
         mode="accept-edits"
-        cli="codex"
         busy
         tokens={120_000}
         contextTriggerAt={193_800}

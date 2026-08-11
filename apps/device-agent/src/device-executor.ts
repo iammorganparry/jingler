@@ -403,14 +403,27 @@ export const makeLiveDeviceSessionCommandExecutor = (
     create: (input) => run(SessionStore.create(input)),
     createFromPr: (input) => run(SessionStore.createFromPr(input)),
     createFromIssue: (input) => run(SessionStore.createFromIssue(input)),
-    continuation: (source) => run(SessionStore.create({
-      ...(source.environmentId === undefined ? {} : { environmentId: source.environmentId }),
-      repoPath: source.repoPath ?? source.worktreePath ?? "",
-      repoName: source.repo,
-      title: source.title,
-      cli: source.cli,
-      baseBranch: source.baseBranch ?? source.branch,
-      useWorktree: true
+    continuation: (source) => run(Effect.gen(function* () {
+      if (
+        source.connectionId === undefined ||
+        source.providerId === undefined ||
+        source.modelId === undefined
+      ) {
+        return yield* Effect.fail(
+          new Error("The source session needs a certified provider connection before continuation.")
+        )
+      }
+      return yield* SessionStore.create({
+        ...(source.environmentId === undefined ? {} : { environmentId: source.environmentId }),
+        repoPath: source.repoPath ?? source.worktreePath ?? "",
+        repoName: source.repo,
+        title: source.title,
+        connectionId: source.connectionId,
+        providerId: source.providerId,
+        modelId: source.modelId,
+        baseBranch: source.baseBranch ?? source.branch,
+        useWorktree: true
+      })
     })),
     listProjects: () => run(listProjects),
     registerProject: (input) => run(ProjectService.register(input)),

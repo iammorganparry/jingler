@@ -1,19 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Attachment,
-  CliKind,
   Environment,
-  HarnessCapability,
   PermissionMode,
   ProviderCatalog,
   ProviderConnectionId,
   ProviderModelId,
-  ProviderModels,
   ReasoningEffort,
   ReasoningSetting,
   Skill,
 } from "@jingler/core";
-import { providerReasoningCapabilitiesFor } from "@jingler/core";
 import {
   ArrowUp,
   FolderGit2,
@@ -40,12 +36,10 @@ import {
   DropdownMenuTrigger,
 } from "../components/dropdown-menu.js";
 import { Pill } from "../components/pill.js";
-import { PROVIDER_LABEL } from "../components/provider-icon.js";
 import { SignalBars } from "../components/signal-bars.js";
 import { StatusDot } from "../components/status-dot.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
-import { ModelBrowser } from "./model-browser.js";
 import {
   ProviderModelBrowser,
   type ProviderModelSelection,
@@ -136,10 +130,7 @@ const activeToken = (value: string, caret: number): MenuState | null => {
 };
 
 /** Codex invokes skills with `$name`; the palette keeps `/` as its common discovery trigger. */
-const skillInsertion = (cli: CliKind | undefined, skill: Skill): string =>
-  cli === "codex" && skill.source === "skill"
-    ? `$${skill.name.slice(1)}`
-    : skill.name;
+const skillInsertion = (skill: Skill): string => skill.name;
 
 /**
  * The prompt composer — a real controlled textarea with Enter-to-send /
@@ -158,11 +149,6 @@ export function Composer({
   environmentId,
   environmentPending = false,
   onSetEnvironment,
-  cli,
-  model,
-  catalog = [],
-  capabilities,
-  onSetHarness,
   providerCatalog,
   connectionId = null,
   modelId = null,
@@ -226,17 +212,7 @@ export function Composer({
   onCodeReferenceRemove?: (index: number) => void;
   /** Clear every captured range after a composer send. */
   onCodeReferencesClear?: () => void;
-  /** The session's current harness (which section of the menu is checked). */
-  cli?: CliKind;
-  /** Current harness model id (shown in the model chip). */
-  model?: string;
-  /** Installed harnesses and their models — the model chip's sectioned menu. */
-  catalog?: ReadonlyArray<ProviderModels>;
-  /** Authoritative provider/model/mode/reasoning snapshot. */
-  capabilities?: ReadonlyArray<HarnessCapability>;
-  /** Picking a model implies its harness, so both travel together. */
-  onSetHarness?: (cli: CliKind, model: string) => void;
-  /** Canonical certified model surface; present in production during the pi cutover. */
+  /** Canonical certified model surface. */
   providerCatalog?: ProviderCatalog | null;
   connectionId?: ProviderConnectionId | null;
   modelId?: ProviderModelId | null;
@@ -279,48 +255,23 @@ export function Composer({
   focusKey?: string;
   className?: string;
 }) {
-  const resolvedCapabilities = useMemo<ReadonlyArray<HarnessCapability>>(
-    () =>
-      capabilities ??
-      catalog.map((provider) => ({
-        ...provider,
-        modes: [
-          ...MODE_OPTIONS.map((option) => ({
-            id: option.value,
-            label: String(option.label),
-            kind: "execute" as const,
-          })),
-          ...(allowPlan
-            ? [{ id: "plan" as const, label: "Plan", kind: "plan" as const }]
-            : []),
-        ],
-      })),
-    [allowPlan, capabilities, catalog],
-  );
-  const selectedCapability = resolvedCapabilities.find(
-    (candidate) => candidate.cli === cli,
-  );
-  const selectedModel = selectedCapability?.models.find(
-    (candidate) => candidate.id === model,
-  );
+  const selectedModel = providerCatalog?.connections
+    .flatMap(({ models }) => models)
+    .find((candidate) => candidate.id === modelId);
   const canonicalModes: ReadonlyArray<{
     readonly id: PermissionMode;
     readonly label: string;
     readonly kind: "execute" | "plan";
     readonly description?: string;
-  }> = providerCatalog
-    ? [
-        ...MODE_OPTIONS.map((option) => ({
-          id: option.value,
-          label: String(option.label),
-          kind: "execute" as const,
-        })),
-        { id: "plan" as const, label: "Plan", kind: "plan" as const },
-      ]
-    : [];
-  const modeOptions: ReadonlyArray<ChipOption<PermissionMode>> = (
-    selectedCapability?.modes ?? canonicalModes
-  )
+  }> = [
+    ...MODE_OPTIONS.map((option) => ({
+      id: option.value,
+      label: String(option.label),
+      kind: "execute" as const,
+    })),
+    { id: "plan" as const, label: "Plan", kind: "plan" as const },
+  ];
+  const modeOptions: ReadonlyArray<ChipOption<PermissionMode>> = canonicalModes
     .filter((option) => allowPlan || option.kind !== "plan")
     .map((option) => ({
       value: option.id,
@@ -330,17 +281,15 @@ export function Composer({
           : option.label,
       description: option.description,
     }));
-  const reasoningEfforts = (selectedModel?.reasoning ?? []).map(
-    (option) => option.id,
-  );
+  const reasoningEfforts = selectedModel?.capabilities.reasoning ?? [];
   const reasoningOptions: ReadonlyArray<ChipOption<ReasoningChoice | "off">> = [
     { value: "default", label: "Default" },
-    ...(providerReasoningCapabilitiesFor(cli).explicitToggle
+    ...(reasoningEfforts.length > 0
       ? [{ value: "off" as const, label: "Off" }]
       : []),
-    ...(selectedModel?.reasoning ?? []).map((option) => ({
-      value: option.id,
-      label: option.label,
+    ...reasoningEfforts.map((effort) => ({
+      value: effort,
+      label: effort[0]!.toUpperCase() + effort.slice(1),
     })),
   ];
   // The chip's value and its bar count are the same fact; deriving it once keeps
@@ -354,9 +303,7 @@ export function Composer({
   const tier = useWidthTier();
   const roomy = atLeast(tier, "wide");
 
-  // Follows the harness — the prompt used to be hardwired to "Message Claude…",
-  // which now visibly lies the moment the operator switches provider.
-  const prompt = placeholder ?? `Message ${PROVIDER_LABEL[cli ?? "claude"]}…`;
+  const prompt = placeholder ?? "Message the agent…";
 
   // Controlled when the host passes `value`/`attachments` (the app, so drafts
   // outlive the pane's unmount); otherwise these locals own the draft. Seeded once
@@ -536,7 +483,7 @@ export function Composer({
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
         if (menu.kind === "slash") {
-          replaceToken(skillInsertion(cli, skillMatches[activeIndex]!));
+          replaceToken(skillInsertion(skillMatches[activeIndex]!));
         } else replaceToken(`@${fileMatches[activeIndex]!}`);
         return;
       }
@@ -566,7 +513,7 @@ export function Composer({
             <CommandMenu
               skills={skillMatches}
               activeIndex={activeIndex}
-              onSelect={(skill) => replaceToken(skillInsertion(cli, skill))}
+              onSelect={(skill) => replaceToken(skillInsertion(skill))}
               onHover={setActiveIndex}
             />
           ) : (
@@ -838,20 +785,12 @@ export function Composer({
               className="max-w-[150px]"
             />
           )}
-          {providerCatalog ? (
+          {providerCatalog && (
             <ProviderModelBrowser
               catalog={providerCatalog}
               connectionId={connectionId}
               modelId={modelId}
               onSelect={onSetModel}
-              className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
-            />
-          ) : (
-            <ModelBrowser
-              cli={cli}
-              model={model}
-              capabilities={resolvedCapabilities}
-              onSelect={onSetHarness}
               className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
             />
           )}

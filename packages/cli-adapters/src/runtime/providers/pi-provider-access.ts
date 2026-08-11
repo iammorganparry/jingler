@@ -4,7 +4,8 @@ import {
   ProviderId,
   ProviderModelId,
   type AuthKind,
-  type ProviderConnection
+  type ProviderConnection,
+  type ReasoningEffort
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
@@ -107,7 +108,7 @@ export const probePiEntitlement = async (input: {
   }
 }
 
-const reasoningLevels = (enabled: boolean): ReadonlyArray<string> =>
+const reasoningLevels = (enabled: boolean): ReadonlyArray<ReasoningEffort> =>
   enabled ? ["low", "medium", "high"] : []
 
 /** Discover models through the connection-pinned credential store, never PATH. */

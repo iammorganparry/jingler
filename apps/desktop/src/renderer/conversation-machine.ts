@@ -10,7 +10,6 @@
  */
 import type {
   Attachment,
-  CliKind,
   ExecutionMode,
   ExternalInstructionIdentity,
   GateDecision,
@@ -24,7 +23,6 @@ import type {
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
-  ProviderModels,
   QuestionAnswer,
   ReasoningSetting,
   ReviewPhase,
@@ -45,8 +43,6 @@ import {
   applyStreamEvent,
   applySubagentEvent,
   assistantMessage,
-  defaultModeFor,
-  defaultModel,
   isFileMutationTool,
   nextReviewPhase,
   planDocumentToPlan,
@@ -58,7 +54,6 @@ import {
   settleLoaded,
   settleStreaming,
   STOPPED_NOTE,
-  supportsSteer,
   userMessage
 } from "@jingler/core"
 import {
@@ -75,6 +70,16 @@ import { publishSessionUpdate } from "./session-updates.js"
 
 const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
+
+/** Temporary persistence adapter until the decoder-only Session.reasoning map is removed. */
+const legacyReasoningRoute = (
+  providerId: ProviderId | null
+): "claude" | "codex" | null =>
+  providerId === "anthropic"
+    ? "claude"
+    : providerId === "openai" || providerId === "openai-codex"
+      ? "codex"
+      : null
 
 /** Optimistic mirror of SessionStore.setProviderModel while its RPC persists. */
 const withProviderModel = (
@@ -153,14 +158,6 @@ export interface ConversationContext {
   readonly executionMode: ExecutionMode
   readonly skills: ReadonlyArray<Skill>
   readonly files: ReadonlyArray<string>
-  /**
-   * The composer chip's state: the session's live harness + model, and the
-   * catalogue of every installed harness's models to choose from. `cli` is held
-   * here (not read off `session`) because it can change mid-session.
-   */
-  readonly cli: CliKind
-  readonly model: string
-  readonly catalog: ReadonlyArray<ProviderModels>
   readonly connectionId: ProviderConnectionId | null
   readonly providerId: ProviderId | null
   readonly modelId: ProviderModelId | null
@@ -789,15 +786,12 @@ export const conversationMachine = setup({
     /**
      * Whether this stream event is a tool boundary we may flush the queue into.
      *
-     * Deliberately narrow. Steering must be NATIVE (`supportsSteer`) — otherwise
-     * the fallback is stop-and-replay, and doing that at every tool call would
-     * shred the turn. A plan re-drive is excluded because its prompt is
+     * Deliberately narrow. A plan re-drive is excluded because its prompt is
      * machine-generated and a queued operator message would derail it.
      */
     canAutoFlush: ({ context, event }) => {
       if (event.type !== "STREAM_EVENT" || event.event._tag !== "ToolEnd") return false
       if (context.steeringId !== null || context.queued.length === 0) return false
-      if (!supportsSteer(context.cli)) return false
       return (
         context.resumePlanId === null &&
         !requiresFreshTurn(context.queued[0]!)
@@ -1373,8 +1367,7 @@ export const conversationMachine = setup({
           pendingExternalAcceptances: []
         }
       }
-      // The harness reports its actual model on init — reflect it in the chip.
-      return e._tag === "Started" && e.model ? { messages, model: e.model } : { messages }
+      return { messages }
     }),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
     markHistoryLoading: assign(() => ({ loadingHistory: true })),
@@ -1508,13 +1501,8 @@ export const conversationMachine = setup({
     }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}
-      if (context.cli === "claude" || context.cli === "codex") {
-        void rpc.agentSetReasoning(context.session.id, context.cli, event.reasoning)
-      }
-      const key =
-        context.cli === "claude" || context.cli === "codex"
-          ? context.cli
-          : null
+      const key = legacyReasoningRoute(context.providerId)
+      if (key !== null) void rpc.agentSetReasoning(context.session.id, key, event.reasoning)
       return {
         reasoning: event.reasoning,
         session:
@@ -1533,11 +1521,12 @@ export const conversationMachine = setup({
       if (event.type !== "SESSION_UPDATED") return {}
       const chat = event.session.chats.find((candidate) => candidate.id === context.chatId)
       if (chat === undefined) return { session: event.session }
-      const reasoning =
-        event.session.cli === "claude" || event.session.cli === "codex"
-          ? event.session.reasoning?.[event.session.cli]
-          : undefined
-      const persistedMode = chat.mode ?? defaultModeFor(event.session.cli)
+      const providerId = chat.providerId ?? event.session.providerId ?? null
+      const reasoningKey = legacyReasoningRoute(providerId)
+      const reasoning = reasoningKey === null
+        ? undefined
+        : event.session.reasoning?.[reasoningKey]
+      const persistedMode = chat.mode ?? event.session.mode ?? "accept-edits"
       // Plan/Gigaplan are TRANSIENT client overlays the backend never persists
       // (see `agent-runner.setMode`: plan is held in memory, only the exec mode
       // reaches `session.mode`). A `SESSION_UPDATED` therefore always carries a
@@ -1548,10 +1537,8 @@ export const conversationMachine = setup({
       const mode = isExecutionMode(context.mode) ? persistedMode : context.mode
       return {
         session: event.session,
-        cli: event.session.cli,
-        model: chat.model ?? defaultModel(event.session.cli),
         connectionId: chat.connectionId ?? event.session.connectionId ?? null,
-        providerId: chat.providerId ?? event.session.providerId ?? null,
+        providerId,
         modelId: chat.modelId ?? event.session.modelId ?? null,
         mode,
         executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
@@ -1698,7 +1685,6 @@ export const conversationMachine = setup({
         connectionId: event.connectionId,
         providerId: event.providerId,
         modelId: event.modelId,
-        model: event.modelId,
         session
       }
     }),
@@ -1860,31 +1846,28 @@ export const conversationMachine = setup({
         createdAt: input.session.updatedAt,
         updatedAt: input.session.updatedAt,
         mode: input.session.mode,
-        model: input.session.model,
         contextTokens: input.session.contextTokens
       }
-    const reasoning =
-      input.session.cli === "claude" || input.session.cli === "codex"
-        ? input.session.reasoning?.[input.session.cli]
-        : undefined
+    const providerId = chat.providerId ?? input.session.providerId ?? null
+    const reasoningKey = legacyReasoningRoute(providerId)
+    const reasoning = reasoningKey === null
+      ? undefined
+      : input.session.reasoning?.[reasoningKey]
     return {
       session: input.session,
       chatId: chat.id,
       messages: [],
       sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] },
       remotePublishProgress: null,
-      mode: chat.mode ?? defaultModeFor(input.session.cli),
+      mode: chat.mode ?? input.session.mode ?? "accept-edits",
       executionMode:
         chat.mode && isExecutionMode(chat.mode)
           ? chat.mode
           : "accept-edits",
       skills: [],
       files: [],
-      cli: input.session.cli,
-      model: chat.model ?? defaultModel(input.session.cli),
-      catalog: [],
       connectionId: chat.connectionId ?? input.session.connectionId ?? null,
-      providerId: chat.providerId ?? input.session.providerId ?? null,
+      providerId,
       modelId: chat.modelId ?? input.session.modelId ?? null,
       patch: "",
       pendingText: "",
@@ -1931,7 +1914,7 @@ export const conversationMachine = setup({
        * chip snaps back, nothing happens.
        *
        * Safe here because `onDone` below assigns only transcript state
-       * (messages/skills/files/patch) and never `cli`/`model`/`mode` — so a
+       * (messages/skills/files/patch) and never provider identity or `mode` — so a
        * choice made mid-load survives the transition rather than being clobbered.
        */
       on: {

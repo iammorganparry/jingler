@@ -57,8 +57,6 @@ const h = vi.hoisted(() => ({
   stopFails: false,
   /** Push reviewer events into the machine, as ReviewService's stream would. */
   reviewCb: null as null | ((event: unknown) => void),
-  // Lets a test hold the catalogue in flight to prove nothing waits on it.
-  catalogGate: Promise.resolve() as Promise<void>,
   // Same, for the skills probe — it spawns the harness, so nothing may wait on it.
   skillsGate: Promise.resolve() as Promise<void>,
   approvalRefused: false,
@@ -67,7 +65,6 @@ const h = vi.hoisted(() => ({
   transcript: [] as ReadonlyArray<Message>,
   transcriptPageCalls: [] as Array<{ before: string | undefined; limit: number }>,
   currentPlan: null as PlanDocument | null,
-  setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
   setModelCalls: [] as Array<{
     sessionId: string
     connectionId: string
@@ -76,11 +73,7 @@ const h = vi.hoisted(() => ({
   }>,
   planCommentCalls: [] as Array<{ planId: string; stepId: string; body: string }>,
   planReviseCalls: [] as Array<string>,
-  reasoningCalls: [] as Array<unknown>,
-  catalog: [
-    { cli: "claude", label: "Claude Code", models: [{ id: "opus", label: "opus" }] },
-    { cli: "codex", label: "Codex CLI", models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol" }] }
-  ]
+  reasoningCalls: [] as Array<unknown>
 }))
 
 vi.mock("./rpc-client.js", () => ({
@@ -116,10 +109,6 @@ vi.mock("./rpc-client.js", () => ({
     workspaceFiles: async () => {
       h.filesCalls += 1
       return h.filesValue
-    },
-    modelsCatalog: async () => {
-      await h.catalogGate
-      return h.catalog
     },
     sessionsDiff: async () => {
       h.diffCalls += 1
@@ -163,14 +152,6 @@ vi.mock("./rpc-client.js", () => ({
     agentSetMode: async () => {},
     agentSetReasoning: async (_sessionId: string, _cli: string, reasoning: unknown) => {
       h.reasoningCalls.push(reasoning)
-    },
-    agentSetHarness: async (
-      sessionId: string,
-      _chatId: string,
-      cli: string,
-      model: string
-    ) => {
-      h.setHarnessCalls.push({ sessionId, cli, model })
     },
     agentSetModel: async (
       sessionId: string,
@@ -291,9 +272,7 @@ beforeEach(() => {
   h.steerStatus = "unsupported"
   h.steerGate = Promise.resolve()
   h.stopFails = false
-  h.setHarnessCalls.length = 0
   h.setModelCalls.length = 0
-  h.catalogGate = Promise.resolve()
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
   h.transcript = []
@@ -1990,7 +1969,7 @@ describe("conversationMachine — PlanUpdated across turns", () => {
 })
 
 describe("conversationMachine — persisted session reconciliation", () => {
-  it("keeps transient plan mode when a Codex model update echoes the persisted exec mode", async () => {
+  it("keeps transient plan mode when a provider-model update echoes the persisted exec mode", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
     actor.send({ type: "SET_MODE", mode: "plan" })
@@ -1999,6 +1978,9 @@ describe("conversationMachine — persisted session reconciliation", () => {
       ...session,
       cli: "codex",
       model: "gpt-5.6-sol",
+      connectionId,
+      providerId,
+      modelId,
       activeChatId: session.id,
       chats: [{
         id: session.id,
@@ -2007,13 +1989,15 @@ describe("conversationMachine — persisted session reconciliation", () => {
         updatedAt: "2026-07-25T00:00:00.000Z",
         // Plan mode is transient and deliberately absent from persistence.
         mode: "accept-edits",
-        model: "gpt-5.6-sol"
+        model: "gpt-5.6-sol",
+        connectionId,
+        providerId,
+        modelId
       }]
     } as Session
 
     actor.send({ type: "SESSION_UPDATED", session: updated })
 
-    expect(actor.getSnapshot().context.cli).toBe("codex")
     expect(actor.getSnapshot().context.mode).toBe("plan")
     actor.stop()
   })
@@ -2025,6 +2009,9 @@ describe("conversationMachine — persisted session reconciliation", () => {
       ...session,
       cli: "codex",
       model: "gpt-5.6-sol",
+      connectionId,
+      providerId,
+      modelId,
       mode: "auto",
       activeChatId: session.id,
       chats: [{
@@ -2033,16 +2020,21 @@ describe("conversationMachine — persisted session reconciliation", () => {
         createdAt: "2026-07-25T00:00:00.000Z",
         updatedAt: "2026-07-25T00:00:00.000Z",
         mode: "auto",
-        model: "gpt-5.6-sol"
+        model: "gpt-5.6-sol",
+        connectionId,
+        providerId,
+        modelId
       }],
-      reasoning: { codex: { enabled: false, effort: "high" } }
+      // Canonical provider identity wins even when legacy cli provenance disagrees.
+      reasoning: { claude: { enabled: false, effort: "high" } }
     } as Session
 
     actor.send({ type: "SESSION_UPDATED", session: updated })
 
     expect(actor.getSnapshot().context).toMatchObject({
-      cli: "codex",
-      model: "gpt-5.6-sol",
+      connectionId,
+      providerId,
+      modelId,
       mode: "auto",
       reasoning: { enabled: false, effort: "high" }
     })

@@ -9,6 +9,7 @@ import { Effect, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { InMemoryModelCertificationStore } from "../certification/model-certification-store.js"
 import { makeProviderCatalogService } from "./provider-catalog.js"
+import type { DiscoveredProviderModel } from "./provider-catalog.js"
 
 const connection = Schema.decodeUnknownSync(ProviderConnection)({
   id: "claude-max",
@@ -30,7 +31,7 @@ const connection = Schema.decodeUnknownSync(ProviderConnection)({
 })
 const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
 const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
-const model = {
+const model: DiscoveredProviderModel = {
   providerId,
   id: modelId,
   label: "Claude Sonnet",

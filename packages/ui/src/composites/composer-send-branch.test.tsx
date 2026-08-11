@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react"
-import type { HarnessCapability } from "@jingler/core"
 import { afterEach, describe, expect, it } from "vitest"
+import { testProviderCatalog } from "../test-support.js"
 import { Composer } from "./composer.js"
 
 /**
@@ -19,28 +19,9 @@ afterEach(cleanup)
 const filledBars = (chip: HTMLElement) =>
   [...chip.querySelectorAll("rect")].filter((r) => r.getAttribute("opacity") === "1").length
 
-const capabilities: ReadonlyArray<HarnessCapability> = [
-  {
-    cli: "claude",
-    label: "Claude Code",
-    modes: [{ id: "accept-edits", label: "Accept edits", kind: "execute" }],
-    models: [{
-      id: "opus",
-      label: "Opus",
-      reasoning: ["low", "medium", "high", "max"].map((id) => ({ id: id as "low" | "medium" | "high" | "max", label: id }))
-    }]
-  },
-  {
-    cli: "codex",
-    label: "Codex",
-    modes: [{ id: "accept-edits", label: "Workspace write", kind: "execute" }],
-    models: [{
-      id: "sol",
-      label: "Sol",
-      reasoning: ["low", "medium", "high", "xhigh"].map((id) => ({ id: id as "low" | "medium" | "high" | "xhigh", label: id }))
-    }]
-  }
-]
+const catalog = testProviderCatalog(["low", "medium", "high", "xhigh"])
+const { id: connectionId } = catalog.connections[0]!.connection
+const { id: modelId } = catalog.connections[0]!.models[0]!
 
 describe("Composer send row", () => {
   it("replaces the pending branch label as soon as the session branch settles", () => {
@@ -97,28 +78,23 @@ describe("Composer send row", () => {
     expect(send.className).toContain("rounded-full")
   })
 
-  it("fills one bar per rung of the harness's own reasoning ladder", () => {
-    // Claude's native ladder makes "high" the third of four strengths.
-    const { rerender } = render(<Composer cli="claude" model="opus" capabilities={capabilities} reasoningEffort="high" />)
+  it("fills one bar per rung of the selected model's reasoning ladder", () => {
+    render(<Composer providerCatalog={catalog} connectionId={connectionId} modelId={modelId} reasoningEffort="high" />)
     const chip = () => screen.getByRole("button", { name: "Thinking strength" })
-    expect(filledBars(chip())).toBe(3)
-
-    // Codex's native ladder has four rungs, and "high" is its third.
-    rerender(<Composer cli="codex" model="sol" capabilities={capabilities} reasoningEffort="high" />)
     expect(filledBars(chip())).toBe(3)
   })
 
-  it("fills nothing for the harness default or for thinking turned off", () => {
-    const { rerender } = render(<Composer cli="claude" />)
+  it("fills nothing for the provider default or for thinking turned off", () => {
+    const { rerender } = render(<Composer />)
     const chip = () => screen.getByRole("button", { name: "Thinking strength" })
     expect(filledBars(chip())).toBe(0)
 
     // `off` is told apart from `default` by the slash, not by a bar count —
     // neither is a strength, so neither may claim a rung.
-    rerender(<Composer cli="claude" thinkingEnabled={false} />)
+    rerender(<Composer thinkingEnabled={false} />)
     expect(filledBars(chip())).toBe(0)
     expect(chip().querySelector("line")).toBeTruthy()
-    rerender(<Composer cli="claude" />)
+    rerender(<Composer />)
     expect(chip().querySelector("line")).toBeNull()
   })
 })
