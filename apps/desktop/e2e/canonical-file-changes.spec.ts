@@ -11,7 +11,6 @@ const session = ({ repoPath }: { readonly repoPath: string }): ReadonlyArray<See
   branch: "jingler/canonical-changes",
   title: "Canonical file changes",
   status: "idle",
-  cli: "claude",
   diff: { added: 3, removed: 2 },
   prNumber: null,
   costUsd: 0,

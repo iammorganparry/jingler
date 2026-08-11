@@ -13,7 +13,7 @@ const input: PublishMetadataInput = {
   session: {
     id: "session-1", repo: "jingler/jingler", branch: "feat/secure-publish",
     semanticBranchProposal: { type: "feat", slug: "secure-publish" },
-    title: "Secure deterministic publishing", status: "idle", cli: "codex",
+    title: "Secure deterministic publishing", status: "idle",
     diff: { added: 10, removed: 2 }, prNumber: null, costUsd: 0, tokens: 0,
     updatedAt: new Date().toISOString(), chats: [], activeChatId: "chat-1"
   } as Session,

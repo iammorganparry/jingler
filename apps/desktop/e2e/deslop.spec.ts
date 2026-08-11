@@ -7,8 +7,8 @@ import type { SeedSession } from "./fixtures.js"
  * The per-file "Deslop" button in the Code Review file list hands that file to
  * the session's agent for an in-place cleanup pass — a normal turn on the
  * session's OWN worktree, so it works for committed and uncommitted changes
- * alike. This drives the real path a user takes; the scripted agent stands in
- * for the harness, so nothing hits the network.
+ * alike. This drives the real path a user takes; the deterministic pi provider
+ * keeps the run offline.
  */
 
 const seeded = (worktreePath: string): SeedSession => ({
@@ -17,7 +17,6 @@ const seeded = (worktreePath: string): SeedSession => ({
   branch: "chore/deslop-session",
   title: "Deslop source session",
   status: "idle",
-  cli: "claude",
   diff: { added: 2, removed: 0 },
   prNumber: null,
   costUsd: 0,

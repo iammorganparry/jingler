@@ -21,7 +21,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/context",
     title: "Long running session",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -39,7 +38,7 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
     sessions: seededSessions
   })
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
 
   // ── A first turn, so there is a conversation worth summarising ──
@@ -96,15 +95,15 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
 /**
  * The regression guard for the streamed-digest bug.
  *
- * A real harness streams its summary token by token, so the manager collects the
+ * A real provider streams its summary token by token, so the manager collects the
  * reply as many `Assistant` deltas and reassembles them. It once joined those
  * fragments with "\n" instead of "": a newline injected inside a JSON string
  * value made the reply invalid JSON, `parseDigest` returned null, and EVERY real
  * digest failed — the session showed "compaction failed" and never compacted.
  *
- * Unit tests missed it because the fake adapters emit the reply as ONE event,
+ * Unit tests missed it because earlier fixtures emitted the reply as ONE event,
  * where the separator is a no-op. This test only means anything because the
- * scripted digest now streams in chunks (see `scriptedRun` in adapter.ts), so a
+ * deterministic pi digest streams in chunks, so a
  * boundary lands mid-string exactly as it does in production. If the join
  * regresses, the digest fails to parse and every assertion below times out.
  */
@@ -115,7 +114,7 @@ test("reassembles a digest that arrives as streamed deltas", async ({ launchApp 
     sessions: seededSessions
   })
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
 
   await composer.click()
@@ -163,13 +162,13 @@ test("exposes the token levers in Settings", async ({ launchApp }) => {
   await window.getByRole("button", { name: /Context/ }).click()
 
   // The budget, and — the part that makes it meaningful — what it means per
-  // harness. Claude's current default is a 1M-window model, so the new 500k
+  // model. Claude's current default is a 1M-window model, so the new 500k
   // quality budget binds before the model's safety margin.
   await expect(window.getByText("500k tokens")).toBeVisible()
-  // One row per harness, and Claude is no longer the only 1M family — Codex's
-  // GPT-5.6 reads the same. So assert the reading appears for EVERY harness that
+  // One row per provider model, and Claude is no longer the only 1M family — Codex's
+  // GPT-5.6 reads the same. So assert the reading appears for EVERY model that
   // has it rather than picking one arbitrarily, which is the honest version of
-  // the claim and does not quietly stop testing when a third 1M harness lands.
+  // the claim and does not quietly stop testing when another 1M model lands.
   const oneMillion = window.getByText("500k of 1M")
   expect(await oneMillion.count()).toBeGreaterThan(0)
   for (const row of await oneMillion.all()) await expect(row).toBeVisible()

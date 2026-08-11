@@ -63,7 +63,6 @@ beforeEach(() => {
       branch: "chore/unsettled",
       title: "Unsettled",
       status: "idle",
-      cli: "claude",
       ...TEST_RUNTIME,
       diff: { added: 0, removed: 0 },
       prNumber: null,

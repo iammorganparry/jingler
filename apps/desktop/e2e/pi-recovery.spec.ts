@@ -11,7 +11,6 @@ const seededSession = (repoPath: string, recovery: boolean): SeedSession => ({
   branch: "jingler/runtime-recovery",
   title: recovery ? "Uncertain mutation" : "Migrated connection",
   status: "idle",
-  cli: "claude",
   diff: { added: recovery ? 1 : 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

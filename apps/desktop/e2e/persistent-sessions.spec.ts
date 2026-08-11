@@ -25,7 +25,6 @@ const keptSession = (worktreePath: string): SeedSession => ({
   worktreePath,
   title: "Keep auth warm",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -215,7 +214,7 @@ test("a direct session completes a turn and deletion preserves its checkout", as
     false
   )
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
   await expect(window.getByRole("button", { name: "Full Access" })).toBeVisible()
   await composer.fill("Run the direct-checkout verification.")

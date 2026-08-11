@@ -23,7 +23,6 @@ const session = (
       branch: `chore/${id}`,
       title: "Streamed plan",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,

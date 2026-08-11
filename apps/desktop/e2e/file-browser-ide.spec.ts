@@ -11,7 +11,6 @@ const session = (worktreePath: string): SeedSession => ({
   branch: "jingler/file-browser-ide",
   title: "File browser IDE",
   status: "idle",
-  cli: "codex",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -19,7 +18,6 @@ const session = (worktreePath: string): SeedSession => ({
   updatedAt: "2026-08-08T00:00:00.000Z",
   worktreePath,
   mode: "auto",
-  model: "gpt-5.6-sol"
 })
 
 const otherSession = (worktreePath: string): SeedSession => ({
@@ -346,7 +344,7 @@ test("shows a previously existing large worktree while its agent is running", as
   })
 
   await expect(appShell(window)).toBeVisible()
-  const composer = window.getByPlaceholder("Message Codex…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[queue-hold]] keep this existing session busy")
   await composer.press("Enter")
   await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
@@ -383,7 +381,7 @@ test("adds selected code to the active chat from the editor context menu", async
   await expect(
     window.getByRole("button", { name: "Remove src/config.ts:L1–L2", exact: true })
   ).toBeVisible()
-  await expect(window.getByPlaceholder("Message Codex…")).toBeFocused()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeFocused()
 })
 
 test("adds selected code to the active chat with the platform J shortcut", async ({
@@ -444,7 +442,7 @@ test("follows the selected chat agent through edited and newly created files", a
 
   // Prove the initial repository scan has settled before creating this file.
   // The scripted agent then reports the mutation only after the file exists,
-  // matching a real harness and making the follow-triggered refresh deterministic.
+  // matching a real provider stream and making the follow-triggered refresh deterministic.
   await expect(
     window.locator(
       '[data-jingler-pierre-file-tree][aria-label="Repository files"] [role="treeitem"]'
@@ -452,7 +450,7 @@ test("follows the selected chat agent through edited and newly created files", a
   ).toBeVisible()
   writeFileSync(join(repoPath, "src", "created.ts"), "export const created = true\n")
 
-  const composer = window.getByPlaceholder("Message Codex…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[codex-edit-preview]] Update and create the configuration files.")
   await composer.press("Enter")
 
@@ -494,7 +492,7 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
   await composerFollow.click()
   await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
 
-  const composer = window.getByPlaceholder("Message Codex…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[subagent-edit-preview]] Delegate this file update.")
   await composer.press("Enter")
 
@@ -543,7 +541,7 @@ test("refreshes the repository tree and follows a moved file to its destination"
     ].join("\n") + "\n"
   )
 
-  const composer = window.getByPlaceholder("Message Codex…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[follow-file-move]] Move and update the configuration file.")
   await composer.press("Enter")
 
@@ -588,7 +586,7 @@ test("reveals the followed mutation diff and sends selected feedback with contex
     "export const mode = 'modern'\nexport const retries = 2\nexport const timeout = 1_000\n"
   )
 
-  const composer = window.getByPlaceholder("Message Codex…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[follow-diff-preview]] Update the configuration mode.")
   await composer.press("Enter")
 

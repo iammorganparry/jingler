@@ -13,7 +13,6 @@ const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession>
     branch: "chore/plan-collaboration",
     title: "Collaborative plan",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,

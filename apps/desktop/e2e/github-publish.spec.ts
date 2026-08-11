@@ -72,7 +72,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   })
 
   await window.getByRole("button", { name: "Chat 1", exact: true }).click()
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Implement deterministic publishing")
   await composer.press("Enter")
   await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
@@ -178,7 +178,7 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
   prepareHermeticPush(detached.worktreePath, repoPath)
   writeFileSync(join(detached.worktreePath, "automatic-proof.txt"), "automatic publish\n")
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Implement automatic publishing")
   await composer.press("Enter")
   await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
@@ -216,7 +216,6 @@ test("publishes a migration-era established jingler branch without renaming it",
       branch,
       title: "Publish historical session",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,

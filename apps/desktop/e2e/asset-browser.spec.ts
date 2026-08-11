@@ -14,7 +14,6 @@ const seeded = (worktreePath: string): SeedSession => ({
   branch: "jingler/large-assets",
   title: "Large asset browser",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

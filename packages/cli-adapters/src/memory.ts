@@ -447,8 +447,10 @@ const forwardMemoryMcp = (
           method: "POST",
           headers: {
             ...scopedHeaders(issued.grant, selection.organizationId),
-            "mcp-protocol-version":
-              input.protocolVersion ?? MEMORY_MCP_PROTOCOL_VERSION
+            // The loopback client and hosted stateless service are independent
+            // protocol boundaries. Never let a provider-side MCP version change
+            // the exact private-memory route Jingler certified upstream.
+            "mcp-protocol-version": MEMORY_MCP_PROTOCOL_VERSION
           },
           body: input.body,
           signal: AbortSignal.timeout(runtime.uiTimeoutMs)

@@ -213,23 +213,6 @@ const BUILDBOX: Environment = {
   lastSeenAt: Date.now()
 }
 
-const clis = [
-  {
-    kind: "claude" as const,
-    label: "Claude Code",
-    binPath: "/usr/local/bin/claude",
-    version: "2.1.0",
-    available: true
-  },
-  {
-    kind: "codex" as const,
-    label: "Codex CLI",
-    binPath: "/usr/local/bin/codex",
-    version: "0.144.1",
-    available: true
-  }
-]
-
 const PROVIDER_CATALOG = Schema.decodeSync(ProviderCatalog)({
   refreshedAt: "2026-08-10T00:00:00.000Z",
   stale: false,
@@ -860,9 +843,9 @@ export const FirstPromptFlow: Story = {
       expect(canvas.getByRole("button", { name: "Base branch" })).toHaveTextContent("main")
     )
     await userEvent.click(canvas.getByRole("button", { name: /^Model:/ }))
-    expect(body.getByRole("option", { name: /Claude Code.*2 models/i })).toBeVisible()
-    await userEvent.click(body.getByRole("option", { name: /Claude Code.*2 models/i }))
-    await userEvent.click(body.getByRole("option", { name: /Opus 5/i }))
+    expect(body.getByRole("option", { name: /ChatGPT Codex.*1 model/i })).toBeVisible()
+    await userEvent.click(body.getByRole("option", { name: /ChatGPT Codex.*1 model/i }))
+    await userEvent.click(body.getByRole("option", { name: /GPT-5.6 Sol/i }))
     fireEvent.change(composer, { target: { value: "Refine the empty-state transitions" } })
     fireEvent.keyDown(composer, { key: "Enter", code: "Enter" })
 
@@ -870,8 +853,9 @@ export const FirstPromptFlow: Story = {
       expect(args.onCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: "project-jingler",
-          cli: "claude",
-          model: "opus",
+          connectionId: "openai-codex-local",
+          providerId: "openai-codex",
+          modelId: "openai-codex/gpt-5.6-sol",
           initialPrompt: "Refine the empty-state transitions",
           useWorktree: true
         })

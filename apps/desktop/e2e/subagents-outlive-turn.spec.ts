@@ -24,7 +24,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/subagents-outlive",
     title: "Sub-agent session",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -45,7 +44,7 @@ test("sub-agents outlive the main agent, and talking to it does not kill them", 
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[held-subagents]] map the UI")
   await composer.press("Enter")
 
@@ -77,7 +76,7 @@ test("sub-agents outlive the main agent, and talking to it does not kill them", 
 
   // They then finish on their own, and the turn settles once they have.
   await expect(window.getByText("Both agents reported back.")).toBeVisible({ timeout: 15_000 })
-  await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
 test("stopping a held-open turn clears every sub-agent tab", async ({ launchApp }) => {
@@ -87,7 +86,7 @@ test("stopping a held-open turn clears every sub-agent tab", async ({ launchApp 
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[held-subagents]] map the UI")
   await composer.press("Enter")
   await expect(window.getByRole("button", { name: FIRST_TAB })).toBeVisible({ timeout: 15_000 })
@@ -96,5 +95,5 @@ test("stopping a held-open turn clears every sub-agent tab", async ({ launchApp 
 
   await expect(window.getByRole("button", { name: FIRST_TAB })).toHaveCount(0)
   await expect(window.getByRole("button", { name: SECOND_TAB })).toHaveCount(0)
-  await expect(window.getByPlaceholder("Message Claude…")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible({ timeout: 15_000 })
 })

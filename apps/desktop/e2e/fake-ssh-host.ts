@@ -44,7 +44,7 @@ process.stdin.setEncoding("utf8")
 process.stdin.on("data", (chunk) => { credential += chunk })
 process.stdin.on("end", () => {
 const result = spawnSync(process.execPath, [${JSON.stringify(options.deviceAgentBundle)}, "enroll", "--server", ${JSON.stringify(options.relayUrl)}, "--name", "buildbox"], {
-  env: { ...process.env, JINGLER_HOME: ${JSON.stringify(options.deviceHome)}, JINGLER_DEVICE_RELAY_URL: ${JSON.stringify(options.relayUrl)}, JINGLER_SCRIPTED_AGENT: "1", JINGLER_E2E: "1" },
+  env: { ...process.env, JINGLER_HOME: ${JSON.stringify(options.deviceHome)}, JINGLER_DEVICE_RELAY_URL: ${JSON.stringify(options.relayUrl)}, JINGLER_E2E: "1" },
   input: credential,
   encoding: "utf8"
 })

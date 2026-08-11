@@ -13,7 +13,6 @@ const localSession = (
   branch: "main",
   title: "Local session",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -117,7 +116,7 @@ test("clones a missing project and creates a workspace on an account-owned envir
   expect(existsSync(join(remoteRepo, ".git"))).toBe(true)
   const remoteProjects = JSON.parse(readFileSync(join(app.deviceHome!, "jingler", "projects.json"), "utf8"))
   expect(remoteProjects).toEqual([expect.objectContaining({ name: "widget", path: remoteRepo })])
-  const composer = app.window.getByPlaceholder("Message Claude…")
+  const composer = app.window.getByPlaceholder("Message the agent…")
   await composer.fill("Reply from buildbox")
   await composer.press("Enter")
   await expect(app.window.getByText("Claude", { exact: true })).toBeVisible({ timeout: 20_000 })
@@ -158,7 +157,7 @@ test("prevents changing environment during an active turn", async ({ launchApp }
     sessions: ({ repoPath }) => [localSession(repoPath)]
   })
   await enrollBuildbox(app)
-  const composer = app.window.getByPlaceholder("Message Claude…")
+  const composer = app.window.getByPlaceholder("Message the agent…")
   await composer.fill("Hold the environment while this runs")
   await composer.press("Enter")
   await expect(app.window.getByTestId("session-row-session_local_abcdefgh").getByText(/Thinking|Running/)).toBeVisible()
@@ -195,7 +194,7 @@ test("resumes a remote turn after relay interruption without duplicate execution
   })
   await enrollBuildbox(app)
   const sessionId = await createRemoteWorkspace(app.window)
-  const composer = app.window.getByPlaceholder("Message Claude…")
+  const composer = app.window.getByPlaceholder("Message the agent…")
   await composer.fill("Complete once after reconnect")
   await composer.press("Enter")
   await expect.poll(() => app.deviceRelay?.commandAdmissions(sessionId, "Agent.run") ?? 0).toBe(1)

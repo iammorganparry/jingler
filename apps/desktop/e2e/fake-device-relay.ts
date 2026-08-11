@@ -132,7 +132,6 @@ export const startFakeDeviceRelay = async (
           HOME: options.deviceHome,
           JINGLER_HOME: options.deviceHome,
           JINGLER_DEVICE_RELAY_URL: baseUrl,
-          JINGLER_SCRIPTED_AGENT: "1",
           JINGLER_E2E: "1",
           JINGLER_DISCOVERY_BIN_DIR: options.deviceBinDir,
           PATH: `${options.deviceBinDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`

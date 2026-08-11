@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -26,10 +25,11 @@ import { startFakeDeviceRelay, type FakeDeviceRelay } from "./fake-device-relay.
 import { installFakeSshHost } from "./fake-ssh-host.js"
 import { DEVICE_AGENT_ENTRY, MAIN_ENTRY } from "./global-setup.js"
 import type { Chat, RuntimeRecoveryState } from "@jingler/core"
-
-/** Labels served by the deterministic provider catalogue used in legacy UI fixtures. */
-export const DEFAULT_CLAUDE_MODEL = "Opus 5"
-export const ALT_CLAUDE_MODEL = "Sonnet 5 1M"
+import {
+  E2E_PI_CONNECTION_ID,
+  E2E_PI_MODEL_ID,
+  E2E_PI_PROVIDER_ID
+} from "../src/main/e2e/fixture-identity.js"
 
 /** Match PlanStore's collision-proof directory for one physical checkout. */
 export const planDirectory = (home: string, worktreePath: string): string => {
@@ -155,7 +155,6 @@ export interface SeedSession {
   readonly branch: string
   readonly title: string
   readonly status: "idle" | "running" | "thinking" | "needs-input" | "done"
-  readonly cli: "claude" | "codex" | "cursor" | "opencode"
   readonly executionLocation?: "local" | "cloud"
   readonly environmentId?: string
   readonly diff: { added: number; removed: number }
@@ -177,8 +176,6 @@ export interface SeedSession {
    */
   readonly repoPath?: string
   readonly baseBranch?: string
-  readonly model?: string
-  readonly resumeId?: string
   readonly connectionId?: string
   readonly providerId?: string
   readonly modelId?: string
@@ -196,12 +193,31 @@ export interface SeedSession {
   readonly activeChatId?: string
 }
 
+const withCanonicalRuntimeIdentity = (session: SeedSession): SeedSession => {
+  const identity =
+    session.connectionSelectionRequired === true || session.modelSelectionRequired === true
+      ? {}
+      : {
+          connectionId: E2E_PI_CONNECTION_ID,
+          providerId: E2E_PI_PROVIDER_ID,
+          modelId: E2E_PI_MODEL_ID
+        }
+  const chats = session.chats?.map((chat) => ({ ...identity, ...chat })) ?? [{
+    id: `c_${session.id}_1`,
+    title: null,
+    createdAt: session.updatedAt,
+    updatedAt: session.updatedAt,
+    ...identity
+  }]
+  return {
+    ...identity,
+    ...session,
+    chats,
+    activeChatId: session.activeChatId ?? chats[0]!.id
+  }
+}
+
 export interface LaunchOptions {
-  /**
-   * Route turns through the deterministic in-process adapter by default.
-   * Set false only when a spec needs a fake harness process end to end.
-   */
-  readonly scriptedAgent?: boolean
   /**
    * Seed a deterministic pi transport script. The production PiAgentRuntime,
    * auth broker, tool registry and diff tracker consume this transport; tests
@@ -299,521 +315,8 @@ export interface LaunchOptions {
     readonly relayHost: string
   }
 
-  /**
-   * Install a deterministic fake `opencode` on PATH so discovery, the version
-   * gate, the model catalogue and the provider list all run offline — instead of
-   * depending on whether this host happens to have opencode installed.
-   */
-  readonly opencode?: {
-    /** What `--version` reports. Below 1.18 the version gate must reject it. */
-    readonly version?: string
-    /** Make storing a key fail, to drive the UI's failure path. */
-    readonly authFails?: boolean
-    /** Providers `/config/providers` reports, mirroring the real response. */
-    readonly providers?: ReadonlyArray<{
-      readonly id: string
-      readonly name?: string
-      /** Where the credential came from; omit for "unconfigured". */
-      readonly source?: "env" | "config" | "custom" | "api"
-      readonly env?: ReadonlyArray<string>
-      readonly models?: ReadonlyArray<string>
-    }>
-  }
 }
 
-/**
- * Install a fake harness in the pinned discovery dir that only answers `--version`.
- *
- * Discovery is pinned to that dir (`JINGLER_DISCOVERY_BIN_DIR`), so without this
- * the suite would find NO harness and every flow gated on one — creating a
- * session, the harness picker, the model chip — would skip. A shim is enough
- * because `JINGLER_SCRIPTED_AGENT` routes actual turns to the scripted harness:
- * the binary is only ever asked for its version.
- *
- * This is what makes those specs both hermetic AND still run. Previously they
- * depended on the developer having the real CLI installed, which meant the suite
- * tested something different on every machine — and on CI, nothing at all. The
- * provider-switch spec is the clearest case: it skipped unless you personally had
- * Codex installed, and its own comment conceded "there's no fixture for it".
- */
-const installVersionOnlyHarness = (binDir: string, bin: string, version: string): void => {
-  mkdirSync(binDir, { recursive: true })
-  const shim = `#!/usr/bin/env node
-// Discovery runs \`--version\`. Anything else (e.g. the codex app-server model
-// probe) exits immediately, so the catalogue degrades to the static fallback
-// list rather than hanging — deterministic either way.
-if (process.argv.includes("--version") || process.argv.includes("-v")) {
-  process.stdout.write("${version}\\n")
-}
-process.exit(0)
-`
-  const path = join(binDir, bin)
-  writeFileSync(path, shim)
-  chmodSync(path, 0o755)
-}
-
-/**
- * Install a fake `codex` that answers `--version` AND speaks enough of the
- * app-server JSON-RPC protocol to serve a model catalogue.
- *
- * A version-only shim isn't enough: the provider-switch spec picks a Codex model
- * by its displayed label, and without a catalogue the chip falls back to the
- * static list — whose ids are lowercase, so the spec's `/^GPT-5\./` finds nothing.
- * That regex was written against the REAL CLI's labels, which is precisely the
- * machine-dependence being removed here, so the fixture reproduces the real
- * response rather than the assertion being relaxed to fit a weaker fake.
- */
-const installFakeCodex = (binDir: string): void => {
-  mkdirSync(binDir, { recursive: true })
-  const shim = `#!/usr/bin/env node
-if (process.argv.includes("--version") || process.argv.includes("-v")) {
-  process.stdout.write("codex-cli 0.144.1\\n")
-  process.exit(0)
-}
-if (!process.argv.includes("app-server")) process.exit(0)
-
-const fs = require("node:fs")
-const reasoning = ["low", "medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort }))
-const models = [
-  { id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol", isDefault: true, supportedReasoningEfforts: reasoning, defaultReasoningEffort: "low" },
-  { id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra", supportedReasoningEfforts: reasoning, defaultReasoningEffort: "medium" },
-  { id: "gpt-5.6-luna", displayName: "GPT-5.6 Luna", supportedReasoningEfforts: reasoning, defaultReasoningEffort: "medium" },
-  { id: "gpt-5.5", displayName: "GPT-5.5", supportedReasoningEfforts: reasoning, defaultReasoningEffort: "medium" }
-]
-const send = (message) =>
-  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\\n")
-const notifyUsage = (tokens, turnId) =>
-  send({
-    method: "thread/tokenUsage/updated",
-    params: {
-      threadId: "thread-e2e",
-      turnId,
-      tokenUsage: {
-        total: { totalTokens: tokens },
-        last: { totalTokens: tokens },
-        modelContextWindow: 258400
-      }
-    }
-  })
-const record = (method) => {
-  if (process.env.JINGLER_E2E_CODEX_LOG) {
-    fs.appendFileSync(process.env.JINGLER_E2E_CODEX_LOG, method + "\\n")
-  }
-}
-const configOverride = (key) => {
-  for (let index = 2; index < process.argv.length - 1; index += 1) {
-    if (process.argv[index] !== "-c") continue
-    const entry = process.argv[index + 1]
-    const prefix = key + "="
-    if (!entry.startsWith(prefix)) continue
-    const encoded = entry.slice(prefix.length)
-    try {
-      return JSON.parse(encoded)
-    } catch {
-      throw new Error("Invalid Codex MCP override for " + key)
-    }
-  }
-  return undefined
-}
-const browserMcpTarget = (input) => {
-  const prefix = "[[browser-control-mcp="
-  const start = input.indexOf(prefix)
-  if (start < 0) return null
-  const valueStart = start + prefix.length
-  const end = input.indexOf("]]", valueStart)
-  if (end < 0) throw new Error("Browser MCP fixture marker is missing ]]")
-  return input.slice(valueStart, end)
-}
-const browserMcpRequest = async (id, method, params, protocolVersion) => {
-  const url = configOverride("mcp_servers.jingler-browser.url")
-  const duplicateToolApproval = configOverride(
-    "features.tool_call_mcp_elicitation"
-  )
-  const authorizationEnvironment = configOverride(
-    "mcp_servers.jingler-browser.env_http_headers.Authorization"
-  )
-  const authorization =
-    typeof authorizationEnvironment === "string"
-      ? process.env[authorizationEnvironment]
-      : undefined
-  if (typeof url !== "string" || url.length === 0) {
-    throw new Error("Codex launch is missing the jingler-browser URL override")
-  }
-  if (duplicateToolApproval !== false) {
-    throw new Error("Codex launch still enables duplicate MCP tool approvals")
-  }
-  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
-    throw new Error("Codex launch is missing the jingler-browser Authorization environment")
-  }
-  const headers = {
-    Accept: "application/json, text/event-stream",
-    Authorization: authorization,
-    "Content-Type": "application/json"
-  }
-  if (protocolVersion) headers["MCP-Protocol-Version"] = protocolVersion
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ jsonrpc: "2.0", id, method, params })
-  })
-  const raw = await response.text()
-  if (!response.ok) {
-    throw new Error("Browser MCP " + method + " returned " + response.status + ": " + raw)
-  }
-  if (response.status === 202) return null
-  const message = JSON.parse(raw)
-  if (message.error) {
-    throw new Error("Browser MCP " + method + " failed: " + message.error.message)
-  }
-  return message.result
-}
-const initializeBrowserMcp = async () => {
-  const initialized = await browserMcpRequest(901, "initialize", {
-    protocolVersion: "2025-11-25",
-    capabilities: {},
-    clientInfo: { name: "jingler-e2e-codex", version: "1.0.0" }
-  })
-  const protocolVersion = initialized?.protocolVersion
-  if (typeof protocolVersion !== "string") {
-    throw new Error("Browser MCP initialize did not return a protocol version")
-  }
-  record("browser-mcp:initialize")
-  await browserMcpRequest(
-    undefined,
-    "notifications/initialized",
-    {},
-    protocolVersion
-  )
-  return protocolVersion
-}
-const navigateBrowserMcp = async (targetUrl) => {
-  const protocolVersion = await initializeBrowserMcp()
-  const result = await browserMcpRequest(
-    903,
-    "tools/call",
-    { name: "navigate", arguments: { url: targetUrl } },
-    protocolVersion
-  )
-  if (result?.isError === true) {
-    const detail = JSON.stringify(result.content ?? [])
-    throw new Error("Browser MCP navigate returned a tool error: " + detail)
-  }
-  record("browser-mcp:tools/call:navigate")
-  // A real agent commonly reads immediately after navigating. Keep that exact
-  // sequence in the fixture so navigate cannot report success while Chromium
-  // is still exposing the previous document to the next tool call.
-  const readResult = await browserMcpRequest(
-    904,
-    "tools/call",
-    { name: "read_text", arguments: {} },
-    protocolVersion
-  )
-  if (readResult?.isError === true) {
-    throw new Error(
-      "Browser MCP read_text returned a tool error: " +
-        JSON.stringify(readResult.content ?? [])
-    )
-  }
-  const text = Array.isArray(readResult?.content)
-    ? readResult.content
-        .filter((item) => item?.type === "text")
-        .map((item) => item.text)
-        .join(" ")
-    : ""
-  record("browser-mcp:tools/call:read_text:" + text)
-}
-const assertAutoTurnPolicy = (params) => {
-  if (params?.approvalPolicy !== "never") {
-    throw new Error("Codex Auto turn is missing approvalPolicy=never")
-  }
-  if (params?.sandboxPolicy?.type !== "dangerFullAccess") {
-    throw new Error("Codex Auto turn is missing dangerFullAccess")
-  }
-  record("permissions:auto")
-}
-const waitForBrowserMcpGate = async () => {
-  const gate = process.env.JINGLER_E2E_BROWSER_MCP_GATE
-  if (!gate) throw new Error("Browser MCP gate path is missing")
-  const deadline = Date.now() + 10000
-  while (!fs.existsSync(gate)) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for Browser MCP gate")
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
-}
-const completeBrowserMcpTurn = async (targetUrl, params, gated) => {
-  try {
-    assertAutoTurnPolicy(params)
-    if (gated) await waitForBrowserMcpGate()
-    await navigateBrowserMcp(targetUrl)
-    send({
-      method: "item/completed",
-      params: {
-        threadId: "thread-e2e",
-        turnId: "turn-e2e",
-        item: {
-          type: "agentMessage",
-          id: "message-e2e",
-          text: "Codex browser MCP complete."
-        }
-      }
-    })
-    send({
-      method: "turn/completed",
-      params: {
-        threadId: "thread-e2e",
-        turn: { id: "turn-e2e", status: "completed", error: null }
-      }
-    })
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause)
-    record("browser-mcp:error:" + message)
-    send({
-      method: "item/completed",
-      params: {
-        threadId: "thread-e2e",
-        turnId: "turn-e2e",
-        item: {
-          type: "agentMessage",
-          id: "message-e2e",
-          text: "Codex browser MCP failed: " + message
-        }
-      }
-    })
-    send({
-      method: "turn/completed",
-      params: {
-        threadId: "thread-e2e",
-        turn: { id: "turn-e2e", status: "failed", error: { message } }
-      }
-    })
-  }
-}
-let buffer = ""
-process.stdin.on("data", (chunk) => {
-  buffer += chunk.toString()
-  let index = buffer.indexOf("\\n")
-  while (index !== -1) {
-    const line = buffer.slice(0, index).trim()
-    buffer = buffer.slice(index + 1)
-    if (line) {
-      const msg = JSON.parse(line)
-      if (msg.method) record(msg.method)
-      if (msg.method === "initialize") send({ id: msg.id, result: {} })
-      if (msg.method === "model/list") send({ id: msg.id, result: { data: models } })
-      if (msg.method === "thread/start") {
-        send({ id: msg.id, result: { thread: { id: "thread-e2e" } } })
-      }
-      if (msg.method === "thread/resume") {
-        send({ id: msg.id, result: { thread: { id: "thread-e2e" } } })
-        // Deliver replay in a later stdout chunk, as the real server may. This is
-        // high enough to require compaction before turn/start.
-        setTimeout(() => notifyUsage(206000, "turn-previous"), 100)
-      }
-      if (msg.method === "thread/compact/start") {
-        send({ id: msg.id, result: {} })
-        setTimeout(
-          () =>
-            send({
-              method: "turn/completed",
-              params: {
-                threadId: "thread-e2e",
-                turn: { id: "compact-e2e", status: "completed", error: null }
-              }
-            }),
-          20
-        )
-      }
-      if (msg.method === "turn/start") {
-        send({ id: msg.id, result: { turn: { id: "turn-e2e" } } })
-        const input = JSON.stringify(msg.params?.input ?? "")
-        const isDigest = input.includes(
-          "You are compacting a coding session's context"
-        )
-        const holdForSteer = input.includes(
-          "Exercise native steering"
-        )
-        const browserTarget = browserMcpTarget(input)
-        if (browserTarget !== null) {
-          void completeBrowserMcpTurn(
-            browserTarget,
-            msg.params,
-            input.includes("[[browser-control-mcp-gated]]")
-          )
-          index = buffer.indexOf("\\n")
-          continue
-        }
-        const reply = isDigest
-          ? '{"goal":"Continue the legacy Codex session.","recentWork":["Loaded the existing session transcript."],"nextStep":"Continue the implementation.","decisions":[],"filesTouched":[],"openThreads":["The implementation is still active."],"preferences":[],"midFlow":true,"midFlowReason":"The implementation is still active."}'
-          : "Codex E2E complete."
-        // Occupancy arrives after turn/start has resolved, like the real server.
-        // The completion delay gives Playwright a deterministic interval to see
-        // the meter and Stop while the transport remains active.
-        if (!isDigest) setTimeout(() => notifyUsage(120000, "turn-e2e"), 500)
-        setTimeout(
-          () =>
-            send({
-              method: "item/completed",
-              params: {
-                threadId: "thread-e2e",
-                turnId: "turn-e2e",
-                item: {
-                  type: "agentMessage",
-                  id: "message-e2e",
-                  text: reply
-                }
-              }
-            }),
-          isDigest ? 20 : 1000
-        )
-        setTimeout(
-          () =>
-            send({
-              method: "turn/completed",
-              params: {
-                threadId: "thread-e2e",
-                turn: { id: "turn-e2e", status: "completed", error: null }
-              }
-            }),
-          isDigest ? 40 : holdForSteer ? 60000 : 3000
-        )
-      }
-      if (msg.method === "turn/steer") {
-        send({ id: msg.id, result: { turnId: msg.params?.expectedTurnId } })
-      }
-      if (msg.method === "turn/interrupt") {
-        send({ id: msg.id, result: {} })
-      }
-    }
-    index = buffer.indexOf("\\n")
-  }
-})
-`
-  const path = join(binDir, "codex")
-  writeFileSync(path, shim)
-  chmodSync(path, 0o755)
-}
-
-/**
- * Install a fake `opencode` on PATH: a node shim that answers `--version` and,
- * on `serve`, boots a tiny HTTP server speaking just enough of opencode's API
- * for discovery and the model catalogue (`/config/providers`).
- *
- * Why a fake rather than the real binary: discovery probes PATH, so today's
- * model-chip tests `test.skip()` on any host without the harness installed —
- * which means the provider-switching path is untested in exactly the situation
- * that matters. A shim makes it deterministic and offline, and lets us drive the
- * cases a real install *can't* reach: a too-old version, or a provider whose key
- * is missing.
- *
- * Returns the env vars the shim reads.
- */
-const installFakeOpencode = (
-  binDir: string,
-  opencode: NonNullable<LaunchOptions["opencode"]>
-): Record<string, string> => {
-  mkdirSync(binDir, { recursive: true })
-  // Providers as `GET /config/providers` reports them, shaped exactly like the
-  // real 1.18 response the adapter parses.
-  const providers = (opencode.providers ?? []).map((p) => ({
-    id: p.id,
-    name: p.name ?? p.id,
-    source: p.source ?? null,
-    env: p.env ?? [],
-    models: Object.fromEntries(
-      (p.models ?? []).map((m) => [m, { id: m, name: m, providerID: p.id }])
-    )
-  }))
-
-  const script = `#!/usr/bin/env node
-const version = process.env.JINGLER_E2E_OPENCODE_VERSION || "1.18.0"
-const providers = JSON.parse(process.env.JINGLER_E2E_OPENCODE_PROVIDERS || "[]")
-const argv = process.argv.slice(2)
-
-if (argv.includes("--version") || argv.includes("-v")) {
-  process.stdout.write(version + "\\n")
-  process.exit(0)
-}
-
-if (argv[0] === "serve") {
-  const http = require("node:http")
-  // A provider is "connected" iff the fixture gave it a source — mirroring the
-  // real server, where /config/providers returns ONLY what resolves while
-  // /provider returns the whole registry plus a connected list.
-  const connected = providers.filter((p) => p.source !== null).map((p) => p.id)
-  const server = http.createServer((req, res) => {
-    res.setHeader("Content-Type", "application/json")
-    if (req.url.startsWith("/provider")) {
-      // The registry stamps a source on everything regardless of whether it
-      // resolves — reproduced here, because the fold must ignore it and trust
-      // \`connected\` instead.
-      res.end(
-        JSON.stringify({
-          all: providers.map((p) => ({ ...p, source: "custom" })),
-          connected,
-          default: {}
-        })
-      )
-      return
-    }
-    if (req.url.startsWith("/config/providers")) {
-      const live = providers.filter((p) => connected.includes(p.id))
-      // The real server also returns a per-provider default; mirroring it keeps
-      // the fold under test identical to production.
-      const def = {}
-      for (const p of live) {
-        const first = Object.keys(p.models)[0]
-        if (first) def[p.id] = first
-      }
-      res.end(JSON.stringify({ providers: live, default: def }))
-      return
-    }
-    if (req.method === "PUT" && req.url.startsWith("/auth/")) {
-      // Record the write so a test can assert the key went to opencode's own
-      // store rather than anywhere of Jingler's.
-      const id = decodeURIComponent(req.url.slice("/auth/".length))
-      let body = ""
-      req.on("data", (c) => (body += c))
-      req.on("end", () => {
-        require("node:fs").appendFileSync(
-          process.env.JINGLER_E2E_OPENCODE_AUTH_LOG,
-          JSON.stringify({ id, body: JSON.parse(body || "{}") }) + "\\n"
-        )
-        // Refusing the write is a state a real server reaches (its credential
-        // store unwritable) and the one the row itself can't show — the UI has
-        // to say so rather than close as though the key landed.
-        if (process.env.JINGLER_E2E_OPENCODE_AUTH_FAILS === "1") {
-          res.statusCode = 500
-          res.end(JSON.stringify({ error: "cannot write auth.json" }))
-          return
-        }
-        res.end("true")
-      })
-      return
-    }
-    res.end("{}")
-  })
-  server.listen(0, "127.0.0.1", () => {
-    process.stdout.write(
-      "opencode server listening on http://127.0.0.1:" + server.address().port + "\\n"
-    )
-  })
-  const bye = () => { server.close(); process.exit(0) }
-  process.on("SIGTERM", bye)
-  process.on("SIGINT", bye)
-  return
-}
-process.exit(0)
-`
-  const path = join(binDir, "opencode")
-  writeFileSync(path, script)
-  chmodSync(path, 0o755)
-  return {
-    JINGLER_E2E_OPENCODE_VERSION: opencode.version ?? "1.18.0",
-    JINGLER_E2E_OPENCODE_PROVIDERS: JSON.stringify(providers),
-    JINGLER_E2E_OPENCODE_AUTH_LOG: join(binDir, "auth-writes.jsonl"),
-    JINGLER_E2E_OPENCODE_AUTH_FAILS: opencode.authFails === true ? "1" : "0"
-  }
-}
 
 export interface LaunchedApp {
   readonly app: ElectronApplication
@@ -839,19 +342,6 @@ export interface LaunchedApp {
   readonly deviceRelay?: FakeDeviceRelay
   /** Throwaway home used by the hermetic remote device agent. */
   readonly deviceHome?: string
-  /**
-   * Keys the fake opencode was asked to store, in the order it was asked. The
-   * point of the assertion is WHERE a key lands: opencode's own credential
-   * store, never Jingler's SecretStore.
-   */
-  readonly opencodeAuthWrites: () => ReadonlyArray<{
-    id: string
-    body: { type: string; key: string }
-  }>
-  /** Ordered JSON-RPC methods received by the fake Codex app-server. */
-  readonly codexCalls: () => ReadonlyArray<string>
-  /** Release a scripted Browser MCP turn held at its explicit test barrier. */
-  readonly releaseBrowserMcp: () => void
   /**
    * Drive a `jingler://` sign-in callback into the running app (the OS would
    * normally do this after the browser flow). Emits the main-process `open-url`.
@@ -914,7 +404,7 @@ export const test = base.extend<{
        *
        * A restart (`home` + `configured`) is supposed to read what the previous
        * launch persisted. Re-seeding threw that away silently: settings the app
-       * wrote (a per-harness MCP opt-out, say) vanished, and the spec read the
+       * wrote (a managed-resource toggle, say) vanished, and the spec read the
        * absence as "it didn't persist" rather than "the fixture deleted it".
        */
       const configPath = join(jinglerDir, "config.json")
@@ -939,7 +429,10 @@ export const test = base.extend<{
             ? options.sessions({ reposDir, repoPath })
             : options.sessions
         mkdirSync(jinglerDir, { recursive: true })
-        writeFileSync(join(jinglerDir, "sessions.json"), JSON.stringify(sessions, null, 2))
+        writeFileSync(
+          join(jinglerDir, "sessions.json"),
+          JSON.stringify(sessions.map(withCanonicalRuntimeIdentity), null, 2)
+        )
       }
       if (options.transcripts) {
         const dir = join(jinglerDir, "transcripts")
@@ -966,17 +459,6 @@ export const test = base.extend<{
         writeFileSync(piFixtureFile, JSON.stringify(options.piFixture, null, 2))
       }
 
-      // A fake harness home for EVERY launch. Anything that reads the harness's own
-      // config — now just the subscription-auth check behind the billing panel —
-      // otherwise reads the developer's real `~` and reports whatever they happen to
-      // be signed into, so the same test says different things on different machines.
-      const mcpEnv: Record<string, string> = {
-        JINGLER_HARNESS_HOME: join(home, "harness-home")
-      }
-
-      // Optional fake harness preparation. GitHub itself is always exercised
-      // through the HTTP GitHub App fixture below.
-      let opencodeEnv: Record<string, string> = {}
       const binDir = join(home, "bin")
       // A connected App fixture needs an origin for immutable repository
       // resolution and API-driven checkout.
@@ -992,26 +474,6 @@ export const test = base.extend<{
           git(repoPath, ["branch", "--force", pr.headRefName, "main"])
         }
       }
-      if (options.opencode) {
-        opencodeEnv = installFakeOpencode(binDir, options.opencode)
-      }
-
-      /**
-       * Harness discovery is PINNED to this dir, so the suite can never find the
-       * developer's real `claude`/`opencode`. That matters for more than speed:
-       * `withOpencodeServer` inherits the environment untouched (the BYOK
-       * contract), so an unpinned run boots the developer's own opencode against
-       * their own credentials — and spawns one per launch.
-       *
-       * A fake `claude` always goes in, because pinning an EMPTY dir would make
-       * every harness-gated flow (create-session, harness picker, model chip)
-       * silently skip. Specs that want opencode install their own shim above.
-       */
-      const availableHarnesses = options.e2eEnv?.JINGLER_E2E_AVAILABLE_HARNESSES
-      if (availableHarnesses !== "codex") {
-        installVersionOnlyHarness(binDir, "claude", "2.0.0 (Claude Code)")
-      }
-      if (availableHarnesses !== "claude") installFakeCodex(binDir)
 
       let deviceRelay: FakeDeviceRelay | undefined
       let deviceHome: string | undefined
@@ -1141,22 +603,12 @@ export const test = base.extend<{
         args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
         env: {
           ...process.env,
-          ...opencodeEnv,
-          ...mcpEnv,
           // Run every built-app scenario against the same clean-machine
-          // boundary: fixture harnesses, Electron/Node, and system git. Never
-          // inherit the developer's PATH. In particular, a locally installed
+          // boundary: embedded pi, Electron/Node, and system git. Never inherit
+          // the developer's PATH. In particular, a locally installed
           // GitHub CLI must not hide a built-in regression back to `gh`.
           PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
           JINGLER_HOME: home,
-          // Pin harness discovery to the fixture's own bin dir. PATH alone can't
-          // do this: `CLI_SPECS.candidates` hardcodes absolute install paths
-          // (/opt/homebrew/bin/opencode), so a real install would still be found.
-          JINGLER_DISCOVERY_BIN_DIR: binDir,
-          // The Anthropic model catalogue is a live HTTP call whenever this is
-          // set. Blank it so the suite falls back to the static list instead of
-          // hitting the network with the developer's key.
-          ANTHROPIC_API_KEY: "",
           ELECTRON_RENDERER_URL: "",
           // Auth: talk to the offline fake backend, and store the token as a plain
           // file (no OS keychain prompts under headless Playwright).
@@ -1178,15 +630,7 @@ export const test = base.extend<{
                 JINGLER_E2E_PI_AUTH_ROUTE: options.piFixture.authRoute
               }
             : {}),
-          // Force the deterministic scripted agent so chat e2e never spawns a
-          // real harness (no auth, no network, reproducible).
-          JINGLER_SCRIPTED_AGENT: options.scriptedAgent === false ? "0" : "1",
-          // A separate boundary for E2E-only scripted markers. Scripted mode is
-          // also a legitimate production fallback when no CLI is installed, so
-          // it must never imply permission to execute test-only side effects.
           JINGLER_E2E: "1",
-          JINGLER_E2E_CODEX_LOG: join(binDir, "codex-calls.log"),
-          JINGLER_E2E_BROWSER_MCP_GATE: join(binDir, "browser-mcp.release"),
           // Keep the window hidden and off the dock. The suite launches a real
           // Electron app dozens of times, and a visible window steals focus on
           // every launch — which makes running the suite locally (its only home;
@@ -1223,33 +667,9 @@ export const test = base.extend<{
         })
       }
 
-      const opencodeAuthWrites = () => {
-        const log = join(home, "bin", "auth-writes.jsonl")
-        if (!existsSync(log)) return []
-        return readFileSync(log, "utf8")
-          .split("\n")
-          .filter((l) => l.length > 0)
-          .map(
-            (l) =>
-              JSON.parse(l) as {
-                id: string
-                body: { type: string; key: string }
-              }
-          )
-      }
 
       const githubOperations = () => [...githubServer.operations]
 
-      const codexCalls = () => {
-        const log = join(home, "bin", "codex-calls.log")
-        if (!existsSync(log)) return []
-        return readFileSync(log, "utf8")
-          .split("\n")
-          .filter((line) => line.length > 0)
-      }
-      const releaseBrowserMcp = () => {
-        writeFileSync(join(binDir, "browser-mcp.release"), "released\n")
-      }
 
       return {
         app,
@@ -1265,9 +685,6 @@ export const test = base.extend<{
         ...(deviceHome ? { deviceHome } : {}),
         completeDeepLinkSignIn,
         completeGitHubConnection,
-        opencodeAuthWrites,
-        codexCalls,
-        releaseBrowserMcp,
         githubOperations
       }
     }

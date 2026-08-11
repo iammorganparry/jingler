@@ -20,7 +20,6 @@ const sessions = (id: string): ((input: { repoPath: string }) => ReadonlyArray<S
     branch: "main",
     title: "Capability workspace",
     status: "idle",
-    cli: "opencode",
     connectionId: CONNECTION_ID,
     providerId: PROVIDER_ID,
     modelId: MODEL_ID,
@@ -48,7 +47,6 @@ test("offers only certified connection models, never harness choices", async ({ 
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    scriptedAgent: false,
     piFixture: PI_FIXTURE,
     sessions: sessions("s_certified_models")
   })
@@ -67,7 +65,6 @@ test("offers the same Jingler permission modes for every certified model", async
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    scriptedAgent: false,
     piFixture: PI_FIXTURE,
     sessions: sessions("s_provider_modes")
   })
@@ -84,7 +81,6 @@ test("derives reasoning choices from the certified model capability", async ({ l
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    scriptedAgent: false,
     piFixture: PI_FIXTURE,
     sessions: sessions("s_reasoning_models")
   })
@@ -100,7 +96,6 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
   const first = await launchApp({
     configured: true,
     withRepo: true,
-    scriptedAgent: false,
     piFixture: PI_FIXTURE,
     sessions: sessions("s_capability_restart")
   })
@@ -132,7 +127,6 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
     userDataDir: first.userDataDir,
     configured: true,
     withRepo: true,
-    scriptedAgent: false,
     piFixture: PI_FIXTURE
   })
   await expect(appShell(reopened.window)).toBeVisible()
@@ -145,7 +139,6 @@ test("configures canonical model, mode, and reasoning before creating a session"
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    scriptedAgent: false,
     piFixture: PI_FIXTURE
   })
   await expect(appShell(launched.window)).toBeVisible()

@@ -11,7 +11,6 @@ const seedSession = ({ repoPath }: { repoPath: string }) => [
     branch: "chore/github-app",
     title: "GitHub integration",
     status: "idle" as const,
-    cli: "claude" as const,
     diff: { added: 0, removed: 0 },
     prNumber: null,
     githubInstallationId: "101",

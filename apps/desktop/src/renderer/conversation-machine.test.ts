@@ -207,7 +207,6 @@ vi.mock("./rpc-client.js", () => ({
 
 const session = {
   id: "s1",
-  cli: "claude",
   worktreePath: "/tmp/wt",
   mode: "accept-edits",
   model: null,

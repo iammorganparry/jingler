@@ -157,7 +157,6 @@ export const ProviderConnectionsLive = Layer.effect(
         refresh: connection.authKind === "openai-codex-oauth" ? "e2e-refresh" : null,
         expiresAt: null
       })
-      yield* broker.restore([connection])
       yield* Effect.tryPromise({
         try: () => certifications.put(e2eCertification(e2eFixture)),
         catch: (cause) => new ProviderConnectionsError({
@@ -175,7 +174,7 @@ export const ProviderConnectionsLive = Layer.effect(
           : discoverPiModels(credentials, connection, signal),
       targetAvailable: (connection) => connection.targetId === "desktop"
     })
-    return yield* makeProviderConnections({
+    const service = yield* makeProviderConnections({
       file: paths.providerConnectionsFile,
       broker,
       catalog,
@@ -211,5 +210,10 @@ export const ProviderConnectionsLive = Layer.effect(
           return certification
         })
     })
+    // makeProviderConnections restores the persisted document during construction.
+    // E2E connections are intentionally ephemeral, so install the fixture after
+    // that restore rather than writing test credentials into the document.
+    if (e2eConnection !== null) yield* broker.restore([e2eConnection])
+    return service
   })
 )

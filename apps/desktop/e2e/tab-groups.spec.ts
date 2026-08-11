@@ -9,7 +9,6 @@ const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession>
   branch: "main",
   title: "Grouped tabs",
   status: "idle",
-  cli: "codex",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

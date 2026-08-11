@@ -4,7 +4,7 @@ import type { SeedSession } from "./fixtures.js"
 /**
  * Two chats in ONE session run their agents at the same time.
  *
- * A session's chats share one git worktree, and the harness used to refuse a
+ * A session's chats share one git worktree, and the runtime used to refuse a
  * second run while any run in the session was live — a chat B prompt came back
  * as "Another chat or plan in this session is running." This proves the refusal
  * is gone: chat A parks at a HITL gate (its run still live), chat B runs
@@ -23,7 +23,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/parallel",
     title: "Parallel chats",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -47,7 +46,7 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
 
   // Chat 1: start a run. In accept-edits it streams, applies the edit, then
   // parks at the command gate — its run stays LIVE, awaiting approval.
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.click()
   await composer.pressSequentially("Add rate limiting to the refund endpoint.")
   await composer.press("Enter")
@@ -58,7 +57,7 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
   await window.getByRole("button", { name: "New chat" }).click()
   await expect(window.getByTitle("2. Chat 2")).toHaveAttribute("aria-current", "page")
 
-  const composer2 = window.getByPlaceholder("Message Claude…")
+  const composer2 = window.getByPlaceholder("Message the agent…")
   await composer2.click()
   await composer2.pressSequentially("Add rate limiting to the settings endpoint.")
   await composer2.press("Enter")

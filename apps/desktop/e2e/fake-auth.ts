@@ -4,6 +4,21 @@ import type { AddressInfo } from "node:net"
 import type { MemoryDashboardSummary } from "@jingler/contracts"
 
 const MEMORY_PROTOCOL = "2026-07-28"
+const MEMORY_TOOL_NAMES = [
+  "memory_dashboard",
+  "memory_suggestions",
+  "memory_graph",
+  "memory_graph_neighborhood",
+  "memory_reviews",
+  "memory_navigation",
+  "memory_search",
+  "memory_export",
+  "memory_read",
+  "memory_propose",
+  "memory_workflow_status",
+  "memory_edge_evidence",
+  "memory_review"
+] as const
 const DEFAULT_TOKEN = "e2e-token"
 const DEFAULT_PAID_ORGANIZATIONS = ["org-e2e", "org-other"] as const
 const CREDENTIAL_PATTERN = /\b(?:api[_-]?key|password|secret)\s*[:=]|\bsk-[A-Za-z0-9_-]{8,}/i
@@ -773,7 +788,37 @@ export const startFakeAuthServer = async (
         ) {
           return json(401, { error: "invalid stateless MCP request" }, { "x-fake-next-instance": assignedInstance })
         }
-        if (rpcMethod === "initialize") return json(400, { error: "initialize is unsupported" })
+        if (rpcMethod === "initialize") {
+          return json(200, {
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              protocolVersion:
+                typeof params.protocolVersion === "string"
+                  ? params.protocolVersion
+                  : "2025-06-18",
+              capabilities: { tools: { listChanged: false } },
+              serverInfo: { name: "jingler-team-memory", version: "1.0.0" }
+            }
+          })
+        }
+        if (rpcMethod === "notifications/initialized") {
+          res.writeHead(202)
+          res.end()
+          return
+        }
+        if (rpcMethod === "tools/list") {
+          return json(200, {
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              tools: MEMORY_TOOL_NAMES.map((name) => ({
+                name,
+                inputSchema: { type: "object", additionalProperties: true }
+              }))
+            }
+          })
+        }
         if (rpcMethod === "server/discover") {
           return json(200, {
             jsonrpc: "2.0",

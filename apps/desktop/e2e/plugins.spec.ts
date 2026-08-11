@@ -33,7 +33,6 @@ const SESSION: SeedSession = {
   branch: "chore/plugin-session",
   title: "Plugin session",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

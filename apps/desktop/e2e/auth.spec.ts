@@ -14,7 +14,6 @@ const seeded: SeedSession = {
   branch: "chore/seed",
   title: "Seeded session",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

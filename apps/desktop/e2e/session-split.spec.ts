@@ -26,7 +26,6 @@ const baseSession = (over: Partial<SeedSession> & { id: string }): SeedSession =
   branch: `chore/${over.id}`,
   title: over.id,
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -689,7 +688,7 @@ test("a freshly mounted composer is one line tall, not its max height", async ({
   // And typing does not RESIZE it — which is what the old bug looked like from
   // the outside: the fix would be worthless if the correct height only arrived
   // on the first keystroke.
-  await pane.getByPlaceholder("Message Claude…").pressSequentially("hello")
+  await pane.getByPlaceholder("Message the agent…").pressSequentially("hello")
   expect(Math.abs((await height()) - untouched)).toBeLessThanOrEqual(2)
 })
 
@@ -765,7 +764,7 @@ test("Shift+Tab cycles the mode of only the focused pane", async ({ launchApp })
   await expect(pane1.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
 
   // Focus the RIGHT pane's composer, then cycle once: auto → plan for Claude.
-  await pane1.getByPlaceholder("Message Claude…").click()
+  await pane1.getByPlaceholder("Message the agent…").click()
   await window.keyboard.press("Shift+Tab")
 
   // Only the focused pane moved; the other keeps its mode. Before the fix, both

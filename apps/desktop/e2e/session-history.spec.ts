@@ -23,7 +23,6 @@ const baseSession = (over: Partial<SeedSession> & { id: string }): SeedSession =
   branch: `chore/${over.id}`,
   title: over.id,
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -155,11 +154,11 @@ test("a transcript zeroed by a killed write opens empty rather than breaking the
   await expect(sessionRow(second.window, "Zeroed session")).toBeVisible()
   await sessionRow(second.window, "Zeroed session").click()
   // The composer is the proof the pane mounted rather than erroring out.
-  await expect(second.window.getByPlaceholder(/message claude/i)).toBeVisible()
+  await expect(second.window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
 test("history written during a run is still there after a restart", async ({ launchApp }) => {
-  // The end-to-end version of the atomic-write fix: drive a real (scripted) run,
+  // The end-to-end version of the atomic-write fix: drive a deterministic pi run,
   // then restart and assert the turn persisted. This is what actually broke —
   // the transcript is rewritten on nearly every stream event, so the window for a
   // truncating write to be interrupted was enormous.
@@ -172,7 +171,7 @@ test("history written during a run is still there after a restart", async ({ lau
   })
 
   await sessionRow(first.window, "Run session").click()
-  await first.window.getByPlaceholder(/message claude/i).fill("summarise the repo")
+  await first.window.getByPlaceholder("Message the agent…").fill("summarise the repo")
   await first.window.getByRole("button", { name: /send/i }).click()
   // Scoped to the transcript throughout: multi-chat titles a chat from its first
   // prompt, so this string is also the chat tab's label. Unscoped it trips strict
@@ -183,7 +182,7 @@ test("history written during a run is still there after a restart", async ({ lau
     first.window.getByTestId("conversation-scroll").getByText("summarise the repo")
   ).toBeVisible()
 
-  // Let the scripted harness finish and the transcript settle on disk.
+  // Let the pi turn finish and the transcript settle on disk.
   //
   // The read has to tolerate "not there yet". `expect.poll` retries on a failed
   // ASSERTION, not on a thrown callback — so a bare `readFileSync` turned the

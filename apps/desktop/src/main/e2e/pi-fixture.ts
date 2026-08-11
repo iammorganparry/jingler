@@ -23,6 +23,11 @@ import {
   scriptedPlanPrd,
   type DiscoveredProviderModel
 } from "@jingler/cli-adapters"
+import {
+  E2E_PI_CONNECTION_ID,
+  E2E_PI_MODEL_ID,
+  E2E_PI_PROVIDER_ID
+} from "./fixture-identity.js"
 
 const E2ePiFixture = Schema.Struct({
   scenarioId: Schema.String,
@@ -33,9 +38,8 @@ const E2ePiFixture = Schema.Struct({
 
 export type E2ePiFixture = Schema.Schema.Type<typeof E2ePiFixture>
 
-const PROVIDER_ID = Schema.decodeUnknownSync(ProviderId)("jingler-e2e")
-const MODEL_ID = Schema.decodeUnknownSync(ProviderModelId)("jingler-e2e/eval-model")
-const CONNECTION_ID = "jingler-e2e-connection"
+const PROVIDER_ID = Schema.decodeUnknownSync(ProviderId)(E2E_PI_PROVIDER_ID)
+const MODEL_ID = Schema.decodeUnknownSync(ProviderModelId)(E2E_PI_MODEL_ID)
 const SUBMIT_PLAN_TOOL = "jingler_submit_plan"
 
 /** Test fixtures are accepted only in an explicitly marked Electron e2e process. */
@@ -47,7 +51,7 @@ export const loadE2ePiFixture = (): E2ePiFixture | null => {
 
 export const e2eProviderConnection = (fixture: E2ePiFixture) =>
   Schema.decodeUnknownSync(ProviderConnection)({
-    id: CONNECTION_ID,
+      id: E2E_PI_CONNECTION_ID,
     providerId: PROVIDER_ID,
     authKind: fixture.authRoute,
     account: { fingerprint: "e2e-account", displayLabel: "Electron fixture" },
@@ -137,6 +141,11 @@ const planResultMarkers = (plan: PlanPrd): ReadonlyArray<string> =>
     )
   )
 
+const browserUrlFrom = (context: PiContext): string => {
+  const match = latestOperatorText(context).match(/\[\[browser-url=([^\]]+)\]\]/)
+  return match?.[1] ?? "about:blank"
+}
+
 const planModeResponse: FauxResponseStep = (context) => {
   const prompt = latestOperatorText(context)
   const amended = prompt.includes("[[amendment]]")
@@ -171,6 +180,32 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
         }),
         fauxAssistantMessage("Managed skill loaded through pi.")
       ]
+    case "memory-recall":
+      return [
+        fauxAssistantMessage(
+          fauxToolCall("mcp__jingler-memory__memory_search", {
+            query: "alpha",
+            limit: 5
+          }),
+          { stopReason: "toolUse" }
+        ),
+        fauxAssistantMessage("Completed through deterministic pi.")
+      ]
+    case "browser-control":
+      return [
+        (context) =>
+          fauxAssistantMessage(
+            fauxToolCall("mcp__jingler-browser__navigate", {
+              url: browserUrlFrom(context)
+            }),
+            { stopReason: "toolUse" }
+          ),
+        fauxAssistantMessage(
+          fauxToolCall("mcp__jingler-browser__read_text", {}),
+          { stopReason: "toolUse" }
+        ),
+        fauxAssistantMessage("Browser workflow completed through pi.")
+      ]
     default:
       return [fauxAssistantMessage("Completed through deterministic pi.")]
   }
@@ -191,6 +226,3 @@ export const configureE2ePiProvider = (fixture: E2ePiFixture) => {
     runtime.registerNativeProvider(provider.provider)
   }
 }
-
-export const E2E_PI_CONNECTION_ID = CONNECTION_ID
-export const E2E_PI_MODEL_ID = MODEL_ID

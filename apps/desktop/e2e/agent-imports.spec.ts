@@ -13,7 +13,6 @@ const seededSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSe
   branch: "main",
   title: "Managed resources",
   status: "idle",
-  cli: "claude",
   connectionId: CONNECTION_ID,
   providerId: "jingler-e2e",
   modelId: MODEL_ID,
@@ -42,7 +41,6 @@ test("invokes an imported skill through the real pi runtime", async ({ launchApp
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    scriptedAgent: false,
     piFixture: { scenarioId: "managed-resources", authRoute: "api-key" },
     sessions: seededSession,
     seed: ({ home }) => {
@@ -71,7 +69,7 @@ test("invokes an imported skill through the real pi runtime", async ({ launchApp
   })
 
   await expect(appShell(launched.window)).toBeVisible()
-  const composer = launched.window.getByPlaceholder("Message Claude…")
+  const composer = launched.window.getByPlaceholder("Message the agent…")
   await composer.fill("Use the managed skill.")
   await composer.press("Enter")
 

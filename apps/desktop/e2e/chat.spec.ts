@@ -1,13 +1,13 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { ALT_CLAUDE_MODEL, appShell, DEFAULT_CLAUDE_MODEL, expect, sessionRow, showSessions, test } from "./fixtures.js"
+import { appShell, expect, sessionRow, showSessions, test } from "./fixtures.js"
 import type { Page } from "@playwright/test"
 import type { SeedSession } from "./fixtures.js"
 
 /**
  * The full chat experience, end to end against the built app and the
- * deterministic scripted adapter: a prompt streams thinking + tool cards + an
+ * deterministic agent fixture: a prompt streams thinking + tool cards + an
  * inline edit, pauses at a HITL command gate, and resumes on approval; Auto mode
  * skips the gate; and the `/` (skills) and `@` (code) palettes work. We assert on
  * what the operator sees, never on internals.
@@ -39,7 +39,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/refactor",
     title: "Refactor auth flow",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -58,7 +57,7 @@ test("shows breathing indicators while the agent is working", async ({ launchApp
   })
 
   await expect(appShell(window)).toBeVisible()
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Add rate limiting to the refund endpoint.")
   await composer.press("Enter")
 
@@ -79,7 +78,7 @@ test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ 
   })
 
   await expect(appShell(window)).toBeVisible()
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
 
   await composer.click()
@@ -142,7 +141,7 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
 
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.click()
   // Switch to Auto via the composer's mode chip (seeded as accept-edits).
   await window.getByText("Accept Edits", { exact: true }).click()
@@ -172,7 +171,7 @@ test("the / menu surfaces built-in + project skills and the @ menu references fi
   })
 
   await expect(appShell(window)).toBeVisible()
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.click()
 
   // `/` surfaces built-in commands…
@@ -195,7 +194,7 @@ test("the mode chip lives in the composer and Shift+Tab cycles it (incl. Plan on
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.click()
 
   // The composer wrapper reflects the active mode (drives the per-mode theming).
@@ -226,7 +225,7 @@ test("thinking strength is a compact per-session composer control", async ({ lau
     withRepo: true,
     sessions: seededSessions
   })
-  await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
   const thinking = window.getByRole("button", { name: "Thinking strength" })
 
   await expect(thinking).toContainText("Default")
@@ -238,52 +237,6 @@ test("thinking strength is a compact per-session composer control", async ({ lau
   await expect(thinking).toContainText(effortLabel)
 })
 
-test("the model chip shows the harness model and switches", async ({ launchApp }) => {
-  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(appShell(window)).toBeVisible()
-  await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
-
-  // The chip opens on the harness's default model (fallback list; no API key in e2e).
-  const modelChip = window.getByRole("button", { name: `Model: ${DEFAULT_CLAUDE_MODEL}`, exact: true })
-  await expect(modelChip).toBeVisible()
-  await modelChip.click()
-
-  // The menu lists EVERY installed harness's models grouped by provider, so the
-  // label must be matched exactly — other harnesses ship near-identical names
-  // (Cursor's `sonnet-4.5`), and a substring match resolves to several.
-  await window.getByRole("option", { name: /^Claude Code\b/ }).click()
-  const alternate = window.getByRole("option", { name: ALT_CLAUDE_MODEL, exact: true })
-  await alternate.click()
-  await expect(window.getByRole("button", { name: `Model: ${ALT_CLAUDE_MODEL}`, exact: true })).toBeVisible()
-})
-
-/**
- * Switching provider from the model chip.
- *
- * The menu only lists installed harnesses, so this used to skip unless the
- * developer personally had the Codex CLI — meaning it asserted nothing on CI and
- * something different on every machine. Discovery is now pinned to the fixture's
- * bin dir, which ships a fake `codex` speaking the app-server protocol, so the
- * harness is always present and the skip has been removed: if Codex is missing
- * from the menu now, that is a real failure.
- */
-test("the model chip switches provider", async ({ launchApp }) => {
-  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
-  await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
-
-  await window.getByRole("button", { name: `Model: ${DEFAULT_CLAUDE_MODEL}`, exact: true }).click()
-  await expect(window.getByText("Codex CLI", { exact: true })).toBeVisible()
-
-  // The catalogue comes from the CLI itself, so assert the shape of an id
-  // (`GPT-5.…`) rather than a specific one — it moves upstream.
-  await window.getByRole("option", { name: /^Codex CLI\b/ }).click()
-  const codexModel = window.getByRole("option", { name: "GPT-5.6 Sol", exact: true })
-  await codexModel.click()
-
-  // The chip follows the pick, and the composer now addresses the new harness.
-  await expect(window.getByRole("button", { name: "Model: GPT-5.6 Sol" })).toBeVisible()
-  await expect(window.getByPlaceholder("Message Codex…")).toBeVisible()
-})
 
 test("the sidebar Usage & limits button opens the usage modal", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
@@ -293,8 +246,8 @@ test("the sidebar Usage & limits button opens the usage modal", async ({ launchA
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: /Usage & limits/ }).click()
 
-  // The modal opens with its title and "last updated" footer (provider rows
-  // depend on which harnesses are installed on the runner, so we don't assert them).
+  // The modal opens with its title and "last updated" footer. Connection rows
+  // depend on the accounts configured for the launch, so we don't assert them.
   const dialog = window.getByRole("dialog")
   await expect(dialog.getByText("Usage & limits")).toBeVisible()
   await expect(dialog.getByText(/Last updated:/)).toBeVisible()
@@ -308,7 +261,6 @@ const seededPrSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<See
     branch: "chore/refactor",
     title: "Refactor auth flow",
     status: "idle",
-    cli: "claude",
     diff: { added: 313, removed: 23 },
     prNumber: 482,
     costUsd: 0,
@@ -326,7 +278,7 @@ test("AskUserQuestion replaces the composer with a question card and resumes on 
   await expect(appShell(window)).toBeVisible()
 
   // The `[[ask]]` marker drives the scripted AskUserQuestion flow.
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[ask]] migrate the store")
   await composer.press("Enter")
 
@@ -345,7 +297,7 @@ test("AskUserQuestion replaces the composer with a question card and resumes on 
 
   // The agent resumes with the answers, and the composer returns.
   await expect(window.getByText(/Got it — starting with/)).toBeVisible({ timeout: 15_000 })
-  await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 
   // The answered question persists inline as a "Your answer" record with the picks.
   await expect(window.getByText("Your answer", { exact: true })).toBeVisible()
@@ -359,7 +311,7 @@ test("a storm of consecutive tool calls collapses to the latest with a +N more t
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[storm]] scan the codebase")
   await composer.press("Enter")
 
@@ -473,7 +425,7 @@ test("the session title renames without navigating and the active chat replaces 
 
   await expect(window.getByRole("button", { name: "Conversation" })).toHaveCount(0)
   await window.getByTestId("active-chat-tab").click()
-  await expect(window.getByPlaceholder("Message Claude…")).toBeVisible()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
 test("a linked PR shows the sidebar badge and the Pull Request / Code Review tabs", async ({
@@ -790,7 +742,6 @@ test("an archived session shows in the Archived group, read-only, and restores",
         branch: "feat/oauth",
         title: "Refactor auth flow",
         status: "idle",
-        cli: "claude",
         diff: { added: 0, removed: 0 },
         prNumber: 482,
         costUsd: 0,
@@ -837,7 +788,6 @@ const twoSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSess
     branch: "chore/one",
     title: "First session",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -852,7 +802,6 @@ const twoSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSess
     branch: "chore/two",
     title: "Second session",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -942,7 +891,6 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
         branch: "chore/shipped",
         title: "Old shipped work",
         status: "idle",
-        cli: "claude",
         diff: { added: 0, removed: 0 },
         prNumber: 500,
         costUsd: 0,

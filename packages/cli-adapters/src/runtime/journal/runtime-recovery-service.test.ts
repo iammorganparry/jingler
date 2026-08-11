@@ -13,7 +13,6 @@ const session = {
   branch: "main",
   title: "Recovery",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

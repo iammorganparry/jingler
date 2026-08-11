@@ -50,7 +50,6 @@ const internalSession = (over: Partial<Session> = {}): Session =>
     branch: "chore/s1",
     title: "Fix auth",
     status: "idle",
-    cli: "claude",
     providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
     diff: { added: 3, removed: 1 },
     prNumber: 42,

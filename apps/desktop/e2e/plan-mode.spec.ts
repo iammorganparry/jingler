@@ -25,7 +25,6 @@ const session = (id = "s_enhanced_plan") =>
         branch: "main",
         title: "Enhanced plan workspace",
         status: "idle",
-        cli: "claude",
         connectionId: "jingler-e2e-connection",
         providerId: "jingler-e2e",
         modelId: "jingler-e2e/eval-model",

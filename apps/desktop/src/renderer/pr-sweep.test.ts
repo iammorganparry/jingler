@@ -17,7 +17,6 @@ const session = (over: Partial<Session> & { id: string }): Session =>
     branch: `chore/${over.id}`,
     title: over.id,
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: 1,
     costUsd: 0,

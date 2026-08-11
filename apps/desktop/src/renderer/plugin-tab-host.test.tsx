@@ -41,7 +41,6 @@ const session = (over: Partial<Session> = {}) =>
     branch: "feat/x",
     title: "A session",
     status: "idle",
-    cli: "claude",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     worktreePath: "/tmp/s1",

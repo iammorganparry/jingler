@@ -22,7 +22,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/refactor",
     title: "Refactor auth flow",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -51,7 +50,7 @@ test("attaching an image shows a thumbnail and persists it on the sent turn", as
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
 
   // Attach an image through the hidden file input (the picker the paperclip opens).
@@ -80,7 +79,7 @@ test("a message sent against a proposed plan revises it immediately", async ({ l
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   // `[[plan]]` proposes a plan and parks the run awaiting approval — the agent is
   // busy (not paused for a gate), so the composer stays live with no timing race.
   await composer.fill("[[plan]] refactor auth to a TokenStore")

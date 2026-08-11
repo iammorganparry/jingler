@@ -13,7 +13,7 @@ import { Context, Data, Effect, Layer } from "effect"
 import { planTaskProgressFingerprint } from "./plan-task-progress.js"
 import type { RuntimeRemoteMcpServer } from "./runtime/mcp/attachment.js"
 import type { JinglerMcpAttachments } from "./runtime/tools/mcp-tools.js"
-import { isE2eEnv } from "./scripted.js"
+import { isE2eEnv } from "./runtime/e2e-environment.js"
 
 /**
  * A remote MCP attachment ready for an embedded pi run.

@@ -11,7 +11,6 @@ const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession
   branch: "main",
   title: "Runtime settings",
   status: "idle",
-  cli: "claude",
   connectionId: CONNECTION_ID,
   providerId: "jingler-e2e",
   modelId: MODEL_ID,
@@ -47,7 +46,6 @@ test("manages approved resources and inspects a redacted real-pi run", async ({ 
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    scriptedAgent: false,
     piFixture: { scenarioId: "runtime-diagnostics", authRoute: "api-key" },
     sessions,
     seed: ({ home }) => {
@@ -76,7 +74,7 @@ test("manages approved resources and inspects a redacted real-pi run", async ({ 
   })
 
   const { window } = launched
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Record a runtime diagnostic.")
   await composer.press("Enter")
   await expect(window.getByText("Completed through deterministic pi.")).toBeVisible({

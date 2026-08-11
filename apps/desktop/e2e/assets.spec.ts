@@ -40,7 +40,6 @@ const session = (worktreePath: string): SeedSession => ({
   branch: "jingler/files",
   title: "Edit repository files",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -378,7 +377,7 @@ test("forwards selected current-buffer lines to the active chat with Cmd-J", asy
   await expect(
     window.getByRole("button", { name: "Remove src/edit.ts:L1–L2", exact: true })
   ).toBeVisible()
-  await expect(window.getByPlaceholder("Message Claude…")).toBeFocused()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeFocused()
 })
 
 test("loads a real large repository tree without leaving Files blank", async ({ launchApp }) => {

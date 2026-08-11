@@ -117,7 +117,6 @@ const seedSession = (activeChatId: string, chatIds: ReadonlyArray<string> = [act
         branch: "feature",
         title: "Test",
         status: "idle",
-        cli: "claude",
         diff: { added: 0, removed: 0 },
         prNumber: 42,
         costUsd: 0,
