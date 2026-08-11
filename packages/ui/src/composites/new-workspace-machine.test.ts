@@ -1,4 +1,4 @@
-import type { CreateSessionInput, HarnessCapability, Project } from "@jingler/core"
+import type { CreateSessionInput, Environment, HarnessCapability, Project } from "@jingler/core"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
 import { newWorkspaceMachine, type NewWorkspaceDeps } from "./new-workspace-machine.js"
@@ -19,6 +19,27 @@ const capabilities: ReadonlyArray<HarnessCapability> = [
     ]
   }
 ]
+
+const cloudEnvironment: Environment = {
+  kind: "managed",
+  id: "cloud",
+  name: "Cloud",
+  platform: { os: "linux", arch: "x64" },
+  state: "online",
+  region: "auto",
+  instanceType: "basic",
+  capabilities: {
+    version: 1,
+    capabilities: ["session.start"],
+    harnesses: ["codex"],
+    maxConcurrentSessions: 1
+  },
+  agentVersion: null,
+  lastSeenAt: null,
+  generation: 1,
+  createdAt: 0,
+  updatedAt: 0
+}
 
 const actorFor = (
   onCreate: (input: CreateSessionInput) => Promise<void> = vi.fn(async () => undefined),
@@ -93,6 +114,48 @@ describe("newWorkspaceMachine", () => {
         path: "/remote/local"
       }
     })
+  })
+
+  it("defers managed workspace provisioning until session creation", async () => {
+    const prepareProject = vi.fn(async (projectId: string, environmentId?: string) => {
+      const project = projects.find((candidate) => candidate.id === projectId)!
+      return environmentId === undefined
+        ? project
+        : { ...project, environmentId, path: `/remote/${project.name}` }
+    })
+    const loadBranches = vi.fn(async (_path: string, environmentId?: string) =>
+      environmentId === undefined ? ["main", "feature"] : ["remote-only"]
+    )
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate, {
+      environments: [cloudEnvironment],
+      prepareProject,
+      loadBranches
+    }).start()
+
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    prepareProject.mockClear()
+    loadBranches.mockClear()
+
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "cloud" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+
+    expect(prepareProject).toHaveBeenCalledWith("p-local", undefined)
+    expect(loadBranches).toHaveBeenCalledWith("/repos/local", undefined)
+    expect(actor.getSnapshot().context).toMatchObject({
+      environmentId: "cloud",
+      baseBranch: "main",
+      resolvedProject: { id: "p-local", path: "/repos/local", environmentId: "cloud" }
+    })
+
+    actor.send({ type: "SET_DRAFT", draft: "Run in Cloud" })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: "cloud", repoPath: "/repos/local" }),
+      []
+    )
   })
 
   it("can switch back to local while remote preparation is still pending", async () => {

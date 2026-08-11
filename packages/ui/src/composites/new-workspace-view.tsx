@@ -180,13 +180,18 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     mode, reasoning, error
   } = state.context
   const selectedProject = props.projects.find((project) => project.id === projectId)
+  const selectedEnvironment = props.environments?.find(
+    (environment) => environment.id === environmentId
+  )
   const submitting = state.matches("submitting")
   const loading = state.matches("loading")
   const sourceLoading = state.matches("sourceLoading")
   const unavailableReason = submitting
     ? "Creating session…"
     : loading
-      ? environmentId === "local" ? "Loading branches…" : "Preparing project on host…"
+      ? environmentId === "local" || selectedEnvironment?.kind === "managed"
+        ? "Loading branches…"
+        : "Preparing project on host…"
       : props.projects.length === 0
         ? "Add a project before starting a session."
         : props.capabilities.length === 0

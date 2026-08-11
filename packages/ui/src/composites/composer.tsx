@@ -13,6 +13,7 @@ import type {
 import { providerReasoningCapabilitiesFor } from "@jingler/core";
 import {
   ArrowUp,
+  Cloud,
   FolderGit2,
   GitBranch,
   ImagePlus,
@@ -782,12 +783,21 @@ export function Composer({
                   searchText: `${environment.name} ${environment.state}`,
                   label: (
                     <span className="inline-flex min-w-0 items-center gap-1.5">
-                      <Server
-                        size={13}
-                        className="flex-none"
-                        aria-hidden
-                        data-environment-icon="remote"
-                      />
+                      {environment.kind === "managed" ? (
+                        <Cloud
+                          size={13}
+                          className="flex-none"
+                          aria-hidden
+                          data-environment-icon="cloud"
+                        />
+                      ) : (
+                        <Server
+                          size={13}
+                          className="flex-none"
+                          aria-hidden
+                          data-environment-icon="remote"
+                        />
+                      )}
                       <span className="truncate">
                         {environment.name}
                         {environment.state === "online"
@@ -857,7 +867,7 @@ export function Composer({
           <span className="flex-none">
             {disabledReason !== undefined ? (
               <Pill tone="yellow" dot>
-                {roomy ? "harness unavailable" : "unavailable"}
+                {roomy ? disabledReason : "unavailable"}
               </Pill>
             ) : paused ? (
             <Pill tone="yellow" dot>
