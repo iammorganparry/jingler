@@ -8,39 +8,38 @@ import { Effect, Layer, Schema, Stream } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
   type AgentContext,
-  CliAdapter,
+  AgentTurnDriver,
   PlanDecision,
-  type SessionSpec,
+  type AgentTurnSpec,
   type SteerTurn
-} from "../../adapter.js"
+} from "../../agent-turn-driver.js"
 import { AgentRuntime, type AgentRuntimeShape } from "./agent-runtime.js"
-import { AgentRuntimeAdapterLive } from "./agent-runtime-adapter.js"
+import { AgentTurnDriverLive } from "./agent-turn-driver-live.js"
 
-const spec = (): SessionSpec => ({
-  cli: "claude",
-  repo: "jingler",
-  branch: "main",
+const spec = (): AgentTurnSpec => ({
+  sessionId: "session-1",
+  chatId: "chat-1",
+  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
+  modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-test"),
+  role: "conversation",
+  priorMessages: [],
+  piSessionId: null,
+  seed: null,
+  targetCapabilities: {
+    versions: CURRENT_RUNTIME_CONTRACTS,
+    toolIds: [],
+    resourceIds: [],
+    targetId: "desktop"
+  },
   cwd: "/tmp/jingler",
   prompt: "Inspect the repository",
   images: [],
-  binPath: null,
   mode: "ask",
-  model: "claude-test",
-  resumeId: null,
-  runtime: {
-    sessionId: "session-1",
-    chatId: "chat-1",
-    connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
-    modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-test"),
-    role: "conversation",
-    priorMessages: [],
-    piSessionId: null,
-    seed: null,
-    targetCapabilities: {
-      versions: CURRENT_RUNTIME_CONTRACTS,
-      toolIds: [],
-      resourceIds: [],
-      targetId: "desktop"
+  mcp: {
+    browser: {
+      name: "jingler-browser",
+      url: "http://127.0.0.1:43123/mcp",
+      headers: { authorization: "Bearer scoped" }
     }
   }
 })
@@ -57,11 +56,11 @@ const context = (): AgentContext => ({
 
 const withRuntime = <A, E>(
   runtime: AgentRuntimeShape,
-  effect: Effect.Effect<A, E, CliAdapter>
+  effect: Effect.Effect<A, E, AgentTurnDriver>
 ) =>
   effect.pipe(
     Effect.provide(
-      AgentRuntimeAdapterLive.pipe(
+      AgentTurnDriverLive.pipe(
         Layer.provide(Layer.succeed(AgentRuntime, AgentRuntime.of(runtime)))
       )
     )
@@ -88,7 +87,7 @@ describe("AgentRuntimeAdapter", () => {
           steer: () => Effect.void,
           interrupt: () => Effect.void
         },
-        Effect.flatMap(CliAdapter, (adapter) =>
+        Effect.flatMap(AgentTurnDriver, (adapter) =>
           adapter.run("run-1", spec(), ctx)
         )
       )
@@ -100,6 +99,7 @@ describe("AgentRuntimeAdapter", () => {
       modelId: "anthropic/claude-test",
       prompt: "Inspect the repository"
     })
+    expect(run.mock.calls[0]?.[1].mcp?.browser?.name).toBe("jingler-browser")
     expect(emit.mock.calls.map(([event]) => event._tag)).toEqual([
       "Started",
       "Assistant",
@@ -108,7 +108,7 @@ describe("AgentRuntimeAdapter", () => {
     expect(registerTurnSteer).toHaveBeenCalled()
   })
 
-  it("interrupts the active pi session and refuses missing canonical identity", async () => {
+  it("interrupts the active pi session", async () => {
     const interrupt = vi.fn(() => Effect.void)
     let release!: () => void
     let markStarted!: () => void
@@ -136,29 +136,19 @@ describe("AgentRuntimeAdapter", () => {
       steer: () => Effect.void,
       interrupt
     }
-    const layer = AgentRuntimeAdapterLive.pipe(
+    const layer = AgentTurnDriverLive.pipe(
       Layer.provide(Layer.succeed(AgentRuntime, AgentRuntime.of(runtime)))
     )
     const program = Effect.gen(function* () {
-      const adapter = yield* CliAdapter
+      const adapter = yield* AgentTurnDriver
       const fiber = yield* Effect.fork(adapter.run("run-1", spec(), context()))
       yield* Effect.promise(() => started)
       yield* adapter.stop("run-1")
       release()
-      yield* fiber.await
-      return yield* Effect.exit(
-        adapter.run("missing", { ...spec(), runtime: undefined }, context())
-      )
+      return yield* fiber.await
     }).pipe(Effect.provide(layer))
 
-    const missing = await Effect.runPromise(program)
+    await Effect.runPromise(program)
     expect(interrupt).toHaveBeenCalledWith("pi-session")
-    expect(missing.toJSON()).toMatchObject({
-      _tag: "Failure",
-      cause: {
-        _tag: "Fail",
-        failure: { _tag: "CliExecError" }
-      }
-    })
   })
 })

@@ -1,24 +1,18 @@
-import { CliExecError } from "@jingler/core"
+import { AgentRunError } from "@jingler/core"
 import { Effect, Layer, Ref, Stream } from "effect"
 import {
   type AgentContext,
-  CliAdapter,
+  AgentTurnDriver,
   PlanDecision,
-  type SessionSpec
-} from "../../adapter.js"
+  type AgentTurnSpec
+} from "../../agent-turn-driver.js"
 import { AgentRuntime } from "./agent-runtime.js"
 
-const missingRuntimeIdentity = (spec: SessionSpec): CliExecError =>
-  new CliExecError({
-    kind: spec.cli,
-    message:
-      "This conversation needs a certified provider connection before it can run."
-  })
+const runtimeFailure = (spec: AgentTurnSpec, message: string): AgentRunError =>
+  new AgentRunError({ kind: spec.connectionId, message })
 
-const runtimeFailure = (spec: SessionSpec, message: string): CliExecError =>
-  new CliExecError({ kind: spec.cli, message })
-
-const runtimeContext = (context: AgentContext) => ({
+const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
+  ...(spec.mcp === undefined ? {} : { mcp: spec.mcp }),
   canUseTool: (request: {
     readonly toolId: string
     readonly risk: "network" | "mutate" | "execute"
@@ -44,14 +38,11 @@ const runtimeContext = (context: AgentContext) => ({
     )
 })
 
-const piSpec = (runId: string, spec: SessionSpec) => {
-  if (!spec.runtime) return null
+const piSpec = (runId: string, spec: AgentTurnSpec) => {
+  const { images: _images, mcp: _mcp, ...runtime } = spec
   return {
     runId,
-    ...spec.runtime,
-    cwd: spec.cwd,
-    prompt: spec.prompt,
-    mode: spec.readOnly ? "read-only" as const : spec.mode
+    ...runtime
   }
 }
 
@@ -59,18 +50,16 @@ const piSpec = (runId: string, spec: SessionSpec) => {
  * Transitional caller seam: existing orchestration keeps its event sink while
  * all production inference and tool execution goes through AgentRuntime.
  */
-export const AgentRuntimeAdapterLive = Layer.effect(
-  CliAdapter,
+export const AgentTurnDriverLive = Layer.effect(
+  AgentTurnDriver,
   Effect.gen(function* () {
     const runtime = yield* AgentRuntime
     const active = yield* Ref.make(new Map<string, string>())
 
-    return CliAdapter.of({
+    return AgentTurnDriver.of({
       run: (runId, spec, context) => {
         const canonical = piSpec(runId, spec)
-        if (canonical === null) return Effect.fail(missingRuntimeIdentity(spec))
-
-        return runtime.run(canonical, runtimeContext(context)).pipe(
+        return runtime.run(canonical, runtimeContext(spec, context)).pipe(
           Stream.runForEach((event) =>
             Effect.gen(function* () {
               if (event._tag === "Started") {
@@ -111,7 +100,7 @@ export const AgentRuntimeAdapterLive = Layer.effect(
               : runtime.interrupt(piSessionId)
           }),
           Effect.mapError((error) =>
-            new CliExecError({ kind: "unknown", message: error.message })
+            new AgentRunError({ kind: "runtime", message: error.message })
           )
         )
     })

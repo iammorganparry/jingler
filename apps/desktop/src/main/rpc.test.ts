@@ -13,7 +13,7 @@ import {
   AppPaths,
   AgentResourceService,
   AssetService,
-  CliAdapter,
+  AgentTurnDriver,
   ConfigService,
   GitHubApi,
   GitService,
@@ -35,8 +35,8 @@ import {
 } from "@jingler/cli-adapters";
 import type {
   AgentContext,
-  CliAdapterShape,
-  SessionSpec,
+  AgentTurnDriverShape,
+  AgentTurnSpec,
 } from "@jingler/cli-adapters";
 import type {
   Attachment,
@@ -837,6 +837,9 @@ describe("RPC handlers", () => {
             title: "Assets",
             status: "idle",
             cli: "claude",
+            connectionId: "anthropic-max",
+            providerId: "anthropic",
+            modelId: "anthropic/claude-sonnet-4-5",
             diff: { added: 0, removed: 0 },
             prNumber: null,
             costUsd: 0,
@@ -1194,7 +1197,7 @@ describe("RPC handlers", () => {
    */
   describe("Review.run", () => {
     /** Persist a session with a linked PR by writing the store's own file. */
-    const withSession = (over: Record<string, unknown> = {}) => {
+    const withSession = (over: Partial<Session> = {}) => {
       mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "sessions.json"),
@@ -1206,6 +1209,9 @@ describe("RPC handlers", () => {
             title: "Feature",
             status: "idle",
             cli: "claude",
+            connectionId: "anthropic-max",
+            providerId: "anthropic",
+            modelId: "anthropic/claude-sonnet-4-5",
             diff: { added: 0, removed: 0 },
             prNumber: 42,
             costUsd: 0,
@@ -1243,25 +1249,25 @@ describe("RPC handlers", () => {
 
     /** A reviewer stub that counts its runs and always reports one finding. */
     const countingAdapter = () => {
-      const spawns: SessionSpec[] = [];
+      const spawns: AgentTurnSpec[] = [];
       const layer = Layer.succeed(
-        CliAdapter,
-        CliAdapter.of({
-          run: ((_id: string, spec: SessionSpec, ctx: AgentContext) =>
+        AgentTurnDriver,
+        AgentTurnDriver.of({
+          run: ((_id: string, spec: AgentTurnSpec, ctx: AgentContext) =>
             Effect.gen(function* () {
               spawns.push(spec);
               yield* ctx.emit({
                 _tag: "Assistant",
                 text: '```json\n{"findings":[{"title":"A bug","severity":"major"}]}\n```',
               });
-            })) as CliAdapterShape["run"],
+            })) as AgentTurnDriverShape["run"],
           stop: () => Effect.void,
         }),
       );
       return { spawns, layer };
     };
 
-    const envFor = (headSha: string, adapter: Layer.Layer<CliAdapter>) =>
+    const envFor = (headSha: string, adapter: Layer.Layer<AgentTurnDriver>) =>
       Layer.mergeAll(
         Layer.succeed(AppPaths, appPathsFor(root)),
         NodeContext.layer,
@@ -1303,8 +1309,7 @@ describe("RPC handlers", () => {
       expect(spawns).toHaveLength(1);
       expect(review.headSha).toBe("sha-one");
       expect(review.findings).toHaveLength(1);
-      // Fable is the default reviewer when nothing is configured.
-      expect(review.model).toBe("claude-fable-5");
+      expect(review.model).toBe("anthropic/claude-sonnet-4-5");
     });
 
     it("does not expose or stamp a stored review after the active PR changes", async () => {
@@ -1335,7 +1340,7 @@ describe("RPC handlers", () => {
       const gitEnv = (
         headSha: string,
         log: string,
-        adapter: Layer.Layer<CliAdapter>,
+        adapter: Layer.Layer<AgentTurnDriver>,
       ) =>
         Layer.mergeAll(
           Layer.succeed(AppPaths, appPathsFor(root)),
@@ -1533,8 +1538,8 @@ describe("RPC handlers", () => {
       const review = await Effect.runPromise(
         reviewRun("s1", false).pipe(Effect.provide(envFor("sha-one", layer))),
       );
-      expect(review.model).toBe("claude-opus-4-8");
-      expect(spawns[0]!.model).toBe("claude-opus-4-8");
+      expect(review.model).toBe("anthropic/claude-sonnet-4-5");
+      expect(spawns[0]!.modelId).toBe("anthropic/claude-sonnet-4-5");
     });
 
     /**
@@ -1596,20 +1601,20 @@ describe("RPC handlers", () => {
         findings: ReadonlyArray<Record<string, unknown>>,
       ) =>
         Layer.succeed(
-          CliAdapter,
-          CliAdapter.of({
-            run: ((_id: string, _spec: SessionSpec, ctx: AgentContext) =>
+          AgentTurnDriver,
+          AgentTurnDriver.of({
+            run: ((_id: string, _spec: AgentTurnSpec, ctx: AgentContext) =>
               ctx.emit({
                 _tag: "Assistant",
                 text: `\`\`\`json\n${JSON.stringify({ findings })}\n\`\`\``,
-              })) as CliAdapterShape["run"],
+              })) as AgentTurnDriverShape["run"],
             stop: () => Effect.void,
           }),
         );
 
       const envWith = (
         github: Layer.Layer<GitHubApi | CommandExecutor.CommandExecutor>,
-        adapter: Layer.Layer<CliAdapter>,
+        adapter: Layer.Layer<AgentTurnDriver>,
       ) =>
         Layer.mergeAll(
           Layer.succeed(AppPaths, appPathsFor(root)),

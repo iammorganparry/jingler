@@ -1,28 +1,22 @@
 import type {
   Attachment,
-  AgentRole,
-  CliKind,
-  Message,
   PermissionMode,
+  PiRunSpec,
   Plan,
   PlanPrd,
-  ProviderConnectionId,
-  ProviderModelId,
   QuestionAnswer,
   QuestionRequest,
-  ReasoningEffort,
-  RuntimeCapabilityManifest,
-  StreamEvent,
-  TranscriptSeed
+  StreamEvent
 } from "@jingler/core"
-import type { CliExecError } from "@jingler/core"
+import type { AgentRunError } from "@jingler/core"
 import { Context, Data, Effect, Layer } from "effect"
 import { planTaskProgressFingerprint } from "./plan-task-progress.js"
 import type { RuntimeRemoteMcpServer } from "./runtime/mcp/attachment.js"
+import type { JinglerMcpAttachments } from "./runtime/tools/mcp-tools.js"
 import { isE2eEnv } from "./scripted.js"
 
 /**
- * A remote MCP attachment ready for a harness launch.
+ * A remote MCP attachment ready for an embedded pi run.
  *
  * Main-process only: headers may contain bearer credentials. AgentRunner builds
  * this source-neutral shape immediately before a run; adapters consume it
@@ -30,113 +24,13 @@ import { isE2eEnv } from "./scripted.js"
  */
 export type RemoteMcpServer = RuntimeRemoteMcpServer
 
-/** Canonical pi identity and context carried through the temporary adapter seam. */
-export interface RuntimeSessionSpec {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly connectionId: ProviderConnectionId
-  readonly modelId: ProviderModelId
-  readonly role: AgentRole
-  readonly priorMessages: ReadonlyArray<Message>
-  readonly piSessionId: string | null
-  readonly seed: TranscriptSeed | null
-  readonly targetCapabilities: RuntimeCapabilityManifest
-}
-
-/** Parameters for starting a new agent turn against a CLI. */
-export interface SessionSpec {
-  /** Canonical runtime identity. Required by the production pi adapter. */
-  readonly runtime?: RuntimeSessionSpec
-  readonly cli: CliKind
-  readonly repo: string
-  readonly branch: string
-  readonly cwd: string
-  readonly prompt: string
+/** Canonical parameters for one turn through the embedded pi runtime. */
+export interface AgentTurnSpec extends Omit<PiRunSpec, "runId"> {
   /** Images the operator attached as context for this turn (empty when none). */
   readonly images: ReadonlyArray<Attachment>
-  /** Resolved path to the harness binary, or null when it isn't installed. */
-  readonly binPath: string | null
-  /** The session's HITL permission mode (drives the harness's permission mode). */
-  readonly mode: PermissionMode
-  /** The model id to run, or null to use the harness default. */
-  readonly model: string | null
-  /** The configured canonical PRD structure for a native plan-mode turn. */
-  readonly planTemplate?: string
-  /** Whether provider thinking is enabled; absent leaves its default untouched. */
-  readonly thinkingEnabled?: boolean
-  /** Provider-native effort; absent leaves the harness default untouched. */
-  readonly reasoningEffort?: ReasoningEffort
-  /**
-   * The harness session id to RESUME from (persisted across app restarts), or
-   * null for a fresh conversation. The adapter prefers its live in-memory id and
-   * falls back to this, so "continue" reloads the full conversation even after a
-   * restart cleared the in-memory resume map.
-   */
-  readonly resumeId: string | null
-  /**
-   * Force a brand-new harness conversation, ignoring the adapter's in-memory
-   * resume map entirely (and not writing to it).
-   *
-   * `resumeId: null` is NOT enough on its own: the adapter prefers its live map
-   * over the spec, so a repeated run under the same key silently resumes the
-   * previous one. A one-shot run that must be a pure function of its prompt —
-   * the adversarial reviewer — sets this.
-   */
-  readonly fresh?: boolean
-  /**
-   * This run must not mutate anything — no edits, no shell commands. Enforced by
-   * the HARNESS, and each adapter says it in its own vocabulary (Claude: refuse
-   * the write tools; Codex: a read-only sandbox).
-   *
-   * `ctx.canUseTool` is not sufficient on its own, in two independent ways:
-   *  - it is a denylist over tool NAMES we recognise (`toPermissionRequest`
-   *    returns null → allowed ungated), so a write-capable tool we don't know
-   *    about is silently permitted; and
-   *  - the Codex adapter never calls it at all (its exec model has no per-tool
-   *    callback), so for Codex the callback is not a control surface whatsoever.
-   *
-   * Hence intent lives here rather than a list of Claude's tool names: a spec
-   * field only one adapter understands is a guarantee only one adapter keeps.
-   */
-  /**
-   * Every remote MCP server attached to this run, regardless of where it came
-   * from. AgentRunner joins configured and internal sources once, immediately
-   * before launch, and each adapter translates this collection into its native
-   * vocabulary. It is optional for direct adapter callers; AgentRunner always
-   * supplies the collection (including an empty one).
-   *
-   * This is secret-bearing launch data. It stays in the Electron main process,
-   * is consumed in-memory by the adapter, and must never be persisted or sent
-   * through RPC.
-   */
-  readonly remoteMcpServers?: ReadonlyArray<RemoteMcpServer>
-
-  readonly readOnly?: boolean
-  /**
-   * This agent runs with nobody watching, so apply the protections that implies.
-   *
-   * Two mechanisms, deliberately kept separate because they fail differently:
-   *
-   *  1. **File-tool confinement to `cwd`** (`confinement.ts`). Read tools are
-   *     never gated — `toPermissionRequest` returns null for them — so without
-   *     this an agent reads anything on disk. A planning proposer was observed
-   *     doing exactly that, pulling 403 lines of an unrelated private repository
-   *     into its context. Pure, and works on every platform.
-   *  2. **A credential denylist sandbox** (`sandbox.ts`). The check above cannot
-   *     see a shell, and a plan step needs Bash to build and test, so `cat
-   *     ~/.ssh/id_rsa` walked straight through it. The sandbox blocks that at the
-   *     OS level — but it needs platform support and degrades silently when
-   *     absent, which is why (1) is kept rather than replaced.
-   *
-   * NEITHER IS CONFINEMENT TO THE WORKTREE, and the gap is measured rather than
-   * assumed: `denyRead` is absolute with no carve-out, so denying `~` also denies
-   * a worktree under `~`. A step that cannot read its own repository is useless.
-   * Anything outside the denylist and outside the file tools remains reachable.
-   *
-   * Deliberately NOT set for the operator's own session: they are watching, and a
-   * coding agent that cannot read a sibling repo on request is less useful.
-   */
-  readonly unattended?: boolean
+  /** Secret-bearing, main-process-only capabilities; never persisted or sent over RPC. */
+  /** Run-scoped Jingler MCP capabilities, kept distinct so source risk cannot drift. */
+  readonly mcp?: JinglerMcpAttachments
 }
 
 /** What the agent is asking permission to do, surfaced before it acts. */
@@ -152,10 +46,9 @@ export interface PermissionRequest {
 export type PermissionDecision = "allow" | "deny"
 
 /**
- * A permission resolver the adapter calls before any gated action. The
- * `AgentRunner` supplies one that applies the session's HITL mode/allowlist and,
- * when it must pause, emits an approval gate and awaits the operator. Mirrors the
- * real `claude -p` `canUseTool` callback, keeping the adapter harness-agnostic.
+ * A permission resolver the runtime calls before any gated action. The
+ * `AgentRunner` applies the session's HITL mode/allowlist and, when it must
+ * pause, emits an approval gate and awaits the operator.
  */
 export type CanUseTool = (req: PermissionRequest) => Effect.Effect<PermissionDecision>
 
@@ -249,24 +142,22 @@ export interface AgentContext {
 }
 
 /**
- * The contract for wrapping a native coding CLI. A real headless adapter
- * (`claude -p --output-format stream-json`, codex/cursor equivalents) parses its
- * CLI's stream into normalized `StreamEvent`s (via `ctx.emit`) and calls
- * `ctx.canUseTool` before gated actions. Everything downstream (persistence, UI)
- * only sees `StreamEvent`, so the experience is identical across harnesses.
+ * Transitional orchestration seam around `AgentRuntime`. Production delegates
+ * to embedded pi; deterministic tests supply a scripted driver that emits the
+ * same normalized `StreamEvent` contract and permission requests.
  */
-export interface CliAdapterShape {
+export interface AgentTurnDriverShape {
   readonly run: (
     sessionId: string,
-    spec: SessionSpec,
+    spec: AgentTurnSpec,
     ctx: AgentContext
-  ) => Effect.Effect<void, CliExecError>
-  readonly stop: (sessionId: string) => Effect.Effect<void, CliExecError>
+  ) => Effect.Effect<void, AgentRunError>
+  readonly stop: (sessionId: string) => Effect.Effect<void, AgentRunError>
 }
 
-export class CliAdapter extends Context.Tag("@jingler/CliAdapter")<
-  CliAdapter,
-  CliAdapterShape
+export class AgentTurnDriver extends Context.Tag("@jingler/AgentTurnDriver")<
+  AgentTurnDriver,
+  AgentTurnDriverShape
 >() {}
 
 /**
@@ -612,8 +503,8 @@ export const scriptedPlanEmission = (
 /**
  * The scripted run body — a deterministic sequence (thinking, reads, a gated
  * edit, a gated shell command) driving the full contract without a real process.
- * Reused by both `makeScriptedCliAdapter`'s Layer and the harness dispatcher's
- * fallback (tests / e2e / no-CLI-installed). `delayMs` paces the stream.
+ * Reused by `makeScriptedAgentTurnDriver` in deterministic tests and Electron
+ * e2e. `delayMs` paces the stream.
  *
  * Markers in the prompt drive the interactive flows: `[[ask]]` → AskUserQuestion,
  * `[[plan]]` → propose a plan and honour the approve/revise decision.
@@ -684,7 +575,7 @@ const scriptedMemoryConflictText = (
 }
 
 export const scriptedRun =
-  (delayMs: number): CliAdapterShape["run"] =>
+  (delayMs: number): AgentTurnDriverShape["run"] =>
   (sessionId, spec, { emit, canUseTool, askQuestion, proposePlan, registerBackgroundStop, registerTurnSteer }) =>
     Effect.gen(function* () {
       const pause = delayMs > 0 ? Effect.sleep(`${delayMs} millis`) : Effect.void
@@ -731,10 +622,8 @@ export const scriptedRun =
       // deliberately a standard, header-free MCP call through the attachment
       // URL: it proves the harness-facing loopback proxy works end to end while
       // keeping the upstream organization grant in Jingler's main process.
-      const memoryServer = spec.remoteMcpServers?.find(
-        ({ name }) => name === "jingler-memory"
-      )
-      if (memoryServer !== undefined) {
+      const memoryServer = spec.mcp?.memory
+      if (memoryServer && "url" in memoryServer) {
         yield* Effect.tryPromise({
           try: () =>
             callScriptedMemoryTool(
@@ -1473,11 +1362,11 @@ export const scriptedRun =
     })
 
 /**
- * A deterministic adapter driving the full contract without a real process —
- * the tests/e2e/fallback path. `delayMs` paces the stream.
+ * A deterministic driver for unit tests and Electron e2e. `delayMs` paces the
+ * stream while the production driver delegates to embedded pi.
  */
-export const makeScriptedCliAdapter = (delayMs: number): Layer.Layer<CliAdapter> =>
-  Layer.succeed(CliAdapter, CliAdapter.of({ run: scriptedRun(delayMs), stop: () => Effect.void }))
+export const makeScriptedAgentTurnDriver = (delayMs: number): Layer.Layer<AgentTurnDriver> =>
+  Layer.succeed(AgentTurnDriver, AgentTurnDriver.of({ run: scriptedRun(delayMs), stop: () => Effect.void }))
 
 /** The default scripted adapter, paced for a visible streaming cadence. */
-export const ScriptedCliAdapterLive = makeScriptedCliAdapter(320)
+export const ScriptedAgentTurnDriverLive = makeScriptedAgentTurnDriver(320)

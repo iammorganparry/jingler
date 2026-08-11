@@ -1,8 +1,4 @@
-import type {
-  CliKind,
-  McpServer,
-  OpenConnectorConfig
-} from "@jingler/core"
+import type { McpServer, OpenConnectorConfig } from "@jingler/core"
 import { OPEN_CONNECTOR_DEFAULT } from "@jingler/core"
 import { Effect } from "effect"
 import { ConfigService } from "./config.js"
@@ -42,15 +38,15 @@ const mcpUrl = (endpoint: string): string => `${normalizeEndpoint(endpoint)}/mcp
  */
 const remoteEntry = (
   config: OpenConnectorConfig,
-  token: string,
-  cli: CliKind
+  token: string
 ): ParsedMcpServer => {
   const url = mcpUrl(config.endpoint)
   // `serverName` is `optionalWith` a default, so the decoded type is a plain string.
   const name = config.serverName
   const server: McpServer = {
     name,
-    cli,
+    // Decoder compatibility only; pi consumes the main-process launch half.
+    cli: "claude",
     transport: "http",
     scope: "user",
     target: url,
@@ -123,14 +119,14 @@ export class OpenConnectorService extends Effect.Service<OpenConnectorService>()
        * `.launch` half to the harness and must never send `.server` verbatim if it
        * could carry more than header names (it cannot — see `remoteEntry`).
        */
-      const injection = (cli: CliKind) =>
+      const injection = () =>
         Effect.gen(function* () {
           const cfg = yield* ConfigService.get()
           const config = cfg?.openConnector
           if (!config?.enabled || config.endpoint.length === 0) return null
           const token = yield* (yield* SecretStore).getOpenConnectorToken
           if (token === null || token.length === 0) return null
-          return remoteEntry(config, token, cli)
+          return remoteEntry(config, token)
         })
 
       /**
@@ -152,7 +148,7 @@ export class OpenConnectorService extends Effect.Service<OpenConnectorService>()
               checkedAt: now()
             }
           }
-          return yield* probeServer(remoteEntry(config, token, "claude"), null, now)
+          return yield* probeServer(remoteEntry(config, token), null, now)
         })
 
       return { get, set, injection, test }

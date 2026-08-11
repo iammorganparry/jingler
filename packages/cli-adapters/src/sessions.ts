@@ -1346,6 +1346,19 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           )
         }))
 
+      /** Clear one chat's pi continuation before a deliberate context reseed. */
+      const clearPiSessionId = (id: string, chatId?: string) =>
+        update(id, (session) => {
+          const target = chatId ?? session.activeChatId
+          return {
+            ...session,
+            piSessionId: undefined,
+            chats: session.chats.map((chat) =>
+              chat.id === target ? { ...chat, piSessionId: undefined } : chat
+            )
+          }
+        })
+
       /**
        * Drop the harness session id so the NEXT turn starts a fresh conversation.
        *
@@ -1831,6 +1844,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setHarness,
         setResumeId,
         setPiSessionId,
+        clearPiSessionId,
         clearResumeId,
         setContextTokens,
         setChatContextTokens,

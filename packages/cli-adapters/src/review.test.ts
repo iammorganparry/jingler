@@ -1,8 +1,8 @@
 import type { StreamEvent } from "@jingler/core"
-import { CliExecError, ProviderConnectionId, ProviderModelId } from "@jingler/core"
-import type { PermissionDecision } from "./adapter.js"
-import { CliAdapter } from "./adapter.js"
-import type { AgentContext, CliAdapterShape, SessionSpec } from "./adapter.js"
+import { AgentRunError, ProviderConnectionId, ProviderModelId } from "@jingler/core"
+import type { PermissionDecision } from "./agent-turn-driver.js"
+import { AgentTurnDriver } from "./agent-turn-driver.js"
+import type { AgentContext, AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
 import { CommandExecutor } from "@effect/platform"
 import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -37,18 +37,20 @@ const INPUT: ReviewInput = {
   baseBranch: "main",
   cli: "claude",
   model: "claude-fable-5",
+  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+  modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-fable-5"),
   diff: "diff --git a/a.ts b/a.ts\n+const x = 1\n"
 }
 
-/** A CliAdapter whose `run` is the supplied script. */
+/** A AgentTurnDriver whose `run` is the supplied script. */
 const stubAdapter = (
-  script: (sessionId: string, spec: SessionSpec, ctx: AgentContext) => Effect.Effect<void>
-): Layer.Layer<CliAdapter> =>
+  script: (sessionId: string, spec: AgentTurnSpec, ctx: AgentContext) => Effect.Effect<void>
+): Layer.Layer<AgentTurnDriver> =>
   Layer.succeed(
-    CliAdapter,
-    CliAdapter.of({
-      run: ((sessionId: string, spec: SessionSpec, ctx: AgentContext) =>
-        script(sessionId, spec, ctx)) as CliAdapterShape["run"],
+    AgentTurnDriver,
+    AgentTurnDriver.of({
+      run: ((sessionId: string, spec: AgentTurnSpec, ctx: AgentContext) =>
+        script(sessionId, spec, ctx)) as AgentTurnDriverShape["run"],
       stop: () => Effect.void
     })
   )
@@ -78,7 +80,7 @@ afterEach(() => {
 })
 
 const env = (
-  adapter: Layer.Layer<CliAdapter>,
+  adapter: Layer.Layer<AgentTurnDriver>,
   executor: Layer.Layer<CommandExecutor.CommandExecutor> = installedHarnesses,
   store: Layer.Layer<ReviewStore> = ReviewStore.Default
 ) =>
@@ -130,7 +132,7 @@ const seedSession = (activeChatId: string, chatIds: ReadonlyArray<string> = [act
   )
 }
 
-const runReview = (adapter: Layer.Layer<CliAdapter>, input: ReviewInput = INPUT) =>
+const runReview = (adapter: Layer.Layer<AgentTurnDriver>, input: ReviewInput = INPUT) =>
   Effect.runPromise(ReviewService.run(input).pipe(Effect.provide(env(adapter))))
 
 const emitJson = (ctx: AgentContext, body: string) =>
@@ -211,7 +213,7 @@ describe("ReviewService — never parks", () => {
 
 describe("ReviewService — spec", () => {
   it("uses canonical runtime identity without probing for a legacy CLI", async () => {
-    let spec: SessionSpec | undefined
+    let spec: AgentTurnSpec | undefined
     const adapter = stubAdapter((_id, captured, ctx) =>
       Effect.gen(function* () {
         spec = captured
@@ -227,14 +229,14 @@ describe("ReviewService — spec", () => {
       }).pipe(Effect.provide(env(adapter, noHarnesses)))
     )
 
-    expect(spec?.runtime).toMatchObject({
+    expect(spec).toMatchObject({
       role: "review",
       targetCapabilities: { targetId: "desktop" }
     })
   })
 
   it("runs on the configured review model, not the session's", async () => {
-    let spec: SessionSpec | undefined
+    let spec: AgentTurnSpec | undefined
     const adapter = stubAdapter((_id, s, ctx) =>
       Effect.gen(function* () {
         spec = s
@@ -242,11 +244,11 @@ describe("ReviewService — spec", () => {
       })
     )
     await runReview(adapter)
-    expect(spec?.model).toBe("claude-fable-5")
+    expect(spec?.modelId).toBe("anthropic/claude-fable-5")
   })
 
-  it("runs in the session's worktree as a fresh throwaway conversation", async () => {
-    let spec: SessionSpec | undefined
+  it("runs in the session's worktree as a fresh pi conversation", async () => {
+    let spec: AgentTurnSpec | undefined
     const adapter = stubAdapter((_id, s, ctx) =>
       Effect.gen(function* () {
         spec = s
@@ -255,17 +257,11 @@ describe("ReviewService — spec", () => {
     )
     await runReview(adapter)
     expect(spec?.cwd).toBe("/wt")
-    expect(spec?.resumeId).toBeNull()
-    // `resumeId: null` alone is NOT enough — the real adapter's in-memory resume
-    // map WINS over the spec, and our adapter key is stable per session, so
-    // without `fresh` every re-review would silently resume the previous one and
-    // inherit the old head's diff and findings. Asserting resumeId against a stub
-    // adapter cannot catch that; this can.
-    expect(spec?.fresh).toBe(true)
+    expect(spec?.piSessionId).toBeNull()
   })
 
-  it("asks the harness itself to enforce read-only, not just our gate", async () => {
-    let spec: SessionSpec | undefined
+  it("enforces read-only mode in the pi run contract", async () => {
+    let spec: AgentTurnSpec | undefined
     const adapter = stubAdapter((_id, s, ctx) =>
       Effect.gen(function* () {
         spec = s
@@ -273,14 +269,11 @@ describe("ReviewService — spec", () => {
       })
     )
     await runReview(adapter)
-    // `canUseTool` alone is not enough twice over: it only fires for tool names
-    // we map, and the Codex adapter never calls it. See mapCodexPolicy /
-    // READ_ONLY_DISALLOWED for how each harness honours this.
-    expect(spec?.readOnly).toBe(true)
+    expect(spec?.mode).toBe("read-only")
   })
 
   it("feeds the diff to the reviewer so it needs no tool call to find it", async () => {
-    let spec: SessionSpec | undefined
+    let spec: AgentTurnSpec | undefined
     const adapter = stubAdapter((_id, s, ctx) =>
       Effect.gen(function* () {
         spec = s
@@ -609,7 +602,7 @@ describe("ReviewService.watch", () => {
 
   /** Run a review while collecting everything a watcher attached first would see. */
   const runWatched = (
-    adapter: Layer.Layer<CliAdapter>,
+    adapter: Layer.Layer<AgentTurnDriver>,
     input: ReviewInput = INPUT,
     chatId = "watcher"
   ) =>
@@ -654,7 +647,7 @@ describe("ReviewService.watch", () => {
   // the reviewer would otherwise appear to still be running.
   it("ends the stream with Failed when the reviewer crashes", async () => {
     const crashing = stubAdapter(
-      () => Effect.fail(new CliExecError({ kind: "claude", message: "boom" })) as unknown as Effect.Effect<void>
+      () => Effect.fail(new AgentRunError({ kind: "claude", message: "boom" })) as unknown as Effect.Effect<void>
     )
     const { seen, review } = await runWatched(crashing)
     expect(review._tag).toBe("Left")
@@ -905,7 +898,7 @@ describe("ReviewService — transcript persistence", () => {
 
   it("restores a failed reviewer as failed", async () => {
     const crashing = stubAdapter(
-      () => Effect.fail(new CliExecError({ kind: "claude", message: "boom" })) as unknown as Effect.Effect<void>
+      () => Effect.fail(new AgentRunError({ kind: "claude", message: "boom" })) as unknown as Effect.Effect<void>
     )
     await Effect.runPromise(ReviewService.run(INPUT).pipe(Effect.provide(env(crashing)), Effect.either))
     const seen = await Effect.runPromise(attach(INPUT.sessionId).pipe(Effect.provide(env(crashing))))

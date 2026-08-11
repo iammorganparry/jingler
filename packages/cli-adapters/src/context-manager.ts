@@ -10,8 +10,6 @@ import {
   DEFAULT_CONTEXT_CONFIG,
   contextPhase,
   contextWindowFor,
-  defaultModel,
-  digestModelFor,
   reconcileWindow,
   shouldHoldSwap,
   triggerAt
@@ -19,9 +17,9 @@ import {
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Fiber, Ref } from "effect"
 import { AppPaths } from "./app-paths.js"
-import type { AgentContext, SessionSpec } from "./adapter.js"
+import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
-import { CliAdapter, PlanDecision } from "./adapter.js"
+import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
 import { ConfigService } from "./config.js"
 import { digestPrompt, lastMessageId, parseDigest, renderTranscript } from "./context-digest.js"
 import { SessionStore } from "./sessions.js"
@@ -128,7 +126,7 @@ const resolveWindow = (inferred: number | null, reported: number | null): number
 }
 
 export type DigestEnv =
-  | CliAdapter
+  | AgentTurnDriver
   | SessionStore
   | TranscriptStore
   | ConfigService
@@ -243,15 +241,13 @@ export class ContextManager extends Effect.Service<ContextManager>()(
                 : measuredWindow,
               peak
             ),
-            binPath: null,
-            digestModel: chat.modelId ?? digestModelFor(session.cli, provider?.backgroundModel)
           }
         })
 
       /**
        * Summarise the session's transcript through its OWN harness.
        *
-       * The single most important property in this file: `CliAdapter.run` with
+       * The single most important property in this file: `AgentTurnDriver.run` with
        * the session's `binPath` means the summary is produced by the CLI the user
        * has already authenticated — their Claude subscription, their Codex login.
        * There is no API client constructed anywhere in this codepath and no key
@@ -280,53 +276,34 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             return
           }
 
-          const adapter = yield* CliAdapter
+          const adapter = yield* AgentTurnDriver
           const collected = yield* Ref.make<ReadonlyArray<string>>([])
+          if (
+            settings.chat.connectionId === undefined ||
+            settings.chat.modelId === undefined
+          ) {
+            return yield* fail(sessionId, "provider connection unavailable")
+          }
 
-          const spec: SessionSpec = {
-            ...(settings.chat.connectionId && settings.chat.modelId
-              ? {
-                  runtime: {
-                    sessionId: settings.session.id,
-                    chatId: settings.chat.id,
-                    connectionId: settings.chat.connectionId,
-                    modelId: settings.chat.modelId,
-                    role: "context-digest" as const,
-                    priorMessages: [],
-                    piSessionId: null,
-                    seed: null,
-                    targetCapabilities: {
-                      versions: CURRENT_RUNTIME_CONTRACTS,
-                      toolIds: [],
-                      resourceIds: [],
-                      targetId: settings.session.environmentId ?? "desktop"
-                    }
-                  }
-                }
-              : {}),
-            cli: settings.session.cli,
-            repo: settings.session.repo,
-            branch: settings.session.branch,
+          const spec: AgentTurnSpec = {
+            sessionId: settings.session.id,
+            chatId: settings.chat.id,
+            connectionId: settings.chat.connectionId,
+            modelId: settings.chat.modelId,
+            role: "context-digest",
+            priorMessages: [],
+            piSessionId: null,
+            seed: null,
+            targetCapabilities: {
+              versions: CURRENT_RUNTIME_CONTRACTS,
+              toolIds: [],
+              resourceIds: [],
+              targetId: settings.session.environmentId ?? "desktop"
+            },
             cwd: settings.session.worktreePath ?? "",
             prompt: digestPrompt(renderTranscript(messages)),
             images: [],
-            binPath: settings.binPath,
-            // "ask" pairs with the deny-all gate below. Not "plan": plan mode
-            // steers the harness toward ExitPlanMode, and a summariser that
-            // proposes a plan instead of answering is useless.
-            mode: "ask",
-            // The cheap tier, on the user's existing subscription.
-            model: settings.digestModel || defaultModel(settings.session.cli),
-            resumeId: null,
-            // `resumeId: null` is NOT enough on its own — the adapter prefers its
-            // in-memory resume map, keyed per session, so without this the digest
-            // run would resume the very conversation it is trying to summarise
-            // and inherit the context we are attempting to shed.
-            fresh: true,
-            // A summariser has no business touching the worktree. Enforced in the
-            // harness because the deny-all gate below is not a control surface for
-            // every adapter — Codex never calls it at all.
-            readOnly: true
+            mode: "read-only"
           }
 
           const ctx: AgentContext = {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { AgentRuntime } from "@jingler/cli-adapters/runtime/agent/agent-runtime"
-import { AgentRuntimeAdapterLive } from "@jingler/cli-adapters/runtime/agent/agent-runtime-adapter"
+import { AgentTurnDriverLive } from "@jingler/cli-adapters/runtime/agent/agent-turn-driver-live"
 import { PiAgentRuntimeLive } from "@jingler/cli-adapters/runtime/agent/pi-runtime-live"
 import { RuntimeDiagnostics } from "@jingler/cli-adapters/runtime/diagnostics/runtime-diagnostics"
 import { AgentResourcesLive } from "@jingler/cli-adapters/runtime/resources/resource-services-live"
@@ -329,7 +329,7 @@ const deviceRuntime = (root: string, targetId: string) => {
     Layer.provide(providers.ProviderConnectionsLive),
     Layer.provide(providers.SecretStoreLive)
   )
-  const agentExecution = AgentRuntimeAdapterLive.pipe(
+  const agentExecution = AgentTurnDriverLive.pipe(
     Layer.provideMerge(piRuntime)
   )
   const services = Layer.mergeAll(

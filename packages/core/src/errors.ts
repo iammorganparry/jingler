@@ -10,8 +10,8 @@ export class CliNotFoundError extends Data.TaggedError("CliNotFoundError")<{
   readonly message: string
 }> {}
 
-/** Raised when invoking a CLI process fails (spawn error, non-zero exit, etc.). */
-export class CliExecError extends Data.TaggedError("CliExecError")<{
+/** Raised when an agent turn cannot start, execute, or stop cleanly. */
+export class AgentRunError extends Data.TaggedError("AgentRunError")<{
   readonly kind: string
   readonly message: string
   readonly cause?: unknown

@@ -1,6 +1,5 @@
-import type { SessionSpec } from "./adapter.js"
+import type { AgentTurnSpec } from "./agent-turn-driver.js"
 import type { MemoryAttachment } from "./memory.js"
-import { composeRemoteMcpServers } from "./mcp-config.js"
 import { composeTurnPrompt } from "./turn-prompt.js"
 
 /**
@@ -11,9 +10,9 @@ import { composeTurnPrompt } from "./turn-prompt.js"
  * explicitly; native sub-agents then inherit the worker's MCP collection.
  */
 export const attachMemoryToSessionSpec = (
-  spec: SessionSpec,
+  spec: AgentTurnSpec,
   attachment: MemoryAttachment | null
-): SessionSpec =>
+): AgentTurnSpec =>
   attachment === null
     ? spec
     : {
@@ -23,8 +22,5 @@ export const attachMemoryToSessionSpec = (
           { memory: attachment.instructions },
           { leadWithText: false }
         ),
-        remoteMcpServers: composeRemoteMcpServers(
-          attachment.server,
-          ...(spec.remoteMcpServers ?? [])
-        )
+        mcp: { ...spec.mcp, memory: attachment.server }
       }

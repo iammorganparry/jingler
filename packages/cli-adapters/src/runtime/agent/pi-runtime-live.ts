@@ -127,6 +127,7 @@ export const makePiAgentRuntimeLive = (
             cwd: spec.cwd,
             workspace,
             mcp: {
+              ...context.mcp,
               imported: managedMcp.map((server) =>
                 server.transport === "stdio"
                   ? { ...server, cwd: spec.cwd }

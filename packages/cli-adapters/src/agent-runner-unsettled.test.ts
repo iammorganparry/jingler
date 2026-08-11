@@ -1,10 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { StreamEvent } from "@jingler/core"
-import { Effect, Layer, Stream } from "effect"
+import {
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
+  type StreamEvent
+} from "@jingler/core"
+import { Effect, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { CliAdapter } from "./adapter.js"
-import type { CliAdapterShape } from "./adapter.js"
+import { AgentTurnDriver } from "./agent-turn-driver.js"
+import type { AgentTurnDriverShape } from "./agent-turn-driver.js"
 import { ConfigService } from "./config.js"
 import { InMemorySecretStoreLive } from "./secret-store.js"
 import { OpenConnectorService } from "./open-connector.js"
@@ -40,6 +45,11 @@ const BrowserControlMcpServiceTest = Layer.succeed(
  */
 
 let temp: ReturnType<typeof withTempRoot>
+const TEST_RUNTIME = {
+  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("test-connection"),
+  providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+  modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-test")
+} as const
 
 beforeEach(() => {
   temp = withTempRoot()
@@ -54,13 +64,14 @@ beforeEach(() => {
       title: "Unsettled",
       status: "idle",
       cli: "claude",
+      ...TEST_RUNTIME,
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
       tokens: 0,
       updatedAt: now,
       worktreePath: temp.root,
-      chats: [{ id: SESSION, title: null, createdAt: now, updatedAt: now }],
+      chats: [{ id: SESSION, title: null, createdAt: now, updatedAt: now, ...TEST_RUNTIME }],
       activeChatId: SESSION
     }])
   )
@@ -68,33 +79,46 @@ beforeEach(() => {
 afterEach(() => temp.cleanup())
 
 const SESSION = "s_unsettled"
+const UnsettledTurnRecord = Schema.Struct({
+  at: Schema.String,
+  sessionId: Schema.String,
+  providerId: Schema.NullOr(Schema.String),
+  images: Schema.Number,
+  events: Schema.Number,
+  lastEvent: Schema.NullOr(Schema.String),
+  exitInterrupted: Schema.Boolean
+})
+type UnsettledTurnRecord = Schema.Schema.Type<typeof UnsettledTurnRecord>
+const decodeUnsettledTurnRecord = Schema.decodeUnknownSync(
+  Schema.parseJson(UnsettledTurnRecord)
+)
 
 /** An adapter that says something and then just stops — no `Done`, no `Failed`. */
-const silentExitAdapter: Layer.Layer<CliAdapter> = Layer.succeed(
-  CliAdapter,
-  CliAdapter.of({
+const silentExitAdapter: Layer.Layer<AgentTurnDriver> = Layer.succeed(
+  AgentTurnDriver,
+  AgentTurnDriver.of({
     run: (_sessionId, _spec, ctx) =>
       Effect.gen(function* () {
         yield* ctx.emit({ _tag: "Assistant", text: "half an answer" })
-      }) as ReturnType<CliAdapterShape["run"]>,
+      }) as ReturnType<AgentTurnDriverShape["run"]>,
     stop: () => Effect.void
   })
 )
 
 /** The healthy path, for contrast: the same run, properly terminated. */
-const settlingAdapter: Layer.Layer<CliAdapter> = Layer.succeed(
-  CliAdapter,
-  CliAdapter.of({
+const settlingAdapter: Layer.Layer<AgentTurnDriver> = Layer.succeed(
+  AgentTurnDriver,
+  AgentTurnDriver.of({
     run: (_sessionId, _spec, ctx) =>
       Effect.gen(function* () {
         yield* ctx.emit({ _tag: "Assistant", text: "a whole answer" })
         yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-      }) as ReturnType<CliAdapterShape["run"]>,
+      }) as ReturnType<AgentTurnDriverShape["run"]>,
     stop: () => Effect.void
   })
 )
 
-const run = (adapter: Layer.Layer<CliAdapter>) => {
+const run = (adapter: Layer.Layer<AgentTurnDriver>) => {
   const base = Layer.mergeAll(
     AgentRunner.Default,
     OpenConnectorService.Default,
@@ -121,13 +145,13 @@ const run = (adapter: Layer.Layer<CliAdapter>) => {
   return Effect.runPromise(program.pipe(Effect.provide(base)))
 }
 
-const records = (): ReadonlyArray<Record<string, unknown>> => {
+const records = (): ReadonlyArray<UnsettledTurnRecord> => {
   const file = join(temp.root, "unsettled-turns.jsonl")
   if (!existsSync(file)) return []
   return readFileSync(file, "utf8")
     .split("\n")
     .filter((l) => l.trim().length > 0)
-    .map((l) => JSON.parse(l) as Record<string, unknown>)
+    .map((line) => decodeUnsettledTurnRecord(line))
 }
 
 describe("AgentRunner unsettled-turn instrumentation", () => {

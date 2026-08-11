@@ -21,7 +21,7 @@
     "./publish-metadata": "./src/publish-metadata.ts",
     "./remote-session": "./src/remote-session.ts",
     "./runtime/agent/agent-runtime": "./src/runtime/agent/agent-runtime.ts",
-    "./runtime/agent/agent-runtime-adapter": "./src/runtime/agent/agent-runtime-adapter.ts",
+    "./runtime/agent/agent-turn-driver-live": "./src/runtime/agent/agent-turn-driver-live.ts",
     "./runtime/agent/pi-runtime-live": "./src/runtime/agent/pi-runtime-live.ts",
     "./runtime/auth/agent-secret-store": "./src/runtime/auth/agent-secret-store.ts",
     "./runtime/certification/model-certification-store": "./src/runtime/certification/model-certification-store.ts",

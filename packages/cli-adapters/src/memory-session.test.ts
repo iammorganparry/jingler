@@ -1,18 +1,32 @@
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  ProviderConnectionId,
+  ProviderModelId
+} from "@jingler/core"
+import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import type { SessionSpec } from "./adapter.js"
+import type { AgentTurnSpec } from "./agent-turn-driver.js"
 import { attachMemoryToSessionSpec } from "./memory-session.js"
 
-const spec: SessionSpec = {
-  cli: "codex",
-  repo: "jingler",
-  branch: "feature/memory-workers",
+const spec: AgentTurnSpec = {
+  sessionId: "session-1",
+  chatId: "chat-1",
+  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("openai-codex"),
+  modelId: Schema.decodeUnknownSync(ProviderModelId)("openai/gpt-5.6-sol"),
+  role: "background",
+  priorMessages: [],
+  piSessionId: null,
+  seed: null,
+  targetCapabilities: {
+    versions: CURRENT_RUNTIME_CONTRACTS,
+    toolIds: [],
+    resourceIds: [],
+    targetId: "desktop"
+  },
   cwd: "/tmp/jingler",
   prompt: "Implement the assigned stage.",
   images: [],
-  binPath: "/usr/bin/codex",
-  mode: "auto",
-  model: "gpt-5.6-sol",
-  resumeId: null
+  mode: "auto"
 }
 
 describe("attachMemoryToSessionSpec", () => {
@@ -29,9 +43,7 @@ describe("attachMemoryToSessionSpec", () => {
     expect(enriched.prompt).toBe(
       "<team-memory>Recall first.</team-memory>\n\nImplement the assigned stage."
     )
-    expect(enriched.remoteMcpServers?.map((server) => server.name)).toEqual([
-      "jingler-memory"
-    ])
+    expect(enriched.mcp?.memory?.name).toBe("jingler-memory")
   })
 
   it("preserves the original spec when memory is unavailable", () => {

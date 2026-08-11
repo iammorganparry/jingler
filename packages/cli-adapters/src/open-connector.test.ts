@@ -42,7 +42,7 @@ describe("OpenConnectorService", () => {
   }
 
   it("injects nothing when the feature is disabled (the shipped default)", async () => {
-    const exit = await run(OpenConnectorService.injection("claude"))
+    const exit = await run(OpenConnectorService.injection())
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") expect(exit.value).toBeNull()
   })
@@ -51,7 +51,7 @@ describe("OpenConnectorService", () => {
     const exit = await run(
       Effect.gen(function* () {
         yield* OpenConnectorService.set(CONFIG) // no token
-        return yield* OpenConnectorService.injection("claude")
+        return yield* OpenConnectorService.injection()
       })
     )
     expect(exit._tag).toBe("Success")
@@ -62,7 +62,7 @@ describe("OpenConnectorService", () => {
     const exit = await run(
       Effect.gen(function* () {
         yield* OpenConnectorService.set(CONFIG, "sk-secret-123")
-        return yield* OpenConnectorService.injection("claude")
+        return yield* OpenConnectorService.injection()
       })
     )
     expect(exit._tag).toBe("Success")

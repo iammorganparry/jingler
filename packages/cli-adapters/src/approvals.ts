@@ -5,7 +5,7 @@ import type {
   PermissionMode,
   QuestionAnswer
 } from "@jingler/core"
-import type { PermissionRequest, PlanDecision } from "./adapter.js"
+import type { PermissionRequest, PlanDecision } from "./agent-turn-driver.js"
 import { PLAN_AUTO_RUN_DEFAULT } from "@jingler/core"
 
 /**

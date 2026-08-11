@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { RemoteMcpServer } from "./adapter.js"
+import type { RemoteMcpServer } from "./agent-turn-driver.js"
 import {
   codexManagedToolOverrides,
   codexMcpEnvironment,

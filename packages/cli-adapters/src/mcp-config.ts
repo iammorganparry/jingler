@@ -1,10 +1,10 @@
 import type { McpServer, McpTransport } from "@jingler/core"
 import { parse } from "smol-toml"
-import type { RemoteMcpServer } from "./adapter.js"
+import type { RemoteMcpServer } from "./agent-turn-driver.js"
 
 /**
  * The write-side of MCP config: given one normalized remote attachment from
- * `SessionSpec.remoteMcpServers`, render it into each harness's OWN launch
+ * `AgentTurnSpec.remoteMcpServers`, render it into each harness's OWN launch
  * vocabulary, plus the parsing utilities the rest of the OpenConnector code
  * shares.
  *

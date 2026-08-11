@@ -8,7 +8,7 @@ import {
 import type { AddressInfo } from "node:net"
 import { Data, Effect } from "effect"
 import type { Scope } from "effect"
-import type { RemoteMcpServer } from "./adapter.js"
+import type { RemoteMcpServer } from "./agent-turn-driver.js"
 
 const LOOPBACK_HOST = "127.0.0.1"
 const AUTHORIZATION_HEADER = "Authorization"

@@ -8,6 +8,7 @@ import type {
   StreamEvent
 } from "@jingler/core"
 import { Context, Data, type Effect, type Stream } from "effect"
+import type { JinglerMcpAttachments } from "../tools/mcp-tools.js"
 
 export class AgentRuntimeError extends Data.TaggedError("AgentRuntimeError")<{
   readonly reason:
@@ -34,6 +35,8 @@ export type RuntimePlanDecision =
   | { readonly _tag: "Reject" }
 
 export interface AgentRuntimeContext {
+  /** Main-process-only capability attachments for this run. */
+  readonly mcp?: JinglerMcpAttachments
   readonly canUseTool: (
     request: RuntimePermissionRequest
   ) => Effect.Effect<RuntimePermissionDecision>

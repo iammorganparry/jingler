@@ -14,7 +14,7 @@ import {
 } from "@jingler/core"
 import { Chunk, Effect, Either, Fiber, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { scriptedPlanPrd } from "./adapter.js"
+import { scriptedPlanPrd } from "./agent-turn-driver.js"
 import { AppPaths } from "./app-paths.js"
 import { PlanStore, planFileName } from "./plan-store.js"
 import { withTempRoot } from "./test-support.js"

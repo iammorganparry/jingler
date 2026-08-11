@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { CliKind, MemoryGrantResponse } from "@jingler/core"
+import type { MemoryGrantResponse } from "@jingler/core"
 import { MEMORY_MCP_PROTOCOL_VERSION } from "@jingler/core"
 import { Context, Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -110,10 +110,7 @@ describe("MemoryService stateless attachment", () => {
 
     const attachments = await Effect.runPromise(
       withEnabledMemory(
-        Effect.forEach(
-          ["claude", "codex", "opencode"] satisfies ReadonlyArray<CliKind>,
-          (cli) => service.attachment(cli)
-        )
+        Effect.forEach([0, 1, 2], () => service.attachment())
       ).pipe(Effect.provide(configuredLayer()))
     )
 
@@ -221,7 +218,7 @@ describe("MemoryService stateless attachment", () => {
     })
 
     const attachment = await Effect.runPromise(
-      withEnabledMemory(service.attachment("claude")).pipe(
+      withEnabledMemory(service.attachment()).pipe(
         Effect.provide(configuredLayer())
       )
     )
@@ -277,7 +274,7 @@ describe("MemoryService stateless attachment", () => {
     })
 
     const attachment = await Effect.runPromise(
-      withEnabledMemory(service.attachment("claude")).pipe(
+      withEnabledMemory(service.attachment()).pipe(
         Effect.provide(configuredLayer())
       )
     )
@@ -334,7 +331,6 @@ describe("MemoryService stateless attachment", () => {
     const attachment = await Effect.runPromise(
       withEnabledMemory(
         service.attachment(
-          "codex",
           "How do refunds work? api_key=secret-should-not-egress",
           "session-1:chat-1"
         )
@@ -345,12 +341,12 @@ describe("MemoryService stateless attachment", () => {
 
     const repeated = await Effect.runPromise(
       withEnabledMemory(
-        service.attachment("codex", "How do refunds work?", "session-1:chat-1")
+        service.attachment("How do refunds work?", "session-1:chat-1")
       ).pipe(Effect.provide(configuredLayer()))
     )
     const separateConversation = await Effect.runPromise(
       withEnabledMemory(
-        service.attachment("codex", "How do refunds work?", "session-2:chat-1")
+        service.attachment("How do refunds work?", "session-2:chat-1")
       ).pipe(Effect.provide(configuredLayer()))
     )
 
@@ -382,24 +378,6 @@ describe("MemoryService stateless attachment", () => {
     }
     expect(searchBody.params.arguments.query).toContain("api_key=[REDACTED]")
     expect(searchBody.params.arguments.query).not.toContain("secret-should-not-egress")
-  })
-
-  it("does not attach team memory to Cursor, which Jingler cannot launch", async () => {
-    const fetchImplementation = vi.fn<typeof fetch>()
-    const service = makeMemoryService({
-      fetch: fetchImplementation,
-      baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
-    })
-
-    const attachment = await Effect.runPromise(
-      withEnabledMemory(service.attachment("cursor")).pipe(
-        Effect.provide(configuredLayer())
-      )
-    )
-
-    expect(attachment).toBeNull()
-    expect(fetchImplementation).not.toHaveBeenCalled()
   })
 
   it("reissues an expired-at-use grant and retries discovery without session state", async () => {
@@ -434,7 +412,7 @@ describe("MemoryService stateless attachment", () => {
       nowSeconds: () => NOW_SECONDS
     })
     const attachment = await Effect.runPromise(
-      withEnabledMemory(service.attachment("codex")).pipe(Effect.provide(configuredLayer()))
+      withEnabledMemory(service.attachment()).pipe(Effect.provide(configuredLayer()))
     )
 
     expect(attachment?.server.url).toBe(`${BASE_URL}/api/mcp`)
@@ -455,7 +433,7 @@ describe("MemoryService stateless attachment", () => {
 
     const disabled = makeMemoryService({ fetch: ineligible, baseUrl: () => BASE_URL })
     expect(
-      await Effect.runPromise(disabled.attachment("claude").pipe(Effect.provide(configuredLayer())))
+      await Effect.runPromise(disabled.attachment().pipe(Effect.provide(configuredLayer())))
     ).toBeNull()
 
     for (const fetchImplementation of [ineligible, expired, unsupported, unavailable]) {
@@ -467,7 +445,7 @@ describe("MemoryService stateless attachment", () => {
       })
       expect(
         await Effect.runPromise(
-          withEnabledMemory(service.attachment("opencode")).pipe(
+          withEnabledMemory(service.attachment()).pipe(
             Effect.provide(configuredLayer())
           )
         )
@@ -477,7 +455,7 @@ describe("MemoryService stateless attachment", () => {
     const signedOut = makeMemoryService({ fetch: ineligible, baseUrl: () => BASE_URL })
     expect(
       await Effect.runPromise(
-        withEnabledMemory(signedOut.attachment("claude")).pipe(
+        withEnabledMemory(signedOut.attachment()).pipe(
           Effect.provide(configuredLayer(null))
         )
       )

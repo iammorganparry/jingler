@@ -4,8 +4,8 @@ import type { Session, StreamEvent } from "@jingler/core"
 import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Effect, Layer, Ref, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { CliAdapter } from "./adapter.js"
-import type { CliAdapterShape, SessionSpec } from "./adapter.js"
+import { AgentTurnDriver } from "./agent-turn-driver.js"
+import type { AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { ConfigService } from "./config.js"
 import { ContextManager } from "./context-manager.js"
@@ -63,12 +63,12 @@ const MID_FLOW_REPLY = `\`\`\`json
 \`\`\``
 
 interface Recorder {
-  readonly specs: Array<SessionSpec>
+  readonly specs: Array<AgentTurnSpec>
   readonly runs: { count: number }
 }
 
 /**
- * A `CliAdapter` that records the spec it was handed and replies with `reply`.
+ * A `AgentTurnDriver` that records the spec it was handed and replies with `reply`.
  * Recording the spec is how we assert the no-extra-cost property: the digest has
  * to arrive at the user's own binary, on the cheap tier, with `fresh`.
  */
@@ -76,10 +76,10 @@ const recordingAdapter = (
   reply: string,
   recorder: Recorder,
   behaviour: "ok" | "hang" | "delay" = "ok"
-): Layer.Layer<CliAdapter> =>
+): Layer.Layer<AgentTurnDriver> =>
   Layer.succeed(
-    CliAdapter,
-    CliAdapter.of({
+    AgentTurnDriver,
+    AgentTurnDriver.of({
       run: (_sessionId, spec, ctx) =>
         Effect.gen(function* () {
           recorder.specs.push(spec)
@@ -89,11 +89,11 @@ const recordingAdapter = (
           yield* ctx.emit({ _tag: "Assistant", text: reply } as StreamEvent)
         }),
       stop: () => Effect.void
-    } satisfies CliAdapterShape)
+    } satisfies AgentTurnDriverShape)
   )
 
 /**
- * A `CliAdapter` that STREAMS its reply as several `Assistant` deltas — the shape
+ * A `AgentTurnDriver` that STREAMS its reply as several `Assistant` deltas — the shape
  * a real harness produces (text arrives token by token via `text_delta`), and the
  * one `recordingAdapter` never exercised because it emits the whole reply at once.
  *
@@ -101,10 +101,10 @@ const recordingAdapter = (
  * fragments, and if it joins them with anything but "" a boundary that falls
  * inside a JSON string value corrupts the reply into invalid JSON.
  */
-const streamingAdapter = (parts: ReadonlyArray<string>): Layer.Layer<CliAdapter> =>
+const streamingAdapter = (parts: ReadonlyArray<string>): Layer.Layer<AgentTurnDriver> =>
   Layer.succeed(
-    CliAdapter,
-    CliAdapter.of({
+    AgentTurnDriver,
+    AgentTurnDriver.of({
       run: (_sessionId, _spec, ctx) =>
         Effect.gen(function* () {
           for (const text of parts) {
@@ -112,10 +112,10 @@ const streamingAdapter = (parts: ReadonlyArray<string>): Layer.Layer<CliAdapter>
           }
         }),
       stop: () => Effect.void
-    } satisfies CliAdapterShape)
+    } satisfies AgentTurnDriverShape)
   )
 
-const layersFor = (adapter: Layer.Layer<CliAdapter>) =>
+const layersFor = (adapter: Layer.Layer<AgentTurnDriver>) =>
   Layer.mergeAll(
     ContextManager.Default,
     SessionStore.Default,
@@ -133,6 +133,9 @@ const layersFor = (adapter: Layer.Layer<CliAdapter>) =>
 const seed = (over: Partial<Session> = {}, withTranscript = true) =>
   Effect.gen(function* () {
     const now = new Date().toISOString()
+    const selectedModelId = over.modelId ?? Schema.decodeUnknownSync(ProviderModelId)(
+      `anthropic/${over.model ?? "claude-opus-4-1"}`
+    )
     const session: Session = {
       id: SESSION,
       repo: "trigify-app",
@@ -140,6 +143,9 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
       title: "Context",
       status: "idle",
       cli: "claude",
+      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+      providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+      modelId: selectedModelId,
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -150,6 +156,9 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
         title: null,
         createdAt: now,
         updatedAt: now,
+        connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+        providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+        modelId: selectedModelId,
         model: over.model ?? "claude-opus-4-1",
         ...(over.contextTokens === undefined ? {} : { contextTokens: over.contextTokens }),
         ...(over.resumeId === undefined ? {} : { resumeId: over.resumeId })
@@ -193,7 +202,7 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
  */
 const run = <A, E, R>(
   program: Effect.Effect<A, E, R>,
-  adapter: Layer.Layer<CliAdapter>
+  adapter: Layer.Layer<AgentTurnDriver>
 ): Promise<A> =>
   Effect.runPromise(
     program.pipe(Effect.orDie, Effect.provide(layersFor(adapter))) as Effect.Effect<A>
@@ -340,7 +349,7 @@ describe("ContextManager.observe", () => {
       recordingAdapter(GOOD_REPLY, rec)
     )
 
-    expect(rec.specs[0]?.runtime).toMatchObject({
+    expect(rec.specs[0]).toMatchObject({
       role: "context-digest",
       targetCapabilities: { targetId: "desktop" }
     })
@@ -373,7 +382,7 @@ describe("ContextManager.observe", () => {
     expect(digest!.digest.goal).toBe("Add rate limiting to the refund route")
   })
 
-  it("summarises through the runtime without a harness binary", async () => {
+  it("summarises through the selected certified pi model", async () => {
     const rec = recorder()
     await run(
       Effect.gen(function* () {
@@ -383,16 +392,10 @@ describe("ContextManager.observe", () => {
       recordingAdapter(GOOD_REPLY, rec)
     )
     const spec = rec.specs[0]!
-    expect(spec.binPath).toBeNull()
-    expect(spec.model).toBe("haiku")
-    expect(spec.model).not.toBe("sonnet")
+    expect(spec.modelId).toBe("anthropic/claude-opus-4-1")
   })
 
-  // `resumeId: null` alone is not enough — the adapter prefers its in-memory
-  // resume map, so without `fresh` the digest run would resume the very
-  // conversation it is trying to summarise and inherit the context we are
-  // attempting to shed.
-  it("runs fresh and read-only, so it cannot resume or mutate the worktree", async () => {
+  it("runs in a fresh read-only pi session", async () => {
     const rec = recorder()
     await run(
       Effect.gen(function* () {
@@ -402,12 +405,8 @@ describe("ContextManager.observe", () => {
       recordingAdapter(GOOD_REPLY, rec)
     )
     const spec = rec.specs[0]!
-    expect(spec.fresh).toBe(true)
-    expect(spec.readOnly).toBe(true)
-    expect(spec.resumeId).toBeNull()
-    // Not "plan": plan mode steers the harness toward proposing a plan instead
-    // of answering, and a summariser that proposes a plan is useless.
-    expect(spec.mode).toBe("ask")
+    expect(spec.piSessionId).toBeNull()
+    expect(spec.mode).toBe("read-only")
   })
 
   it("does not fork a second digest while one is already in flight", async () => {

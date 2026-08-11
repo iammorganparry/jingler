@@ -2,7 +2,7 @@ import { Effect, Fiber } from "effect"
 import { describe, expect, it } from "vitest"
 import type { QuestionAnswer } from "@jingler/core"
 import { allowLabelOf, buildGate, isAllowlisted, makeApprovals, verdict } from "./approvals.js"
-import type { PermissionRequest } from "./adapter.js"
+import type { PermissionRequest } from "./agent-turn-driver.js"
 
 /**
  * Approvals, tested without a harness.

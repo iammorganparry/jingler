@@ -19,7 +19,7 @@ import {
   AssetService,
   AuthService,
   BrowserControlMcpService,
-  type CliAdapter,
+  type AgentTurnDriver,
   ConfigService,
   makeAgentRuntimeTitleGenerator,
   EnvironmentService,
@@ -91,7 +91,6 @@ import {
   type PlanValidationError,
   resolveFindings,
   ReviewError,
-  reviewModelFor,
   PluginError,
   SessionNotFoundError,
   workspaceModeOf,
@@ -143,7 +142,7 @@ import type {
 } from "@jingler/core";
 import type {
   GitHubRepository,
-  SessionSpec,
+  AgentTurnSpec,
 } from "@jingler/cli-adapters";
 import {
   AssetListRpcs,
@@ -1859,16 +1858,14 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     }
 
     const cli = session.cli;
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const configuredReviewModel = config?.github?.reviewCli === cli
-      ? config.github.reviewModel
-      : undefined;
-    const model = session.modelId ?? session.model ?? reviewModelFor(
-      cli,
-      configuredReviewModel,
-    );
+    if (session.connectionId === undefined || session.modelId === undefined) {
+      return yield* Effect.fail(
+        new ReviewError({
+          message: "Choose a certified provider connection before running a review.",
+        }),
+      );
+    }
+    const model = session.modelId;
 
     const diff = yield* GitHubApi.prDiff(
       session.worktreePath,
@@ -1885,10 +1882,8 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       baseBranch: session.baseBranch ?? null,
       cli,
       model,
-      ...(session.connectionId === undefined
-        ? {}
-        : { connectionId: session.connectionId }),
-      ...(session.modelId === undefined ? {} : { modelId: session.modelId }),
+      connectionId: session.connectionId,
+      modelId: session.modelId,
       targetId: session.environmentId ?? "desktop",
       diff,
     });
@@ -5045,7 +5040,7 @@ export type RpcServerRequirements =
   | AuthService
   | BackgroundTaskStore
   | BrowserControlMcpService
-  | CliAdapter
+  | AgentTurnDriver
   | CommandExecutor.CommandExecutor
   | ConfigService
   | ContextManager

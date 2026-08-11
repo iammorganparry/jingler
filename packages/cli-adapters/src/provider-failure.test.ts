@@ -1,4 +1,4 @@
-import { CliExecError } from "@jingler/core"
+import { AgentRunError } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import { classifyProviderFailure, toolMayMutate } from "./provider-failure.js"
 
@@ -33,7 +33,7 @@ describe("classifyProviderFailure", () => {
 
   it("preserves typed CLI error details", () => {
     expect(
-      classifyProviderFailure(new CliExecError({ kind: "codex", message: "provider unavailable" }))
+      classifyProviderFailure(new AgentRunError({ kind: "codex", message: "provider unavailable" }))
     ).toStrictEqual({
       classification: "transient-provider",
       message: "provider unavailable",

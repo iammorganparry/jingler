@@ -9,7 +9,7 @@
 import {
   AgentRunner,
   AgentResourcesLive,
-  AgentRuntimeAdapterLive,
+  AgentTurnDriverLive,
   AssetService,
   AuthService,
   BrowserControlMcpServiceLive,
@@ -91,7 +91,7 @@ const StoreLayers = Layer.mergeAll(
  * review can run on its own model, read-only, without touching that
  * conversation; `ContextManager` does the same to summarise a session's own
  * transcript when its working set outgrows the quality band. Peers — none
- * depends on the others, and all three reach the harness through `CliAdapter`.
+ * depends on the others, and all three reach the harness through `AgentTurnDriver`.
  */
 const HarnessLayers = Layer.mergeAll(
   AgentRunner.Default,
@@ -121,7 +121,7 @@ const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(SecretStoreLayer)
 )
 
-const AgentExecutionLayer = AgentRuntimeAdapterLive.pipe(
+const AgentExecutionLayer = AgentTurnDriverLive.pipe(
   Layer.provideMerge(PiRuntimeLayer)
 )
 
