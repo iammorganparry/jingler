@@ -431,6 +431,13 @@ export const rpc = {
     run((c) => c.Environment.suggestHosts()),
   environmentsPairSsh: (input: PairSshEnvironmentInput): Promise<Environment> =>
     run((c) => c.Environment.pairSsh(input)),
+  environmentsCreateManaged: (name: string): Promise<Environment> =>
+    run((c) => c.Environment.createManaged({ name })),
+  environmentsManagedLifecycle: (
+    environment: Environment,
+    action: "start" | "pause" | "restore"
+  ): Promise<Environment> =>
+    run((c) => c.Environment.managedLifecycle({ environment, action })),
   environmentsRename: (deviceId: string, name: string): Promise<Environment> =>
     run((c) => c.Environment.rename({ deviceId, name })),
   environmentsRevoke: (deviceId: string): Promise<void> =>
@@ -520,8 +527,16 @@ export const rpc = {
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),
   sessionsDiff: (id: string): Promise<string> =>
     run((c) => c.Sessions.diff({ id })),
-  workspaceFiles: (repoPath: string, environmentId?: string): Promise<ReadonlyArray<string>> =>
-    run((c) => c.Workspace.files({ repoPath, ...(environmentId ? { environmentId } : {}) })),
+  workspaceFiles: (
+    repoPath: string,
+    environmentId?: string,
+    sessionId?: string
+  ): Promise<ReadonlyArray<string>> =>
+    run((c) => c.Workspace.files({
+      repoPath,
+      ...(environmentId ? { environmentId } : {}),
+      ...(sessionId ? { sessionId } : {})
+    })),
   /** Validated repository browser entries for one session worktree. */
   assetList: (sessionId: string): Promise<ReadonlyArray<AssetFileEntry>> =>
     runAssetList((c) => c.Asset.list({ sessionId })),

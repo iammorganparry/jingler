@@ -27,6 +27,7 @@ import {
   routeSessionOperation,
   filterVisible,
   GitHubApi,
+  parseGitHubRemote,
   GitHubAuth,
   githubPushPermissions,
   GitHubEventStore,
@@ -72,8 +73,12 @@ import {
   runPublishMachineExclusive,
   UsageService,
   WorkspaceService,
+  exportWorkspaceHandoff,
+  checkoutWorkspaceHandoffBase,
+  importWorkspaceHandoff,
 } from "@jingler/cli-adapters";
 import { appendFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
@@ -98,6 +103,9 @@ import {
   SessionNotFoundError,
   workspaceModeOf,
   Environment as EnvironmentSchema,
+  EnvironmentError,
+  createWorkspaceProvisioningPlan,
+  WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema,
   EnvironmentHandoffError,
   StreamEvent as StreamEventSchema,
   Message as MessageSchema,
@@ -143,6 +151,7 @@ import type {
   GitHubFeedbackClaimStatus,
   SettledSessionStatus,
   WorkspaceConfig,
+  WorkspaceTransferCheckpoint,
 } from "@jingler/core";
 import type {
   GitHubRepository,
@@ -1266,7 +1275,62 @@ const provisionRemoteSession = (
   Effect.gen(function* () {
     const remote = yield* RemoteSessionService;
     const sessions = yield* SessionStore;
-    const value = yield* remote.requestOnEnvironment(environmentId, operation, input).pipe(
+    const environmentService = yield* EnvironmentService;
+    const environment = yield* environmentService.environment(environmentId).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+    );
+    let requestSession = { id: "", environmentId };
+    let requestInput = input;
+    if (environment.kind === "managed") {
+      const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
+      const remoteUrl = yield* GitService.remoteUrl(input.repoPath);
+      const repository = remoteUrl ? parseGitHubRemote(remoteUrl) : null;
+      if (!repository) {
+        return yield* Effect.fail(new GitError({
+          message: "Managed environments currently require a GitHub repository remote.",
+        }));
+      }
+      const branch = operation === "Sessions.createFromPr"
+        ? (input as CreateSessionFromPrInput).pr.headRefName
+        : (input as CreateSessionInput | CreateSessionFromIssueInput).baseBranch;
+      const headSha = yield* GitService.revision(input.repoPath, branch).pipe(
+        Effect.orElse(() => GitService.revision(input.repoPath, `origin/${branch}`)),
+      );
+      const baseBranch = operation === "Sessions.createFromPr"
+        ? (input as CreateSessionFromPrInput).pr.baseRefName
+        : (input as CreateSessionInput | CreateSessionFromIssueInput).baseBranch;
+      const plan = createWorkspaceProvisioningPlan({
+        githubSlug: `${repository.owner}/${repository.repo}`,
+        headSha,
+        branch,
+        baseBranch,
+        createBranch: false,
+        source: operation === "Sessions.createFromPr"
+          ? {
+              kind: "pull-request",
+              pullRequestNumber: (input as CreateSessionFromPrInput).pr.number,
+            }
+          : { kind: "new" },
+      });
+      yield* environmentService.hydrateManagedWorkspace(
+        environment,
+        sessionId,
+        plan,
+      ).pipe(
+        Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+      );
+      requestSession = { id: sessionId, environmentId };
+      requestInput = {
+        ...input,
+        requestedSessionId: sessionId,
+        repoPath: "/workspace",
+      };
+    }
+    const value = yield* (
+      environment.kind === "managed"
+        ? remote.request(requestSession, operation, requestInput)
+        : remote.requestOnEnvironment(environmentId, operation, input)
+    ).pipe(
       Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
     );
     const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
@@ -1371,6 +1435,43 @@ export const continueOnEnvironment = (
         environments: () => environments.list,
         persist: (id, target) => sessions.setEnvironment(id, target),
         continueSession: (source, target) => Effect.gen(function* () {
+          const sourceMessages = yield* TranscriptStore.list(source.activeChatId).pipe(
+            Effect.orElseSucceed(() => []),
+          );
+          const checkpoint = yield* (
+            source.environmentId === undefined
+              ? source.worktreePath
+                ? Effect.tryPromise({
+                    try: () => exportWorkspaceHandoff({
+                      workspacePath: source.worktreePath!,
+                      sourceSessionId: source.id,
+                      eventCursor: sourceMessages.length,
+                    }),
+                    catch: (cause) => new EnvironmentHandoffError({
+                      reason: "unavailable",
+                      message: "The source workspace could not be checkpointed.",
+                      sessionId: source.id,
+                    }),
+                  })
+                : Effect.fail(new EnvironmentHandoffError({
+                    reason: "unavailable",
+                    message: "The source session has no workspace to hand off.",
+                    sessionId: source.id,
+                  }))
+              : remote.request(
+                  source,
+                  "Workspace.exportHandoff",
+                  { eventCursor: sourceMessages.length },
+                ).pipe(
+                  Effect.flatMap(Schema.decodeUnknown(WorkspaceTransferCheckpointSchema)),
+                  Effect.mapError((cause) => new EnvironmentHandoffError({
+                    reason: "unavailable",
+                    message: "The source environment could not checkpoint the workspace.",
+                    sessionId: source.id,
+                    environmentId: source.environmentId,
+                  })),
+                )
+          );
           const sourceRepositories = yield* continuationRepositories(
             environments,
             source.environmentId,
@@ -1382,12 +1483,25 @@ export const continueOnEnvironment = (
           );
           const sourceIdentity = {
             name: sourceRepository?.name ?? source.repo,
-            githubSlug: sourceRepository?.githubSlug ?? null,
+            githubSlug: checkpoint.repositorySlug ?? sourceRepository?.githubSlug ?? null,
           };
+          const targetEnvironment = target === undefined
+            ? undefined
+            : yield* environments.environment(target).pipe(
+                Effect.mapError((cause) => new EnvironmentHandoffError({
+                  reason: "unavailable",
+                  message: "The target environment is no longer available.",
+                  sessionId: source.id,
+                  environmentId: target,
+                })),
+              );
           const targetRepositories = yield* continuationRepositories(
             environments,
             target,
           ).pipe(
+            targetEnvironment?.kind === "managed"
+              ? Effect.orElseSucceed(() => [])
+              : (effect) => effect,
             Effect.mapError(() => new EnvironmentHandoffError({
               reason: "unavailable",
               message: "The target environment could not list its repositories.",
@@ -1399,7 +1513,7 @@ export const continueOnEnvironment = (
             sourceIdentity,
             targetRepositories,
           );
-          if (targetRepository === null) {
+          if (targetRepository === null && targetEnvironment?.kind !== "managed") {
             return yield* Effect.fail(new EnvironmentHandoffError({
               reason: "unavailable",
               message: `${sourceIdentity.githubSlug ?? sourceIdentity.name} is not available on the target environment.`,
@@ -1408,12 +1522,12 @@ export const continueOnEnvironment = (
             }));
           }
           const targetBaseBranch = source.baseBranch
-            ?? targetRepository.defaultBranch
+            ?? targetRepository?.defaultBranch
             ?? source.branch;
           if (target === undefined) {
-            return yield* createSession({
-              repoPath: targetRepository.path,
-              repoName: targetRepository.name,
+            const created = yield* createSession({
+              repoPath: targetRepository!.path,
+              repoName: targetRepository!.name,
               cli: source.cli,
               baseBranch: targetBaseBranch,
               title: `${source.title} continuation`,
@@ -1424,22 +1538,100 @@ export const continueOnEnvironment = (
                 sessionId: source.id,
               })),
             );
+            if (!created.worktreePath) {
+              return yield* Effect.fail(new EnvironmentHandoffError({
+                reason: "unavailable",
+                message: "The local continuation has no verified workspace.",
+                sessionId: source.id,
+              }));
+            }
+            yield* Effect.tryPromise({
+              try: async () => {
+                await checkoutWorkspaceHandoffBase(created.worktreePath!, checkpoint)
+                await importWorkspaceHandoff(created.worktreePath!, checkpoint)
+              },
+              catch: (cause) => new EnvironmentHandoffError({
+                reason: "unavailable",
+                message: "The local continuation did not match the source checkpoint.",
+                sessionId: source.id,
+              }),
+            });
+            for (const message of sourceMessages) {
+              yield* TranscriptStore.append(created.activeChatId, message);
+            }
+            return created;
           }
-          const value = yield* remote.requestOnEnvironment(
-            target,
+          let requestedSessionId: string | undefined;
+          if (targetEnvironment?.kind === "managed") {
+            if (checkpoint.repositorySlug === null) {
+              return yield* Effect.fail(new EnvironmentHandoffError({
+                reason: "unavailable",
+                message: "Managed handoff requires a GitHub repository identity.",
+                sessionId: source.id,
+                environmentId: target,
+              }));
+            }
+            requestedSessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
+            yield* environments.hydrateManagedWorkspace(
+              targetEnvironment,
+              requestedSessionId,
+              createWorkspaceProvisioningPlan({
+                githubSlug: checkpoint.repositorySlug,
+                headSha: checkpoint.headSha,
+                branch: checkpoint.branch ?? source.baseBranch ?? "main",
+                baseBranch: source.baseBranch ?? checkpoint.branch ?? "main",
+                createBranch: false,
+                source: {
+                  kind: "handoff",
+                  sourceSessionId: source.id,
+                  checkpointId: checkpoint.checkpointId,
+                  eventCursor: checkpoint.eventCursor,
+                },
+              }),
+            ).pipe(
+              Effect.mapError((cause) => new EnvironmentHandoffError({
+                reason: "unavailable",
+                message: "The managed target could not verify the source Git base.",
+                sessionId: source.id,
+                environmentId: target,
+              })),
+            );
+          }
+          const targetSession = requestedSessionId
+            ? { id: requestedSessionId, environmentId: target }
+            : null;
+          const value = yield* (targetSession
+            ? remote.request(
+                targetSession,
+                "Sessions.continueOnEnvironment",
+                {
+                  sourceSession: {
+                    ...source,
+                    title: `${source.title} continuation`,
+                    environmentId: target,
+                    repo: targetRepository?.name ?? source.repo,
+                    repoPath: "/workspace",
+                    worktreePath: undefined,
+                    baseBranch: targetBaseBranch,
+                  },
+                  requestedSessionId,
+                },
+              )
+            : remote.requestOnEnvironment(
+                target,
             "Sessions.continueOnEnvironment",
             {
               sourceSession: {
                 ...source,
                 title: `${source.title} continuation`,
                 environmentId: target,
-                repo: targetRepository.name,
-                repoPath: targetRepository.path,
+                repo: targetRepository!.name,
+                repoPath: targetRepository!.path,
                 worktreePath: undefined,
                 baseBranch: targetBaseBranch,
               },
             },
-          ).pipe(
+              )).pipe(
             Effect.mapError(() => new EnvironmentHandoffError({
               reason: "unavailable",
               message: "The target device did not admit a continuation workspace.",
@@ -1463,6 +1655,24 @@ export const continueOnEnvironment = (
               environmentId: target,
             }));
           }
+          yield* remote.request(created, "Workspace.importHandoff", { checkpoint }).pipe(
+            Effect.mapError((cause) => new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: "The target workspace did not verify the source checkpoint.",
+              sessionId: source.id,
+              environmentId: target,
+            })),
+          );
+          yield* remote.request(created, "Sessions.importConversation", {
+            messages: sourceMessages,
+          }).pipe(
+            Effect.mapError(() => new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: "The target session could not restore the source conversation.",
+              sessionId: source.id,
+              environmentId: target,
+            })),
+          );
           return yield* sessions.upsertRemote(created).pipe(
             Effect.mapError(() => new EnvironmentHandoffError({
               reason: "unavailable",
@@ -3756,6 +3966,16 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       Effect.map((hosts) => hosts.map((host) => ({ ...host }))),
     ),
   "Environment.pairSsh": (input) => EnvironmentService.pairSsh(input),
+  "Environment.createManaged": ({ name }) => EnvironmentService.createManaged(name),
+  "Environment.managedLifecycle": ({ environment, action }) =>
+    environment.kind === "managed"
+      ? EnvironmentService.managedLifecycle(environment, action)
+      : Effect.fail(
+          new EnvironmentError({
+            reason: "invalid-input",
+            message: "Only managed environments support lifecycle actions."
+          })
+        ),
   "Environment.rename": ({ deviceId, name }) =>
     EnvironmentService.rename(deviceId, name),
   "Environment.revoke": ({ deviceId }) => EnvironmentService.revoke(deviceId),
@@ -3935,9 +4155,19 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           Effect.mapError((cause) => new GitError({ message: "Could not list remote branches", cause })),
         )
       : WorkspaceService.branches(repoPath),
-  "Workspace.files": ({ repoPath, environmentId }) =>
+  "Workspace.files": ({ repoPath, environmentId, sessionId }) =>
     environmentId
-      ? RemoteSessionService.requestOnEnvironment(environmentId, "Workspace.files", { repoPath }).pipe(
+      ? (sessionId
+          ? RemoteSessionService.request(
+              { id: sessionId, environmentId },
+              "Workspace.files",
+              { repoPath },
+            )
+          : RemoteSessionService.requestOnEnvironment(
+              environmentId,
+              "Workspace.files",
+              { repoPath },
+            )).pipe(
           Effect.flatMap(Schema.decodeUnknown(Schema.Array(Schema.String))),
           Effect.mapError((cause) => new GitError({ message: "Could not list remote files", cause })),
         )
@@ -3946,9 +4176,12 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Workspace.revertLines": (input) => workspaceRevertLines(input),
   "Sessions.list": () => SessionStore.list(),
   "Sessions.get": ({ id }) => SessionStore.get(id),
-  "Sessions.create": (input) => createSessionRouted(input),
-  "Sessions.createFromPr": (input) => createSessionFromPrRouted(input),
-  "Sessions.createFromIssue": (input) => createSessionFromIssueRouted(input),
+  "Sessions.create": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    createSessionRouted(input),
+  "Sessions.createFromPr": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    createSessionFromPrRouted(input),
+  "Sessions.createFromIssue": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    createSessionFromIssueRouted(input),
   "Sessions.linkIssue": (input) => linkIssue(input),
   "Sessions.unlinkIssue": ({ sessionId }) => unlinkIssue(sessionId),
   "Sessions.clearInitialPrompt": ({ sessionId }) =>

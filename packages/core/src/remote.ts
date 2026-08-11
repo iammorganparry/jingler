@@ -13,6 +13,7 @@ export const REMOTE_SESSION_INVENTORY_VERSION = 1 as const
 export const CONTROLLER_LEASE_VERSION = 1 as const
 /** Upper bound enforced independently by the issuer and relay verifier. */
 export const REMOTE_GRANT_MAX_TTL_SECONDS = 15 * 60
+export const MANAGED_RUNTIME_GRANT_MAX_TTL_SECONDS = 5 * 60
 
 const Identity = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))
 const OpaqueId = Identity.pipe(
@@ -25,6 +26,52 @@ const Base64Url = Schema.String.pipe(
 const EpochSeconds = Schema.Int.pipe(Schema.nonNegative())
 const Generation = Schema.Int.pipe(Schema.between(1, Number.MAX_SAFE_INTEGER))
 const Sequence = Schema.Int.pipe(Schema.between(1, Number.MAX_SAFE_INTEGER))
+
+export const ManagedRuntimeAction = Schema.Literal(
+  "session.start",
+  "session.input",
+  "session.cancel",
+  "session.observe"
+)
+export type ManagedRuntimeAction = Schema.Schema.Type<typeof ManagedRuntimeAction>
+
+/** Single wire-authority mapping used by both managed clients and the runtime. */
+export const managedRuntimeActionForOperation = (
+  operation: string
+): ManagedRuntimeAction =>
+  operation === "Agent.stop"
+    ? "session.cancel"
+    : operation === "Sessions.create"
+      ? "session.start"
+      : operation === "Workspace.branches" ||
+          operation === "Workspace.exportHandoff" ||
+          operation === "Workspace.files" ||
+          operation === "Workspace.repos"
+        ? "session.observe"
+        : "session.input"
+
+/** Short-lived server-to-runtime capability; account auth is still checked continuously. */
+export const ManagedRuntimeGrantClaims = Schema.Struct({
+  version: Schema.Literal(1),
+  issuer: Schema.Literal("jingler"),
+  audience: Schema.Literal("managed-runtime"),
+  grantId: OpaqueId,
+  subject: Identity,
+  environmentId: OpaqueId,
+  sessionId: OpaqueId,
+  actions: Schema.Array(ManagedRuntimeAction).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(4)
+  ),
+  authStateVersion: Generation,
+  environmentGeneration: Generation,
+  sessionGeneration: Generation,
+  issuedAt: EpochSeconds,
+  expiresAt: EpochSeconds
+})
+export type ManagedRuntimeGrantClaims = Schema.Schema.Type<
+  typeof ManagedRuntimeGrantClaims
+>
 
 export const RemoteDeviceId = OpaqueId
 export type RemoteDeviceId = Schema.Schema.Type<typeof RemoteDeviceId>
@@ -423,7 +470,7 @@ export type DeviceControlClientMessage = Schema.Schema.Type<
 export const deviceChallengePayload = (
   challenge: DeviceChallenge,
   newPublicKey?: DevicePublicKey
-): Uint8Array<ArrayBuffer> =>
+): Uint8Array =>
   new TextEncoder().encode(
     [
       challenge.version,

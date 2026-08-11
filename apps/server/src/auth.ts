@@ -16,6 +16,10 @@ import { getDb } from "./db/client.js"
 import { schema } from "./db/schema.js"
 import { env, hasGithub, hasGoogle } from "./env.js"
 import {
+  deleteAuthStateSession,
+  upsertAuthStateSession
+} from "./auth-state-client.js"
+import {
   sendLoginEmail,
   sendPasswordChangedEmail,
   sendResetPasswordEmail,
@@ -60,6 +64,11 @@ const createAuth = () => {
   }
   if (hasGoogle()) {
     socialProviders.google = { clientId: env.googleClientId, clientSecret: env.googleClientSecret }
+  }
+  const authState = {
+    enabled: env.managedEnvironmentsEnabled,
+    url: env.authStateUrl,
+    serviceSecret: env.authStateServiceSecret
   }
 
   return betterAuth({
@@ -108,6 +117,32 @@ const createAuth = () => {
             // eslint-disable-next-line no-console
             console.error(`[@jingler/server] welcome email failed for ${user.email}:`, error)
           }
+        }
+      }
+    },
+    session: {
+      create: {
+        after: async (session) => {
+          await upsertAuthStateSession(authState, session).catch((error) => {
+            // Account sign-in must not depend on the optional managed runtime.
+            // Managed execution remains fail-closed until a later refresh syncs.
+            console.error("[@jingler/server] auth-state session sync failed:", error)
+          })
+        }
+      },
+      update: {
+        after: async (session) => {
+          await upsertAuthStateSession(authState, session).catch((error) => {
+            console.error("[@jingler/server] auth-state session sync failed:", error)
+          })
+        }
+      },
+      delete: {
+        // Revoke cloud execution before deleting the local session. If the
+        // authority is unavailable, sign-out remains retryable and cannot leave
+        // a deleted account session authorizing a managed process.
+        before: async (session) => {
+          await deleteAuthStateSession(authState, session)
         }
       }
     }

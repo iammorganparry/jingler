@@ -1,4 +1,5 @@
 import type {
+  AccountDevice,
   DeviceRecord,
   DeviceChallengeExchangeRequest as DeviceChallengeExchangeRequestValue,
   DeviceChallengeRequest as DeviceChallengeRequestValue,
@@ -22,7 +23,7 @@ import {
   PairingClaimRequest
 } from "@jingler/core"
 import { createHash } from "node:crypto"
-import { Either, Schema } from "effect"
+import { Schema } from "effect"
 import { Hono, type Context } from "hono"
 import { getAuth } from "./auth.js"
 import {
@@ -35,10 +36,10 @@ import {
 } from "./device-grant.js"
 import { DeviceRepository, type DeviceEnrollmentResult } from "./db/repositories/device-repository.js"
 import { env } from "./env.js"
+import { decodeBoundedJson } from "./request-decoding.js"
 import { runtime } from "./runtime.js"
 
 const noStoreHeaders = { "cache-control": "no-store" } as const
-const MAX_BODY_BYTES = 128 * 1_024
 type DeviceServerTelemetryValue = string | number | boolean | null
 
 const deviceServerTelemetry = (
@@ -147,47 +148,6 @@ const defaultDependencies = (): DeviceRoutesDependencies => ({
   relayFetch: (input, init) => fetch(input, init)
 })
 
-const decodeRequest = async <A, I>(
-  request: Request,
-  schema: Schema.Schema<A, I>
-): Promise<A | null> => {
-  const contentLength = request.headers.get("content-length")
-  if (contentLength && Number(contentLength) > MAX_BODY_BYTES) return null
-  if (!request.body) return null
-  try {
-    const reader = request.body.getReader()
-    const chunks: Uint8Array<ArrayBuffer>[] = []
-    let size = 0
-    while (true) {
-      const result = await reader.read()
-      if (result.done) break
-      size += result.value.byteLength
-      if (size > MAX_BODY_BYTES) {
-        await reader.cancel()
-        return null
-      }
-      const chunk = new Uint8Array(result.value.byteLength)
-      chunk.set(result.value)
-      chunks.push(chunk)
-    }
-    const bytes = new Uint8Array(size)
-    let offset = 0
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.byteLength
-    }
-    const decoded = Schema.decodeUnknownEither(schema)(
-      JSON.parse(new TextDecoder().decode(bytes)),
-      {
-        onExcessProperty: "error"
-      }
-    )
-    return Either.isRight(decoded) ? decoded.right : null
-  } catch {
-    return null
-  }
-}
-
 const relayUrl = (base: string, path: string): string =>
   `${base.replace(/\/$/u, "")}${path}`
 
@@ -275,6 +235,49 @@ const configured = (dependencies: DeviceRoutesDependencies): Response | null =>
         503
       )
 
+export const loadAccountDevices = async (
+  dependencies: DeviceRoutesDependencies,
+  subject: string,
+  clientInstanceId: string
+): Promise<ReadonlyArray<AccountDevice>> => {
+  const records = await deviceStore(dependencies).listForUser(subject)
+  const relayDevices = await relayRequest(
+    dependencies,
+    "/v1/devices",
+    controlGrant(dependencies, subject, clientInstanceId).grant,
+    "GET"
+  )
+    .then(async (response) => {
+      if (!response.ok) return []
+      return Schema.decodeUnknownSync(DeviceListResponse)(await response.json()).devices
+    })
+    .catch(() => [])
+  const presence = new Map(relayDevices.map((entry) => [entry.deviceId, entry.presence]))
+  return records.map((record) => {
+    const current = presence.get(record.deviceId)
+    return {
+      ...record,
+      presence: {
+        version: 1 as const,
+        deviceId: record.deviceId,
+        state: current?.state ?? "offline",
+        connectedAt: current?.connectedAt ?? null,
+        lastSeenAt: current?.lastSeenAt ?? null,
+        activeSessionIds: current?.activeSessionIds ?? []
+      }
+    }
+  })
+}
+
+export const loadAccountDevicesForUser = (
+  subject: string
+): Promise<ReadonlyArray<AccountDevice>> =>
+  loadAccountDevices(
+    defaultDependencies(),
+    subject,
+    `client_server_${createHash("sha256").update(subject).digest("base64url").slice(0, 24)}`
+  )
+
 export const createDeviceRoutes = (
   dependenciesFactory: () => DeviceRoutesDependencies = defaultDependencies
 ) => {
@@ -286,7 +289,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const input = await decodeRequest(context.req.raw, DeviceClaimRequest)
+    const input = await decodeBoundedJson(context.req.raw, DeviceClaimRequest)
     if (!input) return json({ error: "Invalid device enrollment request" }, 400)
     const issued = dependencies.issueClaim({
       subject,
@@ -392,7 +395,7 @@ export const createDeviceRoutes = (
         retryable: false
       }, 401)
     }
-    const input = await decodeRequest(context.req.raw, DeviceRegistrationRequest)
+    const input = await decodeBoundedJson(context.req.raw, DeviceRegistrationRequest)
     if (!input || input.credentialId !== credential.claimId) {
       return json({
         _tag: "DeviceControlPlaneError",
@@ -467,7 +470,7 @@ export const createDeviceRoutes = (
     if (unavailable) return unavailable
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
-    const input = await decodeRequest(context.req.raw, DeviceRelayGrantRequest)
+    const input = await decodeBoundedJson(context.req.raw, DeviceRelayGrantRequest)
     if (!input) return json({ error: "Invalid grant request" }, 400)
     if (input.audience === "device-control") {
       if (input.deviceId !== null || input.sessionId !== null) {
@@ -550,7 +553,7 @@ export const createDeviceRoutes = (
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
     const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
-    const input = await decodeRequest(context.req.raw, PairingClaimRequest)
+    const input = await decodeBoundedJson(context.req.raw, PairingClaimRequest)
     if (!input) return json({ error: "Invalid pairing claim" }, 400)
     return forward(
       await relayRequest(
@@ -570,41 +573,21 @@ export const createDeviceRoutes = (
     const subject = await authenticatedUser(context.req.raw, dependencies)
     if (!subject) return json({ error: "Authentication required" }, 401)
     const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
-    let records: ReadonlyArray<DeviceRecord>
     try {
-      records = await deviceStore(dependencies).listForUser(subject)
+      const devices = await loadAccountDevices(
+        dependencies,
+        subject,
+        clientInstanceId
+      )
+      return json(
+        Schema.decodeUnknownSync(AccountDeviceListResponse)({
+          version: 1,
+          devices
+        })
+      )
     } catch {
       return json({ error: "Device registry unavailable" }, 503)
     }
-    const relayDevices = await relayRequest(
-      dependencies,
-      "/v1/devices",
-      controlGrant(dependencies, subject, clientInstanceId).grant,
-      "GET"
-    )
-      .then(async (response) => {
-        if (!response.ok) return []
-        return Schema.decodeUnknownSync(DeviceListResponse)(await response.json()).devices
-      })
-      .catch(() => [])
-    const presence = new Map(relayDevices.map((entry) => [entry.deviceId, entry.presence]))
-    return json(Schema.decodeUnknownSync(AccountDeviceListResponse)({
-      version: 1,
-      devices: records.map((record) => {
-        const current = presence.get(record.deviceId)
-        return {
-          ...record,
-          presence: {
-            version: 1,
-            deviceId: record.deviceId,
-            state: current?.state ?? "offline",
-            connectedAt: current?.connectedAt ?? null,
-            lastSeenAt: current?.lastSeenAt ?? null,
-            activeSessionIds: current?.activeSessionIds ?? []
-          }
-        }
-      })
-    }))
   })
 
   routes.get("/:deviceId", async (context) => {
@@ -652,7 +635,7 @@ export const createDeviceRoutes = (
     const dependencies = dependenciesFactory()
     const unavailable = configured(dependencies)
     if (unavailable) return unavailable
-    const input = await decodeRequest(context.req.raw, DeviceChallengeRequest)
+    const input = await decodeBoundedJson(context.req.raw, DeviceChallengeRequest)
     if (!input) return json({ error: "Invalid challenge request" }, 400)
     const challengeGrant = dependencies.issueGrant({
       audience: "device-challenge",
@@ -684,7 +667,7 @@ export const createDeviceRoutes = (
     const dependencies = dependenciesFactory()
     const unavailable = configured(dependencies)
     if (unavailable) return unavailable
-    const input = await decodeRequest(
+    const input = await decodeBoundedJson(
       context.req.raw,
       DeviceChallengeExchangeRequest
     )
@@ -768,7 +751,7 @@ export const createDeviceRoutes = (
     if (!subject) return json({ error: "Authentication required" }, 401)
     const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     const deviceId = context.req.param("deviceId")
-    const input = await decodeRequest(context.req.raw, DeviceRenameRequest)
+    const input = await decodeBoundedJson(context.req.raw, DeviceRenameRequest)
     if (!input || input.deviceId !== deviceId)
       return json({ error: "Invalid device rename" }, 400)
     const renamed = await deviceStore(dependencies).renameForUser({
@@ -814,7 +797,7 @@ export const createDeviceRoutes = (
     if (!subject) return json({ error: "Authentication required" }, 401)
     const clientInstanceId = requestClientInstanceId(context.req.raw, subject)
     const deviceId = context.req.param("deviceId")
-    const input = await decodeRequest(context.req.raw, DeviceKeyRotationRequest)
+    const input = await decodeBoundedJson(context.req.raw, DeviceKeyRotationRequest)
     if (!input || input.challenge.deviceId !== deviceId) {
       return json({ error: "Invalid key rotation" }, 400)
     }

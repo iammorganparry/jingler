@@ -25,6 +25,7 @@ describe("SessionSidebar session identity", () => {
         onSelect={() => {}}
         sessions={[session({ id: "remote", environmentId: "device-buildbox" })]}
         environments={[{
+          kind: "owned",
           id: "device-buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" },
           capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["claude"], maxConcurrentSessions: 4 },
           state: "offline", agentVersion: "2.0.3", lastSeenAt: 1

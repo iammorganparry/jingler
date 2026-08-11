@@ -14,6 +14,11 @@ export interface EnvironmentMachineApi {
   ) => () => void
   suggestHosts: () => Promise<ReadonlyArray<SshHost>>
   pairSsh: (input: PairSshEnvironmentInput) => Promise<Environment>
+  createManaged: (name: string) => Promise<Environment>
+  managedLifecycle: (
+    environment: Environment,
+    action: "start" | "pause" | "restore"
+  ) => Promise<Environment>
   rename: (id: string, name: string) => Promise<Environment>
   revoke: (id: string) => Promise<void>
 }
@@ -39,16 +44,37 @@ type EnvironmentEvent =
   | { type: "RENAME"; id: string; name: string }
   | { type: "REVOKE"; id: string }
   | {
+      type: "CREATE_MANAGED"
+      name: string
+      resolve?: () => void
+      reject?: (error: unknown) => void
+    }
+  | {
+      type: "MANAGED_LIFECYCLE"
+      environment: Environment
+      action: "start" | "pause" | "restore"
+      resolve?: () => void
+      reject?: (error: unknown) => void
+    }
+  | {
       type: "INVENTORY_LOADED"
       environments: ReadonlyArray<Environment>
     }
   | { type: "INVENTORY_FAILED"; error: unknown }
   | { type: "ENVIRONMENT_RENAMED"; environment: Environment }
+  | { type: "ENVIRONMENT_UPDATED"; environment: Environment }
   | { type: "ENVIRONMENT_REVOKED"; id: string }
 
 type InventoryCommand = Extract<
   EnvironmentEvent,
-  { type: "REFRESH" | "RENAME" | "REVOKE" }
+  {
+    type:
+      | "REFRESH"
+      | "RENAME"
+      | "REVOKE"
+      | "CREATE_MANAGED"
+      | "MANAGED_LIFECYCLE"
+  }
 >
 
 const messageOf = (error: unknown): string =>
@@ -118,6 +144,40 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
                 })
               return
             }
+            if (event.type === "CREATE_MANAGED") {
+              void api
+                .createManaged(event.name)
+                .then((environment) => {
+                  if (active) {
+                    sendBack({ type: "ENVIRONMENT_UPDATED", environment })
+                    event.resolve?.()
+                  }
+                })
+                .catch((error: unknown) => {
+                  if (active) {
+                    sendBack({ type: "INVENTORY_FAILED", error })
+                    event.reject?.(error)
+                  }
+                })
+              return
+            }
+            if (event.type === "MANAGED_LIFECYCLE") {
+              void api
+                .managedLifecycle(event.environment, event.action)
+                .then((environment) => {
+                  if (active) {
+                    sendBack({ type: "ENVIRONMENT_UPDATED", environment })
+                    event.resolve?.()
+                  }
+                })
+                .catch((error: unknown) => {
+                  if (active) {
+                    sendBack({ type: "INVENTORY_FAILED", error })
+                    event.reject?.(error)
+                  }
+                })
+              return
+            }
             void api
               .revoke(event.id)
               .then(() => {
@@ -182,7 +242,20 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
       REVOKE: {
         actions: sendTo("inventory", ({ event }) => event)
       },
+      CREATE_MANAGED: {
+        actions: sendTo("inventory", ({ event }) => event)
+      },
+      MANAGED_LIFECYCLE: {
+        actions: sendTo("inventory", ({ event }) => event)
+      },
       ENVIRONMENT_RENAMED: {
+        actions: assign({
+          environments: ({ context, event }) =>
+            upsertEnvironment(context.environments, event.environment),
+          inventoryError: null
+        })
+      },
+      ENVIRONMENT_UPDATED: {
         actions: assign({
           environments: ({ context, event }) =>
             upsertEnvironment(context.environments, event.environment),

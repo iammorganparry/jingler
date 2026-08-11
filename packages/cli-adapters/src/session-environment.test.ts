@@ -8,7 +8,7 @@ const source = (patch: Partial<Session> = {}): Session => ({
   diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0, tokens: 0,
   updatedAt: "2026-08-08T00:00:00.000Z", chats: [{ id: "c_source", title: null, createdAt: "2026-08-08T00:00:00.000Z", updatedAt: "2026-08-08T00:00:00.000Z" }], activeChatId: "c_source", ...patch
 })
-const target: Environment = { id: "buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" }, capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["claude"], maxConcurrentSessions: 4 }, state: "online", agentVersion: "2.0.3", lastSeenAt: 1 }
+const target: Environment = { kind: "owned", id: "buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" }, capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["claude"], maxConcurrentSessions: 4 }, state: "online", agentVersion: "2.0.3", lastSeenAt: 1 }
 
 describe("session environment handoff", () => {
   const deps = () => {

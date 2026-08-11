@@ -127,6 +127,57 @@ describe("GitHub session relay schemas", () => {
 })
 
 describe("Environment", () => {
+  it("decodes legacy environments as owned devices", () => {
+    const decoded = Schema.decodeUnknownSync(Environment)({
+      id: "device-1",
+      name: "buildbox",
+      platform: { os: "darwin", arch: "arm64" },
+      capabilities: {
+        version: 1,
+        capabilities: [],
+        harnesses: ["codex"],
+        maxConcurrentSessions: 1
+      },
+      state: "online",
+      agentVersion: null,
+      lastSeenAt: null
+    })
+
+    expect(decoded.kind).toBe("owned")
+  })
+
+  it("decodes renderer-safe managed environment metadata", () => {
+    const decoded = Schema.decodeUnknownSync(Environment)(
+      {
+        kind: "managed",
+        id: "managed-1",
+        name: "Cloud workspace",
+        platform: { os: "linux", arch: "x64" },
+        capabilities: {
+          version: 1,
+          capabilities: ["session.start"],
+          harnesses: ["codex"],
+          maxConcurrentSessions: 1
+        },
+        state: "sleeping",
+        agentVersion: null,
+        lastSeenAt: null,
+        region: "wnam",
+        instanceType: "basic",
+        generation: 1,
+        createdAt: 1,
+        updatedAt: 1
+      },
+      { onExcessProperty: "error" }
+    )
+
+    expect(decoded).toMatchObject({
+      kind: "managed",
+      state: "sleeping",
+      instanceType: "basic"
+    })
+  })
+
   it("rejects credentials embedded in persisted environment metadata", () => {
     expect(() =>
       Schema.decodeUnknownSync(Environment)(

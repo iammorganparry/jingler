@@ -476,7 +476,11 @@ const loadConversation = fromPromise<
     rpc.sessionsTranscriptPage(input.session.id, input.chatId, undefined, HISTORY_PAGE_SIZE),
     rpc.planCurrent(input.session.id),
     input.session.worktreePath
-      ? rpc.workspaceFiles(input.session.worktreePath, input.session.environmentId)
+      ? rpc.workspaceFiles(
+          input.session.worktreePath,
+          input.session.environmentId,
+          input.session.id
+        )
       : Promise.resolve([] as ReadonlyArray<string>),
     rpc.sessionsDiff(input.session.id)
   ])
@@ -1460,7 +1464,11 @@ export const conversationMachine = setup({
       const worktreePath = context.session.worktreePath
       if (worktreePath) {
         void rpc
-          .workspaceFiles(worktreePath, context.session.environmentId)
+          .workspaceFiles(
+            worktreePath,
+            context.session.environmentId,
+            context.session.id
+          )
           .then((files) => self.send({ type: "FILES_UPDATED", files }))
           .catch(() => {})
       }

@@ -5,7 +5,7 @@ import type {
   RemoteDevice
 } from "@jingler/core"
 import { Effect, Layer } from "effect"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EnvironmentService, environmentFromRemoteDevice } from "./environment.js"
 import {
   type ActivateRemoteDeviceInput,
@@ -130,11 +130,18 @@ const environmentLayer = (bootstrap: {
     )
   )
 
+beforeEach(() => {
+  process.env.JINGLER_HARNESS_HOME = "/nonexistent/jingler-environment-test-home"
+  delete process.env.OPENAI_API_KEY
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
   delete process.env.JINGLER_AUTH_URL
   delete process.env.JINGLER_DEVICE_RELAY_URL
   delete process.env.JINGLER_DEVICE_AGENT_BUNDLE
+  delete process.env.JINGLER_HARNESS_HOME
+  delete process.env.OPENAI_API_KEY
 })
 
 describe("environment metadata", () => {
@@ -166,11 +173,67 @@ describe("environment metadata", () => {
 })
 
 describe("environment device API", () => {
+  it("deletes a managed environment through the server lifecycle route", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = []
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url === "https://server.test/api/environments") {
+        return Response.json({
+          version: 1,
+          environments: [{
+            kind: "managed",
+            id: "managed_one",
+            name: "Cloud workspace",
+            platform: { os: "linux", arch: "x64" },
+            capabilities: {
+              version: 1,
+              capabilities: ["session.start"],
+              harnesses: ["codex"],
+              maxConcurrentSessions: 1
+            },
+            state: "paused",
+            agentVersion: null,
+            lastSeenAt: null,
+            region: "wnam",
+            instanceType: "basic",
+            generation: 7,
+            createdAt: 100,
+            updatedAt: 100
+          }]
+        })
+      }
+      calls.push({
+        url,
+        method: init?.method ?? "GET",
+        body: init?.body ? JSON.parse(String(init.body)) : null
+      })
+      return Response.json({ version: 1 })
+    })
+    process.env.JINGLER_AUTH_URL = "https://server.test"
+    const layer = environmentLayer({
+      bootstrap: () => Effect.succeed(pending),
+      installAndBootstrap: () => Effect.succeed(pending)
+    })
+
+    await Effect.runPromise(
+      EnvironmentService.revoke("managed_one").pipe(Effect.provide(layer))
+    )
+
+    expect(calls).toEqual([{
+      url: "https://server.test/api/environments/managed/managed_one/delete",
+      method: "POST",
+      body: { version: 1, expectedGeneration: 7 }
+    }])
+  })
+
   it("persists the per-install client identity across service restarts", async () => {
     const clientIds: string[] = []
     vi.stubGlobal("fetch", async (_input: string | URL | Request, init?: RequestInit) => {
       clientIds.push(new Headers(init?.headers).get("x-jingler-client-instance-id") ?? "")
-      return Response.json({ version: 1, devices: [accountDevice] })
+      return Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
     })
     process.env.JINGLER_AUTH_URL = "https://server.test"
     const store = await Effect.runPromise(makeInMemorySecretStore("desktop-bearer"))
@@ -187,11 +250,14 @@ describe("environment device API", () => {
     expect(clientIds[1]).toBe(clientIds[0])
   })
 
-  it("uses the server's /api/devices mount for desktop requests", async () => {
+  it("uses the unified server environment inventory for desktop requests", async () => {
     const urls: Array<string> = []
     vi.stubGlobal("fetch", async (input: string | URL | Request) => {
       urls.push(String(input))
-      return Response.json({ version: 1, devices: [accountDevice] })
+      return Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
     })
     process.env.JINGLER_AUTH_URL = "https://server.test"
     const layer = environmentLayer({
@@ -203,8 +269,33 @@ describe("environment device API", () => {
       EnvironmentService.list.pipe(Effect.provide(layer))
     )
 
-    expect(urls).toStrictEqual(["https://server.test/api/devices"])
+    expect(urls).toStrictEqual(["https://server.test/api/environments"])
     expect(environments.map((environment) => environment.id)).toStrictEqual([device.deviceId])
+  })
+
+  it("reuses the immutable environment kind after inventory is loaded", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    process.env.JINGLER_AUTH_URL = "https://server.test"
+    const layer = environmentLayer({
+      bootstrap: () => Effect.succeed(pending),
+      installAndBootstrap: () => Effect.succeed(pending)
+    })
+
+    const kind = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* EnvironmentService.list
+        return yield* EnvironmentService.kind(device.deviceId)
+      }).pipe(Effect.provide(layer))
+    )
+
+    expect(kind).toBe("owned")
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 
   it("enrolls an owned machine with an invisible account credential", async () => {

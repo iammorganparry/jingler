@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { billingPath, harnessEnv, METERED_ENV_KEYS } from "./subscription.js"
+import {
+  billingPath,
+  cloudCodexApiKey,
+  harnessEnv,
+  METERED_ENV_KEYS
+} from "./subscription.js"
 
 const ENV = { PATH: "/usr/bin", HOME: "/home/x", OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "sk-y" }
 
@@ -68,5 +73,14 @@ describe("billingPath", () => {
     // The plan probe failing does not make the billing ambiguous: that key IS
     // what the run gets charged to.
     expect(billingPath("codex", ENV, false, true)).toBe("api-key")
+  })
+})
+
+describe("cloudCodexApiKey", () => {
+  it("returns only a bounded explicit API key", () => {
+    expect(cloudCodexApiKey({ OPENAI_API_KEY: `sk-${"a".repeat(30)}` })).toBe(
+      `sk-${"a".repeat(30)}`
+    )
+    expect(cloudCodexApiKey({ OPENAI_API_KEY: "short" })).toBeNull()
   })
 })

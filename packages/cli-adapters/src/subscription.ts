@@ -116,6 +116,33 @@ const cache = new Map<CliKind, boolean>()
  */
 const harnessHome = (): string => process.env.JINGLER_HARNESS_HOME ?? homedir()
 
+const cloudApiKey = (value: unknown): string | null =>
+  typeof value === "string" &&
+  value.length >= 20 &&
+  value.length <= 512 &&
+  [...value].every((character) => {
+    const code = character.charCodeAt(0)
+    return code >= 33 && code <= 126
+  })
+    ? value
+    : null
+
+/** A metered Codex key that can safely be forwarded to the managed runtime. */
+export const cloudCodexApiKey = (
+  environment: Record<string, string | undefined> = process.env
+): string | null => {
+  const fromEnvironment = cloudApiKey(environment.OPENAI_API_KEY)
+  if (fromEnvironment !== null) return fromEnvironment
+  try {
+    const raw = JSON.parse(
+      readFileSync(join(harnessHome(), ".codex", "auth.json"), "utf8")
+    ) as { OPENAI_API_KEY?: unknown }
+    return cloudApiKey(raw.OPENAI_API_KEY)
+  } catch {
+    return null
+  }
+}
+
 /**
  * Whether the probe itself could not run, as opposed to finding no plan.
  *

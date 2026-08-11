@@ -567,6 +567,7 @@ export const startFakeAuthServer = async (
   const sentEmails: Array<string> = []
   const requests: Array<FakeMemoryRequest> = []
   const organizations = new Map<string, FakeOrganizationMemory>()
+  const managedEnvironments = new Map<string, Record<string, unknown>>()
   let memoryAvailable = !options.unavailable
   let requestSequence = 0
 
@@ -631,6 +632,97 @@ export const startFakeAuthServer = async (
         res.end(await forwarded.text())
       })().catch(() => json(502, { error: "device relay unavailable" }))
       return
+    }
+
+    if (url.pathname === "/api/environments" && req.method === "GET") {
+      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
+      void (async () => {
+        const owned = options.deviceRelayUrl
+          ? await fetch(`${options.deviceRelayUrl}/api/devices`, {
+              headers: { authorization: `Bearer ${options.token}` }
+            })
+              .then((response) => response.json())
+              .then((body) =>
+                Array.isArray((body as { devices?: unknown }).devices)
+                  ? ((body as { devices: Array<Record<string, unknown>> }).devices).map(
+                      (device) => ({
+                        kind: "owned",
+                        id: device.deviceId,
+                        name: device.displayName,
+                        platform: device.platform,
+                        capabilities: device.capabilities,
+                        state:
+                          Array.isArray(
+                            (
+                              device.capabilities as
+                                | { capabilities?: unknown }
+                                | undefined
+                            )?.capabilities
+                          ) &&
+                          !(
+                            device.capabilities as {
+                              capabilities: Array<unknown>
+                            }
+                          ).capabilities.includes("session.start")
+                            ? "incompatible"
+                            : ((device.presence as { state?: unknown } | undefined)
+                                ?.state ?? "offline"),
+                        agentVersion: device.agentVersion ?? null,
+                        lastSeenAt:
+                          (device.presence as { lastSeenAt?: unknown } | undefined)?.lastSeenAt ??
+                          null
+                      })
+                    )
+                  : []
+              )
+          : []
+        json(200, {
+          version: 1,
+          environments: [...owned, ...managedEnvironments.values()]
+        })
+      })().catch(() => json(502, { error: "environment inventory unavailable" }))
+      return
+    }
+
+    if (url.pathname === "/api/environments/managed" && req.method === "POST") {
+      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
+      void readJson().then((value) => {
+        const body = jsonBody(value)
+        const now = Date.now()
+        const environment = {
+          kind: "managed",
+          id: `managed_e2e_${managedEnvironments.size + 1}`,
+          name: typeof body.name === "string" ? body.name : "Cloud environment",
+          platform: { os: "linux", arch: "x64" },
+          capabilities: {
+            version: 1,
+            capabilities: ["session.start", "session.input", "session.cancel", "session.observe"],
+            harnesses: ["codex"],
+            maxConcurrentSessions: 1
+          },
+          state: "online",
+          agentVersion: null,
+          lastSeenAt: now,
+          region: null,
+          instanceType: "basic",
+          generation: 1,
+          createdAt: now,
+          updatedAt: now
+        }
+        managedEnvironments.set(environment.id, environment)
+        json(201, { version: 1, environment })
+      })
+      return
+    }
+
+    const managedMatch = url.pathname.match(
+      /^\/api\/environments\/managed\/([^/]+)\/delete$/u
+    )
+    if (managedMatch && req.method === "POST") {
+      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
+      const environmentId = decodeURIComponent(managedMatch[1] ?? "")
+      if (!managedEnvironments.delete(environmentId)) return json(404, { error: "not found" })
+      return json(200, { version: 1, deleted: true })
     }
 
     if (url.pathname === "/api/memory/organizations" && req.method === "GET") {

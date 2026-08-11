@@ -653,6 +653,15 @@ export class GitService extends Effect.Service<GitService>()(
       const remoteUrl = (cwd: string) =>
         gitLine(cwd, "remote", "get-url", "origin")
 
+      const revision = (cwd: string, ref: string) =>
+        gitLine(cwd, "rev-parse", "--verify", ref).pipe(
+          Effect.flatMap((sha) =>
+            sha
+              ? Effect.succeed(sha)
+              : Effect.fail(new GitError({ message: `Git ref ${ref} is unavailable.` }))
+          )
+        )
+
       const commit = (cwd: string, message: string) =>
         runGit(cwd, ["commit", "--message", message]).pipe(
           Effect.zipRight(gitLine(cwd, "rev-parse", "HEAD")),
@@ -960,6 +969,7 @@ export class GitService extends Effect.Service<GitService>()(
         stageAll,
         hasStagedChanges,
         remoteUrl,
+        revision,
         commit,
         pushConfigured,
         pushWithInstallationToken,

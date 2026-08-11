@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { DevicesSection } from "./settings-view.js"
 
 const base: Environment = {
+  kind: "owned",
   id: "device-1",
   name: "buildbox",
   platform: { os: "darwin", arch: "arm64" },
@@ -44,6 +45,8 @@ describe("Devices settings", () => {
         loading={false}
         dialog={dialog}
         onOpen={vi.fn()}
+        onCreateManaged={vi.fn()}
+        onManagedLifecycle={vi.fn()}
         onRefresh={vi.fn()}
         onRename={vi.fn()}
         onRevoke={vi.fn()}
@@ -66,6 +69,8 @@ describe("Devices settings", () => {
         loading={false}
         dialog={dialog}
         onOpen={vi.fn()}
+        onCreateManaged={vi.fn()}
+        onManagedLifecycle={vi.fn()}
         onRefresh={vi.fn()}
         onRename={vi.fn()}
         onRevoke={revoke}
@@ -85,6 +90,8 @@ describe("Devices settings", () => {
         loading={false}
         dialog={dialog}
         onOpen={vi.fn()}
+        onCreateManaged={vi.fn()}
+        onManagedLifecycle={vi.fn()}
         onRefresh={vi.fn()}
         onRename={rename}
         onRevoke={vi.fn()}
@@ -100,5 +107,33 @@ describe("Devices settings", () => {
     await waitFor(() =>
       expect(rename).toHaveBeenCalledWith("device-1", "Build mini")
     )
+  })
+
+  it("creates a managed cloud environment from the devices surface", async () => {
+    const createManaged = vi.fn()
+    render(
+      <DevicesSection
+        environments={[]}
+        loading={false}
+        dialog={dialog}
+        onOpen={vi.fn()}
+        onCreateManaged={createManaged}
+        onManagedLifecycle={vi.fn()}
+        onRefresh={vi.fn()}
+        onRename={vi.fn()}
+        onRevoke={vi.fn()}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add cloud environment" })
+    )
+    const input = screen.getByRole("textbox", {
+      name: "Cloud environment name"
+    })
+    fireEvent.change(input, { target: { value: "Cloud build" } })
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    await waitFor(() => expect(createManaged).toHaveBeenCalledWith("Cloud build"))
   })
 })
