@@ -2,7 +2,7 @@ import { once } from "node:events"
 import type { ManagedEnvironment } from "@jingler/core"
 import { Chunk, Effect, Stream } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { WebSocket, WebSocketServer } from "ws"
+import { type WebSocket, WebSocketServer } from "ws"
 import { makeManagedSessionTransport } from "./managed-session-transport.js"
 
 const servers: WebSocketServer[] = []
@@ -99,6 +99,72 @@ describe("managed session transport", () => {
       ["session.input"]
     )
     expect(submitted).toHaveLength(1)
+    expect(Chunk.toReadonlyArray(events).map((event) => event.kind)).toEqual([
+      "event",
+      "complete"
+    ])
+  })
+
+  it("re-grants and resumes after a transient observer disconnect", async () => {
+    const server = new WebSocketServer({ port: 0 })
+    servers.push(server)
+    await once(server, "listening")
+    const address = server.address()
+    if (address === null || typeof address === "string") throw new Error("missing address")
+    const runtimeUrl = `http://127.0.0.1:${address.port}`
+    const observers: WebSocket[] = []
+    const replayCursors: string[] = []
+    server.on("connection", (socket, request) => {
+      observers.push(socket)
+      replayCursors.push(new URL(request.url ?? "/", runtimeUrl).searchParams.get("after") ?? "")
+      if (observers.length === 2) {
+        socket.send(JSON.stringify({
+          version: 1,
+          commandId: "command_reconnect_abcdefgh",
+          sessionId: "session_reconnect_abcdefgh",
+          eventSequence: 1,
+          kind: "complete",
+          payload: { exitCode: 0 }
+        }))
+      }
+    })
+    const grant = vi.fn(() => Effect.succeed({
+      version: 1 as const,
+      runtimeUrl,
+      grant: "grant_reconnect_abcdefghijkl",
+      expiresAt: 9_999_999_999
+    }))
+    let submissions = 0
+    const transport = makeManagedSessionTransport({
+      environment: () => Effect.succeed(managedEnvironment),
+      grant,
+      fetch: async () => {
+        submissions += 1
+        observers[0]?.send(JSON.stringify({
+          version: 1,
+          commandId: "command_reconnect_abcdefgh",
+          sessionId: "session_reconnect_abcdefgh",
+          eventSequence: 0,
+          kind: "event",
+          payload: { type: "runtime.output", data: "before disconnect" }
+        }))
+        observers[0]?.close(1012, "restart")
+        return Response.json({ accepted: true }, { status: 202 })
+      }
+    })
+
+    const events = await Effect.runPromise(
+      transport.execute(
+        { id: "session_reconnect_abcdefgh", environmentId: managedEnvironment.id },
+        "ManagedRuntime.exec",
+        { command: "printf hello" },
+        "command_reconnect_abcdefgh"
+      ).pipe(Stream.runCollect)
+    )
+
+    expect(submissions).toBe(1)
+    expect(grant).toHaveBeenCalledTimes(2)
+    expect(replayCursors).toEqual(["-1", "0"])
     expect(Chunk.toReadonlyArray(events).map((event) => event.kind)).toEqual([
       "event",
       "complete"

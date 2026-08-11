@@ -36,7 +36,8 @@ export interface ManagedSessionTransportDependencies {
 const eventsUrl = (
   grant: ManagedEnvironmentGrantResponse,
   sessionId: string,
-  commandId: string
+  commandId: string,
+  after: number
 ): string => {
   const url = new URL(
     `/v1/sessions/${encodeURIComponent(sessionId)}/events`,
@@ -44,9 +45,44 @@ const eventsUrl = (
   )
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   url.searchParams.set("commandId", commandId)
-  url.searchParams.set("after", "-1")
+  url.searchParams.set("after", String(after))
   return url.toString()
 }
+
+const MAX_OBSERVER_RECONNECTS = 5
+
+const openObserver = (input: {
+  readonly grant: ManagedEnvironmentGrantResponse
+  readonly sessionId: string
+  readonly commandId: string
+  readonly after: number
+  readonly onMessage: (raw: WebSocket.RawData) => void
+  readonly onDisconnect: (cause?: unknown) => void
+}): Promise<WebSocket> =>
+  new Promise((resolve, reject) => {
+    const candidate = new WebSocket(
+      eventsUrl(input.grant, input.sessionId, input.commandId, input.after),
+      { headers: { authorization: `Bearer ${input.grant.grant}` } }
+    )
+    let opened = false
+    let disconnectCause: unknown
+    candidate.on("message", input.onMessage)
+    candidate.once("open", () => {
+      opened = true
+      resolve(candidate)
+    })
+    candidate.once("error", (cause) => {
+      if (!opened) {
+        reject(cause)
+        return
+      }
+      disconnectCause = cause
+      candidate.close()
+    })
+    candidate.once("close", () => {
+      if (opened) input.onDisconnect(disconnectCause)
+    })
+  })
 
 const commandsUrl = (
   grant: ManagedEnvironmentGrantResponse,
@@ -56,6 +92,126 @@ const commandsUrl = (
     `/v1/sessions/${encodeURIComponent(sessionId)}/commands`,
     grant.runtimeUrl
   ).toString()
+
+interface ObserverIdentity {
+  readonly environmentId: string
+  readonly sessionId: string
+  readonly commandId: string
+  readonly action: ManagedRuntimeAction
+}
+
+class ManagedSessionObserver {
+  readonly #dependencies: ManagedSessionTransportDependencies
+  readonly #identity: ObserverIdentity
+  readonly #output: Queue.Queue<Output>
+  readonly #sockets = new Set<WebSocket>()
+  #expectedSequence = 0
+  #terminal = false
+  #disposed = false
+  #reconnecting = false
+  #reconnects = 0
+
+  constructor(
+    dependencies: ManagedSessionTransportDependencies,
+    identity: ObserverIdentity,
+    output: Queue.Queue<Output>
+  ) {
+    this.#dependencies = dependencies
+    this.#identity = identity
+    this.#output = output
+  }
+
+  async start(grant: ManagedEnvironmentGrantResponse): Promise<void> {
+    this.#sockets.add(await this.#connect(grant))
+  }
+
+  close(): void {
+    this.#disposed = true
+    for (const socket of this.#sockets) socket.close()
+  }
+
+  #connect(grant: ManagedEnvironmentGrantResponse): Promise<WebSocket> {
+    return openObserver({
+      grant,
+      sessionId: this.#identity.sessionId,
+      commandId: this.#identity.commandId,
+      after: this.#expectedSequence - 1,
+      onMessage: (raw) => this.#onMessage(raw),
+      onDisconnect: (cause) => this.#reconnect(cause)
+    })
+  }
+
+  #onMessage(raw: WebSocket.RawData): void {
+    try {
+      const event = Schema.decodeUnknownSync(RemoteSessionEventSchema)(
+        JSON.parse(raw.toString("utf8")),
+        { onExcessProperty: "error" }
+      )
+      if (
+        event.sessionId !== this.#identity.sessionId ||
+        event.commandId !== this.#identity.commandId ||
+        event.eventSequence !== this.#expectedSequence
+      ) {
+        throw new Error(
+          `Managed event sequence mismatch: expected ${this.#expectedSequence}, received ${event.eventSequence}.`
+        )
+      }
+      this.#expectedSequence += 1
+      this.#terminal = event.kind === "complete" || event.kind === "failed"
+      Effect.runFork(Queue.offer(this.#output, { _tag: "event", event }))
+    } catch (cause) {
+      this.#fail("Managed runtime returned an invalid session event.", cause)
+    }
+  }
+
+  #reconnect(cause?: unknown): void {
+    if (this.#terminal || this.#disposed || this.#reconnecting) return
+    if (this.#reconnects >= MAX_OBSERVER_RECONNECTS) {
+      this.#fail("Managed session event stream closed before completion.", cause)
+      return
+    }
+    this.#reconnecting = true
+    this.#reconnects += 1
+    const delayMs = Math.min(1_000, 50 * 2 ** (this.#reconnects - 1))
+    Effect.runPromise(this.#reconnectEffect(delayMs)).then((socket) => {
+      this.#reconnecting = false
+      if (this.#disposed || this.#terminal) socket.close()
+      else this.#sockets.add(socket)
+    }).catch((error) => {
+      this.#reconnecting = false
+      this.#reconnect(error)
+    })
+  }
+
+  #reconnectEffect(delayMs: number): Effect.Effect<WebSocket, RemoteSessionError> {
+    return Effect.sleep(delayMs).pipe(
+      Effect.zipRight(this.#dependencies.environment(this.#identity.environmentId)),
+      Effect.flatMap((environment) =>
+        this.#dependencies.grant(
+          environment,
+          this.#identity.sessionId,
+          this.#identity.commandId,
+          [this.#identity.action]
+        )
+      ),
+      Effect.flatMap((grant) => Effect.tryPromise({
+        try: () => this.#connect(grant),
+        catch: (error) => new RemoteSessionError({
+          message: "Could not reconnect the managed session event stream.",
+          cause: error
+        })
+      }))
+    )
+  }
+
+  #fail(message: string, cause?: unknown): void {
+    if (this.#terminal || this.#disposed) return
+    Effect.runFork(Queue.offer(this.#output, {
+      _tag: "error",
+      error: new RemoteSessionError({ message, cause })
+    }))
+  }
+}
 
 export const makeManagedSessionTransport = (
   dependencies: ManagedSessionTransportDependencies
@@ -68,6 +224,7 @@ export const makeManagedSessionTransport = (
             new RemoteSessionError({ message: "Managed session has no environment identity." })
           )
         }
+        const environmentId = session.environmentId
         const command: RemoteSessionCommand = {
           version: 1,
           commandId: suppliedCommandId ?? randomBytes(18).toString("base64url"),
@@ -75,7 +232,7 @@ export const makeManagedSessionTransport = (
           operation,
           payload
         }
-        const environment = yield* dependencies.environment(session.environmentId)
+        const environment = yield* dependencies.environment(environmentId)
         const grant = yield* dependencies.grant(
           environment,
           session.id,
@@ -83,92 +240,29 @@ export const makeManagedSessionTransport = (
           [managedRuntimeActionForOperation(operation)]
         )
         const output = yield* Queue.unbounded<Output>()
-        let expectedSequence = 0
-        let terminal = false
-
-        const socket = yield* Effect.acquireRelease(
-          Effect.async<WebSocket, RemoteSessionError>((resume) => {
-            const candidate = new WebSocket(
-              eventsUrl(grant, session.id, command.commandId),
-              { headers: { authorization: `Bearer ${grant.grant}` } }
-            )
-            const failOpen = (cause: unknown) => {
-              candidate.close()
-              resume(
-                Effect.fail(
-                  new RemoteSessionError({
-                    message: "Could not observe the managed session.",
-                    cause
-                  })
-                )
-              )
-            }
-            candidate.once("error", failOpen)
-            candidate.once("open", () => {
-              candidate.off("error", failOpen)
-              resume(Effect.succeed(candidate))
+        const observer = new ManagedSessionObserver(
+          dependencies,
+          {
+            environmentId,
+            sessionId: session.id,
+            commandId: command.commandId,
+            action: managedRuntimeActionForOperation(operation)
+          },
+          output
+        )
+        yield* Effect.acquireRelease(
+          Effect.tryPromise({
+            try: async () => {
+              await observer.start(grant)
+              return observer
+            },
+            catch: (error) => new RemoteSessionError({
+              message: "Could not observe the managed session.",
+              cause: error
             })
           }),
-          (socket) => Effect.sync(() => socket.close())
+          (activeObserver) => Effect.sync(() => activeObserver.close())
         )
-
-        socket.on("message", (raw) => {
-          try {
-            const event = Schema.decodeUnknownSync(RemoteSessionEventSchema)(
-              JSON.parse(raw.toString("utf8")),
-              { onExcessProperty: "error" }
-            )
-            if (
-              event.sessionId !== session.id ||
-              event.commandId !== command.commandId ||
-              event.eventSequence !== expectedSequence
-            ) {
-              throw new Error(
-                `Managed event sequence mismatch: expected ${expectedSequence}, received ${event.eventSequence}.`
-              )
-            }
-            expectedSequence += 1
-            terminal = event.kind === "complete" || event.kind === "failed"
-            Effect.runFork(Queue.offer(output, { _tag: "event", event }))
-          } catch (cause) {
-            Effect.runFork(
-              Queue.offer(
-                output,
-                {
-                  _tag: "error",
-                  error: new RemoteSessionError({
-                    message: "Managed runtime returned an invalid session event.",
-                    cause
-                  })
-                }
-              )
-            )
-          }
-        })
-        socket.on("error", (cause) => {
-          if (terminal) return
-          Effect.runFork(
-            Queue.offer(output, {
-              _tag: "error",
-              error: new RemoteSessionError({
-                message: "Managed session event stream failed.",
-                cause
-              })
-            })
-          )
-        })
-        socket.on("close", () => {
-          if (!terminal) {
-            Effect.runFork(
-              Queue.offer(output, {
-                _tag: "error",
-                error: new RemoteSessionError({
-                  message: "Managed session event stream closed before completion."
-                })
-              })
-            )
-          }
-        })
 
         const response = yield* Effect.tryPromise({
           try: () => (dependencies.fetch ?? fetch)(commandsUrl(grant, session.id), {

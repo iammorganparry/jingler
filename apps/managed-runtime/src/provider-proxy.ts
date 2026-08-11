@@ -91,8 +91,13 @@ export const proxyProviderRequest = async (
   dependencies: ProviderProxyDependencies
 ): Promise<Response> => {
   const upstream = new URL(input.upstreamUrl)
+  const configuredLimit = dependencies.maxEgressBytes
   const maxEgressBytes =
-    dependencies.maxEgressBytes ?? DEFAULT_MAX_EGRESS_BYTES
+    configuredLimit !== undefined &&
+    Number.isSafeInteger(configuredLimit) &&
+    configuredLimit > 0
+      ? configuredLimit
+      : DEFAULT_MAX_EGRESS_BYTES
   if (upstream.protocol !== "https:" || !ALLOWED_PROVIDER_HOSTS.has(upstream.hostname)) {
     return Response.json({ error: "Provider destination is not allowed" }, { status: 400 })
   }

@@ -109,6 +109,24 @@ describe("managed provider credential proxy", () => {
     expect(response.status).toBe(413)
   })
 
+  it("falls back to the bounded default when the configured limit is invalid", async () => {
+    const response = await proxyProviderRequest(
+      {
+        subject: "user_1",
+        capabilityHandle: "capability_github_1",
+        upstreamUrl: "https://github.com/jingler/example.git/git-upload-pack",
+        method: "POST",
+        contentLength: 100 * 1024 * 1024 + 1
+      },
+      {
+        resolve: async () => ({ authorizationHeader: "Bearer test" }),
+        fetch,
+        maxEgressBytes: Number.NaN
+      }
+    )
+    expect(response.status).toBe(413)
+  })
+
   it("stops chunked request bodies at the configured transfer limit", async () => {
     const upstream = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const request = input instanceof Request ? input : new Request(input)
