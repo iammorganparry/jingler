@@ -28,6 +28,11 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   }
 ]
 
+const STREAMED_PLAN_FIXTURE = {
+  scenarioId: "plan-draft-stream",
+  authRoute: "api-key"
+} as const
+
 /**
  * Park a run so the composer is in its queueing form.
  *
@@ -48,6 +53,7 @@ test("Send now turns queued plan feedback into a real revision", async ({ launch
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: STREAMED_PLAN_FIXTURE,
     sessions: seededSessions
   })
   await expect(appShell(window)).toBeVisible()

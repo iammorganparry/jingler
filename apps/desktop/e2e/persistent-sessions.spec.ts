@@ -216,10 +216,12 @@ test("a direct session completes a turn and deletion preserves its checkout", as
 
   const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
-  await expect(window.getByRole("button", { name: "Full Access" })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Accept Edits" })).toBeVisible()
   await composer.fill("Run the direct-checkout verification.")
   await composer.press("Enter")
-  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
+  await expect(
+    window.getByText("Completed through deterministic pi.", { exact: false })
+  ).toBeVisible({ timeout: 25_000 })
   await expect(composer).toBeVisible()
 
   await row.click({ button: "right" })

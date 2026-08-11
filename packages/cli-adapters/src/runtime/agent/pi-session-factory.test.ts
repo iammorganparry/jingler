@@ -112,22 +112,20 @@ describe("pi session creation", () => {
       createSession
     })
 
-    const handle = await Effect.runPromise(
-      factory.create(makeSpec(root), {} as never)
-    )
+    const handle = await Effect.runPromise(factory.create(makeSpec(root), {} as never))
     const received = captured[0]
     expect(handle.id).toBe("/tmp/pi-session.jsonl")
+    expect(handle.contextWindow).toBe(200_000)
     expect(received?.tools).toContain("jingler_ask_question")
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([
-      "jingler_ask_question"
+      "jingler_ask_question",
+      "jingler_submit_plan"
     ])
     expect(received?.resourceLoader?.getExtensions().extensions).toEqual([])
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
       "Jingler's embedded engineering agent"
     )
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "jingler_ask_question"
-    )
+    expect(received?.resourceLoader?.getSystemPrompt()).toContain("jingler_ask_question")
     expect(received?.sessionManager?.getEntries()).toEqual([
       expect.objectContaining({
         type: "custom_message",
@@ -135,14 +133,16 @@ describe("pi session creation", () => {
       })
     ])
   })
-
 })
 
 describe("pi session connection validation", () => {
   it("rejects a mismatch before creating a pi session", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-pi-session-"))
     roots.push(root)
-    const other = { ...connection, id: Schema.decodeUnknownSync(ProviderConnectionId)("other") }
+    const other = {
+      ...connection,
+      id: Schema.decodeUnknownSync(ProviderConnectionId)("other")
+    }
     const createSession = vi.fn()
     const factory = makePiSessionFactory({
       agentDir: join(root, "agent"),
@@ -152,9 +152,7 @@ describe("pi session connection validation", () => {
       createSession
     })
 
-    const exit = await Effect.runPromiseExit(
-      factory.create(makeSpec(root), {} as never)
-    )
+    const exit = await Effect.runPromiseExit(factory.create(makeSpec(root), {} as never))
     expect(exit.toJSON()).toMatchObject({
       _tag: "Failure",
       cause: { _tag: "Fail", failure: { reason: "authentication" } }

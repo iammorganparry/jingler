@@ -2,7 +2,7 @@ import { Schema } from "effect"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { ToolRegistry } from "../tools/tool-registry.js"
-import type { AgentRuntimeContext } from "./agent-runtime.js"
+import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 
 const spec = {
@@ -48,6 +48,7 @@ describe("pi tool bridge", () => {
     const canUseTool = vi.fn(() => Effect.succeed("allow" as const))
     const registry = mutationRegistry(execute)
     const context: AgentRuntimeContext = {
+      ...inactiveRuntimeActivity,
       canUseTool,
       askQuestion: () => Effect.succeed([]),
       saveDraftPlan: () => Effect.void,
@@ -68,13 +69,10 @@ describe("pi tool bridge", () => {
       undefined,
       {} as never
     )
-    expect(canUseTool).toHaveBeenCalledWith(
-      { toolId: "workspace.edit", risk: "mutate" }
-    )
+    expect(canUseTool).toHaveBeenCalledWith({ toolId: "workspace.edit", risk: "mutate" })
     expect(execute).toHaveBeenCalledOnce()
     expect(result?.details).toMatchObject({ status: "success" })
   })
-
 })
 
 describe("pi tool permission denial", () => {
@@ -82,6 +80,7 @@ describe("pi tool permission denial", () => {
     const execute = vi.fn(async () => null)
     const registry = mutationRegistry(execute)
     const context: AgentRuntimeContext = {
+      ...inactiveRuntimeActivity,
       canUseTool: () => Effect.succeed("deny"),
       askQuestion: () => Effect.succeed([]),
       saveDraftPlan: () => Effect.void,

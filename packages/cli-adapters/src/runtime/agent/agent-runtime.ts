@@ -7,7 +7,7 @@ import type {
   QuestionRequest,
   StreamEvent
 } from "@jingler/core"
-import { Context, Data, type Effect, type Stream } from "effect"
+import { Context, Data, Effect, type Stream } from "effect"
 import type { JinglerMcpAttachments } from "../tools/mcp-tools.js"
 
 export class AgentRuntimeError extends Data.TaggedError("AgentRuntimeError")<{
@@ -29,20 +29,34 @@ export interface RuntimePermissionRequest {
 
 export type RuntimePermissionDecision = "allow" | "deny"
 
+export type RuntimeBackgroundStop = (taskId: string) => Promise<void>
+
+/** Activity capabilities for roles and tests that cannot launch background work. */
+export const inactiveRuntimeActivity = {
+  publishEvent: (_event: StreamEvent) => Effect.void,
+  registerBackgroundStop: (_stop: RuntimeBackgroundStop) => Effect.void
+} satisfies Pick<AgentRuntimeContext, "publishEvent" | "registerBackgroundStop">
+
 export type RuntimePlanDecision =
-  | { readonly _tag: "Approve"; readonly mode: PermissionMode; readonly plan?: Plan }
+  | {
+      readonly _tag: "Approve"
+      readonly mode: PermissionMode
+      readonly plan?: Plan
+    }
   | { readonly _tag: "Revise"; readonly feedback: string }
   | { readonly _tag: "Reject" }
 
 export interface AgentRuntimeContext {
   /** Main-process-only capability attachments for this run. */
   readonly mcp?: JinglerMcpAttachments
+  /** Publish Jingler-owned lifecycle events produced by first-class tools. */
+  readonly publishEvent: (event: StreamEvent) => Effect.Effect<void>
+  /** Publish a task-local stop handle for the background-task dock. */
+  readonly registerBackgroundStop: (stop: RuntimeBackgroundStop) => Effect.Effect<void>
   readonly canUseTool: (
     request: RuntimePermissionRequest
   ) => Effect.Effect<RuntimePermissionDecision>
-  readonly askQuestion: (
-    request: QuestionRequest
-  ) => Effect.Effect<ReadonlyArray<QuestionAnswer>>
+  readonly askQuestion: (request: QuestionRequest) => Effect.Effect<ReadonlyArray<QuestionAnswer>>
   readonly saveDraftPlan: (plan: PlanPrd) => Effect.Effect<void>
   readonly proposePlan: (plan: PlanPrd) => Effect.Effect<RuntimePlanDecision>
 }
@@ -52,13 +66,8 @@ export interface AgentRuntimeShape {
     spec: PiRunSpec,
     context: AgentRuntimeContext
   ) => Stream.Stream<StreamEvent, AgentRuntimeError>
-  readonly steer: (
-    piSessionId: string,
-    text: string
-  ) => Effect.Effect<void, AgentRuntimeError>
-  readonly interrupt: (
-    piSessionId: string
-  ) => Effect.Effect<void, AgentRuntimeError>
+  readonly steer: (piSessionId: string, text: string) => Effect.Effect<void, AgentRuntimeError>
+  readonly interrupt: (piSessionId: string) => Effect.Effect<void, AgentRuntimeError>
 }
 
 export class AgentRuntime extends Context.Tag("@jingler/AgentRuntime")<

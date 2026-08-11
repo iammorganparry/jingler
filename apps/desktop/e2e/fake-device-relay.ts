@@ -33,6 +33,12 @@ export interface FakeDeviceRelayOptions {
   readonly deviceAgentBundle: string
   readonly deviceHome: string
   readonly deviceBinDir: string
+  readonly piFixture?: {
+    readonly file: string
+    readonly connectionId: string
+    readonly providerId: string
+    readonly modelId: string
+  }
   /** Real-host QA activates the uploaded daemon over SSH instead of spawning one locally. */
   readonly spawnAgentOnClaim?: boolean
   readonly listenHost?: string
@@ -133,6 +139,14 @@ export const startFakeDeviceRelay = async (
           JINGLER_HOME: options.deviceHome,
           JINGLER_DEVICE_RELAY_URL: baseUrl,
           JINGLER_E2E: "1",
+          ...(options.piFixture === undefined
+            ? {}
+            : {
+                JINGLER_E2E_PI_FIXTURE: options.piFixture.file,
+                JINGLER_E2E_PI_CONNECTION_ID: options.piFixture.connectionId,
+                JINGLER_E2E_PI_PROVIDER_ID: options.piFixture.providerId,
+                JINGLER_E2E_PI_MODEL_ID: options.piFixture.modelId
+              }),
           JINGLER_DISCOVERY_BIN_DIR: options.deviceBinDir,
           PATH: `${options.deviceBinDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
         },
@@ -148,6 +162,11 @@ export const startFakeDeviceRelay = async (
 
   const device = () => {
     const effectiveState = forcedState ?? state
+    const announcedCapabilities =
+      discovery?.capabilities !== null &&
+      typeof discovery?.capabilities === "object"
+        ? discovery.capabilities
+        : undefined
     return {
       version: 1,
       deviceId: DEVICE_ID,
@@ -166,7 +185,7 @@ export const startFakeDeviceRelay = async (
               capabilities: ["session.observe"],
               maxConcurrentSessions: 1
             }
-          : registration?.capabilities,
+          : announcedCapabilities ?? registration?.capabilities,
       agentVersion:
         discovery && typeof discovery.agentVersion === "string"
           ? discovery.agentVersion

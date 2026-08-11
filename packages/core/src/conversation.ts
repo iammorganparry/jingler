@@ -1559,7 +1559,18 @@ export interface AgentFileActivity {
 export type ActivityPhase = "running" | "settling" | "idle"
 
 const READ_TOOLS = new Set(["Read", "Grep", "Glob", "NotebookRead", "LS"])
-const EDIT_TOOLS = new Set(["Edit", "Write", "Update", "NotebookEdit", "MultiEdit"])
+const EDIT_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "Update",
+  "NotebookEdit",
+  "MultiEdit",
+  "workspace_write",
+  "workspace_edit",
+  "workspace_delete",
+  "workspace_rename"
+])
+const WORKSPACE_RECONCILIATION_TOOL = "Workspace changes"
 const WEB_TOOLS = new Set(["WebFetch", "WebSearch"])
 const SUBAGENT_TOOLS = new Set(["Task", "Agent"])
 
@@ -1635,8 +1646,12 @@ export const agentFileActivityOf = (
     ) ?? lastTool(
       [currentTurn],
       (candidate) =>
-        isFileMutationTool(candidate.name) ||
-        (candidate.fileChanges?.changes.length ?? 0) > 0
+        candidate.name !== WORKSPACE_RECONCILIATION_TOOL &&
+        (isFileMutationTool(candidate.name) ||
+          (candidate.fileChanges?.changes.length ?? 0) > 0)
+    ) ?? lastTool(
+      [currentTurn],
+      (candidate) => (candidate.fileChanges?.changes.length ?? 0) > 0
     )
   const change = tool?.fileChanges?.changes.at(-1)
   const path = change?.path ?? tool?.target

@@ -202,13 +202,17 @@ const withCanonicalRuntimeIdentity = (session: SeedSession): SeedSession => {
           providerId: E2E_PI_PROVIDER_ID,
           modelId: E2E_PI_MODEL_ID
         }
-  const chats = session.chats?.map((chat) => ({ ...identity, ...chat })) ?? [{
-    id: `c_${session.id}_1`,
-    title: null,
-    createdAt: session.updatedAt,
-    updatedAt: session.updatedAt,
-    ...identity
-  }]
+  const chatDefaults = session.mode === undefined ? {} : { mode: session.mode }
+  const chats = session.chats?.map((chat) => ({ ...identity, ...chatDefaults, ...chat })) ?? [
+    {
+      id: `c_${session.id}_1`,
+      title: null,
+      createdAt: session.updatedAt,
+      updatedAt: session.updatedAt,
+      ...identity,
+      ...chatDefaults
+    }
+  ]
   return {
     ...identity,
     ...session,
@@ -314,9 +318,13 @@ export interface LaunchOptions {
     readonly identityFile: string
     readonly relayHost: string
   }
-
 }
 
+const DEFAULT_PI_FIXTURE: NonNullable<LaunchOptions["piFixture"]> = {
+  scenarioId: "default",
+  authRoute: "api-key",
+  reasoning: ["low", "medium", "high"]
+}
 
 export interface LaunchedApp {
   readonly app: ElectronApplication
@@ -453,13 +461,15 @@ export const test = base.extend<{
       // when the app first scans them.
       options.seed?.({ home, reposDir, repoPath })
 
+      const piFixture = options.piFixture ?? DEFAULT_PI_FIXTURE
       const piFixtureFile = join(jinglerDir, "e2e-pi-fixture.json")
-      if (options.piFixture) {
+      if (!(reused && options.piFixture === undefined && existsSync(piFixtureFile))) {
         mkdirSync(jinglerDir, { recursive: true })
-        writeFileSync(piFixtureFile, JSON.stringify(options.piFixture, null, 2))
+        writeFileSync(piFixtureFile, JSON.stringify(piFixture, null, 2))
       }
 
       const binDir = join(home, "bin")
+      mkdirSync(binDir, { recursive: true })
       // A connected App fixture needs an origin for immutable repository
       // resolution and API-driven checkout.
       if (options.githubApp?.connected && repoPath) {
@@ -499,6 +509,12 @@ export const test = base.extend<{
           deviceAgentBundle: DEVICE_AGENT_ENTRY,
           deviceHome,
           deviceBinDir: binDir,
+          piFixture: {
+            file: piFixtureFile,
+            connectionId: E2E_PI_CONNECTION_ID,
+            providerId: E2E_PI_PROVIDER_ID,
+            modelId: E2E_PI_MODEL_ID
+          },
           spawnAgentOnClaim: options.realRemoteEnvironment === undefined,
           ...(options.realRemoteEnvironment
             ? { listenHost: "0.0.0.0", publicHost: options.realRemoteEnvironment.relayHost }
@@ -520,7 +536,6 @@ export const test = base.extend<{
             stdio: ["ignore", "pipe", "ignore"]
           })
           writeFileSync(join(sshDir, "known_hosts"), hostKeys, { mode: 0o600 })
-
         } else {
           installFakeSshHost({
             binDir,
@@ -624,12 +639,7 @@ export const test = base.extend<{
           JINGLER_GITHUB_URL: githubServer.url,
           JINGLER_GITHUB_API_URL: githubServer.url,
           JINGLER_SECRET_STORE: "memory",
-          ...(options.piFixture
-            ? {
-                JINGLER_E2E_PI_FIXTURE: piFixtureFile,
-                JINGLER_E2E_PI_AUTH_ROUTE: options.piFixture.authRoute
-              }
-            : {}),
+          JINGLER_E2E_PI_FIXTURE: piFixtureFile,
           JINGLER_E2E: "1",
           // Keep the window hidden and off the dock. The suite launches a real
           // Electron app dozens of times, and a visible window steals focus on
@@ -667,9 +677,7 @@ export const test = base.extend<{
         })
       }
 
-
       const githubOperations = () => [...githubServer.operations]
-
 
       return {
         app,

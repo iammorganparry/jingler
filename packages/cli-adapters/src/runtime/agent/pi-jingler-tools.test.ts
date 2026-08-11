@@ -1,12 +1,11 @@
 import { defaultPlan } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import type { AgentRuntimeContext } from "./agent-runtime.js"
+import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
 import { createJinglerControlTools } from "./pi-jingler-tools.js"
 
-const runtimeContext = (
-  overrides: Partial<AgentRuntimeContext> = {}
-): AgentRuntimeContext => ({
+const runtimeContext = (overrides: Partial<AgentRuntimeContext> = {}): AgentRuntimeContext => ({
+  ...inactiveRuntimeActivity,
   canUseTool: () => Effect.succeed("allow"),
   askQuestion: () => Effect.succeed([]),
   saveDraftPlan: () => Effect.void,
@@ -16,9 +15,7 @@ const runtimeContext = (
 
 describe("Jingler pi control tools", () => {
   it("routes structured questions through AgentRuntimeContext", async () => {
-    const askQuestion = vi.fn(() =>
-      Effect.succeed([{ selected: ["Yes"], other: null }])
-    )
+    const askQuestion = vi.fn(() => Effect.succeed([{ selected: ["Yes"], other: null }]))
     const registry = createJinglerControlTools(runtimeContext({ askQuestion }))
     const request = {
       id: "question-1",
@@ -64,19 +61,20 @@ describe("Jingler plan tool containment", () => {
     expect(proposePlan).toHaveBeenCalledWith(plan)
   })
 
-  it("keeps plan submission unavailable outside the plan role", async () => {
+  it("allows a conversation to submit a structured plan", async () => {
     const proposePlan = vi.fn(() => Effect.succeed({ _tag: "Reject" } as const))
     const registry = createJinglerControlTools(runtimeContext({ proposePlan }))
+    const plan = defaultPlan("Conversation plan")
     const result = await Effect.runPromise(
       registry.execute({
         id: "jingler_submit_plan",
-        arguments: { plan: {} },
+        arguments: { plan },
         role: "conversation",
         mode: "ask"
       })
     )
-    expect(result.error?.code).toBe("forbidden")
-    expect(proposePlan).not.toHaveBeenCalled()
+    expect(result.status).toBe("success")
+    expect(proposePlan).toHaveBeenCalledWith(plan)
   })
 
   it("keeps plan submission available to the producing agent during execution", async () => {

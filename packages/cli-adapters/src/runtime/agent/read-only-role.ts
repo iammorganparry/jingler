@@ -3,6 +3,7 @@ import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
 import { Duration, Effect, Stream } from "effect"
 import {
   AgentRuntimeError,
+  inactiveRuntimeActivity,
   type AgentRuntimeShape
 } from "./agent-runtime.js"
 
@@ -32,38 +33,39 @@ export const runReadOnlyRoleText = (
     )
   }
 
-  return runtime.run(
-    {
-      runId: randomUUID(),
-      sessionId: session.id,
-      chatId: session.activeChatId,
-      connectionId: identity.connectionId,
-      modelId: identity.modelId,
-      role,
-      mode: "read-only",
-      cwd: session.worktreePath ?? process.cwd(),
-      prompt,
-      priorMessages: [],
-      piSessionId: null,
-      seed: null,
-      targetCapabilities: {
-        versions: CURRENT_RUNTIME_CONTRACTS,
-        toolIds: [],
-        resourceIds: [],
-        targetId: session.environmentId ?? "desktop"
+  return runtime
+    .run(
+      {
+        runId: randomUUID(),
+        sessionId: session.id,
+        chatId: session.activeChatId,
+        connectionId: identity.connectionId,
+        modelId: identity.modelId,
+        role,
+        mode: "read-only",
+        cwd: session.worktreePath ?? process.cwd(),
+        prompt,
+        priorMessages: [],
+        piSessionId: null,
+        seed: null,
+        targetCapabilities: {
+          versions: CURRENT_RUNTIME_CONTRACTS,
+          toolIds: [],
+          resourceIds: [],
+          targetId: session.environmentId ?? "desktop"
+        }
+      },
+      {
+        ...inactiveRuntimeActivity,
+        canUseTool: () => Effect.succeed("deny"),
+        askQuestion: () => Effect.succeed([]),
+        saveDraftPlan: () => Effect.void,
+        proposePlan: () => Effect.succeed({ _tag: "Reject" })
       }
-    },
-    {
-      canUseTool: () => Effect.succeed("deny"),
-      askQuestion: () => Effect.succeed([]),
-      saveDraftPlan: () => Effect.void,
-      proposePlan: () => Effect.succeed({ _tag: "Reject" })
-    }
-  ).pipe(
-    Stream.runFold("", (text, event) =>
-      event._tag === "Assistant" ? text + event.text : text
-    ),
-    Effect.timeout(timeout)
-  )
+    )
+    .pipe(
+      Stream.runFold("", (text, event) => (event._tag === "Assistant" ? text + event.text : text)),
+      Effect.timeout(timeout)
+    )
 }
 import { randomUUID } from "node:crypto"

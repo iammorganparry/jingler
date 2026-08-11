@@ -74,7 +74,7 @@ interface ProviderRecovery {
   readonly message: string
 }
 
-const providerRecoveryOf = (
+export const providerRecoveryOf = (
   catalog: ProviderCatalog,
   selection: {
     connectionId: Session["connectionId"] | null
@@ -82,6 +82,7 @@ const providerRecoveryOf = (
     connectionSelectionRequired?: boolean
     modelSelectionRequired?: boolean
     targetId: string
+    target?: Environment
   }
 ): ProviderRecovery | undefined => {
   if (selection.connectionSelectionRequired || selection.modelSelectionRequired) {
@@ -105,7 +106,13 @@ const providerRecoveryOf = (
       message: "Reconnect this account or choose another certified connection."
     }
   }
-  if (connection.connection.targetId !== selection.targetId) {
+  const targetConnection = selection.target?.capabilities.providerConnections?.find(
+    (candidate) => candidate.id === selection.connectionId
+  )
+  if (
+    connection.connection.targetId !== selection.targetId &&
+    targetConnection?.status !== "authenticated"
+  ) {
     return {
       title: "Connection unavailable on this device",
       message: "Connect the same provider account on the selected execution device, or move the session to a compatible target."
@@ -363,7 +370,8 @@ export function ConversationPane({
         ...convo,
         connectionSelectionRequired: session.connectionSelectionRequired,
         modelSelectionRequired: session.modelSelectionRequired,
-        targetId: session.environmentId ?? "desktop"
+        targetId: session.environmentId ?? "desktop",
+        target: environments.find((environment) => environment.id === session.environmentId)
       })
     : undefined
   const composerDisabledReason = typeof providerRecovery === "string"
@@ -384,8 +392,7 @@ export function ConversationPane({
   const handoffModel = providerCatalog?.connections
     .flatMap(({ models }) => models)
     .find(({ id }) => id === convo.modelId)?.label ?? null
-  const backgroundTasksSupported = false
-  const bgTasks = useBackgroundTasks(session.id, backgroundTasksSupported)
+  const bgTasks = useBackgroundTasks(session.id)
 
   /**
    * Context accounting for the meter.
@@ -1067,11 +1074,11 @@ export function ConversationPane({
         />
       )}
       {/*
-        Background tasks dock — harness work that OUTLIVES this turn. Sits below
+        Background tasks dock — runtime work that OUTLIVES this turn. Sits below
         the conversation (not in the sub-agent tab bar, which is per-run and
         cleared on the next turn) so a task the operator needs to stop can't be
-        swept away while it is still running. Renders nothing when the harness
-        has no per-task support or there is nothing to show.
+        swept away while it is still running. Renders nothing when there is no
+        task to show.
       */}
       {viewingTask && (
         <BackgroundTaskOutput
@@ -1082,7 +1089,7 @@ export function ConversationPane({
       )}
       <BackgroundTaskDock
         tasks={bgTasks.tasks}
-        supported={backgroundTasksSupported}
+        supported
         onStop={bgTasks.stop}
         onDismiss={bgTasks.dismiss}
         onView={(taskId) => {

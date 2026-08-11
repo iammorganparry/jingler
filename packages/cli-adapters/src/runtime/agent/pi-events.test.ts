@@ -3,48 +3,102 @@ import { normalizePiEvent } from "./pi-events.js"
 
 describe("pi event normalization", () => {
   it("normalizes streamed text and tool lifecycle", () => {
-    expect(normalizePiEvent({
-      type: "message_update",
-      message: {} as never,
-      assistantMessageEvent: { type: "text_delta", delta: "hello" } as never
-    })).toEqual({ _tag: "Assistant", text: "hello" })
-    expect(normalizePiEvent({
-      type: "tool_execution_start",
-      toolCallId: "call-1",
-      toolName: "workspace.read",
-      args: {}
-    })).toMatchObject({ _tag: "ToolStart", id: "call-1", name: "workspace.read" })
-    expect(normalizePiEvent({
-      type: "tool_execution_end",
-      toolCallId: "call-1",
-      toolName: "workspace.read",
-      result: { content: [{ type: "text", text: "result" }] },
-      isError: false
-    })).toMatchObject({ _tag: "ToolEnd", id: "call-1", status: "success", output: "result" })
+    expect(
+      normalizePiEvent({
+        type: "message_update",
+        message: {} as never,
+        assistantMessageEvent: { type: "text_delta", delta: "hello" } as never
+      })
+    ).toEqual({ _tag: "Assistant", text: "hello" })
+    expect(
+      normalizePiEvent({
+        type: "tool_execution_start",
+        toolCallId: "call-1",
+        toolName: "workspace.read",
+        args: { path: "src/read.ts" }
+      })
+    ).toMatchObject({
+      _tag: "ToolStart",
+      id: "call-1",
+      name: "workspace.read",
+      target: "src/read.ts"
+    })
+    expect(
+      normalizePiEvent({
+        type: "tool_execution_end",
+        toolCallId: "call-1",
+        toolName: "workspace.read",
+        result: { content: [{ type: "text", text: "result" }] },
+        isError: false
+      })
+    ).toMatchObject({
+      _tag: "ToolEnd",
+      id: "call-1",
+      status: "success",
+      output: "result"
+    })
   })
 
   it("normalizes provider failures without exposing reasoning", () => {
-    expect(normalizePiEvent({
-      type: "message_update",
-      message: {} as never,
-      assistantMessageEvent: {
-        type: "error",
-        reason: "error",
-        error: { errorMessage: "rate limited" }
-      } as never
-    })).toEqual({ _tag: "Failed", message: "rate limited" })
+    expect(
+      normalizePiEvent({
+        type: "message_update",
+        message: {} as never,
+        assistantMessageEvent: {
+          type: "error",
+          reason: "error",
+          error: { errorMessage: "rate limited" }
+        } as never
+      })
+    ).toEqual({ _tag: "Failed", message: "rate limited" })
+  })
+
+  it("includes the resolved model context window in usage", () => {
+    expect(
+      normalizePiEvent(
+        {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            usage: { totalTokens: 42_100 }
+          } as never
+        },
+        128_000
+      )
+    ).toEqual({ _tag: "Usage", tokens: 42_100, window: 128_000 })
+  })
+
+  it("derives bounded file targets from schema-validated tool arguments", () => {
+    expect(
+      normalizePiEvent({
+        type: "tool_execution_start",
+        toolCallId: "rename-1",
+        toolName: "workspace_rename",
+        args: { from: "src/old.ts", to: "src/new.ts", ignored: "secret" }
+      })
+    ).toMatchObject({ target: "src/old.ts → src/new.ts" })
+    expect(
+      normalizePiEvent({
+        type: "tool_execution_start",
+        toolCallId: "invalid-1",
+        toolName: "workspace_read_file",
+        args: { path: 42 }
+      })
+    ).toMatchObject({ target: null })
   })
 })
 
 describe("pi retry and compaction events", () => {
   it("normalizes retry and compaction lifecycle", () => {
-    expect(normalizePiEvent({
-      type: "auto_retry_start",
-      attempt: 2,
-      maxAttempts: 3,
-      delayMs: 500,
-      errorMessage: "rate limited"
-    })).toEqual({
+    expect(
+      normalizePiEvent({
+        type: "auto_retry_start",
+        attempt: 2,
+        maxAttempts: 3,
+        delayMs: 500,
+        errorMessage: "rate limited"
+      })
+    ).toEqual({
       _tag: "RetryScheduled",
       operation: "provider",
       attempt: 2,
@@ -52,18 +106,20 @@ describe("pi retry and compaction events", () => {
       delayMs: 500,
       message: "rate limited"
     })
-    expect(normalizePiEvent({
-      type: "compaction_end",
-      reason: "threshold",
-      result: {
-        summary: "redacted from the event",
-        firstKeptEntryId: "entry-1",
-        tokensBefore: 9_000,
-        estimatedTokensAfter: 3_000
-      },
-      aborted: false,
-      willRetry: false
-    })).toEqual({
+    expect(
+      normalizePiEvent({
+        type: "compaction_end",
+        reason: "threshold",
+        result: {
+          summary: "redacted from the event",
+          firstKeptEntryId: "entry-1",
+          tokensBefore: 9_000,
+          estimatedTokensAfter: 3_000
+        },
+        aborted: false,
+        willRetry: false
+      })
+    ).toEqual({
       _tag: "CompactionFinished",
       reason: "threshold",
       status: "success",

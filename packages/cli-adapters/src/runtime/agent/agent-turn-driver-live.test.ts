@@ -60,22 +60,22 @@ const withRuntime = <A, E>(
 ) =>
   effect.pipe(
     Effect.provide(
-      AgentTurnDriverLive.pipe(
-        Layer.provide(Layer.succeed(AgentRuntime, AgentRuntime.of(runtime)))
-      )
+      AgentTurnDriverLive.pipe(Layer.provide(Layer.succeed(AgentRuntime, AgentRuntime.of(runtime))))
     )
   )
 
 describe("AgentRuntimeAdapter", () => {
   it("routes the legacy orchestration sink through AgentRuntime", async () => {
     const events: ReadonlyArray<StreamEvent> = [
-      { _tag: "Started", sessionId: "pi-session", model: "anthropic/claude-test" },
+      {
+        _tag: "Started",
+        sessionId: "pi-session",
+        model: "anthropic/claude-test"
+      },
       { _tag: "Assistant", text: "done" },
       { _tag: "Done", costUsd: 0, tokens: 2 }
     ]
-    const run = vi.fn<AgentRuntimeShape["run"]>((_spec, _context) =>
-      Stream.fromIterable(events)
-    )
+    const run = vi.fn<AgentRuntimeShape["run"]>((_spec, _context) => Stream.fromIterable(events))
     const ctx = context()
     const emit = vi.mocked(ctx.emit)
     const registerTurnSteer = vi.mocked(ctx.registerTurnSteer!)
@@ -87,9 +87,7 @@ describe("AgentRuntimeAdapter", () => {
           steer: () => Effect.void,
           interrupt: () => Effect.void
         },
-        Effect.flatMap(AgentTurnDriver, (adapter) =>
-          adapter.run("run-1", spec(), ctx)
-        )
+        Effect.flatMap(AgentTurnDriver, (adapter) => adapter.run("run-1", spec(), ctx))
       )
     )
 
@@ -100,11 +98,9 @@ describe("AgentRuntimeAdapter", () => {
       prompt: "Inspect the repository"
     })
     expect(run.mock.calls[0]?.[1].mcp?.browser?.name).toBe("jingler-browser")
-    expect(emit.mock.calls.map(([event]) => event._tag)).toEqual([
-      "Started",
-      "Assistant",
-      "Done"
-    ])
+    expect(run.mock.calls[0]?.[1].publishEvent).toBe(ctx.emit)
+    expect(run.mock.calls[0]?.[1].registerBackgroundStop).toBe(ctx.registerBackgroundStop)
+    expect(emit.mock.calls.map(([event]) => event._tag)).toEqual(["Started", "Assistant", "Done"])
     expect(registerTurnSteer).toHaveBeenCalled()
   })
 

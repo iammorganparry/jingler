@@ -22,10 +22,7 @@ const roles = ["conversation", "plan", "plan-execution", "background"] as const
 const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 
 const controlTool = <Input, Encoded>(
-  input: Pick<
-    ToolDefinition<Input, Encoded>,
-    "id" | "description" | "input" | "roles" | "execute"
-  >
+  input: Pick<ToolDefinition<Input, Encoded>, "id" | "description" | "input" | "roles" | "execute">
 ): ToolDefinition<Input, Encoded> => ({
   ...input,
   version: "1",
@@ -54,8 +51,7 @@ export const createJinglerControlTools = (
   registry.register(
     controlTool({
       id: "jingler_save_draft_plan",
-      description:
-        "Save the current structured plan draft without requesting approval.",
+      description: "Save the current structured plan draft without requesting approval.",
       input: Schema.Struct({ plan: PlanPrd }),
       roles: ["plan"],
       execute: ({ plan }) => Effect.runPromise(context.saveDraftPlan(plan))
@@ -66,7 +62,7 @@ export const createJinglerControlTools = (
       id: "jingler_submit_plan",
       description: "Submit the structured plan for operator review and approval.",
       input: Schema.Struct({ plan: PlanPrd }),
-      roles: ["plan", "plan-execution"],
+      roles: ["conversation", "plan", "plan-execution"],
       execute: ({ plan }) => Effect.runPromise(context.proposePlan(plan))
     })
   )

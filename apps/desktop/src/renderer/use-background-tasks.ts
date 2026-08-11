@@ -24,7 +24,7 @@ const POLL_MS = 2000
  * reopened) later has live tasks whose events were all emitted before this hook
  * existed.
  */
-export const useBackgroundTasks = (sessionId: string, supported: boolean) => {
+export const useBackgroundTasks = (sessionId: string) => {
   const [tasks, setTasks] = useState<ReadonlyArray<BackgroundTask>>([])
   // Guards against a slow response landing after the session changed and
   // repopulating the dock with another session's tasks.
@@ -32,7 +32,6 @@ export const useBackgroundTasks = (sessionId: string, supported: boolean) => {
   activeSession.current = sessionId
 
   const refresh = useCallback(() => {
-    if (!supported) return
     const forSession = sessionId
     void rpc
       .backgroundTasksList(forSession)
@@ -42,18 +41,14 @@ export const useBackgroundTasks = (sessionId: string, supported: boolean) => {
       // Best-effort: a failed read must never take down the pane the operator is
       // using. The next tick re-reads anyway.
       .catch(() => {})
-  }, [sessionId, supported])
+  }, [sessionId])
 
   useEffect(() => {
-    if (!supported) {
-      setTasks([])
-      return
-    }
     setTasks([])
     refresh()
     const timer = setInterval(refresh, POLL_MS)
     return () => clearInterval(timer)
-  }, [sessionId, supported, refresh])
+  }, [sessionId, refresh])
 
   const stop = useCallback(
     (taskId: string) => {

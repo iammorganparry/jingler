@@ -23,7 +23,10 @@ import {
   fauxToolCall,
   type FakePiResponse
 } from "./fixtures/fake-pi-provider.js"
-import type { AgentRuntimeContext } from "../src/runtime/agent/agent-runtime.js"
+import {
+  inactiveRuntimeActivity,
+  type AgentRuntimeContext
+} from "../src/runtime/agent/agent-runtime.js"
 import { makePiAgentRuntime } from "../src/runtime/agent/pi-agent-runtime.js"
 import { makePiSessionFactory } from "../src/runtime/agent/pi-session-factory.js"
 import { InMemoryProviderCredentialStore } from "../src/runtime/auth/credential-store.js"
@@ -35,10 +38,7 @@ import { ToolRegistry } from "../src/runtime/tools/tool-registry.js"
 import { makeAgentResourceService } from "../src/runtime/resources/agent-resource-service.js"
 import { detectAgentResources } from "../src/runtime/resources/resource-detector.js"
 import { registerManagedFileTools } from "../src/runtime/resources/managed-file-tools.js"
-import {
-  registerMcpTools,
-  type McpToolClientFactory
-} from "../src/runtime/tools/mcp-tools.js"
+import { registerMcpTools, type McpToolClientFactory } from "../src/runtime/tools/mcp-tools.js"
 import type { RuntimeMcpServer } from "../src/runtime/mcp/attachment.js"
 
 const runFile = promisify(execFile)
@@ -46,17 +46,14 @@ const ALL_ROLES = ["conversation", "plan", "plan-execution", "background"] as co
 const ALL_MODES = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 
 const authKindFor = (scenarioId: string): AuthKind =>
-  scenarioId === "auth.route-pinned"
-    ? "openai-codex-oauth"
-    : "api-key"
+  scenarioId === "auth.route-pinned" ? "openai-codex-oauth" : "api-key"
 
 const responsesFor = (scenarioId: string): ReadonlyArray<FakePiResponse> => {
   if (scenarioId === "permission.denied-edit" || scenarioId === "diff.create-edit-delete-rename") {
     return [
-      fauxAssistantMessage(
-        fauxToolCall("workspace.edit", { path: "src/edit.ts" }),
-        { stopReason: "toolUse" }
-      ),
+      fauxAssistantMessage(fauxToolCall("workspace.edit", { path: "src/edit.ts" }), {
+        stopReason: "toolUse"
+      }),
       fauxAssistantMessage("complete")
     ]
   }
@@ -136,10 +133,7 @@ const createWorkspace = async (): Promise<string> => {
   return root
 }
 
-const fileChangeRegistry = (
-  root: string,
-  observations: Array<EvalObservation>
-): ToolRegistry => {
+const fileChangeRegistry = (root: string, observations: Array<EvalObservation>): ToolRegistry => {
   const tracker = new FileChangeTracker({
     artifactDir: join(root, ".jingler/diffs"),
     sessionId: "eval-session"
@@ -214,19 +208,28 @@ const managedResourceRegistry = async (
   const promptDir = join(root, ".pi", "agent", "prompts")
   await mkdir(skillDir, { recursive: true })
   await mkdir(promptDir, { recursive: true })
-  await writeFile(join(skillDir, "SKILL.md"), "name: managed-skill\ndescription: Managed skill fixture\nUse the managed skill.")
+  await writeFile(
+    join(skillDir, "SKILL.md"),
+    "name: managed-skill\ndescription: Managed skill fixture\nUse the managed skill."
+  )
   await writeFile(join(promptDir, "managed-prompt.md"), "Use the managed prompt.")
-  const service = await Effect.runPromise(makeAgentResourceService({
-    managedRoot: join(root, ".jingler", "managed-resources")
-  }))
-  const detected = await Effect.runPromise(detectAgentResources({
-    homeDir: null,
-    worktreePath: root
-  }))
-  await Effect.runPromise(service.importResources(
-    detected.candidates.filter((candidate) => candidate.kind !== "mcp"),
-    { kind: "portable", allowedTargets: [] }
-  ))
+  const service = await Effect.runPromise(
+    makeAgentResourceService({
+      managedRoot: join(root, ".jingler", "managed-resources")
+    })
+  )
+  const detected = await Effect.runPromise(
+    detectAgentResources({
+      homeDir: null,
+      worktreePath: root
+    })
+  )
+  await Effect.runPromise(
+    service.importResources(
+      detected.candidates.filter((candidate) => candidate.kind !== "mcp"),
+      { kind: "portable", allowedTargets: [] }
+    )
+  )
   const tracker = new FileChangeTracker({
     artifactDir: join(root, ".jingler", "managed-diffs"),
     sessionId: "eval-session"
@@ -254,14 +257,18 @@ const managedResourceRegistry = async (
   const factory: McpToolClientFactory = () => {
     observations.push({ kind: "resource", name: "managed-mcp", state: "opened" })
     return Effect.succeed({
-      listTools: () => Effect.succeed({
-        tools: [{ name: "write_file", inputSchema: { type: "object", additionalProperties: false } }]
-      }),
-      callTool: () => Effect.promise(async () => {
-        observations.push({ kind: "tool-effect", tool: "mcp__managed__write_file" })
-        await writeFile(join(root, "src", "mcp-created.ts"), "export const managed = true\n")
-        return { content: [{ type: "text", text: "created" }] }
-      }),
+      listTools: () =>
+        Effect.succeed({
+          tools: [
+            { name: "write_file", inputSchema: { type: "object", additionalProperties: false } }
+          ]
+        }),
+      callTool: () =>
+        Effect.promise(async () => {
+          observations.push({ kind: "tool-effect", tool: "mcp__managed__write_file" })
+          await writeFile(join(root, "src", "mcp-created.ts"), "export const managed = true\n")
+          return { content: [{ type: "text", text: "created" }] }
+        }),
       close: Effect.sync(() => {
         observations.push({ kind: "resource", name: "managed-mcp", state: "closed" })
       })
@@ -275,9 +282,7 @@ const observeStreamEvent = (
   event: StreamEvent,
   registry: ToolRegistry | undefined
 ): ReadonlyArray<EvalObservation> => {
-  const observations: Array<EvalObservation> = [
-    { kind: "event", tag: event._tag }
-  ]
+  const observations: Array<EvalObservation> = [{ kind: "event", tag: event._tag }]
   if (event._tag === "Failed") {
     observations.push({ kind: "report-text", text: event.message })
   }
@@ -301,10 +306,7 @@ const observeStreamEvent = (
   return observations
 }
 
-const connectionFor = (
-  fake: FakePiProvider,
-  authKind: AuthKind
-): ProviderConnectionType =>
+const connectionFor = (fake: FakePiProvider, authKind: AuthKind): ProviderConnectionType =>
   Schema.decodeUnknownSync(ProviderConnection)({
     id: `eval-${authKind}`,
     providerId: fake.providerId,
@@ -318,8 +320,7 @@ const connectionFor = (
       expiresAt: null,
       quotaLabel: null,
       rateLimitLabel: null,
-      confirmedBillingRoute:
-        authKind === "api-key" ? "api" : "subscription"
+      confirmedBillingRoute: authKind === "api-key" ? "api" : "subscription"
     },
     createdAt: "2026-08-10T00:00:00.000Z",
     updatedAt: "2026-08-10T00:00:00.000Z"
@@ -336,8 +337,7 @@ const credentialsFor = async (
       authKind,
       access: "deterministic-credential",
       refresh: authKind === "openai-codex-oauth" ? "deterministic-refresh" : null,
-      expiresAt:
-        authKind === "openai-codex-oauth" ? Date.now() + 60 * 60_000 : null
+      expiresAt: authKind === "openai-codex-oauth" ? Date.now() + 60 * 60_000 : null
     })
   )
   return credentials
@@ -352,8 +352,7 @@ const registryFor = async (
   if (scenarioId === "capability.managed-resources") {
     return managedResourceRegistry(root, observations)
   }
-  return scenarioId === "permission.denied-edit" ||
-    scenarioId === "diff.create-edit-delete-rename"
+  return scenarioId === "permission.denied-edit" || scenarioId === "diff.create-edit-delete-rename"
     ? fileChangeRegistry(root, observations)
     : undefined
 }
@@ -397,6 +396,7 @@ const contextFor = (
 ): AgentRuntimeContext => {
   const permissionDecision = scenarioId === "permission.denied-edit" ? "deny" : "allow"
   return {
+    ...inactiveRuntimeActivity,
     canUseTool: (request) =>
       Effect.sync(() => {
         observations.push({
@@ -416,8 +416,8 @@ const contextFor = (
       Effect.sync(() => {
         observations.push({ kind: "event", tag: "PlanProposed" })
         return scenarioId === "structured.question-plan"
-          ? { _tag: "Approve", mode: "auto" } as const
-          : { _tag: "Reject" } as const
+          ? ({ _tag: "Approve", mode: "auto" } as const)
+          : ({ _tag: "Reject" } as const)
       })
   }
 }
@@ -468,15 +468,11 @@ const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => 
     resolveConnection: () => Effect.succeed(connection),
     ...(registry ? { toolRegistry: registry } : {}),
     ...(tracker ? { terminalTracker: tracker } : {}),
-    ...(input.configureModelRuntime
-      ? { configureModelRuntime: input.configureModelRuntime }
-      : {})
+    ...(input.configureModelRuntime ? { configureModelRuntime: input.configureModelRuntime } : {})
   })
   const runtime = await Effect.runPromise(makePiAgentRuntime(factory))
   const events = await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
-  observations.push(
-    ...[...events].flatMap((event) => observeStreamEvent(event, registry))
-  )
+  observations.push(...[...events].flatMap((event) => observeStreamEvent(event, registry)))
   const usage = [...events].find((event) => event._tag === "Done")
   return {
     scenarioId,
@@ -521,18 +517,14 @@ export const runPiScenario = async (input: RunPiScenarioInput): Promise<EvalTrac
       registry,
       spec,
       context,
-      ...(input.configureModelRuntime
-        ? { configureModelRuntime: input.configureModelRuntime }
-        : {})
+      ...(input.configureModelRuntime ? { configureModelRuntime: input.configureModelRuntime } : {})
     })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 }
 
-export const runDeterministicScenario = async (
-  scenarioId: string
-): Promise<EvalTrace> => {
+export const runDeterministicScenario = async (scenarioId: string): Promise<EvalTrace> => {
   const authKind = authKindFor(scenarioId)
   const fake = new FakePiProvider({ oauth: authKind === "openai-codex-oauth" })
   fake.setResponses(responsesFor(scenarioId))

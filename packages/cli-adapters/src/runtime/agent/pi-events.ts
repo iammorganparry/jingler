@@ -11,22 +11,40 @@ const ToolContent = Schema.Struct({
 })
 const FileChangeDetails = Schema.Struct({ fileChanges: FileChangeSet })
 const ToolDetails = Schema.Struct({ details: FileChangeDetails })
+const ToolTarget = Schema.Struct({
+  path: Schema.optional(Schema.String),
+  from: Schema.optional(Schema.String),
+  to: Schema.optional(Schema.String)
+})
 
 const decodeText = Schema.decodeUnknownOption(TextResultPart)
 const decodeContent = Schema.decodeUnknownOption(ToolContent)
 const decodeDetails = Schema.decodeUnknownOption(ToolDetails)
+const decodeTarget = Schema.decodeUnknownOption(ToolTarget)
 
 type ToolResultEvent = Extract<
   AgentSessionEvent,
   { readonly type: "tool_execution_update" | "tool_execution_end" }
 >
 
-const projectToolResult = (event: ToolResultEvent): {
+const toolTarget = (
+  event: Extract<AgentSessionEvent, { readonly type: "tool_execution_start" }>
+): string | null => {
+  const target = Option.getOrUndefined(decodeTarget(event.args))
+  if (target?.path !== undefined) return target.path
+  if (target?.from !== undefined && target.to !== undefined) {
+    return `${target.from} → ${target.to}`
+  }
+  return null
+}
+
+const projectToolResult = (
+  event: ToolResultEvent
+): {
   readonly output?: string
   readonly fileChanges?: typeof FileChangeSet.Type
 } => {
-  const result =
-    event.type === "tool_execution_update" ? event.partialResult : event.result
+  const result = event.type === "tool_execution_update" ? event.partialResult : event.result
   const content = Option.getOrUndefined(decodeContent(result))
   const details = Option.getOrUndefined(decodeDetails(result))
 
@@ -39,9 +57,7 @@ const projectToolResult = (event: ToolResultEvent): {
 
   return {
     ...(output ? { output } : {}),
-    ...(details === undefined
-      ? {}
-      : { fileChanges: details.details.fileChanges })
+    ...(details === undefined ? {} : { fileChanges: details.details.fileChanges })
   }
 }
 
@@ -84,10 +100,15 @@ const normalizeToolEnd = (
 }
 
 const normalizeMessageEnd = (
-  event: Extract<AgentSessionEvent, { readonly type: "message_end" }>
+  event: Extract<AgentSessionEvent, { readonly type: "message_end" }>,
+  contextWindow?: number
 ): StreamEvent | null =>
   event.message.role === "assistant"
-    ? { _tag: "Usage", tokens: event.message.usage.totalTokens }
+    ? {
+        _tag: "Usage",
+        tokens: event.message.usage.totalTokens,
+        ...(contextWindow === undefined ? {} : { window: contextWindow })
+      }
     : null
 
 const normalizeCompactionEnd = (
@@ -103,19 +124,20 @@ const normalizeCompactionEnd = (
 
 /** Provider-neutral projection of pi's observable event surface. */
 export const normalizePiEvent = (
-  event: AgentSessionEvent
+  event: AgentSessionEvent,
+  contextWindow?: number
 ): StreamEvent | null => {
   switch (event.type) {
     case "message_update":
       return normalizeMessageUpdate(event)
     case "message_end":
-      return normalizeMessageEnd(event)
+      return normalizeMessageEnd(event, contextWindow)
     case "tool_execution_start":
       return {
         _tag: "ToolStart",
         id: event.toolCallId,
         name: event.toolName,
-        target: null
+        target: toolTarget(event)
       }
     case "tool_execution_update":
       return {

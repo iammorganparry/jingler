@@ -51,7 +51,11 @@ export class FileModelCertificationStore implements ModelCertificationStore {
 }
 
 export class InMemoryModelCertificationStore implements ModelCertificationStore {
-  #items: ReadonlyArray<ModelCertification> = []
+  #items: ReadonlyArray<ModelCertification>
+
+  constructor(items: ReadonlyArray<ModelCertification> = []) {
+    this.#items = items
+  }
 
   list = async (): Promise<ReadonlyArray<ModelCertification>> => this.#items
 

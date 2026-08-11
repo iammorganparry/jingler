@@ -13,6 +13,8 @@ const runtimeFailure = (spec: AgentTurnSpec, message: string): AgentRunError =>
 
 const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
   ...(spec.mcp === undefined ? {} : { mcp: spec.mcp }),
+  publishEvent: context.emit,
+  registerBackgroundStop: context.registerBackgroundStop,
   canUseTool: (request: {
     readonly toolId: string
     readonly risk: "network" | "mutate" | "execute"
@@ -30,7 +32,11 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
     context.proposePlan(plan).pipe(
       Effect.map((decision) =>
         PlanDecision.$is("Approve")(decision)
-          ? { _tag: "Approve" as const, mode: decision.mode, plan: decision.plan }
+          ? {
+              _tag: "Approve" as const,
+              mode: decision.mode,
+              plan: decision.plan
+            }
           : PlanDecision.$is("Revise")(decision)
             ? { _tag: "Revise" as const, feedback: decision.feedback }
             : { _tag: "Reject" as const }
@@ -63,25 +69,21 @@ export const AgentTurnDriverLive = Layer.effect(
           Stream.runForEach((event) =>
             Effect.gen(function* () {
               if (event._tag === "Started") {
-                yield* Ref.update(active, (current) =>
-                  new Map(current).set(runId, event.sessionId)
-                )
-                yield* (context.registerTurnSteer?.((text, images) =>
+                yield* Ref.update(active, (current) => new Map(current).set(runId, event.sessionId))
+                yield* context.registerTurnSteer?.((text, images) =>
                   images.length > 0
                     ? Promise.resolve("deferred")
                     : Effect.runPromise(runtime.steer(event.sessionId, text)).then(
                         () => "accepted" as const,
                         () => "deferred" as const
                       )
-                ) ?? Effect.void)
+                ) ?? Effect.void
               }
               yield* context.emit(event)
             })
           ),
           Effect.mapError((error) => runtimeFailure(spec, error.message)),
-          Effect.ensuring(
-            context.registerTurnSteer?.(null) ?? Effect.void
-          ),
+          Effect.ensuring(context.registerTurnSteer?.(null) ?? Effect.void),
           Effect.ensuring(
             Ref.update(active, (current) => {
               const next = new Map(current)
@@ -95,13 +97,9 @@ export const AgentTurnDriverLive = Layer.effect(
         Ref.get(active).pipe(
           Effect.flatMap((current) => {
             const piSessionId = current.get(runId)
-            return piSessionId === undefined
-              ? Effect.void
-              : runtime.interrupt(piSessionId)
+            return piSessionId === undefined ? Effect.void : runtime.interrupt(piSessionId)
           }),
-          Effect.mapError((error) =>
-            new AgentRunError({ kind: "runtime", message: error.message })
-          )
+          Effect.mapError((error) => new AgentRunError({ kind: "runtime", message: error.message }))
         )
     })
   })

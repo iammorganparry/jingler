@@ -1,4 +1,5 @@
-import type { StreamEvent } from "@jingler/core"
+import { PlanPrd, type StreamEvent } from "@jingler/core"
+import { Option, Schema } from "effect"
 
 const OPENING = /^[\t ]*`{3,4}(?!`)json[\t ]*\r?\n/im
 const CLOSING = /^[\t ]*`{3,4}(?!`)[\t ]*(?=\r?$)/m
@@ -15,6 +16,14 @@ export interface PlanDraftStream {
   readonly clear: () => StreamEvent | null
   /** Discard the transport buffer after atomic canonical promotion. */
   readonly reset: () => void
+}
+
+export interface PlanToolDraftStream {
+  /** Append one JSON argument delta from Jingler's plan tool call. */
+  readonly append: (delta: string) => StreamEvent | null
+  /** Replace the partial argument stream with its schema-validated final plan. */
+  readonly complete: (plan: PlanPrd) => StreamEvent | null
+  readonly clear: () => StreamEvent | null
 }
 
 interface ExtractedDraft {
@@ -134,5 +143,55 @@ export const createPlanDraftStream = (
       }
     },
     reset
+  }
+}
+
+const PlanToolArguments = Schema.Struct({ plan: PlanPrd })
+const PLAN_ARGUMENT_PREFIX = /^[\t ]*\{[\t ]*"plan"[\t ]*:[\t ]*/
+
+/**
+ * Project a streamed `jingler_*_plan` argument object into the same plan
+ * envelope used by text transports. The final value is supplied as a decoded
+ * `PlanPrd`, so incomplete provider JSON never crosses into canonical state.
+ */
+export const createPlanToolDraftStream = (
+  planId: () => string,
+  options: {
+    readonly minIntervalMs?: number
+    readonly now?: () => number
+  } = {}
+): PlanToolDraftStream => {
+  const stream = createPlanDraftStream(planId, options)
+  let argumentsJson = ""
+
+  const partialSource = (): string | null => {
+    const prefix = PLAN_ARGUMENT_PREFIX.exec(argumentsJson)
+    if (prefix === null) return null
+    const parsed = Option.getOrUndefined(
+      Schema.decodeUnknownOption(Schema.parseJson(PlanToolArguments))(argumentsJson)
+    )
+    const planSource =
+      parsed === undefined
+        ? argumentsJson.slice(prefix[0].length)
+        : JSON.stringify(parsed.plan)
+    return `{"mode":"submit","plan":${planSource}`
+  }
+
+  return {
+    append: (delta) => {
+      argumentsJson += delta
+      const source = partialSource()
+      return source === null ? null : stream.update(`\`\`\`json\n${source}`)
+    },
+    complete: (plan) => {
+      argumentsJson = JSON.stringify({ plan })
+      return stream.update(
+        `\`\`\`json\n${JSON.stringify({ mode: "submit", plan })}\n\`\`\``
+      )
+    },
+    clear: () => {
+      argumentsJson = ""
+      return stream.clear()
+    }
   }
 }

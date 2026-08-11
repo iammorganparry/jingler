@@ -16,10 +16,7 @@ import type {
 } from "@jingler/core"
 import { Data, Effect } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
-import type {
-  FileChangeTracker,
-  WorktreeSnapshot
-} from "../file-changes/file-change-tracker.js"
+import type { FileChangeTracker, WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { makePiCredentialStore } from "../auth/pi-credential-store.js"
 import { PromptCompiler } from "../prompt/prompt-compiler.js"
 import { runtimeInvariantLayers } from "../prompt/role-profiles.js"
@@ -27,17 +24,15 @@ import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { createJinglerControlTools } from "./pi-jingler-tools.js"
-import {
-  assertLockedPiResources,
-  createLockedPiResources
-} from "./locked-pi-resources.js"
+import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-resources.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 
-export class PiSessionFactoryError extends Data.TaggedError(
-  "PiSessionFactoryError"
-)<{ readonly message: string; readonly cause?: unknown }> {}
+export class PiSessionFactoryError extends Data.TaggedError("PiSessionFactoryError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
 
 export interface PiSessionFactoryOptions {
   readonly agentDir: string
@@ -47,26 +42,18 @@ export interface PiSessionFactoryOptions {
     spec: PiRunSpec
   ) => Effect.Effect<ProviderConnection, AgentRuntimeError>
   readonly promptCompiler?: PromptCompiler
-  readonly toolRegistry?:
-    | ToolRegistry
-    | ((context: AgentRuntimeContext) => ToolRegistry)
+  readonly toolRegistry?: ToolRegistry | ((context: AgentRuntimeContext) => ToolRegistry)
   readonly createToolRegistry?: (
     spec: PiRunSpec,
     context: AgentRuntimeContext,
     tracker: FileChangeTracker | undefined
   ) => Effect.Effect<ToolRegistry, AgentRuntimeError>
   readonly promptTokenBudget?: number
-  readonly terminalTracker?:
-    | FileChangeTracker
-    | ((spec: PiRunSpec) => FileChangeTracker)
+  readonly terminalTracker?: FileChangeTracker | ((spec: PiRunSpec) => FileChangeTracker)
   /** Internal extension point for deterministic providers; production leaves it unset. */
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
-  readonly createSession?: (
-    options: CreateAgentSessionOptions
-  ) => Promise<CreateAgentSessionResult>
-  readonly recordDiagnostic?: (
-    snapshot: RuntimeDiagnosticSnapshot
-  ) => Effect.Effect<void>
+  readonly createSession?: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>
+  readonly recordDiagnostic?: (snapshot: RuntimeDiagnosticSnapshot) => Effect.Effect<void>
 }
 
 const modelIdForProvider = (spec: PiRunSpec, connection: ProviderConnection) => {
@@ -88,10 +75,7 @@ const transcriptText = (messages: ReadonlyArray<Message>): string =>
     .filter((line): line is string => line !== null)
     .join("\n\n")
 
-const seedTranscript = (
-  manager: SessionManager,
-  spec: PiRunSpec
-): void => {
+const seedTranscript = (manager: SessionManager, spec: PiRunSpec): void => {
   if (spec.seed === null) return
   const content = transcriptText(spec.seed.messages)
   if (content.length === 0) return
@@ -107,10 +91,7 @@ const seedTranscript = (
   )
 }
 
-const sessionManagerFor = (
-  spec: PiRunSpec,
-  sessionsDir: string
-): SessionManager => {
+const sessionManagerFor = (spec: PiRunSpec, sessionsDir: string): SessionManager => {
   if (spec.piSessionId !== null && spec.seed === null) {
     return SessionManager.open(spec.piSessionId, sessionsDir, spec.cwd)
   }
@@ -173,9 +154,14 @@ interface EmbeddedSessionInput {
   readonly registry: ToolRegistry | undefined
 }
 
+interface EmbeddedSession {
+  readonly result: CreateAgentSessionResult
+  readonly contextWindow: number
+}
+
 const createEmbeddedSession = (
   input: EmbeddedSessionInput
-): Effect.Effect<CreateAgentSessionResult, AgentRuntimeError> =>
+): Effect.Effect<EmbeddedSession, AgentRuntimeError> =>
   Effect.tryPromise({
     try: async () => {
       const { options, spec, connection, resources, context, registry } = input
@@ -192,10 +178,8 @@ const createEmbeddedSession = (
           message: `Certified model is unavailable: ${spec.modelId}`
         })
       }
-      const customTools = registry
-        ? [...createPiTools(registry, spec, context)]
-        : []
-      return (options.createSession ?? createAgentSession)({
+      const customTools = registry ? [...createPiTools(registry, spec, context)] : []
+      const result = await (options.createSession ?? createAgentSession)({
         cwd: spec.cwd,
         agentDir: options.agentDir,
         modelRuntime,
@@ -213,11 +197,11 @@ const createEmbeddedSession = (
         tools: customTools.map((tool) => tool.name),
         customTools
       })
+      return { result, contextWindow: model.contextWindow }
     },
     catch: (cause) =>
       new AgentRuntimeError({
-        reason:
-          cause instanceof PiSessionFactoryError ? "certification" : "runtime",
+        reason: cause instanceof PiSessionFactoryError ? "certification" : "runtime",
         message:
           cause instanceof PiSessionFactoryError
             ? cause.message
@@ -227,16 +211,17 @@ const createEmbeddedSession = (
   })
 
 const toHandle = (
-  result: CreateAgentSessionResult,
+  embedded: EmbeddedSession,
   spec: PiRunSpec,
   tracker: FileChangeTracker | undefined,
   snapshot: WorktreeSnapshot | null,
   observe?: (event: StreamEvent) => void
 ): PiSessionHandle => {
-  const { session } = result
+  const { session } = embedded.result
   return {
     id: session.sessionFile ?? session.sessionId,
     modelId: String(spec.modelId),
+    contextWindow: embedded.contextWindow,
     subscribe: (listener) => session.subscribe(listener),
     prompt: (text) => session.prompt(text),
     steer: (text) => session.steer(text),
@@ -249,33 +234,28 @@ const toHandle = (
     ...(observe ? { observe } : {}),
     ...(tracker && snapshot
       ? {
-          reconcile: () =>
-            Effect.runPromise(tracker.reconcile(snapshot, spec.cwd))
+          reconcile: () => Effect.runPromise(tracker.reconcile(snapshot, spec.cwd))
         }
       : {})
   }
 }
 
 /** Construct the real embedded pi session from Jingler-owned contracts only. */
-export const makePiSessionFactory = (
-  options: PiSessionFactoryOptions
-): PiSessionFactory => ({
+export const makePiSessionFactory = (options: PiSessionFactoryOptions): PiSessionFactory => ({
   create: (spec, context: AgentRuntimeContext) =>
     Effect.gen(function* () {
       const connection = yield* options.resolveConnection(spec)
       yield* validateConnection(spec, connection)
-      const tracker = typeof options.terminalTracker === "function"
-        ? options.terminalTracker(spec)
-        : options.terminalTracker
+      const tracker =
+        typeof options.terminalTracker === "function"
+          ? options.terminalTracker(spec)
+          : options.terminalTracker
       const registry = options.createToolRegistry
         ? yield* options.createToolRegistry(spec, context, tracker)
         : typeof options.toolRegistry === "function"
           ? options.toolRegistry(context)
           : (options.toolRegistry ?? createJinglerControlTools(context))
-      if (
-        registry.hasMutatingTools(spec.role, spec.mode) &&
-        !tracker
-      ) {
+      if (registry.hasMutatingTools(spec.role, spec.mode) && !tracker) {
         return yield* Effect.fail(
           new AgentRuntimeError({
             reason: "runtime",
@@ -296,7 +276,7 @@ export const makePiSessionFactory = (
             )
           )
         : null
-      const result = yield* createEmbeddedSession({
+      const embedded = yield* createEmbeddedSession({
         options,
         spec,
         connection,
@@ -319,12 +299,6 @@ export const makePiSessionFactory = (
             Effect.runFork(recordDiagnostic(diagnostic.observe(event)))
           }
         : undefined
-      return toHandle(
-        result,
-        spec,
-        tracker,
-        terminalSnapshot,
-        observe
-      )
+      return toHandle(embedded, spec, tracker, terminalSnapshot, observe)
     })
 })

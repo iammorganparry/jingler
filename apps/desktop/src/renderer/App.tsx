@@ -473,6 +473,33 @@ function AuthedApp({
   const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
   const usage = usageQuery.data ?? null;
 
+  const contextTargets = sessions.flatMap((session) => {
+    const chat =
+      session.chats.find(
+        (candidate) => candidate.id === session.activeChatId,
+      ) ?? session.chats[0];
+    return chat === undefined ? [] : [{ session, chat }];
+  });
+  const contextQueries = useQueries({
+    queries: contextTargets.map(({ session, chat }) => ({
+      queryKey: [
+        "context",
+        session.id,
+        chat.id,
+        chat.connectionId,
+        chat.modelId,
+      ] as const,
+      queryFn: () => rpc.contextState(session.id, chat.id),
+      enabled: sessionsLoaded,
+    })),
+  });
+  const contextSessions = contextTargets.flatMap(({ session }, index) => {
+    const snapshot = contextQueries[index]?.data;
+    return snapshot === undefined
+      ? []
+      : [{ id: session.id, title: session.title, snapshot }];
+  });
+
   // The usage modal loads on open; GitHub refreshes live through its machine.
   const loadUsage = () => usageQuery.refetch().then(() => undefined);
   const saveGithubConfig = (config: GithubConfig) =>
@@ -1323,7 +1350,10 @@ function AuthedApp({
         onConnectGithub={
           github.connection.connected ? github.manage : github.connect
         }
-        onSkipGithub={() => send({ type: "SKIP_GITHUB" })}
+        onSkipGithub={() => {
+          github.cancel()
+          send({ type: "SKIP_GITHUB" })
+        }}
         onConnectClaude={(token) =>
           send({
             type: "CONNECT_CLAUDE",
@@ -1521,6 +1551,7 @@ function AuthedApp({
         }}
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
+        contextSessions={contextSessions}
         planTemplate={configQuery.data?.planTemplate ?? null}
         onSavePlanTemplate={savePlanTemplate}
         unifiedMcp={unifiedMcp}

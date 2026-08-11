@@ -75,8 +75,10 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Implement deterministic publishing")
   await composer.press("Enter")
-  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
-  await expect.poll(() => sessionsAt(home)[0]?.semanticBranchPending).toBe(false)
+  await expect.poll(
+    () => sessionsAt(home)[0]?.semanticBranchPending,
+    { timeout: 25_000 }
+  ).toBe(false)
 
   const session = sessionsAt(home)[0]!
   expect(session.branch).toMatch(/^chore\//)
@@ -181,7 +183,6 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Implement automatic publishing")
   await composer.press("Enter")
-  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step, { timeout: 25_000 }).toBe("complete")
 
   const session = sessionsAt(home)[0]!

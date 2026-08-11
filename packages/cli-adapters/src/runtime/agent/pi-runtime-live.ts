@@ -1,18 +1,25 @@
 import { join } from "node:path"
+import type { PiRunSpec } from "@jingler/core"
 import { Effect, Layer } from "effect"
 import { AppPaths } from "../../app-paths.js"
 import { SecretStore } from "../../secret-store.js"
 import { AgentSecretStore } from "../auth/agent-secret-store.js"
+import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
 import { ProviderConnections } from "../providers/provider-connections.js"
-import { ImportedMcpService } from "../resources/imported-mcp-service.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
+import { ImportedMcpService } from "../resources/imported-mcp-service.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
+import type { ToolRegistry } from "../tools/tool-registry.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
-import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
+import {
+  makeWorkspaceMutationPort,
+  registerWorkspaceMutationTools
+} from "../tools/workspace-mutation-tools.js"
 import { AgentRuntime, AgentRuntimeError } from "./agent-runtime.js"
+import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
@@ -24,6 +31,12 @@ const connectionFailure = (message: string, cause?: unknown) =>
 export interface PiAgentRuntimeLiveOptions {
   /** Explicit test transport seam. Production must leave this unset. */
   readonly configureModelRuntime?: PiSessionFactoryOptions["configureModelRuntime"]
+  /** Explicit test tool seam. Production must leave this unset. */
+  readonly configureToolRegistry?: (input: {
+    readonly registry: ToolRegistry
+    readonly spec: PiRunSpec
+    readonly context: AgentRuntimeContext
+  }) => Effect.Effect<void>
 }
 
 /** Composition for the embedded pi runtime and Jingler-owned tools. */
@@ -39,6 +52,7 @@ export const makePiAgentRuntimeLive = (
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
     const workspace = yield* makeWorkspaceInspectionPort
+    const mutations = yield* makeWorkspaceMutationPort
     const credentials = new AgentSecretStore(secretStore)
 
     const factory = makePiSessionFactory({
@@ -95,13 +109,10 @@ export const makePiAgentRuntimeLive = (
           }
           return connection
         }),
-      terminalTracker: (spec) => {
-        const tracker = new FileChangeTracker({
-          artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
-          sessionId: spec.piSessionId ?? spec.runId
-        })
-        return tracker
-      },
+      terminalTracker: (spec) => new FileChangeTracker({
+        artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
+        sessionId: spec.piSessionId ?? spec.runId
+      }),
       createToolRegistry: (spec, context, tracker) => {
         if (!tracker) {
           return Effect.fail(
@@ -149,7 +160,13 @@ export const makePiAgentRuntimeLive = (
           }).pipe(
             Effect.tap((registry) => Effect.sync(() =>
               registerManagedFileTools(registry, managedResources, managedFiles)
-            ))
+            )),
+            Effect.tap((registry) => Effect.sync(() =>
+              registerWorkspaceMutationTools(registry, spec.cwd, mutations)
+            )),
+            Effect.tap((registry) =>
+              options.configureToolRegistry?.({ registry, spec, context }) ?? Effect.void
+            )
           )),
           Effect.mapError((cause) =>
             new AgentRuntimeError({

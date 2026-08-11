@@ -13,6 +13,7 @@ import type {
 } from "@jingler/core"
 import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
 import { Effect, Layer } from "effect"
+import { loadDeviceE2ePiRuntime } from "./e2e/pi-runtime.js"
 import { makeDeviceProviderLayers } from "./provider-runtime.js"
 
 export interface CapabilitySources {
@@ -65,7 +66,8 @@ export const ensureDeviceWorkspaceConfig = async (
 
 export const discoverDeviceCapabilities = (
   sources: CapabilitySources,
-  agentVersion: string
+  agentVersion: string,
+  targetId = "device"
 ): Effect.Effect<RemoteDeviceDiscovery> =>
   Effect.gen(function* () {
     const repositories = yield* sources.repositories().pipe(Effect.orElseSucceed(() => []))
@@ -106,7 +108,7 @@ export const discoverDeviceCapabilities = (
           versions: CURRENT_RUNTIME_CONTRACTS,
           toolIds: [],
           resourceIds: [],
-          targetId: "device"
+          targetId
         },
         providerConnections: providerConnections.map((connection) => ({
           id: connection.id,
@@ -151,7 +153,12 @@ export const discoverLiveDeviceCapabilities = (
   agentVersion: string,
   targetId = "device"
 ): Effect.Effect<RemoteDeviceDiscovery> => {
-  const deviceProviders = makeDeviceProviderLayers(targetId)
+  const e2eRuntime = loadDeviceE2ePiRuntime(targetId)
+  const deviceProviders = makeDeviceProviderLayers(
+    targetId,
+    process.env,
+    e2eRuntime?.providers
+  )
   const layer = Layer.mergeAll(
     WorkspaceService.Default,
     ConfigService.Default,
@@ -168,7 +175,8 @@ export const discoverLiveDeviceCapabilities = (
           providerConnections: () => Effect.succeed(deviceProviders.connections),
           platform: () => ({ os: platform(), arch: arch() })
         },
-        agentVersion
+        agentVersion,
+        targetId
       )
     )
   )

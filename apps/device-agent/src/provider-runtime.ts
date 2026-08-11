@@ -1,8 +1,14 @@
 import { AppPaths } from "@jingler/cli-adapters/app-paths"
 import { SecretStore, SecretStoreUnavailable } from "@jingler/cli-adapters/secret-store"
 import { AgentSecretStore } from "@jingler/cli-adapters/runtime/auth/agent-secret-store"
-import { FileModelCertificationStore } from "@jingler/cli-adapters/runtime/certification/model-certification-store"
-import { makeProviderCatalogService } from "@jingler/cli-adapters/runtime/providers/provider-catalog"
+import {
+  FileModelCertificationStore,
+  type ModelCertificationStore
+} from "@jingler/cli-adapters/runtime/certification/model-certification-store"
+import {
+  makeProviderCatalogService,
+  type DiscoveredProviderModel
+} from "@jingler/cli-adapters/runtime/providers/provider-catalog"
 import {
   ProviderConnections,
   ProviderConnectionsError
@@ -25,6 +31,16 @@ interface DeviceEnvironment {
   readonly JINGLER_CODEX_OAUTH_ACCESS?: string
   readonly JINGLER_CODEX_OAUTH_REFRESH?: string
   readonly JINGLER_CODEX_OAUTH_EXPIRES_AT?: string
+}
+
+export interface DeviceProviderOverrides {
+  readonly connections: ReadonlyArray<ProviderConnection>
+  readonly credentialsDocument: string
+  readonly certifications: ModelCertificationStore
+  readonly discover: (
+    connection: ProviderConnection,
+    signal: AbortSignal
+  ) => Effect.Effect<ReadonlyArray<DiscoveredProviderModel>, never>
 }
 
 const credential = (value: string | undefined): string | undefined =>
@@ -136,9 +152,16 @@ const unsupported = (message: string) =>
 /** Explicit target-local environment routes used by the headless pi runtime. */
 export const makeDeviceProviderLayers = (
   targetId: string,
-  environment: DeviceEnvironment = process.env
+  environment: DeviceEnvironment = process.env,
+  overrides?: DeviceProviderOverrides
 ) => {
-  const state = environmentState(targetId, environment)
+  const environmentRuntime = environmentState(targetId, environment)
+  const state = overrides === undefined
+    ? environmentRuntime
+    : {
+        connections: overrides.connections,
+        document: overrides.credentialsDocument
+      }
   const SecretStoreLive = Layer.effect(
     SecretStore,
     Effect.gen(function* () {
@@ -164,8 +187,11 @@ export const makeDeviceProviderLayers = (
       const credentials = new AgentSecretStore(store)
       const catalog = yield* makeProviderCatalogService({
         connections: Effect.succeed(state.connections),
-        certifications: new FileModelCertificationStore(paths.certificationsFile),
-        discover: (provider, signal) => discoverPiModels(credentials, provider, signal),
+        certifications:
+          overrides?.certifications ?? new FileModelCertificationStore(paths.certificationsFile),
+        discover:
+          overrides?.discover ??
+          ((provider, signal) => discoverPiModels(credentials, provider, signal)),
         targetAvailable: (provider) => provider.targetId === targetId
       })
       return ProviderConnections.of({

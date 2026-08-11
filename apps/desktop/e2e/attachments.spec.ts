@@ -104,7 +104,12 @@ test("a message sent against a proposed plan revises it immediately", async ({ l
   await expect(window.getByText("Refactor auth flow (revised)", { exact: true })).toBeVisible({
     timeout: 20_000
   })
-  await expect(window.getByText("Open PR #482", { exact: true })).toBeVisible()
+  await expect(
+    window
+      .getByTestId("plan-split-column")
+      .locator("p")
+      .filter({ hasText: /^Open PR #482$/ })
+  ).toBeVisible()
 
   // The revised plan remains approvable through the ordinary plan gate.
   await window.getByRole("button", { name: "Approve", exact: true }).first().click()

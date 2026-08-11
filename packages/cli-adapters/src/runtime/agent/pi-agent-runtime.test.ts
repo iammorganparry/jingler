@@ -1,8 +1,17 @@
-import { CURRENT_RUNTIME_CONTRACTS, ProviderConnectionId, ProviderModelId, type PiRunSpec } from "@jingler/core"
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  ProviderConnectionId,
+  ProviderModelId,
+  type PiRunSpec
+} from "@jingler/core"
 import { Effect, Schema, Stream } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
-import { AgentRuntimeError, type AgentRuntimeContext } from "./agent-runtime.js"
+import {
+  AgentRuntimeError,
+  inactiveRuntimeActivity,
+  type AgentRuntimeContext
+} from "./agent-runtime.js"
 import { makePiAgentRuntime, type PiSessionHandle } from "./pi-agent-runtime.js"
 
 const spec: PiRunSpec = {
@@ -18,10 +27,16 @@ const spec: PiRunSpec = {
   priorMessages: [],
   piSessionId: null,
   seed: null,
-  targetCapabilities: { versions: CURRENT_RUNTIME_CONTRACTS, toolIds: [], resourceIds: [], targetId: "desktop" }
+  targetCapabilities: {
+    versions: CURRENT_RUNTIME_CONTRACTS,
+    toolIds: [],
+    resourceIds: [],
+    targetId: "desktop"
+  }
 }
 
 const context: AgentRuntimeContext = {
+  ...inactiveRuntimeActivity,
   canUseTool: () => Effect.succeed("allow"),
   askQuestion: () => Effect.succeed([]),
   saveDraftPlan: () => Effect.void,
@@ -41,7 +56,7 @@ describe("PiAgentRuntime", () => {
           )
       })
     )
-    const events = [...await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))]
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
     expect(events).toEqual([{ _tag: "Failed", message: "model certification is stale" }])
   })
 
@@ -51,9 +66,20 @@ describe("PiAgentRuntime", () => {
     const handle: PiSessionHandle = {
       id: "pi-session-1",
       modelId: "anthropic/claude-sonnet",
-      subscribe: (next) => { listener = next; return vi.fn() },
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
       prompt: async () => {
-        listener?.({ type: "message_update", message: {} as never, assistantMessageEvent: { type: "text_delta", delta: "hello" } as never })
+        listener?.({
+          type: "message_update",
+          message: {} as never,
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: "hello"
+          } as never
+        })
         listener?.({ type: "agent_settled" })
       },
       steer: async () => undefined,
@@ -61,10 +87,14 @@ describe("PiAgentRuntime", () => {
       dispose,
       usage: () => ({ costUsd: 0, tokens: 3 })
     }
-    const runtime = await Effect.runPromise(makePiAgentRuntime({ create: () => Effect.succeed(handle) }))
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
     const events = await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
     expect([...events].map((event) => event._tag)).toEqual(["Started", "Assistant", "Done"])
-    expect([...events].filter((event) => event._tag === "Done" || event._tag === "Failed")).toHaveLength(1)
+    expect(
+      [...events].filter((event) => event._tag === "Done" || event._tag === "Failed")
+    ).toHaveLength(1)
     expect(dispose).toHaveBeenCalledOnce()
   })
 
@@ -73,12 +103,19 @@ describe("PiAgentRuntime", () => {
     const handle: PiSessionHandle = {
       id: "pi-session-slow-consumer",
       modelId: "anthropic/claude-sonnet",
-      subscribe: (next) => { listener = next; return vi.fn() },
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
       prompt: async () => {
         listener?.({
           type: "message_update",
           message: {} as never,
-          assistantMessageEvent: { type: "text_delta", delta: "hello" } as never
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: "hello"
+          } as never
         })
         listener?.({ type: "agent_settled" })
       },
@@ -99,20 +136,98 @@ describe("PiAgentRuntime", () => {
     expect([...events].map((event) => event._tag)).toEqual(["Started", "Assistant", "Done"])
   })
 
+  it("streams schema-validated plan tool arguments as volatile plan drafts", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    const plan = {
+      title: "Refactor auth flow",
+      sections: [],
+      stages: [],
+      annotations: []
+    }
+    const partial = {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "plan-call",
+          name: "jingler_submit_plan",
+          arguments: {}
+        }
+      ]
+    } as never
+    const handle: PiSessionHandle = {
+      id: "pi-session-plan-draft",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt: async () => {
+        listener?.({ type: "message_start", message: partial })
+        listener?.({
+          type: "message_update",
+          message: partial,
+          assistantMessageEvent: {
+            type: "toolcall_delta",
+            contentIndex: 0,
+            delta: '{"plan":{"title":"Refactor auth flow"',
+            partial
+          }
+        } as never)
+        listener?.({
+          type: "message_update",
+          message: partial,
+          assistantMessageEvent: {
+            type: "toolcall_end",
+            contentIndex: 0,
+            toolCall: {
+              type: "toolCall",
+              id: "plan-call",
+              name: "jingler_submit_plan",
+              arguments: { plan }
+            },
+            partial
+          }
+        } as never)
+        listener?.({ type: "agent_settled" })
+      },
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      usage: () => ({ costUsd: 0, tokens: 3 })
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
+    expect(
+      events.flatMap((event) => (event._tag === "PlanDraft" ? [event.draft.phase] : []))
+    ).toEqual(["composing", "complete"])
+  })
+
   it("surfaces prompt rejection as a single failed terminal", async () => {
     const handle: PiSessionHandle = {
       id: "pi-session-2",
       modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
       subscribe: () => vi.fn(),
-      prompt: async () => { throw new Error("offline") },
+      prompt: async () => {
+        throw new Error("offline")
+      },
       steer: async () => undefined,
       interrupt: async () => undefined,
       dispose: vi.fn(),
       usage: () => ({ costUsd: 0, tokens: 0 })
     }
-    const runtime = await Effect.runPromise(makePiAgentRuntime({ create: () => Effect.succeed(handle) }))
-    const events = [...await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))]
-    expect(events.at(-1)).toEqual({ _tag: "Failed", message: "pi prompt failed" })
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
+    expect(events.at(-1)).toEqual({
+      _tag: "Failed",
+      message: "pi prompt failed"
+    })
   })
 })
 
@@ -122,8 +237,14 @@ describe("PiAgentRuntime reconciliation", () => {
     const handle: PiSessionHandle = {
       id: "pi-session-3",
       modelId: "anthropic/claude-sonnet",
-      subscribe: (next) => { listener = next; return vi.fn() },
-      prompt: async () => { listener?.({ type: "agent_settled" }) },
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt: async () => {
+        listener?.({ type: "agent_settled" })
+      },
       steer: async () => undefined,
       interrupt: async () => undefined,
       dispose: vi.fn(),
@@ -154,14 +275,7 @@ describe("PiAgentRuntime reconciliation", () => {
     const runtime = await Effect.runPromise(
       makePiAgentRuntime({ create: () => Effect.succeed(handle) })
     )
-    const events = [
-      ...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))
-    ]
-    expect(events.map((event) => event._tag)).toEqual([
-      "Started",
-      "ToolStart",
-      "ToolEnd",
-      "Done"
-    ])
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
+    expect(events.map((event) => event._tag)).toEqual(["Started", "ToolStart", "ToolEnd", "Done"])
   })
 })

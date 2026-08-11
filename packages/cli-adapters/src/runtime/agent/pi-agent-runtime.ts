@@ -1,16 +1,15 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
-import type { FileChangeSet, PiRunSpec, StreamEvent } from "@jingler/core"
-import { Effect, Queue, Ref, Stream } from "effect"
-import type {
-  AgentRuntimeContext,
-  AgentRuntimeShape
-} from "./agent-runtime.js"
+import { PlanPrd, type FileChangeSet, type PiRunSpec, type StreamEvent } from "@jingler/core"
+import { Effect, Option, Queue, Ref, Schema, Stream } from "effect"
+import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
+import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { normalizePiEvent } from "./pi-events.js"
 
 export interface PiSessionHandle {
   readonly id: string
   readonly modelId: string
+  readonly contextWindow: number | null
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
   readonly prompt: (text: string) => Promise<void>
   readonly steer: (text: string) => Promise<void>
@@ -58,10 +57,7 @@ const makeEventSink = (
   }
 }
 
-const reconcileWorkspace = async (
-  handle: PiSessionHandle,
-  sink: EventSink
-): Promise<void> => {
+const reconcileWorkspace = async (handle: PiSessionHandle, sink: EventSink): Promise<void> => {
   const changes = await handle.reconcile?.()
   if (!(changes && changes.changes.length > 0)) return
   const id = `reconcile:${changes.id}`
@@ -77,12 +73,43 @@ const reconcileWorkspace = async (
   })
 }
 
+const PLAN_TOOLS = new Set(["jingler_save_draft_plan", "jingler_submit_plan"])
+const PlanToolArguments = Schema.Struct({ plan: PlanPrd })
+const decodePlanToolArguments = Schema.decodeUnknownOption(PlanToolArguments)
+
+const projectPlanDraft = (
+  event: AgentSessionEvent,
+  draft: PlanToolDraftStream
+): StreamEvent | null => {
+  if (event.type === "message_start" && event.message.role === "assistant") {
+    return draft.clear()
+  }
+  if (event.type !== "message_update") return null
+  const update = event.assistantMessageEvent
+  if (update.type === "toolcall_delta") {
+    const block = update.partial.content[update.contentIndex]
+    return block?.type === "toolCall" && PLAN_TOOLS.has(block.name)
+      ? draft.append(update.delta)
+      : null
+  }
+  if (update.type !== "toolcall_end" || !PLAN_TOOLS.has(update.toolCall.name)) {
+    return null
+  }
+  return Option.match(decodePlanToolArguments(update.toolCall.arguments), {
+    onNone: () => draft.clear(),
+    onSome: ({ plan }) => draft.complete(plan)
+  })
+}
+
 const subscribeToSession = (
   handle: PiSessionHandle,
-  sink: EventSink
+  sink: EventSink,
+  planDraft: PlanToolDraftStream
 ): (() => void) =>
   handle.subscribe((event) => {
-    const normalized = normalizePiEvent(event)
+    const draft = projectPlanDraft(event, planDraft)
+    if (draft) sink.emit(draft)
+    const normalized = normalizePiEvent(event, handle.contextWindow ?? undefined)
     if (normalized) sink.emit(normalized)
     if (event.type === "agent_settled" && sink.beginSettling()) {
       reconcileWorkspace(handle, sink)
@@ -96,11 +123,7 @@ const subscribeToSession = (
     }
   })
 
-const startPrompt = (
-  handle: PiSessionHandle,
-  prompt: string,
-  sink: EventSink
-): void => {
+const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): void => {
   Effect.runFork(
     Effect.tryPromise({
       try: () => handle.prompt(prompt),
@@ -114,11 +137,7 @@ const startPrompt = (
       Effect.catchAll((error) =>
         Effect.promise(() => reconcileWorkspace(handle, sink)).pipe(
           Effect.catchAll(() => Effect.void),
-          Effect.tap(() =>
-            Effect.sync(() =>
-              sink.emit({ _tag: "Failed", message: error.message })
-            )
-          )
+          Effect.tap(() => Effect.sync(() => sink.emit({ _tag: "Failed", message: error.message })))
         )
       )
     )
@@ -135,12 +154,15 @@ const runSession = (
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<StreamEvent>()
       const handle = yield* factory.create(spec, context)
-      yield* Ref.update(sessions, (current) =>
-        new Map(current).set(handle.id, handle)
-      )
+      yield* Ref.update(sessions, (current) => new Map(current).set(handle.id, handle))
       const sink = makeEventSink(queue, handle.observe)
-      sink.emit({ _tag: "Started", sessionId: handle.id, model: handle.modelId })
-      const unsubscribe = subscribeToSession(handle, sink)
+      const planDraft = createPlanToolDraftStream(() => `plan-draft:${spec.runId}`)
+      sink.emit({
+        _tag: "Started",
+        sessionId: handle.id,
+        model: handle.modelId
+      })
+      const unsubscribe = subscribeToSession(handle, sink, planDraft)
       startPrompt(handle, spec.prompt, sink)
       return Stream.fromQueue(queue).pipe(
         Stream.takeUntil((event) => event._tag === "Done" || event._tag === "Failed"),
@@ -165,15 +187,16 @@ const runSession = (
     }).pipe(
       Effect.catchAll((error) =>
         Effect.succeed(
-          Stream.succeed<StreamEvent>({ _tag: "Failed", message: error.message })
+          Stream.succeed<StreamEvent>({
+            _tag: "Failed",
+            message: error.message
+          })
         )
       )
     )
   )
 
-export const makePiAgentRuntime = (
-  factory: PiSessionFactory
-): Effect.Effect<AgentRuntimeShape> =>
+export const makePiAgentRuntime = (factory: PiSessionFactory): Effect.Effect<AgentRuntimeShape> =>
   Effect.gen(function* () {
     const sessions = yield* Ref.make(new Map<string, PiSessionHandle>())
 

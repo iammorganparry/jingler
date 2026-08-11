@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
@@ -408,7 +408,7 @@ test("adds selected code to the active chat with the platform J shortcut", async
 test("follows the selected chat agent through edited and newly created files", async ({
   launchApp
 }) => {
-  const { window, repoPath } = await launchApp({
+  const { window } = await launchApp({
     configured: true,
     withRepo: true,
     seed: seedRepository,
@@ -440,16 +440,12 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(window.getByTestId("session-auxiliary-split")).toBeVisible()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
-  // Prove the initial repository scan has settled before creating this file.
-  // The scripted agent then reports the mutation only after the file exists,
-  // matching a real provider stream and making the follow-triggered refresh deterministic.
+  // Prove the initial repository scan has settled before pi creates the file.
   await expect(
     window.locator(
       '[data-jingler-pierre-file-tree][aria-label="Repository files"] [role="treeitem"]'
     ).first()
   ).toBeVisible()
-  writeFileSync(join(repoPath, "src", "created.ts"), "export const created = true\n")
-
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[codex-edit-preview]] Update and create the configuration files.")
   await composer.press("Enter")
@@ -476,7 +472,7 @@ test("follows the selected chat agent through edited and newly created files", a
 })
 
 test("follows a nested sub-agent edit for the selected chat", async ({ launchApp }) => {
-  const { window, repoPath } = await launchApp({
+  const { window } = await launchApp({
     configured: true,
     withRepo: true,
     seed: seedRepository,
@@ -484,8 +480,6 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
   })
 
   await expect(appShell(window)).toBeVisible()
-  writeFileSync(join(repoPath, "src", "delegated.ts"), "export const delegated = true\n")
-
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
@@ -510,7 +504,7 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
 test("refreshes the repository tree and follows a moved file to its destination", async ({
   launchApp
 }) => {
-  const { window, repoPath } = await launchApp({
+  const { window } = await launchApp({
     configured: true,
     withRepo: true,
     seed: seedRepository,
@@ -526,20 +520,6 @@ test("refreshes the repository tree and follows a moved file to its destination"
   await selectTreePath(window, "src/config.ts")
   await composerFollow.click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
-
-  mkdirSync(join(repoPath, "src", "settings"), { recursive: true })
-  renameSync(
-    join(repoPath, "src", "config.ts"),
-    join(repoPath, "src", "settings", "config.ts")
-  )
-  writeFileSync(
-    join(repoPath, "src", "settings", "config.ts"),
-    [
-      "export const mode = 'modern'",
-      "export const retries = 2",
-      "export const timeout = 1_000"
-    ].join("\n") + "\n"
-  )
 
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[follow-file-move]] Move and update the configuration file.")
@@ -569,7 +549,7 @@ test("refreshes the repository tree and follows a moved file to its destination"
 test("reveals the followed mutation diff and sends selected feedback with context", async ({
   launchApp
 }) => {
-  const { window, repoPath } = await launchApp({
+  const { window } = await launchApp({
     configured: true,
     withRepo: true,
     seed: seedRepository,
@@ -581,11 +561,6 @@ test("reveals the followed mutation diff and sends selected feedback with contex
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
   await composerFollow.click()
-  writeFileSync(
-    join(repoPath, "src", "config.ts"),
-    "export const mode = 'modern'\nexport const retries = 2\nexport const timeout = 1_000\n"
-  )
-
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[follow-diff-preview]] Update the configuration mode.")
   await composer.press("Enter")

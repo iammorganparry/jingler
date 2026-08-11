@@ -1174,6 +1174,50 @@ describe("activityOf", () => {
     })
   })
 
+  it("keeps the concrete mutation event when terminal reconciliation repeats its changes", () => {
+    const mutation = tool("workspace_write", "src/config.ts", "success")
+    const reconciliation = tool("Workspace changes", null, "success")
+    const changes = {
+      id: "changes-1",
+      callId: mutation.tool.id,
+      changes: [{
+        status: "M" as const,
+        path: "src/config.ts",
+        oldPath: null,
+        added: 1,
+        removed: 1,
+        binary: false,
+        noNewlineAtEnd: false,
+        beforeBytes: 10,
+        afterBytes: 10,
+        preview: "-old\n+new",
+        patchArtifactId: "patch-1"
+      }],
+      totals: { added: 1, removed: 1 },
+      authoritative: true,
+      reconciledAt: "2026-08-10T12:00:00.000Z"
+    }
+    expect(
+      agentFileActivityOf(
+        [
+          turn(
+            { ...mutation, tool: { ...mutation.tool, fileChanges: changes } },
+            {
+              ...reconciliation,
+              tool: { ...reconciliation.tool, fileChanges: changes }
+            }
+          )
+        ],
+        "settling"
+      )
+    ).toEqual({
+      eventId: "t_workspace_write",
+      path: "src/config.ts",
+      phase: "completed",
+      preview: "-old\n+new"
+    })
+  })
+
   it("does not replay completed or failed mutations after the run becomes idle", () => {
     expect(
       agentFileActivityOf([turn(tool("Write", "src/old.ts", "success"))], "idle")

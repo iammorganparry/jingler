@@ -148,6 +148,7 @@ export const githubConnectionMachine = setup({
       | { type: "MANAGE" }
       | { type: "REFRESH" }
       | { type: "DISCONNECT" }
+      | { type: "CANCEL" }
       | { type: "CALLBACK"; ok: boolean; error: string | null }
       | { type: "RETRY" }
   },
@@ -213,6 +214,10 @@ export const githubConnectionMachine = setup({
         onError: { target: "error", actions: "assignFailure" }
       },
       on: {
+        CANCEL: {
+          target: "disconnected",
+          actions: assign({ connection: EMPTY_GITHUB_CONNECTION })
+        },
         CALLBACK: [
           { guard: ({ event }) => event.ok, target: "refreshing" },
           {

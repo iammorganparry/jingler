@@ -3,7 +3,10 @@ import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { AgentRuntime } from "@jingler/cli-adapters/runtime/agent/agent-runtime"
 import { AgentTurnDriverLive } from "@jingler/cli-adapters/runtime/agent/agent-turn-driver-live"
-import { PiAgentRuntimeLive } from "@jingler/cli-adapters/runtime/agent/pi-runtime-live"
+import {
+  makePiAgentRuntimeLive,
+  PiAgentRuntimeLive
+} from "@jingler/cli-adapters/runtime/agent/pi-runtime-live"
 import { RuntimeDiagnostics } from "@jingler/cli-adapters/runtime/diagnostics/runtime-diagnostics"
 import { AgentResourcesLive } from "@jingler/cli-adapters/runtime/resources/resource-services-live"
 import { AssetService } from "@jingler/cli-adapters/asset"
@@ -54,6 +57,7 @@ import type {
   Project as ProjectValue,
   StreamEvent as StreamEventValue
 } from "@jingler/core"
+import { loadDeviceE2ePiRuntime } from "./e2e/pi-runtime.js"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
 import type { SessionCommandExecutor } from "./session-handler.js"
 import { makeDeviceProviderLayers } from "./provider-runtime.js"
@@ -320,9 +324,19 @@ const HeadlessBrowserControlLive = Layer.succeed(
 )
 
 const deviceRuntime = (root: string, targetId: string) => {
-  const providers = makeDeviceProviderLayers(targetId)
+  const e2eRuntime = loadDeviceE2ePiRuntime(targetId)
+  const providers = makeDeviceProviderLayers(
+    targetId,
+    process.env,
+    e2eRuntime?.providers
+  )
   const assets = AssetService.Default.pipe(Layer.provide(NodeContext.layer))
-  const piRuntime = PiAgentRuntimeLive.pipe(
+  const embeddedPi = e2eRuntime === null
+    ? PiAgentRuntimeLive
+    : makePiAgentRuntimeLive({
+        configureModelRuntime: e2eRuntime.configureModelRuntime
+      })
+  const piRuntime = embeddedPi.pipe(
     Layer.provide(RuntimeDiagnostics.Default),
     Layer.provide(assets),
     Layer.provide(AgentResourcesLive),

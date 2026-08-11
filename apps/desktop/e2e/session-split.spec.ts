@@ -760,15 +760,15 @@ test("Shift+Tab cycles the mode of only the focused pane", async ({ launchApp })
   const pane1 = window.getByTestId("split-pane-1")
 
   // Unspecified persisted modes normalize to the current default.
-  await expect(pane0.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
-  await expect(pane1.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
+  await expect(pane0.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
+  await expect(pane1.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
 
-  // Focus the RIGHT pane's composer, then cycle once: auto → plan for Claude.
+  // Focus the RIGHT pane's composer, then cycle once: accept-edits → auto.
   await pane1.getByPlaceholder("Message the agent…").click()
   await window.keyboard.press("Shift+Tab")
 
   // Only the focused pane moved; the other keeps its mode. Before the fix, both
   // chips would read "plan" here.
-  await expect(pane1.getByRole("button", { name: "Enhanced Plan", exact: true })).toBeVisible()
-  await expect(pane0.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
+  await expect(pane1.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
+  await expect(pane0.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
 })

@@ -56,6 +56,7 @@ import {
   configureE2ePiProvider,
   loadE2ePiFixture
 } from "./e2e/pi-fixture.js"
+import { configureE2ePiTools } from "./e2e/pi-fixture-tools.js"
 import { PlaintextSecretStoreLive, SecretStoreLive } from "./secret-store.js"
 import {
   PlaintextPluginSecretStoreLive,
@@ -108,7 +109,8 @@ const e2ePiFixture = loadE2ePiFixture()
 const EmbeddedPiRuntimeLive = e2ePiFixture === null
   ? PiAgentRuntimeLive
   : makePiAgentRuntimeLive({
-      configureModelRuntime: configureE2ePiProvider(e2ePiFixture)
+      configureModelRuntime: configureE2ePiProvider(e2ePiFixture),
+      configureToolRegistry: configureE2ePiTools
     })
 
 const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(

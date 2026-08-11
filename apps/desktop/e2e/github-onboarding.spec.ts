@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import type { Page } from "@playwright/test"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 
 const seedSession = ({ repoPath }: { repoPath: string }) => [
@@ -32,6 +33,18 @@ const chooseFixtureRepo = async (
   }, reposDir)
 }
 
+const finishProviderSetup = async (window: Page): Promise<void> => {
+  await expect(
+    window.getByRole("heading", { name: "Connect a model provider" })
+  ).toBeVisible()
+  await window.getByRole("button", { name: "Use model" }).click()
+  await expect(
+    window.getByRole("heading", { name: "Import agent resources" })
+  ).toBeVisible()
+  await window.getByRole("button", { name: "Skip for now" }).click()
+  await expect(appShell(window)).toBeVisible()
+}
+
 test("first-run GitHub is explicitly skippable", async ({ launchApp }) => {
   const { app, window, reposDir } = await launchApp({
     withRepo: true,
@@ -47,7 +60,7 @@ test("first-run GitHub is explicitly skippable", async ({ launchApp }) => {
   await window.getByRole("button", { name: "Continue" }).click()
   await expect(window.getByRole("heading", { name: "Connect GitHub" })).toBeVisible()
   await window.getByRole("button", { name: "Skip for now" }).click()
-  await expect(appShell(window)).toBeVisible()
+  await finishProviderSetup(window)
 })
 
 test("first-run GitHub remains skippable when the browser flow is abandoned", async ({
@@ -67,7 +80,7 @@ test("first-run GitHub remains skippable when the browser flow is abandoned", as
 
   await expect(window.getByRole("button", { name: "Skip for now" })).toBeEnabled()
   await window.getByRole("button", { name: "Skip for now" }).click()
-  await expect(appShell(window)).toBeVisible()
+  await finishProviderSetup(window)
 })
 
 test("a migration-era WorkspaceConfig keeps its preferences and offers App reconnection once", async ({
@@ -146,7 +159,7 @@ test("GitHub onboarding resumes after callback and Settings repairs live access"
     .toContainEqual(expect.stringContaining("/browser/install"))
 
   await completeGitHubConnection()
-  await expect(appShell(window)).toBeVisible()
+  await finishProviderSetup(window)
 
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()

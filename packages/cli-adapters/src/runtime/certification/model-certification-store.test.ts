@@ -39,6 +39,13 @@ const certification = (
 })
 
 describe("model certification store", () => {
+  it("can start with fixture evidence without an asynchronous seed step", async () => {
+    const evidence = certification("api-key")
+    const store = new InMemoryModelCertificationStore([evidence])
+
+    expect(await store.get(certificationKey(evidence))).toEqual(evidence)
+  })
+
   it("keeps authentication routes as independent records", async () => {
     const store = new InMemoryModelCertificationStore()
     const oauth = certification("openai-codex-oauth")

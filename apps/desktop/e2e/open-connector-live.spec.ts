@@ -68,7 +68,9 @@ test("connects to the local OpenConnector and serves its real managed catalog", 
   await expect(catalog.getByRole("button", { name: /GitHub/ }).first()).toBeVisible()
 
   // The unified MCP status is authoritative; there are no provider-specific copies.
-  await expect(app.window.getByText(`Point every agent at one OpenConnector`)).toBeVisible()
+  await expect(
+    app.window.getByText("Connect providers once — every agent draws them from the shared OpenConnector.")
+  ).toBeVisible()
 })
 
 /**

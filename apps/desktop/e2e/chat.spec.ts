@@ -97,8 +97,8 @@ test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ 
   const row = window.getByTestId("session-row-s_seeded")
   await expect(row.getByText("Idle", { exact: true })).toHaveCount(0, { timeout: 10_000 })
 
-  // The assistant turn is labelled with the provider (Claude) in the eyebrow.
-  await expect(window.getByText("Claude", { exact: true })).toBeVisible({ timeout: 20_000 })
+  // The assistant turn is labelled with its selected provider in the eyebrow.
+  await expect(window.getByText("jingler-e2e", { exact: true })).toBeVisible({ timeout: 20_000 })
 
   // Cost/token readouts were removed (a usage widget replaces them later).
   await expect(window.getByText(/\$0\.00/)).toHaveCount(0)
@@ -155,7 +155,7 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
   await expect(window.getByText("Approval needed · run a command")).toHaveCount(0)
 })
 
-test("the / menu surfaces built-in + project skills and the @ menu references files", async ({
+test("unimported skills stay unavailable and the @ menu references files", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -174,13 +174,10 @@ test("the / menu surfaces built-in + project skills and the @ menu references fi
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.click()
 
-  // `/` surfaces built-in commands…
-  await composer.pressSequentially("/")
-  await expect(window.getByText("/plan")).toBeVisible()
-  // …and the project skill scanned from the worktree.
-  await composer.pressSequentially("deploy")
-  await expect(window.getByRole("option", { name: /deploy/ })).toBeVisible()
-  await composer.press("Escape")
+  // Detection is read-only: a project skill is unavailable until the operator
+  // explicitly imports it into Jingler's managed resource catalog.
+  await composer.pressSequentially("/deploy")
+  await expect(window.getByRole("option", { name: /deploy/ })).toHaveCount(0)
   for (let i = 0; i < "/deploy".length; i++) await composer.press("Backspace")
 
   // `@` opens the code-reference palette listing tracked files.
@@ -188,7 +185,7 @@ test("the / menu surfaces built-in + project skills and the @ menu references fi
   await expect(window.getByText("README.md").first()).toBeVisible()
 })
 
-test("the mode chip lives in the composer and Shift+Tab cycles it (incl. Plan on Claude)", async ({
+test("the mode chip lives in the composer and Shift+Tab cycles all modes", async ({
   launchApp
 }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
@@ -204,18 +201,18 @@ test("the mode chip lives in the composer and Shift+Tab cycles it (incl. Plan on
   await expect(window.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "accept-edits")
 
-  // On a Claude session Shift+Tab cycles accept-edits → auto → plan → ask.
+  // Shift+Tab cycles accept-edits → auto → plan → ask for every pi model.
   await window.keyboard.press("Shift+Tab")
   await expect(window.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "auto")
 
   await window.keyboard.press("Shift+Tab")
-  // Plan mode is now reachable (Claude-only) and themes the composer purple.
+  // Plan mode is reachable for every certified pi model and themes the composer purple.
   await expect(window.getByRole("button", { name: "Enhanced Plan", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "plan")
 
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByRole("button", { name: "Default", exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Ask Before Actions", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "ask")
 })
 
@@ -283,7 +280,7 @@ test("AskUserQuestion replaces the composer with a question card and resumes on 
   await composer.press("Enter")
 
   // The question card takes over the composer slot.
-  await expect(window.getByText("Claude needs your input")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByText("Agent needs your input")).toBeVisible({ timeout: 15_000 })
   await expect(window.getByText("Which token strategy should the store use?")).toBeVisible()
 
   // Q1 (single): pick an option and advance.
@@ -641,7 +638,9 @@ test("the sidebar Settings cog opens the settings view with the GitHub section",
   // the "Close settings" control and the Providers blurb prove it mounted.
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
   await expect(
-    window.getByText("Set the defaults each agent CLI starts a new session with.")
+    window.getByText(
+      "Each connection pins an account, target, and billing route. Jingler never falls through to another credential."
+    )
   ).toBeVisible()
 
   // Switch to the GitHub section → its section + pull-request toggle render (the

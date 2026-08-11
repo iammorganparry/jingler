@@ -22,6 +22,7 @@ export const useGitHubConnection = () => {
       state.matches("refreshing") ||
       state.matches("disconnecting"),
     connect: () => send({ type: "CONNECT" }),
+    cancel: () => send({ type: "CANCEL" }),
     manage: () => send({ type: "MANAGE" }),
     refresh: () => send({ type: "REFRESH" }),
     disconnect: () => send({ type: "DISCONNECT" }),
