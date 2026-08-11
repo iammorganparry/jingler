@@ -65,12 +65,14 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await expect(app.window.getByRole("button", { name: "Close new session" })).toBeDisabled()
   await expect(startup.locator('[data-phase="checking-access"]')).toHaveAttribute("data-status", /active|complete/)
   await expect(startup.locator('[data-phase="starting-sandbox"]')).toHaveAttribute("data-status", "active")
-  await expect(app.window.getByRole("alert")).toContainText(
-    "Scripted Cloud startup stopped before allocation",
-    { timeout: 10_000 }
-  )
-  await expect(app.window.getByRole("button", { name: "Close new session" })).toBeEnabled()
-  await app.window.getByRole("button", { name: "Close new session" }).click()
+  const pendingCloud = app.window.getByTestId("pending-cloud-session")
+  await expect(pendingCloud).toContainText("Starting in Cloud · widget")
+  await app.window.getByText("Managed environment picker", { exact: true }).click()
+  await expect(startup).toBeHidden()
+  await pendingCloud.click()
+  await expect(startup).toBeVisible()
+  await app.window.getByText("Managed environment picker", { exact: true }).click()
+  await expect(startup).toBeHidden()
 
   const prompt = app.window.getByRole("textbox", { name: MESSAGE_BOX })
   await prompt.fill("Keep this turn active while I move it to Cloud.")

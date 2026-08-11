@@ -38,6 +38,7 @@ import {
 } from "../components/command.js"
 import { Popover, PopoverContent, PopoverTrigger } from "../components/popover.js"
 import { cn } from "../lib/cn.js"
+import type { PendingCloudSession } from "../app/cloud-session-startup-machine.js"
 import { Composer } from "./composer.js"
 import { IssuePickerList } from "./issue-picker-list.js"
 import { newWorkspaceMachine, type NewSessionSource, type NewWorkspaceDeps } from "./new-workspace-machine.js"
@@ -64,7 +65,13 @@ const CLOUD_STARTUP_STEPS: ReadonlyArray<{
   { phase: "ready", label: "Ready", description: "Opening the session." }
 ]
 
-function CloudStartupProgress({ phase }: { phase: SessionCreationPhase | null }) {
+function CloudStartupProgress({
+  phase,
+  error
+}: {
+  phase: SessionCreationPhase | null
+  error?: string | null
+}) {
   const activeIndex = Math.max(0, CLOUD_STARTUP_STEPS.findIndex((step) => step.phase === phase))
   return (
     <section
@@ -105,6 +112,11 @@ function CloudStartupProgress({ phase }: { phase: SessionCreationPhase | null })
           )
         })}
       </ol>
+      {error && (
+        <p role="alert" className="mt-2 rounded-lg border border-red/40 bg-red/10 px-3 py-2 text-[11px] text-red">
+          {error}
+        </p>
+      )}
     </section>
   )
 }
@@ -209,6 +221,8 @@ export interface NewWorkspaceViewProps {
   onCreate: NewWorkspaceDeps["onCreate"]
   onCreateFromPr?: NewWorkspaceDeps["onCreateFromPr"]
   onCreateFromIssue?: NewWorkspaceDeps["onCreateFromIssue"]
+  /** App-owned Cloud startup state survives navigation away from this view. */
+  cloudStartup?: PendingCloudSession | null
   onAddProject?: () => void
   onClose: () => void
 }
@@ -325,15 +339,18 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
           variant="ghost"
           size="icon"
           aria-label="Close new session"
-          disabled={submitting}
+          disabled={submitting && !props.cloudStartup?.error}
           onClick={() => send({ type: "CLOSE" })}
         >
           <X size={15} />
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">
-        {submitting && selectedEnvironment?.kind === "managed" ? (
-          <CloudStartupProgress phase={provisioningPhase} />
+        {props.cloudStartup || (submitting && selectedEnvironment?.kind === "managed") ? (
+          <CloudStartupProgress
+            phase={props.cloudStartup?.phase ?? provisioningPhase}
+            error={props.cloudStartup?.error}
+          />
         ) : (
         <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
           <div className="flex items-center gap-3">
