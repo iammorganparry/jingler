@@ -1,6 +1,6 @@
 {
   "name": "@jingler/desktop",
-  "version": "3.0.1",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Jingler — an agent-session manager for coding CLIs.",

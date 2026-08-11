@@ -1,41 +1,41 @@
 # @jingler/cli-adapters
 
-## 3.0.1
+## 0.2.1
 
 ### Patch Changes
 
-- @jingler/core@3.0.1
-- @jingler/themes@3.0.1
+- @jingler/core@0.2.1
+- @jingler/themes@0.2.1
 
-## 3.0.0
-
-### Patch Changes
-
-- @jingler/core@3.0.0
-- @jingler/themes@3.0.0
-
-## 2.0.3
+## 0.2.0
 
 ### Patch Changes
 
-- @jingler/core@2.0.3
-- @jingler/themes@2.0.3
+- @jingler/core@0.2.0
+- @jingler/themes@0.2.0
 
-## 2.0.2
-
-### Patch Changes
-
-- @jingler/core@2.0.2
-- @jingler/themes@2.0.2
-
-## 2.0.1
+## 0.1.3
 
 ### Patch Changes
 
-- @jingler/core@2.0.1
-- @jingler/themes@2.0.1
+- @jingler/core@0.1.3
+- @jingler/themes@0.1.3
 
-## 2.0.0
+## 0.1.2
+
+### Patch Changes
+
+- @jingler/core@0.1.2
+- @jingler/themes@0.1.2
+
+## 0.1.1
+
+### Patch Changes
+
+- @jingler/core@0.1.1
+- @jingler/themes@0.1.1
+
+## 0.1.0
 
 ### Minor Changes
 
@@ -651,5 +651,5 @@
 - Updated dependencies [b419734]
 - Updated dependencies [f987c20]
 - Updated dependencies [e98acda]
-  - @jingler/core@2.0.0
-  - @jingler/themes@2.0.0
+  - @jingler/core@0.1.0
+  - @jingler/themes@0.1.0

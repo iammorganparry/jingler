@@ -1,12 +1,12 @@
 # @jingler/desktop
 
-## 3.0.1
+## 0.2.1
 
 ### Patch Changes
 
 - c2a2490: Make Cloud sessions selectable before sandbox provisioning and distinguish Cloud targets visually.
 
-## 3.0.0
+## 0.2.0
 
 ### Minor Changes
 
@@ -20,25 +20,25 @@
 - 009f286: Keep GitHub review feedback live when an agent creates a replacement branch and pull request in the same session.
 - 45846d5: Group sidebar sessions by operator attention and open every auxiliary view in a responsive two-thirds chat split.
 
-## 2.0.3
+## 0.1.3
 
 ### Patch Changes
 
 - d0761df: Run release packaging in a cross-platform shell so Windows installers publish successfully.
 
-## 2.0.2
+## 0.1.2
 
 ### Patch Changes
 
 - 9dddee8: Embed Browser in its owning session with a responsive, resizable chat split.
 
-## 2.0.1
+## 0.1.1
 
 ### Patch Changes
 
 - 7a8a9dc: Prevent electron-builder from traversing the bundled plugin SDK workspace symlink when packaging desktop installers.
 
-## 2.0.0
+## 0.1.0
 
 ### Minor Changes
 
@@ -571,4 +571,4 @@
   unchanged, and a new one covers the stranded case.
 
 - Updated dependencies [256f5a0]
-  - @jingler/plugin-sdk@2.0.0
+  - @jingler/plugin-sdk@0.1.0
