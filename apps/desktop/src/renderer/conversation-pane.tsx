@@ -667,7 +667,6 @@ export function ConversationPane({
 
   const activeAgentTranscript = activeSubagent === null ? null : {
     message: activeSubagent.message,
-    cli: activeSubagent.cli,
     providerId: session.providerId
   }
 

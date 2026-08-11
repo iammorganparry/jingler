@@ -57,7 +57,7 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
   return (
     <div className="border-b border-hairline py-[18px] last:border-0">
       <div className="mb-3 flex items-center gap-[9px]">
-        <ProviderIcon cli={p.cli} providerId={p.providerId} size={14} />
+        <ProviderIcon providerId={p.providerId} size={14} />
         <span className="text-[14px] font-semibold text-text-bright">{p.name}</span>
         {p.plan && (
           <Badge tone="neutral" size="sm">
@@ -117,7 +117,7 @@ export function UsageModal({
         <DialogBody className="py-0">
           {providers.length > 0 ? (
             providers.map((p) => (
-              <ProviderSection key={p.connectionId ?? p.cli ?? p.name} provider={p} />
+              <ProviderSection key={p.connectionId ?? p.name} provider={p} />
             ))
           ) : loading ? (
             <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-muted-foreground">

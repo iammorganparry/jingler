@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { CSSProperties } from "react"
-import type { CliInfo, Repo, Session, SessionActivity, ThemeTokens } from "@jingler/core"
+import type { Repo, Session, SessionActivity, ThemeTokens } from "@jingler/core"
 import { CSS_VAR_BY_TOKEN } from "@jingler/core"
 import { jinglerDark, jinglerLight, toTokens } from "@jingler/themes"
 import { ThemeProvider } from "../theme-provider.js"
@@ -53,12 +53,6 @@ const inlineVars = (tokens: ThemeTokens): CSSProperties =>
 
 const DARK = toTokens(jinglerDark)
 const LIGHT = toTokens(jinglerLight)
-
-const clis: ReadonlyArray<CliInfo> = [
-  { kind: "claude", label: "Claude Code", binPath: "/usr/local/bin/claude", version: "2.1.0", available: true },
-  { kind: "codex", label: "Codex CLI", binPath: "/usr/local/bin/codex", version: "0.13.0", available: true },
-  { kind: "cursor", label: "Cursor Agent", binPath: null, version: null, available: false }
-]
 
 const repos: ReadonlyArray<Repo> = [
   { name: "trigify-app", path: "/Users/m/repos/trigify-app", defaultBranch: "main", currentBranch: "main", remoteUrl: "git@github.com:trigify/trigify-app.git", githubSlug: "trigify/trigify-app" },

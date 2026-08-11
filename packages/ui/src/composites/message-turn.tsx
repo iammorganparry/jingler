@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react"
 import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
-import type { CliKind, ContentPart, ExecutionMode, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
+import type { ContentPart, ExecutionMode, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
@@ -358,7 +358,6 @@ function renderParts(
 /** One transcript turn: a You / provider eyebrow followed by its ordered parts. */
 export function MessageTurn({
   message,
-  cli = "claude",
   providerId,
   onDecideGate,
   onApprovePlan,
@@ -366,9 +365,7 @@ export function MessageTurn({
   onOpenPlanReview
 }: {
   message: Message
-  /** The harness that produced assistant turns — sets the eyebrow logo + name. */
-  cli?: CliKind
-  /** Canonical provider identity. Takes precedence over the decoder-era CLI. */
+  /** Canonical provider identity for the assistant eyebrow. */
   providerId?: ProviderId | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   /** Approve a proposed plan inline (from the transcript's plan card). */
@@ -384,10 +381,10 @@ export function MessageTurn({
       {isAssistant ? (
         // Provider-branded eyebrow: logo + name in the provider's brand colour.
         <Eyebrow
-          icon={<ProviderIcon cli={cli} providerId={providerId ?? undefined} mono />}
-          style={{ color: providerColor(providerId, cli) }}
+          icon={<ProviderIcon providerId={providerId ?? undefined} mono />}
+          style={{ color: providerColor(providerId) }}
         >
-          {providerLabel(providerId, cli)}
+          {providerLabel(providerId)}
         </Eyebrow>
       ) : (
         <Eyebrow>You</Eyebrow>

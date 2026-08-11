@@ -1,5 +1,4 @@
 import { Schema } from "effect"
-import { CliKind } from "./domain.js"
 import {
   AuthKind,
   AuthStatus,
@@ -31,7 +30,7 @@ export type UsageWindow = Schema.Schema.Type<typeof UsageWindow>
 
 /** A provider's usage: its windows, plus whether we have any data for it. */
 export const ProviderUsage = Schema.Struct({
-  /** Canonical connection identity. Legacy cli remains decoder-only until stage 7. */
+  /** Canonical connection identity and confirmed billing metadata. */
   connectionId: Schema.optional(ProviderConnectionId),
   providerId: Schema.optional(ProviderId),
   authKind: Schema.optional(AuthKind),
@@ -42,7 +41,6 @@ export const ProviderUsage = Schema.Struct({
   targetId: Schema.optional(Schema.String),
   quotaLabel: Schema.optional(Schema.NullOr(Schema.String)),
   rateLimitLabel: Schema.optional(Schema.NullOr(Schema.String)),
-  cli: Schema.optional(CliKind),
   name: Schema.String,
   /** Subscription/plan label (e.g. "Max"), or null when unknown. */
   plan: Schema.NullOr(Schema.String),

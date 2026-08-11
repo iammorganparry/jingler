@@ -19,54 +19,7 @@ import { RuntimeRecoveryState } from "./runtime/runtime-recovery.js"
  * TypeScript types are derived from the schemas via `Schema.Schema.Type`.
  */
 
-// ── CLI discovery ────────────────────────────────────────────────────────────
-
 export { CLI_KINDS, CliKind } from "./cli.js"
-
-/** The outcome of probing for one CLI on the host. */
-export const CliInfo = Schema.Struct({
-  kind: CliKind,
-  /** Human label, e.g. "Claude Code". */
-  label: Schema.String,
-  /** Resolved absolute path to the binary, or null when not found. */
-  binPath: Schema.NullOr(Schema.String),
-  /** Reported version string, or null when unknown / unavailable. */
-  version: Schema.NullOr(Schema.String),
-  available: Schema.Boolean,
-  /**
-   * Whether this harness exposes BACKGROUND TASKS the operator can see and stop
-   * individually. Only Claude does today: it reports a live task set plus
-   * per-task start/progress/settle signals and accepts a per-task stop. Codex and
-   * OpenCode can only abort a whole turn, so the dock stays hidden for them
-   * rather than offering a Stop button that cannot target anything.
-   *
-   * OPTIONAL for the same reason `ToolCall.output` is: this decodes persisted and
-   * in-flight payloads written before the field existed, and a required field
-   * would reject them.
-   */
-  backgroundTasks: Schema.optional(Schema.Boolean),
-  /**
-   * Whether this harness reports how much of the context window it is using, via
-   * a `Usage` stream event. Claude, Codex and opencode do; Cursor has no headless
-   * adapter and runs on the scripted fallback, so it reports nothing real.
-   *
-   * Gates BOTH the context meter and auto-compaction: a harness we cannot measure
-   * is one we leave alone, with its own internal limit still the backstop. Showing
-   * a meter fed by a fabricated number would be worse than showing none.
-   *
-   * OPTIONAL for the same reason `backgroundTasks` is: it decodes payloads
-   * persisted before the field existed.
-   */
-  contextReporting: Schema.optional(Schema.Boolean),
-  /**
-   * Why an *installed* CLI is nonetheless unavailable — e.g. "opencode 1.0.220
-   * found; Jingler needs ≥1.18". Absent when the CLI is usable, or simply not
-   * installed (nothing to explain). Without this a too-old binary is
-   * indistinguishable from a missing one, which is a miserable thing to debug.
-   */
-  note: Schema.optional(Schema.String)
-})
-export type CliInfo = Schema.Schema.Type<typeof CliInfo>
 
 // ── Environments ────────────────────────────────────────────────────────────
 
@@ -124,35 +77,6 @@ export type PairSshEnvironmentInput = Schema.Schema.Type<
   typeof PairSshEnvironmentInput
 >
 
-/** Which account an installed harness run is charged to. */
-export const HarnessBilling = Schema.Struct({
-  cli: CliKind,
-  path: Schema.Literal("subscription", "api-key", "unknown", "undetermined"),
-  keyWithheld: Schema.Boolean
-})
-export type HarnessBilling = Schema.Schema.Type<typeof HarnessBilling>
-
-/** Harnesses a session can be started on. */
-export const startableClis = (
-  clis: ReadonlyArray<CliInfo>
-): ReadonlyArray<CliInfo> => clis.filter((c) => c.available)
-
-/**
- * Which harness a NEW session runs on: the configured default when it is still
- * installed, else the first available one, else null (nothing to run on).
- *
- * Single source of truth for a choice that used to live in the New Session
- * dialog as a select. The fallback matters — a config naming a harness the user
- * has since uninstalled must not wedge session creation.
- */
-export const newSessionCli = (
-  clis: ReadonlyArray<CliInfo>,
-  defaultCli?: CliKind | null
-): CliKind | null => {
-  const startable = startableClis(clis)
-  const configured = startable.find((c) => c.kind === defaultCli)
-  return (configured ?? startable[0])?.kind ?? null
-}
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 
@@ -253,23 +177,6 @@ export type ReasoningSetting = Schema.Schema.Type<typeof ReasoningSetting>
 /** Concrete harness permission modes that can execute an approved plan. */
 export const ExecutionMode = Schema.Literal("ask", "accept-edits", "auto")
 export type ExecutionMode = Schema.Schema.Type<typeof ExecutionMode>
-
-/**
- * Whether a harness can hold a plan-mode turn.
- *
- * "Can" means two things, and a harness needs both: a way to be held read-only
- * while it thinks, and a channel to submit a plan through. Claude has a real
- * `ExitPlanMode` tool the adapter intercepts; Codex submits the same plan
- * protocol in a fenced reply.
- *
- * A predicate rather than a scatter of `cli === "claude"` checks because the
- * gate is enforced in four places — the composer chip, the Shift+Tab cycle, and
- * the renderer AND main-process coercions on harness switch — and three of them
- * silently drop the mode instead of erroring, so a missed site looks like a bug
- * with no message.
- */
-export const supportsPlanMode = (cli: CliKind): boolean =>
-  cli === "claude" || cli === "codex"
 
 /**
  * The mode a fresh session should start in: the operator's configured default
@@ -983,28 +890,11 @@ export const WorkspaceConfig = Schema.Struct({
    * New Session dialog can preselect it. Absent until the first create.
    */
   lastRepoPath: Schema.optional(Schema.String),
-  /**
-   * Per-CLI provider defaults (model, mode, reasoning, …) from the Settings ·
-   * Providers view. Absent on older configs (each provider falls back to the
-   * harness defaults).
-   */
-  providers: Schema.optional(ProvidersConfig),
-  /** Canonical provider defaults. Legacy CliKind settings remain decoder inputs until cutover. */
+  /** Canonical provider defaults. Legacy settings are handled before schema decoding. */
   defaultConnectionId: Schema.optional(ProviderConnectionId),
   defaultProviderId: Schema.optional(ProviderId),
   defaultModelId: Schema.optional(ProviderModelId),
   connectionSelectionRequired: Schema.optional(Schema.Boolean),
-  /**
-   * Which harness new sessions start on.
-   *
-   * Chosen ONCE in Settings · Providers rather than per session: the New Session
-   * dialog used to ask, and the answer was the same every time — a decision
-   * surface masquerading as a form field.
-   *
-   * Absent, or naming a harness that is not installed, means "the first
-   * available one", so a fresh install can still create sessions.
-   */
-  defaultCli: Schema.optional(CliKind),
   /** Custom PRD/MDX structure injected into every native planning turn. */
   planTemplate: Schema.optional(PlanTemplateConfig),
   /**

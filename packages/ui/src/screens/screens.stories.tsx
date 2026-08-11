@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CliInfo, Session } from "@jingler/core"
+import type { Session } from "@jingler/core"
 import { ComponentLibrary } from "./component-library.js"
 import { LoginScreen } from "./login-screen.js"
 import { JinglerApp } from "../app/jingler-app.js"
@@ -9,12 +9,6 @@ const noop = () => {}
 const meta: Meta = { title: "Screens", parameters: { layout: "fullscreen" } }
 export default meta
 type Story = StoryObj
-
-const clis: ReadonlyArray<CliInfo> = [
-  { kind: "claude", label: "Claude Code", binPath: "/usr/local/bin/claude", version: "1.0.0", available: true },
-  { kind: "codex", label: "Codex CLI", binPath: null, version: null, available: false },
-  { kind: "cursor", label: "Cursor Agent", binPath: "/usr/local/bin/cursor-agent", version: "0.4.2", available: true }
-]
 
 const session = (
   value: Omit<Session, "chats" | "activeChatId">

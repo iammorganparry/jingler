@@ -2,9 +2,6 @@ import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   AdversarialReview,
-  CLI_KINDS,
-  type CliInfo,
-  type CliKind,
   CreateSessionInput,
   defaultModeFor,
   Environment,
@@ -19,9 +16,6 @@ import {
   persistentOf,
   Repo,
   Session,
-  newSessionCli,
-  startableClis,
-  supportsPlanMode,
   workspaceModeOf,
   WorkspaceConfig
 } from "./domain.js"
@@ -552,32 +546,6 @@ describe("CreateSessionInput", () => {
   })
 })
 
-describe("supportsPlanMode", () => {
-  /**
-   * The gate is enforced in four places — the composer chip, the Shift+Tab
-   * cycle, and the renderer AND main-process coercions on harness switch — and
-   * three of them silently drop the mode rather than erroring. A predicate is
-   * what keeps a missed site from looking like a bug with no message.
-   */
-  it("covers every harness that can actually hold a plan turn", () => {
-    // Claude via `ExitPlanMode`; Codex via the fenced JSON plan protocol.
-    expect(supportsPlanMode("claude")).toBe(true)
-    expect(supportsPlanMode("codex")).toBe(true)
-  })
-
-  it("excludes the harnesses that would fabricate a plan", () => {
-    // These values remain decodable for legacy sessions but are not supported
-    // by the current product surface.
-    expect(supportsPlanMode("cursor")).toBe(false)
-    expect(supportsPlanMode("opencode")).toBe(false)
-  })
-
-  it("classifies every CliKind, so a new harness cannot be forgotten", () => {
-    for (const cli of CLI_KINDS)
-      expect(typeof supportsPlanMode(cli)).toBe("boolean")
-  })
-})
-
 describe("defaultModeFor", () => {
   it("defaults every pi provider model to auto", () => {
     expect(defaultModeFor()).toBe("auto")
@@ -586,45 +554,5 @@ describe("defaultModeFor", () => {
   it("honours the operator's configured default over the auto fallback", () => {
     expect(defaultModeFor("accept-edits")).toBe("accept-edits")
     expect(defaultModeFor("ask")).toBe("ask")
-  })
-})
-
-describe("newSessionCli", () => {
-  const cli = (kind: CliKind, available: boolean): CliInfo => ({
-    kind,
-    label: kind,
-    binPath: available ? `/usr/bin/${kind}` : null,
-    version: null,
-    available
-  })
-
-  /**
-   * The New Session dialog no longer asks which harness to use, so this function
-   * IS the answer. Every case below is one the old select handled by being
-   * on-screen; with the select gone, a wrong resolution here is a session that
-   * starts on the wrong CLI, or fails to start at all.
-   */
-  it("prefers the configured default", () => {
-    const clis = [cli("claude", true), cli("codex", true)]
-    expect(newSessionCli(clis, "codex")).toBe("codex")
-  })
-
-  it("falls back to the first available when nothing is configured", () => {
-    expect(newSessionCli([cli("claude", true), cli("codex", true)], null)).toBe(
-      "claude"
-    )
-  })
-
-  it("falls back when the configured harness is no longer installed", () => {
-    // The config outlives an uninstall — without this, session creation wedges
-    // on a harness that is not there.
-    const clis = [cli("claude", true), cli("codex", false)]
-    expect(newSessionCli(clis, "codex")).toBe("claude")
-  })
-
-  it("reports null when no harness can run a session", () => {
-    const clis = [cli("claude", false), cli("codex", false)]
-    expect(newSessionCli(clis, null)).toBe(null)
-    expect(startableClis(clis)).toEqual([])
   })
 })

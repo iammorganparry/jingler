@@ -1,5 +1,5 @@
 import { Match, Schema } from "effect"
-import { CliKind, DiffStat } from "./domain.js"
+import { DiffStat } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
 import { FileChangeSet } from "./runtime/file-change.js"
 
@@ -530,8 +530,6 @@ export const Subagent = Schema.Struct({
   description: Schema.String,
   /** The spawning sub-agent's id, or null when spawned by the main agent. */
   parentId: Schema.NullOr(Schema.String),
-  /** The harness running this sub-agent, when it differs from the session CLI. */
-  cli: Schema.optional(CliKind),
   status: SubagentStatus,
   message: Message
 })
@@ -570,10 +568,7 @@ export type BackgroundTaskStatus = Schema.Schema.Type<typeof BackgroundTaskStatu
  * main process, not in the renderer's per-run conversation state.
  *
  * Provider support is uneven and this model is the common denominator: only
- * Claude exposes real background tasks (start/progress/settle events, a live
- * set, and per-task stop). Codex and OpenCode can cancel a whole turn but have
- * no per-task handle, so they report the capability as unsupported and no dock
- * is shown. `CliInfo.backgroundTasks` carries that flag.
+ * pi tools report start/progress/settle events and expose per-task stop handles.
  */
 export const BackgroundTask = Schema.Struct({
   /** The harness's task id — the handle `stop` needs. */
@@ -707,8 +702,6 @@ export const StreamEvent = Schema.Union(
      * the `parent_tool_use_id` of the message carrying the `Task` call.
      */
     parentId: Schema.NullOr(Schema.String),
-    /** The harness running it, when it differs from the session's own CLI. */
-    cli: Schema.optional(CliKind)
   }),
   /** A spawned sub-agent finished — its tab is removed (transcripts are live-only). */
   Schema.TaggedStruct("SubagentEnded", {
@@ -1299,7 +1292,6 @@ export const applySubagentEvent = (
         name: event.name,
         description: event.description,
         parentId: event.parentId,
-        ...(event.cli === undefined ? {} : { cli: event.cli }),
         status: "working",
         message: assistantMessage(event.id, "")
       }

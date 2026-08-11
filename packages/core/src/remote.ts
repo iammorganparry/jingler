@@ -1,5 +1,4 @@
 import { Schema } from "effect"
-import { CliKind } from "./domain.js"
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js"
 import {
   AuthKind,

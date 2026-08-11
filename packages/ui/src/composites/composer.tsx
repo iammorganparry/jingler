@@ -227,7 +227,7 @@ export function Composer({
   reasoningEffort?: ReasoningEffort;
   thinkingEnabled?: boolean;
   onSetReasoning?: (reasoning?: ReasoningSetting) => void;
-  /** Offer the Plan mode option (harnesses that pass `supportsPlanMode`). */
+  /** Offer the Jingler-owned read-only planning mode. */
   allowPlan?: boolean;
   paused?: boolean;
   /** Disable composing without disabling the model picker used to recover. */

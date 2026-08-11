@@ -1,5 +1,4 @@
 import type {
-  CliKind,
   ContextConfig,
   GitConfig,
   GithubConfig,
@@ -8,7 +7,6 @@ import type {
   OpenConnectorConfig,
   PlanTemplateConfig,
   ProviderConnectionId,
-  ProviderConfig,
   ProviderId,
   ProviderModelId,
 } from "@jingler/core"
@@ -110,7 +108,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.starredRepos ? { starredRepos: existing.starredRepos } : {}),
             ...(existing?.collapsedRepos ? { collapsedRepos: existing.collapsedRepos } : {}),
             ...(existing?.lastRepoPath ? { lastRepoPath: existing.lastRepoPath } : {}),
-            ...(existing?.providers ? { providers: existing.providers } : {}),
             ...(existing?.defaultConnectionId
               ? { defaultConnectionId: existing.defaultConnectionId }
               : {}),
@@ -121,7 +118,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.connectionSelectionRequired !== undefined
               ? { connectionSelectionRequired: existing.connectionSelectionRequired }
               : {}),
-            ...(existing?.defaultCli ? { defaultCli: existing.defaultCli } : {}),
             ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
             ...(existing?.notifications ? { notifications: existing.notifications } : {}),
             // Booleans are checked against `undefined`, not truthiness — a saved
@@ -185,12 +181,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             )
       }
 
-      /**
-       * Which harness new sessions start on. Replaces the New Session dialog's
-       * harness select — one standing answer instead of the same click per session.
-       */
-      const setDefaultCli = (defaultCli: CliKind) => patch({ defaultCli })
-
       /** Persist the canonical runtime selection as one indivisible config update. */
       const setDefaultProviderModel = (
         defaultConnectionId: ProviderConnectionId,
@@ -248,14 +238,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
           })
         })
 
-      const setProvider = (cli: CliKind, provider: ProviderConfig) =>
-        Effect.gen(function* () {
-          const existing = yield* get()
-          return yield* patch({
-            providers: { ...(existing?.providers ?? {}), [cli]: provider }
-          })
-        })
-
       /** Encode + write the config to disk, mapping every failure to `ConfigError`. */
       const persist = (config: WorkspaceConfig): Effect.Effect<WorkspaceConfig, ConfigError, ConfigEnv> =>
         Effect.gen(function* () {
@@ -286,9 +268,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setCollapsedRepos,
         setLastRepoPath,
         setContext,
-        setDefaultCli,
         setDefaultProviderModel,
-        setProvider,
         setPlanTemplate,
         setActiveTheme,
         setThemeCustomizations,
