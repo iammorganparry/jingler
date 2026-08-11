@@ -105,10 +105,7 @@ test("a message sent against a proposed plan revises it immediately", async ({ l
     timeout: 20_000
   })
   await expect(
-    window
-      .getByTestId("plan-split-column")
-      .locator("p")
-      .filter({ hasText: /^Open PR #482$/ })
+    window.getByTestId("plan-split-column").getByText("Open PR #482", { exact: true }).first()
   ).toBeVisible()
 
   // The revised plan remains approvable through the ordinary plan gate.

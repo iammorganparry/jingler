@@ -224,8 +224,11 @@ test("a direct session completes a turn and deletion preserves its checkout", as
   ).toBeVisible({ timeout: 25_000 })
   await expect(composer).toBeVisible()
 
-  await row.click({ button: "right" })
-  await window.getByRole("menuitem", { name: "Delete" }).click()
+  await expect(sessionRow(window, "Run the direct-checkout verification")).toBeVisible()
+  await row.hover()
+  await window
+    .getByRole("button", { name: "Delete Run the direct-checkout verification" })
+    .click()
   const dialog = window.getByRole("dialog")
   await expect(
     dialog.getByText("The repository checkout will be left untouched.", {

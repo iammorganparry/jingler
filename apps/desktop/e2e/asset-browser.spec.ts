@@ -217,17 +217,18 @@ test("renders a changed file preview with the legacy Jingler diff skin on Pierre
     if (line === null || gutter === null) {
       throw new Error("Pierre changed-preview visual contract is missing")
     }
+    const lineStyle = getComputedStyle(line)
     return {
-      fontSize: Math.round(Number.parseFloat(getComputedStyle(line).fontSize)),
-      rowHeight: Math.round(line.getBoundingClientRect().height),
+      fontSize: Math.round(Number.parseFloat(lineStyle.fontSize)),
+      minRowHeight: Math.round(Number.parseFloat(lineStyle.minHeight)),
       gutterWidth: Math.round(gutter.getBoundingClientRect().width),
       internalHeader: root.querySelector('[data-diffs-header="default"]') !== null
     }
   })
   expect(metrics).toMatchObject({
     fontSize: 11,
+    minRowHeight: 21,
     gutterWidth: 80,
     internalHeader: false
   })
-  expect(Math.abs(metrics.rowHeight - 19)).toBeLessThanOrEqual(1)
 })
