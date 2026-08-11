@@ -1,10 +1,16 @@
 import { readFile, writeFile } from "node:fs/promises"
-import { CURRENT_RUNTIME_CONTRACTS, type EvalResult } from "@jingler/core"
-import { Schema } from "effect"
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  ModelCertification,
+  type EvalResult
+} from "@jingler/core"
+import { Effect, Schema } from "effect"
 import { EvalTrace } from "./behavior-contract.js"
+import { LiveEvalMatrix, runLiveMatrix } from "./live/live-matrix.js"
 import { redactReport, scoreScenario } from "./pi-eval.js"
 import { CORE_PI_SCENARIOS, scenarioById } from "./pi-scenarios.js"
 import { runDeterministicScenario } from "./deterministic-runtime.js"
+import { AtomicJsonFile } from "../src/runtime/persistence/atomic-json-file.js"
 
 const deterministicTraces = (): Promise<ReadonlyArray<EvalTrace>> =>
   Promise.all(CORE_PI_SCENARIOS.map((scenario) => runDeterministicScenario(scenario.id)))
@@ -29,23 +35,79 @@ if (mode !== "deterministic" && mode !== "live" && mode !== "replay") {
   throw new Error(`unsupported eval mode: ${mode}`)
 }
 
+let certifications: ReadonlyArray<ModelCertification> = []
+let liveCredentialValues: ReadonlyArray<string> = []
 const traces = mode === "deterministic"
   ? await deterministicTraces()
-  : await (async () => {
-      if (mode === "live" && process.env.JINGLER_EVAL !== "1") throw new Error("live eval requires JINGLER_EVAL=1")
-      const path = mode === "live" ? process.env.JINGLER_LIVE_EVAL_TRACE : process.env.JINGLER_REPLAY_TRACE
-      if (!path) throw new Error(`${mode} eval requires a sanitized trace path`)
-      return Schema.decodeUnknownSync(Schema.Array(EvalTrace))(
-        JSON.parse(await readFile(path, "utf8"))
-      )
-    })()
+  : mode === "replay"
+    ? await (async () => {
+        const path = process.env.JINGLER_REPLAY_TRACE
+        if (!path) throw new Error("replay eval requires a sanitized trace path")
+        return Schema.decodeUnknownSync(Schema.Array(EvalTrace))(
+          JSON.parse(await readFile(path, "utf8"))
+        )
+      })()
+    : await (async () => {
+        if (process.env.JINGLER_EVAL !== "1") {
+          throw new Error("live eval requires JINGLER_EVAL=1")
+        }
+        const path = process.env.JINGLER_LIVE_EVAL_MATRIX
+        if (!path) throw new Error("live eval requires JINGLER_LIVE_EVAL_MATRIX")
+        const targets = Schema.decodeUnknownSync(LiveEvalMatrix)(
+          JSON.parse(await readFile(path, "utf8"))
+        )
+        if (targets.length === 0) throw new Error("live eval matrix is empty")
+        liveCredentialValues = targets.flatMap((target) => [
+          process.env[target.accessCredentialEnv] ?? "",
+          target.refreshCredentialEnv === null
+            ? ""
+            : (process.env[target.refreshCredentialEnv] ?? "")
+        ]).filter(Boolean)
+        const provenance = process.env.JINGLER_EVAL_REVIEWED === "1"
+          ? "reviewed-release" as const
+          : "local" as const
+        const live = await Effect.runPromise(runLiveMatrix(targets, provenance))
+        certifications = live.map((result) => result.certification)
+        return live.flatMap((result) => result.traces)
+      })()
 
 const results = traces.map((trace) => {
   const scenario = scenarioById(trace.scenarioId)
   if (scenario === null) throw new Error(`unknown scenario: ${trace.scenarioId}`)
   return scoreScenario(scenario, trace)
 })
-const report = redactReport(JSON.stringify({ mode, versions: CURRENT_RUNTIME_CONTRACTS, results }, null, 2), secretValues())
+const maxCostUsd = process.env.JINGLER_EVAL_MAX_COST_USD
+  ? Schema.decodeUnknownSync(Schema.NumberFromString)(process.env.JINGLER_EVAL_MAX_COST_USD)
+  : null
+const totalCostUsd = results.reduce((total, result) => total + result.costUsd, 0)
+if (maxCostUsd !== null && totalCostUsd > maxCostUsd) {
+  throw new Error(`live eval cost ${totalCostUsd} exceeded ceiling ${maxCostUsd}`)
+}
+if (mode === "live") {
+  const certificationsPath = process.env.JINGLER_LIVE_CERTIFICATIONS
+  if (!certificationsPath) {
+    throw new Error("live eval requires JINGLER_LIVE_CERTIFICATIONS")
+  }
+  const document = Schema.Array(ModelCertification)
+  await new AtomicJsonFile({
+    file: certificationsPath,
+    decode: (raw) => Schema.decodeUnknownSync(Schema.parseJson(document))(raw),
+    fallback: () => []
+  }).write(certifications)
+}
+const report = redactReport(JSON.stringify({
+  mode,
+  versions: CURRENT_RUNTIME_CONTRACTS,
+  totalCostUsd,
+  routes: certifications.map((certification) => ({
+    providerId: certification.providerId,
+    modelId: certification.modelId,
+    authKind: certification.authRoute.kind,
+    observedRoute: certification.authRoute.observedRoute,
+    provenance: certification.provenance
+  })),
+  results
+}, null, 2), [...secretValues(), ...liveCredentialValues])
 const reportPath = process.env.JINGLER_EVAL_REPORT
 if (reportPath) await writeFile(reportPath, report, "utf8")
 process.stdout.write(`${report}\n${markdown(mode, results)}`)

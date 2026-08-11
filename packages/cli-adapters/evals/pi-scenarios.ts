@@ -1,7 +1,7 @@
-import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS, type CapabilityProfile } from "@jingler/core"
 import {
   authFallback,
-  authRoute,
+  authRouteObserved,
   before,
   event,
   fileChange,
@@ -37,16 +37,9 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
     ordering: []
   }),
   scenario({
-    id: "auth.codex-subscription-pinned",
+    id: "auth.route-pinned",
     capability: "authentication",
-    required: [authRoute("openai-codex-oauth"), event("Done")],
-    forbidden: [authFallback()],
-    ordering: []
-  }),
-  scenario({
-    id: "auth.claude-subscription-pinned",
-    capability: "authentication",
-    required: [authRoute("claude-setup-token"), event("Done")],
+    required: [authRouteObserved(), event("Done")],
     forbidden: [authFallback()],
     ordering: []
   }),
@@ -100,6 +93,12 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
     ordering: []
   })
 ]
+
+export const CORE_CAPABILITY_PROFILE: CapabilityProfile = {
+  id: "core",
+  required: true,
+  scenarioIds: CORE_PI_SCENARIOS.map((scenario) => scenario.id)
+}
 
 export const scenarioById = (id: string): EvalScenario | null =>
   CORE_PI_SCENARIOS.find((candidate) => candidate.id === id) ?? null

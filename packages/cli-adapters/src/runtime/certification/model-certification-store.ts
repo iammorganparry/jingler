@@ -1,7 +1,6 @@
 import {
   certificationKey,
   isCurrentCertification,
-  isReleaseCertification,
   ModelCertification,
   type RuntimeContractVersions
 } from "@jingler/core"
@@ -17,7 +16,6 @@ export interface ModelCertificationStore {
   readonly current: (
     versions?: RuntimeContractVersions
   ) => Promise<ReadonlyArray<ModelCertification>>
-  readonly releaseManifest: () => Promise<ReadonlyArray<ModelCertification>>
 }
 
 const decodeDocument = (raw: string): ReadonlyArray<ModelCertification> =>
@@ -50,8 +48,6 @@ export class FileModelCertificationStore implements ModelCertificationStore {
   ): Promise<ReadonlyArray<ModelCertification>> =>
     (await this.#document.read()).filter((item) => isCurrentCertification(item, versions))
 
-  releaseManifest = async (): Promise<ReadonlyArray<ModelCertification>> =>
-    (await this.#document.read()).filter(isReleaseCertification)
 }
 
 export class InMemoryModelCertificationStore implements ModelCertificationStore {
@@ -75,6 +71,4 @@ export class InMemoryModelCertificationStore implements ModelCertificationStore 
   ): Promise<ReadonlyArray<ModelCertification>> =>
     this.#items.filter((item) => isCurrentCertification(item, versions))
 
-  releaseManifest = async (): Promise<ReadonlyArray<ModelCertification>> =>
-    this.#items.filter(isReleaseCertification)
 }

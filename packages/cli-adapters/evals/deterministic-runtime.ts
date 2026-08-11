@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import {
   CURRENT_RUNTIME_CONTRACTS,
   defaultPlan,
@@ -26,6 +27,7 @@ import type { AgentRuntimeContext } from "../src/runtime/agent/agent-runtime.js"
 import { makePiAgentRuntime } from "../src/runtime/agent/pi-agent-runtime.js"
 import { makePiSessionFactory } from "../src/runtime/agent/pi-session-factory.js"
 import { InMemoryProviderCredentialStore } from "../src/runtime/auth/credential-store.js"
+import type { ProviderCredentialStore } from "../src/runtime/auth/credential-store.js"
 import { FileChangeTracker } from "../src/runtime/file-changes/file-change-tracker.js"
 import { RunJournal } from "../src/runtime/journal/run-journal.js"
 import { createMutationObserver } from "../src/runtime/tools/mutation-observer.js"
@@ -44,11 +46,9 @@ const ALL_ROLES = ["conversation", "plan", "plan-execution", "background"] as co
 const ALL_MODES = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 
 const authKindFor = (scenarioId: string): AuthKind =>
-  scenarioId === "auth.codex-subscription-pinned"
+  scenarioId === "auth.route-pinned"
     ? "openai-codex-oauth"
-    : scenarioId === "auth.claude-subscription-pinned"
-      ? "claude-setup-token"
-      : "api-key"
+    : "api-key"
 
 const responsesFor = (scenarioId: string): ReadonlyArray<FakePiResponse> => {
   if (scenarioId === "permission.denied-edit" || scenarioId === "diff.create-edit-delete-rename") {
@@ -105,6 +105,23 @@ const responsesFor = (scenarioId: string): ReadonlyArray<FakePiResponse> => {
     ]
   }
   return [fauxAssistantMessage("complete")]
+}
+
+const promptFor = (scenarioId: string): string => {
+  switch (scenarioId) {
+    case "permission.denied-edit":
+      return "Call workspace.edit once with path src/edit.ts. If permission is denied, stop without trying another tool."
+    case "diff.create-edit-delete-rename":
+      return "Call workspace.edit exactly once with path src/edit.ts, then finish."
+    case "resource.cleanup":
+      return "Call managed-mcp exactly once, then finish."
+    case "capability.managed-resources":
+      return "Call resource__managed-skill, then resource__managed-prompt, then mcp__managed__write_file. Call each exactly once, then finish."
+    case "structured.question-plan":
+      return "Ask the structured question Continue?, then submit a one-step plan after it is answered."
+    default:
+      return "Reply with OK without calling a tool."
+  }
 }
 
 const createWorkspace = async (): Promise<string> => {
@@ -345,12 +362,12 @@ const specFor = (input: {
   readonly scenarioId: string
   readonly root: string
   readonly connection: ProviderConnectionType
-  readonly fake: FakePiProvider
+  readonly target: PiScenarioTarget
   readonly registry: ToolRegistry | undefined
 }): PiRunSpec => {
-  const { scenarioId, root, connection, fake, registry } = input
+  const { scenarioId, root, connection, target, registry } = input
   const modelId = Schema.decodeUnknownSync(ProviderModelId)(
-    `${fake.providerId}/${fake.modelId}`
+    `${target.providerId}/${target.modelId}`
   )
   return {
     runId: `eval-${scenarioId}`,
@@ -361,7 +378,7 @@ const specFor = (input: {
     role: scenarioId === "structured.question-plan" ? "plan" : "conversation",
     mode: scenarioId === "structured.question-plan" ? "plan" : "ask",
     cwd: root,
-    prompt: `Run deterministic scenario ${scenarioId}`,
+    prompt: promptFor(scenarioId),
     priorMessages: [],
     piSessionId: null,
     seed: null,
@@ -411,7 +428,7 @@ const recordPreflight = (
   spec: PiRunSpec,
   observations: Array<EvalObservation>
 ): void => {
-  if (scenarioId.startsWith("auth.")) {
+  if (scenarioId === "auth.route-pinned") {
     observations.push({ kind: "auth-route", route: authKind })
   }
   if (scenarioId !== "remote.contract-compatible") return
@@ -426,16 +443,16 @@ interface ScenarioExecution {
   readonly startedAt: number
   readonly root: string
   readonly observations: Array<EvalObservation>
-  readonly fake: FakePiProvider
   readonly connection: ProviderConnectionType
-  readonly credentials: InMemoryProviderCredentialStore
+  readonly credentials: ProviderCredentialStore
   readonly registry: ToolRegistry | undefined
   readonly spec: PiRunSpec
   readonly context: AgentRuntimeContext
+  readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
 }
 
 const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => {
-  const { scenarioId, startedAt, root, observations, fake, connection } = input
+  const { scenarioId, startedAt, root, observations, connection } = input
   const { credentials, registry, spec, context } = input
   recordPreflight(scenarioId, connection.authKind, spec, observations)
   const tracker = registry?.hasMutatingTools(spec.role, spec.mode)
@@ -451,7 +468,9 @@ const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => 
     resolveConnection: () => Effect.succeed(connection),
     ...(registry ? { toolRegistry: registry } : {}),
     ...(tracker ? { terminalTracker: tracker } : {}),
-    configureModelRuntime: (runtime) => fake.install(runtime)
+    ...(input.configureModelRuntime
+      ? { configureModelRuntime: input.configureModelRuntime }
+      : {})
   })
   const runtime = await Effect.runPromise(makePiAgentRuntime(factory))
   const events = await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
@@ -469,19 +488,26 @@ const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => 
   }
 }
 
-export const runDeterministicScenario = async (
-  scenarioId: string
-): Promise<EvalTrace> => {
+export interface PiScenarioTarget {
+  readonly providerId: string
+  readonly modelId: string
+}
+
+export interface RunPiScenarioInput {
+  readonly scenarioId: string
+  readonly connection: ProviderConnectionType
+  readonly credentials: ProviderCredentialStore
+  readonly target: PiScenarioTarget
+  readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
+}
+
+export const runPiScenario = async (input: RunPiScenarioInput): Promise<EvalTrace> => {
+  const { scenarioId, connection, credentials, target } = input
   const startedAt = performance.now()
   const root = await createWorkspace()
   const observations: Array<EvalObservation> = []
-  const authKind = authKindFor(scenarioId)
-  const fake = new FakePiProvider({ oauth: authKind === "openai-codex-oauth" })
-  fake.setResponses(responsesFor(scenarioId))
-  const connection = connectionFor(fake, authKind)
-  const credentials = await credentialsFor(connection, authKind)
   const registry = await registryFor(scenarioId, root, observations)
-  const spec = specFor({ scenarioId, root, connection, fake, registry })
+  const spec = specFor({ scenarioId, root, connection, target, registry })
   const context = contextFor(scenarioId, observations)
 
   try {
@@ -490,14 +516,33 @@ export const runDeterministicScenario = async (
       startedAt,
       root,
       observations,
-      fake,
       connection,
       credentials,
       registry,
       spec,
-      context
+      context,
+      ...(input.configureModelRuntime
+        ? { configureModelRuntime: input.configureModelRuntime }
+        : {})
     })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+}
+
+export const runDeterministicScenario = async (
+  scenarioId: string
+): Promise<EvalTrace> => {
+  const authKind = authKindFor(scenarioId)
+  const fake = new FakePiProvider({ oauth: authKind === "openai-codex-oauth" })
+  fake.setResponses(responsesFor(scenarioId))
+  const connection = connectionFor(fake, authKind)
+  const credentials = await credentialsFor(connection, authKind)
+  return runPiScenario({
+    scenarioId,
+    connection,
+    credentials,
+    target: { providerId: fake.providerId, modelId: fake.modelId },
+    configureModelRuntime: (runtime) => fake.install(runtime)
+  })
 }

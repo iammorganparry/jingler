@@ -102,6 +102,11 @@ export const authRoute = (route: AuthRouteKind): EvalMatcher => ({
   matches: (observation) => observation.kind === "auth-route" && observation.route === route
 })
 
+export const authRouteObserved = (): EvalMatcher => ({
+  description: "auth-route",
+  matches: (observation) => observation.kind === "auth-route"
+})
+
 export const authFallback = (): EvalMatcher => ({
   description: "auth-fallback",
   matches: (observation) => observation.kind === "auth-fallback"

@@ -25,7 +25,7 @@ describe("pi behavior scoring", () => {
       { kind: "auth-route", route: "openai-codex-oauth" },
       { kind: "event", tag: "Done" }
     ]
-    expect(scoreScenario(scenario("auth.codex-subscription-pinned"), trace("auth.codex-subscription-pinned", observations)).status).toBe("passed")
+    expect(scoreScenario(scenario("auth.route-pinned"), trace("auth.route-pinned", observations)).status).toBe("passed")
   })
 
   it("fails when subscription auth falls back to an API key", () => {
@@ -34,7 +34,7 @@ describe("pi behavior scoring", () => {
       { kind: "auth-fallback", from: "openai-codex-oauth", to: "api-key" },
       { kind: "event", tag: "Done" }
     ]
-    const result = scoreScenario(scenario("auth.codex-subscription-pinned"), trace("auth.codex-subscription-pinned", observations))
+    const result = scoreScenario(scenario("auth.route-pinned"), trace("auth.route-pinned", observations))
     expect(result.status).toBe("failed")
     expect(result.failures).toContain("forbidden auth-fallback")
   })

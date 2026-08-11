@@ -41,7 +41,8 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo",
     "eval:pi:deterministic": "tsx evals/run-eval.ts deterministic",
     "eval:pi:live": "tsx evals/run-eval.ts live",
-    "eval:pi:replay": "tsx evals/run-eval.ts replay"
+    "eval:pi:replay": "tsx evals/run-eval.ts replay",
+    "eval:pi:release-manifest": "tsx evals/certification/run-release-certifications.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.84.1",
