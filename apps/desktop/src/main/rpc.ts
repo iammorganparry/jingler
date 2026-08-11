@@ -4528,8 +4528,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setLastRepoPath": ({ path }) => ConfigService.setLastRepoPath(path),
   "Config.setPlanTemplate": ({ template }) =>
     ConfigService.setPlanTemplate(template),
-  "Config.setProvider": ({ cli, provider }) =>
-    ConfigService.setProvider(cli, provider),
   "Github.events": () => githubEvents(),
   "Github.claimFeedback": (input) => {
     if (input.operation === "claim") {

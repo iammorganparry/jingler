@@ -20,8 +20,6 @@ import type {
   PluginCatalog,
   PluginSettingValue,
   PluginSettingsSnapshot,
-  CliInfo,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
@@ -40,8 +38,6 @@ import type {
   GitConfig,
   NotificationKind,
   NotificationsConfig,
-  HarnessBilling,
-  HarnessCapability,
   GithubConfig,
   Issue,
   IssueAutomations,
@@ -77,7 +73,6 @@ import type {
   PrState,
   SessionPrStatus,
   PrSummary,
-  ProviderConfig,
   PublishCheckpoint,
   PullRequest,
   QuestionAnswer,
@@ -933,11 +928,6 @@ export const rpc = {
     template: PlanTemplateConfig
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanTemplate({ template })),
-  configSetProvider: (
-    cli: CliKind,
-    provider: ProviderConfig
-  ): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setProvider({ cli, provider })),
   githubPr: (sessionId: string): Promise<PullRequest | null> =>
     run((c) => c.Github.pr({ sessionId })),
   githubPrState: (sessionId: string): Promise<SessionPrStatus | null> =>

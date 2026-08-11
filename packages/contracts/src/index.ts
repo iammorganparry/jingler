@@ -1,7 +1,5 @@
 import {
   AdversarialReview,
-  HarnessBilling,
-  HarnessCapability,
   ArchiveReason,
   AssetFileEntry,
   AssetPayload,
@@ -10,8 +8,6 @@ import {
   AuthProvider,
   AuthSession,
   BrowserBounds,
-  CliInfo,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
@@ -77,7 +73,6 @@ import {
   PrState,
   SessionPrStatus,
   PrSummary,
-  ProviderConfig,
   ProviderModels,
   Project,
   ProjectDirectoryListing,
@@ -1632,12 +1627,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { template: PlanTemplateConfig }
   }),
 
-  /** Persist one CLI's provider defaults (model, mode, reasoning, …). */
-  Rpc.make("Config.setProvider", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: { cli: CliKind, provider: ProviderConfig }
-  })
 ) {}
 
 /** Review, preview, theme, and plugin half of the renderer RPC client. */
