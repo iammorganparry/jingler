@@ -1,5 +1,19 @@
 # @jingler/desktop
 
+## 3.0.0
+
+### Minor Changes
+
+- b25b115: Add the official Linear plugin for creating, linking, viewing, and commenting on issues with personal API-key authentication.
+
+### Patch Changes
+
+- 469af34: Publish durable agent memories automatically and retire the manual review queue.
+- cfd1b89: Show one automatic Cloud execution target and keep live sessions transferable from the execution selector.
+- 9cbf708: Deliver Devin review findings to agents, flush stale feedback after PR merges, and tolerate semantic-branch creation racing publication.
+- 009f286: Keep GitHub review feedback live when an agent creates a replacement branch and pull request in the same session.
+- 45846d5: Group sidebar sessions by operator attention and open every auxiliary view in a responsive two-thirds chat split.
+
 ## 2.0.3
 
 ### Patch Changes

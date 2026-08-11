@@ -1,5 +1,12 @@
 # @jingler/cli-adapters
 
+## 3.0.0
+
+### Patch Changes
+
+- @jingler/core@3.0.0
+- @jingler/themes@3.0.0
+
 ## 2.0.3
 
 ### Patch Changes
