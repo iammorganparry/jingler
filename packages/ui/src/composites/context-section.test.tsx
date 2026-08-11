@@ -54,7 +54,6 @@ const open = (
       clis={CLIS}
       githubConnection={GITHUB_DISCONNECTED}
       onSaveProvider={props.onSaveProvider ?? vi.fn()}
-      loadModels={async () => []}
       context={props.context ?? null}
       providers={props.providers}
       onSaveContext={props.onSaveContext}

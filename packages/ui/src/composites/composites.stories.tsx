@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CliInfo, GitHubConnection, ModelOption, ProvidersConfig } from "@jingler/core"
+import type { CliInfo, GitHubConnection, ProvidersConfig } from "@jingler/core"
 import { SettingsView } from "./settings-view.js"
 import { ToolCall } from "./tool-call.js"
 import { ThoughtBlock } from "./thought-block.js"
@@ -123,16 +123,6 @@ const DEMO_GITHUB: GitHubConnection = {
   error: null
 }
 
-const DEMO_MODELS: Record<string, ReadonlyArray<ModelOption>> = {
-  claude: [
-    { id: "opus", label: "Opus 4.1" },
-    { id: "sonnet", label: "Sonnet 4.5" },
-    { id: "haiku", label: "Haiku 4.5" }
-  ],
-  codex: [{ id: "gpt-5-codex", label: "gpt-5-codex" }],
-  cursor: []
-}
-
 const DEMO_TABS: ReadonlyArray<TerminalTab> = [
   { id: "t1", title: "zsh", status: "running" },
   { id: "t2", title: "node", status: "idle" },
@@ -188,7 +178,6 @@ export const Settings: Story = {
         clis={DEMO_CLIS}
         providers={DEMO_PROVIDERS}
         onSaveProvider={() => {}}
-        loadModels={async (cli) => DEMO_MODELS[cli] ?? []}
         githubConnection={DEMO_GITHUB}
         github={{ enabled: true, autoCreatePr: false, autoDetectPr: true }}
         git={{ shareCheckedOutBranches: true }}

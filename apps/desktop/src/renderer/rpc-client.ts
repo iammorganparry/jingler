@@ -57,8 +57,6 @@ import type {
   ConnectorActionResult,
   Message,
   MemoryConfig,
-  ModelOption,
-  ProviderModels,
   Project,
   ProjectDirectoryListing,
   PermissionMode,

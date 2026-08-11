@@ -576,7 +576,6 @@ export const Settings: Story = {
           error: null
         }}
         onSaveProvider={() => {}}
-        loadModels={async () => []}
         onGithubManage={() => {}}
         onGithubRefresh={() => {}}
         onGithubDisconnect={() => {}}

@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { CliKind, PermissionMode, ReasoningEffort } from "./domain.js"
+import { type CliKind, ReasoningEffort } from "./domain.js"
 
 /** A model a harness can run, shown in the composer's model chip. */
 export const ModelOption = Schema.Struct({
@@ -16,32 +16,6 @@ export const ModelOption = Schema.Struct({
   defaultReasoningId: Schema.optional(ReasoningEffort)
 })
 export type ModelOption = Schema.Schema.Type<typeof ModelOption>
-
-/** A harness plus the models it offers — one section of the composer's model menu. */
-export const ProviderModels = Schema.Struct({
-  cli: CliKind,
-  /** Human label for the section header ("Claude Code", "Codex CLI"). */
-  label: Schema.String,
-  models: Schema.Array(ModelOption)
-})
-export type ProviderModels = Schema.Schema.Type<typeof ProviderModels>
-
-export const HarnessModeOption = Schema.Struct({
-  id: PermissionMode,
-  label: Schema.String,
-  description: Schema.optional(Schema.String),
-  kind: Schema.Literal("execute", "plan")
-})
-export type HarnessModeOption = Schema.Schema.Type<typeof HarnessModeOption>
-
-/** One provider's live model, mode, and reasoning capability snapshot. */
-export const HarnessCapability = Schema.Struct({
-  cli: CliKind,
-  label: Schema.String,
-  modes: Schema.Array(HarnessModeOption),
-  models: Schema.Array(ModelOption)
-})
-export type HarnessCapability = Schema.Schema.Type<typeof HarnessCapability>
 
 /**
  * Fallback model choices per harness — used only when live discovery from the
