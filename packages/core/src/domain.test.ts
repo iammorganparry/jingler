@@ -536,7 +536,7 @@ describe("CreateSessionInput", () => {
     expect(Either.isLeft(result)).toBe(true)
   })
 
-  it("decodes a legacy create request with worktree creation defaulting on", () => {
+  it("rejects a legacy harness create request", () => {
     const result = decode(CreateSessionInput, {
       repoPath: "/Users/me/repos/trigify-app",
       repoName: "trigify-app",
@@ -545,17 +545,16 @@ describe("CreateSessionInput", () => {
       model: "gpt-5.6-sol",
       baseBranch: "main"
     })
-    expect(Either.isRight(result)).toBe(true)
-    if (Either.isRight(result))
-      expect(result.right.useWorktree ?? true).toBe(true)
-    if (Either.isRight(result)) expect(result.right.model).toBe("gpt-5.6-sol")
+    expect(Either.isLeft(result)).toBe(true)
   })
 
   it("decodes an explicit direct-checkout request", () => {
     const result = decode(CreateSessionInput, {
       repoPath: "/Users/me/repos/trigify-app",
       repoName: "trigify-app",
-      cli: "codex",
+      connectionId: "codex-subscription",
+      providerId: "openai-codex",
+      modelId: "openai-codex/gpt-5.6-sol",
       baseBranch: "feature/direct",
       useWorktree: false
     })

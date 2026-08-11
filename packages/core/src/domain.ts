@@ -1998,18 +1998,6 @@ export const AdversarialReview = Schema.Struct({
 })
 export type AdversarialReview = Schema.Schema.Type<typeof AdversarialReview>
 
-const completeRuntimeSelection = (input: {
-  readonly connectionId?: unknown
-  readonly providerId?: unknown
-  readonly modelId?: unknown
-}): boolean | string => {
-  const present = [input.connectionId, input.providerId, input.modelId]
-    .filter((value) => value !== undefined).length
-  return present === 0 || present === 3
-    ? true
-    : "connectionId, providerId, and modelId must be supplied together"
-}
-
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
   /** Paired execution device. Omitted means this desktop. */
@@ -2030,12 +2018,9 @@ export const CreateSessionInput = Schema.Struct({
   /** Optional first task, opened as the new workspace's initial composer draft. */
   initialPrompt: Schema.optional(Schema.String),
   /** Canonical, explicitly authenticated runtime route. */
-  connectionId: Schema.optional(ProviderConnectionId),
-  providerId: Schema.optional(ProviderId),
-  modelId: Schema.optional(ProviderModelId),
-  /** Decoder-era compatibility inputs removed with legacy execution in stage 7. */
-  cli: Schema.optional(CliKind),
-  model: Schema.optional(Schema.String),
+  connectionId: ProviderConnectionId,
+  providerId: ProviderId,
+  modelId: ProviderModelId,
   /** Optional permission mode selected in the new-session composer. */
   mode: Schema.optional(PermissionMode),
   /**
@@ -2053,7 +2038,7 @@ export const CreateSessionInput = Schema.Struct({
   useWorktree: Schema.optional(Schema.Boolean),
   /** Continue the selected branch instead of creating a fresh semantic task branch. */
   continueBranch: Schema.optional(Schema.Boolean)
-}).pipe(Schema.filter(completeRuntimeSelection))
+})
 export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>
 
 /**
@@ -2071,12 +2056,9 @@ export const CreateSessionFromPrInput = Schema.Struct({
   /** The repo's folder name, used for grouping + the worktree directory. */
   repoName: Schema.String,
   /** Canonical, explicitly authenticated runtime route. */
-  connectionId: Schema.optional(ProviderConnectionId),
-  providerId: Schema.optional(ProviderId),
-  modelId: Schema.optional(ProviderModelId),
-  /** Decoder-era compatibility inputs removed with legacy execution in stage 7. */
-  cli: Schema.optional(CliKind),
-  model: Schema.optional(Schema.String),
+  connectionId: ProviderConnectionId,
+  providerId: ProviderId,
+  modelId: ProviderModelId,
   mode: Schema.optional(PermissionMode),
   reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
   initialPrompt: Schema.optional(Schema.String),
@@ -2087,7 +2069,7 @@ export const CreateSessionFromPrInput = Schema.Struct({
     headRefName: Schema.String,
     baseRefName: Schema.String
   })
-}).pipe(Schema.filter(completeRuntimeSelection))
+})
 export type CreateSessionFromPrInput = Schema.Schema.Type<
   typeof CreateSessionFromPrInput
 >
@@ -2107,12 +2089,9 @@ export const CreateSessionFromIssueInput = Schema.Struct({
   /** The repo's folder name, used for grouping + the worktree directory. */
   repoName: Schema.String,
   /** Canonical, explicitly authenticated runtime route. */
-  connectionId: Schema.optional(ProviderConnectionId),
-  providerId: Schema.optional(ProviderId),
-  modelId: Schema.optional(ProviderModelId),
-  /** Decoder-era compatibility inputs removed with legacy execution in stage 7. */
-  cli: Schema.optional(CliKind),
-  model: Schema.optional(Schema.String),
+  connectionId: ProviderConnectionId,
+  providerId: ProviderId,
+  modelId: ProviderModelId,
   mode: Schema.optional(PermissionMode),
   reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
   /** The branch to fork the worktree from. */
@@ -2126,7 +2105,7 @@ export const CreateSessionFromIssueInput = Schema.Struct({
   task: Schema.String,
   /** GitHub-only automations. Other providers omit this field. */
   automations: Schema.optional(IssueAutomations)
-}).pipe(Schema.filter(completeRuntimeSelection))
+})
 export type CreateSessionFromIssueInput = Schema.Schema.Type<
   typeof CreateSessionFromIssueInput
 >

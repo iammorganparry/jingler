@@ -4,6 +4,7 @@ import type { CreateSessionInput } from "@jingler/core"
 import {
   fallbackTitle,
   ProviderConnectionId,
+  ProviderId,
   ProviderModelId,
   userMessage
 } from "@jingler/core"
@@ -27,6 +28,9 @@ import { failureOf, initGitRepo, mkTemp, runExit, withTempRoot } from "./test-su
  * assert persistence, the heuristic-fallback path, and the pin.
  */
 describe("retitleSession", () => {
+  const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+  const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+  const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
   let temp: ReturnType<typeof withTempRoot>
   let repos: ReturnType<typeof mkTemp>
   let repoPath: string
@@ -48,7 +52,9 @@ describe("retitleSession", () => {
   const input = (over: Partial<CreateSessionInput> = {}): CreateSessionInput => ({
     repoPath,
     repoName: "app",
-    cli: "claude",
+    connectionId,
+    providerId,
+    modelId,
     baseBranch: "main",
     ...over
   })

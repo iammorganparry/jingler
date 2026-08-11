@@ -111,19 +111,16 @@ describe("SessionStore", () => {
     repoPath,
     repoName: "trigify-app",
     title: "Fix Login Bug!",
-    cli: "claude",
+    connectionId,
+    providerId,
+    modelId,
     baseBranch: "main",
     ...over
   })
 
   it("persists canonical provider identity on a new session and chat", async () => {
     const result = await runExit(
-      SessionStore.create(input({
-        cli: undefined,
-        connectionId,
-        providerId,
-        modelId
-      })).pipe(Effect.provide(services)),
+      SessionStore.create(input()).pipe(Effect.provide(services)),
       temp.layer
     )
 
@@ -1348,7 +1345,9 @@ describe("SessionStore", () => {
   const prInput = (over: Partial<CreateSessionFromPrInput["pr"]> = {}): CreateSessionFromPrInput => ({
     repoPath,
     repoName: "trigify-app",
-    cli: "claude",
+    connectionId,
+    providerId,
+    modelId,
     pr: { number: 482, title: "Fix Auth Refresh", headRefName: "chore/bump", baseRefName: "main", ...over }
   })
 
@@ -1728,7 +1727,9 @@ describe("SessionStore", () => {
   ): CreateSessionFromIssueInput => ({
     repoPath,
     repoName: "trigify-app",
-    cli: "claude",
+    connectionId,
+    providerId,
+    modelId,
     baseBranch: "main",
     issue: {
       providerId: "github",

@@ -100,7 +100,6 @@ import {
   selectContinuationRepository,
   setReasoning,
   setSessionPersistent,
-  sessionCreationDefaults,
   sessionDiff,
   skillsList,
   transcriptHasGitHubFeedback,
@@ -381,70 +380,6 @@ describe("RPC handlers", () => {
     expect(exit._tag).toBe("Failure");
     expect(String(exit)).toContain("plugin remains installed");
     expect(existsSync(pluginDir)).toBe(true);
-  });
-
-  it("keeps a new session direct, defaulting to auto where the harness supports it", () => {
-    expect(sessionCreationDefaults("codex", null)).toMatchObject({
-      cli: "codex",
-      options: {
-        // No configured default → `auto` (codex supports it): unsandboxed and
-        // able to use git as it does in a direct CLI.
-        defaultMode: "auto",
-        defaultModel: undefined,
-      },
-    });
-  });
-
-  it("prefers the model selected in New Session over the provider default", () => {
-    expect(
-      sessionCreationDefaults(
-        "codex",
-        {
-          reposDir: null,
-          createdAt: "2026-08-09T00:00:00.000Z",
-          providers: {
-            codex: { enabled: true, defaultMode: "auto", defaultModel: "gpt-5.5" },
-          },
-        },
-        "gpt-5.6-sol",
-      ),
-    ).toMatchObject({
-      cli: "codex",
-      options: { defaultModel: "gpt-5.6-sol" },
-    });
-  });
-
-  it("prefers mode and reasoning selected in New Session over provider defaults", () => {
-    expect(
-      sessionCreationDefaults(
-        "codex",
-        {
-          reposDir: null,
-          createdAt: "2026-08-09T00:00:00.000Z",
-          providers: {
-            codex: {
-              enabled: true,
-              defaultMode: "auto",
-              thinkingEnabled: false,
-              reasoningEffort: "minimal",
-            },
-          },
-        },
-        "gpt-5.6-sol",
-        "ask",
-        { enabled: true, effort: "high" },
-      ),
-    ).toMatchObject({
-      options: {
-        defaultMode: "ask",
-        defaultReasoning: { enabled: true, effort: "high" },
-      },
-    });
-
-    expect(
-      sessionCreationDefaults("codex", null, undefined, undefined, null).options
-        .defaultReasoning,
-    ).toBeUndefined();
   });
 
   it("Sessions.setPersistent returns and persists the updated session", async () => {

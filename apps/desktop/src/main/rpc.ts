@@ -79,7 +79,6 @@ import {
   AuthError,
   ConfigError,
   ConnectorError,
-  defaultModeFor,
   GitHubApiError,
   GitError,
   IssueComment,
@@ -110,7 +109,6 @@ import {
 import type {
   BrowserBounds,
   AdversarialReview,
-  CliKind,
   OpenConnectorConfig,
   OpenConnectorDefaults,
   StreamEvent,
@@ -131,7 +129,6 @@ import type {
   SettingContribution,
   PrMergeMethod,
   PublishCheckpoint,
-  ProviderConfig,
   ReviewComment,
   ReviewSubmitKind,
   ReasoningSetting,
@@ -143,7 +140,6 @@ import type {
   GitHubRelayEvent,
   GitHubFeedbackClaimStatus,
   SettledSessionStatus,
-  WorkspaceConfig,
 } from "@jingler/core";
 import type {
   GitHubRepository,
@@ -807,90 +803,15 @@ type SessionWithPr = Session & { readonly prNumber: number };
 const hasActivePr = (session: Session | null): session is SessionWithPr =>
   session !== null && session.prNumber !== null;
 
-const providerReasoning = (
-  provider: ProviderConfig | undefined,
-): ReasoningSetting | undefined => {
-  if (
-    provider === undefined ||
-    (provider.thinkingEnabled === undefined &&
-      provider.reasoningEffort === undefined)
-  ) {
-    return;
-  }
-  return {
-    enabled: provider.thinkingEnabled ?? true,
-    ...(provider.reasoningEffort === undefined
-      ? {}
-      : { effort: provider.reasoningEffort }),
-  };
-};
-
-/** Shared route/default policy for blank, PR, and issue session creation. */
-export const sessionCreationDefaults = (
-  requestedCli: CliKind,
-  config: WorkspaceConfig | null,
-  requestedModel?: string,
-  requestedMode?: PermissionMode,
-  requestedReasoning?: ReasoningSetting | null,
-) => {
-  const cli = requestedCli;
-  const provider = config?.providers?.[cli];
-  return {
-    cli,
-    options: {
-      defaultMode: requestedMode ?? defaultModeFor(cli, provider?.defaultMode),
-      defaultModel: requestedModel ?? provider?.defaultModel,
-      defaultReasoning:
-        requestedReasoning === undefined
-          ? providerReasoning(provider)
-          : (requestedReasoning ?? undefined),
-    },
-  };
-};
-
-/** Remove once Session.cli and the legacy defaults are deleted in stage 7. */
-const compatibilityCliForProvider = (
-  providerId: string | undefined,
-  requestedCli: CliKind | undefined,
-): CliKind =>
-  requestedCli ??
-  (providerId === "anthropic"
-    ? "claude"
-    : providerId === "openai" || providerId === "openai-codex"
-      ? "codex"
-      : "opencode");
-
-const withCanonicalSessionDefaults = <
-  T extends {
-    readonly connectionId?: CreateSessionInput["connectionId"];
-    readonly providerId?: CreateSessionInput["providerId"];
-    readonly modelId?: CreateSessionInput["modelId"];
-  },
->(
-  input: T,
-  config: WorkspaceConfig | null,
-): T => {
-  if (
-    input.connectionId !== undefined ||
-    input.providerId !== undefined ||
-    input.modelId !== undefined
-  ) {
-    return input;
-  }
-  if (
-    config?.defaultConnectionId === undefined ||
-    config.defaultProviderId === undefined ||
-    config.defaultModelId === undefined
-  ) {
-    return input;
-  }
-  return {
-    ...input,
-    connectionId: config.defaultConnectionId,
-    providerId: config.defaultProviderId,
-    modelId: config.defaultModelId,
-  };
-};
+const sessionCreationOptions = (input: {
+  readonly modelId: CreateSessionInput["modelId"];
+  readonly mode?: PermissionMode;
+  readonly reasoning?: ReasoningSetting | null;
+}) => ({
+  defaultMode: input.mode ?? "accept-edits" as const,
+  defaultModel: input.modelId,
+  defaultReasoning: input.reasoning ?? undefined,
+});
 
 const planMutationConflict = (message: string): PlanConflictError =>
   new PlanConflictError({
@@ -1123,19 +1044,11 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
       Effect.orElseSucceed(() => null),
     );
     const allowSharedCheckout = config?.git?.shareCheckedOutBranches ?? true;
-    const resolvedInput = withCanonicalSessionDefaults(input, config);
-    const route = sessionCreationDefaults(
-      compatibilityCliForProvider(resolvedInput.providerId, resolvedInput.cli),
-      config,
-      resolvedInput.model ?? resolvedInput.modelId,
-      resolvedInput.mode,
-      resolvedInput.reasoning,
-    );
     return yield* SessionStore.createFromPr(
-      { ...resolvedInput, cli: route.cli },
+      input,
       {
         allowSharedCheckout,
-        ...route.options,
+        ...sessionCreationOptions(input),
       },
     );
   });
@@ -1160,23 +1073,9 @@ export const createSession = (input: CreateSessionInput) =>
               : { environmentId: project.environmentId })
           }))
         );
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const canonicalInput = withCanonicalSessionDefaults(resolvedInput, config);
-    const route = sessionCreationDefaults(
-      compatibilityCliForProvider(
-        canonicalInput.providerId,
-        canonicalInput.cli,
-      ),
-      config,
-      canonicalInput.model ?? canonicalInput.modelId,
-      canonicalInput.mode,
-      canonicalInput.reasoning,
-    );
     return yield* SessionStore.create(
-      { ...canonicalInput, cli: route.cli },
-      route.options,
+      resolvedInput,
+      sessionCreationOptions(resolvedInput),
     );
   });
 
@@ -1219,20 +1118,9 @@ export const createSessionRouted = (input: CreateSessionInput) =>
  */
 export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
   Effect.gen(function* () {
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const resolvedInput = withCanonicalSessionDefaults(input, config);
-    const route = sessionCreationDefaults(
-      compatibilityCliForProvider(resolvedInput.providerId, resolvedInput.cli),
-      config,
-      resolvedInput.model ?? resolvedInput.modelId,
-      resolvedInput.mode,
-      resolvedInput.reasoning,
-    );
     return yield* SessionStore.createFromIssue(
-      { ...resolvedInput, cli: route.cli },
-      route.options,
+      input,
+      sessionCreationOptions(input),
     );
   });
 
@@ -1388,11 +1276,25 @@ export const continueOnEnvironment = (
           const targetBaseBranch = source.baseBranch
             ?? targetRepository.defaultBranch
             ?? source.branch;
+          if (
+            source.connectionId === undefined ||
+            source.providerId === undefined ||
+            source.modelId === undefined
+          ) {
+            return yield* Effect.fail(new EnvironmentHandoffError({
+              reason: "unavailable",
+              message: "Choose a certified provider connection before continuing this session.",
+              sessionId: source.id,
+              ...(target === undefined ? {} : { environmentId: target }),
+            }));
+          }
           if (target === undefined) {
             return yield* createSession({
               repoPath: targetRepository.path,
               repoName: targetRepository.name,
-              cli: source.cli,
+              connectionId: source.connectionId,
+              providerId: source.providerId,
+              modelId: source.modelId,
               baseBranch: targetBaseBranch,
               title: `${source.title} continuation`,
             }).pipe(
