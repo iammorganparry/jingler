@@ -17,7 +17,6 @@ import type {
   MemoryMcpProxy
 } from "./memory-mcp-proxy.js"
 import { MemoryMcpProxyError } from "./memory-mcp-proxy.js"
-import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
 import { withTempRoot } from "./test-support.js"
 
@@ -134,16 +133,8 @@ describe("MemoryService stateless attachment", () => {
       )
       expect(attachment?.instructions).toContain("memory_workflow_status")
     }
-    const codexServer = attachments[1]?.server
-    expect(codexServer).toBeDefined()
-    if (codexServer !== undefined) {
-      expect(JSON.stringify(codexMcpOverrides([codexServer]))).not.toContain(
-        "grant.shared.signature"
-      )
-      expect(codexMcpEnvironment([codexServer])).toStrictEqual({
-        JINGLER_MEMORY_AUTHORIZATION: "Bearer grant.shared.signature"
-      })
-    }
+    expect(JSON.stringify(attachments.map((attachment) => attachment?.server.headerEnvironment)))
+      .not.toContain("grant.shared.signature")
 
     const grants = requests.filter((request) => request.url.endsWith("/api/memory/grant"))
     const discoveries = requests.filter((request) => request.url.endsWith("/api/mcp"))

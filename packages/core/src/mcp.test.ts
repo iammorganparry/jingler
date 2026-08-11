@@ -7,7 +7,6 @@ const decode = <A, I>(schema: Schema.Schema<A, I>, input: unknown) =>
 
 const SERVER = {
   name: "linear",
-  cli: "claude",
   transport: "stdio",
   scope: "user",
   target: "npx -y @linear/mcp",
@@ -36,10 +35,6 @@ describe("McpServer", () => {
     expect(Either.isRight(decode(McpServer, SERVER))).toBe(true)
   })
 
-  it("rejects a cli that isn't a CliKind", () => {
-    expect(Either.isLeft(decode(McpServer, { ...SERVER, cli: "aider" }))).toBe(true)
-  })
-
   it("requires every field — a config-shaped object alone is not an McpServer", () => {
     expect(Either.isLeft(decode(McpServer, { name: "linear", command: "npx" }))).toBe(true)
   })
@@ -53,7 +48,6 @@ describe("McpServer", () => {
     const fields = Object.keys(McpServer.fields)
     expect(fields).toStrictEqual([
       "name",
-      "cli",
       "transport",
       "scope",
       "target",

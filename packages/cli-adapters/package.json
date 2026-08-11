@@ -54,7 +54,6 @@
     "@octokit/request": "^10.0.13",
     "@octokit/webhooks": "^14.2.0",
     "effect": "^3.21.4",
-    "smol-toml": "^1.7.0",
     "ws": "^8.18.0",
     "xstate": "^5.32.4",
     "zod": "^4.0.0"

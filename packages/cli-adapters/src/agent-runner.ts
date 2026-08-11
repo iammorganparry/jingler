@@ -77,11 +77,11 @@ import type {
 } from "./agent-turn-driver.js"
 import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
-import { healedWorktreePath } from "./cli-project-dir.js"
+import { healedWorktreePath } from "./runtime/persistence/worktree-path.js"
 import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
-import { remoteMcpServer } from "./mcp-config.js"
+import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
@@ -888,9 +888,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // `worktreePath` is stored ABSOLUTE and nothing rewrites it — this
           // app's own rename moved the home directory and shipped no migration
           // — so the stored value can name a directory that is not there while
-          // the worktree sits perfectly intact one name over. Healing it also
-          // moves the agent CLI's transcripts, which are filed under a slug of
-          // the working directory and are otherwise lost to `--resume`.
+          // the worktree sits perfectly intact one name over.
           //
           // Costs one `stat` on the overwhelmingly common healthy path.
           const storedWorktree = session?.worktreePath ?? ""

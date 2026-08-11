@@ -86,14 +86,11 @@ const StoreLayers = Layer.mergeAll(
 )
 
 /**
- * The three things that drive a CLI harness. `AgentRunner` owns the session's
- * conversation; `ReviewService` drives the adapter itself so an adversarial
- * review can run on its own model, read-only, without touching that
- * conversation; `ContextManager` does the same to summarise a session's own
- * transcript when its working set outgrows the quality band. Peers — none
- * depends on the others, and all three reach the harness through `AgentTurnDriver`.
+ * The services that drive pi roles. `AgentRunner` owns conversations;
+ * `ReviewService` runs adversarial review read-only; `ContextManager` compacts a
+ * session transcript. All three share the canonical `AgentTurnDriver` seam.
  */
-const HarnessLayers = Layer.mergeAll(
+const RuntimeRoleLayers = Layer.mergeAll(
   AgentRunner.Default,
   // AgentRunner.Default also depends on this exact layer reference. Effect's
   // layer memoization therefore builds one app-lifetime MemoryService for both
@@ -153,11 +150,11 @@ const RpcServicesLayer = RpcServerLive.pipe(
   // stale through the same store instances the RPC handlers use.
   Layer.provideMerge(SessionStore.Default),
   Layer.provideMerge(StoreLayers),
-  Layer.provide(HarnessLayers),
+  Layer.provide(RuntimeRoleLayers),
   // provideMerge (not provide): both app-lifetime services must stay in runtime
   // context. TerminalService is reached by the before-quit PTY reap; the browser
   // MCP service owns its scoped loopback listener and will be reached by the
-  // harness injection stage. They are independent peers, merged to remain inside
+  // run-scoped capability stage. They are independent peers, merged to remain inside
   // Effect.pipe's 20-argument limit. BrowserControlPort is supplied below.
   Layer.provideMerge(
     Layer.mergeAll(TerminalService.Default, BrowserControlMcpServiceLive)

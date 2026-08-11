@@ -3,18 +3,14 @@ import { OPEN_CONNECTOR_DEFAULT } from "@jingler/core"
 import { Effect } from "effect"
 import { ConfigService } from "./config.js"
 import { SecretStore } from "./secret-store.js"
-import type { ParsedMcpServer } from "./mcp-config.js"
-import { normalizeEndpoint } from "./mcp-config.js"
+import type { ParsedMcpServer } from "./runtime/mcp/attachment.js"
+import { normalizeEndpoint } from "./runtime/mcp/endpoint.js"
 import { probeServer } from "./mcp-probe.js"
 
 /**
- * The unified MCP source: one self-hosted OpenConnector instance every agent
- * (`claude` / `codex` / `cursor` / `opencode`) is pointed at, so a provider
- * connected once is available to all of them.
- *
- * This is the INVERSE of `McpService`, which only READS each harness's own MCP
- * config for display. Here Jingler OWNS a server and injects it at spawn. The
- * two share the `ParsedMcpServer` split so injection reuses the same redaction
+ * The unified MCP source: one self-hosted OpenConnector instance is exposed to
+ * every pi model, so a provider connected once is available to all agents.
+ * Jingler owns the server and the `ParsedMcpServer` split preserves the redaction
  * contract: the `.server` half (header NAMES only) is all that may cross the RPC
  * boundary; the `.launch` half carries the bearer and never leaves main.
  *
@@ -45,8 +41,6 @@ const remoteEntry = (
   const name = config.serverName
   const server: McpServer = {
     name,
-    // Decoder compatibility only; pi consumes the main-process launch half.
-    cli: "claude",
     transport: "http",
     scope: "user",
     target: url,
@@ -114,9 +108,8 @@ export class OpenConnectorService extends Effect.Service<OpenConnectorService>()
         })
 
       /**
-       * The server to inject for `cli`, or null when the feature is off, disabled
-       * for that harness, or the endpoint/token is missing. Callers hand the
-       * `.launch` half to the harness and must never send `.server` verbatim if it
+       * The server to inject, or null when the feature is off or the endpoint/token
+       * is missing. Callers hand the `.launch` half to pi and must never send `.server` verbatim if it
        * could carry more than header names (it cannot — see `remoteEntry`).
        */
       const injection = () =>

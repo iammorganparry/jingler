@@ -1,5 +1,4 @@
 import { Schema } from "effect"
-import { CLI_KINDS, CliKind } from "./cli.js"
 import { BUDGET_RANGE, DEFAULT_BUDGET_TOKENS } from "./context.js"
 import { PlanTemplateConfig } from "./plan-document.js"
 import { ThemeConfig } from "./theme.js"
@@ -18,8 +17,6 @@ import { RuntimeRecoveryState } from "./runtime/runtime-recovery.js"
  * for RPC payload encode/decode, persistence, and runtime validation. The plain
  * TypeScript types are derived from the schemas via `Schema.Schema.Type`.
  */
-
-export { CLI_KINDS, CliKind } from "./cli.js"
 
 // ── Environments ────────────────────────────────────────────────────────────
 
@@ -174,7 +171,7 @@ export const ReasoningSetting = Schema.Struct({
 })
 export type ReasoningSetting = Schema.Schema.Type<typeof ReasoningSetting>
 
-/** Concrete harness permission modes that can execute an approved plan. */
+/** Concrete permission modes that can execute an approved plan. */
 export const ExecutionMode = Schema.Literal("ask", "accept-edits", "auto")
 export type ExecutionMode = Schema.Schema.Type<typeof ExecutionMode>
 
@@ -381,7 +378,7 @@ export const Session = Schema.Struct({
   /** Restart-safe mutation outcomes that require operator inspection. */
   runtimeRecovery: Schema.optional(RuntimeRecoveryState),
   /**
-   * Where the harness process runs. Desktop-created sessions are local; remote
+   * Where the runtime process runs. Desktop-created sessions are local; remote
    * session importers set `cloud`. Optional so older sessions decode as local.
    */
   executionLocation: Schema.optional(Schema.Literal("local", "cloud")),
@@ -637,122 +634,11 @@ export const NOTIFICATIONS_DEFAULT: NotificationsConfig = {
   sound: false
 }
 
-/** Tone / verbosity preset for a harness's replies (Claude "output style"). */
-export const OutputStyle = Schema.Literal("default", "explanatory", "concise")
-export type OutputStyle = Schema.Schema.Type<typeof OutputStyle>
-
-/**
- * Per-CLI provider defaults a new session inherits — the "Settings · Providers"
- * levers (design E10). Keyed by `CliKind` inside `WorkspaceConfig.providers`.
- * Only `defaultMode`/`defaultModel` are consumed at session creation today; the
- * remaining levers are persisted and surfaced in the settings view for future
- * adapter wiring.
- */
-export const ProviderConfig = Schema.Struct({
-  /** Whether this provider is offered when starting a session. */
-  enabled: Schema.Boolean,
-  /** Permission mode new sessions start in (maps to the harness `--permission-mode`). */
-  defaultMode: PermissionMode,
-  /** Default harness model id for new sessions; absent = the harness default. */
-  defaultModel: Schema.optional(Schema.String),
-  /**
-   * Small/fast model for summaries & side tasks; absent = the harness default.
-   *
-   * Consumed by the context digest (`digestModelFor`), which runs through the
-   * session's own harness binary — so the summary bills to the user's existing
-   * subscription rather than any separate API credential.
-   */
-  backgroundModel: Schema.optional(Schema.String),
-  /**
-   * The model's context-window size in tokens, when Jingler can't infer it.
-   *
-   * Only route to auto-compaction for opencode, whose catalogue is resolved from
-   * the user's own credentials across ~167 providers — there is no honest window
-   * default to invent, so `contextWindowFor` reports unknown and compaction stays
-   * off until the user says how big the window is. Also the escape hatch when a
-   * harness ships a model whose window we don't know yet.
-   */
-  contextWindow: Schema.optional(Schema.Number),
-  /** Whether extended thinking is enabled; absent preserves the provider default. */
-  thinkingEnabled: Schema.optional(Schema.Boolean),
-  /** Provider-native effort; absent = the harness default. */
-  reasoningEffort: Schema.optional(ReasoningEffort),
-  /** Reply tone/verbosity preset; absent = the harness default. */
-  outputStyle: Schema.optional(OutputStyle),
-  /**
-   * Model ids to show in the composer's model menu; absent = show everything the
-   * harness offers. Curation exists for opencode, whose catalogue is resolved
-   * live from the user's own credentials and is enormous — a single OpenRouter
-   * key alone yields ~342 models, which is unusable as a flat menu. Ids are
-   * harness-native (for opencode, `provider/model`).
-   *
-   * The composer's menu only. It must never narrow a configuration surface such
-   * as Settings' default-model picker: a curation that could hide models from the screen you'd use
-   * to change it is a one-way door — pick three, and the fourth can never be
-   * chosen again from inside the app.
-   *
-   * No UI writes this yet; the picker that does lands separately. Until then a
-   * hand-edited `config.json` is the only writer, which is exactly why the
-   * one-way-door property matters.
-   */
-  visibleModels: Schema.optional(Schema.Array(Schema.String))
-})
-export type ProviderConfig = Schema.Schema.Type<typeof ProviderConfig>
-
-/**
- * Where an opencode provider's credential came from. opencode resolves providers
- * from the user's own setup, and this says which part of it:
- *  - `env` — an environment variable they exported (`OPENROUTER_API_KEY`, …)
- *  - `api` — a key in opencode's own store, via `opencode auth login` or us
- *  - `config` — declared in their `opencode.json`
- *  - `custom` — opencode's built-in (e.g. the Zen gateway's free tier)
- *
- * Surfaced in Settings so it's obvious what is Jingler's doing and what is the
- * user's own — we never overwrite a credential we didn't put there.
- */
-export const OpencodeProviderSource = Schema.Literal(
-  "env",
-  "config",
-  "custom",
-  "api"
-)
-export type OpencodeProviderSource = Schema.Schema.Type<
-  typeof OpencodeProviderSource
->
-
-/** One provider opencode resolves for the user — a row in Settings · Providers. */
-export const OpencodeProviderInfo = Schema.Struct({
-  /** opencode's provider id, e.g. "openrouter" — the first segment of a model id. */
-  id: Schema.String,
-  /** Display name, e.g. "OpenRouter". */
-  name: Schema.String,
-  /** Null when opencode reports no origin (i.e. it isn't configured). */
-  source: Schema.NullOr(OpencodeProviderSource),
-  /** Env vars this provider reads, so the UI can name the one to set. */
-  env: Schema.Array(Schema.String),
-  /** How many models it resolves — 0 means "integration present, no key". */
-  modelCount: Schema.Number
-})
-export type OpencodeProviderInfo = Schema.Schema.Type<
-  typeof OpencodeProviderInfo
->
-
-/**
- * Per-CLI provider defaults, keyed by `CliKind`. Partial — a config only carries
- * entries for the CLIs the user has actually customised (a literal-key record
- * would otherwise require every CLI to be present).
- */
-export const ProvidersConfig = Schema.partial(
-  Schema.Record({ key: CliKind, value: ProviderConfig })
-)
-export type ProvidersConfig = Schema.Schema.Type<typeof ProvidersConfig>
-
 /**
  * The global auto-compaction levers, persisted at `WorkspaceConfig.context`.
  *
  * Lives here rather than beside the policy in `context.ts` because it is
- * CONFIG — and because `context.ts` may not import this module at runtime
- * without collapsing the schema graph (see the note on its `CliKind` import).
+ * persisted configuration rather than compaction policy.
  */
 export const ContextConfig = Schema.Struct({
   /** Master switch. Off returns the app to exactly its pre-feature behaviour. */
@@ -773,10 +659,8 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
 /**
  * The self-hosted OpenConnector instance every agent draws its MCP tools from.
  *
- * Jingler runs `claude` / `codex` / `cursor` / `opencode` as separate sessions,
- * each of which would otherwise have to configure MCP servers independently. This
- * points all of them at ONE central OpenConnector `/mcp` endpoint, so a provider
- * connected once (in OpenConnector's own console) is available to every agent.
+ * Jingler exposes one central OpenConnector `/mcp` endpoint through its managed
+ * tool registry, so a provider connected once is available to every agent.
  *
  * SECURITY: this struct is persisted to `config.json` and crosses the RPC
  * boundary, so it carries NO secret. The instance's bearer token lives only in
@@ -791,7 +675,7 @@ export const OpenConnectorConfig = Schema.Struct({
   /** Master switch. Off means no agent receives the server. */
   enabled: Schema.Boolean,
   /**
-   * The name the unified server is registered under in every harness. Stable so
+   * The name the unified server is registered under in the runtime. Stable so
    * repeated worktree writes stay idempotent and the Settings list is recognisable.
    */
   serverName: Schema.optionalWith(Schema.String, {
@@ -901,7 +785,7 @@ export const WorkspaceConfig = Schema.Struct({
    * Whether a session in PLAN mode may run commands without stopping for
    * approval. Absent means ON (see `PLAN_AUTO_RUN_DEFAULT`).
    *
-   * On by default because plan mode cannot write: the harness refuses edits, so
+   * On by default because plan mode cannot write: the runtime omits edit tools, so
    * the commands a planning turn wants are reads — `git log`, `rg`, and file inspection.
    * Gating those turned every plan into a queue of approval prompts for actions
    * that cannot change anything, which is how operators learn to click "allow"
@@ -1824,7 +1708,7 @@ export const CreateSessionInput = Schema.Struct({
   mode: Schema.optional(PermissionMode),
   /**
    * Optional reasoning override selected in the new-session composer. `null`
-   * explicitly preserves the harness default; omission keeps compatibility with
+   * explicitly preserves the provider default; omission keeps compatibility with
    * callers that expect the configured provider default to be applied.
    */
   reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),

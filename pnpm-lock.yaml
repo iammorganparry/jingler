@@ -385,9 +385,6 @@ importers:
       effect:
         specifier: ^3.21.4
         version: 3.21.4
-      smol-toml:
-        specifier: ^1.7.0
-        version: 1.7.0
       ws:
         specifier: ^8.18.0
         version: 8.21.0
@@ -8302,10 +8299,6 @@ packages:
   smart-buffer@4.2.0:
     resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
     engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
-
-  smol-toml@1.7.0:
-    resolution: {integrity: sha512-aqVvWoyO21L23mb+drl4RmMXbf6N7FdHjAhTRA9ZBL7apWBgfWC16KjrASI+1p9GAroljyMHj6fK67i0UiTNvQ==}
-    engines: {node: '>= 18'}
 
   socket.io-adapter@2.5.8:
     resolution: {integrity: sha512-6Oy52pbg+kvdCVvjcN+FnY7BvxZ7cIHNScbvztT/It5d0vbwoJoVZmF2gjJmnV0/4WlXRfG15zc45ySk9Ah8bw==}
@@ -17000,8 +16993,6 @@ snapshots:
     optional: true
 
   smart-buffer@4.2.0: {}
-
-  smol-toml@1.7.0: {}
 
   socket.io-adapter@2.5.8:
     dependencies:

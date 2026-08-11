@@ -1,10 +1,7 @@
 import { Schema } from "effect"
-import { CliKind } from "./domain.js"
 
 /**
- * MCP (Model Context Protocol) servers, as configured in the *harness's own*
- * config files. Jingler never defines an MCP format of its own — it reads what
- * `claude` / `codex` / `cursor` / `opencode` already load, and reports it back.
+ * Renderer-safe metadata for an MCP server managed by Jingler.
  */
 
 /** How a server is reached. `stdio` spawns a command; the rest are remote URLs. */
@@ -24,10 +21,8 @@ export type McpScope = Schema.Schema.Type<typeof McpScope>
 /**
  * The result of probing a server.
  *
- * `unknown` means "configured, deliberately not contacted" — a project-scope server
- * from a harness that gates project config behind its own consent prompt, which we
- * must not spawn on the operator's behalf. Distinct from an absent status, which
- * just means nothing has been probed yet.
+ * `unknown` means configured but not yet contacted. Distinct from an absent
+ * status, which means no probe result exists.
  */
 export const McpServerState = Schema.Literal("unknown", "connected", "failed", "disabled")
 export type McpServerState = Schema.Schema.Type<typeof McpServerState>
@@ -41,10 +36,8 @@ export type McpServerState = Schema.Schema.Type<typeof McpServerState>
  * the renderer would require changing this schema, which is the point.
  */
 export const McpServer = Schema.Struct({
-  /** The key the harness knows this server by, e.g. "linear". */
+  /** Stable runtime name, e.g. "linear". */
   name: Schema.String,
-  /** Which harness's config this came from. */
-  cli: CliKind,
   transport: McpTransport,
   scope: McpScope,
   /**
@@ -56,7 +49,7 @@ export const McpServer = Schema.Struct({
   envKeys: Schema.Array(Schema.String),
   /** Names of HTTP headers sent to a remote server. Values are deliberately absent. */
   headerKeys: Schema.Array(Schema.String),
-  /** False when the harness's config explicitly disables/does not approve it. */
+  /** False when the operator disabled the managed server. */
   enabled: Schema.Boolean
 })
 export type McpServer = Schema.Schema.Type<typeof McpServer>

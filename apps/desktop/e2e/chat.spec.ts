@@ -3,7 +3,6 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { ALT_CLAUDE_MODEL, appShell, DEFAULT_CLAUDE_MODEL, expect, sessionRow, showSessions, test } from "./fixtures.js"
 import type { Page } from "@playwright/test"
-import { reasoningEffortsFor } from "../../../packages/ui/src/lib/reasoning-options.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -232,11 +231,8 @@ test("thinking strength is a compact per-session composer control", async ({ lau
 
   await expect(thinking).toContainText("Default")
   await thinking.click()
-  // The menu offers the provider's OWN reasoning efforts now, not Claude's
-  // "think"/"think hard" prompt phrases — see `reasoningEffortsFor`, which gives
-  // Claude low/medium/high/xhigh/max. Read the option list from there rather than
-  // naming one, so a provider adding or renaming a tier doesn't silently rot this.
-  const effort = reasoningEffortsFor("claude")[2]!
+  // The fixture's certified model exposes low/medium/high reasoning in order.
+  const effort = "high"
   const effortLabel = effort[0]!.toUpperCase() + effort.slice(1)
   await window.getByRole("option", { name: effortLabel, exact: true }).click()
   await expect(thinking).toContainText(effortLabel)

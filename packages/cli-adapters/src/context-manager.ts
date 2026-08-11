@@ -219,7 +219,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             auto,
             budget: ctx.budgetTokens,
             // The user's explicit Settings value stays on top because it is the
-            // escape hatch for a harness report we have reason to distrust.
+            // escape hatch for provider telemetry we have reason to distrust.
             // Otherwise, a known model window is a floor: stale Codex telemetry
             // must not lower GPT-5.6 from 1M to its former 258.4k session value.
             // A larger live report still raises an old or conservative table
@@ -229,21 +229,15 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             // occupancy this session has actually reported. A model-id table is a
             // guess, and an observation of 598k in a "200k" window disproves it —
             // left uncorrected, `triggerAt` sits at 170k and the session compacts
-            // every single turn while the harness is perfectly comfortable.
+            // every single turn while the provider is perfectly comfortable.
             window: reconcileWindow(measuredWindow, peak)
           }
         })
 
       /**
-       * Summarise the session's transcript through its OWN harness.
-       *
-       * The single most important property in this file: `AgentTurnDriver.run` with
-       * the session's `binPath` means the summary is produced by the CLI the user
-       * has already authenticated — their Claude subscription, their Codex login.
-       * There is no API client constructed anywhere in this codepath and no key
-       * to configure, so enabling auto-compaction cannot present anyone with a
-       * bill they didn't expect. It runs on `backgroundModel` (haiku by default),
-       * so it is also the cheapest tier that harness offers.
+       * Summarise the transcript through the session's pinned provider connection.
+       * The same explicit billing route and certified model resolution used for
+       * foreground turns applies here; compaction cannot switch credentials.
        */
       const buildDigest = (sessionId: string): Effect.Effect<void, never, DigestEnv> =>
         Effect.gen(function* () {

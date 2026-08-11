@@ -1722,13 +1722,6 @@ export const reviewGet = (sessionId: string) =>
   });
 
 /**
- * `Billing.paths` handler — what each installed harness is charged to.
- *
- * Reports every available harness, including ones with no metered key of their
- * own (opencode), so the pane can be read as a complete picture rather than a
- * list of exceptions.
- */
-/**
  * Strip image payload bytes from transcripts before they cross into the
  * renderer. Metadata stays intact so the renderer can fetch each attachment
  * lazily through `Sessions.attachment`.

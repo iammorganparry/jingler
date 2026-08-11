@@ -568,14 +568,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     stream: true
   }),
 
-  /** List every known coding CLI and whether it is installed on this host. */
-  /**
-   * What each installed harness will actually be billed to.
-   *
-   * Read-only and cheap. Exists because the failure it reports was silent: an
-   * exported API key overriding a paid subscription, with nothing on screen to
-   * say so.
-   */
   Rpc.make("Environment.list", {
     success: Schema.Array(Environment),
     error: EnvironmentError
@@ -586,7 +578,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     error: EnvironmentError
   }),
 
-  /** Safe, versioned repository/harness catalogue announced by one paired device. */
+  /** Safe, versioned runtime catalogue announced by one paired device. */
   Rpc.make("Environment.discovery", {
     success: EnvironmentDiscovery,
     error: EnvironmentError,
@@ -1109,16 +1101,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * Observe a plan's workers without starting or retrying them.
    *
    * The stream begins with a reset snapshot and then carries lifecycle and
-   * normalized harness activity for the producing chat that owns execution.
-   */
-  /**
-   * Change a session's harness and/or model (used on the next turn — a turn
-   * already streaming finishes on the old one).
-   *
-   * Model and harness move together because a model id only means something to
-   * the harness that offers it: `opus` is nonsense to Codex. Switching `cli`
-   * also drops the session's `resumeId` (a Codex thread id is meaningless to
-   * Claude) so the new harness starts a fresh thread.
+   * normalized runtime activity for the producing chat that owns execution.
    */
   /** Change one conversation's certified provider connection/model atomically. */
   Rpc.make("Agent.setModel", {
@@ -1136,7 +1119,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /**
    * Kill ONE live sub-agent, leaving the turn (and its siblings) running.
    *
-   * `agentId` is the tab's id — the spawning tool_use id — not the harness's
+   * `agentId` is the tab's id — the spawning tool-call id — not the runtime's
    * task id. The tab has only ever known the former; the run that owns the
    * sub-agent is the only place the two are correlated, so the translation
    * happens there rather than being pushed onto the renderer.
@@ -1154,8 +1137,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Add input to a live Codex turn. Compaction temporarily defers it; harnesses
-   * without native steering report unsupported so the renderer can stop/replay.
+   * Add input to a live pi turn. Compaction temporarily defers it; providers
+   * without steering support report unsupported so the renderer can stop/replay.
    */
   Rpc.make("Agent.steer", {
     success: Schema.Union(
@@ -1318,12 +1301,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
-  /** List the models a harness supports (live from the provider; for the chip). */
-  /**
-   * Every installed harness with its models — the composer's model menu, which
-   * lets the user switch provider by picking a model under its section. One
-   * round trip instead of one per harness.
-   */
   /** Provider usage / rate-limit windows for the Usage & limits modal. */
   Rpc.make("Usage.get", {
     success: Usage
@@ -1332,7 +1309,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /**
    * A session's context accounting — what the meter renders and what Settings
    * lists. Cheap enough to poll: it reads in-memory state plus the persisted
-   * session, and never touches a harness.
+   * session, and never contacts a provider.
    */
   Rpc.make("Context.state", {
     success: ContextSnapshot,
@@ -1532,10 +1509,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     })
   }),
 
-  /**
-   * Persist which harness NEW sessions start on. One standing answer, set in
-   * Settings · Providers, in place of the New Session dialog's old select.
-   */
   /** Persist the certified provider connection and model as one canonical selection. */
   Rpc.make("Config.setDefaultProviderModel", {
     success: WorkspaceConfig,

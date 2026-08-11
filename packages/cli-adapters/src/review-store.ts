@@ -1,7 +1,6 @@
 import type { AdversarialReview, StreamEvent } from "@jingler/core"
 import {
   AdversarialReview as AdversarialReviewSchema,
-  CliKind,
   ReviewFinding,
   StreamEvent as StreamEventSchema
 } from "@jingler/core"
@@ -18,7 +17,7 @@ const LegacyAdversarialReview = Schema.Struct({
   sessionId: Schema.String,
   prNumber: Schema.Number,
   headSha: Schema.String,
-  cli: CliKind,
+  cli: Schema.Literal("claude", "codex", "cursor", "opencode"),
   model: Schema.String,
   createdAt: Schema.String,
   findings: Schema.Array(ReviewFinding),

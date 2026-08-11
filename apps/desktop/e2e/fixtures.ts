@@ -25,28 +25,11 @@ import { startFakeGitHubRelay, type FakeGitHubRelay } from "./fake-github-relay.
 import { startFakeDeviceRelay, type FakeDeviceRelay } from "./fake-device-relay.js"
 import { installFakeSshHost } from "./fake-ssh-host.js"
 import { DEVICE_AGENT_ENTRY, MAIN_ENTRY } from "./global-setup.js"
-import { FALLBACK_MODELS, type Chat, type RuntimeRecoveryState } from "@jingler/core"
+import type { Chat, RuntimeRecoveryState } from "@jingler/core"
 
-/**
- * Model labels read from the catalogue rather than written out in each spec.
- *
- * `FALLBACK_MODELS` is what the app shows when live discovery has no credentials,
- * which is exactly the e2e's situation — so these ARE the labels on screen. Taking
- * them from the source matters because they move: one commit re-cased and
- * re-versioned the whole Claude list (`opus` → `Opus 5`, and the bare `sonnet` id
- * became `sonnet[1m]`/"Sonnet 5 1M") without touching a spec, and six assertions
- * across four specs had been matching `/opus/` case-sensitively ever since.
- * Because this suite is not in CI, nothing reported it.
- */
-const CLAUDE_MODELS = FALLBACK_MODELS.claude
-/** The composer chip's initial reading: `defaultModel` takes index 0. */
-export const DEFAULT_CLAUDE_MODEL = CLAUDE_MODELS[0]!.label
-/**
- * A different Claude model to switch to. Selected by id prefix rather than label
- * because ids are the stable half of the catalogue, and from index 1 onwards so it
- * stays distinct from the default even if Sonnet is ever promoted to first.
- */
-export const ALT_CLAUDE_MODEL = CLAUDE_MODELS.slice(1).find((m) => m.id.startsWith("sonnet"))!.label
+/** Labels served by the deterministic provider catalogue used in legacy UI fixtures. */
+export const DEFAULT_CLAUDE_MODEL = "Opus 5"
+export const ALT_CLAUDE_MODEL = "Sonnet 5 1M"
 
 /** Match PlanStore's collision-proof directory for one physical checkout. */
 export const planDirectory = (home: string, worktreePath: string): string => {

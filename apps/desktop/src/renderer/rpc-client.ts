@@ -858,7 +858,6 @@ export const rpc = {
   /** Persist the conversation + code text-size multiplier. */
   configSetFontScale: (fontScale: number): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setFontScale({ fontScale })),
-  /** Which harness new sessions start on (Settings · Providers). */
   /** Persist a certified connection/model identity atomically. */
   configSetDefaultProviderModel: (
     connectionId: ProviderConnectionId,

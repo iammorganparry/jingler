@@ -45,7 +45,7 @@ import {
   isContextOverflowFailure,
   planEvidenceFromText
 } from "./agent-runner.js"
-import { composeRemoteMcpServers } from "./mcp-config.js"
+import { composeRemoteMcpServers } from "./runtime/mcp/attachment.js"
 import { ContextManager } from "./context-manager.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
