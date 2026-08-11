@@ -119,7 +119,9 @@ import {
   type MemoryGraphView,
   type MemoryPageDetail,
   type MemorySearchResult,
-  type MemorySuggestionsView
+  type MemorySuggestionsView,
+  type SessionCreationPhase,
+  type SessionCreationUpdate
 } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type {
@@ -221,6 +223,26 @@ const runAssetList = <A>(
   assetListClientPromise
     .then((client) => assetListRuntime.runPromise(f(client)))
     .catch((error) => Promise.reject(unwrapRpcFailure(error)))
+
+const drainSessionCreation = (
+  stream: Stream.Stream<SessionCreationUpdate, unknown>,
+  onProgress?: (phase: SessionCreationPhase) => void
+): Promise<Session> => {
+  let created: Session | null = null
+  return coreRuntime.runPromise(
+    stream.pipe(
+      Stream.runForEach((update) =>
+        Effect.sync(() => {
+          if (update.kind === "progress") onProgress?.(update.phase)
+          else created = update.session
+        })
+      )
+    )
+  ).then(() => {
+    if (created === null) throw new Error("Session creation ended before completion.")
+    return created
+  }).catch((error) => Promise.reject(unwrapRpcFailure(error)))
+}
 
 const decodeMemoryResult = <A, I>(
   schema: Schema.Schema<A, I>,
@@ -439,13 +461,21 @@ export const rpc = {
     run((c) => c.Sessions.list()),
   sessionsGet: (id: string): Promise<Session> =>
     run((c) => c.Sessions.get({ id })),
-  sessionsCreate: (input: CreateSessionInput): Promise<Session> =>
-    run((c) => c.Sessions.create(input)),
-  sessionsCreateFromPr: (input: CreateSessionFromPrInput): Promise<Session> =>
-    run((c) => c.Sessions.createFromPr(input)),
+  sessionsCreate: (
+    input: CreateSessionInput,
+    onProgress?: (phase: SessionCreationPhase) => void
+  ): Promise<Session> =>
+    clientPromise.then((c) => drainSessionCreation(c.Sessions.createWithProgress(input), onProgress)),
+  sessionsCreateFromPr: (
+    input: CreateSessionFromPrInput,
+    onProgress?: (phase: SessionCreationPhase) => void
+  ): Promise<Session> =>
+    clientPromise.then((c) => drainSessionCreation(c.Sessions.createFromPrWithProgress(input), onProgress)),
   sessionsCreateFromIssue: (
-    input: CreateSessionFromIssueInput
-  ): Promise<Session> => run((c) => c.Sessions.createFromIssue(input)),
+    input: CreateSessionFromIssueInput,
+    onProgress?: (phase: SessionCreationPhase) => void
+  ): Promise<Session> =>
+    clientPromise.then((c) => drainSessionCreation(c.Sessions.createFromIssueWithProgress(input), onProgress)),
   sessionsLinkIssue: (
     sessionId: string,
     issue: IssueReference,

@@ -7,18 +7,21 @@ import type {
   ProvidersConfig,
   Project
 } from "@jingler/core"
+import type { SessionCreationPhase } from "@jingler/contracts"
 import { supportsPlanMode } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import {
   Check,
   ChevronDown,
   CircleDot,
+  Cloud,
   FolderGit2,
   GitBranch,
   GitFork,
   GitPullRequest,
   MessageCircle,
   Monitor,
+  LoaderCircle,
   Sparkles,
   X
 } from "lucide-react"
@@ -47,6 +50,63 @@ interface PickerOption<T extends string> {
   keywords?: string
   disabled?: boolean
   icon: React.ReactNode
+}
+
+const CLOUD_STARTUP_STEPS: ReadonlyArray<{
+  phase: SessionCreationPhase
+  label: string
+  description: string
+}> = [
+  { phase: "checking-access", label: "Checking Cloud access", description: "Validating your account and available harness." },
+  { phase: "resolving-repository", label: "Resolving repository", description: "Pinning the selected branch to an exact commit." },
+  { phase: "starting-sandbox", label: "Starting Cloud workspace", description: "Booting an isolated sandbox and cloning the repository." },
+  { phase: "creating-session", label: "Creating session", description: "Connecting Jingler to the hydrated workspace." },
+  { phase: "ready", label: "Ready", description: "Opening the session." }
+]
+
+function CloudStartupProgress({ phase }: { phase: SessionCreationPhase | null }) {
+  const activeIndex = Math.max(0, CLOUD_STARTUP_STEPS.findIndex((step) => step.phase === phase))
+  return (
+    <section
+      className="m-auto w-full max-w-[560px] rounded-2xl border border-line bg-panel p-8"
+      aria-label="Cloud session startup"
+      aria-live="polite"
+      data-testid="cloud-startup-progress"
+    >
+      <div className="mb-7 flex items-center gap-3">
+        <span className="flex size-10 items-center justify-center rounded-xl bg-selection text-blue">
+          <Cloud size={20} aria-hidden />
+        </span>
+        <div>
+          <h2 className="text-[17px] font-semibold text-text-bright">Starting your Cloud session</h2>
+          <p className="mt-0.5 text-[11.5px] text-muted-foreground">Keep this window open while Jingler prepares the workspace.</p>
+        </div>
+      </div>
+      <ol className="flex flex-col" aria-label="Startup steps">
+        {CLOUD_STARTUP_STEPS.map((step, index) => {
+          const complete = index < activeIndex || phase === "ready"
+          const active = index === activeIndex && phase !== "ready"
+          return (
+            <li key={step.phase} className="relative flex min-h-[62px] gap-3" data-phase={step.phase} data-status={complete ? "complete" : active ? "active" : "pending"}>
+              {index < CLOUD_STARTUP_STEPS.length - 1 && (
+                <span className={cn("absolute left-[11px] top-7 h-[35px] w-px", complete ? "bg-green/50" : "bg-line")} aria-hidden />
+              )}
+              <span className={cn(
+                "relative z-10 mt-0.5 flex size-6 flex-none items-center justify-center rounded-full border",
+                complete ? "border-green/50 bg-green/10 text-green" : active ? "border-blue/50 bg-blue/10 text-blue" : "border-line bg-sunken text-dim"
+              )}>
+                {complete ? <Check size={13} aria-hidden /> : active ? <LoaderCircle size={13} className="animate-spin" aria-hidden /> : <span className="size-1 rounded-full bg-current" />}
+              </span>
+              <span className="min-w-0 pb-4">
+                <span className={cn("block text-[12.5px] font-medium", complete || active ? "text-text-bright" : "text-dim")}>{step.label}</span>
+                <span className="mt-0.5 block text-[10.5px] text-muted-foreground">{step.description}</span>
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+    </section>
+  )
 }
 
 function SearchPicker<T extends string>({
@@ -177,7 +237,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
   const {
     projectId, environmentId, isolation, baseBranch, branches, source, search, mine,
     pullRequests, issues, selectedPr, selectedIssue, draft, attachments, cli, model,
-    mode, reasoning, error
+    mode, reasoning, provisioningPhase, error
   } = state.context
   const selectedProject = props.projects.find((project) => project.id === projectId)
   const selectedEnvironment = props.environments?.find(
@@ -261,11 +321,20 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       <div className="flex h-12 flex-none items-center border-b border-hairline px-5">
         <h1 className="text-[13px] font-semibold text-text-bright">New session</h1>
         <span className="flex-1" />
-        <Button variant="ghost" size="icon" aria-label="Close new session" onClick={() => send({ type: "CLOSE" })}>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Close new session"
+          disabled={submitting}
+          onClick={() => send({ type: "CLOSE" })}
+        >
           <X size={15} />
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">
+        {submitting && selectedEnvironment?.kind === "managed" ? (
+          <CloudStartupProgress phase={provisioningPhase} />
+        ) : (
         <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
           <div className="flex items-center gap-3">
             <div>
@@ -444,6 +513,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
           )}
           {error && <p role="alert" className="text-[11px] text-red">{error}</p>}
         </div>
+        )}
       </div>
     </div>
   )

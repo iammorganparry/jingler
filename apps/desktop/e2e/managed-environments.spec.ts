@@ -1,4 +1,5 @@
 import { appShell, expect, test, type SeedSession } from "./fixtures.js"
+import { execFileSync } from "node:child_process"
 
 const DEVICES_SECTION = /^Devices/
 const MESSAGE_BOX = /Message/
@@ -27,7 +28,10 @@ test("selects the fixed authenticated Cloud execution target", async ({
   const app = await launchApp({
     configured: true,
     withRepo: true,
-    sessions: ({ repoPath }) => [localSession(repoPath)]
+    sessions: ({ repoPath }) => {
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/iammorganparry/jingler.git"], { cwd: repoPath })
+      return [localSession(repoPath)]
+    }
   })
   await expect(appShell(app.window)).toBeVisible()
 
@@ -54,6 +58,18 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await cloudOption.click()
   await expect(app.window.getByText("harness unavailable")).toHaveCount(0)
   await expect(app.window.getByRole("button", { name: "Create workspace" })).toBeEnabled()
+  await app.window.getByRole("button", { name: "Create workspace" }).click()
+  const startup = app.window.getByTestId("cloud-startup-progress")
+  await expect(startup).toBeVisible()
+  await expect(startup.getByRole("heading", { name: "Starting your Cloud session" })).toBeVisible()
+  await expect(app.window.getByRole("button", { name: "Close new session" })).toBeDisabled()
+  await expect(startup.locator('[data-phase="checking-access"]')).toHaveAttribute("data-status", /active|complete/)
+  await expect(startup.locator('[data-phase="starting-sandbox"]')).toHaveAttribute("data-status", "active")
+  await expect(app.window.getByRole("alert")).toContainText(
+    "Scripted Cloud startup stopped before allocation",
+    { timeout: 10_000 }
+  )
+  await expect(app.window.getByRole("button", { name: "Close new session" })).toBeEnabled()
   await app.window.getByRole("button", { name: "Close new session" }).click()
 
   const prompt = app.window.getByRole("textbox", { name: MESSAGE_BOX })

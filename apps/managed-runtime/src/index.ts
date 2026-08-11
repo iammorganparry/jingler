@@ -17,6 +17,10 @@ import {
 import type { ManagedRuntimeEnv } from "./runtime-env.js"
 import { r2CheckpointStore } from "./r2-checkpoint-store.js"
 import { json } from "./worker-http.js"
+import {
+  destroyRuntimeSession,
+  unregisterRuntimeSession
+} from "./runtime-cleanup.js"
 
 export { Sandbox } from "@cloudflare/sandbox"
 export { ManagedAccountObject } from "./account-runtime.js"
@@ -69,20 +73,6 @@ class RuntimeRegistrationError extends Error {
   }
 }
 
-const unregisterRuntimeSession = (
-  env: ManagedRuntimeEnv,
-  subject: string,
-  sessionId: string
-): Promise<Response> =>
-  env.MANAGED_ACCOUNT.getByName(subject).fetch(
-    "https://managed-account.internal/v1/sessions/unregister",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ subject, sessionId })
-    }
-  )
-
 const runtimeRegistration = async (
   env: ManagedRuntimeEnv,
   input: {
@@ -110,7 +100,17 @@ const runtimeRegistration = async (
         : "Managed execution is not authorized"
     )
   }
-  const accountBody: unknown = await accountResponse.json()
+  const releaseRegistration = () =>
+    unregisterRuntimeSession(env, input.subject, input.sessionId).catch(
+      () => undefined
+    )
+  let accountBody: unknown
+  try {
+    accountBody = await accountResponse.json()
+  } catch {
+    await releaseRegistration()
+    throw new RuntimeRegistrationError(502, "Managed account registration was invalid")
+  }
   const account =
     typeof accountBody === "object" && accountBody !== null
       ? Object.fromEntries(Object.entries(accountBody))
@@ -125,6 +125,7 @@ const runtimeRegistration = async (
       ? Object.fromEntries(Object.entries(account.credentialHandles))
       : null
   if (auth?.admitted !== true || typeof auth.authStateVersion !== "number") {
+    await releaseRegistration()
     throw new RuntimeRegistrationError(403, "Managed execution is not authorized")
   }
   const credentialHandles = {
@@ -145,9 +146,7 @@ const runtimeRegistration = async (
     }
   )
   if (!sessionResponse.ok) {
-    await unregisterRuntimeSession(env, input.subject, input.sessionId).catch(
-      () => undefined
-    )
+    await releaseRegistration()
     throw new RuntimeRegistrationError(
       sessionResponse.status >= 400 && sessionResponse.status < 600
         ? sessionResponse.status
@@ -161,9 +160,7 @@ const runtimeRegistration = async (
       ? Object.fromEntries(Object.entries(sessionBody))
       : null
   if (typeof session?.sessionGeneration !== "number") {
-    await unregisterRuntimeSession(env, input.subject, input.sessionId).catch(
-      () => undefined
-    )
+    await releaseRegistration()
     throw new RuntimeRegistrationError(502, "Managed session registration was invalid")
   }
   return {
@@ -200,6 +197,7 @@ export default {
           : json({ error: "Managed execution registration failed" }, 503)
       }
       if (registration.credentialHandles.codex === null) {
+        await destroyRuntimeSession(env, input).catch(() => undefined)
         return json({ error: "Managed execution is not authorized" }, 403)
       }
       const issued = await issueManagedRuntimeGrant(
@@ -370,12 +368,13 @@ export default {
           ? json({ error: cause.message }, cause.status)
           : json({ error: "Managed workspace registration failed" }, 503)
       }
+      const cleanup = () => destroyRuntimeSession(env, {
+        subject: bodyFields.subject,
+        environmentId: bodyFields.environmentId,
+        sessionId: bodyFields.sessionId
+      })
       if (registration.credentialHandles.github === null) {
-        await unregisterRuntimeSession(
-          env,
-          bodyFields.subject,
-          bodyFields.sessionId
-        ).catch(() => undefined)
+        await cleanup().catch(() => undefined)
         return json({ error: "GitHub authorization unavailable" }, 403)
       }
       const sessionStub = env.MANAGED_SESSION.getByName(bodyFields.sessionId)
@@ -383,13 +382,23 @@ export default {
         "https://managed-session.internal/v1/git-token",
         { method: "POST" }
       )
-      if (!tokenResponse.ok) return json({ error: "GitHub authorization unavailable" }, 403)
-      const tokenBody: unknown = await tokenResponse.json()
+      if (!tokenResponse.ok) {
+        await cleanup().catch(() => undefined)
+        return json({ error: "GitHub authorization unavailable" }, 403)
+      }
+      let tokenBody: unknown
+      try {
+        tokenBody = await tokenResponse.json()
+      } catch {
+        await cleanup().catch(() => undefined)
+        return json({ error: "GitHub authorization unavailable" }, 403)
+      }
       const tokenFields =
         typeof tokenBody === "object" && tokenBody !== null
           ? Object.fromEntries(Object.entries(tokenBody))
           : null
       if (typeof tokenFields?.token !== "string") {
+        await cleanup().catch(() => undefined)
         return json({ error: "GitHub authorization unavailable" }, 403)
       }
       try {
@@ -405,7 +414,12 @@ export default {
         )
         return json({ version: 1, identity })
       } catch (cause) {
-        await sandbox.destroy().catch(() => undefined)
+        await cleanup().catch(async () => {
+          await sandbox.destroy().catch(() => undefined)
+          await unregisterRuntimeSession(env, bodyFields.subject, bodyFields.sessionId).catch(
+            () => undefined
+          )
+        })
         return json(
           {
             error: cause instanceof Error ? cause.message : "Workspace hydration failed"

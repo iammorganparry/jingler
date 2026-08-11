@@ -710,6 +710,15 @@ export const startFakeAuthServer = async (
       return
     }
 
+    if (
+      url.pathname === "/api/environments/managed/managed_cloud_e2e_account/workspaces" &&
+      req.method === "POST"
+    ) {
+      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
+      setTimeout(() => json(503, { error: "Scripted Cloud startup stopped before allocation" }), 1_000)
+      return
+    }
+
     if (url.pathname === "/api/memory/organizations" && req.method === "GET") {
       if (!memoryAvailable) return json(503, { error: "memory unavailable" })
       if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})

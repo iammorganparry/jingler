@@ -42,7 +42,7 @@ const cloudEnvironment: Environment = {
 }
 
 const actorFor = (
-  onCreate: (input: CreateSessionInput) => Promise<void> = vi.fn(async () => undefined),
+  onCreate: NewWorkspaceDeps["onCreate"] = vi.fn(async () => undefined),
   overrides: Partial<NewWorkspaceDeps> = {}
 ) => createActor(newWorkspaceMachine, {
   input: {
@@ -154,8 +154,37 @@ describe("newWorkspaceMachine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("closed"))
     expect(onCreate).toHaveBeenCalledWith(
       expect.objectContaining({ environmentId: "cloud", repoPath: "/repos/local" }),
-      []
+      [],
+      expect.any(Function)
     )
+  })
+
+  it("tracks backend cloud provisioning milestones until creation completes", async () => {
+    let finish: (() => void) | undefined
+    const onCreate: NewWorkspaceDeps["onCreate"] = vi.fn(async (
+      _input: CreateSessionInput,
+      _images,
+      onProgress?: (phase: "checking-access" | "resolving-repository" | "starting-sandbox" | "creating-session" | "ready") => void
+    ) => {
+      onProgress?.("resolving-repository")
+      await new Promise<void>((resolve) => { finish = resolve })
+      onProgress?.("starting-sandbox")
+      onProgress?.("creating-session")
+      onProgress?.("ready")
+    })
+    const actor = actorFor(onCreate, { environments: [cloudEnvironment] }).start()
+
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_ENVIRONMENT", environmentId: "cloud" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.context.provisioningPhase === "resolving-repository")
+    expect(actor.getSnapshot().matches("submitting")).toBe(true)
+
+    finish?.()
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+    expect(onCreate).toHaveBeenCalledOnce()
   })
 
   it("can switch back to local while remote preparation is still pending", async () => {
@@ -215,7 +244,7 @@ describe("newWorkspaceMachine", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       mode: "ask",
       reasoning: { enabled: true, effort: "high" }
-    }), [])
+    }), [], expect.any(Function))
   })
 
   it("leaves naming to automatic title generation", async () => {
@@ -230,7 +259,7 @@ describe("newWorkspaceMachine", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       initialPrompt: "Refine the empty-state transitions",
       model: "gpt-5.6-sol"
-    }), [])
+    }), [], expect.any(Function))
     expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("title")
   })
 
@@ -246,7 +275,7 @@ describe("newWorkspaceMachine", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       cli: "codex",
       model: "gpt-5.6-luna"
-    }), [])
+    }), [], expect.any(Function))
   })
 
   it("continues an existing branch without requesting a replacement task branch", async () => {
@@ -262,7 +291,7 @@ describe("newWorkspaceMachine", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       baseBranch: "feature",
       continueBranch: true
-    }), [])
+    }), [], expect.any(Function))
   })
 
   it("loads and submits a selected pull request with composer settings", async () => {
@@ -297,6 +326,6 @@ describe("newWorkspaceMachine", () => {
       initialPrompt: "Review the failing checks",
       model: "gpt-5.6-sol",
       mode: "auto"
-    }), [])
+    }), [], expect.any(Function))
   })
 })
