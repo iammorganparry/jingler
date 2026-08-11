@@ -144,6 +144,17 @@ test("configures canonical model, mode, and reasoning before creating a session"
   await expect(appShell(launched.window)).toBeVisible()
   await launched.window.getByTestId("new-session").click()
 
+  const selectorWidths = await Promise.all(
+    [
+      launched.window.getByRole("button", { name: "Project", exact: true }),
+      launched.window.getByRole("button", { name: "Checkout", exact: true }),
+      launched.window.getByRole("button", { name: "Base branch", exact: true })
+    ].map(async (selector) => (await selector.boundingBox())?.width)
+  )
+  const [projectWidth, ...otherWidths] = selectorWidths
+  expect(projectWidth).toBeGreaterThanOrEqual(210)
+  expect(otherWidths).toEqual([projectWidth, projectWidth])
+
   await expect(
     launched.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })
   ).toBeVisible()

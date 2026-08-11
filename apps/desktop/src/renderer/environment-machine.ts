@@ -44,11 +44,17 @@ type EnvironmentEvent =
     }
   | { type: "INVENTORY_FAILED"; error: unknown }
   | { type: "ENVIRONMENT_RENAMED"; environment: Environment }
+  | { type: "ENVIRONMENT_UPDATED"; environment: Environment }
   | { type: "ENVIRONMENT_REVOKED"; id: string }
 
 type InventoryCommand = Extract<
   EnvironmentEvent,
-  { type: "REFRESH" | "RENAME" | "REVOKE" }
+  {
+    type:
+      | "REFRESH"
+      | "RENAME"
+      | "REVOKE"
+  }
 >
 
 const messageOf = (error: unknown): string =>
@@ -183,6 +189,13 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
         actions: sendTo("inventory", ({ event }) => event)
       },
       ENVIRONMENT_RENAMED: {
+        actions: assign({
+          environments: ({ context, event }) =>
+            upsertEnvironment(context.environments, event.environment),
+          inventoryError: null
+        })
+      },
+      ENVIRONMENT_UPDATED: {
         actions: assign({
           environments: ({ context, event }) =>
             upsertEnvironment(context.environments, event.environment),

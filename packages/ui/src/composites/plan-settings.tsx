@@ -64,8 +64,8 @@ export function PlanSettings({ source, onSave }: PlanSettingsProps) {
         </p>
         <h2 className="mt-1 text-[19px] font-semibold text-text-bright">PRD structure</h2>
         <p className="mt-1 max-w-[760px] text-[12px] leading-relaxed text-muted-foreground">
-          This template overrides the selected harness&apos;s native plan mode while Jingler tools
-          are enabled. The selected agent owns progress, evidence, and revisions.
+          This template defines Jingler&apos;s plan mode for every provider model. The selected
+          agent owns progress, evidence, and revisions.
         </p>
       </header>
 

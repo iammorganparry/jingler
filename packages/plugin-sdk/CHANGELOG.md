@@ -1,24 +1,36 @@
 # @jingler/plugin-sdk
 
-## 2.0.3
+## 0.2.1
 
 ### Patch Changes
 
-- @jingler/ui@2.0.3
+- @jingler/ui@0.2.1
 
-## 2.0.2
-
-### Patch Changes
-
-- @jingler/ui@2.0.2
-
-## 2.0.1
+## 0.2.0
 
 ### Patch Changes
 
-- @jingler/ui@2.0.1
+- @jingler/ui@0.2.0
 
-## 2.0.0
+## 0.1.3
+
+### Patch Changes
+
+- @jingler/ui@0.1.3
+
+## 0.1.2
+
+### Patch Changes
+
+- @jingler/ui@0.1.2
+
+## 0.1.1
+
+### Patch Changes
+
+- @jingler/ui@0.1.1
+
+## 0.1.0
 
 ### Minor Changes
 
@@ -72,4 +84,4 @@
 - Updated dependencies [304ac26]
 - Updated dependencies [b419734]
 - Updated dependencies [f987c20]
-  - @jingler/ui@2.0.0
+  - @jingler/ui@0.1.0

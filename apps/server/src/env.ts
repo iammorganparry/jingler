@@ -133,6 +133,11 @@ export const loadEnv = (environment: Environment = process.env) => {
   const memoryEnabled = enabled(environment, "MEMORY_ENABLED")
   const githubAppEnabled = enabled(environment, "GITHUB_APP_ENABLED", false)
   const deviceRelayEnabled = enabled(environment, "DEVICE_RELAY_ENABLED", false)
+  const managedEnvironmentsEnabled = enabled(
+    environment,
+    "MANAGED_ENVIRONMENTS_ENABLED",
+    false
+  )
   const authSecret = secret(environment, "BETTER_AUTH_SECRET", "dev-insecure-secret-change-me")
   const cronSecret = secret(environment, "CRON_SECRET", "dev-cron-secret-change-me")
   if (nodeEnv === "production" && Buffer.byteLength(cronSecret, "utf8") < 32) {
@@ -205,6 +210,81 @@ export const loadEnv = (environment: Environment = process.env) => {
     "DEVICE_BOOTSTRAP_TTL_SECONDS",
     300
   )
+  const managedRuntimeUrl = prodUrl(
+    environment,
+    "MANAGED_RUNTIME_URL",
+    "http://localhost:9400",
+    { require: managedEnvironmentsEnabled }
+  )
+  if (managedEnvironmentsEnabled) {
+    httpUrl(managedRuntimeUrl, "MANAGED_RUNTIME_URL", nodeEnv === "production")
+  }
+  const managedRuntimeServiceSecret = optional(
+    environment,
+    "MANAGED_RUNTIME_SERVICE_SECRET",
+    "dev-managed-runtime-service-secret-change-me"
+  )
+  const authStateUrl = prodUrl(
+    environment,
+    "AUTH_STATE_URL",
+    "http://localhost:9450",
+    { require: managedEnvironmentsEnabled }
+  )
+  const authStateServiceSecret = optional(
+    environment,
+    "AUTH_STATE_SERVICE_SECRET",
+    managedRuntimeServiceSecret
+  )
+  const managedMaxConcurrentSessions = positiveNumber(
+    environment,
+    "MANAGED_MAX_CONCURRENT_SESSIONS",
+    1
+  )
+  const managedMaxActiveSeconds = positiveNumber(
+    environment,
+    "MANAGED_MAX_ACTIVE_SECONDS",
+    7_200
+  )
+  const managedDailyBudgetMicrousd = positiveNumber(
+    environment,
+    "MANAGED_DAILY_BUDGET_MICROUSD",
+    200_000
+  )
+  const managedMaxEgressBytes = positiveNumber(
+    environment,
+    "MANAGED_MAX_EGRESS_BYTES",
+    100 * 1024 * 1024
+  )
+  const managedMaxCheckpointBytes = positiveNumber(
+    environment,
+    "MANAGED_MAX_CHECKPOINT_BYTES",
+    64 * 1024 * 1024
+  )
+  const managedCheckpointRetentionSeconds = positiveNumber(
+    environment,
+    "MANAGED_CHECKPOINT_RETENTION_SECONDS",
+    7 * 24 * 60 * 60
+  )
+  if (
+    managedEnvironmentsEnabled &&
+    nodeEnv === "production" &&
+    Buffer.byteLength(managedRuntimeServiceSecret, "utf8") < 32
+  ) {
+    throw new Error(
+      "MANAGED_RUNTIME_SERVICE_SECRET must contain at least 32 bytes when managed environments are enabled"
+    )
+  }
+  if (managedEnvironmentsEnabled) {
+    httpUrl(authStateUrl, "AUTH_STATE_URL", nodeEnv === "production")
+    if (
+      nodeEnv === "production" &&
+      Buffer.byteLength(authStateServiceSecret, "utf8") < 32
+    ) {
+      throw new Error(
+        "AUTH_STATE_SERVICE_SECRET must contain at least 32 bytes when managed environments are enabled"
+      )
+    }
+  }
   if (
     !Number.isSafeInteger(deviceBootstrapTtlSeconds) ||
     deviceBootstrapTtlSeconds > 3_600
@@ -257,6 +337,18 @@ export const loadEnv = (environment: Environment = process.env) => {
     ),
     deviceRelayGrantTtlSeconds,
     deviceBootstrapTtlSeconds,
+    /** Rollback-safe gate: migrations and runtime deploy before this is enabled. */
+    managedEnvironmentsEnabled,
+    managedRuntimeUrl,
+    managedRuntimeServiceSecret,
+    authStateUrl,
+    authStateServiceSecret,
+    managedMaxConcurrentSessions,
+    managedMaxActiveSeconds,
+    managedDailyBudgetMicrousd,
+    managedMaxEgressBytes,
+    managedMaxCheckpointBytes,
+    managedCheckpointRetentionSeconds,
     googleClientId: optional(environment, "GOOGLE_CLIENT_ID"),
     googleClientSecret: optional(environment, "GOOGLE_CLIENT_SECRET"),
     resendApiKey: optional(environment, "RESEND_API_KEY"),

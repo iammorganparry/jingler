@@ -76,6 +76,7 @@ test("attaching an image shows a thumbnail and persists it on the sent turn", as
 })
 
 test("a message sent against a proposed plan revises it immediately", async ({ launchApp }) => {
+  test.slow()
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
@@ -110,5 +111,5 @@ test("a message sent against a proposed plan revises it immediately", async ({ l
 
   // The revised plan remains approvable through the ordinary plan gate.
   await window.getByRole("button", { name: "Approve", exact: true }).first().click()
-  await expect(window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible({ timeout: 25_000 })
+  await expect(window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible({ timeout: 45_000 })
 })

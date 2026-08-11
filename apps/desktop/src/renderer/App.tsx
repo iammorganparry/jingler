@@ -21,6 +21,7 @@ import type {
   SessionActivity,
   User,
 } from "@jingler/core";
+import type { SessionCreationPhase } from "@jingler/contracts";
 import {
   clampFontScale,
   DEFAULT_THEME_ID,
@@ -444,6 +445,13 @@ function AuthedApp({
   const projectController = useProjects();
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
 
+  // Provider capabilities are versioned by the auth Durable Object. Refresh the
+  // unified inventory after every GitHub auth refresh so managed provider choices
+  // change without restarting the desktop; active turns are fenced server-side.
+  useEffect(() => {
+    environmentController.send({ type: "REFRESH" });
+  }, [environmentController.send, github.connection.lastRefreshedAt]);
+
   // Renderer-side rpc reads, via react-query.
   const configQuery = useQuery({
     queryKey: ["config"],
@@ -619,8 +627,9 @@ function AuthedApp({
   const createSession = async (
     input: CreateSessionInput,
     images: ReadonlyArray<Attachment> = [],
+    onProgress?: (phase: SessionCreationPhase) => void,
   ) => {
-    const session = await rpc.sessionsCreate(input);
+    const session = await rpc.sessionsCreate(input, onProgress);
     void rememberLastRepo(input.repoPath);
     // A first message (typed text and/or attachments) means the operator wants
     // the agent working now, not a pre-filled draft. Flag the session for
@@ -636,8 +645,9 @@ function AuthedApp({
   const createSessionFromPr = async (
     input: CreateSessionFromPrInput,
     images: ReadonlyArray<Attachment> = [],
+    onProgress?: (phase: SessionCreationPhase) => void,
   ) => {
-    const session = await rpc.sessionsCreateFromPr(input);
+    const session = await rpc.sessionsCreateFromPr(input, onProgress);
     void rememberLastRepo(input.repoPath);
     if (input.initialPrompt || images.length > 0) setFirstMessage(session.id, images);
     send({ type: "SESSION_CREATED", session });
@@ -646,8 +656,9 @@ function AuthedApp({
   const createSessionFromIssue = async (
     input: CreateSessionFromIssueInput,
     images: ReadonlyArray<Attachment> = [],
+    onProgress?: (phase: SessionCreationPhase) => void,
   ) => {
-    const session = await rpc.sessionsCreateFromIssue(input);
+    const session = await rpc.sessionsCreateFromIssue(input, onProgress);
     void rememberLastRepo(input.repoPath);
     if (input.task.trim() || images.length > 0) setFirstMessage(session.id, images);
     send({ type: "SESSION_CREATED", session });

@@ -15,7 +15,8 @@ import {
   PendingDeviceRegistrationRequest,
   RemoteDevice,
   RemoteSessionInventory,
-  TunnelClientMessage
+  TunnelClientMessage,
+  managedRuntimeActionForOperation
 } from "./remote.js"
 
 const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown) =>
@@ -32,6 +33,19 @@ const capabilities = {
   capabilities: ["session.start", "session.observe"],
   maxConcurrentSessions: 2
 } as const
+
+describe("managed runtime actions", () => {
+  it("uses one operation mapping for grants and runtime admission", () => {
+    expect(managedRuntimeActionForOperation("Sessions.create")).toBe("session.start")
+    expect(managedRuntimeActionForOperation("Sessions.continueOnEnvironment")).toBe("session.start")
+    expect(managedRuntimeActionForOperation("Agent.stop")).toBe("session.cancel")
+    expect(managedRuntimeActionForOperation("Sessions.transcriptPage")).toBe("session.observe")
+    expect(managedRuntimeActionForOperation("Sessions.diff")).toBe("session.observe")
+    expect(managedRuntimeActionForOperation("Workspace.files")).toBe("session.observe")
+    expect(managedRuntimeActionForOperation("Workspace.importHandoff")).toBe("session.input")
+    expect(managedRuntimeActionForOperation("Agent.run")).toBe("session.input")
+  })
+})
 
 describe("remote device contracts", () => {
   it("decodes a versioned pending registration and rejects unknown revisions", () => {

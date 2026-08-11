@@ -10,6 +10,10 @@ import {
 import { installDeviceService, removeDeviceService } from "./device-service.js"
 import { createConnection } from "node:net"
 import { readFile } from "node:fs/promises"
+import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
+import { Schema } from "effect"
+import { makeLiveDeviceSessionCommandExecutor } from "./device-executor.js"
+import { runManagedCommand } from "./managed-command.js"
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -24,7 +28,7 @@ const print = (value: unknown): void => {
 }
 
 const usage = (): never => {
-  process.stderr.write("Usage: jingler-device <enroll|serve|install-service|status|rotate-key|revoke-local> [options]\n")
+  process.stderr.write("Usage: jingler-device <enroll|serve|managed-command|install-service|status|rotate-key|revoke-local> [options]\n")
   process.exit(2)
 }
 
@@ -46,6 +50,28 @@ const readCredentialStdin = async (): Promise<unknown> => {
 
 const main = async (): Promise<void> => {
   switch (command) {
+    case "managed-command": {
+      const inputFile = option("--input")
+      const root = option("--root")
+      if (!inputFile || !root) {
+        throw new Error("managed-command requires --input and --root")
+      }
+      const command = Schema.decodeUnknownSync(RemoteSessionCommandSchema)(
+        JSON.parse(await readFile(inputFile, "utf8")),
+        { onExcessProperty: "error" }
+      )
+      await runManagedCommand(
+        command,
+        makeLiveDeviceSessionCommandExecutor(root),
+        print
+      )
+      // This entrypoint is deliberately one-shot. The shared cli-adapters
+      // runtime retains background handles used by the long-lived device
+      // daemon; after the terminal protocol frame is flushed those handles
+      // must not keep a Cloudflare exec process alive indefinitely.
+      process.exit(0)
+      return
+    }
     case "direct-session": {
       const socketPath = (await readFile(
         deviceAgentPaths().directSessionSocketFile,
@@ -93,10 +119,10 @@ const main = async (): Promise<void> => {
         await revokeLocalDevice()
         await removeDeviceService()
       }
-      // Some harness adapters own long-lived Node handles (for example an
+      // Runtime services may own long-lived Node handles (for example an
       // embedded callback server). At this point the control connection and
-      // every tracked session task have settled, so do not let those adapter
-      // handles keep a revoked or stopped daemon orphaned under launchd.
+      // every tracked session task have settled, so do not let those handles
+      // keep a revoked or stopped daemon orphaned under launchd.
       process.exit(0)
       return
     }

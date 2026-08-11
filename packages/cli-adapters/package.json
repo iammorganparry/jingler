@@ -1,6 +1,6 @@
 {
   "name": "@jingler/cli-adapters",
-  "version": "2.0.3",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -34,6 +34,7 @@
     "./sessions": "./src/sessions.ts",
     "./workspace": "./src/workspace.ts",
     "./transcripts": "./src/transcripts.ts",
+    "./workspace-handoff": "./src/workspace-handoff.ts",
     "./test-support": "./src/test-support.ts"
   },
   "scripts": {

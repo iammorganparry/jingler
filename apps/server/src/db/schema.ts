@@ -5,7 +5,17 @@
  * `user.id` — this is the anchor the paid-user work hangs off.
  */
 import { sql } from "drizzle-orm"
-import { boolean, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import {
+  bigint,
+  boolean,
+  check,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex
+} from "drizzle-orm/pg-core"
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -153,6 +163,185 @@ export const deviceEnrollment = pgTable("device_enrollment", {
   identityFingerprint: text("identity_fingerprint"),
   createdAt: timestamp("created_at").notNull()
 })
+
+// ── Cloudflare-managed environments ────────────────────────────────────────
+// Postgres owns durable account/lifecycle metadata. Live container state and
+// current authorization stay in the managed-runtime Durable Objects.
+export const managedEnvironment = pgTable(
+  "managed_environment",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    state: text("state").default("paused").notNull(),
+    region: text("region"),
+    instanceType: text("instance_type").default("basic").notNull(),
+    capabilities: text("capabilities_json").notNull(),
+    generation: integer("generation").default(1).notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    deletedAt: timestamp("deleted_at")
+  },
+  (table) => [
+    uniqueIndex("managed_environment_user_idempotency_unique").on(
+      table.userId,
+      table.idempotencyKey
+    ),
+    index("managed_environment_user_state_updated_idx").on(
+      table.userId,
+      table.state,
+      table.updatedAt,
+      table.id
+    ),
+    check(
+      "managed_environment_state_check",
+      sql`${table.state} in ('provisioning', 'online', 'sleeping', 'restoring', 'paused', 'failed', 'revoked')`
+    ),
+    check(
+      "managed_environment_instance_type_check",
+      sql`${table.instanceType} in ('basic', 'standard-1')`
+    ),
+    check("managed_environment_generation_check", sql`${table.generation} >= 1`)
+  ]
+)
+
+export const managedSessionRuntime = pgTable(
+  "managed_session_runtime",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id")
+      .notNull()
+      .references(() => managedEnvironment.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    state: text("state").default("provisioning").notNull(),
+    generation: integer("generation").default(1).notNull(),
+    sandboxId: text("sandbox_id").notNull(),
+    repositoryOwner: text("repository_owner").notNull(),
+    repositoryName: text("repository_name").notNull(),
+    headSha: text("head_sha").notNull(),
+    branch: text("branch").notNull(),
+    lastEventCursor: bigint("last_event_cursor", { mode: "number" }).default(0).notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    terminalAt: timestamp("terminal_at")
+  },
+  (table) => [
+    uniqueIndex("managed_runtime_user_session_unique").on(table.userId, table.sessionId),
+    uniqueIndex("managed_runtime_user_idempotency_unique").on(
+      table.userId,
+      table.idempotencyKey
+    ),
+    index("managed_runtime_user_state_updated_idx").on(
+      table.userId,
+      table.state,
+      table.updatedAt,
+      table.id
+    ),
+    index("managed_runtime_environment_state_idx").on(table.environmentId, table.state),
+    check("managed_runtime_generation_check", sql`${table.generation} >= 1`),
+    check("managed_runtime_event_cursor_check", sql`${table.lastEventCursor} >= 0`)
+  ]
+)
+
+export const workspaceCheckpoint = pgTable(
+  "workspace_checkpoint",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id")
+      .notNull()
+      .references(() => managedEnvironment.id, { onDelete: "cascade" }),
+    runtimeId: text("runtime_id")
+      .notNull()
+      .references(() => managedSessionRuntime.id, { onDelete: "cascade" }),
+    objectKey: text("object_key").notNull(),
+    workspaceDigest: text("workspace_digest").notNull(),
+    headSha: text("head_sha").notNull(),
+    branch: text("branch").notNull(),
+    eventCursor: bigint("event_cursor", { mode: "number" }).default(0).notNull(),
+    manifest: text("manifest_json").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("workspace_checkpoint_runtime_digest_unique").on(
+      table.runtimeId,
+      table.workspaceDigest
+    ),
+    index("workspace_checkpoint_user_runtime_created_idx").on(
+      table.userId,
+      table.runtimeId,
+      table.createdAt,
+      table.id
+    ),
+    index("workspace_checkpoint_expiry_idx").on(table.expiresAt, table.id),
+    check("workspace_checkpoint_size_check", sql`${table.sizeBytes} >= 0`),
+    check("workspace_checkpoint_cursor_check", sql`${table.eventCursor} >= 0`)
+  ]
+)
+
+export const managedUsageReservation = pgTable(
+  "managed_usage_reservation",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    environmentId: text("environment_id")
+      .notNull()
+      .references(() => managedEnvironment.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    runtimeId: text("runtime_id").references(() => managedSessionRuntime.id, {
+      onDelete: "set null"
+    }),
+    state: text("state").default("reserved").notNull(),
+    windowStart: timestamp("window_start").notNull(),
+    estimatedMicrousd: bigint("estimated_microusd", { mode: "number" }).notNull(),
+    settledMicrousd: bigint("settled_microusd", { mode: "number" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("managed_usage_user_idempotency_unique").on(
+      table.userId,
+      table.idempotencyKey
+    ),
+    index("managed_usage_user_window_state_idx").on(
+      table.userId,
+      table.windowStart,
+      table.state,
+      table.id
+    ),
+    index("managed_usage_user_session_state_idx").on(
+      table.userId,
+      table.sessionId,
+      table.state,
+      table.id
+    ),
+    index("managed_usage_expiry_state_idx").on(table.expiresAt, table.state, table.id),
+    check(
+      "managed_usage_state_check",
+      sql`${table.state} in ('reserved', 'active', 'settled', 'released', 'expired')`
+    ),
+    check("managed_usage_estimate_check", sql`${table.estimatedMicrousd} >= 0`),
+    check(
+      "managed_usage_settled_check",
+      sql`${table.settledMicrousd} is null or ${table.settledMicrousd} >= 0`
+    )
+  ]
+)
 
 // ── Personal Access Tokens (headless team-memory MCP auth) ───────────────────
 // Long-lived, org-scoped bearer credentials that let an EXTERNAL agent call the

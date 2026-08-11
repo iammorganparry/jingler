@@ -1,6 +1,6 @@
 {
   "name": "jingler",
-  "version": "2.0.3",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.7.0",
@@ -11,8 +11,8 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
-    "test": "vitest run && pnpm --filter @jingler/github-relay test && pnpm --filter @jingler/device-relay test",
+    "typecheck": "pnpm version:check && turbo run typecheck",
+    "test": "vitest run && pnpm --filter @jingler/github-relay test && pnpm --filter @jingler/device-relay test && pnpm --filter @jingler/auth-state test && pnpm --filter @jingler/managed-runtime test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint .",
@@ -20,7 +20,8 @@
     "artifacts:check": "node scripts/artifacts/check-packaged-artifacts.mjs",
     "clean": "turbo run clean && rimraf node_modules",
     "changeset": "changeset",
-    "version-packages": "changeset version && node scripts/sync-app-version.mjs",
+    "version:check": "node scripts/check-version-policy.mjs",
+    "version-packages": "changeset version && node scripts/sync-app-version.mjs && node scripts/check-version-policy.mjs",
     "lint:fix": "biome lint --write ."
   },
   "devDependencies": {

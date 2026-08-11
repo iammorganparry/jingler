@@ -18,6 +18,31 @@ const rowOrder = () =>
   )
 
 describe("SessionSidebar session identity", () => {
+  it("keeps an in-flight Cloud session navigable before it is persisted", () => {
+    const selectPending = vi.fn()
+    render(
+      <SessionSidebar
+        activeSessionId="local"
+        onSelect={() => {}}
+        sessions={[session({ id: "local" })]}
+        pendingCloudSession={{
+          id: "pending-cloud-session",
+          title: "Investigate startup",
+          repo: "jingler",
+          phase: "starting-sandbox",
+          error: null
+        }}
+        onSelectPendingCloudSession={selectPending}
+      />
+    )
+
+    const row = screen.getByTestId("pending-cloud-session")
+    expect(row.textContent).toContain("Investigate startup")
+    expect(row.textContent).toContain("Starting in Cloud · jingler")
+    fireEvent.click(row)
+    expect(selectPending).toHaveBeenCalledOnce()
+  })
+
   it("reflects the composer-selected environment in the session row", () => {
     render(
       <SessionSidebar
@@ -25,6 +50,7 @@ describe("SessionSidebar session identity", () => {
         onSelect={() => {}}
         sessions={[session({ id: "remote", environmentId: "device-buildbox" })]}
         environments={[{
+          kind: "owned",
           id: "device-buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" },
           capabilities: { version: 1, capabilities: ["session.start"], maxConcurrentSessions: 4 },
           state: "offline", agentVersion: "2.0.3", lastSeenAt: 1

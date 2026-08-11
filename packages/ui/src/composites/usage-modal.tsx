@@ -91,8 +91,8 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
 
 /**
  * The Usage & limits modal: per-provider session/weekly windows as status-tinted
- * bars. Claude and Codex are read live from their local harness APIs; providers
- * without a usage endpoint show as unavailable.
+ * bars. Provider connections report usage through their pinned authentication
+ * route; connections without a usage endpoint show as unavailable.
  */
 export function UsageModal({
   open,

@@ -12,8 +12,15 @@ import { UserRepository } from "./db/repositories/user-repository.js"
 import { env } from "./env.js"
 import { createGitHubRoutes, isLoopbackRedirect, withQuery } from "./github-routes.js"
 import { createDeviceRoutes } from "./device-routes.js"
+import { createEnvironmentRoutes } from "./environment-routes.js"
+import {
+  basicInstanceCeilingMicrousd,
+  ManagedUsageRepository
+} from "./db/repositories/managed-usage-repository.js"
 import { proxyGitHubWebhook } from "./github-webhook-proxy.js"
 import { runtime } from "./runtime.js"
+import { deleteAuthStateSession } from "./auth-state-client.js"
+import { proxyManagedCodexRequest } from "./managed-provider-proxy.js"
 
 export const app = new Hono()
 
@@ -38,7 +45,39 @@ app.post("/webhooks/github", (c) =>
   proxyGitHubWebhook(c.req.raw, env.githubAppRelayUrl)
 )
 
-/** BetterAuth owns everything under /api/auth/* (OAuth, magic link, session). */
+/**
+ * Fence managed execution before BetterAuth clears the bearer. This explicit
+ * API boundary covers ordinary sign-out even if an adapter bypasses per-row
+ * database hooks; the hook remains defense in depth for other deletion paths.
+ */
+app.post("/api/auth/sign-out", async (c) => {
+  if (env.managedEnvironmentsEnabled) {
+    const current = await getAuth().api
+      .getSession({ headers: c.req.raw.headers })
+      .catch(() => null)
+    if (current !== null) {
+      try {
+        await deleteAuthStateSession(
+          {
+            enabled: true,
+            url: env.authStateUrl,
+            serviceSecret: env.authStateServiceSecret
+          },
+          {
+            id: current.session.id,
+            userId: current.user.id,
+            expiresAt: current.session.expiresAt
+          }
+        )
+      } catch {
+        return c.json({ error: "Managed authorization revocation unavailable" }, 503)
+      }
+    }
+  }
+  return getAuth().handler(c.req.raw)
+})
+
+/** BetterAuth owns everything else under /api/auth/* (OAuth, magic link, session). */
 app.on(["GET", "POST"], "/api/auth/*", (c) => getAuth().handler(c.req.raw))
 
 /** Product GitHub App connection; intentionally outside BetterAuth's routes. */
@@ -46,6 +85,56 @@ app.route("/api/github", createGitHubRoutes())
 
 /** Remote-device control. BetterAuth remains the desktop identity provider. */
 app.route("/api/devices", createDeviceRoutes())
+
+/** Unified account inventory and managed-compute lifecycle. */
+app.route("/api/environments", createEnvironmentRoutes())
+
+/** ChatGPT blocks Cloudflare egress, so subscription-backed Codex uses this fixed host hop. */
+app.on(["GET", "POST"], "/api/internal/managed-provider/codex/*", (c) =>
+  proxyManagedCodexRequest(
+    c.req.raw,
+    c.req.path.slice("/api/internal/managed-provider/codex".length),
+    {
+      serviceSecret: env.managedRuntimeServiceSecret,
+      maxEgressBytes: env.managedMaxEgressBytes
+    }
+  )
+)
+
+/** Internal, idempotent settlement callback from the managed-runtime Worker. */
+app.post("/api/internal/managed-usage/settle", async (c) => {
+  if (!env.managedEnvironmentsEnabled) {
+    return c.json({ error: "Managed environments disabled" }, 404)
+  }
+  if (
+    c.req.header("x-jingler-service-secret") !==
+    env.managedRuntimeServiceSecret
+  ) {
+    return c.json({ error: "Unauthorized" }, 401)
+  }
+  const body: unknown = await c.req.json().catch(() => null)
+  const fields =
+    typeof body === "object" && body !== null
+      ? Object.fromEntries(Object.entries(body))
+      : null
+  if (
+    typeof fields?.userId !== "string" ||
+    typeof fields.reservationId !== "string" ||
+    typeof fields.activeSeconds !== "number" ||
+    !Number.isSafeInteger(fields.activeSeconds) ||
+    fields.activeSeconds < 0 ||
+    fields.activeSeconds > env.managedMaxActiveSeconds
+  ) {
+    return c.json({ error: "Invalid managed usage settlement" }, 400)
+  }
+  await runtime.runPromise(ManagedUsageRepository.settle({
+    userId: fields.userId,
+    reservationId: fields.reservationId,
+    settledMicrousd: basicInstanceCeilingMicrousd(fields.activeSeconds),
+    now: new Date()
+  }))
+  return c.json({ settled: true })
+})
 
 /**
  * The signed-in user's profile. BetterAuth validates the bearer session; the user

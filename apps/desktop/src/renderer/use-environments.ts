@@ -30,7 +30,7 @@ export const useEnvironments = () => {
     refresh: () => send({ type: "REFRESH" }),
     rename: (id: string, name: string) =>
       send({ type: "RENAME", id, name }),
-    revoke: (id: string) => send({ type: "REVOKE", id })
+    revoke: (id: string) => send({ type: "REVOKE", id }),
   }
 }
 export type EnvironmentsController = ReturnType<typeof useEnvironments>

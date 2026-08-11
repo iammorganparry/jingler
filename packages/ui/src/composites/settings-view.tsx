@@ -22,6 +22,8 @@ import {
 } from "./provider-connections-settings.js"
 import {
   Boxes,
+  ChevronRight,
+  Cloud,
   Cpu,
   Keyboard,
   Palette,
@@ -487,8 +489,9 @@ export function DevicesSection({
               Devices
             </h2>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              Your account-owned machines appear here automatically after SSH
-              setup.
+              {environments.some((environment) => environment.kind === "managed")
+                ? "Cloud is ready on demand. Account-owned machines appear here automatically after SSH setup."
+                : "Your account-owned machines appear here automatically after SSH setup."}
             </p>
           </div>
           <div className="flex gap-2">
@@ -525,7 +528,11 @@ export function DevicesSection({
                 className="flex items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0"
               >
                 <span className="flex size-9 items-center justify-center rounded-md bg-sunken text-blue">
-                  <Server size={17} />
+                  {environment.kind === "managed" ? (
+                    <Cloud size={17} />
+                  ) : (
+                    <Server size={17} />
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
                   <strong className="block truncate text-[12px] text-text-bright">
@@ -533,9 +540,11 @@ export function DevicesSection({
                   </strong>
                   <span className="text-[10px] text-muted-foreground">
                     {environment.platform.os} · {environment.platform.arch} ·{" "}
-                    {environment.agentVersion
-                      ? `agent ${environment.agentVersion}`
-                      : "agent version unknown"}
+                    {environment.kind === "managed"
+                      ? "sandbox starts automatically per session"
+                      : environment.agentVersion
+                        ? `agent ${environment.agentVersion}`
+                        : "agent version unknown"}
                   </span>
                 </div>
                 <span
@@ -552,27 +561,31 @@ export function DevicesSection({
                 >
                   {environment.state}
                 </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => openRename(environment)}
-                >
-                  Rename
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Revoke ${environment.name}? Active remote sessions will disconnect.`
+                {environment.kind === "owned" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openRename(environment)}
+                  >
+                    Rename
+                  </Button>
+                )}
+                {environment.kind === "owned" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Revoke ${environment.name}? Active remote sessions will disconnect.`
+                        )
                       )
-                    )
-                      void onRevoke(environment.id)
-                  }}
-                >
-                  Revoke
-                </Button>
+                        void onRevoke(environment.id)
+                    }}
+                  >
+                    Revoke
+                  </Button>
+                )}
               </div>
             ))
           )}

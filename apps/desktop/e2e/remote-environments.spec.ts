@@ -44,7 +44,11 @@ const enrollBuildbox = async (app: LaunchedApp): Promise<void> => {
   await expect(app.window.getByRole("status")).toContainText("buildbox")
   await app.window.keyboard.press("Escape")
   await app.window.getByRole("button", { name: "Refresh" }).click()
-  await expect(app.window.getByText("online", { exact: true })).toBeVisible({ timeout: 15_000 })
+  const buildboxRow = app.window
+    .getByText("buildbox", { exact: true })
+    .locator("..")
+    .locator("..")
+  await expect(buildboxRow.getByText("online", { exact: true })).toBeVisible({ timeout: 15_000 })
   await app.window.getByRole("button", { name: "Close settings" }).click()
 }
 
@@ -151,7 +155,7 @@ test("returns a new session to Local while remote project preparation is pending
   await expect(app.window.getByRole("button", { name: "Create workspace" })).toBeEnabled()
 })
 
-test("prevents changing environment during an active turn", async ({ launchApp }) => {
+test("offers a confirmed environment handoff during an active turn", async ({ launchApp }) => {
   const app = await launchApp({
     configured: true,
     withRepo: true,
@@ -160,10 +164,16 @@ test("prevents changing environment during an active turn", async ({ launchApp }
   })
   await enrollBuildbox(app)
   const composer = app.window.getByPlaceholder("Message the agent…")
-  await composer.fill("Hold the environment while this runs")
+  await composer.fill("[[queue-hold]] Hold the environment while this runs")
   await composer.press("Enter")
   await expect(app.window.getByTestId("session-row-session_local_abcdefgh").getByText(/Thinking|Running/)).toBeVisible()
-  await expect(app.window.getByRole("button", { name: "Execution environment" })).toHaveCount(0)
+  const environment = app.window.getByRole("button", { name: "Execution environment" })
+  await expect(environment).toContainText("Local")
+  await environment.click()
+  await app.window.getByRole("option", { name: /buildbox/ }).click()
+  await expect(app.window.getByRole("alert")).toContainText("Stop the active turn")
+  await app.window.getByRole("button", { name: "Cancel" }).click()
+  await expect(environment).toContainText("Local")
 })
 
 test("continues an existing session on another environment without mutating the source", async ({ launchApp }) => {
@@ -230,7 +240,8 @@ test("revokes an account-owned environment while preserving local sessions", asy
   await openDevices(app.window)
   app.window.once("dialog", (dialog) => dialog.accept())
   await app.window.getByRole("button", { name: "Revoke" }).click()
-  await expect(app.window.getByText("No owned machines yet.")).toBeVisible()
+  await expect(app.window.getByText("Cloud", { exact: true })).toBeVisible()
+  await expect(app.window.getByText("buildbox", { exact: true })).toHaveCount(0)
   await app.window.getByRole("button", { name: "Close settings" }).click()
   await expect(sessionRow(app.window, "Local session")).toBeVisible()
   await app.window.getByRole("button", { name: "Execution environment" }).click()

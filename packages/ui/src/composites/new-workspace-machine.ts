@@ -3,6 +3,7 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  Environment,
   IssueProviderDescriptor,
   IssueSummary,
   PermissionMode,
@@ -14,12 +15,14 @@ import type {
   Project,
   ReasoningSetting
 } from "@jingler/core"
-import { assign, fromPromise, setup } from "xstate"
+import type { SessionCreationPhase } from "@jingler/contracts"
+import { assign, fromCallback, fromPromise, setup } from "xstate"
 
 export type NewSessionSource = "blank" | "branch" | "pr" | "github" | `provider:${string}`
 
 export interface NewWorkspaceDeps {
   projects: ReadonlyArray<Project>
+  environments?: ReadonlyArray<Environment>
   issueProviders?: ReadonlyArray<IssueProviderDescriptor>
   providerCatalog?: ProviderCatalog | null
   defaultConnectionId?: ProviderConnectionId | null
@@ -30,9 +33,9 @@ export interface NewWorkspaceDeps {
   loadPullRequests?: (project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<PrSummary>>
   loadGithubIssues?: (project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<IssueSummary>>
   loadProviderIssues?: (providerId: string, project: Project, search: string, mine: boolean) => Promise<ReadonlyArray<IssueSummary>>
-  onCreate: (input: CreateSessionInput, images: ReadonlyArray<Attachment>) => Promise<void>
-  onCreateFromPr?: (input: CreateSessionFromPrInput, images: ReadonlyArray<Attachment>) => Promise<void>
-  onCreateFromIssue?: (input: CreateSessionFromIssueInput, images: ReadonlyArray<Attachment>) => Promise<void>
+  onCreate: (input: CreateSessionInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => Promise<void>
+  onCreateFromPr?: (input: CreateSessionFromPrInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => Promise<void>
+  onCreateFromIssue?: (input: CreateSessionFromIssueInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => Promise<void>
   onClose: () => void
 }
 
@@ -58,6 +61,7 @@ export interface NewWorkspaceContext {
   connectionId: ProviderConnectionId | null
   providerId: ProviderId | null
   modelId: ProviderModelId | null
+  provisioningPhase: SessionCreationPhase | null
   error: string | null
 }
 
@@ -85,6 +89,9 @@ type NewWorkspaceEvent =
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
   | { type: "SYNC_MODELS" }
   | { type: "SUBMIT" }
+  | { type: "PROVISION_PROGRESS"; phase: SessionCreationPhase }
+  | { type: "PROVISION_DONE" }
+  | { type: "PROVISION_FAILED"; error: unknown }
 
 const projectFor = (context: NewWorkspaceContext): Project | undefined =>
   context.getDeps().projects.find((project) => project.id === context.projectId)
@@ -151,10 +158,28 @@ export const newWorkspaceMachine = setup({
       loadBranches: NewWorkspaceDeps["loadBranches"]
       project?: Project
       environmentId?: string
+      environmentKind?: Environment["kind"]
     } }) => {
       if (input.project === undefined) return { project: null, branches: [] as ReadonlyArray<string> }
-      const project = await input.prepare(input.project.id, input.environmentId)
-      return { project, branches: await input.loadBranches(project.path, project.environmentId) }
+      // A managed sandbox is session-scoped. Selecting Cloud must not start one
+      // merely to populate this form; use the local checkout for Git metadata
+      // and carry the target id into session creation, where provisioning begins.
+      const deferProvisioning = input.environmentKind === "managed"
+      const project = await input.prepare(
+        input.project.id,
+        deferProvisioning ? undefined : input.environmentId
+      )
+      const resolvedProject =
+        deferProvisioning && input.environmentId !== undefined
+          ? { ...project, environmentId: input.environmentId }
+          : project
+      return {
+        project: resolvedProject,
+        branches: await input.loadBranches(
+          project.path,
+          deferProvisioning ? undefined : project.environmentId
+        )
+      }
     }),
     loadSource: fromPromise(async ({ input }: { input: {
       deps: NewWorkspaceDeps
@@ -176,7 +201,18 @@ export const newWorkspaceMachine = setup({
       if (!providerId || !input.deps.loadProviderIssues) throw new Error("This issue provider is unavailable.")
       return { pullRequests: [] as ReadonlyArray<PrSummary>, issues: await input.deps.loadProviderIssues(providerId, input.project, input.search, input.mine) }
     }),
-    submit: fromPromise(({ input }: { input: { run: () => Promise<void> } }) => input.run())
+    submit: fromCallback(({ input, sendBack }: { input: {
+      run: (onProgress: (phase: SessionCreationPhase) => void) => Promise<void>
+    }; sendBack: (event: NewWorkspaceEvent) => void }) => {
+      let active = true
+      void input.run((phase) => {
+        if (active) sendBack({ type: "PROVISION_PROGRESS", phase })
+      }).then(
+        () => { if (active) sendBack({ type: "PROVISION_DONE" }) },
+        (error) => { if (active) sendBack({ type: "PROVISION_FAILED", error }) }
+      )
+      return () => { active = false }
+    })
   },
   guards: {
     sourceNeedsLoading: ({ event }) => event.type === "SET_SOURCE" && isRemoteSource(event.source),
@@ -210,6 +246,7 @@ export const newWorkspaceMachine = setup({
         ...provider,
         mode: "accept-edits" as const,
         reasoning: undefined,
+        provisioningPhase: null,
         error: null
       }
     }),
@@ -238,7 +275,18 @@ export const newWorkspaceMachine = setup({
     }),
     setLoadError: assign(({ event }) => ({ branches: [], baseBranch: "", resolvedProject: null, error: errorText((event as unknown as { error: unknown }).error, "Could not load branches.") })),
     setSourceError: assign(({ event }) => ({ pullRequests: [], issues: [], error: errorText((event as unknown as { error: unknown }).error, "Could not load this source.") })),
-    setSubmitError: assign(({ event }) => ({ error: errorText((event as unknown as { error: unknown }).error, "Could not create the workspace.") })),
+    beginSubmit: assign(({ context }) => ({
+      provisioningPhase: (context.environmentId === "local"
+        ? "creating-session"
+        : "checking-access") as SessionCreationPhase,
+      error: null
+    })),
+    setProvisioningPhase: assign(({ event }) =>
+      event.type === "PROVISION_PROGRESS" ? { provisioningPhase: event.phase } : {}
+    ),
+    setSubmitError: assign(({ event }) => ({
+      error: errorText(event.type === "PROVISION_FAILED" ? event.error : event, "Could not create the workspace.")
+    })),
     close: ({ context }) => context.getDeps().onClose()
   }
 }).createMachine({
@@ -260,6 +308,7 @@ export const newWorkspaceMachine = setup({
     connectionId: null,
     providerId: null,
     modelId: null,
+    provisioningPhase: null,
     error: null
   }),
   on: {
@@ -275,7 +324,14 @@ export const newWorkspaceMachine = setup({
           prepare: context.getDeps().prepareProject,
           loadBranches: context.getDeps().loadBranches,
           project: projectFor(context),
-          ...(context.environmentId === "local" ? {} : { environmentId: context.environmentId })
+          ...(context.environmentId === "local"
+            ? {}
+            : {
+                environmentId: context.environmentId,
+                environmentKind: context.getDeps().environments?.find(
+                  (environment) => environment.id === context.environmentId
+                )?.kind
+              })
         }),
         onDone: { target: "editing", actions: "applyBranches" },
         onError: { target: "editing", actions: "setLoadError" }
@@ -317,7 +373,7 @@ export const newWorkspaceMachine = setup({
         SET_ATTACHMENTS: { actions: assign(({ event }) => ({ attachments: event.attachments })) },
         SET_MODE: { actions: "setMode" },
         SET_REASONING: { actions: "setReasoning" },
-        SUBMIT: { guard: "canSubmit", target: "submitting" }
+        SUBMIT: { guard: "canSubmit", target: "submitting", actions: "beginSubmit" }
       }
     },
     sourceLoading: {
@@ -341,7 +397,7 @@ export const newWorkspaceMachine = setup({
       invoke: {
         src: "submit",
         input: ({ context }) => ({
-          run: () => {
+          run: (onProgress) => {
             const project = context.resolvedProject
             if (project === null) return Promise.reject(new Error("Select a project."))
             const canonical =
@@ -369,12 +425,12 @@ export const newWorkspaceMachine = setup({
             if (context.source === "pr") {
               const createFromPr = context.getDeps().onCreateFromPr
               if (!context.selectedPr || !createFromPr) return Promise.reject(new Error("Select a pull request."))
-              return createFromPr({ ...common, ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}), pr: context.selectedPr }, context.attachments)
+              return createFromPr({ ...common, ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}), pr: context.selectedPr }, context.attachments, onProgress)
             }
             if (context.source === "github" || context.source.startsWith("provider:")) {
               const createFromIssue = context.getDeps().onCreateFromIssue
               if (!context.selectedIssue || !createFromIssue) return Promise.reject(new Error("Select an issue."))
-              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments)
+              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
             }
             return context.getDeps().onCreate({
               ...common,
@@ -382,11 +438,15 @@ export const newWorkspaceMachine = setup({
               baseBranch: context.baseBranch,
               useWorktree: context.isolation === "worktree",
               ...(context.source === "branch" ? { continueBranch: true } : {})
-            }, context.attachments)
+            }, context.attachments, onProgress)
           }
-        }),
-        onDone: { target: "closed", actions: "close" },
-        onError: { target: "editing", actions: "setSubmitError" }
+        })
+      },
+      on: {
+        PROVISION_PROGRESS: { actions: "setProvisioningPhase" },
+        PROVISION_DONE: { target: "closed", actions: "close" },
+        PROVISION_FAILED: { target: "editing", actions: "setSubmitError" },
+        CLOSE: { target: "closed", actions: "close" }
       }
     }
   }

@@ -529,6 +529,31 @@ const activeUserToken = async (
   return { accessToken: refreshed.accessToken, fields }
 }
 
+/**
+ * Resolve the existing encrypted GitHub App authorization for managed Git
+ * hydration. The plaintext token exists only for the auth-state handoff and is
+ * never returned through an HTTP response or persisted outside its encrypted
+ * authorities.
+ */
+export const managedGitHubCapabilityForUser = async (
+  userId: string
+): Promise<{
+  readonly authorizationHeader: string
+  readonly expiresAt: Date
+} | null> => {
+  const dependencies = defaultDependencies()
+  if (!(dependencies.enabled && dependencies.configured)) return null
+  const authorization = await dependencies.store.findAuthorizationByUserId(userId)
+  if (authorization === null) return null
+  const token = await activeUserToken(dependencies, authorization)
+  return {
+    authorizationHeader: `Bearer ${token.accessToken}`,
+    expiresAt:
+      token.fields.accessTokenExpiresAt ??
+      new Date((dependencies.now ?? (() => new Date()))().getTime() + 24 * 60 * 60 * 1_000)
+  }
+}
+
 const relayRetryDelayMs = (attemptCount: number): number =>
   Math.min(5 * 60_000, 1_000 * 2 ** Math.min(attemptCount, 8))
 
@@ -739,8 +764,7 @@ const installationTokenScope = (
       const qualified = scope.slice("repository:".length)
       const [owner, name, extra] = qualified.split("/")
       if (
-        !owner ||
-        !name ||
+        !(owner &&name ) ||
         extra !== undefined ||
         owner.toLowerCase() !== installation.accountLogin.toLowerCase()
       ) {
@@ -944,7 +968,7 @@ export const createGitHubRoutes = (
     const url = new URL(request.url)
     const state = url.searchParams.get("state")
     const installationId = parseInstallationId(url.searchParams.get("installation_id") ?? undefined)
-    if (!state || !installationId) return callbackError()
+    if (!(state && installationId)) return callbackError()
     const now = (dependencies.now ?? (() => new Date()))()
     const callbackState = await dependencies.store.consumeCallbackState({
       stateHash: hashGitHubCallbackState(state),
@@ -1132,10 +1156,7 @@ export const createGitHubRoutes = (
       // The uniform validation response below deliberately reveals no ownership state.
     }
     if (
-      !input.sessionId ||
-      !input.installationId ||
-      !input.repositoryId ||
-      !input.pullRequestNumber
+      !(((input.sessionId &&input.installationId ) &&input.repositoryId ) &&input.pullRequestNumber)
     ) {
       return c.json({ error: "Valid session route fields are required" }, 400, noStore)
     }
@@ -1415,9 +1436,7 @@ export const createGitHubRoutes = (
       // The uniform validation response below reveals no connection state.
     }
     if (
-      !input.installationId ||
-      !input.repository ||
-      !input.title ||
+      !((input.installationId &&input.repository ) &&input.title ) ||
       input.body === null ||
       !input.head ||
       !input.base ||

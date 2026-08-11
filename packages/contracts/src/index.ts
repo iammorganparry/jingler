@@ -411,6 +411,22 @@ export type MemorySuggestionsView = Schema.Schema.Type<
   typeof MemorySuggestionsView
 >
 
+export const SessionCreationPhase = Schema.Literal(
+  "checking-access",
+  "resolving-repository",
+  "starting-sandbox",
+  "creating-session",
+  "ready"
+)
+export type SessionCreationPhase = Schema.Schema.Type<typeof SessionCreationPhase>
+
+export const SessionCreationUpdate = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("progress"), phase: SessionCreationPhase }),
+  Schema.Struct({ kind: Schema.Literal("complete"), session: Session }),
+  Schema.Struct({ kind: Schema.Literal("failed"), message: Schema.String })
+)
+export type SessionCreationUpdate = Schema.Schema.Type<typeof SessionCreationUpdate>
+
 export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()(
   "MemoryUiError",
   {
@@ -724,7 +740,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Workspace.files", {
     success: Schema.Array(Schema.String),
     error: GitError,
-    payload: { repoPath: Schema.String, environmentId: Schema.optional(Schema.String) }
+    payload: {
+      repoPath: Schema.String,
+      environmentId: Schema.optional(Schema.String),
+      sessionId: Schema.optional(Schema.String)
+    }
   }),
 
   /** Discard ALL uncommitted changes to a file in a session's worktree. */
@@ -763,6 +783,14 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: CreateSessionInput
   }),
 
+  /** Create a session while streaming real provisioning milestones to the renderer. */
+  Rpc.make("Sessions.createWithProgress", {
+    success: SessionCreationUpdate,
+    error: GitError,
+    payload: CreateSessionInput,
+    stream: true
+  }),
+
   /**
    * Create a session from an existing PR: land a worktree on the PR's head
    * branch using API-resolved fork metadata and ordinary git, link `prNumber`, persist, and return it.
@@ -773,6 +801,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: CreateSessionFromPrInput
   }),
 
+  Rpc.make("Sessions.createFromPrWithProgress", {
+    success: SessionCreationUpdate,
+    error: Schema.Union(GitError, GitHubApiError),
+    payload: CreateSessionFromPrInput,
+    stream: true
+  }),
+
   /**
    * Create a session from a GitHub issue: fork a fresh `<number>-<slug>` branch
    * off base, link the issue + automations, seed the task from the issue.
@@ -781,6 +816,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Session,
     error: GitError,
     payload: CreateSessionFromIssueInput
+  }),
+
+  Rpc.make("Sessions.createFromIssueWithProgress", {
+    success: SessionCreationUpdate,
+    error: GitError,
+    payload: CreateSessionFromIssueInput,
+    stream: true
   }),
 
   /** Link a provider-neutral issue to a live session; returns the updated session. */

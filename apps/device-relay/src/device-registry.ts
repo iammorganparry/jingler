@@ -181,7 +181,7 @@ const base64Url = (bytes: Uint8Array): string => {
   return btoa(binary)
     .replaceAll("+", "-")
     .replaceAll("/", "_")
-    .replace(/=+$/u, "")
+    .replace(/[=]+$/u, "")
 }
 
 const fromBase64Url = (value: string): Uint8Array<ArrayBuffer> => {
@@ -496,7 +496,6 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         attachment.generation
       )
       socket.send(JSON.stringify({ type: "announced", at: nowSeconds }))
-      return
     }
   }
 
@@ -1369,8 +1368,10 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     try {
       const key = await crypto.subtle.importKey(
         "raw",
-        fromBase64Url(
-          decodeJson(DevicePublicKeySchema, device.public_key_json).value
+        new Uint8Array(
+          fromBase64Url(
+            decodeJson(DevicePublicKeySchema, device.public_key_json).value
+          )
         ),
         { name: "Ed25519" },
         false,
@@ -1379,8 +1380,8 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       verified = await crypto.subtle.verify(
         "Ed25519",
         key,
-        fromBase64Url(signature),
-        deviceChallengePayload(challenge, newPublicKey)
+        new Uint8Array(fromBase64Url(signature)),
+        new Uint8Array(deviceChallengePayload(challenge, newPublicKey))
       )
     } catch {
       verified = false

@@ -191,6 +191,7 @@ export const ComposerWithMenus: Story = {
       <Composer
         environments={[
           {
+            kind: "owned",
             id: "mac-mini",
             name: "Mac Mini",
             platform: { os: "darwin", arch: "arm64" },

@@ -418,7 +418,7 @@ describe("device challenges, key rotation, and revocation", () => {
         await crypto.subtle.sign(
           "Ed25519",
           keys.privateKey,
-          deviceChallengePayload(challenge)
+          new Uint8Array(deviceChallengePayload(challenge))
         )
       )
     )
@@ -457,7 +457,7 @@ describe("device challenges, key rotation, and revocation", () => {
         await crypto.subtle.sign(
           "Ed25519",
           oldKeys.privateKey,
-          deviceChallengePayload(challenge, nextKeys.publicKey)
+          new Uint8Array(deviceChallengePayload(challenge, nextKeys.publicKey))
         )
       )
     )

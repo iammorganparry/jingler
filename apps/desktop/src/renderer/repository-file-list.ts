@@ -9,7 +9,8 @@ export interface RepositoryFileApis {
   ) => Promise<Pick<Session, "worktreePath" | "environmentId">>
   readonly workspaceFiles: (
     worktreePath: string,
-    environmentId?: string
+    environmentId?: string,
+    sessionId?: string
   ) => Promise<ReadonlyArray<string>>
 }
 
@@ -56,7 +57,11 @@ export const listRepositoryFiles = async (
     return []
   }
   const paths = session?.environmentId
-    ? await apis.workspaceFiles(currentWorktreePath, session.environmentId)
+    ? await apis.workspaceFiles(
+        currentWorktreePath,
+        session.environmentId,
+        sessionId
+      )
     : await apis.workspaceFiles(currentWorktreePath)
   return paths.map((path) => ({ path, status: "clean" as const }))
 }

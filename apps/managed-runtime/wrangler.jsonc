@@ -1,0 +1,76 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jingler-managed-runtime",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "managed-runtime.jingler.dev",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "SANDBOX_TRANSPORT": "rpc",
+    "MANAGED_RUNTIME_ORIGIN": "https://managed-runtime.jingler.dev",
+    "MANAGED_CONTROL_PLANE_URL": "https://api.jingler.dev",
+    "MANAGED_RUNTIME_IDLE_SECONDS": "120",
+    "MANAGED_RUNTIME_MAX_ACTIVE_SECONDS": "7200",
+    "MANAGED_RUNTIME_MAX_EGRESS_BYTES": "104857600",
+    "MANAGED_RUNTIME_MAX_CHECKPOINT_BYTES": "67108864",
+    "MANAGED_RUNTIME_CHECKPOINT_RETENTION_SECONDS": "604800"
+  },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "basic",
+      "max_instances": 10
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "Sandbox",
+        "class_name": "Sandbox"
+      },
+      {
+        "name": "MANAGED_ACCOUNT",
+        "class_name": "ManagedAccountObject"
+      },
+      {
+        "name": "MANAGED_SESSION",
+        "class_name": "ManagedSessionObject"
+      },
+      {
+        "name": "AUTH_STATE",
+        "class_name": "AuthStateObject",
+        "script_name": "jingler-auth-state"
+      }
+    ]
+  },
+  "r2_buckets": [
+    {
+      "binding": "WORKSPACE_CHECKPOINTS",
+      "bucket_name": "jingler-managed-workspace-checkpoints"
+    }
+  ],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox", "ManagedAccountObject", "ManagedSessionObject"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
+  }
+}

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { createEnvironmentMachine } from "./environment-machine.js"
 
 const environment: Environment = {
+  kind: "owned",
   id: "device_buildbox",
   name: "buildbox",
   platform: { os: "darwin", arch: "arm64" },

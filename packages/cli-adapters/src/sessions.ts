@@ -522,6 +522,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           return found ?? (yield* Effect.fail(new SessionNotFoundError({ sessionId: id })))
         })
 
+      const ensureSessionIdAvailable = (
+        sessions: readonly Session[],
+        sessionId: string
+      ): Effect.Effect<void, GitError> =>
+        sessions.some((session) => session.id === sessionId)
+          ? Effect.fail(
+              new GitError({ message: `A session with id ${sessionId} already exists.` })
+            )
+          : Effect.void
+
       const create = (
         input: CreateSessionInput,
         /** Provider defaults (from config) to stamp onto the new session. */
@@ -574,7 +584,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             const seed = yield* Effect.sync(() => Date.now() + nextOpId() * 7919)
             slug = freeCreativeName(usedSlugs, seed, `${taskSlug(title)}-${stamp}`)
           }
-          const id = `s_${slug}`
+          const id = input.requestedSessionId ?? `s_${slug}`
+          yield* ensureSessionIdAvailable(existing, id)
           const selection = runtimeSelection(input)
           const chat = initialChat(id, now, { mode: options.defaultMode }, {
             ...selection,
@@ -659,6 +670,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                 yield* atomically(
                   Effect.gen(function* () {
                     const latest = yield* readAll()
+                    yield* ensureSessionIdAvailable(latest, reservation.id)
                     yield* writeAll([reservation, ...latest])
                   })
                 )
@@ -726,6 +738,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* atomically(
             Effect.gen(function* () {
               const current = yield* readAll()
+              yield* ensureSessionIdAvailable(current, session.id)
               yield* writeAll([session, ...current])
             })
           )
@@ -770,6 +783,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           // from a failed attempt is NOT a live session, so retries still work.)
           const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
           const priorSessions = yield* readAll()
+          const now = yield* Effect.sync(() => new Date().toISOString())
+          const stamp = yield* Effect.sync(() => Date.now().toString(36))
+          const id = input.requestedSessionId ?? `s_${slug}_${stamp}`
+          yield* ensureSessionIdAvailable(priorSessions, id)
           if (priorSessions.some((s) => s.worktreePath === worktreePath)) {
             return yield* Effect.fail(
               new GitError({ message: "A session already exists for this pull request." })
@@ -791,9 +808,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           // The live branch after checkout is the PR head; fall back to the
           // reported head ref if `rev-parse` can't resolve it.
           const branch = (yield* GitService.branchAt(worktree.path)) ?? input.pr.headRefName
-          const now = yield* Effect.sync(() => new Date().toISOString())
-          const stamp = yield* Effect.sync(() => Date.now().toString(36))
-          const id = `s_${slug}_${stamp}`
           const selection = runtimeSelection(input)
           const chat = initialChat(id, now, { mode: opts.defaultMode }, {
             ...selection,
@@ -827,7 +841,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             repoPath: worktree.repoPath,
             baseBranch: input.pr.baseRefName
           }
-          const existing = yield* readAll()
           // Re-read INSIDE the lock rather than reusing the list read before
           // the worktree fork: that read is now seconds stale, and appending to
           // it would drop any session created — or any deps status written — in
@@ -835,6 +848,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* atomically(
             Effect.gen(function* () {
               const current = yield* readAll()
+              yield* ensureSessionIdAvailable(current, session.id)
               yield* writeAll([session, ...current])
             })
           )
@@ -869,6 +883,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             `${input.issue.providerId}-${input.issue.identifier}-${input.issue.title}`
           )
           const prior = yield* readAll()
+          const requestedId = input.requestedSessionId
+          if (requestedId !== undefined) {
+            yield* ensureSessionIdAvailable(prior, requestedId)
+          }
           const repository = { path: input.repoPath, name: input.repoName }
           if (
             prior.some((session) =>
@@ -890,6 +908,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           )
             ? disambiguateIssueSlug(baseSlug, input.issue)
             : baseSlug
+          const id = requestedId ?? `s_${slug}_${stamp}`
           const worktree = yield* GitService.createDetachedWorktree({
             repoPath: input.repoPath,
             repoName: input.repoName,
@@ -903,7 +922,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               .map((s) => s.trim())
               .filter((s) => s.length > 0)
               .join("\n\n")
-          const id = `s_${slug}_${stamp}`
           const selection = runtimeSelection(input)
           const chat = initialChat(id, now, { mode: options.defaultMode }, {
             ...selection,
@@ -957,6 +975,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* atomically(
             Effect.gen(function* () {
               const current = yield* readAll()
+              yield* ensureSessionIdAvailable(current, session.id)
               yield* writeAll([session, ...current])
             })
           )
@@ -1386,13 +1405,19 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setPrNumber = (id: string, prNumber: number | null) =>
         update(id, (s) => ({ ...s, prNumber }))
 
-      /** Persist immutable GitHub routing identity alongside the linked PR. */
+      /** Persist the live worktree/PR identity as one routing transition. */
       const setGitHubLink = (
         id: string,
-        link: { readonly installationId: string; readonly repositoryId: string; readonly prNumber: number }
+        link: {
+          readonly installationId: string
+          readonly repositoryId: string
+          readonly prNumber: number
+          readonly branch?: string
+        }
       ) =>
         update(id, (session) => ({
           ...session,
+          ...(link.branch === undefined ? {} : { branch: link.branch }),
           prNumber: link.prNumber,
           githubInstallationId: link.installationId,
           githubRepositoryId: link.repositoryId

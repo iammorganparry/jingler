@@ -8,6 +8,7 @@ import type {
   User
 } from "@jingler/core"
 import type { DockSide } from "../app/terminal-panel.js"
+import type { PendingCloudSession } from "../app/cloud-session-startup-machine.js"
 import { SessionSidebar } from "../app/session-sidebar.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
@@ -154,6 +155,11 @@ export interface SessionConversationProps {
   settingsView?: ReactNode
   /** New-session creation takeover; keeps the sidebar visible. */
   newSessionView?: ReactNode
+  /** Whether the mounted new-session view currently owns the main pane. */
+  newSessionViewActive?: boolean
+  /** Cloud creation remains navigable before its durable Session record exists. */
+  pendingCloudSession?: PendingCloudSession | null
+  onSelectPendingCloudSession?: () => void
   /** Organization-scoped Memory takeover; credentials remain outside this tree. */
   memoryView?: ReactNode
   memoryEligible?: boolean
@@ -258,12 +264,18 @@ export function SessionConversation(props: SessionConversationProps) {
         memoryEligible={props.memoryEligible}
         memoryActive={props.memoryActive}
         onOpenMemory={props.onOpenMemory}
+        pendingCloudSession={props.pendingCloudSession}
+        pendingCloudSessionActive={props.newSessionViewActive}
+        onSelectPendingCloudSession={props.onSelectPendingCloudSession}
       />
 
       <div className="m-2 ml-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-editor shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)]">
-        {props.newSessionView ? (
-          props.newSessionView
-        ) : props.memoryView ? (
+        {props.newSessionView && (
+          <div className={props.newSessionViewActive ? "flex min-h-0 flex-1" : "hidden"}>
+            {props.newSessionView}
+          </div>
+        )}
+        {!props.newSessionViewActive && (props.memoryView ? (
           props.memoryView
         ) : props.settingsView ? (
           props.settingsView
@@ -309,7 +321,7 @@ export function SessionConversation(props: SessionConversationProps) {
             selectTabRequest={props.selectTabRequest}
             onTabRequestHandled={props.onTabRequestHandled}
           />
-        )}
+        ))}
       </div>
     </div>
   )

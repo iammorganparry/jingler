@@ -134,7 +134,8 @@ const RpcServicesLayer = RpcServerLive.pipe(
     RemoteSessionService.Default.pipe(
       Layer.provideMerge(
         EnvironmentService.Default.pipe(
-          Layer.provide(RemoteBootstrapService.Default)
+          Layer.provide(RemoteBootstrapService.Default),
+          Layer.provide(ProviderConnectionsLive)
         )
       )
     )

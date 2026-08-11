@@ -4,9 +4,12 @@ import { displayStatusOf, persistentOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
   BrainCircuit,
+  CircleAlert,
+  Cloud,
   Columns2,
   GitBranch,
   Layers,
+  LoaderCircle,
   PanelLeft,
   Plus,
   Search,
@@ -30,6 +33,7 @@ import { SplitRow } from "../composites/split-row.js"
 import { displayStatusLabel, displayStatusTone } from "../tokens.js"
 import { UserMenu } from "../composites/user-menu.js"
 import type { SplitGroup } from "./split-layout.js"
+import type { PendingCloudSession } from "./cloud-session-startup-machine.js"
 import {
   filterSessions,
   groupSessions,
@@ -114,6 +118,9 @@ export interface SessionSidebarProps {
   memoryEligible?: boolean
   memoryActive?: boolean
   onOpenMemory?: () => void
+  pendingCloudSession?: PendingCloudSession | null
+  pendingCloudSessionActive?: boolean
+  onSelectPendingCloudSession?: () => void
   /**
    * Open on these filters instead of the persisted ones.
    *
@@ -169,6 +176,9 @@ function SidebarBody({
   memoryEligible = false,
   memoryActive = false,
   onOpenMemory,
+  pendingCloudSession,
+  pendingCloudSessionActive = false,
+  onSelectPendingCloudSession,
   onCollapse
 }: SessionSidebarProps & {
   /** Current docked width in px. */
@@ -473,6 +483,40 @@ function SidebarBody({
         </div>
       )}
 
+      {pendingCloudSession && (
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            data-testid="pending-cloud-session"
+            aria-current={pendingCloudSessionActive ? "page" : undefined}
+            onClick={onSelectPendingCloudSession}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              pendingCloudSessionActive
+                ? "bg-surface text-text-bright"
+                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+            )}
+          >
+            <span className="relative flex size-7 flex-none items-center justify-center rounded-md bg-selection text-blue">
+              <Cloud size={15} aria-hidden />
+              {pendingCloudSession.error === null ? (
+                <LoaderCircle className="absolute -bottom-1 -right-1 animate-spin text-blue" size={10} aria-hidden />
+              ) : (
+                <CircleAlert className="absolute -bottom-1 -right-1 text-red" size={10} aria-hidden />
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12px] font-semibold">
+                {pendingCloudSession.title}
+              </span>
+              <span className="block truncate text-[10px] text-dim">
+                {pendingCloudSession.error ?? `Starting in Cloud · ${pendingCloudSession.repo}`}
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Fixed persistent navigation: never narrowed by the ordinary list's
           status/repo filters, and never duplicated in those groups. */}
       <div
@@ -718,6 +762,9 @@ function SessionRail({
   memoryEligible,
   memoryActive,
   onOpenMemory,
+  pendingCloudSession,
+  pendingCloudSessionActive,
+  onSelectPendingCloudSession,
   onExpand
 }: {
   sessions: ReadonlyArray<Session>
@@ -729,6 +776,9 @@ function SessionRail({
   memoryEligible?: boolean
   memoryActive?: boolean
   onOpenMemory?: () => void
+  pendingCloudSession?: PendingCloudSession | null
+  pendingCloudSessionActive?: boolean
+  onSelectPendingCloudSession?: () => void
   /** Re-dock the sidebar (the top button). */
   onExpand: () => void
 }) {
@@ -855,6 +905,27 @@ function SessionRail({
         </button>
       )}
       <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto">
+        {pendingCloudSession && (
+          <button
+            type="button"
+            data-testid="pending-cloud-session-rail"
+            onClick={onSelectPendingCloudSession}
+            aria-current={pendingCloudSessionActive ? "page" : undefined}
+            aria-label={pendingCloudSession.title}
+            title={pendingCloudSession.error ?? "Starting in Cloud"}
+            className={cn(
+              "relative flex size-8 flex-none items-center justify-center rounded-md text-blue outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring",
+              pendingCloudSessionActive && "bg-surface"
+            )}
+          >
+            <Cloud size={16} />
+            {pendingCloudSession.error === null ? (
+              <LoaderCircle className="absolute -bottom-px -right-px animate-spin" size={9} />
+            ) : (
+              <CircleAlert className="absolute -bottom-px -right-px text-red" size={9} />
+            )}
+          </button>
+        )}
         {persistent.map(renderCell)}
         {persistent.length > 0 && ordinary.length > 0 && (
           <span
@@ -938,6 +1009,9 @@ export function SessionSidebar(props: SessionSidebarProps) {
       memoryEligible={props.memoryEligible}
       memoryActive={props.memoryActive}
       onOpenMemory={props.onOpenMemory}
+      pendingCloudSession={props.pendingCloudSession}
+      pendingCloudSessionActive={props.pendingCloudSessionActive}
+      onSelectPendingCloudSession={props.onSelectPendingCloudSession}
       onExpand={() => setPin(true)}
     />
   )

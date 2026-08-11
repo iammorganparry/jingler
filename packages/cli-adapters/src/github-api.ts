@@ -17,6 +17,8 @@ import { request as octokitRequest } from "@octokit/request"
 import { Effect, Runtime } from "effect"
 import { branchAt } from "./git.js"
 import { GitHubAuth, type GitHubInstallationCredential } from "./github-auth.js"
+import { parseGitHubRemote } from "./github-remote.js"
+export { parseGitHubRemote } from "./github-remote.js"
 import {
   mapApiFiles,
   mapCheck,
@@ -182,18 +184,6 @@ const text = (value: unknown): string | null =>
 
 const number = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null
-
-export const parseGitHubRemote = (
-  remote: string
-): { readonly owner: string; readonly repo: string } | null => {
-  const trimmed = remote.trim()
-  const match =
-    trimmed.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i) ??
-    trimmed.match(/^ssh:\/\/git@github\.com\/([^/]+)\/(.+?)(?:\.git)?$/i) ??
-    trimmed.match(/^https?:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?\/?$/i)
-  if (!match?.[1] || !match[2]) return null
-  return { owner: match[1], repo: match[2].replace(/\.git$/i, "") }
-}
 
 const headersRecord = (headers: ResponseHeaders): Readonly<Record<string, string | undefined>> =>
   Object.fromEntries(

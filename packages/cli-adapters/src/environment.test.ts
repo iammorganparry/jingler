@@ -5,7 +5,7 @@ import type {
   RemoteDevice
 } from "@jingler/core"
 import { Effect, Layer } from "effect"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EnvironmentService, environmentFromRemoteDevice } from "./environment.js"
 import {
   type ActivateRemoteDeviceInput,
@@ -14,9 +14,11 @@ import {
   type InstallAndEnrollOwnedDeviceInput,
   type InstallAndBootstrapSshInput,
   RemoteBootstrapService,
-  SshBootstrapError
+  type SshBootstrapError
 } from "./remote-bootstrap.js"
 import { makeInMemorySecretStore, SecretStore, type SecretStoreShape } from "./secret-store.js"
+import { ProviderConnections } from "./runtime/providers/provider-connections.js"
+import { Stream } from "effect"
 
 const device: RemoteDevice = {
   version: 1,
@@ -95,6 +97,20 @@ const enrollmentCredential: DeviceEnrollmentCredentialResponse = {
   token: "signed-enrollment-token"
 }
 
+const ProviderConnectionsTest = Layer.succeed(ProviderConnections, {
+  loginEvents: Stream.empty,
+  list: Effect.dieMessage("Provider catalog is not used by environment tests"),
+  status: Effect.succeed([]),
+  resolveCredential: () => Effect.dieMessage("Credential export is not used by this test"),
+  connectClaudeToken: () => Effect.dieMessage("Provider login is not used by environment tests"),
+  startCodexLogin: () => Effect.dieMessage("Provider login is not used by environment tests"),
+  cancelLogin: () => Effect.void,
+  setApiKey: () => Effect.dieMessage("Provider login is not used by environment tests"),
+  refresh: () => Effect.dieMessage("Provider refresh is not used by environment tests"),
+  logout: () => Effect.dieMessage("Provider logout is not used by environment tests"),
+  verifyModel: () => Effect.dieMessage("Provider verification is not used by environment tests")
+})
+
 const environmentLayer = (bootstrap: {
   readonly bootstrap: (
     input: BootstrapSshInput
@@ -126,14 +142,22 @@ const environmentLayer = (bootstrap: {
       store
         ? Layer.succeed(SecretStore, store)
         : Layer.effect(SecretStore, makeInMemorySecretStore("desktop-bearer"))
-    )
+    ),
+    Layer.provide(ProviderConnectionsTest)
   )
+
+beforeEach(() => {
+  process.env.JINGLER_HARNESS_HOME = "/nonexistent/jingler-environment-test-home"
+  delete process.env.OPENAI_API_KEY
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()
   delete process.env.JINGLER_AUTH_URL
   delete process.env.JINGLER_DEVICE_RELAY_URL
   delete process.env.JINGLER_DEVICE_AGENT_BUNDLE
+  delete process.env.JINGLER_HARNESS_HOME
+  delete process.env.OPENAI_API_KEY
 })
 
 describe("environment metadata", () => {
@@ -165,11 +189,42 @@ describe("environment metadata", () => {
 })
 
 describe("environment device API", () => {
+  it("revokes an owned device without fetching the environment inventory", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = []
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({
+        url,
+        method: init?.method ?? "GET",
+        body: init?.body ? JSON.parse(String(init.body)) : null
+      })
+      return Response.json({ version: 1 })
+    })
+    process.env.JINGLER_AUTH_URL = "https://server.test"
+    const layer = environmentLayer({
+      bootstrap: () => Effect.succeed(pending),
+      installAndBootstrap: () => Effect.succeed(pending)
+    })
+
+    await Effect.runPromise(
+      EnvironmentService.revoke(device.deviceId).pipe(Effect.provide(layer))
+    )
+
+    expect(calls).toEqual([{
+      url: `https://server.test/api/devices/${device.deviceId}/revoke`,
+      method: "POST",
+      body: null
+    }])
+  })
+
   it("persists the per-install client identity across service restarts", async () => {
     const clientIds: string[] = []
     vi.stubGlobal("fetch", async (_input: string | URL | Request, init?: RequestInit) => {
       clientIds.push(new Headers(init?.headers).get("x-jingler-client-instance-id") ?? "")
-      return Response.json({ version: 1, devices: [accountDevice] })
+      return Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
     })
     process.env.JINGLER_AUTH_URL = "https://server.test"
     const store = await Effect.runPromise(makeInMemorySecretStore("desktop-bearer"))
@@ -186,11 +241,14 @@ describe("environment device API", () => {
     expect(clientIds[1]).toBe(clientIds[0])
   })
 
-  it("uses the server's /api/devices mount for desktop requests", async () => {
+  it("uses the unified server environment inventory for desktop requests", async () => {
     const urls: Array<string> = []
     vi.stubGlobal("fetch", async (input: string | URL | Request) => {
       urls.push(String(input))
-      return Response.json({ version: 1, devices: [accountDevice] })
+      return Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
     })
     process.env.JINGLER_AUTH_URL = "https://server.test"
     const layer = environmentLayer({
@@ -202,8 +260,58 @@ describe("environment device API", () => {
       EnvironmentService.list.pipe(Effect.provide(layer))
     )
 
-    expect(urls).toStrictEqual(["https://server.test/api/devices"])
+    expect(urls).toStrictEqual(["https://server.test/api/environments"])
     expect(environments.map((environment) => environment.id)).toStrictEqual([device.deviceId])
+  })
+
+  it("reuses the immutable environment kind after inventory is loaded", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    process.env.JINGLER_AUTH_URL = "https://server.test"
+    const layer = environmentLayer({
+      bootstrap: () => Effect.succeed(pending),
+      installAndBootstrap: () => Effect.succeed(pending)
+    })
+
+    const kind = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* EnvironmentService.list
+        return yield* EnvironmentService.kind(device.deviceId)
+      }).pipe(Effect.provide(layer))
+    )
+
+    expect(kind).toBe("owned")
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it("reuses loaded environment metadata when session creation resolves its target", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    process.env.JINGLER_AUTH_URL = "https://server.test"
+    const layer = environmentLayer({
+      bootstrap: () => Effect.succeed(pending),
+      installAndBootstrap: () => Effect.succeed(pending)
+    })
+
+    const environment = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* EnvironmentService.list
+        return yield* EnvironmentService.environment(device.deviceId)
+      }).pipe(Effect.provide(layer))
+    )
+
+    expect(environment.id).toBe(device.deviceId)
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 
   it("enrolls an owned machine with an invisible account credential", async () => {

@@ -9,6 +9,12 @@ the released **app** version, read by electron-builder and shown in-app as
 Nothing is published to npm (all packages are `private`); Changesets is used only
 as a **version + CHANGELOG** engine.
 
+Until Jingler is publicly released, every workspace package must remain below
+`1.0.0`. `pnpm version:check` enforces that boundary and verifies that all
+`@jingler/*` packages still match the desktop version. The corrected release
+line is `0.1.x` followed by `0.2.x`; do not recreate the accidental `2.x`/`3.x`
+line caused by pre-versioning an official plugin at `1.0.0`.
+
 ## Recording a change
 
 When you make a user-facing change, add a changeset and commit it with your PR:

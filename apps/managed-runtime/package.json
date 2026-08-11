@@ -1,0 +1,32 @@
+{
+  "name": "@jingler/managed-runtime",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Authenticated, session-isolated Cloudflare Sandbox execution for Jingler.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "wrangler dev --port 9400",
+    "pretypecheck": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "types": "wrangler types",
+    "image:prepare": "pnpm --filter @jingler/device-agent build && mkdir -p dist && cp ../device-agent/dist/jingler-device.mjs dist/jingler-device.mjs",
+    "deploy": "pnpm image:prepare && wrangler deploy",
+    "deploy:dry": "pnpm image:prepare && wrangler deploy --dry-run",
+    "clean": "rimraf dist .wrangler .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "0.10.3",
+    "@jingler/core": "workspace:*",
+    "effect": "^3.21.4"
+  },
+  "devDependencies": {
+    "@jingler/tsconfig": "workspace:*",
+    "rimraf": "^6.0.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.120.0"
+  }
+}

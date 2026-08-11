@@ -501,7 +501,11 @@ describe("device relay HTTP authorization", () => {
     const challenge: DeviceChallenge = await challengeResponse.json()
     const signature = base64Url(
       new Uint8Array(
-        await crypto.subtle.sign("Ed25519", keys.privateKey, deviceChallengePayload(challenge))
+        await crypto.subtle.sign(
+          "Ed25519",
+          keys.privateKey,
+          new Uint8Array(deviceChallengePayload(challenge))
+        )
       )
     )
     const exchangeBody = JSON.stringify({ version: 1, challenge, signature })

@@ -37,6 +37,18 @@ export interface ProviderConnectionsShape {
   readonly loginEvents: Stream.Stream<ProviderLoginEvent>
   readonly list: Effect.Effect<ProviderCatalog, ProviderConnectionsError>
   readonly status: Effect.Effect<ReadonlyArray<ProviderConnection>, ProviderConnectionsError>
+  /** Main-process-only credential resolution for an explicitly selected route. */
+  readonly resolveCredential: (
+    id: ProviderConnectionId
+  ) => Effect.Effect<
+    {
+      readonly connection: ProviderConnection
+      readonly access: string
+      readonly expiresAt: number | null
+      readonly accountId: string | null
+    },
+    ProviderConnectionsError
+  >
   readonly connectClaudeToken: (
     input: ConnectClaudeTokenInput
   ) => Effect.Effect<ProviderConnection, ProviderConnectionsError>
@@ -121,6 +133,7 @@ export const makeProviderConnections = (
         Effect.mapError(serviceError("Failed to list providers"))
       ),
       status: options.broker.list,
+      resolveCredential: (id) => brokerCall(options.broker.resolve(id)),
       connectClaudeToken: (input) =>
         brokerCall(options.broker.connectClaudeToken(input)).pipe(
           Effect.flatMap(persist),

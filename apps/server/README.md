@@ -173,12 +173,15 @@ permissions at **No access**. Subscribe only to these webhook events:
 
 - Installation
 - Issue comment
+- Pull request
 - Pull request review
 - Pull request review comment
 
 The PR screen reads checks and pull-request state through scoped GitHub API
-requests. Subscribing Check run, Check suite, Pull request, or Status as well
-would duplicate those reads and wake the relay for events it intentionally
+requests. The Pull request subscription is retained only for its merged event,
+which flushes queued review feedback for the completed PR; other pull-request
+state events are discarded. Subscribing Check run, Check suite, or Status as
+well would duplicate those reads and wake the relay for events it intentionally
 discards.
 
 Jingler narrows each installation token again when it mints it. Reads request

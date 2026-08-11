@@ -19,7 +19,7 @@ const source = (patch: Partial<Session> = {}): Session => ({
   connectionId, providerId, modelId,
   updatedAt: "2026-08-08T00:00:00.000Z", chats: [{ id: "c_source", title: null, connectionId, providerId, modelId, createdAt: "2026-08-08T00:00:00.000Z", updatedAt: "2026-08-08T00:00:00.000Z" }], activeChatId: "c_source", ...patch
 })
-const target: Environment = { id: "buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" }, capabilities: { version: 1, capabilities: ["session.start"], maxConcurrentSessions: 4, runtime: { versions: CURRENT_RUNTIME_CONTRACTS, toolIds: [], resourceIds: [], targetId: "buildbox" }, providerConnections: [{ id: connectionId, providerId, authKind: "claude-setup-token", status: "authenticated" }] }, state: "online", agentVersion: "2.0.3", lastSeenAt: 1 }
+const target: Environment = { kind: "owned", id: "buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" }, capabilities: { version: 1, capabilities: ["session.start"], maxConcurrentSessions: 4, runtime: { versions: CURRENT_RUNTIME_CONTRACTS, toolIds: [], resourceIds: [], targetId: "buildbox" }, providerConnections: [{ id: connectionId, providerId, authKind: "claude-setup-token", status: "authenticated" }] }, state: "online", agentVersion: "2.0.3", lastSeenAt: 1 }
 
 describe("session environment handoff", () => {
   const deps = () => {
@@ -29,6 +29,9 @@ describe("session environment handoff", () => {
   }
   it("re-provisions a pristine session in place", async () => {
     const d = deps(); const result = await Effect.runPromise(setSessionEnvironment(source(), "buildbox", d)); expect(result.id).toBe("s_source"); expect(d.persist).toHaveBeenCalledOnce()
+  })
+  it("never reassigns a session whose live transcript has not reached persisted counters yet", async () => {
+    const d = deps(); const exit = await Effect.runPromiseExit(setSessionEnvironment(source(), "buildbox", d, true)); expect(Exit.isFailure(exit)).toBe(true); expect(d.persist).not.toHaveBeenCalled()
   })
   it("creates a continuation when the source session contains work", async () => {
     const d = deps(); const result = await Effect.runPromise(continueSessionOnEnvironment(source({ diff: { added: 2, removed: 0 } }), "buildbox", d)); expect(result.id).toBe("s_continuation"); expect(d.persist).not.toHaveBeenCalled()

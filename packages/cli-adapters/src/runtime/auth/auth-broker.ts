@@ -9,6 +9,7 @@ import {
 } from "@jingler/core"
 import { Context, Data, Effect, Ref, Schema } from "effect"
 import type { ProviderCredentialStore, StoredProviderCredential } from "./credential-store.js"
+import { codexAccountIdFromAccessToken } from "./codex-access-token.js"
 
 export interface OAuthCredential {
   readonly access: string
@@ -106,7 +107,12 @@ export interface AuthBrokerShape {
   }) => Effect.Effect<ProviderConnection, AuthBrokerError>
   readonly cancelLogin: (id: ProviderConnectionId) => Effect.Effect<void>
   readonly resolve: (id: ProviderConnectionId) => Effect.Effect<
-    { readonly connection: ProviderConnection; readonly access: string },
+    {
+      readonly connection: ProviderConnection
+      readonly access: string
+      readonly expiresAt: number | null
+      readonly accountId: string | null
+    },
     AuthBrokerError
   >
   readonly refresh: (
@@ -240,7 +246,15 @@ class LiveAuthBroker implements AuthBrokerShape {
         return yield* this.fail("Reauthentication required")
       }
       const credential = yield* this.refreshIfNeeded(stored)
-      return { connection, access: credential.access }
+      return {
+        connection,
+        access: credential.access,
+        expiresAt: credential.expiresAt,
+        accountId:
+          connection.providerId === "openai-codex"
+            ? codexAccountIdFromAccessToken(credential.access)
+            : null
+      }
     })
 
   refresh: AuthBrokerShape["refresh"] = (id) =>

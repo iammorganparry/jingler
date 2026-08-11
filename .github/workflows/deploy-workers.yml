@@ -14,6 +14,56 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  deploy-auth-state:
+    name: Deploy auth-state authority
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.7.0
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate auth-state bundle
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @jingler/auth-state run deploy:dry
+      - name: Deploy auth-state authority
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @jingler/auth-state run deploy
+      - name: Publish auth-state secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MANAGED_RUNTIME_SERVICE_SECRET: ${{ secrets.MANAGED_RUNTIME_SERVICE_SECRET }}
+          AUTH_STATE_ENCRYPTION_KEY: ${{ secrets.AUTH_STATE_ENCRYPTION_KEY }}
+        run: |
+          test -n "$MANAGED_RUNTIME_SERVICE_SECRET"
+          test -n "$AUTH_STATE_ENCRYPTION_KEY"
+          jq -n \
+            --arg secret "$MANAGED_RUNTIME_SERVICE_SECRET" \
+            --arg encryption "$AUTH_STATE_ENCRYPTION_KEY" \
+            '{AUTH_STATE_SERVICE_SECRET:$secret,MANAGED_RUNTIME_CALLBACK_SECRET:$secret,AUTH_STATE_ENCRYPTION_KEY:$encryption}' \
+            > "$RUNNER_TEMP/auth-state-secrets.json"
+          pnpm --filter @jingler/auth-state exec wrangler secret bulk "$RUNNER_TEMP/auth-state-secrets.json"
+
   deploy:
     name: Deploy ${{ matrix.name }}
     if: >-
@@ -32,6 +82,8 @@ jobs:
             package: "@jingler/memory-worker"
           - name: Device relay
             package: "@jingler/device-relay"
+          - name: Managed runtime
+            package: "@jingler/managed-runtime"
 
     steps:
       - name: Check out the tested revision
@@ -69,8 +121,35 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm --filter "${{ matrix.package }}" run deploy:dry
 
+      - name: Provision managed-runtime dependencies
+        if: matrix.package == '@jingler/managed-runtime'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          pnpm --filter @jingler/managed-runtime exec wrangler deployments list --name jingler-auth-state
+          pnpm --filter @jingler/managed-runtime exec wrangler r2 bucket info jingler-managed-workspace-checkpoints >/dev/null 2>&1 || pnpm --filter @jingler/managed-runtime exec wrangler r2 bucket create jingler-managed-workspace-checkpoints
+          pnpm --filter @jingler/managed-runtime exec wrangler r2 bucket lifecycle list jingler-managed-workspace-checkpoints | grep -q expire-managed-checkpoints || pnpm --filter @jingler/managed-runtime exec wrangler r2 bucket lifecycle add jingler-managed-workspace-checkpoints expire-managed-checkpoints --expire-days 7 --force
+
       - name: Deploy Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm --filter "${{ matrix.package }}" run deploy
+
+      - name: Publish managed-runtime secrets
+        if: matrix.package == '@jingler/managed-runtime'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MANAGED_RUNTIME_SERVICE_SECRET: ${{ secrets.MANAGED_RUNTIME_SERVICE_SECRET }}
+          MANAGED_RUNTIME_GRANT_SECRET: ${{ secrets.MANAGED_RUNTIME_GRANT_SECRET }}
+        run: |
+          test -n "$MANAGED_RUNTIME_SERVICE_SECRET"
+          test -n "$MANAGED_RUNTIME_GRANT_SECRET"
+          jq -n \
+            --arg service "$MANAGED_RUNTIME_SERVICE_SECRET" \
+            --arg grant "$MANAGED_RUNTIME_GRANT_SECRET" \
+            '{MANAGED_RUNTIME_SERVICE_SECRET:$service,MANAGED_RUNTIME_GRANT_SECRET:$grant}' \
+            > "$RUNNER_TEMP/managed-runtime-secrets.json"
+          pnpm --filter @jingler/managed-runtime exec wrangler secret bulk "$RUNNER_TEMP/managed-runtime-secrets.json"
