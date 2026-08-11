@@ -38,6 +38,7 @@ describe("legacy runtime identity migration", () => {
       transcriptMarker: "preserved"
     })
     expect(result).not.toHaveProperty("resumeId", "native-thread")
+    expect(result).not.toHaveProperty("cli")
     expect(result.chats).toEqual([
       expect.objectContaining({
         id: "chat-1",

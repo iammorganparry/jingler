@@ -800,7 +800,6 @@ const sessionCreationOptions = (input: {
   readonly reasoning?: ReasoningSetting | null;
 }) => ({
   defaultMode: input.mode ?? "accept-edits" as const,
-  defaultModel: input.modelId,
   defaultReasoning: input.reasoning ?? undefined,
 });
 

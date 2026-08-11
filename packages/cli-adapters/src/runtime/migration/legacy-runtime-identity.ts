@@ -125,8 +125,15 @@ export const migrateLegacyRuntimeIdentity = (
     cli: typeof value.cli === "string" ? value.cli : null
   }) ?? null
 
+  const {
+    cli: _cli,
+    resumeId: _resumeId,
+    model: _model,
+    ...session
+  } = value
+
   return {
-    ...value,
+    ...session,
     ...(chats === undefined ? {} : { chats }),
     ...(value.connectionId === undefined && resolved
       ? { connectionId: resolved.connectionId }
@@ -145,8 +152,6 @@ export const migrateLegacyRuntimeIdentity = (
     ...(typeof value.cli === "string" ? { legacyCli: value.cli } : {}),
     ...(legacyModel === null ? {} : { legacyModel }),
     ...(legacyResumeId === null ? {} : { legacyResumeId }),
-    resumeId: undefined,
-    model: undefined
   }
 }
 

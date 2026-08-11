@@ -106,7 +106,6 @@ beforeEach(() => {
       branch: "chore/test",
       title: "Test",
       status: "idle",
-      cli: "claude",
       ...TEST_RUNTIME,
       diff: { added: 0, removed: 0 },
       prNumber: null,
@@ -1209,7 +1208,6 @@ describe("AgentRunner plan mode", () => {
       branch: "b",
       title: "t",
       status: "idle",
-      cli: "claude",
       ...TEST_RUNTIME,
       diff: { added: 0, removed: 0 },
       prNumber: null,
@@ -1771,7 +1769,7 @@ describe("AgentRunner plan mode", () => {
 })
 
 describe("AgentRunner model", () => {
-  // A harness that reports its real model on init (as the Claude adapter does).
+  // Provider metadata must not replace the certified model selected for the run.
   const modelReportingAdapter = Layer.succeed(
     AgentTurnDriver,
     AgentTurnDriver.of({
@@ -1783,15 +1781,13 @@ describe("AgentRunner model", () => {
     })
   )
 
-  it("persists the harness's actual model (reported on init) onto the session", async () => {
-    // Seed a session on disk so the runner can persist its model back.
+  it("does not replace the certified model id with provider event metadata", async () => {
     const session: Session = {
       id: SESSION,
       repo: "r",
       branch: "b",
       title: "t",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -1818,15 +1814,15 @@ describe("AgentRunner model", () => {
       ConfigService.Default,
       temp.layer
     )
-    const model = await Effect.runPromise(
+    const persistedModelId = await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.prompt(SESSION, SESSION, "hi").pipe(Stream.runDrain)
         const persisted = yield* SessionStore.get(SESSION)
-        return persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.model
+        return persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.modelId
       }).pipe(Effect.provide(base))
     )
-    expect(model).toBe("opus-live")
+    expect(persistedModelId).toBe("anthropic/claude-test")
   })
 })
 
@@ -1841,7 +1837,6 @@ describe("AgentRunner plan library", () => {
       branch: "chore/mysession",
       title: "My session",
       status: "idle",
-      cli: "claude",
       ...TEST_RUNTIME,
       diff: { added: 0, removed: 0 },
       prNumber: null,
@@ -2424,7 +2419,6 @@ describe("AgentRunner resume across restarts", () => {
       branch: "b",
       title: "t",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -2517,7 +2511,6 @@ describe("AgentRunner plan progress across turns", () => {
       branch: "chore/crossturn",
       title: "Cross-turn session",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,

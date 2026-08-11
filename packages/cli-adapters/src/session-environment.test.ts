@@ -14,7 +14,7 @@ const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
 const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
 
 const source = (patch: Partial<Session> = {}): Session => ({
-  id: "s_source", repo: "acme/app", branch: "main", title: "Source", status: "idle", cli: "claude",
+  id: "s_source", repo: "acme/app", branch: "main", title: "Source", status: "idle",
   diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0, tokens: 0,
   connectionId, providerId, modelId,
   updatedAt: "2026-08-08T00:00:00.000Z", chats: [{ id: "c_source", title: null, connectionId, providerId, modelId, createdAt: "2026-08-08T00:00:00.000Z", updatedAt: "2026-08-08T00:00:00.000Z" }], activeChatId: "c_source", ...patch

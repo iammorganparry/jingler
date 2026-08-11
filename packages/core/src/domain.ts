@@ -325,15 +325,12 @@ export const Chat = Schema.Struct({
   title: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
-  /** Provider thread identities belong to the chat, not the shared worktree. */
-  resumeId: Schema.optional(Schema.String),
-  /** Permission and model choices are restored independently for each chat. */
+  /** Permission choices are restored independently for each chat. */
   mode: Schema.optional(PermissionMode),
   reasoning: Schema.optional(ReasoningSetting),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
-  model: Schema.optional(Schema.String),
   contextTokens: Schema.optional(Schema.Number),
-  /** Canonical pi continuation identity; legacy resumeId is decoder-only migration input. */
+  /** Canonical provider selection and pi continuation identity. */
   connectionId: Schema.optional(ProviderConnectionId),
   providerId: Schema.optional(ProviderId),
   modelId: Schema.optional(ProviderModelId),
@@ -464,9 +461,7 @@ export const Session = Schema.Struct({
   semanticBranchPending: Schema.optional(Schema.Boolean),
   title: Schema.String,
   status: SessionStatus,
-  /** Which CLI is driving this session. */
-  cli: CliKind,
-  /** Canonical execution identity during the rolling pi migration. */
+  /** Canonical pi execution identity. */
   connectionId: Schema.optional(ProviderConnectionId),
   providerId: Schema.optional(ProviderId),
   modelId: Schema.optional(ProviderModelId),
@@ -570,14 +565,9 @@ export const Session = Schema.Struct({
   repoPath: Schema.optional(Schema.String),
   /** The branch this session's worktree was forked from. */
   baseBranch: Schema.optional(Schema.String),
-  /**
-   * Legacy single-chat aliases accepted during the rolling migration.
-   * New code reads/writes the active `Chat`; `SessionStore` strips these on read.
-   */
-  resumeId: Schema.optional(Schema.String),
+  /** Legacy single-chat mode and allowlist aliases retained during rolling migration. */
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
-  model: Schema.optional(Schema.String),
   /**
    * Per-session auto-compaction override. Absent = follow the global setting.
    *

@@ -2005,8 +2005,6 @@ describe("conversationMachine — persisted session reconciliation", () => {
 
     const updated = {
       ...session,
-      cli: "codex",
-      model: "gpt-5.6-sol",
       connectionId,
       providerId,
       modelId,
@@ -2018,7 +2016,6 @@ describe("conversationMachine — persisted session reconciliation", () => {
         updatedAt: "2026-07-25T00:00:00.000Z",
         // Plan mode is transient and deliberately absent from persistence.
         mode: "accept-edits",
-        model: "gpt-5.6-sol",
         connectionId,
         providerId,
         modelId
@@ -2036,8 +2033,6 @@ describe("conversationMachine — persisted session reconciliation", () => {
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
     const updated = {
       ...session,
-      cli: "codex",
-      model: "gpt-5.6-sol",
       connectionId,
       providerId,
       modelId,
@@ -2049,7 +2044,6 @@ describe("conversationMachine — persisted session reconciliation", () => {
         createdAt: "2026-07-25T00:00:00.000Z",
         updatedAt: "2026-07-25T00:00:00.000Z",
         mode: "auto",
-        model: "gpt-5.6-sol",
         connectionId,
         providerId,
         modelId,
@@ -2090,7 +2084,9 @@ describe("conversationMachine — persisted session reconciliation", () => {
         createdAt: "2026-07-25T00:00:00.000Z",
         updatedAt: "2026-07-25T00:00:00.000Z",
         mode: "auto",
-        model: session.model
+        connectionId,
+        providerId,
+        modelId
       }]
     } as Session
 

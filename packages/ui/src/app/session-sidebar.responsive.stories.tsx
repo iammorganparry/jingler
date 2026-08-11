@@ -12,7 +12,6 @@ const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Sessio
   repo: "jingler",
   branch: `chore/${over.id}`,
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

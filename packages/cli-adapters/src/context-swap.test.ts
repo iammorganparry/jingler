@@ -111,7 +111,6 @@ const seed = (over: Partial<Session> = {}) =>
       branch: "chore/swap",
       title: "Swap",
       status: "idle",
-      cli: "claude",
       connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
       providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
       modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
@@ -136,7 +135,6 @@ const seed = (over: Partial<Session> = {}) =>
         connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
         providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
         modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
-        model: over.model ?? "sonnet",
         piSessionId: over.piSessionId ?? "harness_thread_old",
         ...("contextTokens" in over
           ? over.contextTokens === undefined
@@ -146,7 +144,6 @@ const seed = (over: Partial<Session> = {}) =>
       }],
       activeChatId: SESSION,
       worktreePath: temp.root,
-      model: "sonnet",
       piSessionId: "harness_thread_old",
       ...over
     }
@@ -314,7 +311,6 @@ describe("compaction swap", () => {
         connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
         providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
         modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
-        model: "sonnet",
         piSessionId: "harness_thread_old"
       }]
     })

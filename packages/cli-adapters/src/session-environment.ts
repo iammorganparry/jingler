@@ -14,7 +14,7 @@ export const sessionContainsWork = (session: Session): boolean =>
   session.costUsd > 0 ||
   session.status !== "idle" ||
   session.semanticBranchPending === false ||
-  session.chats.some((chat) => chat.resumeId !== undefined)
+  session.chats.some((chat) => chat.piSessionId !== undefined)
 
 export const compatibleEnvironment = (
   session: Session,

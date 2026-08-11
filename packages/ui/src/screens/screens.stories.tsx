@@ -30,9 +30,9 @@ const session = (
 })
 
 const sessions: ReadonlyArray<Session> = [
-  session({ id: "s1", repo: "trigify/api", branch: "feat/oauth", title: "Refactor auth flow", status: "thinking", cli: "claude", diff: { added: 313, removed: 23 }, prNumber: 482, costUsd: 1.24, tokens: 218000, updatedAt: "2026-07-11T09:41:00Z" }),
-  session({ id: "s2", repo: "trigify/api", branch: "chore/deps", title: "Bump dependencies", status: "idle", cli: "claude", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0.12, tokens: 14200, updatedAt: "2026-07-11T08:12:00Z" }),
-  session({ id: "s3", repo: "trigify/web", branch: "main", title: "Fix flaky tests", status: "needs-input", cli: "codex", diff: { added: 47, removed: 9 }, prNumber: null, costUsd: 0.44, tokens: 61800, updatedAt: "2026-07-11T09:05:00Z" })
+  session({ id: "s1", repo: "trigify/api", branch: "feat/oauth", title: "Refactor auth flow", status: "thinking", diff: { added: 313, removed: 23 }, prNumber: 482, costUsd: 1.24, tokens: 218000, updatedAt: "2026-07-11T09:41:00Z" }),
+  session({ id: "s2", repo: "trigify/api", branch: "chore/deps", title: "Bump dependencies", status: "idle", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0.12, tokens: 14200, updatedAt: "2026-07-11T08:12:00Z" }),
+  session({ id: "s3", repo: "trigify/web", branch: "main", title: "Fix flaky tests", status: "needs-input", diff: { added: 47, removed: 9 }, prNumber: null, costUsd: 0.44, tokens: 61800, updatedAt: "2026-07-11T09:05:00Z" })
 ]
 
 export const Library: Story = {

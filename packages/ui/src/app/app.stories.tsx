@@ -78,10 +78,10 @@ const session = (value: Omit<Session, "chats" | "activeChatId">): Session => ({
  * with three idle sessions exercises one row style and hides the other four.
  */
 const sessions: ReadonlyArray<Session> = [
-  session({ id: "s1", repo: "trigify-app", branch: "feat/oauth", title: "Refactor auth flow", status: "thinking", cli: "claude", diff: { added: 313, removed: 23 }, prNumber: 482, costUsd: 1.24, tokens: 218_000, updatedAt: "2026-07-11T09:41:00Z" }),
-  session({ id: "s2", repo: "trigify-app", branch: "chore/deps", title: "Bump dependencies", status: "idle", cli: "claude", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0.12, tokens: 14_200, updatedAt: "2026-07-11T08:12:00Z" }),
-  session({ id: "s3", repo: "gtm-grid", branch: "fix/flaky", title: "Fix flaky tests", status: "needs-input", cli: "codex", diff: { added: 47, removed: 9 }, prNumber: null, costUsd: 0.44, tokens: 61_800, updatedAt: "2026-07-11T09:05:00Z" }),
-  session({ id: "s4", repo: "gtm-grid", branch: "feat/scoring", title: "Score model v2", status: "running", cli: "claude", diff: { added: 128, removed: 64 }, prNumber: 204, costUsd: 0.88, tokens: 96_400, updatedAt: "2026-07-11T09:52:00Z" })
+  session({ id: "s1", repo: "trigify-app", branch: "feat/oauth", title: "Refactor auth flow", status: "thinking", diff: { added: 313, removed: 23 }, prNumber: 482, costUsd: 1.24, tokens: 218_000, updatedAt: "2026-07-11T09:41:00Z" }),
+  session({ id: "s2", repo: "trigify-app", branch: "chore/deps", title: "Bump dependencies", status: "idle", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0.12, tokens: 14_200, updatedAt: "2026-07-11T08:12:00Z" }),
+  session({ id: "s3", repo: "gtm-grid", branch: "fix/flaky", title: "Fix flaky tests", status: "needs-input", diff: { added: 47, removed: 9 }, prNumber: null, costUsd: 0.44, tokens: 61_800, updatedAt: "2026-07-11T09:05:00Z" }),
+  session({ id: "s4", repo: "gtm-grid", branch: "feat/scoring", title: "Score model v2", status: "running", diff: { added: 128, removed: 64 }, prNumber: 204, costUsd: 0.88, tokens: 96_400, updatedAt: "2026-07-11T09:52:00Z" })
 ]
 
 const liveActivity: Record<string, SessionActivity> = {

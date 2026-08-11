@@ -37,7 +37,6 @@ const demoSession: Session = {
   branch: "feat/oauth",
   title: "Refactor auth flow",
   status: "thinking",
-  cli: "claude",
   diff: { added: 313, removed: 23 },
   prNumber: 482,
   costUsd: 1.24,

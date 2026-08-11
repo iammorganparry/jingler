@@ -1114,7 +1114,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // whose context we have already decided to abandon.
           if (digest !== null) {
             yield* SessionStore.clearPiSessionId(sessionId, chatId).pipe(Effect.ignore)
-            yield* SessionStore.clearResumeId(sessionId, chatId).pipe(Effect.ignore)
           }
 
           // Capture the persistence services so `emit`/`run` handed to the
@@ -1559,15 +1558,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }
               yield* Ref.set(acc, next)
               yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
-              // Persist the harness's actual model (reported on init) so the chip
-              // reflects reality even when the session hadn't pinned one.
-              if (event._tag === "Started" && event.model) {
-                yield* SessionStore.setModel(sessionId, chatId, event.model).pipe(Effect.ignore)
-              }
-              // Persist the harness session id (carried on Started) so the NEXT
+              // Persist the pi session id (carried on Started) so the NEXT
               // prompt resumes this conversation — even after an app restart wiped
-              // the adapter's in-memory resume map. `event.sessionId` is the
-              // harness's own id, not our `sessionId` (the Jingler session key).
+              // the runtime's in-memory resume map. `event.sessionId` is the
+              // pi session id, not our `sessionId` (the Jingler session key).
               if (event._tag === "Started" && event.sessionId.length > 0) {
                 yield* SessionStore.setPiSessionId(
                   sessionId,

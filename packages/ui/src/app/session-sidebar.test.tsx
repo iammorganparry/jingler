@@ -45,7 +45,6 @@ describe("SessionSidebar session identity", () => {
             repo: "jingler",
             title: "Liquid glass sidebar",
             status: "running",
-            cli: "codex",
             executionLocation: "cloud",
             prNumber: 5462
           })

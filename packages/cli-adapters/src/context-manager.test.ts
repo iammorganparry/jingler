@@ -32,6 +32,8 @@ beforeEach(() => {
 afterEach(() => temp.cleanup())
 
 const SESSION = "s_ctx"
+const providerModel = (model: string) =>
+  Schema.decodeUnknownSync(ProviderModelId)(`anthropic/${model}`)
 
 /** A host where every harness is installed, so discovery reports them available. */
 const installed: FakeCommandHandler = (command, args) => {
@@ -135,16 +137,13 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
     const now = new Date().toISOString()
     const selectedProviderId = over.providerId ??
       Schema.decodeUnknownSync(ProviderId)("anthropic")
-    const selectedModelId = over.modelId ?? Schema.decodeUnknownSync(ProviderModelId)(
-      `anthropic/${over.model ?? "claude-opus-4-1"}`
-    )
+    const selectedModelId = over.modelId ?? providerModel("claude-opus-4-1")
     const session: Session = {
       id: SESSION,
       repo: "trigify-app",
       branch: "chore/ctx",
       title: "Context",
       status: "idle",
-      cli: "claude",
       connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
       providerId: selectedProviderId,
       modelId: selectedModelId,
@@ -161,15 +160,12 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
         connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
         providerId: selectedProviderId,
         modelId: selectedModelId,
-        model: over.model ?? "claude-opus-4-1",
         ...(over.contextTokens === undefined ? {} : { contextTokens: over.contextTokens }),
-        ...(over.resumeId === undefined ? {} : { resumeId: over.resumeId })
       }],
       activeChatId: SESSION,
       worktreePath: temp.root,
       // A known 200k legacy model keeps the manager's timing scenarios compact;
       // current 1M aliases are covered explicitly below.
-      model: "claude-opus-4-1",
       ...over
     }
     // Write straight to the store's file: `SessionStore.create` would fork a real
@@ -342,8 +338,7 @@ describe("ContextManager.observe", () => {
             updatedAt: new Date().toISOString(),
             connectionId,
             providerId,
-            modelId,
-            model: "claude-opus-4-1"
+            modelId
           }]
         })
         yield* observeAndSettle(900_000, rec)
@@ -693,7 +688,7 @@ describe("window correction", () => {
     const snap = await run(
       Effect.gen(function* () {
         // An unknown model falls back to 200k from the table…
-        yield* seed({ model: "some-new-tier" })
+        yield* seed({ modelId: providerModel("some-new-tier") })
         // …but a session cannot hold 598k inside a 200k window.
         yield* ContextManager.observe(SESSION, 598_000, null)
         return yield* ContextManager.snapshot(SESSION)
@@ -709,7 +704,7 @@ describe("window correction", () => {
     const rec = recorder()
     const snap = await run(
       Effect.gen(function* () {
-        yield* seed({ model: "some-new-tier" })
+        yield* seed({ modelId: providerModel("some-new-tier") })
         yield* ContextManager.observe(SESSION, 598_000, null)
         // A compaction (or simply a smaller turn) shrinks the working set. The
         // CEILING did not move.
@@ -727,7 +722,7 @@ describe("window correction", () => {
     const rec = recorder()
     const snap = await run(
       Effect.gen(function* () {
-        yield* seed({ model: "claude-opus-4-8" })
+        yield* seed({ modelId: providerModel("claude-opus-4-8") })
         yield* ContextManager.observe(SESSION, 213_600, null)
         return yield* ContextManager.snapshot(SESSION)
       }),
@@ -1048,7 +1043,7 @@ describe("ContextManager.snapshot", () => {
     const rec = recorder()
     const snap = await run(
       Effect.gen(function* () {
-        yield* seed({ model: "sonnet" })
+        yield* seed({ modelId: providerModel("sonnet") })
         yield* turnEnd(100_000)
         return yield* ContextManager.snapshot(SESSION)
       }),
@@ -1064,7 +1059,7 @@ describe("ContextManager.snapshot", () => {
     const rec = recorder()
     const snap = await run(
       Effect.gen(function* () {
-        yield* seed({ model: "some-new-tier" })
+        yield* seed({ modelId: providerModel("some-new-tier") })
         yield* turnEnd(250_000, 1_000_000)
         return yield* ContextManager.snapshot(SESSION)
       }),
@@ -1157,7 +1152,15 @@ describe("chat-scoped context", () => {
       const now = new Date().toISOString()
       return yield* seed({
         chats: [
-          { id: CHAT, title: null, createdAt: now, updatedAt: now, model: "claude-opus-4-1" }
+          {
+            id: CHAT,
+            title: null,
+            createdAt: now,
+            updatedAt: now,
+            connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+            providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+            modelId: providerModel("claude-opus-4-1")
+          }
         ],
         activeChatId: CHAT
       })

@@ -331,7 +331,6 @@ describe("Session", () => {
     branch: "chore/fix-login",
     title: "Fix login",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -373,7 +372,7 @@ describe("Session", () => {
       workspaceMode: "direct",
       persistent: true,
       baseBranch: "main",
-      chats: [{ ...base.chats[0]!, mode: "auto", model: "opus" }]
+      chats: [{ ...base.chats[0]!, mode: "auto" }]
     }
     const roundTripped = Schema.decodeUnknownSync(Session)(
       Schema.encodeSync(Session)(withWorktree)
@@ -441,10 +440,10 @@ describe("Session", () => {
     ).toBe(true)
   })
 
-  it("rejects an unknown cli kind", () => {
-    expect(Either.isLeft(decode(Session, { ...base, cli: "copilot" }))).toBe(
-      true
-    )
+  it("does not expose decoder-era cli fields on canonical sessions", () => {
+    const decoded = decode(Session, { ...base, cli: "copilot" })
+    expect(Either.isRight(decoded)).toBe(true)
+    if (Either.isRight(decoded)) expect(decoded.right).not.toHaveProperty("cli")
   })
 })
 
