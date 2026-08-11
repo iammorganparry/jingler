@@ -11,6 +11,7 @@ const LEGACY_HARNESS_PACKAGES = [
 
 const LEADING_SLASH = /^\//
 const PLAINTEXT_AUTH_FILE = /(^|\/)(auth|oauth)\.json$/
+const RELEASE_CERTIFICATION_MARKER = "jingler-release-certification-manifest-v1"
 
 const packageMarker = (name) => `node_modules/${name}/`
 
@@ -23,7 +24,10 @@ export const auditDeviceBundle = (source) => [
   ),
   ...(source.includes("Copyright (c) 2025 Mario Zechner") && source.includes("MIT License")
     ? []
-    : ["device bundle is missing the pi license notice"])
+    : ["device bundle is missing the pi license notice"]),
+  ...(source.includes(RELEASE_CERTIFICATION_MARKER)
+    ? []
+    : ["device bundle is missing the release certification manifest"])
 ]
 
 export const auditDesktopArchive = (entries) => {

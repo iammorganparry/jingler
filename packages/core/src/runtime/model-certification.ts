@@ -15,7 +15,7 @@ export type RuntimeContractVersions = Schema.Schema.Type<typeof RuntimeContractV
 
 export const CURRENT_RUNTIME_CONTRACTS: RuntimeContractVersions = {
   behavior: "1",
-  authentication: "1",
+  authentication: "2",
   prompt: "1",
   tools: "1",
   diff: "1",

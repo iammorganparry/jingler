@@ -138,6 +138,17 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      - name: Embed reviewed provider certifications
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTIFICATION_RUN_ID: ${{ inputs.certification_run_id }}
+        run: |
+          mkdir -p .artifacts/pi-certification
+          gh run download "$CERTIFICATION_RUN_ID" --name pi-provider-certification --dir .artifacts/pi-certification
+          cp .artifacts/pi-certification/release-manifest.json packages/core/src/runtime/release-certification-manifest.json
+          node -e 'const manifest = require("./packages/core/src/runtime/release-certification-manifest.json"); if (!Array.isArray(manifest.models) || manifest.models.length === 0) throw new Error("Release certification manifest has no selectable models")'
+
       # macOS notarization: stage the App Store Connect API key from a base64
       # secret. Skipped (and the build stays unsigned) when the secret is absent.
       - name: Stage Apple API key (macOS)

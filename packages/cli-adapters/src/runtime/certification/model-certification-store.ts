@@ -13,6 +13,9 @@ export interface ModelCertificationStore {
   readonly list: () => Promise<ReadonlyArray<ModelCertification>>
   readonly get: (key: string) => Promise<ModelCertification | null>
   readonly put: (certification: ModelCertification) => Promise<void>
+  readonly putAll: (
+    certifications: ReadonlyArray<ModelCertification>
+  ) => Promise<void>
   readonly current: (
     versions?: RuntimeContractVersions
   ) => Promise<ReadonlyArray<ModelCertification>>
@@ -35,11 +38,23 @@ export class FileModelCertificationStore implements ModelCertificationStore {
     (await this.#document.read()).find((item) => certificationKey(item) === key) ?? null
 
   put = (certification: ModelCertification): Promise<void> =>
+    this.putAll([certification])
+
+  putAll = (
+    certifications: ReadonlyArray<ModelCertification>
+  ): Promise<void> =>
     this.#document.update((current) => {
-      const key = certificationKey(certification)
+      const replacements = new Map(
+        certifications.map((certification) => [
+          certificationKey(certification),
+          certification
+        ])
+      )
       return [
-        ...current.filter((item) => certificationKey(item) !== key),
-        certification
+        ...current.filter(
+          (item) => !replacements.has(certificationKey(item))
+        ),
+        ...replacements.values()
       ]
     })
 
@@ -63,10 +78,23 @@ export class InMemoryModelCertificationStore implements ModelCertificationStore 
     this.#items.find((item) => certificationKey(item) === key) ?? null
 
   put = async (certification: ModelCertification): Promise<void> => {
-    const key = certificationKey(certification)
+    await this.putAll([certification])
+  }
+
+  putAll = async (
+    certifications: ReadonlyArray<ModelCertification>
+  ): Promise<void> => {
+    const replacements = new Map(
+      certifications.map((certification) => [
+        certificationKey(certification),
+        certification
+      ])
+    )
     this.#items = [
-      ...this.#items.filter((item) => certificationKey(item) !== key),
-      certification
+      ...this.#items.filter(
+        (item) => !replacements.has(certificationKey(item))
+      ),
+      ...replacements.values()
     ]
   }
 

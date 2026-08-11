@@ -17,6 +17,7 @@ import {
   SecretStore
 } from "@jingler/cli-adapters"
 import {
+  BUNDLED_RELEASE_CERTIFICATION_MANIFEST,
   CURRENT_RUNTIME_CONTRACTS,
   type CodexLoginMethod,
   type ModelCertification
@@ -126,7 +127,8 @@ const e2eEntitlementProbe = async (input: {
   planLabel: input.authKind === "api-key" ? null : "Test subscription",
   quotaLabel: null,
   rateLimitLabel: null,
-  billingRoute: input.authKind === "api-key" ? "api" : "subscription"
+  billingRoute: input.authKind === "api-key" ? "api" : "subscription",
+  observedRoute: `e2e-${input.authKind}`
 })
 
 /** Desktop composition for explicit, encrypted, connection-pinned provider auth. */
@@ -148,6 +150,18 @@ export const ProviderConnectionsLive = Layer.effect(
     const certifications = new FileModelCertificationStore(
       paths.certificationsFile
     )
+    if (BUNDLED_RELEASE_CERTIFICATION_MANIFEST.models.length > 0) {
+      yield* Effect.tryPromise({
+        try: () =>
+          certifications.putAll(
+            BUNDLED_RELEASE_CERTIFICATION_MANIFEST.models
+          ),
+        catch: (cause) => new ProviderConnectionsError({
+          message: "Failed to install bundled model certifications",
+          cause
+        })
+      })
+    }
     if (e2eFixture !== null && e2eConnection !== null) {
       const connection = e2eConnection
       yield* credentials.write({

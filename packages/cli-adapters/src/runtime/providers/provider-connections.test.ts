@@ -33,7 +33,8 @@ describe("ProviderConnections", () => {
         planLabel: "API",
         quotaLabel: null,
         rateLimitLabel: null,
-        billingRoute: "api"
+        billingRoute: "api",
+        observedRoute: "fixture-api"
       })
     }))
     const service = await Effect.runPromise(
@@ -96,7 +97,8 @@ describe("ProviderConnections", () => {
         planLabel: authKind === "api-key" ? "API" : "Subscription",
         quotaLabel: null,
         rateLimitLabel: null,
-        billingRoute: authKind === "api-key" ? "api" : "subscription"
+        billingRoute: authKind === "api-key" ? "api" : "subscription",
+        observedRoute: `fixture-${authKind}`
       })
     }))
     const certification = {

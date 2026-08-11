@@ -14,12 +14,15 @@ import { makePiCredentialStore } from "../auth/pi-credential-store.js"
 import { ProviderCatalogError, type DiscoveredProviderModel } from "./provider-catalog.js"
 
 const credentialFor = (authKind: AuthKind, access: string): Credential =>
-  authKind === "openai-codex-oauth"
+  authKind === "openai-codex-oauth" || authKind === "claude-setup-token"
     ? {
         type: "oauth",
         access,
         refresh: "",
-        expires: Date.now() + 10 * 60_000
+        expires:
+          authKind === "claude-setup-token"
+            ? Number.MAX_SAFE_INTEGER
+            : Date.now() + 10 * 60_000
       }
     : { type: "api_key", key: access }
 
@@ -65,6 +68,34 @@ const firstAvailableModel = async (
   return model
 }
 
+const routeLabel = (authKind: AuthKind): string => {
+  switch (authKind) {
+    case "claude-setup-token":
+      return "claude-oauth"
+    case "openai-codex-oauth":
+      return "chatgpt-subscription"
+    case "api-key":
+      return "api-key"
+    case "device-environment":
+      return "device-environment"
+  }
+}
+
+const redactedEndpoint = (baseUrl: string): string => {
+  const endpoint = new URL(baseUrl)
+  endpoint.username = ""
+  endpoint.password = ""
+  endpoint.search = ""
+  endpoint.hash = ""
+  return endpoint.toString().replace(/\/$/u, "")
+}
+
+const observedRoute = (
+  authKind: AuthKind,
+  model: Awaited<ReturnType<typeof firstAvailableModel>>
+): string =>
+  `${routeLabel(authKind)}:${model.api}:${redactedEndpoint(model.baseUrl)}`
+
 /** Verify entitlement with a minimal request through only the selected auth route. */
 export const probePiEntitlement = async (input: {
   readonly providerId: string
@@ -104,7 +135,8 @@ export const probePiEntitlement = async (input: {
         ? "api"
         : input.authKind === "device-environment"
           ? "device-environment"
-          : "subscription"
+          : "subscription",
+    observedRoute: observedRoute(input.authKind, model)
   }
 }
 

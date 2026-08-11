@@ -9,6 +9,11 @@ import {
 } from "@jingler/core"
 import { Data, Effect, Schema } from "effect"
 import { InMemoryProviderCredentialStore } from "../../src/runtime/auth/credential-store.js"
+import type {
+  AuthBrokerOptions,
+  EntitlementProbeResult
+} from "../../src/runtime/auth/auth-broker.js"
+import { probePiEntitlement } from "../../src/runtime/providers/pi-provider-access.js"
 import type { EvalTrace } from "../behavior-contract.js"
 import { runPiScenario } from "../deterministic-runtime.js"
 import { scoreScenario } from "../pi-eval.js"
@@ -54,17 +59,22 @@ const expectedBillingRoute = (
   }
 }
 
-const requireRoute = (
-  connection: ProviderConnectionType
+const requireObservedRoute = (
+  connection: ProviderConnectionType,
+  observation: EntitlementProbeResult
 ): Effect.Effect<void, LiveEvalError> => {
   const expected = expectedBillingRoute(connection.authKind)
   if (
-    connection.status !== "authenticated" ||
-    connection.subscription.entitlement !== "active" ||
-    connection.subscription.confirmedBillingRoute !== expected
+    observation.entitlement !== "active" ||
+    observation.billingRoute !== expected
   ) {
     return Effect.fail(new LiveEvalError({
       message: `${connection.id} has not confirmed its ${expected} billing route`
+    }))
+  }
+  if (observation.observedRoute.trim().length === 0) {
+    return Effect.fail(new LiveEvalError({
+      message: `${connection.id} returned no observable provider route`
     }))
   }
   return Effect.void
@@ -86,7 +96,10 @@ const optionalCredential = (
 
 const makeCredentials = (
   target: LiveEvalTarget
-): Effect.Effect<InMemoryProviderCredentialStore, LiveEvalError> =>
+): Effect.Effect<{
+  readonly access: string
+  readonly store: InMemoryProviderCredentialStore
+}, LiveEvalError> =>
   Effect.gen(function* () {
     const access = yield* requiredCredential(target.accessCredentialEnv)
     const oauth = target.connection.authKind === "openai-codex-oauth"
@@ -112,8 +125,65 @@ const makeCredentials = (
         cause
       }))
     )
-    return store
+    return { access, store }
   })
+
+const observeRoute = (
+  target: LiveEvalTarget,
+  access: string,
+  probe: AuthBrokerOptions["probe"]
+): Effect.Effect<EntitlementProbeResult, LiveEvalError> =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => new AbortController()),
+    (controller) =>
+      Effect.tryPromise({
+        try: () => probe({
+          providerId: target.connection.providerId,
+          authKind: target.connection.authKind,
+          access,
+          signal: controller.signal
+        }),
+        catch: (cause) => new LiveEvalError({
+          message: `${target.connection.id} entitlement probe failed`,
+          cause
+        })
+      }).pipe(
+        Effect.tap((observation) =>
+          requireObservedRoute(target.connection, observation)
+        )
+      ),
+    (controller) => Effect.sync(() => controller.abort())
+  )
+
+const targetFromObservation = (
+  target: LiveEvalTarget,
+  observation: EntitlementProbeResult
+): LiveEvalTarget => ({
+  ...target,
+  connection: {
+    ...target.connection,
+    account:
+      target.connection.account === null
+        ? null
+        : {
+            ...target.connection.account,
+            displayLabel: observation.planLabel
+          },
+    status: "authenticated",
+    subscription: {
+      entitlement: observation.entitlement,
+      planLabel: observation.planLabel,
+      expiresAt:
+        target.expiresAt === null
+          ? null
+          : new Date(target.expiresAt).toISOString(),
+      quotaLabel: observation.quotaLabel,
+      rateLimitLabel: observation.rateLimitLabel,
+      confirmedBillingRoute: observation.billingRoute
+    },
+    updatedAt: new Date().toISOString()
+  }
+})
 
 const failedTrace = (scenarioId: string, durationMs: number): EvalTrace => ({
   scenarioId,
@@ -171,6 +241,7 @@ export const runLiveTarget = (
   target: LiveEvalTarget,
   provenance: ModelCertification["provenance"],
   options: {
+    readonly probe?: AuthBrokerOptions["probe"]
     readonly runScenario?: (
       target: LiveEvalTarget,
       credentials: InMemoryProviderCredentialStore,
@@ -179,11 +250,21 @@ export const runLiveTarget = (
   } = {}
 ): Effect.Effect<LiveTargetResult, LiveEvalError> =>
   Effect.gen(function* () {
-    yield* requireRoute(target.connection)
     const credentials = yield* makeCredentials(target)
+    const observation = yield* observeRoute(
+      target,
+      credentials.access,
+      options.probe ?? probePiEntitlement
+    )
+    const verifiedTarget = targetFromObservation(target, observation)
     const traces = yield* Effect.forEach(
       CORE_PI_SCENARIOS,
-      (scenario) => (options.runScenario ?? runScenario)(target, credentials, scenario.id),
+      (scenario) =>
+        (options.runScenario ?? runScenario)(
+          verifiedTarget,
+          credentials.store,
+          scenario.id
+        ),
       { concurrency: 1 }
     )
     return {
@@ -193,12 +274,12 @@ export const runLiveTarget = (
         modelId: target.modelId,
         authRoute: {
           kind: target.connection.authKind,
-          observedRoute: target.connection.subscription.confirmedBillingRoute ?? "",
+          observedRoute: observation.observedRoute,
           subscription: expectedBillingRoute(target.connection.authKind) === "subscription",
-          entitlementConfirmed: target.connection.subscription.entitlement === "active",
+          entitlementConfirmed: observation.entitlement === "active",
           apiBillingFallbackObserved:
             expectedBillingRoute(target.connection.authKind) === "subscription" &&
-            target.connection.subscription.confirmedBillingRoute === "api"
+            observation.billingRoute === "api"
         },
         versions: CURRENT_RUNTIME_CONTRACTS,
         provenance,

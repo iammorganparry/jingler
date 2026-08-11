@@ -8,6 +8,7 @@ import {
 const piBundle = [
   "node_modules/@earendil-works/pi-ai/dist/index.js",
   "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+  "jingler-release-certification-manifest-v1",
   "MIT License",
   "Copyright (c) 2025 Mario Zechner"
 ].join("\n")

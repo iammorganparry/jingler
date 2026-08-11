@@ -10,7 +10,8 @@ const activeProbe = vi.fn(async () => ({
   planLabel: "Subscription",
   quotaLabel: null,
   rateLimitLabel: null,
-  billingRoute: "subscription" as const
+  billingRoute: "subscription" as const,
+  observedRoute: "fixture-subscription"
 }))
 
 const oauth = (expires: number): CodexOAuthFlow => ({
@@ -52,7 +53,14 @@ describe("AuthBroker", () => {
     const broker = await Effect.runPromise(makeAuthBroker({
       credentials,
       codexOAuth: oauth(Date.now() + 60_000),
-      probe: async () => ({ entitlement: "requires-api-credits", planLabel: null, quotaLabel: null, rateLimitLabel: null, billingRoute: "api" })
+      probe: async () => ({
+        entitlement: "requires-api-credits",
+        planLabel: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        billingRoute: "api",
+        observedRoute: "fixture-api"
+      })
     }))
     const connection = await Effect.runPromise(broker.connectClaudeToken({ id: "claude-1", token: "sk-ant-oat-fixture-value", targetId: "desktop" }))
     expect(connection.status).toBe("entitlement-unconfirmed")
@@ -80,7 +88,8 @@ describe("AuthBroker API connections", () => {
         planLabel: "API",
         quotaLabel: null,
         rateLimitLabel: null,
-        billingRoute: "api"
+        billingRoute: "api",
+        observedRoute: "fixture-api"
       })
     }))
     const connection = await Effect.runPromise(

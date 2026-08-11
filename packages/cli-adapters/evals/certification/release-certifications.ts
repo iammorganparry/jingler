@@ -150,6 +150,7 @@ export const buildReleaseCertificationManifest = (
     }
 
     return {
+      format: "jingler-release-certification-manifest-v1" as const,
       schemaVersion: 1 as const,
       generatedAt: input.generatedAt,
       versions,

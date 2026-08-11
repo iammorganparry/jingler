@@ -34,6 +34,8 @@ export interface EntitlementProbeResult {
   readonly quotaLabel: string | null
   readonly rateLimitLabel: string | null
   readonly billingRoute: "subscription" | "api" | "device-environment" | null
+  /** Successful provider request route, stripped of credentials and query data. */
+  readonly observedRoute: string
 }
 
 export interface AuthBrokerOptions {

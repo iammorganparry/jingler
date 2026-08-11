@@ -17,7 +17,10 @@ import {
   ProviderConnectionsError,
 } from "@jingler/cli-adapters/runtime/providers/provider-connections";
 import { discoverPiModels } from "@jingler/cli-adapters/runtime/providers/pi-provider-access";
-import { ProviderConnection } from "@jingler/core";
+import {
+  BUNDLED_RELEASE_CERTIFICATION_MANIFEST,
+  ProviderConnection,
+} from "@jingler/core";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Effect, Layer, Ref, Schema, Stream } from "effect";
 
@@ -267,11 +270,28 @@ export const makeDeviceProviderLayers = (
       const paths = yield* AppPaths;
       const store = yield* SecretStore;
       const credentials = new AgentSecretStore(store);
+      const certifications =
+        overrides?.certifications ??
+        new FileModelCertificationStore(paths.certificationsFile);
+      if (
+        overrides === undefined &&
+        BUNDLED_RELEASE_CERTIFICATION_MANIFEST.models.length > 0
+      ) {
+        yield* Effect.tryPromise({
+          try: () =>
+            certifications.putAll(
+              BUNDLED_RELEASE_CERTIFICATION_MANIFEST.models,
+            ),
+          catch: (cause) =>
+            new ProviderConnectionsError({
+              message: "Failed to install bundled model certifications",
+              cause,
+            }),
+        });
+      }
       const catalog = yield* makeProviderCatalogService({
         connections: Effect.succeed(state.connections),
-        certifications:
-          overrides?.certifications ??
-          new FileModelCertificationStore(paths.certificationsFile),
+        certifications,
         discover:
           overrides?.discover ??
           ((provider, signal) =>

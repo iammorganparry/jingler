@@ -13,12 +13,16 @@ import type {
 const toPiCredential = (
   credential: StoredProviderCredential
 ): Credential =>
-  credential.authKind === "openai-codex-oauth"
+  credential.authKind === "openai-codex-oauth" ||
+  credential.authKind === "claude-setup-token"
     ? {
         type: "oauth",
         access: credential.access,
         refresh: credential.refresh ?? "",
-        expires: credential.expiresAt ?? 0
+        // Claude setup-tokens are non-refreshing OAuth credentials. Keeping
+        // them non-expiring here prevents pi from attempting a refresh with
+        // an empty token while retaining its OAuth request semantics.
+        expires: credential.expiresAt ?? Number.MAX_SAFE_INTEGER
       }
     : { type: "api_key", key: credential.access }
 
@@ -27,13 +31,21 @@ const fromPiCredential = (
   credential: Credential
 ): StoredProviderCredential =>
   credential.type === "oauth"
-    ? {
-        connectionId: connection.id,
-        authKind: "openai-codex-oauth",
-        access: credential.access,
-        refresh: credential.refresh,
-        expiresAt: credential.expires
-      }
+    ? connection.authKind === "claude-setup-token"
+      ? {
+          connectionId: connection.id,
+          authKind: connection.authKind,
+          access: credential.access,
+          refresh: null,
+          expiresAt: null
+        }
+      : {
+          connectionId: connection.id,
+          authKind: "openai-codex-oauth",
+          access: credential.access,
+          refresh: credential.refresh,
+          expiresAt: credential.expires
+        }
     : {
         connectionId: connection.id,
         authKind: connection.authKind,
@@ -67,7 +79,8 @@ export const makePiCredentialStore = (
             {
               providerId: connection.providerId,
               type:
-                credential.authKind === "openai-codex-oauth"
+                credential.authKind === "openai-codex-oauth" ||
+                credential.authKind === "claude-setup-token"
                   ? "oauth"
                   : "api_key"
             }

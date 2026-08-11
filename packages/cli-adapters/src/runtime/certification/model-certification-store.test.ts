@@ -57,6 +57,23 @@ describe("model certification store", () => {
     expect(await store.list()).toHaveLength(2)
   })
 
+  it("merges a reviewed release manifest without duplicating an existing route", async () => {
+    const store = new InMemoryModelCertificationStore()
+    const local = certification("openai-codex-oauth")
+    const reviewed = certification("openai-codex-oauth", "reviewed-release")
+    await store.put(local)
+    await store.putAll([
+      reviewed,
+      certification("claude-setup-token", "reviewed-release")
+    ])
+
+    expect(await store.list()).toEqual(expect.arrayContaining([
+      reviewed,
+      certification("claude-setup-token", "reviewed-release")
+    ]))
+    expect(await store.list()).toHaveLength(2)
+  })
+
   it("persists concurrent updates atomically without losing a route", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-certifications-"))
     roots.push(root)
