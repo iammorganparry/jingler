@@ -92,7 +92,7 @@ export const toSessionSnapshot = (session: Session): SessionSnapshot => ({
   repo: session.repo,
   branch: session.branch,
   title: session.title,
-  cli: session.cli,
+  ...(session.providerId === undefined ? {} : { providerId: session.providerId }),
   prNumber: session.prNumber ?? null,
   ...(session.issueNumber != null ? { issueNumber: session.issueNumber } : {}),
   ...(issueReferenceOf(session) ? { linkedIssue: issueReferenceOf(session) } : {}),

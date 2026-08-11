@@ -162,7 +162,7 @@ interface SessionSnapshot {
   readonly repo: string          // "owner/repo"
   readonly branch: string
   readonly title: string
-  readonly cli: "claude" | "codex" | "cursor" | "opencode" | "jingler"
+  readonly providerId?: string
   readonly prNumber: number | null
   readonly issueNumber?: number
   readonly linkedIssue?: IssueReference

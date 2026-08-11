@@ -374,7 +374,7 @@ interface SessionSnapshot {
   repo: string            // "owner/repo"
   branch: string
   title: string
-  cli: "claude" | "codex" | "cursor" | "opencode" | "jingler"
+  providerId?: string
   prNumber: number | null
   issueNumber?: number
   worktreePath?: string

@@ -46,7 +46,6 @@ export function SessionHoverCard({
           you hovered is the first thing the card confirms. */}
       <span className="flex min-w-0 items-center gap-1.5">
         <ProviderIcon
-          cli={session.cli}
           providerId={session.providerId ?? undefined}
           size={13}
           className="flex-none"

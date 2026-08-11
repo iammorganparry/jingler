@@ -1,10 +1,11 @@
-import type { CliKind, Message, Subagent } from "@jingler/core"
+import type { CliKind, Message, ProviderId, Subagent } from "@jingler/core"
 import { MessageTurn } from "../composites/message-turn.js"
 
 /** The transcript fields shared by Claude sub-agents, workers, and reviewers. */
 export interface VisibleAgentTranscript {
   readonly message: Message
-  readonly cli: CliKind
+  readonly cli?: CliKind
+  readonly providerId?: ProviderId
 }
 
 /**
@@ -24,7 +25,7 @@ export function AgentView({ agent }: { agent: VisibleAgentTranscript }) {
     <div className="flex min-h-0 flex-1 flex-col bg-editor">
       <div className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-[760px]">
-          <MessageTurn message={agent.message} cli={agent.cli} />
+          <MessageTurn message={agent.message} cli={agent.cli} providerId={agent.providerId} />
         </div>
       </div>
     </div>

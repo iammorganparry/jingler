@@ -790,7 +790,6 @@ function SessionRail({
               know, and two sessions on the same feature collide; which
               agent is driving is the fact you actually navigate by. */}
           <ProviderIcon
-            cli={s.cli}
             providerId={s.providerId ?? undefined}
             size={16}
             // Brand colour for the active session, monochrome for the

@@ -95,8 +95,8 @@ export interface SessionSnapshot {
   readonly branch: string
   /** The session's display title, as shown in the sidebar. */
   readonly title: string
-  /** Which local agent is driving the session. */
-  readonly cli: "claude" | "codex" | "cursor" | "opencode"
+  /** Canonical inference provider, when the session has completed runtime selection. */
+  readonly providerId?: string
   /** The linked pull-request number, or `null` when the session has no PR. */
   readonly prNumber: number | null
   /** The linked GitHub issue number, when one drove the session. */

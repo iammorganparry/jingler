@@ -30,7 +30,7 @@ function Greeting({ session }: TabProps) {
   const facts: ReadonlyArray<readonly [string, string]> = [
     ["Repo", session.repo],
     ["Branch", session.branch],
-    ["Agent", session.cli],
+    ["Provider", session.providerId ?? "Not selected"],
     ["Pull request", session.prNumber === null ? "none" : `#${session.prNumber}`],
     ["Worktree", session.worktreePath ?? "none"]
   ]

@@ -86,7 +86,6 @@ export function PersistentSessionTile({
     >
       <span className="flex w-full items-center">
         <ProviderIcon
-          cli={session.cli}
           providerId={session.providerId ?? undefined}
           size={15}
           mono={!active}

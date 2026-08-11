@@ -667,7 +667,8 @@ export function ConversationPane({
 
   const activeAgentTranscript = activeSubagent === null ? null : {
     message: activeSubagent.message,
-    cli: activeSubagent.cli ?? session.cli
+    cli: activeSubagent.cli,
+    providerId: session.providerId
   }
 
   // Drilling into an agent shows its children AND its own transcript; a crumb
