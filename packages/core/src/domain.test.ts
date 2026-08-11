@@ -21,9 +21,7 @@ import {
   Session,
   newSessionCli,
   startableClis,
-  supportsAutoMode,
   supportsPlanMode,
-  supportsSteer,
   workspaceModeOf,
   WorkspaceConfig
 } from "./domain.js"
@@ -600,53 +598,14 @@ describe("supportsPlanMode", () => {
   })
 })
 
-describe("supportsSteer", () => {
-  /**
-   * This predicate gates the queue's AUTOMATIC flush at tool boundaries. Where
-   * steering isn't native the fallback is stop-and-replay, so a wrong `true` here
-   * doesn't degrade — it interrupts the operator's turn at every tool call.
-   */
-  it("covers the harnesses with a channel into a live turn", () => {
-    // claude via the SDK's streaming input; codex via `turn/steer`.
-    expect(supportsSteer("claude")).toBe(true)
-    expect(supportsSteer("codex")).toBe(true)
-  })
-
-  it("excludes the harnesses whose turn cannot be added to", () => {
-    expect(supportsSteer("cursor")).toBe(false)
-    expect(supportsSteer("opencode")).toBe(false)
-  })
-
-  it("classifies every CliKind, so a new harness cannot be forgotten", () => {
-    for (const cli of CLI_KINDS)
-      expect(typeof supportsSteer(cli)).toBe("boolean")
-  })
-})
-
-describe("supportsAutoMode", () => {
-  it("is true for the supported Claude and Codex harnesses", () => {
-    expect(supportsAutoMode("claude")).toBe(true)
-    expect(supportsAutoMode("codex")).toBe(true)
-    expect(supportsAutoMode("cursor")).toBe(false)
-    expect(supportsAutoMode("opencode")).toBe(false)
-  })
-
-  it("classifies every CliKind, so a new harness cannot be forgotten", () => {
-    for (const cli of CLI_KINDS)
-      expect(typeof supportsAutoMode(cli)).toBe("boolean")
-  })
-})
-
 describe("defaultModeFor", () => {
-  it("defaults to auto where the harness supports it", () => {
-    expect(defaultModeFor("codex")).toBe("auto")
-    expect(defaultModeFor("claude")).toBe("auto")
+  it("defaults every pi provider model to auto", () => {
+    expect(defaultModeFor()).toBe("auto")
   })
 
   it("honours the operator's configured default over the auto fallback", () => {
-    // "default to auto UNLESS the user changes it in settings."
-    expect(defaultModeFor("codex", "accept-edits")).toBe("accept-edits")
-    expect(defaultModeFor("codex", "ask")).toBe("ask")
+    expect(defaultModeFor("accept-edits")).toBe("accept-edits")
+    expect(defaultModeFor("ask")).toBe("ask")
   })
 })
 

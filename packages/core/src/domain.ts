@@ -272,47 +272,14 @@ export const supportsPlanMode = (cli: CliKind): boolean =>
   cli === "claude" || cli === "codex"
 
 /**
- * Whether the harness can take new input INTO a live turn (`Agent.steer`).
- *
- * Claude (streaming-input `query()`) and Codex (`turn/steer`) both can; the rest
- * have no channel into a running turn, so a steer there is answered
- * `unsupported` and the renderer falls back to stop-and-replay.
- *
- * This gates the queue's automatic flush, which is why it is a predicate rather
- * than a try-it-and-see: auto-flushing into a harness that cannot steer would
- * KILL the running turn at every tool boundary, turning "your message will be
- * picked up shortly" into "your agent keeps getting interrupted".
- */
-export const supportsSteer = (cli: CliKind): boolean =>
-  cli === "claude" || cli === "codex"
-
-/**
- * Whether a harness can run in fully-autonomous `auto` mode — no sandbox, no
- * per-action gate.
- *
- * `auto` is the default a fresh session lands in when the harness supports it,
- * because that is how the operator drives the CLI directly (unsandboxed and able
- * to run repository tools such as `git push`). A harness that does NOT support it
- * falls back to `accept-edits`, where the sandbox stays on and any action needing
- * escalation is FORWARDED to the operator through the approval gate. Every harness
- * Jingler ships today supports `auto`; the predicate exists so a future harness
- * that cannot can opt out in one place.
- */
-export const supportsAutoMode = (cli: CliKind): boolean =>
-  cli === "claude" || cli === "codex"
-
-/**
  * The mode a fresh session should start in: the operator's configured default
- * when they set one in settings, else `auto` where the harness supports it, else
- * `accept-edits` (sandbox on, permissions forwarded). The single source of truth
- * for "what does a new session default to", so creation and the runtime fallback
- * cannot drift.
+ * when they set one in settings, otherwise `auto`. pi owns the permission
+ * contract for every provider model, so this policy is not provider-dependent.
  */
 export const defaultModeFor = (
-  cli: CliKind,
   configuredDefault?: PermissionMode
 ): PermissionMode =>
-  configuredDefault ?? (supportsAutoMode(cli) ? "auto" : "accept-edits")
+  configuredDefault ?? "auto"
 
 /**
  * Automations for a session linked to a GitHub issue (design I2 toggles).

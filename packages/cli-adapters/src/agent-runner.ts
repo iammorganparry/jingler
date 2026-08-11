@@ -79,7 +79,6 @@ import type {
 } from "./adapter.js"
 import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
-import { readDefaultMode } from "./default-mode.js"
 import { healedWorktreePath } from "./cli-project-dir.js"
 import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
@@ -632,18 +631,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         return approvalAccepted
       })
 
-    /**
-     * The user's configured default execution mode for a session (`auto` /
-     * `accept-edits` / `ask`), read from their CLI config. `AppPaths.root` is
-     * `~/jingler`, so its parent is $HOME. Never fails.
-     */
-    const resolveExecMode = (sessionId: string): Effect.Effect<PermissionMode, never, PromptEnv> =>
-      Effect.gen(function* () {
-        const session = yield* getSessionOrNull(sessionId)
-        const pathSvc = yield* Path.Path
-        const appPaths = yield* AppPaths
-        return yield* readDefaultMode(session?.cli ?? "claude", pathSvc.dirname(appPaths.root))
-      })
+    /** Jingler's provider-independent execution fallback. */
+    const resolveExecMode = (): Effect.Effect<PermissionMode> =>
+      Effect.succeed(defaultModeFor())
 
     /** The plan with `planId` from a session's persisted transcript, or null. */
     const sessionPlan = (chatId: string, planId: string): Effect.Effect<Plan | null, never, PromptEnv> =>
@@ -716,7 +706,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             (chat) => chat.id === chatId
           )?.mode
           const restore =
-            persisted && persisted !== "plan" ? persisted : yield* resolveExecMode(sessionId)
+            persisted && persisted !== "plan" ? persisted : yield* resolveExecMode()
           yield* setMode(sessionId, chatId, restore)
           return prompt(
             sessionId,
@@ -861,7 +851,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           yield* TranscriptStore.adoptLegacy(sessionId, chatId)
 
           const sessionMode =
-            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor(session.cli)
+            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor()
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
@@ -877,7 +867,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const cli = sessionCli
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
-          const execDefault = yield* resolveExecMode(sessionId)
+          const execDefault = yield* resolveExecMode()
           yield* Ref.update(execDefaults, (m) => new Map(m).set(chatId, execDefault))
           const binPath = null
           // The agent always runs in the session's recorded working checkout.
