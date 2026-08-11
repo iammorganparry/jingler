@@ -189,6 +189,7 @@ import {
   GitHubRelayConnection,
   GitHubRelaySupervisor,
   installationCanRouteRepository,
+  refreshGitHubRelaySupervisors,
 } from "./github-relay.js";
 
 /** The single IPC channel both directions of the RPC transport ride on. */
@@ -2112,12 +2113,27 @@ export const githubDetectPr = (sessionId: string) =>
     // drifts once the agent checks out / creates a different branch there.
     const n = yield* GitHubApi.prForWorktree(session.worktreePath);
     if (n !== null) {
-      const repository = yield* GitHubApi.repository(session.worktreePath);
-      yield* SessionStore.setGitHubLink(session.id, {
+      const [repository, liveBranch] = yield* Effect.all([
+        GitHubApi.repository(session.worktreePath),
+        GitService.branchAt(session.worktreePath),
+      ]);
+      const linked = yield* SessionStore.setGitHubLink(session.id, {
         installationId: repository.installationId,
         repositoryId: repository.id,
         prNumber: n,
+        ...(liveBranch === null ? {} : { branch: liveBranch }),
+      }).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      );
+      if (!linked) return null;
+      yield* GitHubAuth.upsertSessionRoute({
+        sessionId: session.id,
+        installationId: repository.installationId,
+        repositoryId: repository.id,
+        pullRequestNumber: n,
       }).pipe(Effect.ignore);
+      yield* Effect.promise(refreshGitHubRelaySupervisors);
     }
     return n;
   });

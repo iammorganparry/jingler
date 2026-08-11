@@ -1433,13 +1433,19 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setPrNumber = (id: string, prNumber: number | null) =>
         update(id, (s) => ({ ...s, prNumber }))
 
-      /** Persist immutable GitHub routing identity alongside the linked PR. */
+      /** Persist the live worktree/PR identity as one routing transition. */
       const setGitHubLink = (
         id: string,
-        link: { readonly installationId: string; readonly repositoryId: string; readonly prNumber: number }
+        link: {
+          readonly installationId: string
+          readonly repositoryId: string
+          readonly prNumber: number
+          readonly branch?: string
+        }
       ) =>
         update(id, (session) => ({
           ...session,
+          ...(link.branch === undefined ? {} : { branch: link.branch }),
           prNumber: link.prNumber,
           githubInstallationId: link.installationId,
           githubRepositoryId: link.repositoryId

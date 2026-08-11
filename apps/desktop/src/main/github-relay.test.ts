@@ -405,6 +405,61 @@ describe("GitHubRelaySupervisor", () => {
     }
   });
 
+  it("reconciles a replacement pull-request route immediately when explicitly refreshed", async () => {
+    vi.useFakeTimers();
+    try {
+      let sessions = [
+        {
+          sessionId: "session-a",
+          relaySessionId: "relay-old",
+          installationId: "99",
+        },
+      ];
+      const sockets = new Map<string, FakeSocket>();
+      const supervisor = new GitHubRelaySupervisor({
+        listSessions: async () => sessions,
+        createConnection: (target, onStatus) => {
+          const socket = new FakeSocket();
+          sockets.set(target.relaySessionId, socket);
+          return new GitHubRelayConnection({
+            clientId: `desktop:${target.relaySessionId}`,
+            grant: async () => ({
+              relayUrl: "https://relay.test",
+              grant: "grant",
+              expiresAt: 1,
+            }),
+            cursorStore: { load: async () => 0, save: async () => {} },
+            dial: () => socket,
+            onEvent: async () => {},
+            onStatus,
+            heartbeatMs: 60_000,
+          });
+        },
+      });
+
+      await supervisor.start();
+      sockets.get("relay-old")?.open();
+      sessions = [
+        {
+          sessionId: "session-a",
+          relaySessionId: "relay-replacement",
+          installationId: "99",
+        },
+      ];
+
+      await supervisor.refresh();
+
+      expect(sockets.get("relay-old")?.closes).toContainEqual({
+        code: 1000,
+        reason: "Jingler stopped relay connection",
+      });
+      expect(sockets.has("relay-replacement")).toBe(true);
+      supervisor.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reconciles linked session additions and removals without restart", async () => {
     vi.useFakeTimers();
     try {
