@@ -1857,16 +1857,17 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       return prior;
     }
 
-    const cli = session.cli;
-    if (session.connectionId === undefined || session.modelId === undefined) {
+    if (
+      session.connectionId === undefined ||
+      session.providerId === undefined ||
+      session.modelId === undefined
+    ) {
       return yield* Effect.fail(
         new ReviewError({
           message: "Choose a certified provider connection before running a review.",
         }),
       );
     }
-    const model = session.modelId;
-
     const diff = yield* GitHubApi.prDiff(
       session.worktreePath,
       session.prNumber,
@@ -1880,9 +1881,8 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       repo: session.repo,
       branch: session.branch,
       baseBranch: session.baseBranch ?? null,
-      cli,
-      model,
       connectionId: session.connectionId,
+      providerId: session.providerId,
       modelId: session.modelId,
       targetId: session.environmentId ?? "desktop",
       diff,

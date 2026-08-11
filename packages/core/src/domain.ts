@@ -670,11 +670,7 @@ export const GithubConfig = Schema.Struct({
    * advances. Off by default (a reviewer run costs real tokens); de-duped on the
    * PR head SHA so a poll loop can fire it safely. Absent on older configs.
    */
-  autoAdversarialReview: Schema.optional(Schema.Boolean),
-  /** Harness that runs the reviewer; absent = "claude". */
-  reviewCli: Schema.optional(CliKind),
-  /** Reviewer model id; absent = `DEFAULT_REVIEW_MODEL[reviewCli]` (Fable). */
-  reviewModel: Schema.optional(Schema.String)
+  autoAdversarialReview: Schema.optional(Schema.Boolean)
 })
 export type GithubConfig = Schema.Schema.Type<typeof GithubConfig>
 
@@ -1863,10 +1859,12 @@ export const AdversarialReview = Schema.Struct({
    * poll-driven trigger from re-spawning a reviewer on every tick.
    */
   headSha: Schema.String,
-  /** The harness that ran the reviewer. */
-  cli: CliKind,
-  /** The model the reviewer ran on (e.g. "claude-fable-5"). */
-  model: Schema.String,
+  /** Canonical runtime identity. Null only for reviews migrated from harness-era storage. */
+  connectionId: Schema.NullOr(ProviderConnectionId),
+  providerId: Schema.NullOr(ProviderId),
+  modelId: Schema.NullOr(ProviderModelId),
+  /** Decoder-only display provenance for a review written before provider model ids. */
+  legacyModel: Schema.optional(Schema.String),
   /** ISO-8601 timestamp of the run. */
   createdAt: Schema.String,
   findings: Schema.Array(ReviewFinding),
@@ -1914,6 +1912,10 @@ export const AdversarialReview = Schema.Struct({
   })
 })
 export type AdversarialReview = Schema.Schema.Type<typeof AdversarialReview>
+
+/** Human-readable model attribution for current and migrated reviews. */
+export const adversarialReviewModelLabel = (review: AdversarialReview): string =>
+  review.modelId ?? review.legacyModel ?? "Unknown model"
 
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({

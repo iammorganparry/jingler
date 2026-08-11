@@ -1,5 +1,10 @@
 import type { AdversarialReview, StreamEvent } from "@jingler/core"
-import { AdversarialReview as AdversarialReviewSchema, StreamEvent as StreamEventSchema } from "@jingler/core"
+import {
+  AdversarialReview as AdversarialReviewSchema,
+  CliKind,
+  ReviewFinding,
+  StreamEvent as StreamEventSchema
+} from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Ref, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
@@ -7,6 +12,36 @@ import { AppPaths } from "./app-paths.js"
 type ReviewEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
 const Events = Schema.Array(StreamEventSchema)
+
+/** Decoder-only shape for reviews written before provider connections existed. */
+const LegacyAdversarialReview = Schema.Struct({
+  sessionId: Schema.String,
+  prNumber: Schema.Number,
+  headSha: Schema.String,
+  cli: CliKind,
+  model: Schema.String,
+  createdAt: Schema.String,
+  findings: Schema.Array(ReviewFinding),
+  note: Schema.NullOr(Schema.String),
+  routedAt: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
+  postedAt: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null }),
+  postError: Schema.optionalWith(Schema.NullOr(Schema.String), { default: () => null })
+})
+const StoredReview = Schema.Union(AdversarialReviewSchema, LegacyAdversarialReview)
+
+const migrateStoredReview = (
+  stored: Schema.Schema.Type<typeof StoredReview>
+): AdversarialReview => {
+  if (!("cli" in stored)) return stored
+  const { cli: _legacyCli, model, ...review } = stored
+  return {
+    ...review,
+    connectionId: null,
+    providerId: null,
+    modelId: null,
+    legacyModel: model
+  }
+}
 
 /**
  * The stored transcript, now wrapped so it can carry its OWNING chat id — the
@@ -82,8 +117,8 @@ export class ReviewStore extends Effect.Service<ReviewStore>()("@jingler/ReviewS
         if (!exists) return null
         const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""))
         if (raw.trim().length === 0) return null
-        return yield* Schema.decodeUnknown(Schema.parseJson(AdversarialReviewSchema))(raw).pipe(
-          Effect.map((r): AdversarialReview | null => r),
+        return yield* Schema.decodeUnknown(Schema.parseJson(StoredReview))(raw).pipe(
+          Effect.map((stored): AdversarialReview | null => migrateStoredReview(stored)),
           // A malformed review must never block a re-review: fold to null and the
           // caller simply runs a fresh one.
           Effect.orElseSucceed(() => null)

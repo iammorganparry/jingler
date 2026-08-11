@@ -1,7 +1,7 @@
 import type {
   AdversarialReview,
-  CliKind,
   ProviderConnectionId,
+  ProviderId,
   ProviderModelId,
   ReviewFinding,
   ReviewSeverity,
@@ -22,7 +22,7 @@ import { adversarialPrompt } from "./review-prompt.js"
  *
  * Why this does NOT go through `AgentRunner`: `AgentRunner.prompt` is stateful —
  * it takes the model from the *session*, writes the transcript, persists the
- * harness `resumeId`, and parks on approval gates. All four are wrong here. A
+ * conversation continuation, and parks on approval gates. All four are wrong here. A
  * review must run on its own (usually stronger) model, leave no trace on the
  * session's conversation, and never block waiting for a human who isn't looking.
  * So we build our own `AgentTurnSpec` and drive `AgentTurnDriver` directly.
@@ -170,9 +170,8 @@ export interface ReviewInput {
   readonly branch: string
   /** The PR's base branch, or null when the session doesn't record one. */
   readonly baseBranch: string | null
-  readonly cli: CliKind
-  readonly model: string
   readonly connectionId: ProviderConnectionId
+  readonly providerId: ProviderId
   readonly modelId: ProviderModelId
   readonly targetId?: string
   readonly diff: string
@@ -447,7 +446,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
           Effect.mapError(
             (cause) =>
               new ReviewError({
-                message: `The ${input.cli} reviewer failed to run: ${cause.message}`,
+                message: `The ${input.providerId} reviewer failed to run: ${cause.message}`,
                 cause
               })
           )
@@ -468,8 +467,9 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
           sessionId: input.sessionId,
           prNumber: input.prNumber,
           headSha: input.headSha,
-          cli: input.cli,
-          model: input.model,
+          connectionId: input.connectionId,
+          providerId: input.providerId,
+          modelId: input.modelId,
           createdAt: now,
           findings: findings ?? [],
           // A reviewer that ran but emitted no parseable block still produced a

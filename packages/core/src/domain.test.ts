@@ -25,6 +25,11 @@ import {
   workspaceModeOf,
   WorkspaceConfig
 } from "./domain.js"
+import {
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId
+} from "./runtime/provider-connection.js"
 
 /**
  * These schemas back persistence (config.json, sessions.json) and the RPC wire
@@ -204,39 +209,14 @@ describe("WorkspaceConfig", () => {
 })
 
 describe("GithubConfig", () => {
-  // The review fields are optional precisely so this keeps passing: every
-  // config.json written before the adversarial reviewer existed lacks them, and
-  // a required field would make the whole workspace config fail to decode on
-  // upgrade — i.e. the app would boot as if it had never been set up.
-  it("decodes a config written before the review fields existed", () => {
-    const result = decode(GithubConfig, {
-      enabled: true,
-      autoCreatePr: false,
-      autoDetectPr: true
-    })
-    expect(Either.isRight(result)).toBe(true)
-  })
-
-  it("decodes a config carrying the review fields", () => {
+  it("decodes provider-neutral review preferences", () => {
     const result = decode(GithubConfig, {
       enabled: true,
       autoCreatePr: false,
       autoDetectPr: true,
-      autoAdversarialReview: true,
-      reviewCli: "claude",
-      reviewModel: "claude-fable-5"
+      autoAdversarialReview: true
     })
     expect(Either.isRight(result)).toBe(true)
-  })
-
-  it("rejects a reviewCli that is not a known harness", () => {
-    const result = decode(GithubConfig, {
-      enabled: true,
-      autoCreatePr: false,
-      autoDetectPr: true,
-      reviewCli: "gemini"
-    })
-    expect(Either.isLeft(result)).toBe(true)
   })
 
   it("still decodes inside a WorkspaceConfig with a legacy github block", () => {
@@ -254,8 +234,9 @@ describe("AdversarialReview", () => {
     sessionId: "s1",
     prNumber: 42,
     headSha: "abc123",
-    cli: "claude",
-    model: "claude-fable-5",
+    connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+    providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+    modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-fable-5"),
     createdAt: "2026-07-16T10:00:00.000Z",
     findings: [
       {

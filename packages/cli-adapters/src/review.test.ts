@@ -1,5 +1,5 @@
 import type { StreamEvent } from "@jingler/core"
-import { AgentRunError, ProviderConnectionId, ProviderModelId } from "@jingler/core"
+import { AgentRunError, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import type { PermissionDecision } from "./agent-turn-driver.js"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
 import type { AgentContext, AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
@@ -35,9 +35,8 @@ const INPUT: ReviewInput = {
   repo: "acme/widget",
   branch: "feature",
   baseBranch: "main",
-  cli: "claude",
-  model: "claude-fable-5",
   connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+  providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
   modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-fable-5"),
   diff: "diff --git a/a.ts b/a.ts\n+const x = 1\n"
 }

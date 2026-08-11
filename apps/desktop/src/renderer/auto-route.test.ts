@@ -56,8 +56,10 @@ const review = (over: Partial<AdversarialReview> = {}): AdversarialReview => ({
   // Unique per test — the guard is keyed by sessionId:headSha and is
   // module-level, so a shared SHA would leak a claim across tests.
   headSha: "head-default",
-  cli: "claude",
-  model: "claude-fable-5",
+  connectionId: null,
+  providerId: null,
+  modelId: null,
+  legacyModel: "claude-fable-5",
   createdAt: "2026-07-17T10:00:00.000Z",
   findings: [finding("f1", "critical"), finding("f2", "nit")],
   note: null,

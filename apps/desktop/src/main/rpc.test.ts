@@ -1309,7 +1309,7 @@ describe("RPC handlers", () => {
       expect(spawns).toHaveLength(1);
       expect(review.headSha).toBe("sha-one");
       expect(review.findings).toHaveLength(1);
-      expect(review.model).toBe("anthropic/claude-sonnet-4-5");
+      expect(review.modelId).toBe("anthropic/claude-sonnet-4-5");
     });
 
     it("does not expose or stamp a stored review after the active PR changes", async () => {
@@ -1517,28 +1517,13 @@ describe("RPC handlers", () => {
       expect(second.headSha).toBe("sha-two");
     });
 
-    it("honours a configured review model", async () => {
+    it("uses the session's certified provider model", async () => {
       withSession();
-      mkdirSync(root, { recursive: true });
-      writeFileSync(
-        join(root, "config.json"),
-        JSON.stringify({
-          reposDir: "/repos",
-          createdAt: "2026-01-01T00:00:00.000Z",
-          github: {
-            enabled: true,
-            autoCreatePr: false,
-            autoDetectPr: true,
-            reviewCli: "claude",
-            reviewModel: "claude-opus-4-8",
-          },
-        }),
-      );
       const { layer, spawns } = countingAdapter();
       const review = await Effect.runPromise(
         reviewRun("s1", false).pipe(Effect.provide(envFor("sha-one", layer))),
       );
-      expect(review.model).toBe("anthropic/claude-sonnet-4-5");
+      expect(review.modelId).toBe("anthropic/claude-sonnet-4-5");
       expect(spawns[0]!.modelId).toBe("anthropic/claude-sonnet-4-5");
     });
 

@@ -1,4 +1,5 @@
 import type { AdversarialReview, ReviewFinding } from "@jingler/core"
+import { adversarialReviewModelLabel } from "@jingler/core"
 import { findingLocation, partitionFindings } from "@jingler/core"
 import { postableLines } from "./github-mappers.js"
 
@@ -131,7 +132,7 @@ export const planReviewPost = (
   const summary = [
     `**Adversarial review** — ${toPr.length} low-severity ${
       toPr.length === 1 ? "finding" : "findings"
-    } from \`${review.model}\`.`,
+    } from \`${adversarialReviewModelLabel(review)}\`.`,
     "",
     "Critical and major findings (if any) went straight to the agent rather than here."
   ]
