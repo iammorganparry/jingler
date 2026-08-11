@@ -155,7 +155,6 @@ export function Composer({
   onSetModel,
   mode = "accept-edits",
   onSetMode,
-  useJinglerTools = true,
   followAgent = false,
   onToggleFollowAgent,
   reasoningEffort,
@@ -220,8 +219,6 @@ export function Composer({
   /** Current HITL mode (shown in the mode chip; Shift+Tab cycles it). */
   mode?: PermissionMode;
   onSetMode?: (mode: PermissionMode) => void;
-  /** Enhanced Plan replaces provider-native Plan while Jingler tools are enabled. */
-  useJinglerTools?: boolean;
   /** Whether Files is following mutations from this chat's active agent. */
   followAgent?: boolean;
   /** Toggle the session file browser's shared agent-follow mode. */
@@ -276,7 +273,7 @@ export function Composer({
     .map((option) => ({
       value: option.id,
       label:
-        useJinglerTools && option.kind === "plan"
+        option.kind === "plan"
           ? "Enhanced Plan"
           : option.label,
       description: option.description,

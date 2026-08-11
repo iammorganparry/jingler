@@ -44,7 +44,6 @@ import {
   type SettingsViewProps
 } from "../composites/settings-view.js"
 import type { ConnectorCenterProps } from "../composites/connector-center.js"
-import type { InjectionTargetsProps } from "../composites/injection-targets.js"
 import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
@@ -209,8 +208,6 @@ export interface JinglerAppProps {
   unifiedMcp?: OpenConnectorSectionProps
   /** MCP Connector Center data + actions (Settings → Connector Center). */
   connector?: ConnectorCenterProps
-  /** Per-harness injection readout (Settings → Connectors). */
-  injection?: InjectionTargetsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (
     session: Session,
@@ -438,7 +435,6 @@ export function JinglerApp({
   onSavePlanTemplate,
   unifiedMcp,
   connector,
-  injection,
   renderPullRequest,
   tabContributions,
   paneContributions,
@@ -1163,7 +1159,6 @@ export function JinglerApp({
               onSavePlanTemplate={onSavePlanTemplate}
               unifiedMcp={unifiedMcp}
               connector={connector}
-              injection={injection}
               githubConnection={githubConnection}
               githubBusy={githubBusy}
               onGithubConnect={onGithubConnect}

@@ -1011,20 +1011,29 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // mode, for the same reason: no system-prompt hook is shared by every
           // harness, and this has to survive a mid-session harness switch.
           const ask = questionNote(cli)
-          const preferJinglerTools =
-            workspaceConfig?.openConnector?.preferJinglerTools ?? true
           // How this harness submits an enhanced plan. Null for Claude — the adapter passes
           // `planModeInstructions` as a real SDK option there, and saying it twice
           // would compete with the `ExitPlanMode` tool the harness is steered
           // toward. With Jingler tools disabled, the harness owns planning and
           // receives none of Jingler's structured plan protocol.
-          const planProtocol =
-            mode === "plan" && preferJinglerTools
-              ? planNote(cli)
-              : null
+          const planProtocol = mode === "plan" ? planNote(cli) : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
+          const activePlan = worktreePath.length === 0
+            ? null
+            : yield* PlanStore.readDocument(
+                worktreePath,
+                sessionId,
+                chatId
+              ).pipe(Effect.orElseSucceed(() => null))
+          const activePlanExecutionId =
+            planExecutionId ??
+            (activePlan !== null &&
+            activePlan.producingChatId === chatId &&
+            ["approved", "executing", "needs-verification"].includes(activePlan.status)
+              ? activePlan.id
+              : null)
           const operatorText = displayText ?? text
           const promptText = text
           const resolvedReasoning = reasoning === undefined ? chat.reasoning : reasoning
@@ -1072,7 +1081,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     role:
                       mode === "plan"
                         ? "plan" as const
-                        : planExecutionId
+                        : activePlanExecutionId
                           ? "plan-execution" as const
                           : "conversation" as const,
                     priorMessages,
@@ -1106,7 +1115,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 planPointer,
                 adhd,
                 memory: memoryAttachment?.instructions ?? null,
-                tools: preferJinglerTools ? managedToolsNote() : null,
+                tools: managedToolsNote(),
                 ask,
                 planProtocol
               },
@@ -1144,8 +1153,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // read-only instead of restoring the operator's Auto policy.
             // Each adapter enforces plan mode in its own native vocabulary.
             remoteMcpServers,
-            mcpPolicy: preferJinglerTools ? "managed-only" : "merge",
-            enhancedPlan: preferJinglerTools
           }
 
           // Clear the PERSISTED id too, so a crash between here and the harness
@@ -1768,6 +1775,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   return PlanDecision.Reject()
                 }
                 canonicalPlan = promotion.right.plan
+                yield* Ref.set(executingPlanId, canonicalPlan.id)
                 if (submittedBlock !== undefined) {
                   yield* turnMutation.withPermits(1)(
                     Effect.gen(function* () {

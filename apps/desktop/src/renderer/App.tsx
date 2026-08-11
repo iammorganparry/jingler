@@ -99,7 +99,6 @@ import { useOpenConnector } from "./use-open-connector.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useAgentsSettings } from "./use-agents-settings.js";
 import { useRuntimeInspector } from "./use-runtime-inspector.js";
-import { useInjectionTargets } from "./use-injection-targets.js";
 import { useEnvironments } from "./use-environments.js";
 import { useProjects } from "./use-projects.js";
 import {
@@ -441,7 +440,6 @@ function AuthedApp({
   const providerCatalog = useProviderCatalog();
   const agentsSettings = useAgentsSettings();
   const runtimeInspector = useRuntimeInspector();
-  const injectionTargets = useInjectionTargets(unifiedMcp.config);
   const environmentController = useEnvironments();
   const projectController = useProjects();
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
@@ -1526,11 +1524,6 @@ function AuthedApp({
         planTemplate={configQuery.data?.planTemplate ?? null}
         onSavePlanTemplate={savePlanTemplate}
         unifiedMcp={unifiedMcp}
-        injection={{
-          targets: injectionTargets.targets,
-          loading: injectionTargets.loading,
-          onToggle: injectionTargets.setEnabled,
-        }}
         connector={connector}
         environments={environmentController.environments}
         loadEnvironmentDiscovery={rpc.environmentsDiscovery}

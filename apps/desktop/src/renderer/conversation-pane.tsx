@@ -1051,7 +1051,6 @@ export function ConversationPane({
           // transcript is on screen — only the focused pane still has to be checked.
           autoFocusComposer={paneFocused}
           focusKey={activeChat.id}
-          useJinglerTools={providersQuery.data?.openConnector?.preferJinglerTools ?? true}
           followAgent={fileBrowser.followEnabled}
           onToggleFollowAgent={toggleFollowAgent}
           archived={

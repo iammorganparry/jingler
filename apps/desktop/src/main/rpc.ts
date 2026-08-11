@@ -711,7 +711,6 @@ export const openConnectorAutoSetup = () => {
     endpoint: d.endpoint,
     enabled: d.kind === "local",
     serverName: "open-connector",
-    preferJinglerTools: true,
   };
   return openConnectorSet(
     config,
@@ -737,13 +736,6 @@ export const openConnectorSet = (
 
 /** `OpenConnector.test` handler — live probe of the configured endpoint. */
 export const openConnectorTest = () => OpenConnectorService.test;
-
-/**
- * `OpenConnector.injection` handler — what each harness would actually launch with,
- * resolved by the same service method the agent runner calls.
- */
-export const openConnectorInjection = () =>
-  OpenConnectorService.injectionTargets;
 
 // ── MCP Connector Center handlers ────────────────────────────────────────────
 
@@ -4324,7 +4316,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "OpenConnector.set": ({ config, token }) => openConnectorSet(config, token),
   "OpenConnector.test": () => openConnectorTest(),
   "OpenConnector.autoSetup": () => openConnectorAutoSetup(),
-  "OpenConnector.injection": () => openConnectorInjection(),
   "Connector.providers": () => OpenConnectorApi.listProviders(),
   "Connector.provider": ({ service }) => OpenConnectorApi.getProvider(service),
   "Connector.connections": () => OpenConnectorApi.listConnections(),

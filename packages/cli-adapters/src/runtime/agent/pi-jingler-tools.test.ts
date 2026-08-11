@@ -78,4 +78,23 @@ describe("Jingler plan tool containment", () => {
     expect(result.error?.code).toBe("forbidden")
     expect(proposePlan).not.toHaveBeenCalled()
   })
+
+  it("keeps plan submission available to the producing agent during execution", async () => {
+    const proposePlan = vi.fn(() =>
+      Effect.succeed({ _tag: "Approve" as const, mode: "auto" as const })
+    )
+    const registry = createJinglerControlTools(runtimeContext({ proposePlan }))
+    const plan = defaultPlan("Amended runtime cutover")
+
+    const result = await Effect.runPromise(
+      registry.execute({
+        id: "jingler_submit_plan",
+        arguments: { plan },
+        role: "plan-execution",
+        mode: "auto"
+      })
+    )
+    expect(result.status).toBe("success")
+    expect(proposePlan).toHaveBeenCalledWith(plan)
+  })
 })

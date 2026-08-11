@@ -1,6 +1,5 @@
 import * as React from "react"
 import { ConnectorCenter, type ConnectorCenterProps } from "./connector-center.js"
-import { InjectionTargets, type InjectionTargetsProps } from "./injection-targets.js"
 import { OpenConnectorSection, type OpenConnectorSectionProps } from "./open-connector-section.js"
 
 /**
@@ -13,11 +12,9 @@ import { OpenConnectorSection, type OpenConnectorSectionProps } from "./open-con
 export interface ConnectorsSettingsProps {
   readonly unifiedMcp?: OpenConnectorSectionProps
   readonly connector?: ConnectorCenterProps
-  /** Per-harness injection readout (`OpenConnector.injection`), shown in both views. */
-  readonly injection?: InjectionTargetsProps
 }
 
-export function ConnectorsSettings({ unifiedMcp, connector, injection }: ConnectorsSettingsProps) {
+export function ConnectorsSettings({ unifiedMcp, connector }: ConnectorsSettingsProps) {
   const [manage, setManage] = React.useState(false)
 
   /**
@@ -50,9 +47,6 @@ export function ConnectorsSettings({ unifiedMcp, connector, injection }: Connect
     return (
       <div className="flex flex-col gap-4">
         <OpenConnectorSection {...unifiedMcp} />
-        {/* Shown in the setup view too: the per-harness rows are how the operator
-            sees an opt-out or a missing token, which is what they came here to fix. */}
-        {injection ? <InjectionTargets {...injection} /> : null}
         {connected ? (
           <button
             type="button"
@@ -91,7 +85,6 @@ export function ConnectorsSettings({ unifiedMcp, connector, injection }: Connect
           Manage connection
         </button>
       </div>
-      {injection ? <InjectionTargets {...injection} /> : null}
       {connector ? <ConnectorCenter {...connector} /> : null}
     </div>
   )

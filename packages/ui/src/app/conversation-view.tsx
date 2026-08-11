@@ -215,8 +215,6 @@ export interface ConversationViewProps {
   autoFocusComposer?: boolean
   /** Identity of "the one on screen" — the session id. */
   focusKey?: string
-  /** Whether Jingler's enhanced Plan/tools layer is enabled. */
-  useJinglerTools?: boolean
   /** Disable sending while preserving the model picker as the recovery path. */
   composerDisabledReason?: string
   /** Whether the session Files workspace follows this chat's agent mutations. */
@@ -294,7 +292,6 @@ export function ConversationView({
   onDraftCodeReferencesClear,
   autoFocusComposer,
   focusKey,
-  useJinglerTools = true,
   composerDisabledReason,
   followAgent = false,
   onToggleFollowAgent,
@@ -659,7 +656,6 @@ export function ConversationView({
                 onSetModel={onSetModel}
                 mode={mode}
                 onSetMode={onSetMode}
-                useJinglerTools={useJinglerTools}
                 followAgent={followAgent}
                 onToggleFollowAgent={onToggleFollowAgent}
                 reasoningEffort={reasoningEffort}

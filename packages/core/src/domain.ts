@@ -928,7 +928,7 @@ export const OpenConnectorConfig = Schema.Struct({
    * `https://mcp.internal`. The injected server targets `${endpoint}/mcp`.
    */
   endpoint: Schema.String,
-  /** Master switch. Off means no agent receives the server, regardless of `perCli`. */
+  /** Master switch. Off means no agent receives the server. */
   enabled: Schema.Boolean,
   /**
    * The name the unified server is registered under in every harness. Stable so
@@ -937,25 +937,6 @@ export const OpenConnectorConfig = Schema.Struct({
   serverName: Schema.optionalWith(Schema.String, {
     default: () => "open-connector"
   }),
-  /**
-   * Make Jingler's managed MCP collection authoritative for agent launches.
-   * Native/user/project MCPs are suppressed by default so a shared provider or
-   * visible browser cannot be shadowed by a harness-specific equivalent.
-   */
-  preferJinglerTools: Schema.optional(Schema.Boolean),
-  /**
-   * Per-harness opt-out. A CLI absent from the map defaults to ENABLED (when the
-   * master switch is on); only an explicit `false` withholds the server from that
-   * harness.
-   *
-   * Keyed by a bare string, not `CliKind`, on purpose: a `Record` over a literal
-   * union is exhaustive under `Schema.encode` (every harness key would be
-   * mandatory), which defeats the "absent ⇒ enabled" default. Lookups still pass a
-   * `CliKind`, so the looser key costs no call-site safety.
-   */
-  perCli: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.Boolean })
-  )
 })
 export type OpenConnectorConfig = Schema.Schema.Type<typeof OpenConnectorConfig>
 
@@ -963,8 +944,7 @@ export type OpenConnectorConfig = Schema.Schema.Type<typeof OpenConnectorConfig>
 export const OPEN_CONNECTOR_DEFAULT: OpenConnectorConfig = {
   endpoint: "",
   enabled: false,
-  serverName: "open-connector",
-  preferJinglerTools: true
+  serverName: "open-connector"
 }
 
 /**

@@ -466,7 +466,6 @@ describe("AgentRunner remote MCP attachments", () => {
     )
 
     expect(captured).toHaveLength(1)
-    expect(captured[0]!.mcpPolicy).toBe("managed-only")
     expect(captured[0]!.prompt).toContain("<managed-tools>")
     expect(browserAcquireCalls).toStrictEqual([
       { sessionId: SESSION, ownerId: `${SESSION}:${SESSION}` }
@@ -486,49 +485,6 @@ describe("AgentRunner remote MCP attachments", () => {
     expect(persistedSession).not.toContain("connector-secret")
     expect(persistedSession).not.toContain("preview-secret")
     expect(persistedSession).not.toContain("remoteMcpServers")
-  })
-
-  it("allows operators to merge native harness tools back in", async () => {
-    const captured: SessionSpec[] = []
-    const recordingAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
-        run: (_sessionId, spec, ctx) =>
-          Effect.sync(() => captured.push(spec)).pipe(
-            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
-          ),
-        stop: () => Effect.void
-      })
-    )
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      recordingAdapter,
-      ContextManager.Default,
-      temp.layer
-    )
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* OpenConnectorService.set({
-          endpoint: "https://connector.example",
-          enabled: true,
-          serverName: "open-connector",
-          preferJinglerTools: false
-        }, "token")
-        yield* (yield* AgentRunner).prompt(SESSION, SESSION, "use native tools").pipe(Stream.runDrain)
-      }).pipe(Effect.provide(base))
-    )
-
-    expect(captured[0]!.mcpPolicy).toBe("merge")
-    expect(captured[0]!.prompt).not.toContain("<managed-tools>")
   })
 
   it("keeps a Jingler-owned attachment when an operator connector claims its name", () => {
@@ -1994,7 +1950,7 @@ describe("AgentRunner plan library", () => {
     }
   })
 
-  it("leaves plan protocol and capture with the native harness when Jingler tools are disabled", async () => {
+  it("always attaches Jingler's managed tool contract to plan runs", async () => {
     seedSessionWithWorktree("plan")
     const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
       prompt: null,
@@ -2002,23 +1958,15 @@ describe("AgentRunner plan library", () => {
     }
     await Effect.runPromise(
       Effect.gen(function* () {
-        yield* OpenConnectorService.set({
-          endpoint: "",
-          enabled: false,
-          serverName: "open-connector",
-          preferJinglerTools: false
-        })
         yield* (yield* AgentRunner)
-          .prompt(SESSION, SESSION, "Plan this using the harness's native flow.")
+          .prompt(SESSION, SESSION, "Plan this work.")
           .pipe(Stream.runDrain)
       }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
     )
 
     expect(captured.specs).toHaveLength(1)
     expect(captured.specs[0]?.mode).toBe("plan")
-    expect(captured.specs[0]?.enhancedPlan).toBe(false)
-    expect(captured.prompt).not.toContain("PLAN MODE —")
-    expect(captured.prompt).not.toContain("PlanPrdStage")
+    expect(captured.prompt).toContain("<managed-tools>")
   })
 
   it("executes and verifies bounded work directly without proposing a plan", async () => {

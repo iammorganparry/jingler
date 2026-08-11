@@ -66,7 +66,7 @@ export const createJinglerControlTools = (
       id: "jingler_submit_plan",
       description: "Submit the structured plan for operator review and approval.",
       input: Schema.Struct({ plan: PlanPrd }),
-      roles: ["plan"],
+      roles: ["plan", "plan-execution"],
       execute: ({ plan }) => Effect.runPromise(context.proposePlan(plan))
     })
   )

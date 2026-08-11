@@ -48,7 +48,6 @@ const makeEventSink = (
       observe?.(event)
       emissions = emissions.then(async () => {
         await Effect.runPromise(Queue.offer(queue, event))
-        if (isTerminal) await Effect.runPromise(Queue.shutdown(queue))
       })
     },
     beginSettling: () => {
@@ -144,11 +143,15 @@ const runSession = (
       const unsubscribe = subscribeToSession(handle, sink)
       startPrompt(handle, spec.prompt, sink)
       return Stream.fromQueue(queue).pipe(
+        Stream.takeUntil((event) => event._tag === "Done" || event._tag === "Failed"),
         Stream.ensuring(
-          Effect.sync(() => {
-            unsubscribe()
-            handle.dispose()
-          }).pipe(
+          Queue.shutdown(queue).pipe(
+            Effect.zipRight(
+              Effect.sync(() => {
+                unsubscribe()
+                handle.dispose()
+              })
+            ),
             Effect.zipRight(
               Ref.update(sessions, (current) => {
                 const next = new Map(current)

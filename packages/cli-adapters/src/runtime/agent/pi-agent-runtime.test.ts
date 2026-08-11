@@ -68,6 +68,37 @@ describe("PiAgentRuntime", () => {
     expect(dispose).toHaveBeenCalledOnce()
   })
 
+  it("delivers the terminal event before closing a slow consumer", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    const handle: PiSessionHandle = {
+      id: "pi-session-slow-consumer",
+      modelId: "anthropic/claude-sonnet",
+      subscribe: (next) => { listener = next; return vi.fn() },
+      prompt: async () => {
+        listener?.({
+          type: "message_update",
+          message: {} as never,
+          assistantMessageEvent: { type: "text_delta", delta: "hello" } as never
+        })
+        listener?.({ type: "agent_settled" })
+      },
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      usage: () => ({ costUsd: 0, tokens: 3 })
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+    const events = await Effect.runPromise(
+      runtime.run(spec, context).pipe(
+        Stream.mapEffect((event) => Effect.sleep("10 millis").pipe(Effect.as(event))),
+        Stream.runCollect
+      )
+    )
+    expect([...events].map((event) => event._tag)).toEqual(["Started", "Assistant", "Done"])
+  })
+
   it("surfaces prompt rejection as a single failed terminal", async () => {
     const handle: PiSessionHandle = {
       id: "pi-session-2",

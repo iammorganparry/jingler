@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 import { FAKE_TOKEN, startFakeOpenConnector } from "./fake-open-connector.js"
 
@@ -45,30 +43,6 @@ const configureUnifiedMcp = async (window: import("@playwright/test").Page, endp
   await window.getByRole("button", { name: /^Test/ }).click()
 }
 
-test("persists the native tool merge preference", async ({ launchApp }) => {
-  const instance = await startFakeOpenConnector()
-  try {
-    const app = await launchApp({ configured: true })
-    await openSettings(app.window)
-    await app.window.getByRole("button", { name: /Connectors/ }).click()
-
-    const preference = app.window.getByRole("switch", {
-      name: "Use Jingler tools"
-    })
-    await expect(preference).toBeChecked()
-    await preference.click()
-    await app.window.getByPlaceholder("https://mcp.internal").fill(instance.endpoint)
-    await app.window.getByPlaceholder("Paste the instance token").fill(FAKE_TOKEN)
-    await app.window.getByRole("button", { name: "Save" }).click()
-
-    await expect.poll(() => {
-      const config = JSON.parse(readFileSync(join(app.home, "jingler", "config.json"), "utf8"))
-      return config.openConnector?.preferJinglerTools
-    }).toBe(false)
-  } finally {
-    await instance.close()
-  }
-})
 
 test("browse, connect, and disconnect a provider through the Connector Center", async ({ launchApp }) => {
   const instance = await startFakeOpenConnector()

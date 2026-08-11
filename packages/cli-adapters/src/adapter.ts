@@ -111,12 +111,6 @@ export interface SessionSpec {
    */
   readonly remoteMcpServers?: ReadonlyArray<RemoteMcpServer>
 
-  /** Whether managed attachments replace or merge with harness-native MCP config. */
-  readonly mcpPolicy?: "managed-only" | "merge"
-
-  /** Jingler owns structured plan capture/approval for this turn. */
-  readonly enhancedPlan?: boolean
-
   readonly readOnly?: boolean
   /**
    * This agent runs with nobody watching, so apply the protections that implies.
@@ -1044,7 +1038,7 @@ export const scriptedRun =
       // document inline. Model that contract
       // directly so the runner exercises amendment reconciliation without opening
       // a second approval gate.
-      if (spec.enhancedPlan !== false && spec.prompt.includes("[[amendment]]")) {
+      if (spec.prompt.includes("[[amendment]]")) {
         yield* emit({
           _tag: "Thinking",
           text: "Folding the requested audit amendment into the approved plan.",
@@ -1061,7 +1055,6 @@ export const scriptedRun =
       // A `[[plan]]` marker drives plan mode: propose a plan, then execute on
       // approval or re-propose a revised one on revise (one cycle max, for tests).
       if (
-        spec.enhancedPlan !== false &&
         (spec.prompt.includes("[[plan]]") || spec.mode === "plan")
       ) {
         yield* emit({ _tag: "Thinking", text: "Mapping out the work before touching anything.", seconds: 3, done: true })
