@@ -51,6 +51,11 @@ const eventsUrl = (
 
 const MAX_OBSERVER_RECONNECTS = 5
 
+const observerFailureMessage = (error: unknown): string =>
+  error instanceof Error && error.message.trim().length > 0
+    ? `Could not observe the managed session: ${error.message}`
+    : "Could not observe the managed session."
+
 const openObserver = (input: {
   readonly grant: ManagedEnvironmentGrantResponse
   readonly sessionId: string
@@ -93,12 +98,26 @@ const commandsUrl = (
     grant.runtimeUrl
   ).toString()
 
+const cancelUrl = (
+  grant: ManagedEnvironmentGrantResponse,
+  sessionId: string
+): string =>
+  new URL(
+    `/v1/sessions/${encodeURIComponent(sessionId)}/cancel`,
+    grant.runtimeUrl
+  ).toString()
+
 interface ObserverIdentity {
   readonly environmentId: string
   readonly sessionId: string
   readonly commandId: string
   readonly action: ManagedRuntimeAction
 }
+
+const grantActions = (
+  action: ManagedRuntimeAction
+): ReadonlyArray<ManagedRuntimeAction> =>
+  action === "session.observe" ? [action] : [action, "session.observe"]
 
 class ManagedSessionObserver {
   readonly #dependencies: ManagedSessionTransportDependencies
@@ -191,7 +210,7 @@ class ManagedSessionObserver {
           environment,
           this.#identity.sessionId,
           this.#identity.commandId,
-          [this.#identity.action]
+          grantActions(this.#identity.action)
         )
       ),
       Effect.flatMap((grant) => Effect.tryPromise({
@@ -237,8 +256,35 @@ export const makeManagedSessionTransport = (
           environment,
           session.id,
           command.commandId,
-          [managedRuntimeActionForOperation(operation)]
+          grantActions(managedRuntimeActionForOperation(operation))
         )
+        if (operation === "Agent.stop") {
+          const response = yield* Effect.tryPromise({
+            try: () => (dependencies.fetch ?? fetch)(cancelUrl(grant, session.id), {
+              method: "POST",
+              headers: { authorization: `Bearer ${grant.grant}` }
+            }),
+            catch: (cause) => new RemoteSessionError({
+              message: "Could not cancel the managed session.",
+              cause
+            })
+          })
+          if (!response.ok) {
+            return yield* Effect.fail(new RemoteSessionError({
+              message: response.status === 401 || response.status === 403
+                ? "Managed session authorization expired. Reconnect the environment."
+                : "Managed session cancellation failed."
+            }))
+          }
+          return Stream.succeed<RemoteSessionEvent>({
+            version: 1,
+            commandId: command.commandId,
+            sessionId: session.id,
+            eventSequence: 0,
+            kind: "complete",
+            payload: { status: "cancelled" }
+          })
+        }
         const output = yield* Queue.unbounded<Output>()
         const observer = new ManagedSessionObserver(
           dependencies,
@@ -257,7 +303,7 @@ export const makeManagedSessionTransport = (
               return observer
             },
             catch: (error) => new RemoteSessionError({
-              message: "Could not observe the managed session.",
+              message: observerFailureMessage(error),
               cause: error
             })
           }),

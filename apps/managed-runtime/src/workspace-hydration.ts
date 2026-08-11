@@ -11,7 +11,11 @@ export interface WorkspaceCommandResult {
 export interface WorkspaceCommandExecutor {
   readonly exec: (
     command: string,
-    options: { readonly cwd: string; readonly timeout: number }
+    options: {
+      readonly cwd: string
+      readonly timeout: number
+      readonly env?: Readonly<Record<string, string>>
+    }
   ) => Promise<WorkspaceCommandResult>
 }
 
@@ -26,9 +30,14 @@ const shellQuote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)
 const run = async (
   executor: WorkspaceCommandExecutor,
   command: string,
-  timeout = 120_000
+  timeout = 120_000,
+  env?: Readonly<Record<string, string>>
 ): Promise<string> => {
-  const result = await executor.exec(command, { cwd: WORKSPACE_PATH, timeout })
+  const result = await executor.exec(command, {
+    cwd: WORKSPACE_PATH,
+    timeout,
+    ...(env === undefined ? {} : { env })
+  })
   if (!result.success) {
     throw new Error(`Workspace hydration failed: ${result.stderr.trim() || command}`)
   }
@@ -56,13 +65,20 @@ export const hydrateWorkspace = async (
     executor,
     `git remote get-url origin >/dev/null 2>&1 && git remote set-url origin ${url} || git remote add origin ${url}`
   )
+  // Keep even the short-lived proxy capability out of the command string.
+  // Cloudflare records sandbox command text, whereas command environments are
+  // not included in the execution log. Git's --config-env reads the header
+  // without placing it in argv, the repository config, or the workspace.
   const authorization = options.authorizationHeader
-    ? `-c http.extraHeader=${shellQuote(`Authorization: ${options.authorizationHeader}`)} `
+    ? "--config-env=http.extraHeader=JINGLER_GIT_AUTHORIZATION "
     : ""
   await run(
     executor,
     `git ${authorization}fetch --no-tags --depth=1 origin ${sha}`,
-    180_000
+    180_000,
+    options.authorizationHeader === undefined
+      ? undefined
+      : { JINGLER_GIT_AUTHORIZATION: `Authorization: ${options.authorizationHeader}` }
   )
   await run(executor, `git checkout --quiet --force -B ${branch} ${sha}`)
   await run(executor, `git reset --quiet --hard ${sha}`)

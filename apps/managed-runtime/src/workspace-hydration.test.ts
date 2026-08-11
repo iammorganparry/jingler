@@ -10,13 +10,23 @@ const headSha = "a".repeat(40)
 const executor = (expectedBranch: string): {
   executor: WorkspaceCommandExecutor
   commands: string[]
+  calls: Array<{
+    command: string
+    options: Parameters<WorkspaceCommandExecutor["exec"]>[1]
+  }>
 } => {
   const commands: string[] = []
+  const calls: Array<{
+    command: string
+    options: Parameters<WorkspaceCommandExecutor["exec"]>[1]
+  }> = []
   return {
     commands,
+    calls,
     executor: {
-      exec: async (command) => {
+      exec: async (command, options) => {
         commands.push(command)
+        calls.push({ command, options })
         return {
           success: true,
           stdout: command === "git rev-parse HEAD"
@@ -108,8 +118,12 @@ describe("managed workspace hydration", () => {
       }
     )
     expect(fake.commands).toContain(
-      `git -c http.extraHeader='Authorization: Bearer git_opaque_capability' fetch --no-tags --depth=1 origin '${headSha}'`
+      `git --config-env=http.extraHeader=JINGLER_GIT_AUTHORIZATION fetch --no-tags --depth=1 origin '${headSha}'`
     )
+    expect(fake.commands.join("\n")).not.toContain("git_opaque_capability")
+    expect(fake.calls.find(({ command }) => command.includes("fetch"))?.options.env).toEqual({
+      JINGLER_GIT_AUTHORIZATION: "Authorization: Bearer git_opaque_capability"
+    })
     expect(fake.commands.at(-1)).toBe(
       "git remote set-url origin 'https://github.com/jingler/example.git'"
     )

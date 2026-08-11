@@ -65,6 +65,11 @@ const main = async (): Promise<void> => {
         makeLiveDeviceSessionCommandExecutor(root),
         print
       )
+      // This entrypoint is deliberately one-shot. The shared cli-adapters
+      // runtime retains background handles used by the long-lived device
+      // daemon; after the terminal protocol frame is flushed those handles
+      // must not keep a Cloudflare exec process alive indefinitely.
+      process.exit(0)
       return
     }
     case "direct-session": {

@@ -234,7 +234,8 @@ const drainSessionCreation = (
       Stream.runForEach((update) =>
         Effect.sync(() => {
           if (update.kind === "progress") onProgress?.(update.phase)
-          else created = update.session
+          else if (update.kind === "complete") created = update.session
+          else throw new Error(update.message)
         })
       )
     )

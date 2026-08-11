@@ -30,7 +30,7 @@ import {
 } from "./device-secret-document.js"
 import { RemoteBootstrapService } from "./remote-bootstrap.js"
 import { SecretStore } from "./secret-store.js"
-import { cloudCodexApiKey } from "./subscription.js"
+import { cloudClaudeCredential, cloudCodexCredential } from "./subscription.js"
 
 const authBaseUrl = (): string => process.env.JINGLER_AUTH_URL ?? "http://localhost:9100"
 const deviceAgentBundlePath = (): string | undefined => process.env.JINGLER_DEVICE_AGENT_BUNDLE
@@ -75,10 +75,28 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
     effect: Effect.gen(function* () {
       const secrets = yield* SecretStore
       const bootstrap = yield* RemoteBootstrapService
-      const codexApiKey = cloudCodexApiKey()
-      const managedAuthHeaders = codexApiKey === null
-        ? undefined
-        : { "x-jingler-codex-api-key": codexApiKey }
+      const managedAuthHeaders = (): Record<string, string> | undefined => {
+        const codex = cloudCodexCredential()
+        const claude = cloudClaudeCredential()
+        const headers: Record<string, string> = {}
+        if (codex?.kind === "api-key") {
+          headers["x-jingler-codex-api-key"] = codex.token
+        } else if (codex?.kind === "chatgpt") {
+          Object.assign(headers, {
+              "x-jingler-codex-access-token": codex.token,
+              "x-jingler-codex-account-id": codex.accountId
+          })
+        }
+        if (claude !== null) {
+          headers[
+            claude.kind === "api-key"
+              ? "x-jingler-claude-api-key"
+              : "x-jingler-claude-access-token"
+          ] = claude.token
+          headers["x-jingler-claude-expires-at"] = String(claude.expiresAt)
+        }
+        return Object.keys(headers).length === 0 ? undefined : headers
+      }
       const clientInstanceId = yield* Effect.tryPromise({
         try: async () => {
           const document = await updateDeviceSecretDocument(secrets, (current) => {
@@ -245,7 +263,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           ManagedEnvironmentGrantResponseSchema,
           {
             method: "POST",
-            headers: managedAuthHeaders,
+            headers: managedAuthHeaders(),
             body: JSON.stringify({
               version: REMOTE_PROTOCOL_VERSION,
               sessionId,
@@ -266,7 +284,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           Schema.Struct({ version: Schema.Literal(1), hydrated: Schema.Literal(true) }),
           {
             method: "POST",
-            headers: managedAuthHeaders,
+            headers: managedAuthHeaders(),
             body: JSON.stringify({
               version: 1,
               sessionId,
@@ -274,6 +292,16 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
               plan
             })
           }
+        ).pipe(Effect.asVoid)
+
+      const cleanupManagedSession = (
+        environment: ManagedEnvironment,
+        sessionId: string
+      ): Effect.Effect<void, EnvironmentError> =>
+        request(
+          `${ENVIRONMENT_API_ROOT}/managed/${encodeURIComponent(environment.id)}/sessions/${encodeURIComponent(sessionId)}/delete`,
+          Schema.Struct({ version: Schema.Literal(1), deleted: Schema.Literal(true) }),
+          { method: "POST" }
         ).pipe(Effect.asVoid)
 
       const enrollmentCredential = (
@@ -437,6 +465,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
         suggestHosts: bootstrap.discoverHosts,
         pairSsh,
         hydrateManagedWorkspace,
+        cleanupManagedSession,
         directSsh,
         rename,
         revoke

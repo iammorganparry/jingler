@@ -47,7 +47,7 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-jingler-service-secret": this.env.MANAGED_RUNTIME_SERVICE_SECRET
+          "x-jingler-service-secret": this.env.AUTH_STATE_SERVICE_SECRET
         },
         body: JSON.stringify({
           subject,
@@ -108,9 +108,11 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       const auth = current.authorize("managed.session.execute", now)
       const credentialHandles = {
         codex: current.credentialHandle("codex", now),
+        claude: current.credentialHandle("claude", now),
         github: current.credentialHandle("github", now)
       }
-      if (!(connected && auth.admitted && credentialHandles.codex !== null)) {
+      if (!(connected && auth.admitted &&
+        (credentialHandles.codex !== null || credentialHandles.claude !== null))) {
         return json({ connected, auth, credentialHandles })
       }
       try {
@@ -149,10 +151,12 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       const admitted = current.authorize("managed.session.execute", now).admitted
       return json({
         version: 1,
-        harnesses:
-          admitted && current.credentialHandle("codex", now) !== null
-            ? ["codex"]
-            : []
+        harnesses: admitted
+          ? [
+              ...(current.credentialHandle("codex", now) === null ? [] : ["codex"]),
+              ...(current.credentialHandle("claude", now) === null ? [] : ["claude"])
+            ]
+          : []
       })
     }
 

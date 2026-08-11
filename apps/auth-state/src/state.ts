@@ -1,4 +1,9 @@
-export type CapabilityProvider = "github" | "codex"
+export type CapabilityProvider = "github" | "codex" | "claude"
+export type CapabilityUpstream =
+  | "github-api"
+  | "openai-api"
+  | "chatgpt-codex"
+  | "anthropic-api"
 
 export interface AuthSession {
   readonly id: string
@@ -11,6 +16,8 @@ export interface StoredCredential {
   /** Stable one-way identity used to make repeated capability sync idempotent. */
   readonly fingerprint: string
   readonly authorizationHeaderEncrypted: string
+  readonly upstream?: CapabilityUpstream
+  readonly accountIdEncrypted?: string
   readonly expiresAt: number
 }
 
@@ -81,7 +88,9 @@ export const snapshotOf = (state: AuthStateRecord, now: number): ManagedAuthSnap
       ...credentialCapabilities.map((credential) => credential.expiresAt)
     ),
     capabilities:
-      authenticated && credentialCapabilities.some(({ provider }) => provider === "codex")
+      authenticated && credentialCapabilities.some(
+        ({ provider }) => provider === "codex" || provider === "claude"
+      )
         ? ["managed.session.execute"]
         : [],
     credentialCapabilities

@@ -30,6 +30,7 @@ import {
 import { env } from "./env.js"
 import {
   deleteAuthStateCapability,
+  type AuthCapabilityUpstream,
   upsertAuthStateCapability
 } from "./auth-state-client.js"
 import { managedGitHubCapabilityForUser } from "./github-routes.js"
@@ -104,10 +105,20 @@ export interface EnvironmentRoutesDependencies {
   readonly now: () => Date
   readonly getUserId: (headers: Headers) => Promise<string | null>
   readonly listOwned: (userId: string) => Promise<ReadonlyArray<OwnedInventoryEntry>>
-  readonly managedHarnesses?: (userId: string) => Promise<ReadonlyArray<"codex">>
+  readonly managedHarnesses?: (userId: string) => Promise<ReadonlyArray<"codex" | "claude">>
   readonly syncCapabilities?: (input: {
     readonly userId: string
-    readonly codexApiKey: string | null
+    readonly codexCredential: {
+      readonly authorizationHeader: string
+      readonly upstream: AuthCapabilityUpstream
+      readonly accountId?: string
+      readonly expiresAt: Date
+    } | null
+    readonly claudeCredential: {
+      readonly authorizationHeader: string
+      readonly upstream: "anthropic-api"
+      readonly expiresAt: Date
+    } | null
     readonly includeGitHub: boolean
   }) => Promise<void>
   readonly store: ManagedEnvironmentStore
@@ -130,6 +141,16 @@ export interface EnvironmentRoutesDependencies {
   readonly destroyEnvironment?: (input: {
     readonly userId: string
     readonly environmentId: string
+  }) => Promise<void>
+  readonly destroySession?: (input: {
+    readonly userId: string
+    readonly environmentId: string
+    readonly sessionId: string
+  }) => Promise<void>
+  readonly releaseSessionStart?: (input: {
+    readonly userId: string
+    readonly environmentId: string
+    readonly sessionId: string
   }) => Promise<void>
   readonly hydrateWorkspace?: (input: {
     readonly userId: string
@@ -187,11 +208,12 @@ const defaultDependencies = (): EnvironmentRoutesDependencies => ({
     if (!response.ok) return []
     const body: unknown = await response.json()
     if (typeof body !== "object" || body === null || !("harnesses" in body)) return []
-    return Array.isArray(body.harnesses) && body.harnesses.includes("codex")
-      ? ["codex"]
-      : []
+    if (!Array.isArray(body.harnesses)) return []
+    return body.harnesses.filter(
+      (harness): harness is "codex" | "claude" => harness === "codex" || harness === "claude"
+    )
   },
-  syncCapabilities: async ({ userId, codexApiKey, includeGitHub }) => {
+  syncCapabilities: async ({ userId, codexCredential, claudeCredential, includeGitHub }) => {
     const config = {
       enabled: env.managedEnvironmentsEnabled,
       url: env.authStateUrl,
@@ -201,13 +223,19 @@ const defaultDependencies = (): EnvironmentRoutesDependencies => ({
       ? await managedGitHubCapabilityForUser(userId)
       : undefined
     await Promise.all([
-      codexApiKey === null
-        ? Promise.resolve()
+      codexCredential === null
+        ? deleteAuthStateCapability(config, { userId, provider: "codex" })
         : upsertAuthStateCapability(config, {
             userId,
             provider: "codex",
-            authorizationHeader: `Bearer ${codexApiKey}`,
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000)
+            ...codexCredential
+          }),
+      claudeCredential === null
+        ? deleteAuthStateCapability(config, { userId, provider: "claude" })
+        : upsertAuthStateCapability(config, {
+            userId,
+            provider: "claude",
+            ...claudeCredential
           }),
       github === undefined
         ? Promise.resolve()
@@ -247,6 +275,7 @@ const defaultDependencies = (): EnvironmentRoutesDependencies => ({
     id: `usage_${crypto.randomUUID().replaceAll("-", "")}`,
     userId: input.userId,
     environmentId: input.environmentId,
+    sessionId: input.sessionId,
     idempotencyKey: `managed-interval:${input.sessionId}:${input.usageIntervalId}`,
     policy: {
       maxConcurrentSessions: env.managedMaxConcurrentSessions,
@@ -280,6 +309,29 @@ const defaultDependencies = (): EnvironmentRoutesDependencies => ({
     )
     if (!response.ok) throw await runtimeError(response, "Managed environment cleanup failed")
   },
+  destroySession: async (input) => {
+    const response = await fetch(
+      `${env.managedRuntimeUrl.replace(/\/$/u, "")}/v1/sessions/destroy`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.managedRuntimeServiceSecret}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          subject: input.userId,
+          environmentId: input.environmentId,
+          sessionId: input.sessionId
+        })
+      }
+    )
+    if (!response.ok) throw await runtimeError(response, "Managed session cleanup failed")
+  },
+  releaseSessionStart: (input) =>
+    runtime.runPromise(ManagedUsageRepository.releaseReservedForSession({
+      ...input,
+      now: new Date()
+    })),
   hydrateWorkspace: async (input) => {
     const response = await fetch(
       `${env.managedRuntimeUrl.replace(/\/$/u, "")}/v1/workspaces/hydrate`,
@@ -311,16 +363,104 @@ const ManagedWorkspaceRequest = Schema.Struct({
   plan: WorkspaceProvisioningPlan
 })
 
-const codexApiKeyFrom = (request: Request): string | null => {
-  const value = request.headers.get("x-jingler-codex-api-key")?.trim() ?? ""
-  return value.length >= 20 &&
-    value.length <= 512 &&
-    [...value].every((character) => {
-      const code = character.charCodeAt(0)
-      return code >= 33 && code <= 126
-    })
+const boundedCredential = (value: string): string | null =>
+  value.length >= 20 &&
+  value.length <= 4_096 &&
+  [...value].every((character) => {
+    const code = character.charCodeAt(0)
+    return code >= 33 && code <= 126
+  })
     ? value
     : null
+
+const jwtExpiry = (token: string): number | null => {
+  const encoded = token.split(".")[1]
+  if (encoded === undefined) return null
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
+      exp?: unknown
+    }
+    return typeof payload.exp === "number" && Number.isSafeInteger(payload.exp)
+      ? payload.exp
+      : null
+  } catch {
+    return null
+  }
+}
+
+const codexCredentialFrom = (
+  request: Request
+): {
+  readonly authorizationHeader: string
+  readonly upstream: AuthCapabilityUpstream
+  readonly accountId?: string
+  readonly expiresAt: Date
+} | null => {
+  const value = request.headers.get("x-jingler-codex-api-key")?.trim() ?? ""
+  const apiKey = boundedCredential(value)
+  if (apiKey !== null) {
+    return {
+      authorizationHeader: `Bearer ${apiKey}`,
+      upstream: "openai-api",
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000)
+    }
+  }
+  const accessToken = boundedCredential(
+    request.headers.get("x-jingler-codex-access-token")?.trim() ?? ""
+  )
+  const accountId = request.headers.get("x-jingler-codex-account-id")?.trim() ?? ""
+  const expiresAt = accessToken === null ? null : jwtExpiry(accessToken)
+  const now = Math.floor(Date.now() / 1_000)
+  if (
+    accessToken === null ||
+    !/^[0-9a-f]{8}-[0-9a-f-]{27,36}$/iu.test(accountId) ||
+    expiresAt === null ||
+    expiresAt <= now + 60
+  ) {
+    return null
+  }
+  return {
+    authorizationHeader: `Bearer ${accessToken}`,
+    upstream: "chatgpt-codex",
+    accountId,
+    expiresAt: new Date(Math.min(expiresAt, now + 24 * 60 * 60) * 1_000)
+  }
+}
+
+const claudeCredentialFrom = (
+  request: Request
+): {
+  readonly authorizationHeader: string
+  readonly upstream: "anthropic-api"
+  readonly expiresAt: Date
+} | null => {
+  const apiKey = boundedCredential(
+    request.headers.get("x-jingler-claude-api-key")?.trim() ?? ""
+  )
+  const accessToken = boundedCredential(
+    request.headers.get("x-jingler-claude-access-token")?.trim() ?? ""
+  )
+  const rawExpiresAt = Number(request.headers.get("x-jingler-claude-expires-at") ?? 0)
+  const now = Math.floor(Date.now() / 1_000)
+  if (apiKey !== null) {
+    return {
+      authorizationHeader: `X-Api-Key ${apiKey}`,
+      upstream: "anthropic-api",
+      expiresAt: new Date((now + 24 * 60 * 60) * 1_000)
+    }
+  }
+  if (
+    accessToken === null ||
+    !Number.isSafeInteger(rawExpiresAt) ||
+    rawExpiresAt <= now + 60
+  ) {
+    return null
+  }
+  return {
+    authorizationHeader: `Bearer ${accessToken}`,
+    upstream: "anthropic-api",
+    expiresAt: new Date(Math.min(rawExpiresAt, now + 24 * 60 * 60) * 1_000)
+  }
 }
 
 /**
@@ -332,7 +472,7 @@ export const managedCloudIdForUser = (userId: string): string =>
   `managed_cloud_${crypto.createHash("sha256").update(userId).digest("hex").slice(0, 32)}`
 
 const managedCloudCapabilities = (
-  harnesses: ReadonlyArray<"codex">
+  harnesses: ReadonlyArray<"codex" | "claude">
 ): ManagedEnvironment["capabilities"] => ({
   version: 1,
   capabilities: [
@@ -347,7 +487,7 @@ const managedCloudCapabilities = (
 
 const managedCloudEnvironment = (
   userId: string,
-  harnesses: ReadonlyArray<"codex">
+  harnesses: ReadonlyArray<"codex" | "claude">
 ): ManagedEnvironment => ({
   kind: "managed",
   id: managedCloudIdForUser(userId),
@@ -367,7 +507,7 @@ const managedCloudEnvironment = (
 const ensureManagedCloudEnvironment = async (
   dependencies: EnvironmentRoutesDependencies,
   userId: string,
-  harnesses: ReadonlyArray<"codex"> = []
+  harnesses: ReadonlyArray<"codex" | "claude"> = []
 ): Promise<ManagedEnvironment> => {
   const environmentId = managedCloudIdForUser(userId)
   const existing = await dependencies.store.findForUser(userId, environmentId)
@@ -445,7 +585,7 @@ export const createEnvironmentRoutes = (
             left.createdAt - right.createdAt ||
             left.environment.id.localeCompare(right.environment.id)
         ).map((entry) => entry.environment),
-        managedCloudEnvironment(userId, ["codex"])
+        managedCloudEnvironment(userId, ["codex", "claude"])
       ]
       return json(
         Schema.decodeUnknownSync(EnvironmentInventoryResponse)({
@@ -468,13 +608,14 @@ export const createEnvironmentRoutes = (
     try {
       await dependencies.syncCapabilities?.({
         userId,
-        codexApiKey: codexApiKeyFrom(context.req.raw),
+        codexCredential: codexCredentialFrom(context.req.raw),
+        claudeCredential: claudeCredentialFrom(context.req.raw),
         includeGitHub: true
       })
       const harnesses = await (dependencies.managedHarnesses?.(userId) ?? Promise.resolve([]))
-      if (!harnesses.includes("codex")) {
+      if (harnesses.length === 0) {
         return json({
-          error: "Managed Codex requires an OPENAI_API_KEY and an active GitHub connection"
+          error: "Managed Cloud requires a local Codex or Claude login and an active GitHub connection"
         }, 409)
       }
       const environment = await ensureManagedCloudEnvironment(
@@ -566,7 +707,8 @@ export const createEnvironmentRoutes = (
     try {
       await dependencies.syncCapabilities?.({
         userId,
-        codexApiKey: codexApiKeyFrom(context.req.raw),
+        codexCredential: codexCredentialFrom(context.req.raw),
+        claudeCredential: claudeCredentialFrom(context.req.raw),
         includeGitHub: true
       })
       await dependencies.hydrateWorkspace({
@@ -587,6 +729,30 @@ export const createEnvironmentRoutes = (
       return cause instanceof ManagedRuntimeRequestError
         ? json({ error: cause.message }, cause.status)
         : json({ error: "Managed workspace hydration failed" }, 503)
+    }
+  })
+
+  routes.post("/managed/:environmentId/sessions/:sessionId/delete", async (context) => {
+    const dependencies = dependenciesFactory()
+    if (!dependencies.enabled) return json({ error: "Managed environments disabled" }, 404)
+    const userId = await authenticate(context.req.raw, dependencies)
+    if (!userId) return json({ error: "Authentication required" }, 401)
+    const environmentId = context.req.param("environmentId")
+    const sessionId = context.req.param("sessionId")
+    if (environmentId !== managedCloudIdForUser(userId)) {
+      return json({ error: "Managed environment not found" }, 404)
+    }
+    if (!dependencies.destroySession) {
+      return json({ error: "Managed session cleanup unavailable" }, 503)
+    }
+    try {
+      await dependencies.destroySession({ userId, environmentId, sessionId })
+      await dependencies.releaseSessionStart?.({ userId, environmentId, sessionId })
+      return json({ version: 1, deleted: true })
+    } catch (cause) {
+      return cause instanceof ManagedRuntimeRequestError
+        ? json({ error: cause.message }, cause.status)
+        : json({ error: "Managed session cleanup failed" }, 503)
     }
   })
 
@@ -651,7 +817,8 @@ export const createEnvironmentRoutes = (
       try {
         await dependencies.syncCapabilities?.({
           userId,
-          codexApiKey: codexApiKeyFrom(context.req.raw),
+          codexCredential: codexCredentialFrom(context.req.raw),
+          claudeCredential: claudeCredentialFrom(context.req.raw),
           includeGitHub: false
         })
       } catch {

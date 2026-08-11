@@ -11,6 +11,8 @@ import {
   restoreWorkspaceCheckpoint
 } from "./workspace-checkpoint.js"
 import {
+  createControlPlaneProviderFetch,
+  providerAuthorizationScope,
   proxyProviderRequest,
   resolveProviderCredential
 } from "./provider-proxy.js"
@@ -54,11 +56,30 @@ const grantRequestIdentity = (value: unknown): {
     : null
 }
 
+const runtimeSessionIdentity = (value: unknown): {
+  readonly subject: string
+  readonly environmentId: string
+  readonly sessionId: string
+} | null => {
+  if (typeof value !== "object" || value === null) return null
+  const fields = Object.fromEntries(Object.entries(value))
+  return typeof fields.subject === "string" &&
+    typeof fields.environmentId === "string" &&
+    typeof fields.sessionId === "string"
+    ? {
+        subject: fields.subject,
+        environmentId: fields.environmentId,
+        sessionId: fields.sessionId
+      }
+    : null
+}
+
 interface RuntimeRegistration {
   readonly authStateVersion: number
   readonly sessionGeneration: number
   readonly credentialHandles: {
     readonly codex: string | null
+    readonly claude: string | null
     readonly github: string | null
   }
 }
@@ -130,6 +151,7 @@ const runtimeRegistration = async (
   }
   const credentialHandles = {
     codex: typeof handles?.codex === "string" ? handles.codex : null,
+    claude: typeof handles?.claude === "string" ? handles.claude : null,
     github: typeof handles?.github === "string" ? handles.github : null
   }
   const sessionResponse = await env.MANAGED_SESSION.getByName(input.sessionId).fetch(
@@ -141,6 +163,7 @@ const runtimeRegistration = async (
         ...input,
         authStateVersion: auth.authStateVersion,
         codexCapabilityHandle: credentialHandles.codex,
+        claudeCapabilityHandle: credentialHandles.claude,
         githubCapabilityHandle: credentialHandles.github
       })
     }
@@ -196,7 +219,10 @@ export default {
           ? json({ error: cause.message }, cause.status)
           : json({ error: "Managed execution registration failed" }, 503)
       }
-      if (registration.credentialHandles.codex === null) {
+      if (
+        registration.credentialHandles.codex === null &&
+        registration.credentialHandles.claude === null
+      ) {
         await destroyRuntimeSession(env, input).catch(() => undefined)
         return json({ error: "Managed execution is not authorized" }, 403)
       }
@@ -221,6 +247,7 @@ export default {
       }
       const sandbox = getSandbox(env.Sandbox, "probe", {
         transport: "rpc",
+        normalizeId: true,
         enableDefaultSession: false,
         sleepAfter: "2m"
       })
@@ -238,6 +265,7 @@ export default {
       const store = r2CheckpointStore(env.WORKSPACE_CHECKPOINTS)
       let sandbox = getSandbox(env.Sandbox, sessionId, {
         transport: "rpc",
+        normalizeId: true,
         enableDefaultSession: false,
         sleepAfter: "2m"
       })
@@ -264,6 +292,7 @@ export default {
         await sandbox.destroy()
         sandbox = getSandbox(env.Sandbox, sessionId, {
           transport: "rpc",
+          normalizeId: true,
           enableDefaultSession: false,
           sleepAfter: "2m"
         })
@@ -325,6 +354,15 @@ export default {
       }
       return json({ destroyed: results.filter((response) => response.ok).length })
     }
+    if (url.pathname === "/v1/sessions/destroy" && request.method === "POST") {
+      if (!hasBearerServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401)
+      }
+      const body = runtimeSessionIdentity(await request.json())
+      if (body === null) return json({ error: "Invalid session cleanup request" }, 400)
+      await destroyRuntimeSession(env, body)
+      return json({ destroyed: true })
+    }
     if (url.pathname === "/v1/workspaces/hydrate" && request.method === "POST") {
       if (!hasBearerServiceAuthorization(request, env)) {
         return json({ error: "Unauthorized" }, 401)
@@ -350,8 +388,13 @@ export default {
       }
       const sandbox = getSandbox(env.Sandbox, bodyFields.sessionId, {
         transport: "rpc",
+        normalizeId: true,
         enableDefaultSession: false,
-        sleepAfter: `${env.MANAGED_RUNTIME_IDLE_SECONDS}s`
+        // Hydration can legitimately outlive the settled-session idle window:
+        // a cold VM plus an exact-SHA Git fetch must remain active until the
+        // workspace is ready. Subsequent session commands reapply the short
+        // idle policy, and every failure path below destroys the sandbox.
+        sleepAfter: `${env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS}s`
       })
       let registration: RuntimeRegistration
       try {
@@ -433,44 +476,55 @@ export default {
         )
       }
     }
-    const codexProxyMatch = url.pathname.match(
-      /^\/v1\/provider\/codex\/([^/]+)(\/.*)$/u
+    const providerProxyMatch = url.pathname.match(
+      /^\/v1\/provider\/(codex|claude)\/([^/]+)(\/.*)$/u
     )
-    if (codexProxyMatch !== null) {
-      const sessionId = decodeURIComponent(codexProxyMatch[1] ?? "")
+    if (providerProxyMatch !== null) {
+      const provider = providerProxyMatch[1] as "codex" | "claude"
+      const sessionId = decodeURIComponent(providerProxyMatch[2] ?? "")
       const authorization = await env.MANAGED_SESSION.getByName(sessionId).fetch(
-        "https://managed-session.internal/v1/provider-authorization",
+        `https://managed-session.internal/v1/provider-authorization/${provider}`,
         { method: "POST", headers: { authorization: request.headers.get("authorization") ?? "" } }
       )
-      if (!authorization.ok) return json({ error: "Provider authorization unavailable" }, 403)
-      const scope: unknown = await authorization.json()
-      const scopeFields =
-        typeof scope === "object" && scope !== null
-          ? Object.fromEntries(Object.entries(scope))
-          : null
-      if (
-        typeof scopeFields?.subject !== "string" ||
-        typeof scopeFields.capabilityHandle !== "string" ||
-        typeof scopeFields.repositorySlug !== "string"
-      ) {
+      if (!authorization.ok) {
+        console.warn(JSON.stringify({
+          component: "managed-provider-proxy",
+          event: "session_scope_denied",
+          provider,
+          status: authorization.status
+        }))
+        return json({ error: "Provider authorization unavailable" }, 403)
+      }
+      const scope = providerAuthorizationScope(await authorization.json())
+      if (scope === null) {
         return json({ error: "Provider authorization unavailable" }, 403)
       }
       return proxyProviderRequest(
         {
-          provider: "codex",
-          subject: scopeFields.subject,
-          capabilityHandle: scopeFields.capabilityHandle,
-          upstreamUrl: `https://api.openai.com${codexProxyMatch[2] ?? "/"}`,
+          provider,
+          subject: scope.subject,
+          capabilityHandle: scope.capabilityHandle,
+          upstreamUrl: provider === "codex"
+            ? `https://api.openai.com${providerProxyMatch[3] ?? "/"}`
+            : `https://api.anthropic.com${providerProxyMatch[3] ?? "/"}`,
           method: request.method === "GET" ? "GET" : "POST",
           body: request.body,
           contentType: request.headers.get("content-type"),
           accept: request.headers.get("accept"),
+          userAgent: request.headers.get("user-agent"),
+          originator: request.headers.get("originator"),
+          openAiBeta: request.headers.get("openai-beta"),
+          anthropicBeta: request.headers.get("anthropic-beta"),
           contentLength: Number(request.headers.get("content-length") ?? 0)
         },
         {
           resolve: (subject, handle) =>
-            resolveProviderCredential(env, subject, handle, "codex"),
-          fetch,
+            resolveProviderCredential(env, subject, handle, provider),
+          fetch: createControlPlaneProviderFetch({
+            controlPlaneUrl: env.MANAGED_CONTROL_PLANE_URL,
+            serviceSecret: env.MANAGED_RUNTIME_SERVICE_SECRET,
+            fetch
+          }),
           maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES)
         }
       )
@@ -505,6 +559,7 @@ export default {
       return proxyProviderRequest(
         {
           provider: "github",
+          gitSmartHttp: true,
           subject: scopeFields.subject,
           capabilityHandle: scopeFields.capabilityHandle,
           upstreamUrl: `https://github.com/${owner}/${repository}${suffix}${url.search}`,
@@ -562,9 +617,11 @@ export default {
       const operation = sessionMatch[2] ?? ""
       const target = new URL(`https://managed-session.internal/v1/${operation}`)
       target.search = url.search
-      return env.MANAGED_SESSION.getByName(sessionId).fetch(
-        new Request(target, request)
+      const forwardedRequest = new Request(target, request)
+      const response = await env.MANAGED_SESSION.getByName(sessionId).fetch(
+        forwardedRequest
       )
+      return response
     }
     return json({ error: "Not found" }, 404)
   }

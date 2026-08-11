@@ -37,6 +37,45 @@ const managedEnvironment: ManagedEnvironment = {
 }
 
 describe("managed session transport", () => {
+  it("cancels out of band without opening an observer or command process", async () => {
+    const requested: Array<{ url: string; method: string | undefined }> = []
+    const grant = vi.fn(() => Effect.succeed({
+      version: 1 as const,
+      runtimeUrl: "https://managed-runtime.example.test",
+      grant: "grant_cancel_abcdefghijklmnop",
+      expiresAt: 9_999_999_999
+    }))
+    const transport = makeManagedSessionTransport({
+      environment: () => Effect.succeed(managedEnvironment),
+      grant,
+      fetch: async (input, init) => {
+        requested.push({ url: String(input), method: init?.method })
+        return Response.json({ ok: true })
+      }
+    })
+
+    const events = await Effect.runPromise(
+      transport.execute(
+        { id: "session_cancel_abcdefgh", environmentId: managedEnvironment.id },
+        "Agent.stop",
+        { chatId: "chat_cancel" },
+        "command_cancel_abcdefgh"
+      ).pipe(Stream.runCollect)
+    )
+
+    expect(grant).toHaveBeenCalledWith(
+      managedEnvironment,
+      "session_cancel_abcdefgh",
+      "command_cancel_abcdefgh",
+      ["session.cancel", "session.observe"]
+    )
+    expect(requested).toEqual([{
+      url: "https://managed-runtime.example.test/v1/sessions/session_cancel_abcdefgh/cancel",
+      method: "POST"
+    }])
+    expect(Chunk.toReadonlyArray(events).map((event) => event.kind)).toEqual(["complete"])
+  })
+
   it("uses one command submission and the shared ordered event stream", async () => {
     const server = new WebSocketServer({ port: 0 })
     servers.push(server)
@@ -96,7 +135,7 @@ describe("managed session transport", () => {
       managedEnvironment,
       "session_managed_abcdefgh",
       "command_managed_abcdefgh",
-      ["session.input"]
+      ["session.input", "session.observe"]
     )
     expect(submitted).toHaveLength(1)
     expect(Chunk.toReadonlyArray(events).map((event) => event.kind)).toEqual([

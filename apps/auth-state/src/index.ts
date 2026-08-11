@@ -12,6 +12,7 @@ import {
   snapshotOf,
   type AuthSession,
   type AuthStateRecord,
+  type CapabilityUpstream,
   type CapabilityProvider,
   type StoredCredential
 } from "./state.js"
@@ -43,10 +44,14 @@ const readBody = async (request: Request): Promise<Record<string, unknown> | nul
 
 const nowSeconds = (): number => Math.floor(Date.now() / 1_000)
 
-const credentialFingerprint = async (authorizationHeader: string): Promise<string> => {
+const credentialFingerprint = async (
+  authorizationHeader: string,
+  upstream: CapabilityUpstream,
+  accountId: string | null
+): Promise<string> => {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(authorizationHeader)
+    new TextEncoder().encode(`${upstream}\n${accountId ?? ""}\n${authorizationHeader}`)
   )
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -54,7 +59,22 @@ const credentialFingerprint = async (authorizationHeader: string): Promise<strin
 }
 
 const providerOf = (value: unknown): CapabilityProvider | null =>
-  value === "github" || value === "codex" ? value : null
+  value === "github" || value === "codex" || value === "claude" ? value : null
+
+const upstreamOf = (
+  provider: CapabilityProvider,
+  value: unknown
+): CapabilityUpstream | null => {
+  if (provider === "github") return value === undefined || value === "github-api" ? "github-api" : null
+  if (provider === "codex") {
+    return value === undefined || value === "openai-api"
+      ? "openai-api"
+      : value === "chatgpt-codex"
+        ? value
+        : null
+  }
+  return value === undefined || value === "anthropic-api" ? "anthropic-api" : null
+}
 
 const authorized = (request: Request, env: AuthStateEnv): boolean =>
   env.AUTH_STATE_SERVICE_SECRET.length >= 32 &&
@@ -182,7 +202,17 @@ export class AuthStateObject extends DurableObject<AuthStateEnv> {
             authorizationHeader: await openCredential(
               credential.authorizationHeaderEncrypted,
               this.env.AUTH_STATE_ENCRYPTION_KEY
-            )
+            ),
+            upstream: credential.upstream ??
+              (credential.provider === "github" ? "github-api" : "openai-api"),
+            ...(credential.accountIdEncrypted === undefined
+              ? {}
+              : {
+                  accountId: await openCredential(
+                    credential.accountIdEncrypted,
+                    this.env.AUTH_STATE_ENCRYPTION_KEY
+                  )
+                })
           })
     }
 
@@ -218,20 +248,31 @@ export class AuthStateObject extends DurableObject<AuthStateEnv> {
 
     if (url.pathname === "/v1/internal/capability" && request.method === "PUT") {
       const provider = providerOf(body?.provider)
+      const upstream = provider === null ? null : upstreamOf(provider, body?.upstream)
       const authorizationHeader =
         typeof body?.authorizationHeader === "string" ? body.authorizationHeader : null
+      const accountId = typeof body?.accountId === "string" ? body.accountId : null
       const expiresAt = typeof body?.expiresAt === "number" ? body.expiresAt : null
       if (
         provider === null ||
+        upstream === null ||
         authorizationHeader === null ||
-        !authorizationHeader.startsWith("Bearer ") ||
+        !(authorizationHeader.startsWith("Bearer ") ||
+          authorizationHeader.startsWith("X-Api-Key ")) ||
         expiresAt === null ||
         !Number.isSafeInteger(expiresAt) ||
         expiresAt <= nowSeconds()
       ) {
         return json({ error: "Invalid capability" }, 400)
       }
-      const fingerprint = await credentialFingerprint(authorizationHeader)
+      if (
+        (upstream === "chatgpt-codex" &&
+          (accountId === null || !/^[0-9a-f-]{36}$/iu.test(accountId))) ||
+        (upstream !== "chatgpt-codex" && accountId !== null)
+      ) {
+        return json({ error: "Invalid capability scope" }, 400)
+      }
+      const fingerprint = await credentialFingerprint(authorizationHeader, upstream, accountId)
       const existing = state.credentials[provider]
       if (
         existing?.fingerprint === fingerprint &&
@@ -246,10 +287,19 @@ export class AuthStateObject extends DurableObject<AuthStateEnv> {
             ? existing.handle
             : `capability_${crypto.randomUUID().replaceAll("-", "")}`,
         fingerprint,
+        upstream,
         authorizationHeaderEncrypted: await sealCredential(
           authorizationHeader,
           this.env.AUTH_STATE_ENCRYPTION_KEY
         ),
+        ...(accountId === null
+          ? {}
+          : {
+              accountIdEncrypted: await sealCredential(
+                accountId,
+                this.env.AUTH_STATE_ENCRYPTION_KEY
+              )
+            }),
         expiresAt
       }
       const next = {

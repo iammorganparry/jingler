@@ -15,11 +15,13 @@ import { MAIN_ENTRY } from "./global-setup.js"
 
 const runRealManagedQa = process.env.JINGLER_REAL_MANAGED_QA === "1"
 const realAuthToken = process.env.JINGLER_REAL_AUTH_TOKEN
+const realAuthUrl = process.env.JINGLER_REAL_AUTH_URL ?? "https://api.jingler.dev"
 const repositoryUrl =
   process.env.JINGLER_REAL_MANAGED_REPOSITORY ??
   "https://github.com/iammorganparry/jingler.git"
 const DEVICES_SECTION = /^Devices/
 const CONTINUATION_ROW = /continuation/i
+const MESSAGE_BOX = /Message/
 
 test.describe("real managed environment canary", () => {
   test.skip(
@@ -27,7 +29,7 @@ test.describe("real managed environment canary", () => {
     "Set JINGLER_REAL_MANAGED_QA=1 and JINGLER_REAL_AUTH_TOKEN to run the production-backed canary."
   )
 
-  test("stops local work, hands it to Cloud, and continues there", async () => {
+  test("runs directly in Cloud, then stops local work and continues it there", async () => {
     test.setTimeout(12 * 60_000)
     const root = mkdtempSync(join(tmpdir(), "jingler-real-managed-"))
     const home = join(root, "home")
@@ -94,7 +96,7 @@ test.describe("real managed environment canary", () => {
         env: {
           ...process.env,
           ELECTRON_RENDERER_URL: "",
-          JINGLER_AUTH_URL: "https://api.jingler.dev",
+          JINGLER_AUTH_URL: realAuthUrl,
           JINGLER_E2E: "0",
           JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
           JINGLER_HOME: home,
@@ -119,16 +121,81 @@ test.describe("real managed environment canary", () => {
 
       await window.getByTestId("new-session").click()
       await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
-      const prompt = window.getByPlaceholder(
-        "Message the agent, tag @files, or use /commands and /skills"
+      await window.getByRole("button", { name: "Execution environment" }).click()
+      await window.getByRole("option", { name: "Cloud" }).click()
+      await window.getByRole("button", { name: "Create workspace" }).click()
+      await expect(window.getByTestId("cloud-startup-progress")).toBeVisible()
+      const pendingCloud = window.getByTestId("pending-cloud-session")
+      await expect(pendingCloud).toBeVisible()
+      const startupAlert = window.getByRole("alert")
+      await Promise.race([
+        expect(window.getByTestId("cloud-startup-progress")).toHaveCount(0, {
+          timeout: 5 * 60_000
+        }),
+        startupAlert.waitFor({ state: "visible", timeout: 5 * 60_000 }).then(async () => {
+          throw new Error(`Cloud startup failed: ${await startupAlert.textContent()}`)
+        })
+      ])
+      const directCloudRow = sessionRow(window, "Untitled session")
+      await expect(directCloudRow).toBeVisible({ timeout: 30_000 })
+      await expect(window.getByRole("button", { name: "Execution environment" })).toContainText(
+        "Cloud"
       )
+      const directCloudPrompt = window.getByRole("textbox", { name: MESSAGE_BOX })
+      await expect(directCloudPrompt).toBeVisible()
+      await directCloudPrompt.fill(
+        "Create docs/direct-cloud-qa-marker.md containing exactly `direct cloud QA passed`. Do not commit or push."
+      )
+      await directCloudPrompt.press("Enter")
+      await expect(window.getByRole("button", { name: "Stop", exact: true })).toBeVisible({
+        timeout: 90_000
+      })
+      await expect(window.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0, {
+        timeout: 5 * 60_000
+      })
+      await window.getByRole("button", { name: "Changes" }).first().click()
+      const directCloudChanges = window.getByRole("region", { name: "Code review changes" })
+      await expect(directCloudChanges).toContainText("docs/direct-cloud-qa-marker.md", {
+        timeout: 60_000
+      })
+      await expect(directCloudChanges).toContainText("direct cloud QA passed")
+      await window.getByTestId("active-chat-tab").click()
+
+      await window.getByTestId("new-session").click()
+      await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+      await window.getByRole("button", { name: "Execution environment" }).click()
+      await window.getByRole("option", { name: "Local" }).click()
+      const prompt = window.getByRole("textbox", { name: MESSAGE_BOX })
       await prompt.fill(
-        "First create docs/managed-cloud-qa-marker.md containing exactly `managed cloud QA passed`. Then run `sleep 45` so I can test a live handoff. Do not commit or push."
+        "Create docs/managed-cloud-qa-marker.md containing exactly `managed cloud QA passed`. Do not commit or push."
       )
       await prompt.press("Enter")
 
       const localRow = sessionRow(window, "Untitled session")
       await expect(localRow).toBeVisible({ timeout: 90_000 })
+      await expect(window.getByRole("button", { name: "Stop", exact: true })).toBeVisible({
+        timeout: 90_000
+      })
+      await expect(window.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0, {
+        timeout: 5 * 60_000
+      })
+
+      // Prove the source workspace is dirty before exercising handoff. Without
+      // this boundary assertion a later "missing in Cloud" failure cannot
+      // distinguish a transfer bug from work that never existed on the source.
+      await window.getByRole("button", { name: "Changes" }).first().click()
+      const localChanges = window.getByRole("region", { name: "Code review changes" })
+      await expect(localChanges).toContainText("docs/managed-cloud-qa-marker.md", {
+        timeout: 90_000
+      })
+      await expect(localChanges).toContainText("managed cloud QA passed")
+      await window.getByTestId("active-chat-tab").click()
+
+      // Keep a second turn live so the selector exercises stop → checkpoint →
+      // continuation, without relying on the model to order a write before a
+      // long-running shell command inside one turn.
+      await prompt.fill("Run `sleep 45` now so I can test a live handoff.")
+      await prompt.press("Enter")
       await expect(window.getByRole("button", { name: "Stop", exact: true })).toBeVisible({
         timeout: 90_000
       })
@@ -146,9 +213,11 @@ test.describe("real managed environment canary", () => {
         "Cloud"
       )
       await window.getByRole("button", { name: "Changes" }).first().click()
-      await expect(
-        window.locator('[data-item-path="docs/managed-cloud-qa-marker.md"]')
-      ).toBeVisible({ timeout: 60_000 })
+      const handedOffChanges = window.getByRole("region", { name: "Code review changes" })
+      await expect(handedOffChanges).toContainText("docs/managed-cloud-qa-marker.md", {
+        timeout: 60_000
+      })
+      await expect(handedOffChanges).toContainText("managed cloud QA passed")
       await window.getByTestId("active-chat-tab").click()
 
       await prompt.fill(

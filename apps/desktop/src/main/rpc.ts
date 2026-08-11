@@ -1175,7 +1175,17 @@ const sessionCreationStream = <E, R>(
             })
           ),
           Effect.matchEffect({
-            onFailure: (error) => mailbox.fail(error).pipe(Effect.asVoid),
+            onFailure: (error) =>
+              Effect.sync(() => {
+                const message =
+                  typeof error === "object" &&
+                  error !== null &&
+                  "message" in error &&
+                  typeof error.message === "string"
+                    ? error.message
+                    : "Session creation failed."
+                mailbox.unsafeOffer({ kind: "failed", message })
+              }).pipe(Effect.zipRight(mailbox.end), Effect.asVoid),
             onSuccess: () => mailbox.end.pipe(Effect.asVoid),
           }),
         ),
@@ -1327,8 +1337,9 @@ const provisionRemoteSession = (
   input: CreateSessionInput | CreateSessionFromPrInput | CreateSessionFromIssueInput,
   progress?: SessionCreationProgress,
   knownEnvironment?: Environment,
-) =>
-  Effect.gen(function* () {
+) => {
+  let managedSessionId: string | undefined;
+  return Effect.gen(function* () {
     const remote = yield* RemoteSessionService;
     const sessions = yield* SessionStore;
     const environmentService = yield* EnvironmentService;
@@ -1340,6 +1351,7 @@ const provisionRemoteSession = (
     if (environment.kind === "managed") {
       yield* reportSessionCreation(progress, "resolving-repository")
       const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
+      managedSessionId = sessionId;
       const remoteUrl = yield* GitService.remoteUrl(input.repoPath);
       const repository = remoteUrl ? parseGitHubRemote(remoteUrl) : null;
       if (!repository) {
@@ -1406,7 +1418,22 @@ const provisionRemoteSession = (
     const persisted = yield* sessions.upsertRemote(created);
     yield* reportSessionCreation(progress, "ready")
     return persisted;
-  });
+  }).pipe(
+    Effect.onError(() =>
+      Effect.gen(function* () {
+        if (managedSessionId === undefined) return;
+        const environments = yield* EnvironmentService;
+        const environment = yield* environments.environment(environmentId).pipe(
+          Effect.orElseSucceed(() => null),
+        );
+        if (environment?.kind !== "managed") return;
+        yield* environments.cleanupManagedSession(environment, managedSessionId).pipe(
+          Effect.ignore,
+        );
+      }),
+    ),
+  );
+};
 
 export const createSessionFromPrRouted = (
   input: CreateSessionFromPrInput,
@@ -1444,6 +1471,13 @@ export const setEnvironment = (
     const sessions = yield* SessionStore;
     const environments = yield* EnvironmentService;
     const session = yield* sessions.get(sessionId);
+    // The persisted Session counters lag a running turn. The transcript is the
+    // durable proof that this checkout has started work, so never move it in
+    // place merely because the first streamed usage/diff update has not landed.
+    const hasTranscript = yield* TranscriptStore.list(session.activeChatId).pipe(
+      Effect.map((messages) => messages.length > 0),
+      Effect.orElseSucceed(() => true),
+    );
     return yield* setSessionEnvironment(
       session,
       environmentId,
@@ -1458,6 +1492,7 @@ export const setEnvironment = (
             ...(target === undefined ? {} : { environmentId: target }),
           })),
       },
+      hasTranscript,
     );
   });
 

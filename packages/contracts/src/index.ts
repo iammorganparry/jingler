@@ -413,7 +413,8 @@ export type SessionCreationPhase = Schema.Schema.Type<typeof SessionCreationPhas
 
 export const SessionCreationUpdate = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("progress"), phase: SessionCreationPhase }),
-  Schema.Struct({ kind: Schema.Literal("complete"), session: Session })
+  Schema.Struct({ kind: Schema.Literal("complete"), session: Session }),
+  Schema.Struct({ kind: Schema.Literal("failed"), message: Schema.String })
 )
 export type SessionCreationUpdate = Schema.Schema.Type<typeof SessionCreationUpdate>
 

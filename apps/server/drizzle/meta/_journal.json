@@ -71,6 +71,13 @@
       "when": 1786380425332,
       "tag": "0009_managed_environments",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786456344289,
+      "tag": "0010_deep_sabra",
+      "breakpoints": true
     }
   ]
 }

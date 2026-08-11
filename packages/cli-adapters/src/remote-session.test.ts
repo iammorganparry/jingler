@@ -310,6 +310,7 @@ process.stdin.on("data", (chunk) => {
       directSsh: () => Effect.succeed(null),
       pairSsh: () => Effect.never,
       hydrateManagedWorkspace: () => Effect.never,
+      cleanupManagedSession: () => Effect.void,
       rename: () => Effect.never,
       revoke: () => Effect.never
     }
@@ -410,6 +411,7 @@ process.stdin.on("data", (chunk) => {
       managedSessionGrant: () => Effect.never,
       discovery: () => Effect.never, directSsh: () => Effect.succeed(null), pairSsh: () => Effect.never,
       hydrateManagedWorkspace: () => Effect.never,
+      cleanupManagedSession: () => Effect.void,
       rename: () => Effect.never, revoke: () => Effect.never
     }
     const services = RemoteSessionService.Default.pipe(Layer.provide(Layer.mergeAll(

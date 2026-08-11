@@ -55,6 +55,7 @@ const repositoryFor = (database: Database) => ({
     readonly id: string
     readonly userId: string
     readonly environmentId: string
+    readonly sessionId: string
     readonly idempotencyKey: string
     readonly policy: ManagedUsagePolicy
     readonly now: Date
@@ -64,14 +65,42 @@ const repositoryFor = (database: Database) => ({
         // Serialize admissions for one account without scanning or locking other users.
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`)
         const existing = await tx
-          .select({ id: managedUsageReservation.id })
+          .select({
+            id: managedUsageReservation.id,
+            state: managedUsageReservation.state
+          })
           .from(managedUsageReservation)
           .where(and(
             eq(managedUsageReservation.userId, input.userId),
             eq(managedUsageReservation.idempotencyKey, input.idempotencyKey)
           ))
           .limit(1)
-        if (existing[0]) return { status: "existing", reservationId: existing[0].id } as const
+        if (
+          existing[0] &&
+          !["released", "expired"].includes(existing[0].state)
+        ) {
+          return { status: "existing", reservationId: existing[0].id } as const
+        }
+
+        // Commands are metered as one lifecycle interval per managed session.
+        // Follow-up input and cancellation must reuse that interval instead of
+        // consuming another account concurrency slot.
+        const activeForSession = await tx
+          .select({ id: managedUsageReservation.id })
+          .from(managedUsageReservation)
+          .where(and(
+            eq(managedUsageReservation.userId, input.userId),
+            eq(managedUsageReservation.sessionId, input.sessionId),
+            inArray(managedUsageReservation.state, ["reserved", "active"])
+          ))
+          .orderBy(managedUsageReservation.createdAt)
+          .limit(1)
+        if (activeForSession[0]) {
+          return {
+            status: "existing",
+            reservationId: activeForSession[0].id
+          } as const
+        }
 
         const windowStart = new Date(input.now)
         windowStart.setUTCHours(0, 0, 0, 0)
@@ -94,10 +123,24 @@ const repositoryFor = (database: Database) => ({
         })
         if (!decision.admitted) return { status: "denied", reason: decision.reason } as const
         const expiresAt = new Date(input.now.getTime() + input.policy.maxActiveSeconds * 1_000)
+        if (existing[0]) {
+          await tx.update(managedUsageReservation)
+            .set({
+              state: "reserved",
+              windowStart,
+              estimatedMicrousd: decision.estimatedMicrousd,
+              settledMicrousd: null,
+              updatedAt: input.now,
+              expiresAt
+            })
+            .where(eq(managedUsageReservation.id, existing[0].id))
+          return { status: "reserved", reservationId: existing[0].id } as const
+        }
         await tx.insert(managedUsageReservation).values({
           id: input.id,
           userId: input.userId,
           environmentId: input.environmentId,
+          sessionId: input.sessionId,
           runtimeId: null,
           state: "reserved",
           windowStart,
@@ -139,6 +182,23 @@ const repositoryFor = (database: Database) => ({
         .where(and(
           eq(managedUsageReservation.id, input.reservationId),
           eq(managedUsageReservation.userId, input.userId),
+          eq(managedUsageReservation.state, "reserved")
+        ))
+    ).pipe(Effect.asVoid),
+
+  releaseReservedForSession: (input: {
+    readonly userId: string
+    readonly environmentId: string
+    readonly sessionId: string
+    readonly now: Date
+  }): Effect.Effect<void, DatabaseError> =>
+    database.run("ManagedUsageRepository.releaseReservedForSession", (db) =>
+      db.update(managedUsageReservation)
+        .set({ state: "released", updatedAt: input.now })
+        .where(and(
+          eq(managedUsageReservation.userId, input.userId),
+          eq(managedUsageReservation.environmentId, input.environmentId),
+          eq(managedUsageReservation.sessionId, input.sessionId),
           eq(managedUsageReservation.state, "reserved")
         ))
     ).pipe(Effect.asVoid),

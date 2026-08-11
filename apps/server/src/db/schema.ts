@@ -300,6 +300,7 @@ export const managedUsageReservation = pgTable(
     environmentId: text("environment_id")
       .notNull()
       .references(() => managedEnvironment.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
     runtimeId: text("runtime_id").references(() => managedSessionRuntime.id, {
       onDelete: "set null"
     }),
@@ -320,6 +321,12 @@ export const managedUsageReservation = pgTable(
     index("managed_usage_user_window_state_idx").on(
       table.userId,
       table.windowStart,
+      table.state,
+      table.id
+    ),
+    index("managed_usage_user_session_state_idx").on(
+      table.userId,
+      table.sessionId,
       table.state,
       table.id
     ),

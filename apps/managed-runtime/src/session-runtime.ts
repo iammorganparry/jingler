@@ -5,7 +5,7 @@ import {
   type RemoteSessionEvent
 } from "@jingler/core"
 import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
-import { getSandbox } from "@cloudflare/sandbox"
+import { getSandbox, parseSSEStream, type LogEvent } from "@cloudflare/sandbox"
 import { DurableObject } from "cloudflare:workers"
 import { Either, Schema } from "effect"
 import { decodeManagedAuthSnapshot } from "./auth-subscription.js"
@@ -15,6 +15,7 @@ import {
   type ManagedGrantVerification
 } from "./grant.js"
 import { applyManagedAuthorizationSnapshot } from "./authorization.js"
+import { managedCodexConfig, managedCodexHome } from "./harness-config.js"
 import {
   emptyManagedSessionJournal,
   ManagedSessionJournal,
@@ -38,7 +39,9 @@ interface RuntimeMetadata {
   readonly authStateVersion: number
   readonly processId: string | null
   readonly authorized: boolean
+  readonly harness: "codex" | "claude" | null
   readonly codexCapabilityHandle: string | null
+  readonly claudeCapabilityHandle: string | null
   readonly githubCapabilityHandle: string | null
   readonly repositorySlug: string | null
   readonly providerTokenHash: string | null
@@ -58,6 +61,17 @@ const sha256 = async (value: string): Promise<string> => {
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
   )
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+const harnessFromCommand = (
+  command: RemoteSessionCommand,
+  current: RuntimeMetadata["harness"]
+): RuntimeMetadata["harness"] => {
+  const payload = fields(command.payload)
+  const direct = payload?.cli
+  const source = fields(payload?.sourceSession)?.cli
+  const candidate = direct ?? source
+  return candidate === "codex" || candidate === "claude" ? candidate : current
 }
 
 export const decodeManagedCommandFrame = (
@@ -80,6 +94,7 @@ export const decodeManagedCommandFrame = (
 
 export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   #journalTail: Promise<void> = Promise.resolve()
+  #executionTail: Promise<void> = Promise.resolve()
 
   async #metadata(): Promise<RuntimeMetadata | null> {
     return (await this.ctx.storage.get<RuntimeMetadata>(METADATA_KEY)) ?? null
@@ -110,6 +125,17 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       () => undefined
     )
     return result
+  }
+
+  #scheduleExecution(command: RemoteSessionCommand): Promise<void> {
+    // A Sandbox has one mutable transport configuration. Opening transcript,
+    // file and diff reads concurrently used to let one command switch back to
+    // RPC while another was still consuming its HTTP log stream. Serialize the
+    // short-lived command runners per managed session; cancellation uses the
+    // dedicated /cancel endpoint and therefore never waits behind this queue.
+    const execution = this.#executionTail.then(() => this.#execute(command))
+    this.#executionTail = execution.catch(() => undefined)
+    return execution
   }
 
   async #authorize(
@@ -149,9 +175,6 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     for (const socket of this.ctx.getWebSockets(commandId)) {
       try {
         socket.send(JSON.stringify(event))
-        if (event.kind === "complete" || event.kind === "failed") {
-          socket.close(1000, "terminal")
-        }
       } catch {
         socket.close(1011, "delivery-failed")
       }
@@ -161,11 +184,12 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   async #settle(
     commandId: string,
     status: "complete" | "failed" | "cancelled",
-    payload: unknown
+    payload: unknown,
+    checkpoint: boolean
   ): Promise<void> {
     const terminal = await this.#settleJournal(commandId, status, payload)
     this.#broadcast(commandId, terminal)
-    await this.#checkpoint(terminal.eventSequence)
+    if (checkpoint) await this.#checkpoint(terminal.eventSequence)
     const metadata = await this.#metadata()
     if (metadata !== null) {
       await this.ctx.storage.put(METADATA_KEY, {
@@ -193,6 +217,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     if (metadata === null) return
     const sandbox = getSandbox(this.env.Sandbox, metadata.sessionId, {
       transport: "rpc",
+      normalizeId: true,
       enableDefaultSession: false,
       sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`
     })
@@ -283,60 +308,74 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   async #execute(command: RemoteSessionCommand): Promise<void> {
     const sandbox = getSandbox(this.env.Sandbox, command.sessionId, {
       transport: "rpc",
+      normalizeId: true,
       enableDefaultSession: false,
       sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`
     })
     const inputDirectory = "/tmp/jingler-commands"
     const inputFile = `${inputDirectory}/${await sha256(command.commandId)}.json`
+    let phase = "preparing command input"
+    const checkpoint = managedRuntimeActionForOperation(command.operation) !== "session.observe"
     try {
       await sandbox.mkdir(inputDirectory, { recursive: true })
       await sandbox.writeFile(inputFile, JSON.stringify(command))
-      const session = await sandbox.createSession({
-        id: "jingler-session",
-        name: "Jingler managed session",
-        cwd: "/workspace"
-      })
       const metadata = await this.#metadata()
       if (metadata === null) throw new Error("Managed runtime metadata disappeared")
+      const harness = harnessFromCommand(command, metadata.harness)
+      if (harness === null) throw new Error("Managed session harness is unavailable")
+      if (
+        (harness === "codex" && metadata.codexCapabilityHandle === null) ||
+        (harness === "claude" && metadata.claudeCapabilityHandle === null)
+      ) {
+        throw new Error(`Managed ${harness} authorization is unavailable`)
+      }
       const providerToken = `provider_${crypto.randomUUID().replaceAll("-", "")}`
+      const codexBaseUrl = `${this.env.MANAGED_RUNTIME_ORIGIN}/v1/provider/codex/${encodeURIComponent(command.sessionId)}/v1`
+      if (harness === "codex") {
+        await sandbox.mkdir(managedCodexHome, { recursive: true })
+        await sandbox.writeFile(
+          `${managedCodexHome}/config.toml`,
+          managedCodexConfig(codexBaseUrl)
+        )
+      }
       await this.ctx.storage.put(METADATA_KEY, {
         ...metadata,
+        harness,
         processId: command.commandId,
         providerTokenHash: await sha256(providerToken),
         usageStartedAt: metadata.usageStartedAt ?? Date.now()
       })
-      const process = await session.startProcess(
-        [
-          "node",
-          "/opt/jingler/jingler-device.mjs",
-          "managed-command",
-          "--root",
-          "/workspace/.jingler-runtime",
-          "--input",
-          shellQuote(inputFile)
-        ].join(" "),
-        {
-          cwd: "/workspace",
-          processId: command.commandId,
-          autoCleanup: false,
-          env: {
-            OPENAI_API_KEY: providerToken,
-            OPENAI_BASE_URL: `${this.env.MANAGED_RUNTIME_ORIGIN}/v1/provider/codex/${encodeURIComponent(command.sessionId)}/v1`
-          }
-        }
-      )
-      const stream = await session.streamProcessLogs(process.id)
-      const reader = stream.getReader()
-      const decoder = new TextDecoder()
-      let buffered = ""
+      const commandLine = [
+        "node",
+        "/opt/jingler/jingler-device.mjs",
+        "managed-command",
+        "--root",
+        "/workspace/.jingler-runtime",
+        "--input",
+        shellQuote(inputFile)
+      ].join(" ")
+      const processEnv = {
+        ...(harness !== "codex"
+          ? {}
+          : {
+              OPENAI_API_KEY: providerToken,
+              OPENAI_BASE_URL: codexBaseUrl,
+              CODEX_HOME: managedCodexHome
+            }),
+        ...(harness !== "claude"
+          ? {}
+          : {
+              ANTHROPIC_AUTH_TOKEN: providerToken,
+              ANTHROPIC_BASE_URL: `${this.env.MANAGED_RUNTIME_ORIGIN}/v1/provider/claude/${encodeURIComponent(command.sessionId)}`
+            })
+      }
       let settled = false
-      while (true) {
-        const next = await reader.read()
-        if (next.done) break
-        buffered += decoder.decode(next.value, { stream: true })
+      let buffered = ""
+      const admitOutput = async (chunk: string): Promise<void> => {
+        buffered += chunk
         while (true) {
           const newline = buffered.indexOf("\n")
-          if (newline < 0) break
+          if (newline < 0) return
           const line = buffered.slice(0, newline)
           buffered = buffered.slice(newline + 1)
           if (!line) continue
@@ -350,26 +389,103 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           if (frame?.type === "managed-event") {
             await this.#append(command.commandId, frame.event)
           } else if (frame?.type === "managed-complete") {
-            await this.#settle(command.commandId, "complete", frame.payload)
+            await this.#settle(command.commandId, "complete", frame.payload, checkpoint)
             settled = true
           } else if (frame?.type === "managed-failed") {
-            await this.#settle(command.commandId, "failed", frame.payload)
+            await this.#settle(command.commandId, "failed", frame.payload, checkpoint)
             settled = true
           }
         }
       }
-      const exit = await process.waitForExit(Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS) * 1_000)
-      if (!settled) {
-        await this.#settle(command.commandId, "failed", {
-          code: "runtime-protocol-ended",
-          message: `Managed command runner exited without a terminal frame (${exit.exitCode}).`
+
+      // Only a real agent turn needs incremental output. Conversation bootstrap,
+      // file/diff reads and lifecycle mutations return one bounded protocol
+      // result, so a single RPC exec is both cheaper and immune to the SDK's
+      // long-lived ReadableStream transport edge cases.
+      if (command.operation !== "Agent.run") {
+        phase = "running the bounded command"
+        const result = await sandbox.exec(commandLine, {
+          cwd: "/workspace",
+          env: processEnv,
+          timeout: Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS) * 1_000
         })
+        await admitOutput(result.stdout.endsWith("\n") ? result.stdout : `${result.stdout}\n`)
+        if (!settled) {
+          await this.#settle(command.commandId, "failed", {
+            code: "runtime-protocol-ended",
+            message: `Managed command runner exited without a terminal frame (${result.exitCode}).`
+          }, checkpoint)
+        }
+        return
+      }
+
+      phase = "creating the execution session"
+      const session = await sandbox.createSession({
+        id: "jingler-session",
+        name: "Jingler managed session",
+        cwd: "/workspace"
+      })
+      phase = "starting the harness process"
+      const process = await session.startProcess(commandLine, {
+        cwd: "/workspace",
+        processId: command.commandId,
+        autoCleanup: false,
+        env: processEnv
+      })
+      // RPC is efficient for bounded lifecycle operations, but ReadableStream
+      // values can be disconnected when they cross the Worker↔DO RPC boundary.
+      // Use one HTTP/SSE request for the long-lived process log stream while
+      // retaining RPC for every other sandbox operation.
+      const streamSandbox = getSandbox(this.env.Sandbox, command.sessionId, {
+        transport: "http",
+        normalizeId: true,
+        enableDefaultSession: false,
+        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`
+      })
+      // getSandbox applies transport configuration asynchronously. Await the
+      // explicit switch so this stream cannot accidentally start over RPC.
+      await streamSandbox.setTransport("http")
+      try {
+        phase = "opening the harness log stream"
+        const processSignal = AbortSignal.timeout(
+          Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS) * 1_000
+        )
+        const stream = await streamSandbox.streamProcessLogs(process.id)
+        let exitCode: number | null = null
+        phase = "reading harness output"
+        for await (const event of parseSSEStream<LogEvent>(stream, processSignal)) {
+          if (event.type === "stdout") {
+            await admitOutput(event.data ?? "")
+            // Jingler's terminal frame is the authoritative end of the
+            // command. Cloudflare's process-log SSE stream can remain open
+            // after the process has emitted that frame, so waiting for the
+            // transport-level exit event would pin the session and its
+            // container until the active-duration timeout.
+            if (settled) break
+          } else if (event.type === "error") {
+            throw new Error(event.data || "Harness log stream failed")
+          } else if (event.type === "exit") {
+            exitCode = event.exitCode ?? 1
+            break
+          }
+        }
+        if (buffered.trim().length > 0) await admitOutput("\n")
+        if (!settled) {
+          await this.#settle(command.commandId, "failed", {
+            code: "runtime-protocol-ended",
+            message: `Managed command runner exited without a terminal frame (${exitCode ?? "unknown"}).`
+          }, checkpoint)
+        }
+      } finally {
+        await streamSandbox.setTransport("rpc").catch(() => undefined)
       }
     } catch (cause) {
       await this.#settle(command.commandId, "failed", {
         code: "runtime-failed",
-        message: cause instanceof Error ? cause.message : "Managed runtime failed"
-      }).catch(() => undefined)
+        message: cause instanceof Error
+          ? `Managed runtime failed while ${phase}: ${cause.message}`
+          : `Managed runtime failed while ${phase}`
+      }, checkpoint).catch(() => undefined)
     } finally {
       await sandbox.deleteFile(inputFile).catch(() => undefined)
     }
@@ -396,6 +512,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     if (metadata.processId === null) return
     const sandbox = getSandbox(this.env.Sandbox, metadata.sessionId, {
       transport: "rpc",
+      normalizeId: true,
       enableDefaultSession: false,
       sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`
     })
@@ -442,14 +559,25 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         sessionGeneration: previous?.sessionGeneration ?? 1,
         processId: previous?.processId ?? null,
         authorized: true,
+        harness: previous?.harness ?? null,
         codexCapabilityHandle:
           typeof body.codexCapabilityHandle === "string"
             ? body.codexCapabilityHandle
-            : previous?.codexCapabilityHandle ?? null,
+            : body.codexCapabilityHandle === null
+              ? null
+              : previous?.codexCapabilityHandle ?? null,
+        claudeCapabilityHandle:
+          typeof body.claudeCapabilityHandle === "string"
+            ? body.claudeCapabilityHandle
+            : body.claudeCapabilityHandle === null
+              ? null
+              : previous?.claudeCapabilityHandle ?? null,
         githubCapabilityHandle:
           typeof body.githubCapabilityHandle === "string"
             ? body.githubCapabilityHandle
-            : previous?.githubCapabilityHandle ?? null,
+            : body.githubCapabilityHandle === null
+              ? null
+              : previous?.githubCapabilityHandle ?? null,
         repositorySlug:
           typeof body.repositorySlug === "string"
             ? body.repositorySlug
@@ -480,9 +608,16 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         const codexCapability = snapshot?.credentialCapabilities.find(
           (capability) => capability.provider === "codex" && capability.expiresAt > now
         )
+        const claudeCapability = snapshot?.credentialCapabilities.find(
+          (capability) => capability.provider === "claude" && capability.expiresAt > now
+        )
         const authorized =
           snapshot?.capabilities.includes("managed.session.execute") === true &&
-          codexCapability !== undefined &&
+          (metadata.harness === "codex"
+            ? codexCapability !== undefined
+            : metadata.harness === "claude"
+              ? claudeCapability !== undefined
+              : codexCapability !== undefined || claudeCapability !== undefined) &&
           (snapshot?.expiresAt ?? 0) > now
         const next = await applyManagedAuthorizationSnapshot(
           metadata,
@@ -492,6 +627,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         await this.ctx.storage.put(METADATA_KEY, {
           ...next,
           codexCapabilityHandle: codexCapability?.handle ?? null,
+          claudeCapabilityHandle: claudeCapability?.handle ?? null,
           githubCapabilityHandle:
             snapshot?.credentialCapabilities.find(
               (capability) =>
@@ -522,6 +658,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       await this.#settleUsage()
       const sandbox = getSandbox(this.env.Sandbox, metadata.sessionId, {
         transport: "rpc",
+        normalizeId: true,
         enableDefaultSession: false,
         sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`
       })
@@ -547,26 +684,46 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       if (command.sessionId !== metadata.sessionId) return json({ error: "wrong-scope" }, 403)
       const admission = await this.#mutateJournal((journal) => journal.admit(command))
       if (admission === "started") {
-        this.ctx.waitUntil(this.#execute(command))
+        this.ctx.waitUntil(this.#scheduleExecution(command))
       }
       return json({ accepted: true, replay: admission === "replay" }, 202)
     }
 
-    if (url.pathname === "/v1/provider-authorization" && request.method === "POST") {
+    const providerAuthorization = url.pathname.match(
+      /^\/v1\/provider-authorization\/(codex|claude)$/u
+    )
+    if (providerAuthorization !== null && request.method === "POST") {
       const token = bearerManagedGrant(request)
+      const capabilityHandle = providerAuthorization[1] === "claude"
+        ? metadata.claudeCapabilityHandle
+        : metadata.codexCapabilityHandle
+      const tokenMatches =
+        token !== null &&
+        metadata.providerTokenHash !== null &&
+        (await sha256(token)) === metadata.providerTokenHash
       if (
         !metadata.authorized ||
+        metadata.harness !== providerAuthorization[1] ||
         metadata.processId === null ||
-        token === null ||
-        metadata.providerTokenHash === null ||
-        (await sha256(token)) !== metadata.providerTokenHash ||
-        metadata.codexCapabilityHandle === null
+        !tokenMatches ||
+        capabilityHandle === null
       ) {
+        console.warn(JSON.stringify({
+          component: "managed-session-runtime",
+          event: "provider_authorization_denied",
+          provider: providerAuthorization[1],
+          authorized: metadata.authorized,
+          harnessMatches: metadata.harness === providerAuthorization[1],
+          processActive: metadata.processId !== null,
+          tokenPresent: token !== null,
+          tokenMatches,
+          capabilityPresent: capabilityHandle !== null
+        }))
         return json({ error: "Provider authorization unavailable" }, 403)
       }
       return json({
         subject: metadata.subject,
-        capabilityHandle: metadata.codexCapabilityHandle
+        capabilityHandle
       })
     }
 
@@ -631,9 +788,12 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       }
       this.ctx.acceptWebSocket(server, [commandId])
       for (const event of events) server.send(JSON.stringify(event))
-      if (events.some((event) => event.kind === "complete" || event.kind === "failed")) {
-        server.close(1000, "terminal")
-      }
+      // Do not close in the same task that sends a terminal frame. Cloudflare's
+      // WebSocket implementation may flush the close before the queued message,
+      // leaving the observer with a clean 1000 close but no terminal event. The
+      // client owns the stream lifetime and closes as soon as it consumes the
+      // durable terminal frame; hibernation keeps an idle replay socket cheap in
+      // the narrow interval before that happens.
       return new Response(null, { status: 101, webSocket: client })
     }
 

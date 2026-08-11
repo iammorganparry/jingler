@@ -41,9 +41,15 @@ export const managedRuntimeActionForOperation = (
 ): ManagedRuntimeAction =>
   operation === "Agent.stop"
     ? "session.cancel"
-    : operation === "Sessions.create"
+    : operation === "Sessions.create" ||
+        operation === "Sessions.createFromPr" ||
+        operation === "Sessions.createFromIssue" ||
+        operation === "Sessions.continueOnEnvironment"
       ? "session.start"
-      : operation === "Workspace.branches" ||
+      : operation === "Projects.list" ||
+          operation === "Sessions.diff" ||
+          operation === "Sessions.transcriptPage" ||
+          operation === "Workspace.branches" ||
           operation === "Workspace.exportHandoff" ||
           operation === "Workspace.files" ||
           operation === "Workspace.repos"

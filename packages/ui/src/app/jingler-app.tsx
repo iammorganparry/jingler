@@ -551,6 +551,7 @@ export function JinglerApp({
   const setSelected = split.selectSession
   const [newOpen, setNewOpen] = useState(false)
   const [cloudStartup, sendCloudStartup] = useMachine(cloudSessionStartupMachine)
+  const [createdSessionToSelect, setCreatedSessionToSelect] = useState<string | null>(null)
   const pendingCloudSession = cloudStartup.context.pending
   const selectSession = useCallback(
     (id: string) => {
@@ -597,6 +598,21 @@ export function JinglerApp({
     setSettingsOpen(false)
     setNewOpen(true)
   }, [memory])
+
+  // A managed create resolves in the child before the parent's XState
+  // SESSION_CREATED update has produced a new `sessions` prop. Selecting that
+  // id immediately lets the split-layout eligibility effect prune it as
+  // unknown, leaving a blank workspace after the startup screen disappears.
+  // Wait until the persisted session is visible to this component, then select
+  // it exactly once.
+  useEffect(() => {
+    if (
+      createdSessionToSelect === null ||
+      !sessions.some((session) => session.id === createdSessionToSelect)
+    ) return
+    setSelected(createdSessionToSelect)
+    setCreatedSessionToSelect(null)
+  }, [createdSessionToSelect, sessions, setSelected])
 
   // An outside request to jump to a session (notification click). Keyed on the
   // NONCE, not the id: clicking two notifications for the same session must
@@ -1080,11 +1096,17 @@ export function JinglerApp({
     }
     try {
       const session = await create(report)
-      if (managed) sendCloudStartup({ type: "COMPLETED" })
+      if (managed) {
+        setCreatedSessionToSelect(session.id)
+        sendCloudStartup({ type: "COMPLETED" })
+      }
       setNewOpen(false)
-      setSelected(session.id)
+      if (!managed) setSelected(session.id)
     } catch (cause) {
-      if (managed) sendCloudStartup({ type: "FAILED", error: cause })
+      if (managed) {
+        setCreatedSessionToSelect(null)
+        sendCloudStartup({ type: "FAILED", error: cause })
+      }
       throw cause
     }
   }, [environments, sendCloudStartup, setSelected])

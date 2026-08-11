@@ -3,7 +3,11 @@ import { EnvironmentHandoffError } from "@jingler/core"
 import { Effect } from "effect"
 
 /** Facts that make moving the existing checkout unsafe. Deliberately conservative. */
-export const sessionContainsWork = (session: Session): boolean =>
+export const sessionContainsWork = (
+  session: Session,
+  hasTranscript = false
+): boolean =>
+  hasTranscript ||
   session.diff.added > 0 ||
   session.diff.removed > 0 ||
   session.tokens > 0 ||
@@ -59,10 +63,11 @@ export const setSessionEnvironment = <E1, R1, E2, R2, E3, R3>(
   // Generic error/environment channels preserve the caller's typed Effect contract.
   session: Session,
   environmentId: string | undefined,
-  dependencies: SessionEnvironmentDependencies<E1, R1, E2, R2, E3, R3>
+  dependencies: SessionEnvironmentDependencies<E1, R1, E2, R2, E3, R3>,
+  hasTranscript = false
 ) =>
   Effect.gen(function* () {
-    if (sessionContainsWork(session)) {
+    if (sessionContainsWork(session, hasTranscript)) {
       return yield* Effect.fail(
         new EnvironmentHandoffError({
           reason: "has-work",

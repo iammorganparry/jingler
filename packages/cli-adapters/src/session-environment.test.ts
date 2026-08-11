@@ -19,6 +19,9 @@ describe("session environment handoff", () => {
   it("re-provisions a pristine session in place", async () => {
     const d = deps(); const result = await Effect.runPromise(setSessionEnvironment(source(), "buildbox", d)); expect(result.id).toBe("s_source"); expect(d.persist).toHaveBeenCalledOnce()
   })
+  it("never reassigns a session whose live transcript has not reached persisted counters yet", async () => {
+    const d = deps(); const exit = await Effect.runPromiseExit(setSessionEnvironment(source(), "buildbox", d, true)); expect(Exit.isFailure(exit)).toBe(true); expect(d.persist).not.toHaveBeenCalled()
+  })
   it("creates a continuation when the source session contains work", async () => {
     const d = deps(); const result = await Effect.runPromise(continueSessionOnEnvironment(source({ diff: { added: 2, removed: 0 } }), "buildbox", d)); expect(result.id).toBe("s_continuation"); expect(d.persist).not.toHaveBeenCalled()
   })
