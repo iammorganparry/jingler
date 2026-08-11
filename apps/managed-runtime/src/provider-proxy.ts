@@ -123,7 +123,7 @@ export const proxyProviderRequest = async (
   const requestInit: RequestInit & { duplex?: "half" } = {
     method: input.method,
     headers,
-    body: input.body,
+    body: boundedStream(input.body ?? null, maxEgressBytes),
     redirect: "manual"
   }
   if (input.body !== null && input.body !== undefined) requestInit.duplex = "half"

@@ -3,7 +3,11 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { exportWorkspaceHandoff, importWorkspaceHandoff } from "./workspace-handoff.js"
+import {
+  checkoutWorkspaceHandoffBase,
+  exportWorkspaceHandoff,
+  importWorkspaceHandoff
+} from "./workspace-handoff.js"
 
 const git = (cwd: string, args: readonly string[]) =>
   execFileSync("git", [...args], { cwd, encoding: "utf8" }).trim()
@@ -58,5 +62,28 @@ describe("workspace handoff", () => {
     await expect(importWorkspaceHandoff(source, checkpoint)).rejects.toThrow(
       "HEAD does not match"
     )
+  })
+
+  it("exports detached sources and checks a continuation out at the exact commit", async () => {
+    const source = repository()
+    git(source, ["checkout", "--detach"])
+    const checkpoint = await exportWorkspaceHandoff({
+      workspacePath: source,
+      sourceSessionId: "session_detached",
+      eventCursor: 0
+    })
+    expect(checkpoint.branch).toBeNull()
+
+    writeFileSync(join(source, "later.txt"), "later\n")
+    git(source, ["add", "."])
+    git(source, ["commit", "-m", "later"])
+    const target = mkdtempSync(join(tmpdir(), "jingler-handoff-target-"))
+    git(target, ["clone", "--quiet", source, "."])
+
+    await checkoutWorkspaceHandoffBase(target, checkpoint)
+    await importWorkspaceHandoff(target, checkpoint)
+
+    expect(git(target, ["rev-parse", "HEAD"])).toBe(checkpoint.headSha)
+    expect(git(target, ["branch", "--show-current"])).toBe("")
   })
 })

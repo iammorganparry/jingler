@@ -6,6 +6,7 @@ import { promisify } from "node:util"
 import type { WorkspaceTransferCheckpoint } from "@jingler/core"
 import { Schema } from "effect"
 import { WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema } from "@jingler/core"
+import { parseGitHubRemote } from "./github-remote.js"
 
 const execFileAsync = promisify(execFile)
 const MAX_TRANSFER_BYTES = 4 * 1024 * 1024
@@ -32,13 +33,6 @@ const safeRelativePath = (value: string): string => {
     throw new Error("Workspace handoff contains an unsafe path")
   }
   return value
-}
-
-const githubSlug = (remote: string): string | null => {
-  const match = remote.match(
-    /github\.com(?::|\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/u
-  )
-  return match?.[1] ?? null
 }
 
 const applyPatch = async (
@@ -81,6 +75,7 @@ export const exportWorkspaceHandoff = async (input: {
     git(workspacePath, ["ls-files", "--others", "--exclude-standard", "-z"])
   ])
   const paths = untracked.length === 0 ? [] : untracked.split("\0").filter(Boolean)
+  const parsedRemote = parseGitHubRemote(remote)
   const untrackedFiles: Array<{ path: string; contentBase64: string }> = []
   let size = Buffer.byteLength(stagedPatch) + Buffer.byteLength(unstagedPatch)
   for (const candidate of paths) {
@@ -103,9 +98,10 @@ export const exportWorkspaceHandoff = async (input: {
     version: 1,
     checkpointId: `handoff_${randomUUID().replaceAll("-", "")}`,
     sourceSessionId: input.sourceSessionId,
-    repositorySlug: githubSlug(remote),
+    repositorySlug:
+      parsedRemote === null ? null : `${parsedRemote.owner}/${parsedRemote.repo}`,
     headSha,
-    branch,
+    branch: branch || null,
     stagedPatch,
     unstagedPatch,
     untrackedFiles,
@@ -141,4 +137,16 @@ export const importWorkspaceHandoff = async (
   if (restoredHead.toLowerCase() !== decoded.headSha.toLowerCase()) {
     throw new Error("Restored workspace identity does not match the handoff checkpoint")
   }
+}
+
+/** Prepare a newly-created local continuation at the source's exact commit. */
+export const checkoutWorkspaceHandoffBase = async (
+  workspacePath: string,
+  checkpoint: WorkspaceTransferCheckpoint
+): Promise<void> => {
+  const decoded = Schema.decodeUnknownSync(WorkspaceTransferCheckpointSchema)(checkpoint, {
+    onExcessProperty: "error"
+  })
+  const root = await realpath(workspacePath)
+  await git(root, ["checkout", "--detach", decoded.headSha])
 }

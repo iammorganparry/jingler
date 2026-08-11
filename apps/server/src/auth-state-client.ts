@@ -11,6 +11,15 @@ interface AuthSessionState {
   readonly expiresAt: Date
 }
 
+export type AuthCapabilityProvider = "github" | "codex"
+
+interface AuthCapabilityState {
+  readonly userId: string
+  readonly provider: AuthCapabilityProvider
+  readonly authorizationHeader: string
+  readonly expiresAt: Date
+}
+
 const endpoint = (config: AuthStateClientConfig, userId: string): string =>
   new URL(
     `/v1/internal/users/${encodeURIComponent(userId)}/session`,
@@ -48,3 +57,58 @@ export const deleteAuthStateSession = (
   config: AuthStateClientConfig,
   input: AuthSessionState
 ): Promise<void> => send(config, input, "DELETE")
+
+const capabilityEndpoint = (
+  config: AuthStateClientConfig,
+  userId: string
+): string =>
+  new URL(
+    `/v1/internal/users/${encodeURIComponent(userId)}/capability`,
+    config.url
+  ).toString()
+
+export const upsertAuthStateCapability = async (
+  config: AuthStateClientConfig,
+  input: AuthCapabilityState
+): Promise<void> => {
+  if (!config.enabled) return
+  const response = await (config.fetch ?? fetch)(
+    capabilityEndpoint(config, input.userId),
+    {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-jingler-service-secret": config.serviceSecret
+      },
+      body: JSON.stringify({
+        provider: input.provider,
+        authorizationHeader: input.authorizationHeader,
+        expiresAt: Math.floor(input.expiresAt.getTime() / 1_000)
+      })
+    }
+  )
+  if (!response.ok) {
+    throw new Error(`Auth-state capability sync failed (${response.status})`)
+  }
+}
+
+export const deleteAuthStateCapability = async (
+  config: AuthStateClientConfig,
+  input: { readonly userId: string; readonly provider: AuthCapabilityProvider }
+): Promise<void> => {
+  if (!config.enabled) return
+  const response = await (config.fetch ?? fetch)(
+    capabilityEndpoint(config, input.userId),
+    {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        "x-jingler-service-secret": config.serviceSecret
+      },
+      body: JSON.stringify({ provider: input.provider })
+    }
+  )
+  if (!response.ok) {
+    throw new Error(`Auth-state capability sync failed (${response.status})`)
+  }
+}

@@ -1,7 +1,8 @@
-import type {
-  ManagedRuntimeAction,
-  RemoteSessionCommand,
-  RemoteSessionEvent
+import {
+  managedRuntimeActionForOperation,
+  type ManagedRuntimeAction,
+  type RemoteSessionCommand,
+  type RemoteSessionEvent
 } from "@jingler/core"
 import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
 import { getSandbox } from "@cloudflare/sandbox"
@@ -39,6 +40,7 @@ interface RuntimeMetadata {
   readonly authorized: boolean
   readonly codexCapabilityHandle: string | null
   readonly githubCapabilityHandle: string | null
+  readonly repositorySlug: string | null
   readonly providerTokenHash: string | null
   readonly gitTokenHash: string | null
   readonly usageReservationId: string | null
@@ -48,12 +50,6 @@ interface RuntimeMetadata {
 
 const METADATA_KEY = "runtime-metadata"
 const JOURNAL_KEY = "session-journal"
-
-const commandAction = (command: RemoteSessionCommand): ManagedRuntimeAction => {
-  if (command.operation === "Agent.stop") return "session.cancel"
-  if (command.operation === "Sessions.create") return "session.start"
-  return "session.input"
-}
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 
@@ -83,6 +79,8 @@ export const decodeManagedCommandFrame = (
 }
 
 export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
+  #journalTail: Promise<void> = Promise.resolve()
+
   async #metadata(): Promise<RuntimeMetadata | null> {
     return (await this.ctx.storage.get<RuntimeMetadata>(METADATA_KEY)) ?? null
   }
@@ -96,6 +94,22 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
 
   async #persistJournal(journal: ManagedSessionJournal): Promise<void> {
     await this.ctx.storage.put(JOURNAL_KEY, journal.snapshot())
+  }
+
+  #mutateJournal<Value>(
+    mutation: (journal: ManagedSessionJournal) => Value
+  ): Promise<Value> {
+    const result = this.#journalTail.then(async () => {
+      const journal = await this.#journal()
+      const value = mutation(journal)
+      await this.#persistJournal(journal)
+      return value
+    })
+    this.#journalTail = result.then(
+      () => undefined,
+      () => undefined
+    )
+    return result
   }
 
   async #authorize(
@@ -125,9 +139,9 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     commandId: string,
     event: Omit<RemoteSessionEvent, "version" | "commandId" | "sessionId" | "eventSequence">
   ): Promise<void> {
-    const journal = await this.#journal()
-    const value = journal.append(commandId, event)
-    await this.#persistJournal(journal)
+    const value = await this.#mutateJournal((journal) =>
+      journal.append(commandId, event)
+    )
     this.#broadcast(commandId, value)
   }
 
@@ -149,9 +163,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     status: "complete" | "failed" | "cancelled",
     payload: unknown
   ): Promise<void> {
-    const journal = await this.#journal()
-    const terminal = journal.settle(commandId, status, payload)
-    await this.#persistJournal(journal)
+    const terminal = await this.#settleJournal(commandId, status, payload)
     this.#broadcast(commandId, terminal)
     await this.#checkpoint(terminal.eventSequence)
     const metadata = await this.#metadata()
@@ -164,6 +176,16 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       await this.#settleUsage()
       await this.#unregisterSession(metadata)
     }
+  }
+
+  #settleJournal(
+    commandId: string,
+    status: "complete" | "failed" | "cancelled",
+    payload: unknown
+  ): Promise<RemoteSessionEvent> {
+    return this.#mutateJournal((journal) =>
+      journal.settle(commandId, status, payload)
+    )
   }
 
   async #checkpoint(eventCursor: number): Promise<void> {
@@ -347,7 +369,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       await this.#settle(command.commandId, "failed", {
         code: "runtime-failed",
         message: cause instanceof Error ? cause.message : "Managed runtime failed"
-      })
+      }).catch(() => undefined)
     } finally {
       await sandbox.deleteFile(inputFile).catch(() => undefined)
     }
@@ -378,15 +400,14 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`
     })
     await sandbox.killProcess(metadata.processId).catch(() => undefined)
-    const journal = await this.#journal()
-    const command = Object.values(journal.snapshot().commands).find(
-      (candidate) => candidate.status === "running"
-    )
-    if (command !== undefined) {
-      const terminal = journal.settle(command.command.commandId, "cancelled", { reason })
-      await this.#persistJournal(journal)
-      this.#broadcast(command.command.commandId, terminal)
+    try {
+      const terminal = await this.#settleJournal(metadata.processId, "cancelled", {
+        reason
+      })
+      this.#broadcast(metadata.processId, terminal)
       await this.#checkpoint(terminal.eventSequence)
+    } catch {
+      // A concurrently completing process may already have durably settled.
     }
   }
 
@@ -429,6 +450,10 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           typeof body.githubCapabilityHandle === "string"
             ? body.githubCapabilityHandle
             : previous?.githubCapabilityHandle ?? null,
+        repositorySlug:
+          typeof body.repositorySlug === "string"
+            ? body.repositorySlug
+            : previous?.repositorySlug ?? null,
         providerTokenHash: previous?.providerTokenHash ?? null,
         gitTokenHash: previous?.gitTokenHash ?? null,
         usageReservationId:
@@ -451,24 +476,27 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       const snapshot = decodeManagedAuthSnapshot(body?.snapshot)
       const metadata = await this.#metadata()
       if (metadata !== null) {
+        const now = Math.floor(Date.now() / 1_000)
+        const codexCapability = snapshot?.credentialCapabilities.find(
+          (capability) => capability.provider === "codex" && capability.expiresAt > now
+        )
+        const authorized =
+          snapshot?.capabilities.includes("managed.session.execute") === true &&
+          codexCapability !== undefined &&
+          (snapshot?.expiresAt ?? 0) > now
         const next = await applyManagedAuthorizationSnapshot(
           metadata,
-          snapshot?.version ?? null,
+          authorized ? (snapshot?.version ?? null) : null,
           async () => this.#terminateProcess(metadata, "authorization-revoked")
         )
         await this.ctx.storage.put(METADATA_KEY, {
           ...next,
-          codexCapabilityHandle:
-            snapshot?.credentialCapabilities.find(
-              (capability) =>
-                capability.provider === "codex" &&
-                capability.expiresAt > Math.floor(Date.now() / 1_000)
-            )?.handle ?? null,
+          codexCapabilityHandle: codexCapability?.handle ?? null,
           githubCapabilityHandle:
             snapshot?.credentialCapabilities.find(
               (capability) =>
                 capability.provider === "github" &&
-                capability.expiresAt > Math.floor(Date.now() / 1_000)
+                capability.expiresAt > now
             )?.handle ?? null
         })
         if (metadata.processId !== null && next.processId === null) {
@@ -510,12 +538,14 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       )
       if (Either.isLeft(decoded)) return json({ error: "Invalid command" }, 400)
       const command = decoded.right
-      const verification = await this.#authorize(request, metadata, commandAction(command))
+      const verification = await this.#authorize(
+        request,
+        metadata,
+        managedRuntimeActionForOperation(command.operation)
+      )
       if (!verification.ok) return json({ error: verification.reason }, 403)
       if (command.sessionId !== metadata.sessionId) return json({ error: "wrong-scope" }, 403)
-      const journal = await this.#journal()
-      const admission = journal.admit(command)
-      await this.#persistJournal(journal)
+      const admission = await this.#mutateJournal((journal) => journal.admit(command))
       if (admission === "started") {
         this.ctx.waitUntil(this.#execute(command))
       }
@@ -541,7 +571,11 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     }
 
     if (url.pathname === "/v1/git-token" && request.method === "POST") {
-      if (!metadata.authorized || metadata.githubCapabilityHandle === null) {
+      if (
+        !metadata.authorized ||
+        metadata.githubCapabilityHandle === null ||
+        typeof metadata.repositorySlug !== "string"
+      ) {
         return json({ error: "Git authorization unavailable" }, 403)
       }
       const token = `git_${crypto.randomUUID().replaceAll("-", "")}`
@@ -570,7 +604,8 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       }
       return json({
         subject: metadata.subject,
-        capabilityHandle: metadata.githubCapabilityHandle
+        capabilityHandle: metadata.githubCapabilityHandle,
+        repositorySlug: metadata.repositorySlug
       })
     }
 

@@ -181,7 +181,7 @@ const base64Url = (bytes: Uint8Array): string => {
   return btoa(binary)
     .replaceAll("+", "-")
     .replaceAll("/", "_")
-    .replace(/=+$/u, "")
+    .replace(/[=]+$/u, "")
 }
 
 const fromBase64Url = (value: string): Uint8Array<ArrayBuffer> => {
@@ -496,7 +496,6 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         attachment.generation
       )
       socket.send(JSON.stringify({ type: "announced", at: nowSeconds }))
-      return
     }
   }
 

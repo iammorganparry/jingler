@@ -67,9 +67,19 @@ describe("managed workspace checkpoints", () => {
     if (created.status !== "created") throw new Error("Expected checkpoint")
     vi.mocked(runtime.readFile).mockClear()
     vi.mocked(checkpointStore.put).mockClear()
-    await expect(
-      createWorkspaceCheckpoint(runtime, checkpointStore, input(created.manifest))
-    ).resolves.toMatchObject({ status: "skipped", workspaceDigest: digest })
+    const skipped = await createWorkspaceCheckpoint(
+      runtime,
+      checkpointStore,
+      input(created.manifest)
+    )
+    expect(skipped).toMatchObject({
+      status: "skipped",
+      workspaceDigest: digest,
+      manifest: {
+        createdAt: created.manifest.createdAt,
+        backup: { expiresAt: created.manifest.backup.expiresAt }
+      }
+    })
     expect(runtime.readFile).not.toHaveBeenCalled()
     expect(checkpointStore.put).not.toHaveBeenCalled()
   })
@@ -86,6 +96,22 @@ describe("managed workspace checkpoints", () => {
     expect(serialized).not.toMatch(/token|credential|secret|prompt/iu)
     expect(serialized).toContain('"workspaceDigest"')
     expect(serialized).toContain('"eventCursor":12')
+  })
+
+  it("renews an unchanged archive before its lifecycle expiry", async () => {
+    const runtime = sandbox()
+    const checkpointStore = store()
+    const created = await createWorkspaceCheckpoint(runtime, checkpointStore, input(null))
+    if (created.status !== "created") throw new Error("Expected checkpoint")
+    vi.mocked(checkpointStore.put).mockClear()
+
+    const renewed = await createWorkspaceCheckpoint(runtime, checkpointStore, {
+      ...input(created.manifest),
+      nowSeconds: created.manifest.backup.expiresAt - 60
+    })
+
+    expect(renewed.status).toBe("created")
+    expect(checkpointStore.put).toHaveBeenCalled()
   })
 
   it("rejects an oversized checkpoint before uploading it", async () => {

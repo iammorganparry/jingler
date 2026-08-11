@@ -500,7 +500,7 @@ export const makeLiveDeviceSessionCommandExecutor = (
     ),
     exportHandoff: (sessionId, eventCursor) => run(
       repoPath(sessionId).pipe(
-        Effect.flatMap((path) => Effect.promise(() => exportWorkspaceHandoff({
+        Effect.flatMap((path) => Effect.tryPromise(() => exportWorkspaceHandoff({
           workspacePath: path,
           sourceSessionId: sessionId,
           eventCursor
@@ -509,7 +509,7 @@ export const makeLiveDeviceSessionCommandExecutor = (
     ),
     importHandoff: (sessionId, checkpoint) => run(
       repoPath(sessionId).pipe(
-        Effect.flatMap((path) => Effect.promise(() => importWorkspaceHandoff(
+        Effect.flatMap((path) => Effect.tryPromise(() => importWorkspaceHandoff(
           path,
           Schema.decodeUnknownSync(WorkspaceTransferCheckpoint)(checkpoint, {
             onExcessProperty: "error"

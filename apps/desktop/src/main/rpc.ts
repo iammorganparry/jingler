@@ -74,6 +74,7 @@ import {
   UsageService,
   WorkspaceService,
   exportWorkspaceHandoff,
+  checkoutWorkspaceHandoffBase,
   importWorkspaceHandoff,
 } from "@jingler/cli-adapters";
 import { appendFileSync } from "node:fs";
@@ -1544,7 +1545,10 @@ export const continueOnEnvironment = (
               }));
             }
             yield* Effect.tryPromise({
-              try: () => importWorkspaceHandoff(created.worktreePath!, checkpoint),
+              try: async () => {
+                await checkoutWorkspaceHandoffBase(created.worktreePath!, checkpoint)
+                await importWorkspaceHandoff(created.worktreePath!, checkpoint)
+              },
               catch: (cause) => new EnvironmentHandoffError({
                 reason: "unavailable",
                 message: "The local continuation did not match the source checkpoint.",
@@ -1573,8 +1577,8 @@ export const continueOnEnvironment = (
               createWorkspaceProvisioningPlan({
                 githubSlug: checkpoint.repositorySlug,
                 headSha: checkpoint.headSha,
-                branch: checkpoint.branch,
-                baseBranch: source.baseBranch ?? checkpoint.branch,
+                branch: checkpoint.branch ?? source.baseBranch ?? "main",
+                baseBranch: source.baseBranch ?? checkpoint.branch ?? "main",
                 createBranch: false,
                 source: {
                   kind: "handoff",
@@ -4156,9 +4160,12 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Workspace.revertLines": (input) => workspaceRevertLines(input),
   "Sessions.list": () => SessionStore.list(),
   "Sessions.get": ({ id }) => SessionStore.get(id),
-  "Sessions.create": (input) => createSessionRouted(input),
-  "Sessions.createFromPr": (input) => createSessionFromPrRouted(input),
-  "Sessions.createFromIssue": (input) => createSessionFromIssueRouted(input),
+  "Sessions.create": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    createSessionRouted(input),
+  "Sessions.createFromPr": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    createSessionFromPrRouted(input),
+  "Sessions.createFromIssue": ({ requestedSessionId: _internalSessionId, ...input }) =>
+    createSessionFromIssueRouted(input),
   "Sessions.linkIssue": (input) => linkIssue(input),
   "Sessions.unlinkIssue": ({ sessionId }) => unlinkIssue(sessionId),
   "Sessions.clearInitialPrompt": ({ sessionId }) =>

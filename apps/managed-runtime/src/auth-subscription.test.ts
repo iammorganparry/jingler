@@ -58,4 +58,18 @@ describe("ManagedAuthSubscriptionLedger", () => {
     expect(ledger.registerSession("session_2", 101)).toEqual({ subscribe: false })
     expect(ledger.snapshot().activeSessionIds).toEqual(["session_2"])
   })
+
+  it("reclaims an abandoned session slot after its bounded lease", () => {
+    const ledger = new ManagedAuthSubscriptionLedger("user_123")
+    ledger.registerSession("session_abandoned", 100)
+    ledger.apply({ ...snapshot(), expiresAt: 20_000 }, { leaseExpiresAt: 10_000 })
+
+    expect(() => ledger.registerSession("session_blocked", 101)).toThrow(
+      "Managed session concurrency exceeded"
+    )
+    expect(ledger.registerSession("session_recovered", 7_301)).toEqual({
+      subscribe: false
+    })
+    expect(ledger.snapshot().activeSessionIds).toEqual(["session_recovered"])
+  })
 })

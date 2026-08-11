@@ -5,7 +5,7 @@ export interface ManagedAuthorizationState {
   readonly authorized: boolean
 }
 
-/** Applies a capability snapshot atomically and fences every earlier session grant. */
+/** Applies a capability snapshot atomically; only actual revocation stops work. */
 export const applyManagedAuthorizationSnapshot = async <
   State extends ManagedAuthorizationState
 >(
@@ -13,20 +13,22 @@ export const applyManagedAuthorizationSnapshot = async <
   snapshotVersion: number | null,
   stopProcess: (processId: string) => Promise<void>
 ): Promise<State> => {
-  if (
-    snapshotVersion === state.authStateVersion &&
-    snapshotVersion !== null &&
-    state.authorized
-  ) {
-    return state
+  if (snapshotVersion !== null) {
+    return snapshotVersion === state.authStateVersion && state.authorized
+      ? state
+      : {
+          ...state,
+          authStateVersion: snapshotVersion,
+          authorized: true
+        }
   }
+  if (!state.authorized) return state
   if (state.processId !== null) await stopProcess(state.processId)
   return {
     ...state,
-    authStateVersion: snapshotVersion ?? state.authStateVersion,
+    authStateVersion: state.authStateVersion,
     sessionGeneration: state.sessionGeneration + 1,
     processId: null,
-    authorized: snapshotVersion !== null
+    authorized: false
   }
 }
-

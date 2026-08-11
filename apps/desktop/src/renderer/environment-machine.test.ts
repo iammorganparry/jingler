@@ -202,10 +202,12 @@ describe("environment machine", () => {
 
   it("creates and pauses a managed environment through the inventory actor", async () => {
     const services = api()
+    const created = vi.fn()
+    const paused = vi.fn()
     const actor = createActor(createEnvironmentMachine(services)).start()
     await waitFor(actor, (snapshot) => !snapshot.context.loading)
 
-    actor.send({ type: "CREATE_MANAGED", name: "Cloud build" })
+    actor.send({ type: "CREATE_MANAGED", name: "Cloud build", resolve: created })
     await waitFor(
       actor,
       (snapshot) => snapshot.context.environments[0]?.kind === "managed"
@@ -213,6 +215,7 @@ describe("environment machine", () => {
     const managed = actor.getSnapshot().context.environments[0]!
     if (managed.kind !== "managed") throw new Error("expected managed environment")
     expect(services.createManaged).toHaveBeenCalledWith("Cloud build")
+    expect(created).toHaveBeenCalledOnce()
 
     services.managedLifecycle.mockResolvedValueOnce({
       ...managed,
@@ -222,13 +225,15 @@ describe("environment machine", () => {
     actor.send({
       type: "MANAGED_LIFECYCLE",
       environment: managed,
-      action: "pause"
+      action: "pause",
+      resolve: paused
     })
     await waitFor(
       actor,
       (snapshot) => snapshot.context.environments[0]?.state === "paused"
     )
     expect(services.managedLifecycle).toHaveBeenCalledWith(managed, "pause")
+    expect(paused).toHaveBeenCalledOnce()
     actor.stop()
   })
 

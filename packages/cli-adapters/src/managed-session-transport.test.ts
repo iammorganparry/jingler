@@ -95,7 +95,8 @@ describe("managed session transport", () => {
     expect(grant).toHaveBeenCalledWith(
       managedEnvironment,
       "session_managed_abcdefgh",
-      "command_managed_abcdefgh"
+      "command_managed_abcdefgh",
+      ["session.input"]
     )
     expect(submitted).toHaveLength(1)
     expect(Chunk.toReadonlyArray(events).map((event) => event.kind)).toEqual([

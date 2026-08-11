@@ -715,8 +715,10 @@ export const startFakeAuthServer = async (
       return
     }
 
-    const managedMatch = url.pathname.match(/^\/api\/environments\/managed\/([^/]+)$/u)
-    if (managedMatch && req.method === "DELETE") {
+    const managedMatch = url.pathname.match(
+      /^\/api\/environments\/managed\/([^/]+)\/delete$/u
+    )
+    if (managedMatch && req.method === "POST") {
       if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
       const environmentId = decodeURIComponent(managedMatch[1] ?? "")
       if (!managedEnvironments.delete(environmentId)) return json(404, { error: "not found" })

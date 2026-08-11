@@ -35,6 +35,21 @@ export const ManagedRuntimeAction = Schema.Literal(
 )
 export type ManagedRuntimeAction = Schema.Schema.Type<typeof ManagedRuntimeAction>
 
+/** Single wire-authority mapping used by both managed clients and the runtime. */
+export const managedRuntimeActionForOperation = (
+  operation: string
+): ManagedRuntimeAction =>
+  operation === "Agent.stop"
+    ? "session.cancel"
+    : operation === "Sessions.create"
+      ? "session.start"
+      : operation === "Workspace.branches" ||
+          operation === "Workspace.exportHandoff" ||
+          operation === "Workspace.files" ||
+          operation === "Workspace.repos"
+        ? "session.observe"
+        : "session.input"
+
 /** Short-lived server-to-runtime capability; account auth is still checked continuously. */
 export const ManagedRuntimeGrantClaims = Schema.Struct({
   version: Schema.Literal(1),

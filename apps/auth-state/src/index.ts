@@ -1,4 +1,9 @@
 import { DurableObject } from "cloudflare:workers"
+import {
+  readBoundedJson,
+  workerFields as fields,
+  workerJson as json
+} from "@jingler/core/worker-http"
 import { openCredential, sealCredential } from "./credential-envelope.js"
 import {
   emptyAuthState,
@@ -28,29 +33,33 @@ interface Subscriber {
 const STATE_KEY = "auth-state"
 const SUBSCRIBER_KEY = "managed-subscriber"
 const SUBSCRIPTION_SECONDS = 5 * 60
-const MAX_BODY_BYTES = 16_384
-
-const json = (body: unknown, status = 200): Response =>
-  Response.json(body, { status, headers: { "cache-control": "no-store" } })
-
-const fields = (value: unknown): Record<string, unknown> | null =>
-  typeof value === "object" && value !== null
-    ? Object.fromEntries(Object.entries(value))
-    : null
-
 const readBody = async (request: Request): Promise<Record<string, unknown> | null> => {
-  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return null
-  return fields(await request.json())
+  try {
+    return fields(await readBoundedJson(request))
+  } catch {
+    return null
+  }
 }
 
 const nowSeconds = (): number => Math.floor(Date.now() / 1_000)
+
+const credentialFingerprint = async (authorizationHeader: string): Promise<string> => {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(authorizationHeader)
+  )
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+}
 
 const providerOf = (value: unknown): CapabilityProvider | null =>
   value === "github" || value === "codex" ? value : null
 
 const authorized = (request: Request, env: AuthStateEnv): boolean =>
-  request.headers.get("x-jingler-service-secret") === env.AUTH_STATE_SERVICE_SECRET ||
-  request.headers.get("authorization") === `Bearer ${env.AUTH_STATE_SERVICE_SECRET}`
+  env.AUTH_STATE_SERVICE_SECRET.length >= 32 &&
+  (request.headers.get("x-jingler-service-secret") === env.AUTH_STATE_SERVICE_SECRET ||
+    request.headers.get("authorization") === `Bearer ${env.AUTH_STATE_SERVICE_SECRET}`)
 
 const subjectPath = (
   pathname: string
@@ -197,6 +206,9 @@ export class AuthStateObject extends DurableObject<AuthStateEnv> {
     if (url.pathname === "/v1/internal/session" && request.method === "DELETE") {
       const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null
       if (sessionId === null) return json({ error: "Invalid session" }, 400)
+      if (state.sessions[sessionId] === undefined) {
+        return json({ ok: true, version: state.version })
+      }
       const { [sessionId]: _removed, ...sessions } = state.sessions
       const next = { ...state, version: state.version + 1, sessions }
       await this.#put(next)
@@ -219,9 +231,21 @@ export class AuthStateObject extends DurableObject<AuthStateEnv> {
       ) {
         return json({ error: "Invalid capability" }, 400)
       }
+      const fingerprint = await credentialFingerprint(authorizationHeader)
+      const existing = state.credentials[provider]
+      if (
+        existing?.fingerprint === fingerprint &&
+        existing.expiresAt > nowSeconds() + 6 * 60 * 60
+      ) {
+        return json({ ok: true, version: state.version, handle: existing.handle })
+      }
       const credential: StoredCredential = {
         provider,
-        handle: `capability_${crypto.randomUUID().replaceAll("-", "")}`,
+        handle:
+          existing?.fingerprint === fingerprint
+            ? existing.handle
+            : `capability_${crypto.randomUUID().replaceAll("-", "")}`,
+        fingerprint,
         authorizationHeaderEncrypted: await sealCredential(
           authorizationHeader,
           this.env.AUTH_STATE_ENCRYPTION_KEY
@@ -241,6 +265,9 @@ export class AuthStateObject extends DurableObject<AuthStateEnv> {
     if (url.pathname === "/v1/internal/capability" && request.method === "DELETE") {
       const provider = providerOf(body?.provider)
       if (provider === null) return json({ error: "Invalid capability" }, 400)
+      if (state.credentials[provider] === undefined) {
+        return json({ ok: true, version: state.version })
+      }
       const { [provider]: _removed, ...credentials } = state.credentials
       const next = { ...state, version: state.version + 1, credentials }
       await this.#put(next)

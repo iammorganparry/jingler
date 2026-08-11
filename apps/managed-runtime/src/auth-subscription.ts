@@ -1,5 +1,6 @@
 const MAX_CAPABILITIES = 32
 const MAX_ACTIVE_SESSIONS = 1
+const ACTIVE_SESSION_LEASE_SECONDS = 2 * 60 * 60
 
 export interface ManagedAuthSnapshot {
   readonly subject: string
@@ -22,6 +23,7 @@ export interface ManagedAuthState {
   readonly snapshot: ManagedAuthSnapshot | null
   readonly subscription: ManagedAuthSubscription | null
   readonly activeSessionIds: readonly string[]
+  readonly activeSessionLeases: Readonly<Record<string, number>>
 }
 
 export type AuthorizationDecision =
@@ -43,11 +45,7 @@ export const decodeManagedAuthSnapshot = (
   if (typeof value !== "object" || value === null) return null
   const candidate = Object.fromEntries(Object.entries(value))
   if (
-    !isNonEmptyString(candidate.subject) ||
-    !isPositiveInteger(candidate.version) ||
-    !isPositiveInteger(candidate.issuedAt) ||
-    !isPositiveInteger(candidate.expiresAt) ||
-    !Array.isArray(candidate.capabilities) ||
+    !((((isNonEmptyString(candidate.subject) &&isPositiveInteger(candidate.version) ) &&isPositiveInteger(candidate.issuedAt) ) &&isPositiveInteger(candidate.expiresAt) ) &&Array.isArray(candidate.capabilities) ) ||
     candidate.capabilities.length > MAX_CAPABILITIES ||
     !candidate.capabilities.every(isNonEmptyString)
   ) {
@@ -84,7 +82,8 @@ export const decodeManagedAuthSnapshot = (
 export const emptyManagedAuthState = (): ManagedAuthState => ({
   snapshot: null,
   subscription: null,
-  activeSessionIds: []
+  activeSessionIds: [],
+  activeSessionLeases: {}
 })
 
 /** Pure coordinator state used by the Durable Object and deterministic tests. */
@@ -92,9 +91,17 @@ export class ManagedAuthSubscriptionLedger {
   readonly #subject: string
   #state: ManagedAuthState
 
-  constructor(subject: string, restored = emptyManagedAuthState()) {
+  constructor(
+    subject: string,
+    restored: ManagedAuthState | Omit<ManagedAuthState, "activeSessionLeases"> =
+      emptyManagedAuthState()
+  ) {
     this.#subject = subject
-    this.#state = restored
+    this.#state = {
+      ...restored,
+      activeSessionLeases:
+        "activeSessionLeases" in restored ? restored.activeSessionLeases : {}
+    }
   }
 
   snapshot(): ManagedAuthState {
@@ -111,24 +118,46 @@ export class ManagedAuthSubscriptionLedger {
   }
 
   registerSession(sessionId: string, now: number): { subscribe: boolean } {
+    const activeSessionIds = this.#state.activeSessionIds.filter(
+      (candidate) => (this.#state.activeSessionLeases[candidate] ?? 0) > now
+    )
+    const activeSessionLeases = Object.fromEntries(
+      activeSessionIds.map((candidate) => [candidate, this.#state.activeSessionLeases[candidate]!])
+    )
+    this.#state = { ...this.#state, activeSessionIds, activeSessionLeases }
     if (!this.#state.activeSessionIds.includes(sessionId)) {
       if (this.#state.activeSessionIds.length >= MAX_ACTIVE_SESSIONS) {
         throw new Error("Managed session concurrency exceeded")
       }
       this.#state = {
         ...this.#state,
-        activeSessionIds: [...this.#state.activeSessionIds, sessionId]
+        activeSessionIds: [...this.#state.activeSessionIds, sessionId],
+        activeSessionLeases: {
+          ...this.#state.activeSessionLeases,
+          [sessionId]: now + ACTIVE_SESSION_LEASE_SECONDS
+        }
+      }
+    } else {
+      this.#state = {
+        ...this.#state,
+        activeSessionLeases: {
+          ...this.#state.activeSessionLeases,
+          [sessionId]: now + ACTIVE_SESSION_LEASE_SECONDS
+        }
       }
     }
     return { subscribe: this.needsSubscription(now) }
   }
 
   unregisterSession(sessionId: string): void {
+    const { [sessionId]: _removed, ...activeSessionLeases } =
+      this.#state.activeSessionLeases
     this.#state = {
       ...this.#state,
       activeSessionIds: this.#state.activeSessionIds.filter(
         (candidate) => candidate !== sessionId
-      )
+      ),
+      activeSessionLeases
     }
   }
 

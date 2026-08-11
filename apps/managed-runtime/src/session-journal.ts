@@ -41,7 +41,14 @@ export class ManagedSessionJournal {
       return "replay"
     }
     if (Object.keys(this.#state.commands).length >= MAX_COMMANDS) {
-      throw new Error("Managed session command retention is full")
+      const oldestSettled = Object.entries(this.#state.commands).find(
+        ([, entry]) => entry.status !== "running"
+      )
+      if (oldestSettled === undefined) {
+        throw new Error("Managed session command retention is full")
+      }
+      const { [oldestSettled[0]]: _evicted, ...commands } = this.#state.commands
+      this.#state = { commands }
     }
     this.#state = {
       commands: {

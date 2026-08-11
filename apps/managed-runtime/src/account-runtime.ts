@@ -102,26 +102,27 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
     if (url.pathname === "/v1/sessions/register" && request.method === "POST") {
       const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null
       if (sessionId === null) return json({ error: "sessionId is required" }, 400)
-      const decision = ledger.registerSession(sessionId, Math.floor(Date.now() / 1_000))
-      await this.#persist(ledger)
-      const connected = !decision.subscribe || (await this.#subscribe(subject))
+      const now = Math.floor(Date.now() / 1_000)
+      const connected = !ledger.needsSubscription(now) || (await this.#subscribe(subject))
       const current = connected ? await this.#ledger(subject) : ledger
+      const auth = current.authorize("managed.session.execute", now)
+      const credentialHandles = {
+        codex: current.credentialHandle("codex", now),
+        github: current.credentialHandle("github", now)
+      }
+      if (!(connected && auth.admitted && credentialHandles.codex !== null)) {
+        return json({ connected, auth, credentialHandles })
+      }
+      try {
+        current.registerSession(sessionId, now)
+      } catch {
+        return json({ error: "Managed session concurrency exceeded" }, 429)
+      }
+      await this.#persist(current)
       return json({
         connected,
-        auth: current.authorize(
-          "managed.session.execute",
-          Math.floor(Date.now() / 1_000)
-        ),
-        credentialHandles: {
-          codex: current.credentialHandle(
-            "codex",
-            Math.floor(Date.now() / 1_000)
-          ),
-          github: current.credentialHandle(
-            "github",
-            Math.floor(Date.now() / 1_000)
-          )
-        }
+        auth,
+        credentialHandles
       })
     }
 

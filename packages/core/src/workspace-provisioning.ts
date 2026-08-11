@@ -15,13 +15,7 @@ const GitBranch = Schema.String.pipe(
   Schema.maxLength(512),
   Schema.filter(
     (branch) =>
-      !branch.startsWith("-") &&
-      !branch.startsWith("/") &&
-      !branch.endsWith("/") &&
-      !branch.endsWith(".") &&
-      !branch.includes("..") &&
-      !branch.includes("//") &&
-      !branch.includes("@{") &&
+      !((((((branch.startsWith("-") ||branch.startsWith("/") ) ||branch.endsWith("/") ) ||branch.endsWith(".") ) ||branch.includes("..") ) ||branch.includes("//") ) ||branch.includes("@{") ) &&
       Array.from(branch).every(
         (character) =>
           character.charCodeAt(0) > 0x20 && !"~^:?*[\\".includes(character)
@@ -80,7 +74,7 @@ export const WorkspaceTransferCheckpoint = Schema.Struct({
   sourceSessionId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
   repositorySlug: Schema.NullOr(GitHubSlug),
   headSha: GitSha,
-  branch: GitBranch,
+  branch: Schema.NullOr(GitBranch),
   stagedPatch: Schema.String.pipe(Schema.maxLength(5_600_000)),
   unstagedPatch: Schema.String.pipe(Schema.maxLength(5_600_000)),
   untrackedFiles: Schema.Array(WorkspaceTransferFile).pipe(Schema.maxItems(2_000)),

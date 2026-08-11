@@ -108,4 +108,37 @@ describe("managed provider credential proxy", () => {
     )
     expect(response.status).toBe(413)
   })
+
+  it("stops chunked request bodies at the configured transfer limit", async () => {
+    const upstream = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const request = input instanceof Request ? input : new Request(input)
+      await request.arrayBuffer()
+      return new Response("unexpected")
+    })
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(6))
+        controller.enqueue(new Uint8Array(6))
+        controller.close()
+      }
+    })
+
+    await expect(
+      proxyProviderRequest(
+        {
+          subject: "user_1",
+          capabilityHandle: "capability_github_1",
+          upstreamUrl: "https://github.com/jingler/example.git/git-upload-pack",
+          method: "POST",
+          body
+        },
+        {
+          resolve: async () => ({ authorizationHeader: "Bearer test" }),
+          fetch: upstream,
+          maxEgressBytes: 10
+        }
+      )
+    ).rejects.toThrow("exceeded its egress limit")
+    expect(upstream).toHaveBeenCalledOnce()
+  })
 })

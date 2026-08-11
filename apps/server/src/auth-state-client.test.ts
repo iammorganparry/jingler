@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   deleteAuthStateSession,
+  upsertAuthStateCapability,
   upsertAuthStateSession
 } from "./auth-state-client.js"
 
@@ -48,6 +49,38 @@ describe("auth-state client", () => {
         session
       )
     ).rejects.toThrow("Auth-state session sync failed (503)")
+  })
+
+  it("publishes a bounded provider capability to the same user authority", async () => {
+    let sentUrl = ""
+    let sentBody: unknown
+    await upsertAuthStateCapability(
+      {
+        enabled: true,
+        url: "https://auth-state.jingler.dev",
+        serviceSecret: "secret",
+        fetch: async (input, init) => {
+          sentUrl = String(input)
+          sentBody = JSON.parse(String(init?.body))
+          return new Response(null, { status: 204 })
+        }
+      },
+      {
+        userId: "user/1",
+        provider: "codex",
+        authorizationHeader: "Bearer cloud-provider-key",
+        expiresAt: new Date("2026-08-11T18:00:00Z")
+      }
+    )
+
+    expect(sentUrl).toBe(
+      "https://auth-state.jingler.dev/v1/internal/users/user%2F1/capability"
+    )
+    expect(sentBody).toEqual({
+      provider: "codex",
+      authorizationHeader: "Bearer cloud-provider-key",
+      expiresAt: 1_786_471_200
+    })
   })
 
   it("does not issue network traffic while managed environments are disabled", async () => {

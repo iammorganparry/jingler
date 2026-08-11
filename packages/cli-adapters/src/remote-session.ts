@@ -208,7 +208,7 @@ const openSshChannel = (
     ], { shell: false, stdio: ["pipe", "pipe", "pipe"] })
     const stdout = child.stdout
     const stdin = child.stdin
-    if (!stdout || !stdin) {
+    if (!(stdout && stdin)) {
       child.kill()
       resume(Effect.fail(new RemoteSessionError({ message: "Direct SSH pipes are unavailable." })))
       return
@@ -644,7 +644,7 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
             const terminal = event.kind === "complete" || event.kind === "failed"
             if (terminal) claimedPendingCommandIds.delete(event.commandId)
             yield* states.update(sessionId, (state) => {
-              if (!terminal || !(event.commandId in state.pendingCommands)) {
+              if (!(terminal && (event.commandId in state.pendingCommands))) {
                 return { ...state, acknowledgedDeviceSequence: envelope.sequence }
               }
               const pendingCommands = { ...state.pendingCommands }
@@ -971,11 +971,12 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                 : new RemoteSessionError({ message: cause.message, cause })
             )
           ),
-        grant: (environment, sessionId, usageIntervalId) =>
+        grant: (environment, sessionId, usageIntervalId, actions) =>
           environments.managedSessionGrant(
             environment,
             sessionId,
-            usageIntervalId
+            usageIntervalId,
+            actions
           ).pipe(
             Effect.mapError(
               (cause) => new RemoteSessionError({ message: cause.message, cause })
@@ -991,12 +992,12 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
       ) =>
         Stream.unwrap(
           session.environmentId
-            ? environments.environment(session.environmentId).pipe(
+            ? environments.kind(session.environmentId).pipe(
                 Effect.mapError(
                   (cause) => new RemoteSessionError({ message: cause.message, cause })
                 ),
-                Effect.map((environment) =>
-                  environment.kind === "managed"
+                Effect.map((kind) =>
+                  kind === "managed"
                     ? managedTransport.execute(session, operation, payload, commandId)
                     : ownedExecute(session, operation, payload, commandId)
                 )

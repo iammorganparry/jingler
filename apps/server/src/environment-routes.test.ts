@@ -59,6 +59,7 @@ const harness = (overrides: Partial<EnvironmentRoutesDependencies> = {}) => {
     now: () => new Date("2026-08-10T12:00:00.000Z"),
     getUserId: async () => "user_one",
     listOwned: async () => [{ environment: owned, createdAt: 100 }],
+    managedHarnesses: async () => ["codex"],
     store: store(),
     issueGrant: async () => ({
       version: 1,
@@ -73,6 +74,36 @@ const harness = (overrides: Partial<EnvironmentRoutesDependencies> = {}) => {
 }
 
 describe("environment routes", () => {
+  it("lists owned environments without touching managed services when disabled", async () => {
+    const managedStore = store()
+    const managedHarnesses = vi.fn(async () => ["codex" as const])
+    const { app } = harness({
+      enabled: false,
+      store: managedStore,
+      managedHarnesses
+    })
+
+    const response = await app.request("/api/environments")
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).environments).toEqual([owned])
+    expect(managedStore.listForUser).not.toHaveBeenCalled()
+    expect(managedHarnesses).not.toHaveBeenCalled()
+  })
+
+  it("keeps inventory available when managed capability discovery is unavailable", async () => {
+    const { app } = harness({
+      managedHarnesses: async () => Promise.reject(new Error("runtime unavailable"))
+    })
+
+    const response = await app.request("/api/environments")
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.environments).toHaveLength(2)
+    expect(body.environments[1].capabilities.harnesses).toEqual([])
+  })
+
   it("lists owned and managed environments in stable created order", async () => {
     const { app } = harness()
     const response = await app.request("/api/environments")
@@ -116,6 +147,54 @@ describe("environment routes", () => {
         instanceType: "basic"
       })
     )
+  })
+
+  it("syncs the desktop Codex capability before managed creation", async () => {
+    const syncCapabilities = vi.fn(async () => undefined)
+    const { app } = harness({ syncCapabilities })
+    const response = await app.request("/api/environments/managed", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-jingler-codex-api-key": `sk-${"a".repeat(30)}`
+      },
+      body: JSON.stringify({
+        version: 1,
+        name: "Cloud workspace",
+        region: "wnam",
+        instanceType: "basic",
+        idempotencyKey: "create_workspace_with_capability"
+      })
+    })
+
+    expect(response.status).toBe(201)
+    expect(syncCapabilities).toHaveBeenCalledWith({
+      userId: "user_one",
+      codexApiKey: `sk-${"a".repeat(30)}`,
+      includeGitHub: true
+    })
+  })
+
+  it("refuses managed creation until a cloud-safe harness capability exists", async () => {
+    const managedStore = store()
+    const { app } = harness({
+      store: managedStore,
+      managedHarnesses: async () => []
+    })
+    const response = await app.request("/api/environments/managed", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        version: 1,
+        name: "Cloud workspace",
+        region: "wnam",
+        instanceType: "basic",
+        idempotencyKey: "create_workspace_without_capability"
+      })
+    })
+
+    expect(response.status).toBe(409)
+    expect(managedStore.create).not.toHaveBeenCalled()
   })
 
   it("refuses a grant for a stale managed environment generation", async () => {
@@ -175,6 +254,42 @@ describe("environment routes", () => {
     })
     expect(issueGrant).toHaveBeenCalledWith(expect.objectContaining({
       reservationId: "usage_command_one"
+    }))
+  })
+
+  it("issues cancellation grants without a second compute reservation", async () => {
+    const reserveStart = vi.fn()
+    const syncCapabilities = vi.fn(async () => undefined)
+    const issueGrant = vi.fn<EnvironmentRoutesDependencies["issueGrant"]>(
+      async () => ({
+        version: 1,
+        runtimeUrl: "https://managed-runtime.test",
+        grant: "signed-runtime-grant",
+        expiresAt: 300
+      })
+    )
+    const { app } = harness({ reserveStart, issueGrant, syncCapabilities })
+
+    const response = await app.request(
+      "/api/environments/managed/managed_one/grants",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          version: 1,
+          sessionId: "session_one",
+          usageIntervalId: "command_stop",
+          expectedGeneration: 1,
+          actions: ["session.cancel"]
+        })
+      }
+    )
+
+    expect(response.status).toBe(200)
+    expect(reserveStart).not.toHaveBeenCalled()
+    expect(syncCapabilities).not.toHaveBeenCalled()
+    expect(issueGrant).toHaveBeenCalledWith(expect.objectContaining({
+      reservationId: null
     }))
   })
 

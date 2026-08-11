@@ -6,6 +6,7 @@ import type {
   EnvironmentDiscovery,
   ManagedEnvironment,
   ManagedEnvironmentGrantResponse,
+  ManagedRuntimeAction,
   PairSshEnvironmentInput,
   RemoteDevice,
   WorkspaceProvisioningPlan
@@ -30,6 +31,7 @@ import {
 } from "./device-secret-document.js"
 import { RemoteBootstrapService } from "./remote-bootstrap.js"
 import { SecretStore } from "./secret-store.js"
+import { cloudCodexApiKey } from "./subscription.js"
 
 const authBaseUrl = (): string => process.env.JINGLER_AUTH_URL ?? "http://localhost:9100"
 const deviceAgentBundlePath = (): string | undefined => process.env.JINGLER_DEVICE_AGENT_BUNDLE
@@ -74,6 +76,10 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
     effect: Effect.gen(function* () {
       const secrets = yield* SecretStore
       const bootstrap = yield* RemoteBootstrapService
+      const codexApiKey = cloudCodexApiKey()
+      const managedAuthHeaders = codexApiKey === null
+        ? undefined
+        : { "x-jingler-codex-api-key": codexApiKey }
       const clientInstanceId = yield* Effect.tryPromise({
         try: async () => {
           const document = await updateDeviceSecretDocument(secrets, (current) => {
@@ -113,6 +119,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
               fetch(`${authBaseUrl()}${path}`, {
                 ...init,
                 headers: {
+                  ...Object.fromEntries(new Headers(init?.headers).entries()),
                   authorization: `Bearer ${token}`,
                   "x-jingler-client-instance-id": clientInstanceId,
                   ...(init?.body ? { "content-type": "application/json" } : {})
@@ -148,10 +155,20 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
 
       const accountDevices = () => request(DEVICE_API_ROOT, AccountDeviceListResponseSchema)
 
+      const environmentKinds = new Map<string, Environment["kind"]>()
       const list = request(
         ENVIRONMENT_API_ROOT,
         EnvironmentInventoryResponseSchema
-      ).pipe(Effect.map((response) => response.environments))
+      ).pipe(
+        Effect.map((response) => response.environments),
+        Effect.tap((environments) =>
+          Effect.sync(() => {
+            for (const candidate of environments) {
+              environmentKinds.set(candidate.id, candidate.kind)
+            }
+          })
+        )
+      )
 
       const environment = (
         environmentId: string
@@ -171,6 +188,15 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
                 )
           })
         )
+
+      const kind = (
+        environmentId: string
+      ): Effect.Effect<Environment["kind"], EnvironmentError> => {
+        const cached = environmentKinds.get(environmentId)
+        return cached === undefined
+          ? environment(environmentId).pipe(Effect.map((value) => value.kind))
+          : Effect.succeed(cached)
+      }
 
       const device = (
         deviceId: string
@@ -209,24 +235,21 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
       const managedSessionGrant = (
         environment: ManagedEnvironment,
         sessionId: string,
-        usageIntervalId: string
+        usageIntervalId: string,
+        actions: ReadonlyArray<ManagedRuntimeAction>
       ): Effect.Effect<ManagedEnvironmentGrantResponse, EnvironmentError> =>
         request(
           `${ENVIRONMENT_API_ROOT}/managed/${encodeURIComponent(environment.id)}/grants`,
           ManagedEnvironmentGrantResponseSchema,
           {
             method: "POST",
+            headers: managedAuthHeaders,
             body: JSON.stringify({
               version: REMOTE_PROTOCOL_VERSION,
               sessionId,
               usageIntervalId,
               expectedGeneration: environment.generation,
-              actions: [
-                "session.start",
-                "session.input",
-                "session.cancel",
-                "session.observe"
-              ]
+              actions
             })
           }
         )
@@ -253,6 +276,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           managedEnvironmentResponse,
           {
             method: "POST",
+            headers: managedAuthHeaders,
             body: JSON.stringify({
               version: 1,
               name: trimmed,
@@ -292,6 +316,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           Schema.Struct({ version: Schema.Literal(1), hydrated: Schema.Literal(true) }),
           {
             method: "POST",
+            headers: managedAuthHeaders,
             body: JSON.stringify({
               version: 1,
               sessionId,
@@ -445,10 +470,10 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
           const selected = yield* environment(deviceId)
           if (selected.kind === "managed") {
             yield* request(
-              `${ENVIRONMENT_API_ROOT}/managed/${encodeURIComponent(deviceId)}`,
+              `${ENVIRONMENT_API_ROOT}/managed/${encodeURIComponent(deviceId)}/delete`,
               Schema.Unknown,
               {
-                method: "DELETE",
+                method: "POST",
                 body: JSON.stringify({
                   version: 1,
                   expectedGeneration: selected.generation
@@ -480,6 +505,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
       return {
         list,
         environment,
+        kind,
         device,
         sessionGrant,
         managedSessionGrant,

@@ -123,12 +123,18 @@ const createAuth = () => {
     session: {
       create: {
         after: async (session) => {
-          await upsertAuthStateSession(authState, session)
+          await upsertAuthStateSession(authState, session).catch((error) => {
+            // Account sign-in must not depend on the optional managed runtime.
+            // Managed execution remains fail-closed until a later refresh syncs.
+            console.error("[@jingler/server] auth-state session sync failed:", error)
+          })
         }
       },
       update: {
         after: async (session) => {
-          await upsertAuthStateSession(authState, session)
+          await upsertAuthStateSession(authState, session).catch((error) => {
+            console.error("[@jingler/server] auth-state session sync failed:", error)
+          })
         }
       },
       delete: {

@@ -19,6 +19,7 @@ import {
 } from "./db/repositories/managed-usage-repository.js"
 import { proxyGitHubWebhook } from "./github-webhook-proxy.js"
 import { runtime } from "./runtime.js"
+import { deleteAuthStateSession } from "./auth-state-client.js"
 
 export const app = new Hono()
 
@@ -43,7 +44,39 @@ app.post("/webhooks/github", (c) =>
   proxyGitHubWebhook(c.req.raw, env.githubAppRelayUrl)
 )
 
-/** BetterAuth owns everything under /api/auth/* (OAuth, magic link, session). */
+/**
+ * Fence managed execution before BetterAuth clears the bearer. This explicit
+ * API boundary covers ordinary sign-out even if an adapter bypasses per-row
+ * database hooks; the hook remains defense in depth for other deletion paths.
+ */
+app.post("/api/auth/sign-out", async (c) => {
+  if (env.managedEnvironmentsEnabled) {
+    const current = await getAuth().api
+      .getSession({ headers: c.req.raw.headers })
+      .catch(() => null)
+    if (current !== null) {
+      try {
+        await deleteAuthStateSession(
+          {
+            enabled: true,
+            url: env.authStateUrl,
+            serviceSecret: env.authStateServiceSecret
+          },
+          {
+            id: current.session.id,
+            userId: current.user.id,
+            expiresAt: current.session.expiresAt
+          }
+        )
+      } catch {
+        return c.json({ error: "Managed authorization revocation unavailable" }, 503)
+      }
+    }
+  }
+  return getAuth().handler(c.req.raw)
+})
+
+/** BetterAuth owns everything else under /api/auth/* (OAuth, magic link, session). */
 app.on(["GET", "POST"], "/api/auth/*", (c) => getAuth().handler(c.req.raw))
 
 /** Product GitHub App connection; intentionally outside BetterAuth's routes. */
@@ -57,6 +90,9 @@ app.route("/api/environments", createEnvironmentRoutes())
 
 /** Internal, idempotent settlement callback from the managed-runtime Worker. */
 app.post("/api/internal/managed-usage/settle", async (c) => {
+  if (!env.managedEnvironmentsEnabled) {
+    return c.json({ error: "Managed environments disabled" }, 404)
+  }
   if (
     c.req.header("x-jingler-service-secret") !==
     env.managedRuntimeServiceSecret

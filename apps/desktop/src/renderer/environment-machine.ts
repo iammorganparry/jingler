@@ -43,11 +43,18 @@ type EnvironmentEvent =
   | { type: "REFRESH" }
   | { type: "RENAME"; id: string; name: string }
   | { type: "REVOKE"; id: string }
-  | { type: "CREATE_MANAGED"; name: string }
+  | {
+      type: "CREATE_MANAGED"
+      name: string
+      resolve?: () => void
+      reject?: (error: unknown) => void
+    }
   | {
       type: "MANAGED_LIFECYCLE"
       environment: Environment
       action: "start" | "pause" | "restore"
+      resolve?: () => void
+      reject?: (error: unknown) => void
     }
   | {
       type: "INVENTORY_LOADED"
@@ -141,11 +148,16 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
               void api
                 .createManaged(event.name)
                 .then((environment) => {
-                  if (active)
+                  if (active) {
                     sendBack({ type: "ENVIRONMENT_UPDATED", environment })
+                    event.resolve?.()
+                  }
                 })
                 .catch((error: unknown) => {
-                  if (active) sendBack({ type: "INVENTORY_FAILED", error })
+                  if (active) {
+                    sendBack({ type: "INVENTORY_FAILED", error })
+                    event.reject?.(error)
+                  }
                 })
               return
             }
@@ -153,11 +165,16 @@ export const createEnvironmentMachine = (api: EnvironmentMachineApi) =>
               void api
                 .managedLifecycle(event.environment, event.action)
                 .then((environment) => {
-                  if (active)
+                  if (active) {
                     sendBack({ type: "ENVIRONMENT_UPDATED", environment })
+                    event.resolve?.()
+                  }
                 })
                 .catch((error: unknown) => {
-                  if (active) sendBack({ type: "INVENTORY_FAILED", error })
+                  if (active) {
+                    sendBack({ type: "INVENTORY_FAILED", error })
+                    event.reject?.(error)
+                  }
                 })
               return
             }

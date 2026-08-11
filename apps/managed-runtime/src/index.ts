@@ -2,6 +2,8 @@ import { getSandbox } from "@cloudflare/sandbox"
 import type { ManagedRuntimeAction } from "@jingler/core"
 import { WorkspaceProvisioningPlan } from "@jingler/core"
 import { Either, Schema } from "effect"
+import { decodeManagedGrantRequest } from "./grant-request.js"
+import { matchesGitRepositoryScope } from "./git-scope.js"
 import { issueManagedRuntimeGrant } from "./grant.js"
 import { hydrateWorkspace } from "./workspace-hydration.js"
 import {
@@ -24,25 +26,17 @@ const hasServiceAuthorization = (
   request: Request,
   env: ManagedRuntimeEnv
 ): boolean =>
+  env.MANAGED_RUNTIME_SERVICE_SECRET.length >= 32 &&
   request.headers.get("x-jingler-service-secret") ===
-  env.MANAGED_RUNTIME_SERVICE_SECRET
+    env.MANAGED_RUNTIME_SERVICE_SECRET
 
 const hasBearerServiceAuthorization = (
   request: Request,
   env: ManagedRuntimeEnv
 ): boolean =>
+  env.MANAGED_RUNTIME_SERVICE_SECRET.length >= 32 &&
   request.headers.get("authorization") ===
-  `Bearer ${env.MANAGED_RUNTIME_SERVICE_SECRET}`
-
-const managedRuntimeActions: readonly ManagedRuntimeAction[] = [
-  "session.start",
-  "session.input",
-  "session.cancel",
-  "session.observe"
-]
-
-const isManagedRuntimeAction = (value: unknown): value is ManagedRuntimeAction =>
-  typeof value === "string" && managedRuntimeActions.some((action) => action === value)
+    `Bearer ${env.MANAGED_RUNTIME_SERVICE_SECRET}`
 
 const grantRequestIdentity = (value: unknown): {
   readonly subject: string
@@ -65,6 +59,30 @@ interface RuntimeRegistration {
   }
 }
 
+class RuntimeRegistrationError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = "RuntimeRegistrationError"
+    this.status = status
+  }
+}
+
+const unregisterRuntimeSession = (
+  env: ManagedRuntimeEnv,
+  subject: string,
+  sessionId: string
+): Promise<Response> =>
+  env.MANAGED_ACCOUNT.getByName(subject).fetch(
+    "https://managed-account.internal/v1/sessions/unregister",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, sessionId })
+    }
+  )
+
 const runtimeRegistration = async (
   env: ManagedRuntimeEnv,
   input: {
@@ -73,8 +91,9 @@ const runtimeRegistration = async (
     readonly environmentGeneration: number
     readonly sessionId: string
     readonly reservationId: string | null
+    readonly repositorySlug?: string
   }
-): Promise<RuntimeRegistration | null> => {
+): Promise<RuntimeRegistration> => {
   const accountResponse = await env.MANAGED_ACCOUNT.getByName(input.subject).fetch(
     "https://managed-account.internal/v1/sessions/register",
     {
@@ -83,7 +102,14 @@ const runtimeRegistration = async (
       body: JSON.stringify({ subject: input.subject, sessionId: input.sessionId })
     }
   )
-  if (!accountResponse.ok) return null
+  if (!accountResponse.ok) {
+    throw new RuntimeRegistrationError(
+      accountResponse.status,
+      accountResponse.status === 429
+        ? "Managed session concurrency exceeded"
+        : "Managed execution is not authorized"
+    )
+  }
   const accountBody: unknown = await accountResponse.json()
   const account =
     typeof accountBody === "object" && accountBody !== null
@@ -99,7 +125,7 @@ const runtimeRegistration = async (
       ? Object.fromEntries(Object.entries(account.credentialHandles))
       : null
   if (auth?.admitted !== true || typeof auth.authStateVersion !== "number") {
-    return null
+    throw new RuntimeRegistrationError(403, "Managed execution is not authorized")
   }
   const credentialHandles = {
     codex: typeof handles?.codex === "string" ? handles.codex : null,
@@ -118,53 +144,32 @@ const runtimeRegistration = async (
       })
     }
   )
-  if (!sessionResponse.ok) return null
+  if (!sessionResponse.ok) {
+    await unregisterRuntimeSession(env, input.subject, input.sessionId).catch(
+      () => undefined
+    )
+    throw new RuntimeRegistrationError(
+      sessionResponse.status >= 400 && sessionResponse.status < 600
+        ? sessionResponse.status
+        : 503,
+      "Managed session registration failed"
+    )
+  }
   const sessionBody: unknown = await sessionResponse.json()
   const session =
     typeof sessionBody === "object" && sessionBody !== null
       ? Object.fromEntries(Object.entries(sessionBody))
       : null
-  return typeof session?.sessionGeneration === "number"
-    ? {
-        authStateVersion: auth.authStateVersion,
-        sessionGeneration: session.sessionGeneration,
-        credentialHandles
-      }
-    : null
-}
-
-const grantRequest = (value: unknown): {
-  subject: string
-  environmentId: string
-  sessionId: string
-  actions: ManagedRuntimeAction[]
-  environmentGeneration: number
-  reservationId: string
-} | null => {
-  if (typeof value !== "object" || value === null) return null
-  const fields = Object.fromEntries(Object.entries(value))
-  if (
-    fields.version !== 1 ||
-    typeof fields.subject !== "string" ||
-    typeof fields.environmentId !== "string" ||
-    typeof fields.sessionId !== "string" ||
-    typeof fields.reservationId !== "string" ||
-    fields.reservationId.length < 8 ||
-    !Array.isArray(fields.actions) ||
-    !fields.actions.every(isManagedRuntimeAction) ||
-    typeof fields.environmentGeneration !== "number" ||
-    !Number.isSafeInteger(fields.environmentGeneration) ||
-    fields.environmentGeneration < 1
-  ) {
-    return null
+  if (typeof session?.sessionGeneration !== "number") {
+    await unregisterRuntimeSession(env, input.subject, input.sessionId).catch(
+      () => undefined
+    )
+    throw new RuntimeRegistrationError(502, "Managed session registration was invalid")
   }
   return {
-    subject: fields.subject,
-    environmentId: fields.environmentId,
-    sessionId: fields.sessionId,
-    reservationId: fields.reservationId,
-    actions: fields.actions,
-    environmentGeneration: fields.environmentGeneration
+    authStateVersion: auth.authStateVersion,
+    sessionGeneration: session.sessionGeneration,
+    credentialHandles
   }
 }
 
@@ -184,10 +189,17 @@ export default {
       if (!hasBearerServiceAuthorization(request, env)) {
         return json({ error: "Unauthorized" }, 401)
       }
-      const input = grantRequest(await request.json())
+      const input = decodeManagedGrantRequest(await request.json())
       if (input === null) return json({ error: "Invalid grant request" }, 400)
-      const registration = await runtimeRegistration(env, input)
-      if (registration === null || registration.credentialHandles.codex === null) {
+      let registration: RuntimeRegistration
+      try {
+        registration = await runtimeRegistration(env, input)
+      } catch (cause) {
+        return cause instanceof RuntimeRegistrationError
+          ? json({ error: cause.message }, cause.status)
+          : json({ error: "Managed execution registration failed" }, 503)
+      }
+      if (registration.credentialHandles.codex === null) {
         return json({ error: "Managed execution is not authorized" }, 403)
       }
       const issued = await issueManagedRuntimeGrant(
@@ -310,10 +322,10 @@ export default {
           }
         )
       ))
-      if (results.some((response) => !response.ok)) {
+      if (results.some((response) => !response.ok && response.status !== 403)) {
         return json({ error: "Managed environment cleanup incomplete" }, 503)
       }
-      return json({ destroyed: sessionIds.length })
+      return json({ destroyed: results.filter((response) => response.ok).length })
     }
     if (url.pathname === "/v1/workspaces/hydrate" && request.method === "POST") {
       if (!hasBearerServiceAuthorization(request, env)) {
@@ -343,14 +355,27 @@ export default {
         enableDefaultSession: false,
         sleepAfter: `${env.MANAGED_RUNTIME_IDLE_SECONDS}s`
       })
-      const registration = await runtimeRegistration(env, {
-        subject: bodyFields.subject,
-        environmentId: bodyFields.environmentId,
-        environmentGeneration: bodyFields.environmentGeneration,
-        sessionId: bodyFields.sessionId,
-        reservationId: null
-      })
-      if (registration === null || registration.credentialHandles.github === null) {
+      let registration: RuntimeRegistration
+      try {
+        registration = await runtimeRegistration(env, {
+          subject: bodyFields.subject,
+          environmentId: bodyFields.environmentId,
+          environmentGeneration: bodyFields.environmentGeneration,
+          sessionId: bodyFields.sessionId,
+          reservationId: null,
+          repositorySlug: decoded.right.repository.slug
+        })
+      } catch (cause) {
+        return cause instanceof RuntimeRegistrationError
+          ? json({ error: cause.message }, cause.status)
+          : json({ error: "Managed workspace registration failed" }, 503)
+      }
+      if (registration.credentialHandles.github === null) {
+        await unregisterRuntimeSession(
+          env,
+          bodyFields.subject,
+          bodyFields.sessionId
+        ).catch(() => undefined)
         return json({ error: "GitHub authorization unavailable" }, 403)
       }
       const sessionStub = env.MANAGED_SESSION.getByName(bodyFields.sessionId)
@@ -394,38 +419,6 @@ export default {
         )
       }
     }
-    if (url.pathname === "/v1/internal/provider-proxy" && request.method === "POST") {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401)
-      }
-      const body: unknown = await request.json()
-      const proxy =
-        typeof body === "object" && body !== null
-          ? Object.fromEntries(Object.entries(body))
-          : null
-      if (
-        typeof proxy?.subject !== "string" ||
-        typeof proxy.capabilityHandle !== "string" ||
-        typeof proxy.upstreamUrl !== "string" ||
-        (proxy.method !== "GET" && proxy.method !== "POST")
-      ) {
-        return json({ error: "Invalid provider proxy request" }, 400)
-      }
-      return proxyProviderRequest(
-        {
-          subject: proxy.subject,
-          capabilityHandle: proxy.capabilityHandle,
-          upstreamUrl: proxy.upstreamUrl,
-          method: proxy.method
-        },
-        {
-          resolve: (subject, handle) =>
-            resolveProviderCredential(env, subject, handle),
-          fetch,
-          maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES)
-        }
-      )
-    }
     const codexProxyMatch = url.pathname.match(
       /^\/v1\/provider\/codex\/([^/]+)(\/.*)$/u
     )
@@ -443,7 +436,8 @@ export default {
           : null
       if (
         typeof scopeFields?.subject !== "string" ||
-        typeof scopeFields.capabilityHandle !== "string"
+        typeof scopeFields.capabilityHandle !== "string" ||
+        typeof scopeFields.repositorySlug !== "string"
       ) {
         return json({ error: "Provider authorization unavailable" }, 403)
       }
@@ -491,6 +485,9 @@ export default {
       const owner = gitProxyMatch[2] ?? ""
       const repository = gitProxyMatch[3] ?? ""
       const suffix = gitProxyMatch[4] ?? ""
+      if (!matchesGitRepositoryScope(owner, repository, scopeFields.repositorySlug)) {
+        return json({ error: "Git repository scope denied" }, 403)
+      }
       return proxyProviderRequest(
         {
           provider: "github",

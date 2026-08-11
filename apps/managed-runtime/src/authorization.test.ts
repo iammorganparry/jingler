@@ -42,6 +42,28 @@ describe("managed runtime authorization fencing", () => {
     })
   })
 
+  it("keeps an active process running across an authorized token refresh", async () => {
+    const stop = vi.fn(async () => undefined)
+    const next = await applyManagedAuthorizationSnapshot(
+      {
+        authStateVersion: 4,
+        sessionGeneration: 3,
+        processId: "process_1",
+        authorized: true
+      },
+      5,
+      stop
+    )
+
+    expect(stop).not.toHaveBeenCalled()
+    expect(next).toEqual({
+      authStateVersion: 5,
+      sessionGeneration: 3,
+      processId: "process_1",
+      authorized: true
+    })
+  })
+
   it("rejects stale auth version", async () => {
     const grant = await issued()
     await expect(

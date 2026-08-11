@@ -58,4 +58,17 @@ describe("managed session runtime", () => {
     expect(MAX_COMMANDS).toBe(256)
     expect(MAX_EVENTS_PER_COMMAND).toBe(4_096)
   })
+
+  it("evicts the oldest settled command instead of bricking a long session", () => {
+    const journal = new ManagedSessionJournal()
+    for (let index = 0; index < MAX_COMMANDS; index += 1) {
+      const commandId = `command_${index}`
+      journal.admit(command(commandId))
+      journal.settle(commandId, "complete", { exitCode: 0 })
+    }
+
+    expect(journal.admit(command("command_next"))).toBe("started")
+    expect(journal.replay("command_0")).toEqual([])
+    expect(journal.snapshot().commands).toHaveProperty("command_next")
+  })
 })

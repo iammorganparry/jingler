@@ -289,6 +289,7 @@ process.stdin.on("data", (chunk) => {
       _tag: "@jingler/EnvironmentService" as const,
       list: Effect.succeed([]),
       environment: () => Effect.succeed(environmentFromRemoteDevice(fakeDevice)),
+      kind: () => Effect.succeed("owned" as const),
       refresh: Effect.succeed([]),
       suggestHosts: () => Effect.succeed([]),
       device: () => Effect.succeed(fakeDevice),
@@ -398,6 +399,7 @@ process.stdin.on("data", (chunk) => {
       _tag: "@jingler/EnvironmentService" as const,
       list: Effect.succeed([]), refresh: Effect.succeed([]), suggestHosts: () => Effect.succeed([]),
       environment: () => Effect.succeed(environmentFromRemoteDevice(fakeDevice)),
+      kind: () => Effect.succeed("owned" as const),
       device: () => Effect.succeed(fakeDevice),
       sessionGrant: (_deviceId: string, sessionId: string) => Effect.succeed({
         version: 1 as const, relayUrl, grant: "grant_concurrent_abcdefghijklmnop",

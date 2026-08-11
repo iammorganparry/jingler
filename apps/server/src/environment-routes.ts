@@ -28,6 +28,11 @@ import {
   type ManagedUsageReservationResult
 } from "./db/repositories/managed-usage-repository.js"
 import { env } from "./env.js"
+import {
+  deleteAuthStateCapability,
+  upsertAuthStateCapability
+} from "./auth-state-client.js"
+import { managedGitHubCapabilityForUser } from "./github-routes.js"
 import { decodeBoundedJson } from "./request-decoding.js"
 import { runtime } from "./runtime.js"
 
@@ -100,6 +105,11 @@ export interface EnvironmentRoutesDependencies {
   readonly getUserId: (headers: Headers) => Promise<string | null>
   readonly listOwned: (userId: string) => Promise<ReadonlyArray<OwnedInventoryEntry>>
   readonly managedHarnesses?: (userId: string) => Promise<ReadonlyArray<"codex">>
+  readonly syncCapabilities?: (input: {
+    readonly userId: string
+    readonly codexApiKey: string | null
+    readonly includeGitHub: boolean
+  }) => Promise<void>
   readonly store: ManagedEnvironmentStore
   readonly issueGrant: (input: {
     readonly userId: string
@@ -182,6 +192,35 @@ const defaultDependencies = (): EnvironmentRoutesDependencies => ({
     return Array.isArray(body.harnesses) && body.harnesses.includes("codex")
       ? ["codex"]
       : []
+  },
+  syncCapabilities: async ({ userId, codexApiKey, includeGitHub }) => {
+    const config = {
+      enabled: env.managedEnvironmentsEnabled,
+      url: env.authStateUrl,
+      serviceSecret: env.authStateServiceSecret
+    }
+    const github = includeGitHub
+      ? await managedGitHubCapabilityForUser(userId)
+      : undefined
+    await Promise.all([
+      codexApiKey === null
+        ? Promise.resolve()
+        : upsertAuthStateCapability(config, {
+            userId,
+            provider: "codex",
+            authorizationHeader: `Bearer ${codexApiKey}`,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000)
+          }),
+      github === undefined
+        ? Promise.resolve()
+        : github === null
+          ? deleteAuthStateCapability(config, { userId, provider: "github" })
+          : upsertAuthStateCapability(config, {
+              userId,
+              provider: "github",
+              ...github
+            })
+    ])
   },
   store: persistentStore,
   issueGrant: async (input) => {
@@ -274,6 +313,18 @@ const ManagedWorkspaceRequest = Schema.Struct({
   plan: WorkspaceProvisioningPlan
 })
 
+const codexApiKeyFrom = (request: Request): string | null => {
+  const value = request.headers.get("x-jingler-codex-api-key")?.trim() ?? ""
+  return value.length >= 20 &&
+    value.length <= 512 &&
+    [...value].every((character) => {
+      const code = character.charCodeAt(0)
+      return code >= 33 && code <= 126
+    })
+    ? value
+    : null
+}
+
 const lifecycleState = (
   action: ManagedEnvironmentLifecycleRequestValue["action"]
 ): ManagedEnvironment["state"] => {
@@ -300,10 +351,25 @@ export const createEnvironmentRoutes = (
     const userId = await authenticate(context.req.raw, dependencies)
     if (!userId) return json({ error: "Authentication required" }, 401)
     try {
+      if (!dependencies.enabled) {
+        const owned = await dependencies.listOwned(userId)
+        return json(
+          Schema.decodeUnknownSync(EnvironmentInventoryResponse)({
+            version: 1,
+            environments: [...owned]
+              .sort(
+                (left, right) =>
+                  left.createdAt - right.createdAt ||
+                  left.environment.id.localeCompare(right.environment.id)
+              )
+              .map((entry) => entry.environment)
+          })
+        )
+      }
       const [owned, managed, managedHarnesses] = await Promise.all([
         dependencies.listOwned(userId),
         dependencies.store.listForUser(userId),
-        dependencies.managedHarnesses?.(userId) ?? Promise.resolve([])
+        (dependencies.managedHarnesses?.(userId) ?? Promise.resolve([])).catch(() => [])
       ])
       const environments = [
         ...owned,
@@ -343,6 +409,17 @@ export const createEnvironmentRoutes = (
     const input = await decodeBoundedJson(context.req.raw, CreateManagedEnvironmentRequest)
     if (!input) return json({ error: "Invalid managed environment request" }, 400)
     try {
+      await dependencies.syncCapabilities?.({
+        userId,
+        codexApiKey: codexApiKeyFrom(context.req.raw),
+        includeGitHub: true
+      })
+      const harnesses = await (dependencies.managedHarnesses?.(userId) ?? Promise.resolve([]))
+      if (!harnesses.includes("codex")) {
+        return json({
+          error: "Managed Codex requires an OPENAI_API_KEY and an active GitHub connection"
+        }, 409)
+      }
       const environment = await dependencies.store.create({
         id: `managed_${crypto.randomUUID().replaceAll("-", "")}`,
         userId,
@@ -357,7 +434,7 @@ export const createEnvironmentRoutes = (
             "session.cancel",
             "session.observe"
           ],
-          harnesses: ["codex"],
+          harnesses,
           maxConcurrentSessions: 1
         },
         idempotencyKey: input.idempotencyKey,
@@ -437,6 +514,11 @@ export const createEnvironmentRoutes = (
       return json({ error: "Managed workspace hydration unavailable" }, 503)
     }
     try {
+      await dependencies.syncCapabilities?.({
+        userId,
+        codexApiKey: codexApiKeyFrom(context.req.raw),
+        includeGitHub: true
+      })
       await dependencies.hydrateWorkspace({
         userId,
         environment,
@@ -507,7 +589,21 @@ export const createEnvironmentRoutes = (
     if (environment.generation !== request.expectedGeneration) {
       return json({ error: "Managed environment generation changed" }, 409)
     }
-    const reservation = dependencies.reserveStart
+    const metered = request.actions.some(
+      (action) => action === "session.start" || action === "session.input"
+    )
+    if (metered) {
+      try {
+        await dependencies.syncCapabilities?.({
+          userId,
+          codexApiKey: codexApiKeyFrom(context.req.raw),
+          includeGitHub: false
+        })
+      } catch {
+        return json({ error: "Managed authorization sync unavailable" }, 503)
+      }
+    }
+    const reservation = metered && dependencies.reserveStart
       ? await dependencies.reserveStart({
           userId,
           environmentId: environment.id,
@@ -515,7 +611,7 @@ export const createEnvironmentRoutes = (
           usageIntervalId: request.usageIntervalId
         }).catch(() => null)
       : null
-    if (dependencies.reserveStart && reservation === null) {
+    if (metered && dependencies.reserveStart && reservation === null) {
       return json({ error: "Managed usage budget is temporarily unavailable" }, 503)
     }
     if (reservation?.status === "denied") {

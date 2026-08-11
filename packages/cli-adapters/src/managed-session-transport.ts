@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto"
+import { managedRuntimeActionForOperation } from "@jingler/core"
 import type {
   ManagedEnvironment,
   ManagedEnvironmentGrantResponse,
+  ManagedRuntimeAction,
   RemoteSessionCommand,
   RemoteSessionEvent
 } from "@jingler/core"
@@ -25,7 +27,8 @@ export interface ManagedSessionTransportDependencies {
   readonly grant: (
     environment: ManagedEnvironment,
     sessionId: string,
-    usageIntervalId: string
+    usageIntervalId: string,
+    actions: ReadonlyArray<ManagedRuntimeAction>
   ) => Effect.Effect<ManagedEnvironmentGrantResponse, RemoteSessionError>
   readonly fetch?: typeof fetch
 }
@@ -76,7 +79,8 @@ export const makeManagedSessionTransport = (
         const grant = yield* dependencies.grant(
           environment,
           session.id,
-          command.commandId
+          command.commandId,
+          [managedRuntimeActionForOperation(operation)]
         )
         const output = yield* Queue.unbounded<Output>()
         let expectedSequence = 0

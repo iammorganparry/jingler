@@ -14,6 +14,7 @@ const state = (now: number): AuthStateRecord => ({
     codex: {
       provider: "codex",
       handle: "capability_opaque",
+      fingerprint: "fingerprint_opaque",
       authorizationHeaderEncrypted: "v1.encrypted-secret",
       expiresAt: now + 300
     }

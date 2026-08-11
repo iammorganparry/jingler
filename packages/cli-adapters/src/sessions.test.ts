@@ -249,6 +249,25 @@ describe("SessionStore", () => {
     expect(existsSync(second.value.worktreePath!)).toBe(true)
   })
 
+  it("rejects a requested session id that is already persisted", async () => {
+    const duplicate = await runExit(
+      Effect.gen(function* () {
+        yield* SessionStore.create(
+          input({ title: "First", requestedSessionId: "s_requested_once" })
+        )
+        return yield* SessionStore.create(
+          input({ title: "Second", requestedSessionId: "s_requested_once" })
+        )
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(failureOf(duplicate)).toMatchObject({
+      _tag: "GitError",
+      message: "A session with id s_requested_once already exists."
+    })
+  })
+
   it("creates an idle session in a detached fresh-base worktree", async () => {
     const exit = await runExit(
       SessionStore.create(input()).pipe(Effect.provide(services)),
@@ -1366,6 +1385,30 @@ describe("SessionStore", () => {
     expect(first.value.id).not.toBe(second.value.id)
   })
 
+  it("createFromPr rejects a requested id owned by another session", async () => {
+    const env = Layer.mergeAll(
+      temp.layer,
+      fakeCommandExecutor(prExecutor("chore/bump", [])),
+      apiHead()
+    )
+    const duplicate = await runExit(
+      Effect.gen(function* () {
+        yield* SessionStore.createFromPr(
+          { ...prInput({ number: 101 }), requestedSessionId: "s_pr_requested" }
+        )
+        return yield* SessionStore.createFromPr(
+          { ...prInput({ number: 202 }), requestedSessionId: "s_pr_requested" }
+        )
+      }).pipe(Effect.provide(prServices)),
+      env
+    )
+
+    expect(failureOf(duplicate)).toMatchObject({
+      _tag: "GitError",
+      message: "A session with id s_pr_requested already exists."
+    })
+  })
+
   it("createFromPr falls back to the PR head ref when HEAD is detached", async () => {
     const calls: Array<string> = []
     // "HEAD" (detached) → branchAt yields null → the reported head ref is used.
@@ -1684,6 +1727,32 @@ describe("SessionStore", () => {
       temp.layer
     )
     expect(failureOf(twice)?._tag).toBe("GitError")
+  })
+
+  it("createFromIssue rejects a requested id owned by another issue", async () => {
+    const secondIssue = issueInput({
+      requestedSessionId: "s_issue_requested",
+      issue: {
+        ...issueInput().issue,
+        id: "129",
+        identifier: "#129",
+        url: "https://github.com/acme/api/issues/129"
+      }
+    })
+    const duplicate = await runExit(
+      Effect.gen(function* () {
+        yield* SessionStore.createFromIssue(
+          issueInput({ requestedSessionId: "s_issue_requested" })
+        )
+        return yield* SessionStore.createFromIssue(secondIssue)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(failureOf(duplicate)).toMatchObject({
+      _tag: "GitError",
+      message: "A session with id s_issue_requested already exists."
+    })
   })
 
   it("createFromIssue identifies a duplicate after its title and identifier change", async () => {

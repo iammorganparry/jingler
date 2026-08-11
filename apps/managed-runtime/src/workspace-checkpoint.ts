@@ -139,17 +139,24 @@ export const createWorkspaceCheckpoint = async (
     timeout: 120_000
   })
   const workspaceDigest = digestResult.stdout.trim().toLowerCase()
-  if (!digestResult.success || !/^[a-f0-9]{64}$/u.test(workspaceDigest)) {
+  if (!(digestResult.success && /^[a-f0-9]{64}$/u.test(workspaceDigest))) {
     throw new Error("Unable to calculate a bounded workspace digest")
   }
-  if (input.previousCheckpoint?.workspaceDigest === workspaceDigest) {
+  const renewalWindowSeconds = Math.max(
+    60,
+    Math.min(24 * 60 * 60, Math.floor(input.retentionSeconds / 4))
+  )
+  if (
+    input.previousCheckpoint?.workspaceDigest === workspaceDigest &&
+    input.previousCheckpoint.backup.expiresAt >
+      input.nowSeconds + renewalWindowSeconds
+  ) {
     return {
       status: "skipped",
       workspaceDigest,
       manifest: {
         ...input.previousCheckpoint,
-        eventCursor: input.eventCursor,
-        createdAt: input.nowSeconds
+        eventCursor: input.eventCursor
       }
     }
   }
@@ -159,8 +166,7 @@ export const createWorkspaceCheckpoint = async (
   ])
   const estimatedBytes = Number(sizeResult.stdout.trim())
   if (
-    !sizeResult.success ||
-    !Number.isSafeInteger(estimatedBytes) ||
+    !(sizeResult.success &&Number.isSafeInteger(estimatedBytes) ) ||
     estimatedBytes < 0 ||
     estimatedBytes > (input.maxBytes ?? 64 * 1024 * 1024)
   ) {
@@ -170,10 +176,7 @@ export const createWorkspaceCheckpoint = async (
     .trim()
     .split("\n")
   if (
-    !identityResult.success ||
-    !headSha ||
-    !/^[a-f0-9]{40,64}$/iu.test(headSha) ||
-    !branch ||
+    !(((identityResult.success &&headSha ) &&/^[a-f0-9]{40,64}$/iu.test(headSha) ) &&branch ) ||
     (stagedFlag !== "0" && stagedFlag !== "1") ||
     (dirtyFlag !== "0" && dirtyFlag !== "1")
   ) {

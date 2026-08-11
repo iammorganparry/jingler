@@ -8,6 +8,8 @@ export interface AuthSession {
 export interface StoredCredential {
   readonly provider: CapabilityProvider
   readonly handle: string
+  /** Stable one-way identity used to make repeated capability sync idempotent. */
+  readonly fingerprint: string
   readonly authorizationHeaderEncrypted: string
   readonly expiresAt: number
 }
