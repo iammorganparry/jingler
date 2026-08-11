@@ -1001,7 +1001,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // ADHD mode rides in the same per-turn prefix as the primer and plan
           // pointer so a Settings change applies immediately. Its own scope makes
           // the format dormant during work and active only for the final summary.
-          const adhd = adhdMode ? adhdNote(cli) : null
+          const adhd = adhdMode ? adhdNote() : null
           // Not optional, and not a setting: an agent that asks in prose is an
           // agent whose question never reaches the operator. Claude has the
           // `AskUserQuestion` tool the adapter intercepts, Codex has the fenced
@@ -1010,13 +1010,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // an unanswerable paragraph. Rides the same per-turn prefix as ADHD
           // mode, for the same reason: no system-prompt hook is shared by every
           // harness, and this has to survive a mid-session harness switch.
-          const ask = questionNote(cli)
+          const ask = questionNote()
           // How this harness submits an enhanced plan. Null for Claude — the adapter passes
           // `planModeInstructions` as a real SDK option there, and saying it twice
           // would compete with the `ExitPlanMode` tool the harness is steered
           // toward. With Jingler tools disabled, the harness owns planning and
           // receives none of Jingler's structured plan protocol.
-          const planProtocol = mode === "plan" ? planNote(cli) : null
+          const planProtocol = mode === "plan" ? planNote() : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
@@ -1119,7 +1119,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 ask,
                 planProtocol
               },
-              { leadWithText: leadsWithCommand(cli, promptText) }
+              { leadWithText: leadsWithCommand(promptText) }
             ),
             images,
             binPath,

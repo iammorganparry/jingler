@@ -1,8 +1,5 @@
-import type { CliKind } from "@jingler/core"
-
 /**
- * The rules, spelled out. Used verbatim for every harness that cannot see the
- * operator's Claude skills — Codex, Cursor, opencode, the scripted fallback.
+ * Completion-summary rules owned by Jingler rather than a provider harness.
  */
 const INLINE_RULES = [
   "RESPONSE FORMAT — MANDATORY:",
@@ -27,12 +24,7 @@ const COMPLETION_SCOPE = [
  * The ADHD completion-summary instruction, carried per turn so a Settings
  * change applies immediately but explicitly dormant until the task is finished.
  *
- * Claude gets pointed at the operator's `i-have-adhd` skill rather than a copy
- * of its rules: the skill is the source of truth and the operator can edit it
- * without a release. Every other harness has no access to `~/.claude/skills`, so
- * naming the skill there would be a silent no-op — they get the rules inline.
+ * Managed skills remain lower-trust resources, so product behavior is defined
+ * inline and stays identical across provider models.
  */
-export const adhdNote = (cli: CliKind): string =>
-  cli === "claude"
-    ? `${COMPLETION_SCOPE}\n\nFor that final completion summary only, invoke the \`i-have-adhd:i-have-adhd\` skill and shape the summary with it. If that skill is unavailable, follow these rules instead:\n\n${INLINE_RULES}`
-    : `${COMPLETION_SCOPE}\n\n${INLINE_RULES}`
+export const adhdNote = (): string => `${COMPLETION_SCOPE}\n\n${INLINE_RULES}`
