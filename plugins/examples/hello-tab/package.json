@@ -1,6 +1,6 @@
 {
   "name": "@jingler-example/hello-tab",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "The smallest complete Jingler plugin — one tab, no host half.",

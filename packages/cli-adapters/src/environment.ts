@@ -154,7 +154,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
 
       const accountDevices = () => request(DEVICE_API_ROOT, AccountDeviceListResponseSchema)
 
-      const environmentKinds = new Map<string, Environment["kind"]>()
+      const environmentsById = new Map<string, Environment>()
       const list = request(
         ENVIRONMENT_API_ROOT,
         EnvironmentInventoryResponseSchema
@@ -163,7 +163,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
         Effect.tap((environments) =>
           Effect.sync(() => {
             for (const candidate of environments) {
-              environmentKinds.set(candidate.id, candidate.kind)
+              environmentsById.set(candidate.id, candidate)
             }
           })
         )
@@ -171,8 +171,10 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
 
       const environment = (
         environmentId: string
-      ): Effect.Effect<Environment, EnvironmentError> =>
-        list.pipe(
+      ): Effect.Effect<Environment, EnvironmentError> => {
+        const cached = environmentsById.get(environmentId)
+        if (cached !== undefined) return Effect.succeed(cached)
+        return list.pipe(
           Effect.flatMap((environments) => {
             const found = environments.find(
               (candidate) => candidate.id === environmentId
@@ -187,14 +189,15 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
                 )
           })
         )
+      }
 
       const kind = (
         environmentId: string
       ): Effect.Effect<Environment["kind"], EnvironmentError> => {
-        const cached = environmentKinds.get(environmentId)
+        const cached = environmentsById.get(environmentId)
         return cached === undefined
           ? environment(environmentId).pipe(Effect.map((value) => value.kind))
-          : Effect.succeed(cached)
+          : Effect.succeed(cached.kind)
       }
 
       const device = (

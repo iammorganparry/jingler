@@ -273,6 +273,31 @@ describe("environment device API", () => {
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 
+  it("reuses loaded environment metadata when session creation resolves its target", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        version: 1,
+        environments: [environmentFromRemoteDevice(accountDevice)]
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    process.env.JINGLER_AUTH_URL = "https://server.test"
+    const layer = environmentLayer({
+      bootstrap: () => Effect.succeed(pending),
+      installAndBootstrap: () => Effect.succeed(pending)
+    })
+
+    const environment = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* EnvironmentService.list
+        return yield* EnvironmentService.environment(device.deviceId)
+      }).pipe(Effect.provide(layer))
+    )
+
+    expect(environment.id).toBe(device.deviceId)
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
   it("enrolls an owned machine with an invisible account credential", async () => {
     const installCalls: Array<InstallAndEnrollOwnedDeviceInput> = []
     vi.stubGlobal("fetch", async (input: string | URL | Request) => {

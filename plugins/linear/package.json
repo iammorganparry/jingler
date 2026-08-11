@@ -1,6 +1,6 @@
 {
   "name": "@jingler/plugin-linear",
-  "version": "3.0.1",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "The official Linear issue plugin for Jingler.",

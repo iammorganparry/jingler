@@ -715,7 +715,9 @@ export const startFakeAuthServer = async (
       req.method === "POST"
     ) {
       if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
-      setTimeout(() => json(503, { error: "Scripted Cloud startup stopped before allocation" }), 1_000)
+      setTimeout(() => {
+        json(503, { error: "Scripted Cloud startup stopped before allocation" })
+      }, 2_000)
       return
     }
 
