@@ -56,13 +56,6 @@ const DIGEST_TIMEOUT = "90 seconds"
  */
 const MAX_FAILURES = 2
 
-/**
- * Legacy Codex sessions created before live occupancy telemetry can resume with
- * `contextTokens: 0`. A large local transcript is then the only evidence that
- * resuming the vendor thread is unsafe.
- */
-const UNKNOWN_CODEX_TRANSCRIPT_RECOVERY_CHARS = 500_000
-
 interface SessionContext {
   readonly status: "idle" | "preparing" | "ready"
   readonly digest: ContextDigest | null
@@ -205,9 +198,11 @@ export class ContextManager extends Effect.Service<ContextManager>()(
 
           const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
           const ctx = config?.context ?? DEFAULT_CONTEXT_CONFIG
-          const provider = config?.providers?.[session.cli]
-          const selectedModel = chat.modelId ?? chat.model ?? null
-          const inferredWindow = contextWindowFor(session.cli, selectedModel)
+          const selectedModel = chat.modelId ?? null
+          const inferredWindow = contextWindowFor(
+            chat.providerId ?? session.providerId ?? null,
+            selectedModel
+          )
           const measuredWindow = resolveWindow(inferredWindow, reported)
 
           // A harness that reports no usage gives us nothing to measure, so it is
@@ -235,12 +230,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             // guess, and an observation of 598k in a "200k" window disproves it —
             // left uncorrected, `triggerAt` sits at 170k and the session compacts
             // every single turn while the harness is perfectly comfortable.
-            window: reconcileWindow(
-              provider?.contextWindow !== undefined && provider.contextWindow !== null
-                ? contextWindowFor(session.cli, selectedModel, provider.contextWindow)
-                : measuredWindow,
-              peak
-            ),
+            window: reconcileWindow(measuredWindow, peak)
           }
         })
 
@@ -513,44 +503,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
         })
 
       /**
-       * Prepare a blocking digest for a legacy Codex resume whose occupancy is
-       * unknown but whose transcript is already large enough to be risky.
-       *
-       * This is deliberately narrower than ordinary auto-compaction: measured
-       * sessions use their Usage reading, small unknown sessions proceed, and an
-       * operator who disabled automatic compaction keeps that choice.
-       */
-      const prepareUnknownCodexResume = (
-        sessionId: string
-      ): Effect.Effect<void, never, DigestEnv> =>
-        Effect.gen(function* () {
-          const settings = yield* settingsFor(sessionId)
-          if (
-            settings === null ||
-            !settings.auto ||
-            settings.session.cli !== "codex" ||
-            settings.chat.resumeId === undefined
-          ) {
-            return
-          }
-          const state = yield* stateOf(sessionId)
-          const persisted = settings.chat.contextTokens ?? 0
-          if (state.tokens > 0 || persisted > 0 || state.status === "ready") return
-
-          const messages = yield* TranscriptStore.list(sessionId).pipe(
-            Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
-          )
-          let chars = 0
-          for (const message of messages) {
-            chars += JSON.stringify(message).length
-            if (chars >= UNKNOWN_CODEX_TRANSCRIPT_RECOVERY_CHARS) {
-              yield* compactNow(sessionId, { waitForReady: true })
-              return
-            }
-          }
-        })
-
-      /**
        * The structural half of the mid-flow question, which no summary can see.
        *
        * These are facts about the session's CURRENT state rather than its
@@ -646,7 +598,10 @@ export class ContextManager extends Effect.Service<ContextManager>()(
               tokens: tokensBefore,
               window:
                 state.window ??
-                  contextWindowFor(session?.cli ?? "claude", chat?.model ?? null),
+                  contextWindowFor(
+                    chat?.providerId ?? session?.providerId ?? null,
+                    chat?.modelId ?? session?.modelId ?? null
+                  ),
               deferrals: state.deferrals
             })
           if (hold) {
@@ -806,7 +761,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
         applyIfReady,
         applyWhenReady,
         compactNow,
-        prepareUnknownCodexResume,
         cancel,
         forget,
         snapshot

@@ -1,21 +1,24 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { ContextConfig, DEFAULT_CONTEXT_CONFIG } from "./domain.js"
-import { FALLBACK_MODELS, defaultModel } from "./models.js"
+import { ProviderId } from "./runtime/provider-connection.js"
 import {
   BUDGET_RANGE,
   ContextSnapshot,
   DEFAULT_BUDGET_TOKENS,
-  DEFAULT_DIGEST_MODEL,
   MAX_SWAP_DEFERRALS,
   clampBudget,
   contextPhase,
   contextWindowFor,
-  digestModelFor,
   reconcileWindow,
   shouldHoldSwap,
   triggerAt
 } from "./context.js"
+
+const providerId = Schema.decodeUnknownSync(ProviderId)
+const anthropic = providerId("anthropic")
+const openaiCodex = providerId("openai-codex")
+const openrouter = providerId("openrouter")
 
 /**
  * The whole feature turns on one pure decision. These tests pin the property
@@ -25,30 +28,30 @@ import {
 
 describe("contextWindowFor", () => {
   it("reads a 1M window for current Claude Code Opus and Sonnet aliases", () => {
-    expect(contextWindowFor("claude", "claude-fable-5")).toBe(1_000_000)
-    expect(contextWindowFor("claude", "opus")).toBe(1_000_000)
-    expect(contextWindowFor("claude", "sonnet")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "claude-fable-5")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "opus")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "sonnet")).toBe(1_000_000)
   })
 
   // Harness model ids are unstable — `sonnet`, `claude-sonnet-4-5` and
   // `claude-sonnet-4-5-20250929` are all one model. Prefix matching is what
   // keeps the table from going stale every time a provider stamps a date on.
   it("matches a dated, fully-qualified model id", () => {
-    expect(contextWindowFor("claude", "claude-sonnet-4-5-20250929")).toBe(1_000_000)
-    expect(contextWindowFor("codex", "gpt-5.6-sol-20260709")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "claude-sonnet-4-5-20250929")).toBe(1_000_000)
+    expect(contextWindowFor(openaiCodex, "gpt-5.6-sol-20260709")).toBe(1_000_000)
   })
 
   it("uses the 1M context window for every GPT-5.6 variant", () => {
-    expect(contextWindowFor("codex", "gpt-5.6-sol")).toBe(1_000_000)
-    expect(contextWindowFor("codex", "gpt-5.6-terra")).toBe(1_000_000)
-    expect(contextWindowFor("codex", "gpt-5.6-luna")).toBe(1_000_000)
+    expect(contextWindowFor(openaiCodex, "gpt-5.6-sol")).toBe(1_000_000)
+    expect(contextWindowFor(openaiCodex, "gpt-5.6-terra")).toBe(1_000_000)
+    expect(contextWindowFor(openaiCodex, "gpt-5.6-luna")).toBe(1_000_000)
   })
 
   // `claude-fable-5` contains no shorter model name today, but a future id like
   // `claude-fable-sonnet` would match both. Longest prefix has to win, or a 1M
   // model gets treated as 200k and compacts five times more than it needs to.
   it("prefers the longest matching prefix", () => {
-    expect(contextWindowFor("claude", "claude-fable-5-preview")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "claude-fable-5-preview")).toBe(1_000_000)
   })
 
   /**
@@ -58,10 +61,10 @@ describe("contextWindowFor", () => {
    * soon" and reseeds itself every turn. Observed in the wild at 213.6k.
    */
   it("reads a 1M window for modern Opus", () => {
-    expect(contextWindowFor("claude", "claude-opus-4-5")).toBe(1_000_000)
-    expect(contextWindowFor("claude", "claude-opus-4-8")).toBe(1_000_000)
-    expect(contextWindowFor("claude", "claude-opus-5")).toBe(1_000_000)
-    expect(contextWindowFor("claude", "claude-opus-4-5-20251101")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "claude-opus-4-5")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "claude-opus-4-8")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "claude-opus-5")).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "claude-opus-4-5-20251101")).toBe(1_000_000)
   })
 
   it("recognises Claude Code's explicit 1M model variants", () => {
@@ -72,7 +75,7 @@ describe("contextWindowFor", () => {
       "claude-sonnet-4-6[1m]",
       "sonnet[1m]"
     ]) {
-      expect(contextWindowFor("claude", model)).toBe(1_000_000)
+      expect(contextWindowFor(anthropic, model)).toBe(1_000_000)
     }
   })
 
@@ -89,38 +92,38 @@ describe("contextWindowFor", () => {
       "claude-3-5-sonnet-20241022",
       "claude-3-5-haiku-20241022"
     ]) {
-      expect(contextWindowFor("claude", model)).toBe(200_000)
+      expect(contextWindowFor(anthropic, model)).toBe(200_000)
     }
   })
 
   it("keeps Haiku at the conservative floor without a known 1M release", () => {
-    expect(contextWindowFor("claude", "haiku")).toBe(200_000)
-    expect(contextWindowFor("claude", "claude-haiku-4-5")).toBe(200_000)
+    expect(contextWindowFor(anthropic, "haiku")).toBe(200_000)
+    expect(contextWindowFor(anthropic, "claude-haiku-4-5")).toBe(200_000)
   })
 
   it("falls back to the harness floor for an unrecognised model", () => {
-    expect(contextWindowFor("claude", "some-new-tier")).toBe(200_000)
-    expect(contextWindowFor("codex", "gpt-6-unreleased")).toBe(272_000)
+    expect(contextWindowFor(anthropic, "some-new-tier")).toBe(200_000)
+    expect(contextWindowFor(openaiCodex, "gpt-6-unreleased")).toBe(272_000)
   })
 
   // Unknown is load-bearing, not a gap: cursor has no headless adapter, and
   // opencode resolves models from the user's own credentials across ~167
   // providers, so there is no honest default to invent.
-  it("reports unknown for harnesses whose window we cannot know", () => {
-    expect(contextWindowFor("cursor", "auto")).toBeNull()
-    expect(contextWindowFor("opencode", "opencode/big-pickle")).toBeNull()
-    expect(contextWindowFor("claude", null)).toBe(200_000)
+  it("reports unknown for providers whose window we cannot know", () => {
+    expect(contextWindowFor(openrouter, "openrouter/unknown")).toBeNull()
+    expect(contextWindowFor(null, "unknown/model")).toBeNull()
+    expect(contextWindowFor(anthropic, null)).toBe(200_000)
   })
 
-  it("lets a user override win — the only route to auto-compaction on opencode", () => {
-    expect(contextWindowFor("opencode", "openrouter/anthropic/claude-opus-4.5", 200_000)).toBe(200_000)
-    expect(contextWindowFor("claude", "sonnet", 1_000_000)).toBe(1_000_000)
+  it("lets a caller override win for a provider without known model metadata", () => {
+    expect(contextWindowFor(openrouter, "anthropic/claude-opus-4.5", 200_000)).toBe(200_000)
+    expect(contextWindowFor(anthropic, "sonnet", 1_000_000)).toBe(1_000_000)
   })
 
   it("ignores a nonsensical override rather than trusting it", () => {
-    expect(contextWindowFor("claude", "sonnet", 0)).toBe(1_000_000)
-    expect(contextWindowFor("claude", "sonnet", -5)).toBe(1_000_000)
-    expect(contextWindowFor("claude", "sonnet", null)).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "sonnet", 0)).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "sonnet", -5)).toBe(1_000_000)
+    expect(contextWindowFor(anthropic, "sonnet", null)).toBe(1_000_000)
   })
 })
 
@@ -315,33 +318,6 @@ describe("shouldHoldSwap", () => {
     expect(shouldHoldSwap({ ...base, midFlow: true, deferrals: Number.NaN })).toBe(false)
     expect(shouldHoldSwap({ ...base, midFlow: true, tokens: Number.NaN })).toBe(true)
     expect(shouldHoldSwap({ ...base, midFlow: true, window: 0 })).toBe(true)
-  })
-})
-
-describe("DEFAULT_DIGEST_MODEL / digestModelFor", () => {
-  // The digest is mechanical summarisation, so it reaches for the CHEAPEST tier
-  // — the exact inverse of the reviewer, which reaches for a stronger model than
-  // wrote the code. Both run on the user's own subscription.
-  it("summarises on a cheaper tier than the session writes code with", () => {
-    expect(DEFAULT_DIGEST_MODEL.claude).toBe("haiku")
-    expect(DEFAULT_DIGEST_MODEL.claude).not.toBe(defaultModel("claude"))
-  })
-
-  // Same guard the reviewer has: a digest model the harness won't accept fails
-  // at runtime, silently, in a background fiber nobody is watching.
-  it("names a digest model the harness actually offers", () => {
-    for (const cli of ["claude", "codex", "cursor", "opencode"] as const) {
-      expect(FALLBACK_MODELS[cli].map((m) => m.id)).toContain(DEFAULT_DIGEST_MODEL[cli])
-    }
-  })
-
-  it("honours the user's backgroundModel override", () => {
-    expect(digestModelFor("claude", "claude-haiku-4-5")).toBe("claude-haiku-4-5")
-  })
-
-  it("falls back when the override is empty", () => {
-    expect(digestModelFor("claude", "")).toBe("haiku")
-    expect(digestModelFor("claude", undefined)).toBe("haiku")
   })
 })
 

@@ -960,7 +960,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * digest; an immediate retry waits here rather than resuming the same
            * full thread. Sub-agents never reach this top-level path.
            */
-          yield* ContextManager.prepareUnknownCodexResume(chatId)
           const applied = yield* ContextManager.applyWhenReady(chatId)
           const digest = applied?.digest ?? null
           // The WORKING SET at the moment of the swap, straight from the manager.

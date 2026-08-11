@@ -133,6 +133,8 @@ const layersFor = (adapter: Layer.Layer<AgentTurnDriver>) =>
 const seed = (over: Partial<Session> = {}, withTranscript = true) =>
   Effect.gen(function* () {
     const now = new Date().toISOString()
+    const selectedProviderId = over.providerId ??
+      Schema.decodeUnknownSync(ProviderId)("anthropic")
     const selectedModelId = over.modelId ?? Schema.decodeUnknownSync(ProviderModelId)(
       `anthropic/${over.model ?? "claude-opus-4-1"}`
     )
@@ -144,7 +146,7 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
       status: "idle",
       cli: "claude",
       connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
-      providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+      providerId: selectedProviderId,
       modelId: selectedModelId,
       diff: { added: 0, removed: 0 },
       prNumber: null,
@@ -157,7 +159,7 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
         createdAt: now,
         updatedAt: now,
         connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
-        providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+        providerId: selectedProviderId,
         modelId: selectedModelId,
         model: over.model ?? "claude-opus-4-1",
         ...(over.contextTokens === undefined ? {} : { contextTokens: over.contextTokens }),
@@ -1006,78 +1008,6 @@ describe("ContextManager.compactNow", () => {
 
 })
 
-describe("ContextManager.prepareUnknownCodexResume", () => {
-  it("compacts a large legacy Codex resume before reusing its thread", async () => {
-    const rec = recorder()
-    const digest = await run(
-      Effect.gen(function* () {
-        yield* seed({
-          cli: "codex",
-          model: "gpt-5.6-sol",
-          resumeId: "legacy-thread",
-          contextTokens: 0
-        })
-        yield* TranscriptStore.append(SESSION, {
-          id: "m3",
-          role: "assistant",
-          parts: [{ _tag: "Text", text: "x".repeat(510_000) }],
-          streaming: false,
-          createdAt: new Date().toISOString()
-        })
-        yield* ContextManager.prepareUnknownCodexResume(SESSION)
-        return yield* ContextManager.applyWhenReady(SESSION)
-      }),
-      recordingAdapter(GOOD_REPLY, rec, "delay")
-    )
-    expect(rec.runs.count).toBe(1)
-    expect(digest).not.toBeNull()
-  })
-
-  it("does not compact a small unknown Codex resume", async () => {
-    const rec = recorder()
-    await run(
-      Effect.gen(function* () {
-        yield* seed({
-          cli: "codex",
-          model: "gpt-5.6-sol",
-          resumeId: "legacy-thread",
-          contextTokens: 0
-        })
-        yield* ContextManager.prepareUnknownCodexResume(SESSION)
-        yield* settle()
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(rec.runs.count).toBe(0)
-  })
-
-  it("respects an auto-compaction opt-out", async () => {
-    const rec = recorder()
-    await run(
-      Effect.gen(function* () {
-        yield* seed({
-          cli: "codex",
-          model: "gpt-5.6-sol",
-          resumeId: "legacy-thread",
-          contextTokens: 0
-        })
-        yield* TranscriptStore.append(SESSION, {
-          id: "m3",
-          role: "assistant",
-          parts: [{ _tag: "Text", text: "x".repeat(510_000) }],
-          streaming: false,
-          createdAt: new Date().toISOString()
-        })
-        yield* ConfigService.setContext({ auto: false, budgetTokens: 500_000 })
-        yield* ContextManager.prepareUnknownCodexResume(SESSION)
-        yield* settle()
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(rec.runs.count).toBe(0)
-  })
-})
-
 describe("ContextManager.cancel", () => {
   it("interrupts an in-flight digest so a stopped session stops summarising", async () => {
     const rec = recorder()
@@ -1146,27 +1076,6 @@ describe("ContextManager.snapshot", () => {
     expect(rec.runs.count).toBe(0)
   })
 
-  // The user's explicit Settings value is also the escape hatch for a harness
-  // whose self-report we have reason to distrust, so it still wins.
-  it("lets the user's configured window override the harness report", async () => {
-    const rec = recorder()
-    const snap = await run(
-      Effect.gen(function* () {
-        yield* seed({ model: "claude-opus-4-8" })
-        yield* ConfigService.setProvider("claude", {
-          enabled: true,
-          defaultMode: "accept-edits",
-          contextWindow: 200_000
-        })
-        yield* turnEnd(100_000, 1_000_000)
-        return yield* ContextManager.snapshot(SESSION)
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(snap.window).toBe(200_000)
-    expect(snap.triggerAt).toBe(150_000)
-  })
-
   // A freshly reopened session must show its real size before its first turn,
   // which is exactly what the persisted reading is for.
   it("falls back to the persisted reading before the first turn", async () => {
@@ -1188,8 +1097,8 @@ describe("ContextManager.snapshot", () => {
         // Exact bad value persisted by s_royal-liskov when the SDK's cumulative
         // turn usage was mistaken for context occupancy.
         yield* seed({
-          cli: "codex",
-          model: "gpt-5.6-sol",
+          providerId: Schema.decodeUnknownSync(ProviderId)("openai-codex"),
+          modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5.6-sol"),
           contextTokens: 2_979_284
         })
         const before = yield* ContextManager.snapshot(SESSION)
