@@ -88,6 +88,12 @@ export interface FakeGitHubServer {
   }>;
   readonly connect: () => void;
   readonly setInstallation: (patch: Partial<GitHubAppInstallation>) => void;
+  readonly addPr: (pr: FakeGitHubPr) => void;
+  readonly sessionRoute: (sessionId: string) => {
+    readonly relaySessionId: string;
+    readonly pullRequestNumber: number;
+    readonly state: "active" | "archived";
+  } | null;
   /** Fail exactly the next matching mutation, then recover for retry/restart tests. */
   readonly failNext: (operation: "create-pr" | "update-pr") => void;
   readonly status: () => GitHubAppConnectionStatus;
@@ -397,9 +403,16 @@ export const startFakeGitHubServer = async (
             return;
           }
           const existing = sessionRoutes.get(sessionId);
+          const identityChanged =
+            existing !== undefined &&
+            (existing.installationId !== installationId ||
+              existing.repositoryId !== repositoryId ||
+              existing.pullRequestNumber !== pullRequestNumber);
           const route = {
             sessionId,
-            relaySessionId: existing?.relaySessionId ?? `relay-${sessionId}`,
+            relaySessionId: identityChanged
+              ? `relay-${sessionId}-${pullRequestNumber}`
+              : (existing?.relaySessionId ?? `relay-${sessionId}`),
             installationId,
             repositoryId,
             pullRequestNumber,
@@ -944,6 +957,19 @@ export const startFakeGitHubServer = async (
         ...patch,
         account: patch.account ?? installation.account,
       };
+    },
+    addPr: (pr) => {
+      prs.push(pr);
+    },
+    sessionRoute: (sessionId) => {
+      const route = sessionRoutes.get(sessionId);
+      return route
+        ? {
+            relaySessionId: route.relaySessionId,
+            pullRequestNumber: route.pullRequestNumber,
+            state: route.state,
+          }
+        : null;
     },
     failNext: (operation) => {
       failures.add(operation);

@@ -1,4 +1,5 @@
 import type { GitHubRelayEvent } from "@jingler/core";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appShell, expect, openSessionByTitle, test } from "./fixtures.js";
@@ -51,10 +52,104 @@ const feedback = (
   occurredAt: "2026-08-05T09:00:00.000Z",
 });
 
+const replacementSession = (repoPath: string) => ({
+  id: "s_replacement",
+  repo: "widget",
+  branch: "main",
+  baseBranch: "main",
+  title: "Replacement review",
+  status: "idle",
+  cli: "claude",
+  diff: { added: 0, removed: 0 },
+  prNumber: 42,
+  githubInstallationId: "101",
+  githubRepositoryId: "301",
+  costUsd: 0,
+  tokens: 0,
+  updatedAt: "2026-08-11T06:00:00.000Z",
+  worktreePath: repoPath,
+  workspaceMode: "worktree",
+  semanticBranchPending: false,
+  chats: [
+    {
+      id: "c_s_replacement_1",
+      title: null,
+      createdAt: "2026-08-11T06:00:00.000Z",
+      updatedAt: "2026-08-11T06:00:00.000Z",
+    },
+  ],
+  activeChatId: "c_s_replacement_1",
+  mode: "accept-edits",
+});
+
+const persistedSessionIdentity = (home: string, id: string) => {
+  const sessions = JSON.parse(
+    readFileSync(join(home, "jingler", "sessions.json"), "utf8"),
+  ) as Array<{ id: string; branch: string; prNumber: number | null }>;
+  return sessions.find((session) => session.id === id);
+};
+
 // This is intentionally one lifecycle test: it crosses two Electron launches,
 // a forced post-acceptance failure, reconnect replay, and a busy-agent release.
 // Keep its budget local so slower machines do not weaken the suite-wide limit.
 test.setTimeout(120_000);
+
+test("moves the live relay to a replacement PR created in the same session", async ({
+  launchApp,
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: {
+      github: { enabled: true, autoCreatePr: false, autoDetectPr: true },
+    },
+    githubApp: {
+      connected: true,
+      userLogin: "octocat",
+      repositorySelection: "selected",
+    },
+    sessions: ({ repoPath }) => [replacementSession(repoPath)],
+  });
+  const { window, githubRelay, githubServer, repoPath, home } = launched;
+
+  await expect(appShell(window)).toBeVisible();
+  await expect.poll(() => githubRelay.connectedClientIds().length).toBe(1);
+  const originalRoute = githubServer.sessionRoute("s_replacement");
+  expect(originalRoute).toMatchObject({ pullRequestNumber: 42, state: "active" });
+
+  execFileSync("git", ["switch", "-c", "fix/replacement-review"], { cwd: repoPath });
+  githubServer.addPr({
+    number: 43,
+    title: "Replacement review PR",
+    headRefName: "fix/replacement-review",
+    baseRefName: "main",
+    author: { login: "octocat" },
+  });
+
+  await openSessionByTitle(window, "Replacement review");
+  await window.getByRole("button", { name: "Pull Request", exact: true }).click();
+  await expect.poll(() => persistedSessionIdentity(home, "s_replacement")).toMatchObject({
+    branch: "fix/replacement-review",
+    prNumber: 43,
+  });
+  await expect.poll(() => githubServer.sessionRoute("s_replacement")).toMatchObject({
+    pullRequestNumber: 43,
+    state: "active",
+  });
+  const replacementRoute = githubServer.sessionRoute("s_replacement");
+  if (!replacementRoute) throw new Error("Replacement relay route was not registered");
+  expect(replacementRoute?.relaySessionId).not.toBe(originalRoute?.relaySessionId);
+  await expect.poll(() => githubRelay.connectedClientIds().length).toBe(1);
+
+  const body = "Route this replacement PR review without waiting for a topology poll.";
+  githubRelay.publish(
+    replacementRoute.relaySessionId,
+    feedback("delivery-replacement", "comment-replacement", 43, body),
+  );
+  await expect(window.getByText(body, { exact: false })).toHaveCount(1, {
+    timeout: 20_000,
+  });
+});
 
 test("uses a distinct relay Durable Object connection per linked session and replays offline feedback in isolation", async ({
   launchApp,

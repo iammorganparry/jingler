@@ -15,6 +15,7 @@ import {
   CliAdapter,
   ConfigService,
   DiscoveryService,
+  GitHubAuth,
   GitHubApi,
   GitService,
   InMemorySecretStoreLive,
@@ -1221,6 +1222,12 @@ describe("RPC handlers", () => {
         base,
         SessionStore.Default,
         fakeGithubApi(),
+        Layer.succeed(GitService, {
+          branchAt: () => Effect.succeed(null),
+        } as never),
+        Layer.succeed(GitHubAuth, {
+          upsertSessionRoute: () => Effect.die("unexpected route registration"),
+        } as never),
       );
       const pr = await Effect.runPromise(
         githubPr("nope").pipe(Effect.provide(github)),
@@ -1230,6 +1237,90 @@ describe("RPC handlers", () => {
         githubDetectPr("nope").pipe(Effect.provide(github)),
       );
       expect(detected).toBeNull();
+    });
+
+    it("synchronizes the live branch and replacement PR route before returning", async () => {
+      const now = "2026-08-11T06:00:00.000Z";
+      const worktreePath = join(dir, "replacement-pr-worktree");
+      mkdirSync(root, { recursive: true });
+      mkdirSync(worktreePath, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "replacement-session",
+            repo: "widget",
+            branch: "fix/original-pr",
+            baseBranch: "main",
+            title: "Replacement PR",
+            status: "idle",
+            cli: "claude",
+            diff: { added: 0, removed: 0 },
+            prNumber: 42,
+            githubInstallationId: "99",
+            githubRepositoryId: "200",
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: now,
+            worktreePath,
+            workspaceMode: "worktree",
+            semanticBranchPending: false,
+            semanticBranchProposal: { type: "fix", slug: "original-pr" },
+            chats: [{ id: "replacement-chat", title: null, createdAt: now, updatedAt: now }],
+            activeChatId: "replacement-chat",
+          },
+        ]),
+      );
+      const upsertSessionRoute = vi.fn(() =>
+        Effect.succeed({
+          sessionId: "replacement-session",
+          relaySessionId: "relay-replacement",
+          installationId: "99",
+          repositoryId: "200",
+          pullRequestNumber: 43,
+          state: "active" as const,
+          updatedAt: now,
+        }),
+      );
+      const github = Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        fakeGithubApi({
+          prForWorktree: () => Effect.succeed(43),
+          repository: () =>
+            Effect.succeed({
+              id: "200",
+              installationId: "99",
+              fullName: "acme/widget",
+            }),
+        }),
+        Layer.succeed(GitService, {
+          branchAt: () => Effect.succeed("fix/replacement-pr"),
+        } as never),
+        Layer.succeed(GitHubAuth, { upsertSessionRoute } as never),
+      );
+
+      await expect(
+        Effect.runPromise(
+          githubDetectPr("replacement-session").pipe(Effect.provide(github)),
+        ),
+      ).resolves.toBe(43);
+      await expect(
+        Effect.runPromise(
+          SessionStore.get("replacement-session").pipe(Effect.provide(github)),
+        ),
+      ).resolves.toMatchObject({
+        branch: "fix/replacement-pr",
+        prNumber: 43,
+        githubInstallationId: "99",
+        githubRepositoryId: "200",
+      });
+      expect(upsertSessionRoute).toHaveBeenCalledWith({
+        sessionId: "replacement-session",
+        installationId: "99",
+        repositoryId: "200",
+        pullRequestNumber: 43,
+      });
     });
   });
 

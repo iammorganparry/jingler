@@ -127,6 +127,13 @@ export interface GitHubRelaySupervisorOptions {
   readonly clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
 }
 
+const activeSupervisors = new Set<GitHubRelaySupervisor>();
+
+/** Wake every live relay supervisor after persisted session-route topology changes. */
+export const refreshGitHubRelaySupervisors = async (): Promise<void> => {
+  await Promise.all([...activeSupervisors].map((supervisor) => supervisor.refresh()));
+};
+
 /** Whether a live installation still grants this immutable repository id. */
 export const installationCanRouteRepository = (
   installations: ReadonlyArray<GitHubAppInstallation>,
@@ -509,6 +516,8 @@ export class GitHubRelaySupervisor {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private generation = 0;
+  private refreshPromise: Promise<void> | null = null;
+  private refreshQueued = false;
   private readonly retryCoordinator = new GitHubRelayRetryCoordinator();
 
   constructor(private readonly options: GitHubRelaySupervisorOptions) {
@@ -519,11 +528,14 @@ export class GitHubRelaySupervisor {
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
-    await this.reconcile();
+    activeSupervisors.add(this);
+    await this.refresh();
   }
 
   stop(): void {
     this.running = false;
+    activeSupervisors.delete(this);
+    this.refreshQueued = false;
     this.generation += 1;
     if (this.timer) this.clearTimer(this.timer);
     this.timer = null;
@@ -532,6 +544,29 @@ export class GitHubRelaySupervisor {
       this.options.onStatus?.({ ...target, mode: "stopped" });
     }
     this.connections.clear();
+  }
+
+  /** Reconcile persisted route topology now, coalescing concurrent wake-ups. */
+  refresh(): Promise<void> {
+    if (!this.running) return Promise.resolve();
+    this.refreshQueued = true;
+    if (this.refreshPromise === null) {
+      const operation = this.drainRefreshes().finally(() => {
+        if (this.refreshPromise === operation) this.refreshPromise = null;
+      });
+      this.refreshPromise = operation;
+    }
+    return this.refreshPromise;
+  }
+
+  private async drainRefreshes(): Promise<void> {
+    while (this.running && this.refreshQueued) {
+      this.refreshQueued = false;
+      if (this.timer) this.clearTimer(this.timer);
+      this.timer = null;
+      // biome-ignore lint/performance/noAwaitInLoops: topology generations must reconcile in order.
+      await this.reconcile();
+    }
   }
 
   private async reconcile(): Promise<void> {
@@ -595,7 +630,7 @@ export class GitHubRelaySupervisor {
       if (this.running && generation === this.generation) {
         this.timer = this.setTimer(() => {
           this.timer = null;
-          void this.reconcile();
+          void this.refresh();
         }, this.options.refreshMs ?? 5 * 60_000);
       }
     }
