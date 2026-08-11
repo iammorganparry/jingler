@@ -1,5 +1,12 @@
 # @jingler/memory-worker
 
+## 3.0.1
+
+### Patch Changes
+
+- @jingler/core@3.0.1
+- @jingler/memory@3.0.1
+
 ## 3.0.0
 
 ### Patch Changes

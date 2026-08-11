@@ -1,5 +1,11 @@
 # @jingler/desktop
 
+## 3.0.1
+
+### Patch Changes
+
+- c2a2490: Make Cloud sessions selectable before sandbox provisioning and distinguish Cloud targets visually.
+
 ## 3.0.0
 
 ### Minor Changes
