@@ -1027,12 +1027,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           )
           const operatorText = displayText ?? text
           const promptText = text
-          const providerReasoning =
-            cli === "claude" || cli === "codex" || cli === "opencode"
-              ? session.reasoning?.[cli]
-              : undefined
-          const resolvedReasoning =
-            reasoning === undefined ? providerReasoning : reasoning
+          const resolvedReasoning = reasoning === undefined ? chat.reasoning : reasoning
           // Resolve every remote MCP source once, here, where the full service
           // context is available — adapters run in `R = never` async code and
           // cannot reach services. Best-effort: a configured connector read

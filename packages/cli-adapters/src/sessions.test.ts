@@ -29,6 +29,7 @@ import {
   isSessionPublishBranchReady,
   SessionStore,
   migrateRepoName,
+  migrateSessionChats,
   migrateUnsupportedHarness
 } from "./sessions.js"
 import {
@@ -569,7 +570,7 @@ describe("SessionStore", () => {
     if (withDefaults._tag === "Success") {
       expect(activeChat(withDefaults.value).mode).toBe("plan")
       expect(activeChat(withDefaults.value).model).toBe("opus")
-      expect(withDefaults.value.reasoning?.claude).toStrictEqual({
+      expect(activeChat(withDefaults.value).reasoning).toStrictEqual({
         enabled: false,
         effort: "high"
       })
@@ -583,7 +584,7 @@ describe("SessionStore", () => {
     if (noDefaults._tag === "Success") {
       expect(activeChat(noDefaults.value).mode).toBeUndefined()
       expect(activeChat(noDefaults.value).model).toBeUndefined()
-      expect(noDefaults.value.reasoningEffort).toBeUndefined()
+      expect(activeChat(noDefaults.value).reasoning).toBeUndefined()
     }
   })
 
@@ -686,14 +687,17 @@ describe("SessionStore", () => {
     }, "feature/direct")).toBe(false)
   })
 
-  it("keeps the native resume id while reasoning changes", async () => {
+  it("keeps the native resume id while chat reasoning changes", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Two threads" }))
         yield* SessionStore.setResumeId(created.id, "normal-thread")
-        yield* SessionStore.setReasoningEffort(created.id, "ultrathink")
+        yield* SessionStore.setReasoning(created.id, created.activeChatId, {
+          enabled: true,
+          effort: "xhigh"
+        })
         const configured = yield* SessionStore.get(created.id)
-        yield* SessionStore.setReasoningEffort(created.id, undefined)
+        yield* SessionStore.setReasoning(created.id, created.activeChatId, undefined)
         const cleared = yield* SessionStore.get(created.id)
         return { configured, cleared }
       }).pipe(Effect.provide(services)),
@@ -702,12 +706,12 @@ describe("SessionStore", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     expect(activeChat(exit.value.configured).resumeId).toBe("normal-thread")
-    expect(exit.value.configured.reasoning?.claude).toStrictEqual({
+    expect(activeChat(exit.value.configured).reasoning).toStrictEqual({
       enabled: true,
       effort: "xhigh"
     })
     expect(activeChat(exit.value.cleared).resumeId).toBe("normal-thread")
-    expect(exit.value.cleared.reasoning?.claude).toBeUndefined()
+    expect(activeChat(exit.value.cleared).reasoning).toBeUndefined()
   })
 
   it("persists pi continuation identity on the owning chat", async () => {
@@ -1136,6 +1140,10 @@ describe("SessionStore", () => {
           }))
           yield* SessionStore.setResumeId(created.id, created.activeChatId, "native-thread")
           yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+          yield* SessionStore.setReasoning(created.id, created.activeChatId, {
+            enabled: true,
+            effort: "max"
+          })
           yield* SessionStore.setProviderModel(
             created.id,
             created.activeChatId,
@@ -1166,6 +1174,7 @@ describe("SessionStore", () => {
       })
       expect(activeChat(exit.value).piSessionId).toBeUndefined()
       expect(activeChat(exit.value).resumeId).toBeUndefined()
+      expect(activeChat(exit.value).reasoning).toBeUndefined()
     })
 
     it("keeps an existing pi session when the exact selection is re-applied", async () => {
@@ -2069,6 +2078,34 @@ describe("migrateRepoName", () => {
 })
 
 describe("legacy harness migration", () => {
+  it("moves legacy provider reasoning onto matching active and closed chats", () => {
+    const migrated = migrateSessionChats({
+      id: "s_reasoning",
+      cli: "claude",
+      providerId: "anthropic",
+      updatedAt: "2026-08-11T00:00:00.000Z",
+      reasoning: {
+        claude: { enabled: true, effort: "max" },
+        codex: { enabled: true, effort: "high" }
+      },
+      chats: [
+        { id: "c_claude", providerId: "anthropic" },
+        { id: "c_codex", providerId: "openai-codex" }
+      ],
+      closedChats: [{ id: "c_closed", providerId: "openai" }],
+      activeChatId: "c_claude"
+    }) as Record<string, unknown>
+
+    expect(migrated).not.toHaveProperty("reasoning")
+    expect(migrated.chats).toEqual([
+      expect.objectContaining({ reasoning: { enabled: true, effort: "max" } }),
+      expect.objectContaining({ reasoning: { enabled: true, effort: "high" } })
+    ])
+    expect(migrated.closedChats).toEqual([
+      expect.objectContaining({ reasoning: { enabled: true, effort: "high" } })
+    ])
+  })
+
   it("migrates an unsupported legacy harness without changing transcript or workspace identity", () => {
     const legacy = {
       id: "s_legacy",

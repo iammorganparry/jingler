@@ -2925,10 +2925,10 @@ export const createTerminal = (input: {
  */
 export const setReasoning = (
   sessionId: string,
-  cli: "claude" | "codex",
+  chatId: string,
   reasoning: Parameters<typeof SessionStore.setReasoning>[2],
 ) =>
-  SessionStore.setReasoning(sessionId, cli, reasoning).pipe(
+  SessionStore.setReasoning(sessionId, chatId, reasoning).pipe(
     Effect.tapError((error) =>
       Effect.logWarning(
         `Failed to persist reasoning strength for session ${sessionId}: ${error.message}`,
@@ -4245,8 +4245,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     Effect.flatMap(AgentRunner, (runner) =>
       runner.setMode(sessionId, chatId, mode),
     ),
-  "Agent.setReasoning": ({ sessionId, cli, reasoning }) =>
-    setReasoning(sessionId, cli, reasoning),
+  "Agent.setReasoning": ({ sessionId, chatId, reasoning }) =>
+    setReasoning(sessionId, chatId, reasoning),
   "Agent.commentPlanStep": ({ sessionId, planId, stepId, body, anchor }) =>
     Effect.flatMap(AgentRunner, (runner) =>
       runner.commentPlanStep(sessionId, planId, stepId, body, anchor),

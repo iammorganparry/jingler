@@ -171,7 +171,7 @@ export const ProviderConnectionsLive = Layer.effect(
       certifications,
       discover: (connection, signal) =>
         e2eFixture !== null
-          ? Effect.succeed([e2eDiscoveredModel(connection.providerId)])
+          ? Effect.succeed([e2eDiscoveredModel(e2eFixture, connection.providerId)])
           : discoverPiModels(credentials, connection, signal),
       targetAvailable: (connection) => connection.targetId === "desktop"
     })

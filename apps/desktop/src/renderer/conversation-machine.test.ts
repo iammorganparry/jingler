@@ -150,8 +150,8 @@ vi.mock("./rpc-client.js", () => ({
     agentDecideGate: async () => {},
     agentAnswerQuestion: async () => {},
     agentSetMode: async () => {},
-    agentSetReasoning: async (_sessionId: string, _cli: string, reasoning: unknown) => {
-      h.reasoningCalls.push(reasoning)
+    agentSetReasoning: async (sessionId: string, chatId: string, reasoning: unknown) => {
+      h.reasoningCalls.push({ sessionId, chatId, reasoning })
     },
     agentSetModel: async (
       sessionId: string,
@@ -1307,10 +1307,16 @@ describe("conversationMachine — image attachments", () => {
     it("updates canonical identity and clears incompatible continuation state", async () => {
       const actor = start()
       await waitFor(actor, (snapshot) => snapshot.matches(idle))
+      actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "max" } })
 
       actor.send({ type: "SET_MODEL", connectionId, providerId, modelId })
 
-      expect(actor.getSnapshot().context).toMatchObject({ connectionId, providerId, modelId })
+      expect(actor.getSnapshot().context).toMatchObject({
+        connectionId,
+        providerId,
+        modelId,
+        reasoning: undefined
+      })
       expect(actor.getSnapshot().context.session).toMatchObject({
         connectionId,
         providerId,
@@ -1969,6 +1975,29 @@ describe("conversationMachine — PlanUpdated across turns", () => {
 })
 
 describe("conversationMachine — persisted session reconciliation", () => {
+  it("persists reasoning against the active chat without a provider-specific route", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    actor.send({
+      type: "SET_REASONING",
+      reasoning: { enabled: true, effort: "max" }
+    })
+
+    await vi.waitFor(() => {
+      expect(h.reasoningCalls).toEqual([{
+        sessionId: session.id,
+        chatId: session.id,
+        reasoning: { enabled: true, effort: "max" }
+      }])
+    })
+    expect(actor.getSnapshot().context.session.chats[0]?.reasoning).toEqual({
+      enabled: true,
+      effort: "max"
+    })
+    actor.stop()
+  })
+
   it("keeps transient plan mode when a provider-model update echoes the persisted exec mode", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
@@ -2016,17 +2045,16 @@ describe("conversationMachine — persisted session reconciliation", () => {
       activeChatId: session.id,
       chats: [{
         id: session.id,
-        title: "Chat 1",
+        title: null,
         createdAt: "2026-07-25T00:00:00.000Z",
         updatedAt: "2026-07-25T00:00:00.000Z",
         mode: "auto",
         model: "gpt-5.6-sol",
         connectionId,
         providerId,
-        modelId
-      }],
-      // Canonical provider identity wins even when legacy cli provenance disagrees.
-      reasoning: { claude: { enabled: false, effort: "high" } }
+        modelId,
+        reasoning: { enabled: false, effort: "high" }
+      }]
     } as Session
 
     actor.send({ type: "SESSION_UPDATED", session: updated })

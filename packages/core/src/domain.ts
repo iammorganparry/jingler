@@ -250,29 +250,6 @@ export const ReasoningSetting = Schema.Struct({
 })
 export type ReasoningSetting = Schema.Schema.Type<typeof ReasoningSetting>
 
-export const ClaudeReasoningSetting = Schema.Struct({
-  enabled: Schema.Boolean,
-  effort: Schema.optional(ClaudeReasoningEffort)
-})
-export type ClaudeReasoningSetting = Schema.Schema.Type<
-  typeof ClaudeReasoningSetting
->
-
-export const CodexReasoningSetting = Schema.Struct({
-  enabled: Schema.Boolean,
-  effort: Schema.optional(CodexReasoningEffort)
-})
-export type CodexReasoningSetting = Schema.Schema.Type<
-  typeof CodexReasoningSetting
->
-
-export const SessionReasoning = Schema.Struct({
-  claude: Schema.optional(ReasoningSetting),
-  codex: Schema.optional(ReasoningSetting),
-  opencode: Schema.optional(ReasoningSetting)
-})
-export type SessionReasoning = Schema.Schema.Type<typeof SessionReasoning>
-
 /** Concrete harness permission modes that can execute an approved plan. */
 export const ExecutionMode = Schema.Literal("ask", "accept-edits", "auto")
 export type ExecutionMode = Schema.Schema.Type<typeof ExecutionMode>
@@ -385,6 +362,7 @@ export const Chat = Schema.Struct({
   resumeId: Schema.optional(Schema.String),
   /** Permission and model choices are restored independently for each chat. */
   mode: Schema.optional(PermissionMode),
+  reasoning: Schema.optional(ReasoningSetting),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
   contextTokens: Schema.optional(Schema.Number),
@@ -625,8 +603,6 @@ export const Session = Schema.Struct({
   repoPath: Schema.optional(Schema.String),
   /** The branch this session's worktree was forked from. */
   baseBranch: Schema.optional(Schema.String),
-  /** Per-provider reasoning choices, retained when the session changes harness. */
-  reasoning: Schema.optional(SessionReasoning),
   /**
    * Legacy single-chat aliases accepted during the rolling migration.
    * New code reads/writes the active `Chat`; `SessionStore` strips these on read.
@@ -635,12 +611,6 @@ export const Session = Schema.Struct({
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
-  reasoningEffort: Schema.optional(
-    Schema.Union(
-      ReasoningEffort,
-      Schema.Literal("off", "think", "think-hard", "ultrathink")
-    )
-  ),
   /**
    * Per-session auto-compaction override. Absent = follow the global setting.
    *

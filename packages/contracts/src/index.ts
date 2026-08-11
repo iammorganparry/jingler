@@ -79,8 +79,6 @@ import {
   PublishCheckpoint,
   PullRequest,
   QuestionAnswer,
-  ClaudeReasoningSetting,
-  CodexReasoningSetting,
   ReasoningEffort,
   ReasoningSetting,
   Repo,
@@ -1054,20 +1052,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
-  /** Change the current provider's native thinking settings. */
+  /** Change one chat's provider-neutral thinking settings. */
   Rpc.make("Agent.setReasoning", {
-    payload: Schema.Union(
-      Schema.Struct({
-        sessionId: Schema.String,
-        cli: Schema.Literal("claude"),
-        reasoning: Schema.optional(ClaudeReasoningSetting)
-      }),
-      Schema.Struct({
-        sessionId: Schema.String,
-        cli: Schema.Literal("codex"),
-        reasoning: Schema.optional(CodexReasoningSetting)
-      })
-    )
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      reasoning: Schema.optional(ReasoningSetting)
+    }
   }),
 
   /**

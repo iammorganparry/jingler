@@ -71,16 +71,6 @@ import { publishSessionUpdate } from "./session-updates.js"
 const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
 
-/** Temporary persistence adapter until the decoder-only Session.reasoning map is removed. */
-const legacyReasoningRoute = (
-  providerId: ProviderId | null
-): "claude" | "codex" | null =>
-  providerId === "anthropic"
-    ? "claude"
-    : providerId === "openai" || providerId === "openai-codex"
-      ? "codex"
-      : null
-
 /** Optimistic mirror of SessionStore.setProviderModel while its RPC persists. */
 const withProviderModel = (
   session: Session,
@@ -112,7 +102,9 @@ const withProviderModel = (
             modelId,
             connectionSelectionRequired: false,
             modelSelectionRequired: false,
-            ...(changed ? { piSessionId: undefined, resumeId: undefined } : {})
+            ...(changed
+              ? { piSessionId: undefined, resumeId: undefined, reasoning: undefined }
+              : {})
           }
     )
   }
@@ -1501,20 +1493,17 @@ export const conversationMachine = setup({
     }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}
-      const key = legacyReasoningRoute(context.providerId)
-      if (key !== null) void rpc.agentSetReasoning(context.session.id, key, event.reasoning)
+      void rpc.agentSetReasoning(context.session.id, context.chatId, event.reasoning)
       return {
         reasoning: event.reasoning,
-        session:
-          key === null
-            ? context.session
-            : {
-                ...context.session,
-                reasoning: {
-                  ...context.session.reasoning,
-                  [key]: event.reasoning
-                }
-              }
+        session: {
+          ...context.session,
+          chats: context.session.chats.map((chat) =>
+            chat.id === context.chatId
+              ? { ...chat, reasoning: event.reasoning }
+              : chat
+          )
+        }
       }
     }),
     reconcileSession: assign(({ context, event }) => {
@@ -1522,10 +1511,6 @@ export const conversationMachine = setup({
       const chat = event.session.chats.find((candidate) => candidate.id === context.chatId)
       if (chat === undefined) return { session: event.session }
       const providerId = chat.providerId ?? event.session.providerId ?? null
-      const reasoningKey = legacyReasoningRoute(providerId)
-      const reasoning = reasoningKey === null
-        ? undefined
-        : event.session.reasoning?.[reasoningKey]
       const persistedMode = chat.mode ?? event.session.mode ?? "accept-edits"
       // Plan/Gigaplan are TRANSIENT client overlays the backend never persists
       // (see `agent-runner.setMode`: plan is held in memory, only the exec mode
@@ -1542,7 +1527,7 @@ export const conversationMachine = setup({
         modelId: chat.modelId ?? event.session.modelId ?? null,
         mode,
         executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
-        reasoning,
+        reasoning: chat.reasoning,
         tokens: chat.contextTokens ?? context.tokens,
         persistedStatus: event.session.status
       }
@@ -1685,6 +1670,7 @@ export const conversationMachine = setup({
         connectionId: event.connectionId,
         providerId: event.providerId,
         modelId: event.modelId,
+        reasoning: session.chats.find((chat) => chat.id === context.chatId)?.reasoning,
         session
       }
     }),
@@ -1849,10 +1835,6 @@ export const conversationMachine = setup({
         contextTokens: input.session.contextTokens
       }
     const providerId = chat.providerId ?? input.session.providerId ?? null
-    const reasoningKey = legacyReasoningRoute(providerId)
-    const reasoning = reasoningKey === null
-      ? undefined
-      : input.session.reasoning?.[reasoningKey]
     return {
       session: input.session,
       chatId: chat.id,
@@ -1875,7 +1857,7 @@ export const conversationMachine = setup({
       pendingImages: [],
       pendingExternalInstruction: null,
       pendingExternalAcceptances: [],
-      reasoning,
+      reasoning: chat.reasoning,
       queued: [],
       steeringId: null,
       subagents: [],

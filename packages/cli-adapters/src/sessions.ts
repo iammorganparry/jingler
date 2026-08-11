@@ -14,8 +14,6 @@ import type {
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
-  ReasoningEffort,
-  ReasoningSetting,
   Session,
   SettledSessionStatus,
   WorkspaceMode
@@ -25,6 +23,7 @@ import {
   GitError,
   defaultModel,
   issueReferenceOf,
+  ReasoningSetting,
   semanticBranchProposalFromName,
   SessionNotFoundError,
   supportsPlanMode,
@@ -75,6 +74,7 @@ const initialChat = (
     readonly connectionId?: ProviderConnectionId
     readonly providerId?: ProviderId
     readonly modelId?: ProviderModelId
+    readonly reasoning?: ReasoningSetting
   } = {}
 ): Chat => ({
   id: chatIdFor(sessionId, "1"),
@@ -145,6 +145,28 @@ const migrateReasoning = (value: unknown): ReasoningSetting | undefined => {
 const reasoningKey = (cli: unknown): "claude" | "codex" | "opencode" | null =>
   cli === "claude" || cli === "codex" || cli === "opencode" ? cli : null
 
+const reasoningKeyForProvider = (providerId: unknown) =>
+  providerId === "anthropic"
+    ? "claude" as const
+    : providerId === "openai" || providerId === "openai-codex"
+      ? "codex" as const
+      : null
+
+const legacyReasoningFor = (
+  session: JsonRecord,
+  chat: JsonRecord
+): ReasoningSetting | undefined => {
+  const stored = isRecord(session.reasoning) ? session.reasoning : {}
+  const key =
+    reasoningKeyForProvider(chat.providerId) ??
+    reasoningKeyForProvider(session.providerId) ??
+    reasoningKey(session.cli)
+  const candidate = key === null ? undefined : stored[key]
+  const decoded = Schema.decodeUnknownEither(ReasoningSetting)(candidate)
+  if (Either.isRight(decoded)) return decoded.right
+  return migrateReasoning(session.reasoningEffort)
+}
+
 /**
  * Upgrade the old one-session/one-transcript shape before schema decoding.
  * The transformation is deterministic, so a legacy file can be read repeatedly
@@ -153,18 +175,23 @@ const reasoningKey = (cli: unknown): "claude" | "codex" | "opencode" | null =>
 export const migrateSessionChats = (value: unknown): unknown => {
   if (!isRecord(value) || typeof value.id !== "string") return value
   const now = typeof value.updatedAt === "string" ? value.updatedAt : new Date(0).toISOString()
+  const migrateChat = (chat: unknown): unknown => {
+    if (!isRecord(chat)) return chat
+    const reasoning = legacyReasoningFor(value, chat)
+    return {
+      ...chat,
+      ...(persistedMode(chat.mode) === undefined ? {} : { mode: persistedMode(chat.mode) }),
+      ...(chat.reasoning !== undefined || reasoning === undefined ? {} : { reasoning })
+    }
+  }
   const rawChats =
     Array.isArray(value.chats) && value.chats.length > 0
       ? value.chats
       : [initialChat(value.id, now, value)]
-  const chats = rawChats.map((chat) =>
-    isRecord(chat)
-      ? {
-          ...chat,
-          ...(persistedMode(chat.mode) === undefined ? {} : { mode: persistedMode(chat.mode) })
-        }
-      : chat
-  )
+  const chats = rawChats.map(migrateChat)
+  const closedChats = Array.isArray(value.closedChats)
+    ? value.closedChats.map(migrateChat)
+    : value.closedChats
   const chatIds = new Set(
     chats.flatMap((chat) =>
       isRecord(chat) && typeof chat.id === "string" ? [chat.id] : []
@@ -174,27 +201,20 @@ export const migrateSessionChats = (value: unknown): unknown => {
     typeof value.activeChatId === "string" && chatIds.has(value.activeChatId)
       ? value.activeChatId
       : (chatIds.values().next().value ?? chatIdFor(value.id, "1"))
-  const key = reasoningKey(value.cli)
-  const migratedReasoning = migrateReasoning(value.reasoningEffort)
-  const reasoning =
-    isRecord(value.reasoning)
-      ? value.reasoning
-      : key !== null && migratedReasoning !== undefined
-        ? { [key]: migratedReasoning }
-        : undefined
   const {
     resumeId: _resumeId,
     mode: _mode,
     allowlist: _allowlist,
     model: _model,
+    reasoning: _reasoning,
     reasoningEffort: _reasoningEffort,
     ...session
   } = value
   return {
     ...session,
     chats,
-    activeChatId,
-    ...(reasoning === undefined ? {} : { reasoning })
+    ...(closedChats === undefined ? {} : { closedChats }),
+    activeChatId
   }
 }
 
@@ -242,14 +262,10 @@ export const migrateUnsupportedHarness = (value: unknown): unknown => {
           : chat
       )
     : value.chats
-  const reasoning = isRecord(value.reasoning) && value.reasoning.codex !== undefined
-    ? { codex: value.reasoning.codex }
-    : undefined
   return {
     ...value,
     cli: "codex",
-    ...(chats === undefined ? {} : { chats }),
-    ...(reasoning === undefined ? {} : { reasoning })
+    ...(chats === undefined ? {} : { chats })
   }
 }
 
@@ -594,8 +610,12 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const chat = initialChat(id, now, {
             mode: options.defaultMode,
             model: options.defaultModel
-          }, selection)
-          const providerKey = reasoningKey(cli)
+          }, {
+            ...selection,
+            ...(options.defaultReasoning === undefined
+              ? {}
+              : { reasoning: options.defaultReasoning })
+          })
           const makeSession = (
             workspace: { path: string; branch: string; repoPath: string },
             workspaceMode: WorkspaceMode
@@ -626,14 +646,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: workspace.path,
             workspaceMode,
             repoPath: workspace.repoPath,
-            baseBranch: input.baseBranch,
-            ...(providerKey !== null && options.defaultReasoning
-              ? {
-                  reasoning: {
-                    [providerKey]: options.defaultReasoning
-                  }
-                }
-              : {})
+            baseBranch: input.baseBranch
           })
 
           if (input.useWorktree === false) {
@@ -822,8 +835,12 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const chat = initialChat(id, now, {
             mode: opts.defaultMode,
             model: opts.defaultModel
-          }, selection)
-          const providerKey = reasoningKey(cli)
+          }, {
+            ...selection,
+            ...(opts.defaultReasoning === undefined
+              ? {}
+              : { reasoning: opts.defaultReasoning })
+          })
           const session: Session = {
             id,
             ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
@@ -849,14 +866,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             workspaceMode: "worktree",
             repoPath: worktree.repoPath,
-            baseBranch: input.pr.baseRefName,
-            ...(providerKey !== null && opts.defaultReasoning
-              ? {
-                  reasoning: {
-                    [providerKey]: opts.defaultReasoning
-                  }
-                }
-              : {})
+            baseBranch: input.pr.baseRefName
           }
           const existing = yield* readAll()
           // Re-read INSIDE the lock rather than reusing the list read before
@@ -941,8 +951,12 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const chat = initialChat(id, now, {
             mode: options.defaultMode,
             model: options.defaultModel
-          }, selection)
-          const providerKey = reasoningKey(cli)
+          }, {
+            ...selection,
+            ...(options.defaultReasoning === undefined
+              ? {}
+              : { reasoning: options.defaultReasoning })
+          })
           const session: Session = {
             // Stamp the id (like `createFromPr`) so a delete-then-recreate of the
             // same issue can't collide with the old session's persisted data; the
@@ -981,14 +995,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             workspaceMode: "worktree",
             repoPath: worktree.repoPath,
-            baseBranch: input.baseBranch,
-            ...(providerKey !== null && options.defaultReasoning
-              ? {
-                  reasoning: {
-                    [providerKey]: options.defaultReasoning
-                  }
-                }
-              : {})
+            baseBranch: input.baseBranch
           }
           // Re-read INSIDE the lock rather than reusing the list read before
           // the worktree fork: that read is now seconds stale, and appending to
@@ -1039,6 +1046,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               createdAt: now,
               updatedAt: now,
               ...(source?.mode === undefined ? {} : { mode: source.mode }),
+              ...(source?.reasoning === undefined ? {} : { reasoning: source.reasoning }),
               ...(source?.model === undefined ? {} : { model: source.model }),
               ...(source?.connectionId === undefined ? {} : { connectionId: source.connectionId }),
               ...(source?.providerId === undefined ? {} : { providerId: source.providerId }),
@@ -1093,7 +1101,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               createdAt: now,
               updatedAt: now,
               ...(closed?.mode === undefined ? {} : { mode: closed.mode }),
+              ...(closed?.reasoning === undefined ? {} : { reasoning: closed.reasoning }),
               ...(closed?.model === undefined ? {} : { model: closed.model }),
+              ...(closed?.connectionId === undefined ? {} : { connectionId: closed.connectionId }),
+              ...(closed?.providerId === undefined ? {} : { providerId: closed.providerId }),
+              ...(closed?.modelId === undefined ? {} : { modelId: closed.modelId }),
               ...(closed?.allowlist === undefined ? {} : { allowlist: closed.allowlist })
             }
             const chats = remaining.length > 0 ? remaining : [replacement]
@@ -1199,7 +1211,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                     modelId,
                     connectionSelectionRequired: false,
                     modelSelectionRequired: false,
-                    ...(changed ? { piSessionId: undefined, resumeId: undefined } : {})
+                    ...(changed
+                      ? { piSessionId: undefined, resumeId: undefined, reasoning: undefined }
+                      : {})
                   }
             )
           }
@@ -1226,47 +1240,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
         })
 
-      /** Persist a provider-native session reasoning choice. */
+      /** Persist one chat's provider-neutral reasoning choice. */
       const setReasoning = (
         id: string,
-        cli: "claude" | "codex" | "opencode",
+        chatId: string,
         reasoning: ReasoningSetting | undefined
       ) =>
-        update(id, (session) => ({
-          ...session,
-          reasoning: {
-            ...session.reasoning,
-            [cli]: reasoning
-          }
-        }))
-
-      /** Temporary compatibility shim for callers being migrated to `setReasoning`. */
-      const setReasoningEffort = (
-        id: string,
-        reasoningEffort:
-          | ReasoningEffort
-          | "off"
-          | "think"
-          | "think-hard"
-          | "ultrathink"
-          | undefined
-      ) =>
-        update(id, (session) => {
-          const key = reasoningKey(session.cli)
-          const migrated = migrateReasoning(reasoningEffort)
-          return {
-            ...session,
-            reasoningEffort,
-            ...(key === null
-              ? {}
-              : {
-                  reasoning: {
-                    ...session.reasoning,
-                    [key]: migrated
-                  }
-                })
-          }
-        })
+        updateChat(id, chatId, (chat) => ({ ...chat, reasoning }))
 
       /**
        * Accrue what a finished turn reported, ADDING to the session's running
@@ -1847,7 +1827,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setRuntimeRecovery,
         resolveRuntimeRecovery,
         setReasoning,
-        setReasoningEffort,
         addUsage,
         setHarness,
         setResumeId,

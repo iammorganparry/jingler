@@ -227,6 +227,7 @@ export interface LaunchOptions {
   readonly piFixture?: {
     readonly scenarioId: string
     readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"
+    readonly reasoning?: ReadonlyArray<"minimal" | "low" | "medium" | "high" | "xhigh" | "max">
     readonly seedConnection?: boolean
   }
   /**

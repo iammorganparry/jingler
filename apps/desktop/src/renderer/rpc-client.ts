@@ -784,45 +784,14 @@ export const rpc = {
   ): Promise<void> => run((c) => c.Agent.setMode({ sessionId, chatId, mode })),
   agentSetReasoning: (
     sessionId: string,
-    cli: "claude" | "codex",
+    chatId: string,
     reasoning: ReasoningSetting | undefined
   ): Promise<void> =>
-    run((c) => {
-      if (cli === "claude") {
-        const effort = reasoning?.effort
-        const compatible =
-          reasoning === undefined
-            ? undefined
-            : {
-                enabled: reasoning.enabled,
-                ...(effort === undefined
-                  ? {}
-                  : {
-                      effort: effort === "minimal" ? ("low" as const) : effort
-                    })
-              }
-        return c.Agent.setReasoning({
-          sessionId,
-          cli,
-          ...(compatible === undefined ? {} : { reasoning: compatible })
-        })
-      }
-      const effort = reasoning?.effort
-      const compatible =
-        reasoning === undefined
-          ? undefined
-          : {
-              enabled: reasoning.enabled,
-              ...(effort === undefined
-                ? {}
-                : { effort: effort === "max" ? ("xhigh" as const) : effort })
-            }
-      return c.Agent.setReasoning({
-        sessionId,
-        cli,
-        ...(compatible === undefined ? {} : { reasoning: compatible })
-      })
-    }),
+    run((c) => c.Agent.setReasoning({
+      sessionId,
+      chatId,
+      ...(reasoning === undefined ? {} : { reasoning })
+    })),
   agentCommentPlanStep: (
     sessionId: string,
     planId: string,

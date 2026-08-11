@@ -12,6 +12,7 @@ import {
   ProviderConnection,
   ProviderId,
   ProviderModelId,
+  ReasoningEffort,
   type ModelCertification
 } from "@jingler/core"
 import { Schema } from "effect"
@@ -20,6 +21,7 @@ import type { DiscoveredProviderModel } from "@jingler/cli-adapters"
 const E2ePiFixture = Schema.Struct({
   scenarioId: Schema.String,
   authRoute: AuthKind,
+  reasoning: Schema.optional(Schema.Array(ReasoningEffort)),
   seedConnection: Schema.optionalWith(Schema.Boolean, { default: () => true })
 })
 
@@ -57,12 +59,17 @@ export const e2eProviderConnection = (fixture: E2ePiFixture) =>
   })
 
 export const e2eDiscoveredModel = (
+  fixture: E2ePiFixture,
   providerId: ProviderId = PROVIDER_ID
 ): DiscoveredProviderModel => ({
   providerId,
   id: Schema.decodeUnknownSync(ProviderModelId)(`${providerId}/eval-model`),
   label: "Deterministic pi model",
-  capabilities: { contextWindow: 32_000, reasoning: [], vision: false }
+  capabilities: {
+    contextWindow: 32_000,
+    reasoning: fixture.reasoning ?? [],
+    vision: false
+  }
 })
 
 export const e2eCertification = (

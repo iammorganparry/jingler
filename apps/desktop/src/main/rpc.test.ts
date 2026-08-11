@@ -609,7 +609,7 @@ describe("RPC handlers", () => {
       });
 
       await Effect.runPromise(
-        setReasoning("session-1", "claude", {
+        setReasoning("session-1", "chat-1", {
           enabled: true,
           effort: "high",
         }).pipe(
