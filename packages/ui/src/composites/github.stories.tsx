@@ -2,7 +2,6 @@ import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type {
   AdversarialReview,
-  CliInfo,
   PrFileChange,
   PullRequest as PullRequestData,
   PrReviewThread,
@@ -558,7 +557,6 @@ export const Settings: Story = {
     <div className="flex h-screen bg-editor">
       <SettingsView
         initialSection="github"
-        clis={[] as ReadonlyArray<CliInfo>}
         githubConnection={{
           mode: "partial-access",
           enabled: true,
@@ -575,7 +573,6 @@ export const Settings: Story = {
           lastRefreshedAt: "2026-08-04T09:00:00.000Z",
           error: null
         }}
-        onSaveProvider={() => {}}
         onGithubManage={() => {}}
         onGithubRefresh={() => {}}
         onGithubDisconnect={() => {}}

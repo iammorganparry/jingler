@@ -8,7 +8,6 @@ import {
 import type {
   ContextConfig,
   ContextSnapshot,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
@@ -172,7 +171,6 @@ export interface JinglerAppProps {
   contextSessions?: ReadonlyArray<{
     id: string
     title: string
-    cli: CliKind
     snapshot: ContextSnapshot
   }>
   /** Persisted git preferences (for the settings modal's Git section). */

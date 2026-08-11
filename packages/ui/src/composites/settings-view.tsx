@@ -1,14 +1,10 @@
 import * as React from "react"
 import type {
-  CliInfo,
-  CliKind,
   GitHubConnection,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
   PlanTemplateConfig,
-  ProviderConfig,
-  ProvidersConfig,
   ContextConfig,
   ContextSnapshot,
   Environment
@@ -17,11 +13,7 @@ import {
   BUDGET_RANGE,
   DEFAULT_CONTEXT_CONFIG,
   NOTIFICATIONS_DEFAULT,
-  clampFontScale,
-  contextWindowFor,
-  defaultModel,
-  digestModelFor,
-  triggerAt
+  clampFontScale
 } from "@jingler/core"
 import { ContextMeter } from "./context-meter.js"
 import {
@@ -159,8 +151,6 @@ const NAV: ReadonlyArray<NavItem> = [
 ]
 
 export interface SettingsViewProps {
-  /** Legacy decoder fixtures may still supply discovered CLIs in stories. */
-  clis?: ReadonlyArray<CliInfo>
   /** Canonical provider connections. When present, legacy CLI cards stay hidden. */
   providerConnections?: ProviderConnectionsSettingsProps
   /** Operator-controlled skills, prompts, and MCP resources. */
@@ -189,10 +179,7 @@ export interface SettingsViewProps {
     onRename: (id: string, name: string) => void | Promise<void>
     onRevoke: (id: string) => void | Promise<void>
   }
-  /** Legacy context-preview input; removed with the remaining CLI context path. */
-  providers?: ProvidersConfig | null
-  onSaveProvider?: (cli: CliKind, config: ProviderConfig) => Promise<void> | void
-  /** Custom PRD structure injected into every native planning harness. */
+  /** Custom PRD structure injected into planning runs. */
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
   /** Unified MCP (OpenConnector) connection settings (from `useOpenConnector`). */
@@ -214,7 +201,6 @@ export interface SettingsViewProps {
   contextSessions?: ReadonlyArray<{
     id: string
     title: string
-    cli: CliKind
     snapshot: ContextSnapshot
   }>
   // Shared GitHub App connection (separate from BetterAuth social sign-in).
@@ -253,15 +239,12 @@ export interface SettingsViewProps {
  * fills the main pane (the sidebar stays), replacing the old modal.
  */
 export function SettingsView({
-  clis,
   providerConnections,
   agents,
   runtimeInspector,
   themes,
   plugins,
   devices,
-  providers,
-  onSaveProvider,
   planTemplate,
   onSavePlanTemplate,
   unifiedMcp,
@@ -401,12 +384,9 @@ export function SettingsView({
         )
       ) : section === "context" ? (
         <ContextSection
-          clis={clis ?? []}
           context={context}
-          providers={providers ?? undefined}
           sessions={contextSessions}
           onSaveContext={onSaveContext}
-          onSaveProvider={onSaveProvider}
         />
       ) : section === "plan" ? (
         <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
@@ -681,24 +661,17 @@ const fmtK = (n: number): string =>
  * subscription. Showing them apart would make each look arbitrary.
  */
 function ContextSection({
-  clis,
   context,
-  providers,
   sessions,
-  onSaveContext,
-  onSaveProvider
+  onSaveContext
 }: {
-  clis: ReadonlyArray<CliInfo>
   context?: ContextConfig | null
-  providers?: ProvidersConfig
   sessions?: ReadonlyArray<{
     id: string
     title: string
-    cli: CliKind
     snapshot: ContextSnapshot
   }>
   onSaveContext?: (config: ContextConfig) => void
-  onSaveProvider?: (cli: CliKind, config: ProviderConfig) => void
 }) {
   const [draft, setDraft] = React.useState<ContextConfig>(
     context ?? DEFAULT_CONTEXT_CONFIG
@@ -709,9 +682,6 @@ function ContextSection({
     setDraft(next)
     onSaveContext?.(next)
   }
-
-  const measurable = clis.filter((c) => c.available && c.contextReporting)
-  const unmeasurable = clis.filter((c) => c.available && !c.contextReporting)
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor">
@@ -733,7 +703,7 @@ function ContextSection({
         <div className="divide-y divide-hairline">
           <ToggleRow
             label="Compact sessions automatically"
-            description="Summarise and reseed in the background when a session outgrows its budget. Off returns Jingler to relying on each harness's own limit."
+            description="Summarise and reseed in the background when a session outgrows its budget. Off leaves the selected provider model to enforce its own limit."
             checked={draft.auto}
             onChange={(auto) => save({ ...draft, auto })}
           />
@@ -773,46 +743,6 @@ function ContextSection({
           </div>
         </div>
 
-        {/* ── What that means per harness ── */}
-        <div className="rounded-lg border border-line bg-sunken p-3">
-          <Eyebrow>Compacts at</Eyebrow>
-          <p className="mb-2 mt-1 text-[11px] leading-[1.5] text-muted-foreground">
-            These figures apply to each harness&apos;s default model. A model
-            whose window is smaller than the budget compacts earlier, so it
-            never reaches its own hard limit.
-          </p>
-          <div className="space-y-1">
-            {measurable.map((cli) => (
-              <div key={cli.kind} className="flex items-center justify-between">
-                <span className="text-[12px] text-text-body">{cli.label}</span>
-                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                  {(() => {
-                    const model =
-                      providers?.[cli.kind]?.defaultModel ||
-                      defaultModel(cli.kind)
-                    const w = contextWindowFor(
-                      cli.kind,
-                      model,
-                      providers?.[cli.kind]?.contextWindow
-                    )
-                    return w === null
-                      ? "set a window below"
-                      : `${fmtK(triggerAt(w, draft.budgetTokens))} of ${fmtK(w)}`
-                  })()}
-                </span>
-              </div>
-            ))}
-            {unmeasurable.map((cli) => (
-              <div key={cli.kind} className="flex items-center justify-between">
-                <span className="text-[12px] text-text-body">{cli.label}</span>
-                <span className="font-mono text-[11px] text-dim">
-                  reports no usage
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
         {/* ── Live sessions ── */}
         {sessions !== undefined && sessions.length > 0 && (
           <div className="rounded-lg border border-line bg-sunken p-3">
@@ -842,101 +772,6 @@ function ContextSection({
                   )}
                 </div>
               ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── The digest model ── */}
-        <div>
-          <div className="text-[12.5px] font-medium text-text-body">
-            Summarised by
-          </div>
-          <p className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-            Summaries run through the CLI you have already signed in to, on its
-            cheapest tier — no API key, and nothing billed outside your existing
-            plan. This is the same &quot;background model&quot; used for side
-            tasks.
-          </p>
-          <div className="mt-2 space-y-2">
-            {measurable.map((cli) => {
-              const provider = providers?.[cli.kind]
-              return (
-                <div
-                  key={cli.kind}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <span className="text-[12px] text-text-body">
-                    {cli.label}
-                  </span>
-                  <span className="font-mono text-[11px] text-muted-foreground">
-                    {digestModelFor(cli.kind, provider?.backgroundModel)}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          <p className="mt-2 text-[10.5px] text-dim">
-            Change these under Providers → Background model.
-          </p>
-        </div>
-
-        {/* ── Window override ── */}
-        {onSaveProvider && (
-          <div>
-            <div className="text-[12.5px] font-medium text-text-body">
-              Context window override
-            </div>
-            <p className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-              Jingler infers each model&apos;s window when the selected harness
-              reports it. Set an override here when a newly released model is
-              not yet known.
-            </p>
-            <div className="mt-2 space-y-2">
-              {clis
-                // Only harnesses that DO report usage but whose window we cannot
-                // infer. Offering this for Cursor would be a dead control: it
-                // reports no context at all, so a declared window still leaves
-                // nothing to measure against.
-                .filter(
-                  (c) =>
-                    c.available &&
-                    c.contextReporting &&
-                    contextWindowFor(c.kind, null) === null
-                )
-                .map((cli) => {
-                  const provider = providers?.[cli.kind]
-                  return (
-                    <div
-                      key={cli.kind}
-                      className="flex items-center justify-between gap-3"
-                    >
-                      <span className="text-[12px] text-text-body">
-                        {cli.label}
-                      </span>
-                      <input
-                        type="number"
-                        min={0}
-                        step={1000}
-                        placeholder="unknown"
-                        aria-label={`${cli.label} context window`}
-                        defaultValue={provider?.contextWindow ?? ""}
-                        onBlur={(e) => {
-                          const raw = Number(e.target.value)
-                          onSaveProvider(cli.kind, {
-                            enabled: provider?.enabled ?? true,
-                            defaultMode:
-                              provider?.defaultMode ?? "accept-edits",
-                            ...provider,
-                            ...(Number.isFinite(raw) && raw > 0
-                              ? { contextWindow: raw }
-                              : { contextWindow: undefined })
-                          })
-                        }}
-                        className="w-[128px] rounded-md border border-line bg-editor px-2 py-1 text-right font-mono text-[11px] tabular-nums text-text-body"
-                      />
-                    </div>
-                  )
-                })}
             </div>
           </div>
         )}
