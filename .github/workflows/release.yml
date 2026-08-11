@@ -5,9 +5,15 @@ name: Release
 # for electron-vite. Requires at least one pending changeset (pnpm changeset).
 on:
   workflow_dispatch:
+    inputs:
+      certification_run_id:
+        description: Successful pi-provider-evals workflow run for this exact commit
+        required: true
+        type: string
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   # Nothing ships unless typecheck + tests are green.
@@ -24,8 +30,29 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm --filter @jingler/cli-adapters eval:pi:deterministic
+      - run: pnpm license:check
+      - name: Require reviewed live certification for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTIFICATION_RUN_ID: ${{ inputs.certification_run_id }}
+        run: |
+          test "$(gh run view "$CERTIFICATION_RUN_ID" --json conclusion --jq .conclusion)" = "success"
+          test "$(gh run view "$CERTIFICATION_RUN_ID" --json headSha --jq .headSha)" = "$GITHUB_SHA"
+          gh run download "$CERTIFICATION_RUN_ID" --name pi-provider-certification --dir .artifacts/pi-certification
+      - name: Revalidate reviewed release manifest inputs
+        env:
+          JINGLER_RELEASE_CANDIDATES: .artifacts/pi-certification/candidates.json
+          JINGLER_RELEASE_CERTIFICATIONS: .artifacts/pi-certification/certifications.json
+          JINGLER_RELEASE_MANIFEST: .artifacts/pi-certification/revalidated-manifest.json
+        run: pnpm --filter @jingler/cli-adapters eval:pi:release-manifest
+      - name: Install Electron runtime dependencies
+        run: pnpm --filter @jingler/desktop exec playwright install --with-deps chromium
+      - name: Electron end-to-end behavior contract
+        run: xvfb-run -a pnpm --filter @jingler/desktop e2e
 
   # Apply pending changesets, bump every @jingler/* package in lockstep, sync the
   # root version, commit `release: vX.Y.Z`, tag, and push both back to main.
@@ -133,6 +160,9 @@ jobs:
       - name: Build bundled plugins
         run: pnpm --filter @jingler/desktop run build:bundled-plugins
 
+      - name: Build device agent
+        run: pnpm --filter @jingler/desktop run build:device-agent
+
       - name: Build (electron-vite)
         run: pnpm --filter @jingler/desktop run build
 
@@ -157,6 +187,16 @@ jobs:
           APPLE_API_KEY: ${{ steps.asc.outputs.path }}
           APPLE_API_KEY_ID: ${{ runner.os == 'macOS' && secrets.APPLE_API_KEY_ID || '' }}
           APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.APPLE_API_ISSUER || '' }}
+
+      - name: Inspect desktop and device artifacts
+        shell: bash
+        run: |
+          ASAR_PATH=$(find apps/desktop/release -type f -name app.asar | head -n 1)
+          RESOURCES_PATH=$(dirname "$ASAR_PATH")
+          JINGLER_DESKTOP_ASAR="$ASAR_PATH" \
+          JINGLER_DESKTOP_RESOURCES="$RESOURCES_PATH" \
+          JINGLER_DEVICE_BUNDLE="$RESOURCES_PATH/device-agent/jingler-device.mjs" \
+          pnpm artifacts:check
 
   # Flip the draft release electron-builder created to public + latest.
   publish:

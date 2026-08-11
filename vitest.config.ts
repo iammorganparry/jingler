@@ -17,7 +17,8 @@ export default defineConfig({
       "apps/desktop/vitest.config.ts",
       "apps/device-agent/vitest.config.ts",
       "apps/memory-worker/vitest.config.ts",
-      "apps/server/vitest.config.ts"
+      "apps/server/vitest.config.ts",
+      "scripts/vitest.config.ts"
     ],
     // Cap each project's fork pool. Without this, Vitest sizes every project's
     // pool to the CPU count — on an 11-core box the suites collectively fork

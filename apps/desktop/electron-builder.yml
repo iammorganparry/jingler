@@ -51,6 +51,8 @@ extraResources:
   # twice on purpose. See `windowIcon()` in src/main/index.ts.
   - from: build-resources/icon.png
     to: icon.png
+  - from: ../../THIRD-PARTY-LICENSES
+    to: THIRD-PARTY-LICENSES
   - from: ../../plugins/github-issues
     to: plugins/github-issues
     filter:

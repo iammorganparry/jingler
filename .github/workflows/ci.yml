@@ -36,8 +36,39 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # Unit + integration tests (Vitest). The Playwright `_electron` e2e suite is
-      # run locally (`pnpm --filter @jingler/desktop e2e`), not in CI — it needs a
-      # headless/xvfb Electron and a real `git`, which is deferred.
+      # Unit + integration tests (Vitest). Electron Playwright runs separately
+      # under xvfb so failures retain a focused job log and artifact build.
       - name: Test
         run: pnpm test
+
+      - name: Deterministic pi behavior contract
+        run: pnpm --filter @jingler/cli-adapters eval:pi:deterministic
+
+      - name: Production license policy
+        run: pnpm license:check
+
+  electron:
+    name: Electron behavior and package gates
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Electron runtime dependencies
+        run: pnpm --filter @jingler/desktop exec playwright install --with-deps chromium
+      - name: Electron end-to-end behavior contract
+        run: xvfb-run -a pnpm --filter @jingler/desktop e2e
+      - name: Build unpacked desktop artifact
+        run: pnpm --filter @jingler/desktop dist
+      - name: Inspect desktop and device artifacts
+        env:
+          JINGLER_DESKTOP_ASAR: apps/desktop/release/linux-unpacked/resources/app.asar
+          JINGLER_DESKTOP_RESOURCES: apps/desktop/release/linux-unpacked/resources
+          JINGLER_DEVICE_BUNDLE: apps/desktop/release/linux-unpacked/resources/device-agent/jingler-device.mjs
+        run: pnpm artifacts:check
