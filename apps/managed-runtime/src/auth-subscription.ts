@@ -9,7 +9,7 @@ export interface ManagedAuthSnapshot {
   readonly expiresAt: number
   readonly capabilities: readonly string[]
   readonly credentialCapabilities: readonly {
-    readonly provider: "github" | "codex"
+    readonly provider: "github" | "codex" | "claude"
     readonly handle: string
     readonly expiresAt: number
   }[]
@@ -61,7 +61,9 @@ export const decodeManagedAuthSnapshot = (
           ? Object.fromEntries(Object.entries(capability))
           : null
       return (
-        (fields?.provider === "github" || fields?.provider === "codex") &&
+        (fields?.provider === "github" ||
+          fields?.provider === "codex" ||
+          fields?.provider === "claude") &&
         isNonEmptyString(fields.handle) &&
         isPositiveInteger(fields.expiresAt)
       )
@@ -197,7 +199,7 @@ export class ManagedAuthSubscriptionLedger {
   }
 
   credentialHandle(
-    provider: "github" | "codex",
+    provider: "github" | "codex" | "claude",
     now: number
   ): string | null {
     if (this.needsSubscription(now)) return null

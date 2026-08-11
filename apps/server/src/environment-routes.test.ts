@@ -102,7 +102,7 @@ describe("environment routes", () => {
 
     expect(response.status).toBe(200)
     expect(body.environments).toHaveLength(2)
-    expect(body.environments[1].capabilities.harnesses).toEqual(["codex"])
+    expect(body.environments[1].capabilities.harnesses).toEqual(["codex", "claude"])
     expect(managedHarnesses).not.toHaveBeenCalled()
   })
 
@@ -170,7 +170,12 @@ describe("environment routes", () => {
     expect(response.status).toBe(200)
     expect(syncCapabilities).toHaveBeenCalledWith({
       userId: "user_one",
-      codexApiKey: `sk-${"a".repeat(30)}`,
+      codexCredential: {
+        authorizationHeader: `Bearer sk-${"a".repeat(30)}`,
+        upstream: "openai-api",
+        expiresAt: expect.any(Date)
+      },
+      claudeCredential: null,
       includeGitHub: true
     })
   })
@@ -291,6 +296,30 @@ describe("environment routes", () => {
     expect(issueGrant).toHaveBeenCalledWith(expect.objectContaining({
       reservationId: null
     }))
+  })
+
+  it("destroys a failed managed session and releases its unused reservation", async () => {
+    const destroySession = vi.fn(async () => undefined)
+    const releaseSessionStart = vi.fn(async () => undefined)
+    const { app } = harness({ destroySession, releaseSessionStart })
+
+    const response = await app.request(
+      `${managedRoute}/sessions/session_failed/delete`,
+      { method: "POST" }
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ version: 1, deleted: true })
+    expect(destroySession).toHaveBeenCalledWith({
+      userId: "user_one",
+      environmentId: managed.id,
+      sessionId: "session_failed"
+    })
+    expect(releaseSessionStart).toHaveBeenCalledWith({
+      userId: "user_one",
+      environmentId: managed.id,
+      sessionId: "session_failed"
+    })
   })
 
   it("does not allow the fixed Cloud target to be deleted", async () => {

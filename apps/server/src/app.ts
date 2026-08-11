@@ -20,6 +20,7 @@ import {
 import { proxyGitHubWebhook } from "./github-webhook-proxy.js"
 import { runtime } from "./runtime.js"
 import { deleteAuthStateSession } from "./auth-state-client.js"
+import { proxyManagedCodexRequest } from "./managed-provider-proxy.js"
 
 export const app = new Hono()
 
@@ -87,6 +88,18 @@ app.route("/api/devices", createDeviceRoutes())
 
 /** Unified account inventory and managed-compute lifecycle. */
 app.route("/api/environments", createEnvironmentRoutes())
+
+/** ChatGPT blocks Cloudflare egress, so subscription-backed Codex uses this fixed host hop. */
+app.on(["GET", "POST"], "/api/internal/managed-provider/codex/*", (c) =>
+  proxyManagedCodexRequest(
+    c.req.raw,
+    c.req.path.slice("/api/internal/managed-provider/codex".length),
+    {
+      serviceSecret: env.managedRuntimeServiceSecret,
+      maxEgressBytes: env.managedMaxEgressBytes
+    }
+  )
+)
 
 /** Internal, idempotent settlement callback from the managed-runtime Worker. */
 app.post("/api/internal/managed-usage/settle", async (c) => {

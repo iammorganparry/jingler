@@ -940,7 +940,17 @@ export function ConversationPane({
           environments={environments}
           environmentId={session.environmentId}
           environmentPending={environmentMutation.isPending}
-          onSetEnvironment={(environmentId) => environmentMutation.mutate(environmentId)}
+          onSetEnvironment={(environmentId) => {
+            if (convo.busy && environmentId !== session.environmentId) {
+              // The persisted Session can lag the renderer's live actor during
+              // its first turn. A running checkout is never safe to reassign in
+              // place, so enter the explicit stop/checkpoint/continue flow here
+              // instead of waiting for stale counters to catch up.
+              setContinuationEnvironmentId(environmentId)
+              return
+            }
+            environmentMutation.mutate(environmentId)
+          }}
           busy={convo.busy}
           tokens={convo.tokens}
           contextTriggerAt={contextQuery.data?.triggerAt ?? null}

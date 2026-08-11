@@ -127,20 +127,154 @@ const cloudApiKey = (value: unknown): string | null =>
     ? value
     : null
 
-/** A metered Codex key that can safely be forwarded to the managed runtime. */
-export const cloudCodexApiKey = (
-  environment: Record<string, string | undefined> = process.env
-): string | null => {
-  const fromEnvironment = cloudApiKey(environment.OPENAI_API_KEY)
-  if (fromEnvironment !== null) return fromEnvironment
+const cloudAccessToken = (value: unknown): string | null =>
+  typeof value === "string" &&
+  value.length >= 20 &&
+  value.length <= 4_096 &&
+  [...value].every((character) => {
+    const code = character.charCodeAt(0)
+    return code >= 33 && code <= 126
+  })
+    ? value
+    : null
+
+export type CloudCodexCredential =
+  | {
+      readonly kind: "api-key"
+      readonly token: string
+      readonly expiresAt: number
+    }
+  | {
+      readonly kind: "chatgpt"
+      readonly token: string
+      readonly accountId: string
+      readonly expiresAt: number
+    }
+
+export type CloudClaudeCredential = {
+  readonly kind: "api-key" | "oauth"
+  readonly token: string
+  readonly expiresAt: number
+}
+
+const jwtExpiry = (token: string): number | null => {
+  const encoded = token.split(".")[1]
+  if (encoded === undefined) return null
   try {
-    const raw = JSON.parse(
-      readFileSync(join(harnessHome(), ".codex", "auth.json"), "utf8")
-    ) as { OPENAI_API_KEY?: unknown }
-    return cloudApiKey(raw.OPENAI_API_KEY)
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as {
+      exp?: unknown
+    }
+    return typeof payload.exp === "number" && Number.isSafeInteger(payload.exp)
+      ? payload.exp
+      : null
   } catch {
     return null
   }
+}
+
+/**
+ * A short-lived Codex credential for the Worker-side managed-runtime proxy.
+ * The raw value is never given to the sandbox: the server immediately seals it
+ * in auth-state and the container receives a one-command proxy token instead.
+ */
+export const cloudCodexCredential = (
+  environment: Record<string, string | undefined> = process.env,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+  home = harnessHome()
+): CloudCodexCredential | null => {
+  try {
+    const raw = JSON.parse(
+      readFileSync(join(home, ".codex", "auth.json"), "utf8")
+    ) as {
+      OPENAI_API_KEY?: unknown
+      tokens?: {
+        access_token?: unknown
+        account_id?: unknown
+      } | null
+    }
+    const accessToken = cloudAccessToken(raw.tokens?.access_token)
+    const accountId = raw.tokens?.account_id
+    const expiresAt = accessToken === null ? null : jwtExpiry(accessToken)
+    if (
+      accessToken !== null &&
+      typeof accountId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f-]{27,36}$/iu.test(accountId) &&
+      expiresAt !== null &&
+      expiresAt > nowSeconds + 60
+    ) {
+      return { kind: "chatgpt", token: accessToken, accountId, expiresAt }
+    }
+    const storedApiKey = cloudApiKey(raw.OPENAI_API_KEY)
+    if (storedApiKey !== null) {
+      return {
+        kind: "api-key",
+        token: storedApiKey,
+        expiresAt: nowSeconds + 24 * 60 * 60
+      }
+    }
+  } catch {
+    // Fall through to an explicit metered key only when subscription auth is absent.
+  }
+  const fromEnvironment = cloudApiKey(environment.OPENAI_API_KEY)
+  return fromEnvironment === null
+    ? null
+    : {
+        kind: "api-key",
+        token: fromEnvironment,
+        expiresAt: nowSeconds + 24 * 60 * 60
+      }
+}
+
+const claudeCredentialDocument = (home: string): unknown => {
+  const file = join(home, ".claude", ".credentials.json")
+  if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8"))
+  if (process.env.JINGLER_HARNESS_HOME !== undefined || process.platform !== "darwin") {
+    return null
+  }
+  return JSON.parse(
+    execFileSync(
+      "security",
+      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    )
+  )
+}
+
+/** Current Claude credential for the same encrypted Worker-side proxy boundary. */
+export const cloudClaudeCredential = (
+  environment: Record<string, string | undefined> = process.env,
+  nowSeconds = Math.floor(Date.now() / 1_000),
+  home = harnessHome()
+): CloudClaudeCredential | null => {
+  try {
+    const document = claudeCredentialDocument(home)
+    if (typeof document === "object" && document !== null) {
+      const credential = Object.fromEntries(Object.entries(document)).claudeAiOauth
+      if (typeof credential === "object" && credential !== null) {
+        const fields = Object.fromEntries(Object.entries(credential))
+        const token = cloudAccessToken(fields.accessToken)
+        const rawExpiry = fields.expiresAt
+        const expiresAt = typeof rawExpiry === "number" && Number.isSafeInteger(rawExpiry)
+          ? rawExpiry > 10_000_000_000
+            ? Math.floor(rawExpiry / 1_000)
+            : rawExpiry
+          : null
+        if (token !== null && expiresAt !== null && expiresAt > nowSeconds + 60) {
+          return { kind: "oauth", token, expiresAt }
+        }
+      }
+    }
+  } catch {
+    // Fall through to explicit credentials only when subscription auth is absent.
+  }
+  const explicitOauth = cloudAccessToken(environment.ANTHROPIC_AUTH_TOKEN)
+  if (explicitOauth !== null) {
+    return { kind: "oauth", token: explicitOauth, expiresAt: nowSeconds + 60 * 60 }
+  }
+  const apiKey = cloudApiKey(environment.ANTHROPIC_API_KEY)
+  return apiKey === null
+    ? null
+    : { kind: "api-key", token: apiKey, expiresAt: nowSeconds + 24 * 60 * 60 }
 }
 
 /**

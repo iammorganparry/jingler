@@ -1,12 +1,29 @@
-import { describe, expect, it } from "vitest"
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
 import {
   billingPath,
-  cloudCodexApiKey,
+  cloudClaudeCredential,
+  cloudCodexCredential,
   harnessEnv,
   METERED_ENV_KEYS
 } from "./subscription.js"
 
 const ENV = { PATH: "/usr/bin", HOME: "/home/x", OPENAI_API_KEY: "sk-x", ANTHROPIC_API_KEY: "sk-y" }
+const temporaryHomes: string[] = []
+
+afterEach(() => {
+  delete process.env.JINGLER_HARNESS_HOME
+  for (const directory of temporaryHomes.splice(0)) rmSync(directory, { recursive: true })
+})
+
+const harnessHome = (): string => {
+  const directory = mkdtempSync(join(tmpdir(), "jingler-subscription-"))
+  temporaryHomes.push(directory)
+  process.env.JINGLER_HARNESS_HOME = directory
+  return directory
+}
 
 describe("harnessEnv", () => {
   it("withholds the metered key when the harness has a plan", () => {
@@ -76,11 +93,54 @@ describe("billingPath", () => {
   })
 })
 
-describe("cloudCodexApiKey", () => {
+describe("cloudCodexCredential", () => {
   it("returns only a bounded explicit API key", () => {
-    expect(cloudCodexApiKey({ OPENAI_API_KEY: `sk-${"a".repeat(30)}` })).toBe(
-      `sk-${"a".repeat(30)}`
-    )
-    expect(cloudCodexApiKey({ OPENAI_API_KEY: "short" })).toBeNull()
+    const home = harnessHome()
+    expect(cloudCodexCredential({ OPENAI_API_KEY: `sk-${"a".repeat(30)}` }, 1_000, home)).toEqual({
+      kind: "api-key",
+      token: `sk-${"a".repeat(30)}`,
+      expiresAt: 87_400
+    })
+    expect(cloudCodexCredential({ OPENAI_API_KEY: "short" }, 1_000, home)).toBeNull()
+  })
+
+  it("reads current ChatGPT subscription auth without copying refresh credentials", () => {
+    const home = harnessHome()
+    mkdirSync(join(home, ".codex"), { recursive: true })
+    const payload = Buffer.from(JSON.stringify({ exp: 5_000 })).toString("base64url")
+    const token = `${"a".repeat(24)}.${payload}.${"b".repeat(24)}`
+    writeFileSync(join(home, ".codex", "auth.json"), JSON.stringify({
+      tokens: {
+        access_token: token,
+        refresh_token: "must-not-leave-the-device",
+        account_id: "12345678-1234-1234-1234-123456789abc"
+      }
+    }))
+    expect(cloudCodexCredential({ OPENAI_API_KEY: `sk-${"m".repeat(30)}` }, 1_000, home)).toEqual({
+      kind: "chatgpt",
+      token,
+      accountId: "12345678-1234-1234-1234-123456789abc",
+      expiresAt: 5_000
+    })
+  })
+})
+
+describe("cloudClaudeCredential", () => {
+  it("extracts only the current Claude OAuth access token", () => {
+    const home = harnessHome()
+    mkdirSync(join(home, ".claude"), { recursive: true })
+    writeFileSync(join(home, ".claude", ".credentials.json"), JSON.stringify({
+      claudeAiOauth: {
+        accessToken: `oauth-${"a".repeat(30)}`,
+        refreshToken: "must-not-leave-the-device",
+        expiresAt: 5_000_000
+      },
+      mcpOauth: { secret: "must-not-leave-the-device" }
+    }))
+    expect(cloudClaudeCredential({ ANTHROPIC_API_KEY: `sk-${"m".repeat(30)}` }, 1_000, home)).toEqual({
+      kind: "oauth",
+      token: `oauth-${"a".repeat(30)}`,
+      expiresAt: 5_000_000
+    })
   })
 })

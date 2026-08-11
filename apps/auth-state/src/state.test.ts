@@ -41,4 +41,26 @@ describe("auth state", () => {
     expect(resolveCredential(state(1_000), "codex", "wrong", 1_000)).toBeNull()
     expect(resolveCredential(state(1_000), "github", "capability_opaque", 1_000)).toBeNull()
   })
+
+  it("admits managed execution from Claude subscription auth", () => {
+    const now = 1_000
+    const claude: AuthStateRecord = {
+      ...emptyAuthState("user_1"),
+      sessions: { session_1: { id: "session_1", expiresAt: now + 600 } },
+      credentials: {
+        claude: {
+          provider: "claude",
+          handle: "capability_claude",
+          fingerprint: "fingerprint_claude",
+          authorizationHeaderEncrypted: "v1.encrypted-secret",
+          upstream: "anthropic-api",
+          expiresAt: now + 300
+        }
+      }
+    }
+    expect(snapshotOf(claude, now)).toMatchObject({
+      capabilities: ["managed.session.execute"],
+      credentialCapabilities: [expect.objectContaining({ provider: "claude" })]
+    })
+  })
 })

@@ -19,10 +19,11 @@ describe("managed runtime dependency and cost footprint", () => {
     expect(dockerfile).toContain(`cloudflare/sandbox:${sdkVersion}`)
   })
 
-  it("ships one harness and never copies project dependency trees", () => {
+  it("ships the two supported harnesses and never copies project dependency trees", () => {
     const dockerfile = readRuntimeFile("Dockerfile")
     expect(dockerfile.match(/npm install/gu)).toHaveLength(1)
-    expect(dockerfile).toContain("--omit=dev @openai/codex@")
+    expect(dockerfile).toContain("@openai/codex@0.147.0")
+    expect(dockerfile).toContain("@anthropic-ai/claude-code@2.1.227")
     expect(dockerfile).not.toMatch(/COPY .*node_modules|pnpm install|npm install (?!.*--global)/u)
   })
 

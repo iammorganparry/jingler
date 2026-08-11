@@ -11,13 +11,20 @@ interface AuthSessionState {
   readonly expiresAt: Date
 }
 
-export type AuthCapabilityProvider = "github" | "codex"
+export type AuthCapabilityProvider = "github" | "codex" | "claude"
+export type AuthCapabilityUpstream =
+  | "github-api"
+  | "openai-api"
+  | "chatgpt-codex"
+  | "anthropic-api"
 
 interface AuthCapabilityState {
   readonly userId: string
   readonly provider: AuthCapabilityProvider
   readonly authorizationHeader: string
   readonly expiresAt: Date
+  readonly upstream?: AuthCapabilityUpstream
+  readonly accountId?: string
 }
 
 const endpoint = (config: AuthStateClientConfig, userId: string): string =>
@@ -83,7 +90,9 @@ export const upsertAuthStateCapability = async (
       body: JSON.stringify({
         provider: input.provider,
         authorizationHeader: input.authorizationHeader,
-        expiresAt: Math.floor(input.expiresAt.getTime() / 1_000)
+        expiresAt: Math.floor(input.expiresAt.getTime() / 1_000),
+        ...(input.upstream === undefined ? {} : { upstream: input.upstream }),
+        ...(input.accountId === undefined ? {} : { accountId: input.accountId })
       })
     }
   )
