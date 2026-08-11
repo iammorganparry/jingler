@@ -801,7 +801,7 @@ export function Composer({
               onSelect={(value) =>
                 onSetEnvironment(value === "__local__" ? undefined : value)
               }
-              disabled={busy || environmentPending}
+              disabled={environmentPending}
               appearance="quiet"
               ariaLabel="Execution environment"
               className="max-w-[150px]"

@@ -431,13 +431,6 @@ export const rpc = {
     run((c) => c.Environment.suggestHosts()),
   environmentsPairSsh: (input: PairSshEnvironmentInput): Promise<Environment> =>
     run((c) => c.Environment.pairSsh(input)),
-  environmentsCreateManaged: (name: string): Promise<Environment> =>
-    run((c) => c.Environment.createManaged({ name })),
-  environmentsManagedLifecycle: (
-    environment: Environment,
-    action: "start" | "pause" | "restore"
-  ): Promise<Environment> =>
-    run((c) => c.Environment.managedLifecycle({ environment, action })),
   environmentsRename: (deviceId: string, name: string): Promise<Environment> =>
     run((c) => c.Environment.rename({ deviceId, name })),
   environmentsRevoke: (deviceId: string): Promise<void> =>

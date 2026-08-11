@@ -47,9 +47,12 @@ describe("composer environment selector", () => {
     render(<Composer environments={[{ ...environments[0]!, state: "offline" }]} environmentId="buildbox" onSetEnvironment={() => {}} />)
     expect(screen.getByRole("button", { name: "Execution environment" }).textContent).toContain("offline")
   })
-  it("disables environment changes during an active turn", () => {
-    render(<Composer environments={environments} busy onSetEnvironment={() => {}} />)
-    expect(screen.queryByRole("button", { name: "Execution environment" })).toBeNull()
-    expect(screen.getByText("Local").closest("button")).toBeNull()
+  it("keeps environment handoff available during an active turn", () => {
+    const select = vi.fn()
+    render(<Composer environments={environments} busy onSetEnvironment={select} />)
+    const trigger = screen.getByRole("button", { name: "Execution environment" })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole("option", { name: "buildbox" }))
+    expect(select).toHaveBeenCalledWith("buildbox")
   })
 })

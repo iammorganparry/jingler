@@ -309,8 +309,6 @@ process.stdin.on("data", (chunk) => {
       discovery: () => Effect.never,
       directSsh: () => Effect.succeed(null),
       pairSsh: () => Effect.never,
-      createManaged: () => Effect.never,
-      managedLifecycle: () => Effect.never,
       hydrateManagedWorkspace: () => Effect.never,
       rename: () => Effect.never,
       revoke: () => Effect.never
@@ -411,7 +409,6 @@ process.stdin.on("data", (chunk) => {
       }),
       managedSessionGrant: () => Effect.never,
       discovery: () => Effect.never, directSsh: () => Effect.succeed(null), pairSsh: () => Effect.never,
-      createManaged: () => Effect.never, managedLifecycle: () => Effect.never,
       hydrateManagedWorkspace: () => Effect.never,
       rename: () => Effect.never, revoke: () => Effect.never
     }

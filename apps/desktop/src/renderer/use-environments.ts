@@ -11,8 +11,6 @@ export const useEnvironments = () => {
       watch: rpc.environmentsWatch,
       suggestHosts: rpc.environmentsSuggestHosts,
       pairSsh: rpc.environmentsPairSsh,
-      createManaged: rpc.environmentsCreateManaged,
-      managedLifecycle: rpc.environmentsManagedLifecycle,
       rename: rpc.environmentsRename,
       revoke: rpc.environmentsRevoke
     }),
@@ -33,23 +31,6 @@ export const useEnvironments = () => {
     rename: (id: string, name: string) =>
       send({ type: "RENAME", id, name }),
     revoke: (id: string) => send({ type: "REVOKE", id }),
-    createManaged: (name: string): Promise<void> =>
-      new Promise((resolve, reject) =>
-        send({ type: "CREATE_MANAGED", name, resolve, reject })
-      ),
-    managedLifecycle: (
-      environment: Parameters<typeof rpc.environmentsManagedLifecycle>[0],
-      action: Parameters<typeof rpc.environmentsManagedLifecycle>[1]
-    ): Promise<void> =>
-      new Promise((resolve, reject) =>
-        send({
-          type: "MANAGED_LIFECYCLE",
-          environment,
-          action,
-          resolve,
-          reject
-        })
-      )
   }
 }
 export type EnvironmentsController = ReturnType<typeof useEnvironments>

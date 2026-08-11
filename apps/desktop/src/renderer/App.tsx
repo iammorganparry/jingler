@@ -1407,8 +1407,6 @@ function AuthedApp({
             environmentController.send({ type: "RESET" });
             setEnvironmentDialogOpen(true);
           },
-          onCreateManaged: environmentController.createManaged,
-          onManagedLifecycle: environmentController.managedLifecycle,
           onRefresh: environmentController.refresh,
           onRename: environmentController.rename,
           onRevoke: environmentController.revoke,

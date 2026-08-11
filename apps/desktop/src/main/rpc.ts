@@ -3966,16 +3966,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       Effect.map((hosts) => hosts.map((host) => ({ ...host }))),
     ),
   "Environment.pairSsh": (input) => EnvironmentService.pairSsh(input),
-  "Environment.createManaged": ({ name }) => EnvironmentService.createManaged(name),
-  "Environment.managedLifecycle": ({ environment, action }) =>
-    environment.kind === "managed"
-      ? EnvironmentService.managedLifecycle(environment, action)
-      : Effect.fail(
-          new EnvironmentError({
-            reason: "invalid-input",
-            message: "Only managed environments support lifecycle actions."
-          })
-        ),
   "Environment.rename": ({ deviceId, name }) =>
     EnvironmentService.rename(deviceId, name),
   "Environment.revoke": ({ deviceId }) => EnvironmentService.revoke(deviceId),

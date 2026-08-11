@@ -19,6 +19,26 @@ const base: Environment = {
   agentVersion: "1.0.0",
   lastSeenAt: 100
 }
+const cloud: Environment = {
+  kind: "managed",
+  id: "managed_cloud_account",
+  name: "Cloud",
+  platform: { os: "linux", arch: "x64" },
+  capabilities: {
+    version: 1,
+    capabilities: ["session.start"],
+    harnesses: ["codex"],
+    maxConcurrentSessions: 1
+  },
+  state: "online",
+  agentVersion: null,
+  lastSeenAt: null,
+  region: null,
+  instanceType: "basic",
+  generation: 1,
+  createdAt: 100,
+  updatedAt: 100
+}
 const dialog = {
   open: false,
   state: "configuring" as const,
@@ -45,8 +65,6 @@ describe("Devices settings", () => {
         loading={false}
         dialog={dialog}
         onOpen={vi.fn()}
-        onCreateManaged={vi.fn()}
-        onManagedLifecycle={vi.fn()}
         onRefresh={vi.fn()}
         onRename={vi.fn()}
         onRevoke={vi.fn()}
@@ -69,8 +87,6 @@ describe("Devices settings", () => {
         loading={false}
         dialog={dialog}
         onOpen={vi.fn()}
-        onCreateManaged={vi.fn()}
-        onManagedLifecycle={vi.fn()}
         onRefresh={vi.fn()}
         onRename={vi.fn()}
         onRevoke={revoke}
@@ -90,8 +106,6 @@ describe("Devices settings", () => {
         loading={false}
         dialog={dialog}
         onOpen={vi.fn()}
-        onCreateManaged={vi.fn()}
-        onManagedLifecycle={vi.fn()}
         onRefresh={vi.fn()}
         onRename={rename}
         onRevoke={vi.fn()}
@@ -109,31 +123,23 @@ describe("Devices settings", () => {
     )
   })
 
-  it("creates a managed cloud environment from the devices surface", async () => {
-    const createManaged = vi.fn()
+  it("presents Cloud as a fixed automatic execution target", () => {
     render(
       <DevicesSection
-        environments={[]}
+        environments={[cloud]}
         loading={false}
         dialog={dialog}
         onOpen={vi.fn()}
-        onCreateManaged={createManaged}
-        onManagedLifecycle={vi.fn()}
         onRefresh={vi.fn()}
         onRename={vi.fn()}
         onRevoke={vi.fn()}
       />
     )
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add cloud environment" })
-    )
-    const input = screen.getByRole("textbox", {
-      name: "Cloud environment name"
-    })
-    fireEvent.change(input, { target: { value: "Cloud build" } })
-    fireEvent.click(screen.getByRole("button", { name: "Create" }))
-
-    await waitFor(() => expect(createManaged).toHaveBeenCalledWith("Cloud build"))
+    expect(screen.getByText("Cloud", { exact: true })).toBeTruthy()
+    expect(screen.getByText(/sandbox starts automatically per session/i)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Add cloud environment" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull()
   })
 })

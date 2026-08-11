@@ -567,7 +567,6 @@ export const startFakeAuthServer = async (
   const sentEmails: Array<string> = []
   const requests: Array<FakeMemoryRequest> = []
   const organizations = new Map<string, FakeOrganizationMemory>()
-  const managedEnvironments = new Map<string, Record<string, unknown>>()
   let memoryAvailable = !options.unavailable
   let requestSequence = 0
 
@@ -678,51 +677,37 @@ export const startFakeAuthServer = async (
           : []
         json(200, {
           version: 1,
-          environments: [...owned, ...managedEnvironments.values()]
+          environments: [
+            ...owned,
+            {
+              kind: "managed",
+              id: "managed_cloud_e2e_account",
+              name: "Cloud",
+              platform: { os: "linux", arch: "x64" },
+              capabilities: {
+                version: 1,
+                capabilities: [
+                  "session.start",
+                  "session.input",
+                  "session.cancel",
+                  "session.observe"
+                ],
+                harnesses: ["codex"],
+                maxConcurrentSessions: 1
+              },
+              state: "online",
+              agentVersion: null,
+              lastSeenAt: null,
+              region: null,
+              instanceType: "basic",
+              generation: 1,
+              createdAt: 0,
+              updatedAt: 0
+            }
+          ]
         })
       })().catch(() => json(502, { error: "environment inventory unavailable" }))
       return
-    }
-
-    if (url.pathname === "/api/environments/managed" && req.method === "POST") {
-      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
-      void readJson().then((value) => {
-        const body = jsonBody(value)
-        const now = Date.now()
-        const environment = {
-          kind: "managed",
-          id: `managed_e2e_${managedEnvironments.size + 1}`,
-          name: typeof body.name === "string" ? body.name : "Cloud environment",
-          platform: { os: "linux", arch: "x64" },
-          capabilities: {
-            version: 1,
-            capabilities: ["session.start", "session.input", "session.cancel", "session.observe"],
-            harnesses: ["codex"],
-            maxConcurrentSessions: 1
-          },
-          state: "online",
-          agentVersion: null,
-          lastSeenAt: now,
-          region: null,
-          instanceType: "basic",
-          generation: 1,
-          createdAt: now,
-          updatedAt: now
-        }
-        managedEnvironments.set(environment.id, environment)
-        json(201, { version: 1, environment })
-      })
-      return
-    }
-
-    const managedMatch = url.pathname.match(
-      /^\/api\/environments\/managed\/([^/]+)\/delete$/u
-    )
-    if (managedMatch && req.method === "POST") {
-      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
-      const environmentId = decodeURIComponent(managedMatch[1] ?? "")
-      if (!managedEnvironments.delete(environmentId)) return json(404, { error: "not found" })
-      return json(200, { version: 1, deleted: true })
     }
 
     if (url.pathname === "/api/memory/organizations" && req.method === "GET") {

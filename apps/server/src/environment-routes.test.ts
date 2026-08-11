@@ -3,14 +3,15 @@ import { Hono } from "hono"
 import { describe, expect, it, vi } from "vitest"
 import {
   createEnvironmentRoutes,
+  managedCloudIdForUser,
   type EnvironmentRoutesDependencies,
   type ManagedEnvironmentStore
 } from "./environment-routes.js"
 
 const managed: ManagedEnvironment = {
   kind: "managed",
-  id: "managed_one",
-  name: "Cloud workspace",
+  id: managedCloudIdForUser("user_one"),
+  name: "Cloud",
   platform: { os: "linux", arch: "x64" },
   capabilities: {
     version: 1,
@@ -18,7 +19,7 @@ const managed: ManagedEnvironment = {
     harnesses: ["codex"],
     maxConcurrentSessions: 1
   },
-  state: "paused",
+  state: "online",
   agentVersion: null,
   lastSeenAt: null,
   region: "wnam",
@@ -43,10 +44,10 @@ const owned: Environment = {
   agentVersion: "2.0.3",
   lastSeenAt: 190
 }
+const managedRoute = `/api/environments/managed/${managed.id}`
 
 const store = (): ManagedEnvironmentStore => ({
   create: vi.fn(async () => managed),
-  listForUser: vi.fn(async () => [managed]),
   findForUser: vi.fn(async () => managed),
   renameForUser: vi.fn(async () => managed),
   setStateForUser: vi.fn(async () => managed),
@@ -87,13 +88,13 @@ describe("environment routes", () => {
 
     expect(response.status).toBe(200)
     expect((await response.json()).environments).toEqual([owned])
-    expect(managedStore.listForUser).not.toHaveBeenCalled()
     expect(managedHarnesses).not.toHaveBeenCalled()
   })
 
-  it("keeps inventory available when managed capability discovery is unavailable", async () => {
+  it("does not poll managed authorization state while listing the fixed Cloud target", async () => {
+    const managedHarnesses = vi.fn(async () => Promise.reject(new Error("runtime unavailable")))
     const { app } = harness({
-      managedHarnesses: async () => Promise.reject(new Error("runtime unavailable"))
+      managedHarnesses
     })
 
     const response = await app.request("/api/environments")
@@ -101,7 +102,8 @@ describe("environment routes", () => {
 
     expect(response.status).toBe(200)
     expect(body.environments).toHaveLength(2)
-    expect(body.environments[1].capabilities.harnesses).toEqual([])
+    expect(body.environments[1].capabilities.harnesses).toEqual(["codex"])
+    expect(managedHarnesses).not.toHaveBeenCalled()
   })
 
   it("lists owned and managed environments in stable created order", async () => {
@@ -112,7 +114,7 @@ describe("environment routes", () => {
     const body = await response.json()
     expect(body.environments.map((environment: Environment) => environment.id)).toEqual([
       "device_one",
-      "managed_one"
+      managed.id
     ])
   })
 
@@ -124,7 +126,7 @@ describe("environment routes", () => {
     expect(body).not.toMatch(/signed-runtime-grant|credential|providerToken|secret/)
   })
 
-  it("creates managed environments idempotently through the account-scoped store", async () => {
+  it("returns the fixed Cloud target to older create clients", async () => {
     const managedStore = store()
     const { app } = harness({ store: managedStore })
     const response = await app.request("/api/environments/managed", {
@@ -139,14 +141,12 @@ describe("environment routes", () => {
       })
     })
 
-    expect(response.status).toBe(201)
-    expect(managedStore.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user_one",
-        idempotencyKey: "create_workspace_one",
-        instanceType: "basic"
-      })
-    )
+    expect(response.status).toBe(200)
+    expect((await response.json()).environment).toMatchObject({
+      id: managed.id,
+      name: "Cloud"
+    })
+    expect(managedStore.create).not.toHaveBeenCalled()
   })
 
   it("syncs the desktop Codex capability before managed creation", async () => {
@@ -167,7 +167,7 @@ describe("environment routes", () => {
       })
     })
 
-    expect(response.status).toBe(201)
+    expect(response.status).toBe(200)
     expect(syncCapabilities).toHaveBeenCalledWith({
       userId: "user_one",
       codexApiKey: `sk-${"a".repeat(30)}`,
@@ -200,7 +200,7 @@ describe("environment routes", () => {
   it("refuses a grant for a stale managed environment generation", async () => {
     const issueGrant = vi.fn<EnvironmentRoutesDependencies["issueGrant"]>()
     const { app } = harness({ issueGrant })
-    const response = await app.request("/api/environments/managed/managed_one/grants", {
+    const response = await app.request(`${managedRoute}/grants`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -231,7 +231,7 @@ describe("environment routes", () => {
     )
     const { app } = harness({ reserveStart, issueGrant })
     const response = await app.request(
-      "/api/environments/managed/managed_one/grants",
+      `${managedRoute}/grants`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -248,7 +248,7 @@ describe("environment routes", () => {
     expect(response.status).toBe(200)
     expect(reserveStart).toHaveBeenCalledWith({
       userId: "user_one",
-      environmentId: "managed_one",
+      environmentId: managed.id,
       sessionId: "session_one",
       usageIntervalId: "command_one"
     })
@@ -271,7 +271,7 @@ describe("environment routes", () => {
     const { app } = harness({ reserveStart, issueGrant, syncCapabilities })
 
     const response = await app.request(
-      "/api/environments/managed/managed_one/grants",
+      `${managedRoute}/grants`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -293,12 +293,12 @@ describe("environment routes", () => {
     }))
   })
 
-  it("cleans the runtime before deleting managed metadata", async () => {
+  it("does not allow the fixed Cloud target to be deleted", async () => {
     const managedStore = store()
     const destroyEnvironment = vi.fn(async () => undefined)
     const { app } = harness({ store: managedStore, destroyEnvironment })
     const response = await app.request(
-      "/api/environments/managed/managed_one/delete",
+      `${managedRoute}/delete`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -306,11 +306,8 @@ describe("environment routes", () => {
       }
     )
 
-    expect(response.status).toBe(200)
-    expect(destroyEnvironment).toHaveBeenCalledOnce()
-    expect(managedStore.deleteForUser).toHaveBeenCalledOnce()
-    expect(destroyEnvironment.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
-      vi.mocked(managedStore.deleteForUser).mock.invocationCallOrder[0] ?? 0
-    )
+    expect(response.status).toBe(409)
+    expect(destroyEnvironment).not.toHaveBeenCalled()
+    expect(managedStore.deleteForUser).not.toHaveBeenCalled()
   })
 })
