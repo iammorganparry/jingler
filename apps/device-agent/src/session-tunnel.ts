@@ -1,6 +1,7 @@
 import {
   RemoteSessionCommand as RemoteSessionCommandSchema,
-  RemoteSessionKeyOffer as RemoteSessionKeyOfferSchema
+  RemoteSessionKeyOffer as RemoteSessionKeyOfferSchema,
+  type RemoteSessionEvent
 } from "@jingler/core"
 import {
   decryptRemotePayload,
@@ -69,14 +70,16 @@ export const runDeviceSessionTunnel = (
       acknowledgedSequence: transport.acknowledgedDesktopSequence
     })
     const outgoingGate = yield* Effect.makeSemaphore(1)
-    const flushCommand = (commandId: string) => outgoingGate.withPermits(1)(
+    const flushCommand = (commandId?: string) => outgoingGate.withPermits(1)(
       Effect.gen(function* () {
         const outgoing = yield* Effect.tryPromise({
-          try: () => handler.prepareOutgoingEnvelopes(
-            commandId,
-            (event, sequence) =>
+          try: () => {
+            const encrypt = (event: RemoteSessionEvent, sequence: number) =>
               encryptRemotePayload(key, request.sessionId, sequence, "device", event)
-          ),
+            return commandId === undefined
+              ? handler.prepareAllOutgoingEnvelopes(encrypt)
+              : handler.prepareOutgoingEnvelopes(commandId, encrypt)
+          },
           catch: (cause) => new RemoteSessionError({
             message: "Could not persist remote event sequences.",
             cause
@@ -102,6 +105,13 @@ export const runDeviceSessionTunnel = (
         yield* tunnel.acknowledge(persisted.acknowledgedDesktopSequence)
       })
     )
+    const stopWatching = handler.watchPersisted((commandId) =>
+      Effect.runPromise(flushCommand(commandId))
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(stopWatching))
+    // A replacement tunnel must pick up events persisted after its predecessor
+    // closed even though the admitted desktop command is never re-executed.
+    yield* flushCommand()
     // Relay confirmation from the desktop is the only safe point at which the
     // device can discard persisted response ciphertext. This runs independently
     // from command dispatch so a long Agent.run cannot block pruning.
@@ -132,7 +142,7 @@ export const runDeviceSessionTunnel = (
             try: () => handler.handle(
               command,
               envelope.sequence,
-              (commandId) => Effect.runPromise(flushCommand(commandId)),
+              undefined,
               controllerScope
             ),
             catch: (cause) => new RemoteSessionError({ message: "Remote command dispatch failed.", cause })

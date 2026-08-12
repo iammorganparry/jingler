@@ -907,6 +907,11 @@ export const makeRemoteSessionStateRepository = (
 interface ActiveRemoteSession {
   readonly key: Uint8Array;
   readonly tunnel: RemoteTunnel & { readonly close: Effect.Effect<void> };
+  readonly delivery: RemoteSessionDelivery;
+}
+
+interface RemoteSessionDelivery {
+  readonly gate: Effect.Semaphore;
   readonly subscribers: Map<string, Queue.Queue<Output>>;
   readonly backlog: Map<string, RemoteSessionEvent[]>;
 }
@@ -930,7 +935,23 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
       const secrets = yield* SecretStore;
       const states = makeRemoteSessionStateRepository(secrets);
       const active = new Map<string, Promise<ActiveRemoteSession>>();
+      const deliveries = new Map<string, RemoteSessionDelivery>();
       const claimedPendingCommandIds = new Set<string>();
+
+      const deactivateIfCurrent = async (
+        sessionId: string,
+        connection: ActiveRemoteSession,
+      ): Promise<boolean> => {
+        const candidate = active.get(sessionId);
+        if (!candidate) return false;
+        try {
+          if ((await candidate) !== connection) return false;
+        } catch {
+          return false;
+        }
+        active.delete(sessionId);
+        return true;
+      };
 
       const consumeConnection = (
         sessionId: string,
@@ -997,43 +1018,44 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                 };
               });
               yield* connection.tunnel.acknowledge(envelope.sequence);
-              const subscriber = connection.subscribers.get(event.commandId);
-              if (subscriber) {
-                yield* Queue.offer(subscriber, { _tag: "event", event });
-                if (terminal) {
-                  connection.subscribers.delete(event.commandId);
-                  yield* Queue.shutdown(subscriber);
-                  if (connection.subscribers.size === 0)
-                    yield* connection.tunnel.close;
-                }
-              } else {
-                const queued = connection.backlog.get(event.commandId) ?? [];
-                queued.push(event);
-                connection.backlog.set(event.commandId, queued);
-              }
+              yield* connection.delivery.gate.withPermits(1)(
+                Effect.gen(function* () {
+                  const subscriber = connection.delivery.subscribers.get(event.commandId);
+                  if (subscriber) {
+                    yield* Queue.offer(subscriber, { _tag: "event", event });
+                    if (terminal) {
+                      connection.delivery.subscribers.delete(event.commandId);
+                      if (connection.delivery.subscribers.size === 0)
+                        yield* connection.tunnel.close;
+                    }
+                    return;
+                  }
+                  const queued = connection.delivery.backlog.get(event.commandId) ?? [];
+                  queued.push(event);
+                  connection.delivery.backlog.set(event.commandId, queued);
+                }),
+              );
             }),
           ),
           Effect.matchEffect({
             onFailure: (error) =>
               Effect.gen(function* () {
-                active.delete(sessionId);
-                for (const subscriber of connection.subscribers.values()) {
+                if (!(yield* Effect.promise(() => deactivateIfCurrent(sessionId, connection)))) return;
+                for (const subscriber of connection.delivery.subscribers.values()) {
                   yield* Queue.offer(subscriber, { _tag: "error", error });
-                  yield* Queue.shutdown(subscriber);
                 }
-                connection.subscribers.clear();
+                connection.delivery.subscribers.clear();
               }),
             onSuccess: () =>
               Effect.gen(function* () {
                 const error = new RemoteSessionError({
                   message: "Remote tunnel closed.",
                 });
-                active.delete(sessionId);
-                for (const subscriber of connection.subscribers.values()) {
+                if (!(yield* Effect.promise(() => deactivateIfCurrent(sessionId, connection)))) return;
+                for (const subscriber of connection.delivery.subscribers.values()) {
                   yield* Queue.offer(subscriber, { _tag: "error", error });
-                  yield* Queue.shutdown(subscriber);
                 }
-                connection.subscribers.clear();
+                connection.delivery.subscribers.clear();
               }),
           }),
         );
@@ -1170,11 +1192,19 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                       )
                     : relay();
                 const tunnel = yield* direct;
+                let delivery = deliveries.get(session.id);
+                if (!delivery) {
+                  delivery = {
+                    gate: yield* Effect.makeSemaphore(1),
+                    subscribers: new Map(),
+                    backlog: new Map(),
+                  };
+                  deliveries.set(session.id, delivery);
+                }
                 const connection: ActiveRemoteSession = {
                   key,
                   tunnel,
-                  subscribers: new Map(),
-                  backlog: new Map(),
+                  delivery,
                 };
                 void Effect.runPromise(
                   consumeConnection(session.id, connection),
@@ -1298,25 +1328,29 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                     commandId,
                   );
                   const subscription = yield* Queue.unbounded<Output>();
-                  connection.subscribers.set(
-                    pending.command.commandId,
-                    subscription,
+                  const pendingCommandId = pending.command.commandId;
+                  yield* connection.delivery.gate.withPermits(1)(
+                    Effect.gen(function* () {
+                      connection.delivery.subscribers.set(
+                        pendingCommandId,
+                        subscription,
+                      );
+                      const backlogged =
+                        connection.delivery.backlog.get(pendingCommandId) ?? [];
+                      for (const event of backlogged) {
+                        yield* Queue.offer(subscription, { _tag: "event", event });
+                      }
+                      connection.delivery.backlog.delete(pendingCommandId);
+                      if (
+                        backlogged.some(
+                          (event) =>
+                            event.kind === "complete" || event.kind === "failed",
+                        )
+                      ) {
+                        connection.delivery.subscribers.delete(pendingCommandId);
+                      }
+                    }),
                   );
-                  const backlogged =
-                    connection.backlog.get(pending.command.commandId) ?? [];
-                  for (const event of backlogged) {
-                    yield* Queue.offer(subscription, { _tag: "event", event });
-                  }
-                  connection.backlog.delete(pending.command.commandId);
-                  if (
-                    backlogged.some(
-                      (event) =>
-                        event.kind === "complete" || event.kind === "failed",
-                    )
-                  ) {
-                    connection.subscribers.delete(pending.command.commandId);
-                    yield* Queue.shutdown(subscription);
-                  }
                   let relayNext = yield* connection.tunnel.nextOutgoingSequence;
                   // A later control command may allocate its sequence while the
                   // preceding run envelope is still awaiting relay acceptance.
@@ -1331,7 +1365,7 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                     relayNext = yield* connection.tunnel.nextOutgoingSequence;
                   }
                   if (pending.envelope.sequence > relayNext) {
-                    connection.subscribers.delete(pending.command.commandId);
+                    connection.delivery.subscribers.delete(pending.command.commandId);
                     return yield* Effect.fail(
                       new RemoteSessionError({
                         message: `Remote command sequence gap: relay expects ${relayNext}, local state has ${pending.envelope.sequence}.`,
@@ -1345,7 +1379,7 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                           .send(pending.envelope)
                           .pipe(Effect.either);
                   if (Either.isLeft(sent)) {
-                    connection.subscribers.delete(pending.command.commandId);
+                    connection.delivery.subscribers.delete(pending.command.commandId);
                     active.delete(session.id);
                     yield* connection.tunnel.close;
                     failures += 1;
@@ -1354,6 +1388,12 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                     continue;
                   }
                   const ended = yield* Stream.fromQueue(subscription).pipe(
+                    Stream.takeUntil(
+                      (item) =>
+                        item._tag === "error" ||
+                        item.event.kind === "complete" ||
+                        item.event.kind === "failed",
+                    ),
                     Stream.runForEach((item) =>
                       item._tag === "error"
                         ? Effect.fail(item.error)
@@ -1367,7 +1407,7 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                     Effect.either,
                   );
                   if (Either.isLeft(ended)) {
-                    connection.subscribers.delete(pending.command.commandId);
+                    connection.delivery.subscribers.delete(pending.command.commandId);
                     active.delete(session.id);
                     yield* connection.tunnel.close;
                     failures += 1;
@@ -1389,16 +1429,21 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
                       claimedPendingCommandIds.delete(
                         pending.command.commandId,
                       );
-                      currentConnection?.subscribers.delete(
+                      currentConnection?.delivery.subscribers.delete(
                         pending.command.commandId,
                       );
                     }
                   }),
                 ),
-                Effect.ensuring(Queue.shutdown(output)),
               ),
             );
             return Stream.fromQueue(output).pipe(
+              Stream.takeUntil(
+                (item) =>
+                  item._tag === "error" ||
+                  item.event.kind === "complete" ||
+                  item.event.kind === "failed",
+              ),
               Stream.mapEffect((item) =>
                 item._tag === "event"
                   ? Effect.succeed(item.event)
@@ -1540,6 +1585,7 @@ export class RemoteSessionService extends Effect.Service<RemoteSessionService>()
         Effect.gen(function* () {
           const connection = active.get(sessionId);
           active.delete(sessionId);
+          deliveries.delete(sessionId);
           if (connection) {
             yield* Effect.tryPromise({
               try: async () =>

@@ -412,6 +412,10 @@ export const startFakeDeviceRelay = async (
       const acknowledged = Number(url.searchParams.get("acknowledgedSequence") ?? "0")
       const tunnel = tunnels.get(sessionId) ?? { envelopes: [] }
       tunnels.set(sessionId, tunnel)
+      const replaced = tunnel[endpoint]
+      if (replaced?.readyState === WebSocket.OPEN) {
+        replaced.close(4002, "Connection replaced")
+      }
       tunnel[endpoint] = websocket
       const newestOutgoingSequence = tunnel.envelopes
         .filter((envelope) => envelope.sender === endpoint)

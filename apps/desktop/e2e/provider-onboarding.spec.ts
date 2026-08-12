@@ -1,9 +1,42 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ModelCertification, type AuthKind } from "@jingler/core";
+import { Schema } from "effect";
 import { appShell, expect, test, type LaunchedApp } from "./fixtures.js";
 
 const SUBSCRIPTION_ENTITLEMENT = /Test subscription · subscription/;
 const SUBSCRIPTION_BILLING = /billing: subscription/;
+const CertificationDocument = Schema.Array(ModelCertification);
+
+const expectCertifiedRoute = (
+  launched: LaunchedApp,
+  authKind: AuthKind,
+): void => {
+  const certifications = Schema.decodeUnknownSync(CertificationDocument)(
+    JSON.parse(
+      readFileSync(
+        join(launched.home, "jingler", "runtime", "certifications.json"),
+        "utf8",
+      ),
+    ),
+  );
+  const certification = certifications.find(
+    (candidate) => candidate.authRoute.kind === authKind,
+  );
+  expect(certification).toMatchObject({
+    authRoute: {
+      kind: authKind,
+      subscription: true,
+      entitlementConfirmed: true,
+      apiBillingFallbackObserved: false,
+    },
+    capabilityProfiles: ["core"],
+  });
+  expect(certification?.results).toHaveLength(8);
+  expect(
+    certification?.results.every((result) => result.status === "passed"),
+  ).toBe(true);
+};
 
 const chooseFixtureRepo = async (launched: LaunchedApp): Promise<void> => {
   await launched.app.evaluate(({ dialog }, selected) => {
@@ -66,6 +99,7 @@ test("connects Claude Max with a pinned setup-token subscription route", async (
   await launched.window.getByRole("button", { name: "Connect Claude" }).click();
   await expect(input).toHaveValue("");
   await finishProviderSetup(launched, "Claude Pro / Max setup-token");
+  expectCertifiedRoute(launched, "claude-setup-token");
 
   const metadata = readFileSync(
     join(launched.home, "jingler", "runtime", "provider-connections.json"),
@@ -89,6 +123,7 @@ test("connects ChatGPT Codex with a pinned OAuth subscription route", async ({
 
   await launched.window.getByRole("button", { name: "Open browser" }).click();
   await finishProviderSetup(launched, "ChatGPT Codex subscription");
+  expectCertifiedRoute(launched, "openai-codex-oauth");
 });
 
 test("recovers a configured workspace that has no selectable provider", async ({

@@ -251,13 +251,29 @@ process.stdin.on("data", (chunk) => {
       if (connections === 2) {
         const resumedCommandId = received[0]?.commandId
         if (!resumedCommandId) throw new Error("missing persisted command")
-        socket.send(JSON.stringify({
-          type: "envelope",
-          envelope: encryptRemotePayload(key, "session_restart_abcdefgh", 1, "device", {
+        const replayed: ReadonlyArray<RemoteSessionEvent> = [
+          ...Array.from({ length: 64 }, (_, index): RemoteSessionEvent => ({
             version: 1, commandId: resumedCommandId, sessionId: "session_restart_abcdefgh",
-            eventSequence: 1, kind: "complete", payload: "done"
-          }, 1)
-        }))
+            eventSequence: index + 1, kind: "event", payload: `chunk-${index + 1}`
+          })),
+          {
+            version: 1, commandId: resumedCommandId, sessionId: "session_restart_abcdefgh",
+            eventSequence: 65, kind: "complete", payload: "done"
+          }
+        ]
+        replayed.forEach((event, index) => {
+          socket.send(JSON.stringify({
+            type: "envelope",
+            envelope: encryptRemotePayload(
+              key,
+              "session_restart_abcdefgh",
+              index + 1,
+              "device",
+              event,
+              1
+            )
+          }))
+        })
       }
       socket.on("message", (raw) => {
         const message = JSON.parse(raw.toString("utf8"))
@@ -328,7 +344,18 @@ process.stdin.on("data", (chunk) => {
         { prompt: "hello" }
       ).pipe(Stream.runCollect)
     }).pipe(Effect.provide(services)))
-    expect(Chunk.toReadonlyArray(events)).toEqual([{ version: 1, commandId: received[0]?.commandId, sessionId: "session_restart_abcdefgh", eventSequence: 1, kind: "complete", payload: "done" }])
+    expect(Chunk.toReadonlyArray(events)).toEqual([
+      ...Array.from({ length: 64 }, (_, index): RemoteSessionEvent => ({
+        version: 1, commandId: received[0]?.commandId ?? "missing-command",
+        sessionId: "session_restart_abcdefgh", eventSequence: index + 1,
+        kind: "event", payload: `chunk-${index + 1}`
+      })),
+      {
+        version: 1, commandId: received[0]?.commandId,
+        sessionId: "session_restart_abcdefgh", eventSequence: 65,
+        kind: "complete", payload: "done"
+      }
+    ])
     expect(connections).toBe(2)
     expect(grants).toBe(2)
     expect(received).toHaveLength(1)

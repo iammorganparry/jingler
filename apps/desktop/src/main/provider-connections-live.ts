@@ -14,11 +14,12 @@ import {
   probePiEntitlement,
   ProviderConnections,
   ProviderConnectionsError,
-  SecretStore
+  SecretStore,
+  verifyProviderModelBehavior,
+  runPiScenario
 } from "@jingler/cli-adapters"
 import {
   BUNDLED_RELEASE_CERTIFICATION_MANIFEST,
-  CURRENT_RUNTIME_CONTRACTS,
   type CodexLoginMethod,
   type ModelCertification
 } from "@jingler/core"
@@ -27,6 +28,7 @@ import {
   e2eCertification,
   e2eDiscoveredModel,
   e2eProviderConnection,
+  configureE2eVerificationProvider,
   loadE2ePiFixture
 } from "./e2e/pi-fixture.js"
 
@@ -69,37 +71,6 @@ const loginNotification = (event: AuthEvent): void => {
       break
   }
 }
-
-const incompleteCertification = (
-  providerId: string,
-  modelId: string,
-  authKind: ModelCertification["authRoute"]["kind"]
-): ModelCertification => ({
-  providerId,
-  modelId,
-  authRoute: {
-    kind: authKind,
-    observedRoute: authKind,
-    subscription:
-      authKind === "claude-setup-token" || authKind === "openai-codex-oauth",
-    entitlementConfirmed: true,
-    apiBillingFallbackObserved: false
-  },
-  versions: CURRENT_RUNTIME_CONTRACTS,
-  provenance: "local",
-  capabilityProfiles: [],
-  results: [
-    {
-      scenarioId: "behavior-contract.incomplete",
-      status: "failed",
-      failures: ["Full PiAgentRuntime behavior verification has not run"],
-      durationMs: 0,
-      tokens: 0,
-      costUsd: 0
-    }
-  ],
-  certifiedAt: new Date().toISOString()
-})
 
 const e2eCodexOAuth: CodexOAuthFlow = {
   login: async ({ signal }) => {
@@ -198,21 +169,38 @@ export const ProviderConnectionsLive = Layer.effect(
       }),
       verifyModel: (input) =>
         Effect.gen(function* () {
-          const connection = yield* broker.get(input.connectionId)
-          if (connection === null) {
-            return yield* Effect.fail(
-              new ProviderConnectionsError({
-                message: "Provider connection not found"
-              })
-            )
-          }
-          const certification = e2eFixture !== null
-            ? e2eCertification(e2eFixture, connection.providerId, input.modelId)
-            : incompleteCertification(
-                connection.providerId,
-                input.modelId,
-                connection.authKind
-              )
+          const resolved = yield* broker.resolve(input.connectionId).pipe(
+            Effect.mapError((cause) => new ProviderConnectionsError({
+              message: "Provider connection could not be resolved",
+              cause
+            }))
+          )
+          const certification = yield* verifyProviderModelBehavior({
+            connection: resolved.connection,
+            access: resolved.access,
+            credentials,
+            modelId: input.modelId,
+            ...(e2eFixture === null
+              ? {}
+              : {
+                  probe: (probeInput) => e2eEntitlementProbe({
+                    authKind: probeInput.authKind
+                  }),
+                  runScenario: (scenarioInput) => runPiScenario({
+                    ...scenarioInput,
+                    configureModelRuntime: configureE2eVerificationProvider(
+                      scenarioInput.connection.providerId,
+                      scenarioInput.scenarioId,
+                      scenarioInput.connection.authKind
+                    )
+                  })
+                })
+          }).pipe(
+            Effect.mapError((cause) => new ProviderConnectionsError({
+              message: cause.message,
+              cause
+            }))
+          )
           yield* Effect.tryPromise({
             try: () => certifications.put(certification),
             catch: (cause) =>

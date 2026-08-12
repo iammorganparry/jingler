@@ -184,6 +184,35 @@ describe("device session command handler", () => {
     expect(await handler.prepareOutgoingEnvelopes("command_1", encrypt)).toHaveLength(2)
   })
 
+  it("notifies a replacement tunnel when an admitted command settles", async () => {
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const handler = new SessionCommandHandler(join(root, "ledger.json"), {
+      execute: async (_input, emit) => {
+        await emit({ kind: "event", payload: { text: "before reconnect" } })
+        await gate
+        return "after reconnect"
+      }
+    })
+    const running = handler.handle(
+      command(),
+      1,
+      async () => Promise.reject(new Error("old tunnel closed"))
+    )
+    await vi.waitFor(async () => {
+      expect(await handler.prepareAllOutgoingEnvelopes(encrypt)).toHaveLength(1)
+    })
+    const flushed: number[] = []
+    const stopWatching = handler.watchPersisted(async () => {
+      flushed.push((await handler.prepareAllOutgoingEnvelopes(encrypt)).length)
+    })
+
+    release?.()
+    await running
+    await vi.waitFor(() => expect(flushed.at(-1)).toBe(2))
+    stopWatching()
+  })
+
   it("restores outgoing sequence and acknowledgements after process restart", async () => {
     const file = join(root, "ledger.json")
     const first = new SessionCommandHandler(file, { execute: async () => "one" })

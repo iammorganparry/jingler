@@ -6,7 +6,8 @@ import {
   fauxThinking,
   fauxToolCall,
   type Context as PiContext,
-  type FauxResponseStep
+  type FauxResponseStep,
+  type Provider
 } from "@earendil-works/pi-ai"
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import {
@@ -25,6 +26,7 @@ import {
   scriptedPlanPrd,
   type DiscoveredProviderModel
 } from "@jingler/cli-adapters"
+import { scriptedPiScenarioResponses } from "@jingler/cli-adapters/runtime/certification/pi-scenario-fixture"
 import { E2E_PI_CONNECTION_ID, E2E_PI_MODEL_ID, E2E_PI_PROVIDER_ID } from "./fixture-identity.js"
 import {
   E2E_BACKGROUND_TOOL,
@@ -667,5 +669,40 @@ export const configureE2ePiProvider = (fixture: E2ePiFixture) => {
   provider.setResponses([...responsesFor(fixture)])
   return (runtime: ModelRuntime): void => {
     runtime.registerNativeProvider(provider.provider)
+  }
+}
+
+export const configureE2eVerificationProvider = (
+  providerId: string,
+  scenarioId: string,
+  authKind: E2ePiFixture["authRoute"]
+) => {
+  const provider = fauxProvider({
+    provider: providerId,
+    api: `${providerId}-e2e-verification`,
+    models: [{ id: "eval-model", contextWindow: E2E_CONTEXT_WINDOW }],
+    tokensPerSecond: 0
+  })
+  provider.setResponses([...scriptedPiScenarioResponses(scenarioId)])
+  const runtimeProvider: Provider =
+    authKind === "claude-setup-token" || authKind === "openai-codex-oauth"
+      ? {
+          ...provider.provider,
+          auth: {
+            ...provider.provider.auth,
+            oauth: {
+              name: "Deterministic subscription",
+              isSubscription: true,
+              login: async () => {
+                throw new Error("E2E login is supplied by AuthBroker")
+              },
+              refresh: async (credential) => credential,
+              toAuth: async (credential) => ({ apiKey: credential.access })
+            }
+          }
+        }
+      : provider.provider
+  return (runtime: ModelRuntime): void => {
+    runtime.registerNativeProvider(runtimeProvider)
   }
 }
