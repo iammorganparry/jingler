@@ -871,7 +871,15 @@ const initRepo = (dir: string): void => {
   git(dir, ["config", "commit.gpgsign", "false"])
   writeFileSync(join(dir, "README.md"), "# e2e repo\n")
   git(dir, ["add", "-A"])
-  git(dir, ["commit", "-m", "init", "--no-gpg-sign"])
+  execFileSync("git", ["commit", "-m", "init", "--no-gpg-sign"], {
+    cwd: dir,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z",
+      GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z"
+    }
+  })
 }
 
 export const test = base.extend<{

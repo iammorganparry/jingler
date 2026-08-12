@@ -192,6 +192,10 @@ export const migrateRepoName = (value: unknown): unknown => {
   if (!isRecord(value)) return value
   const repoPath = typeof value.repoPath === "string" ? value.repoPath.trim() : ""
   if (repoPath.length === 0) return value
+  // Managed sandboxes deliberately mount every repository at /workspace. That
+  // path is runtime plumbing, not repository identity; the server-resolved
+  // `repo` field remains canonical for remote sessions.
+  if (repoPath === "/workspace" && typeof value.environmentId === "string") return value
   const derived = basename(repoPath)
   // `basename` yields "" for "/" and for a path that is only separators. An
   // empty group heading is worse than a stale one, so keep what was stored.

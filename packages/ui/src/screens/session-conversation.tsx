@@ -9,7 +9,7 @@ import type {
   User
 } from "@jingler/core"
 import type { DockSide } from "../app/terminal-panel.js"
-import type { PendingCloudSession } from "../app/cloud-session-startup-machine.js"
+import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
 import { SessionSidebar } from "../app/session-sidebar.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
@@ -157,9 +157,9 @@ export interface SessionConversationProps {
   newSessionView?: ReactNode
   /** Whether the mounted new-session view currently owns the main pane. */
   newSessionViewActive?: boolean
-  /** Cloud creation remains navigable before its durable Session record exists. */
-  pendingCloudSession?: PendingCloudSession | null
-  onSelectPendingCloudSession?: () => void
+  /** Remote creation remains navigable before its durable Session record exists. */
+  pendingEnvironmentSession?: PendingEnvironmentSession | null
+  onSelectPendingEnvironmentSession?: () => void
   /** Organization-scoped Memory takeover; credentials remain outside this tree. */
   memoryView?: ReactNode
   memoryEligible?: boolean
@@ -264,9 +264,9 @@ export function SessionConversation(props: SessionConversationProps) {
         memoryEligible={props.memoryEligible}
         memoryActive={props.memoryActive}
         onOpenMemory={props.onOpenMemory}
-        pendingCloudSession={props.pendingCloudSession}
-        pendingCloudSessionActive={props.newSessionViewActive}
-        onSelectPendingCloudSession={props.onSelectPendingCloudSession}
+        pendingEnvironmentSession={props.pendingEnvironmentSession}
+        pendingEnvironmentSessionActive={props.newSessionViewActive}
+        onSelectPendingEnvironmentSession={props.onSelectPendingEnvironmentSession}
       />
 
       <div className="m-2 ml-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-editor shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)]">

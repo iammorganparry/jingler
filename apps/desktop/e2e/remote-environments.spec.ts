@@ -65,6 +65,17 @@ const createRemoteWorkspace = async (window: Page): Promise<string> => {
   await window.getByRole("option", { name: "buildbox" }).click()
   await expect(window.getByRole("button", { name: "Create workspace" })).toBeEnabled({ timeout: 20_000 })
   await window.getByRole("button", { name: "Create workspace" }).click()
+  const startup = window.getByTestId("environment-startup-progress")
+  await expect(startup).toBeVisible()
+  await expect(
+    startup.getByRole("heading", { name: "Starting your session on buildbox" })
+  ).toBeVisible()
+  await expect(startup.locator('[data-phase="resolving-repository"]')).toHaveAttribute(
+    "data-status",
+    /active|complete/
+  )
+  const pending = window.getByTestId("pending-environment-session")
+  await expect(pending).toContainText("Starting on buildbox · widget")
   const row = sessionRow(window, "Untitled session")
   await expect(row).toBeVisible({ timeout: 20_000 })
   const testId = await row.getAttribute("data-testid")

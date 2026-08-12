@@ -33,4 +33,12 @@ describe("managed runtime dependency and cost footprint", () => {
     expect(wrangler).toContain('"max_instances": 10')
     expect(wrangler).toContain('"SANDBOX_TRANSPORT": "rpc"')
   })
+
+  it("uses one RPC transport for streamed turns and cancellation", () => {
+    const runtime = readRuntimeFile("src/session-runtime.ts")
+    expect(runtime).not.toContain('transport: "http"')
+    expect(runtime).not.toContain('setTransport("http")')
+    expect(runtime).toContain("onOutput")
+    expect(runtime).toContain("waitForExit")
+  })
 })

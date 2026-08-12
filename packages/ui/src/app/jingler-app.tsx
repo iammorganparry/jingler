@@ -84,7 +84,7 @@ import {
   type PluginPaletteCommand
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
-import { cloudSessionStartupMachine } from "./cloud-session-startup-machine.js"
+import { environmentSessionStartupMachine } from "./environment-session-startup-machine.js"
 import {
   BUILTIN_TAB,
   builtinTabContributions,
@@ -550,9 +550,9 @@ export function JinglerApp({
   const selected = split.activeSessionId
   const setSelected = split.selectSession
   const [newOpen, setNewOpen] = useState(false)
-  const [cloudStartup, sendCloudStartup] = useMachine(cloudSessionStartupMachine)
+  const [environmentStartup, sendEnvironmentStartup] = useMachine(environmentSessionStartupMachine)
   const [createdSessionToSelect, setCreatedSessionToSelect] = useState<string | null>(null)
-  const pendingCloudSession = cloudStartup.context.pending
+  const pendingEnvironmentSession = environmentStartup.context.pending
   const selectSession = useCallback(
     (id: string) => {
       memory?.onClose()
@@ -593,13 +593,13 @@ export function JinglerApp({
     setNewOpen(true)
   }, [memory])
 
-  const openPendingCloudSession = useCallback(() => {
+  const openPendingEnvironmentSession = useCallback(() => {
     memory?.onClose()
     setSettingsOpen(false)
     setNewOpen(true)
   }, [memory])
 
-  // A managed create resolves in the child before the parent's XState
+  // A remote create resolves in the child before the parent's XState
   // SESSION_CREATED update has produced a new `sessions` prop. Selecting that
   // id immediately lets the split-layout eligibility effect prune it as
   // unknown, leaving a blank workspace after the startup screen disappears.
@@ -1079,37 +1079,40 @@ export function JinglerApp({
     onProgress: ((phase: SessionCreationPhase) => void) | undefined,
     create: (report: (phase: SessionCreationPhase) => void) => Promise<Session>
   ) => {
-    const managed = environments.some(
-      (environment) => environment.id === input.environmentId && environment.kind === "managed"
+    const environment = environments.find(
+      (candidate) => candidate.id === input.environmentId
     )
-    if (managed) {
-      sendCloudStartup({
+    if (environment) {
+      sendEnvironmentStartup({
         type: "START",
-        id: "pending-cloud-session",
+        id: "pending-environment-session",
         title: cloudCreationTitle(input),
-        repo: input.repoName
+        repo: input.repoName,
+        environmentId: environment.id,
+        environmentName: environment.name,
+        environmentKind: environment.kind
       })
     }
     const report = (phase: SessionCreationPhase) => {
       onProgress?.(phase)
-      if (managed) sendCloudStartup({ type: "PROGRESS", phase })
+      if (environment) sendEnvironmentStartup({ type: "PROGRESS", phase })
     }
     try {
       const session = await create(report)
-      if (managed) {
+      if (environment) {
         setCreatedSessionToSelect(session.id)
-        sendCloudStartup({ type: "COMPLETED" })
+        sendEnvironmentStartup({ type: "COMPLETED" })
       }
       setNewOpen(false)
-      if (!managed) setSelected(session.id)
+      if (!environment) setSelected(session.id)
     } catch (cause) {
-      if (managed) {
+      if (environment) {
         setCreatedSessionToSelect(null)
-        sendCloudStartup({ type: "FAILED", error: cause })
+        sendEnvironmentStartup({ type: "FAILED", error: cause })
       }
       throw cause
     }
-  }, [environments, sendCloudStartup, setSelected])
+  }, [environments, sendEnvironmentStartup, setSelected])
 
   const handleCreate = useCallback(
     async (input: CreateSessionInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => {
@@ -1147,8 +1150,8 @@ export function JinglerApp({
         clis={clis}
         activeSessionId={selected}
         onSelectSession={selectSession}
-        pendingCloudSession={pendingCloudSession}
-        onSelectPendingCloudSession={openPendingCloudSession}
+        pendingEnvironmentSession={pendingEnvironmentSession}
+        onSelectPendingEnvironmentSession={openPendingEnvironmentSession}
         group={group}
         splitGroups={split.workspace.groups}
         activeGroupId={split.workspace.activeGroupId}
@@ -1236,12 +1239,12 @@ export function JinglerApp({
         memoryView={memory?.active ? memory.content : undefined}
         newSessionViewActive={newOpen}
         newSessionView={
-          (newOpen || pendingCloudSession !== null) && onCreateSession ? (
+          (newOpen || pendingEnvironmentSession !== null) && onCreateSession ? (
             <NewWorkspaceView
-              open={newOpen || pendingCloudSession !== null}
+              open={newOpen || pendingEnvironmentSession !== null}
               onClose={() => {
                 setNewOpen(false)
-                if (pendingCloudSession?.error) sendCloudStartup({ type: "DISMISS" })
+                if (pendingEnvironmentSession?.error) sendEnvironmentStartup({ type: "DISMISS" })
               }}
               onAddProject={
                 onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub
@@ -1250,7 +1253,7 @@ export function JinglerApp({
               }
               projects={projects}
               environments={environments}
-              cloudStartup={pendingCloudSession}
+              environmentStartup={pendingEnvironmentSession}
               capabilities={modelCapabilities}
               defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
               clis={clis}

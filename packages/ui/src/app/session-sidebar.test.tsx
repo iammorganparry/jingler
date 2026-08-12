@@ -18,27 +18,30 @@ const rowOrder = () =>
   )
 
 describe("SessionSidebar session identity", () => {
-  it("keeps an in-flight Cloud session navigable before it is persisted", () => {
+  it("keeps an in-flight remote session navigable before it is persisted", () => {
     const selectPending = vi.fn()
     render(
       <SessionSidebar
         activeSessionId="local"
         onSelect={() => {}}
         sessions={[session({ id: "local" })]}
-        pendingCloudSession={{
-          id: "pending-cloud-session",
-          title: "Investigate startup",
+        pendingEnvironmentSession={{
+          id: "pending-environment-session",
+          title: "Prepare on buildbox",
           repo: "jingler",
-          phase: "starting-sandbox",
+          environmentId: "device-buildbox",
+          environmentName: "buildbox",
+          environmentKind: "owned",
+          phase: "resolving-repository",
           error: null
         }}
-        onSelectPendingCloudSession={selectPending}
+        onSelectPendingEnvironmentSession={selectPending}
       />
     )
 
-    const row = screen.getByTestId("pending-cloud-session")
-    expect(row.textContent).toContain("Investigate startup")
-    expect(row.textContent).toContain("Starting in Cloud · jingler")
+    const row = screen.getByTestId("pending-environment-session")
+    expect(row.textContent).toContain("Prepare on buildbox")
+    expect(row.textContent).toContain("Starting on buildbox · jingler")
     fireEvent.click(row)
     expect(selectPending).toHaveBeenCalledOnce()
   })

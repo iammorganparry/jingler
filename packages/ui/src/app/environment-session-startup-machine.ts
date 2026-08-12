@@ -1,10 +1,14 @@
+import type { Environment } from "@jingler/core"
 import type { SessionCreationPhase } from "@jingler/contracts"
 import { assign, setup } from "xstate"
 
-export interface PendingCloudSession {
+export interface PendingEnvironmentSession {
   readonly id: string
   readonly title: string
   readonly repo: string
+  readonly environmentId: string
+  readonly environmentName: string
+  readonly environmentKind: Environment["kind"]
   readonly phase: SessionCreationPhase
   readonly error: string | null
 }
@@ -12,18 +16,26 @@ export interface PendingCloudSession {
 const messageOf = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause)
 
-export const cloudSessionStartupMachine = setup({
+export const environmentSessionStartupMachine = setup({
   types: {
-    context: {} as { pending: PendingCloudSession | null },
+    context: {} as { pending: PendingEnvironmentSession | null },
     events: {} as
-      | { type: "START"; id: string; title: string; repo: string }
+      | {
+          type: "START"
+          id: string
+          title: string
+          repo: string
+          environmentId: string
+          environmentName: string
+          environmentKind: Environment["kind"]
+        }
       | { type: "PROGRESS"; phase: SessionCreationPhase }
       | { type: "FAILED"; error: unknown }
       | { type: "COMPLETED" }
       | { type: "DISMISS" }
   }
 }).createMachine({
-  id: "cloud-session-startup",
+  id: "environment-session-startup",
   initial: "idle",
   context: { pending: null },
   states: {
@@ -36,6 +48,9 @@ export const cloudSessionStartupMachine = setup({
               id: event.id,
               title: event.title,
               repo: event.repo,
+              environmentId: event.environmentId,
+              environmentName: event.environmentName,
+              environmentKind: event.environmentKind,
               phase: "checking-access" as const,
               error: null
             }
@@ -75,6 +90,9 @@ export const cloudSessionStartupMachine = setup({
               id: event.id,
               title: event.title,
               repo: event.repo,
+              environmentId: event.environmentId,
+              environmentName: event.environmentName,
+              environmentKind: event.environmentKind,
               phase: "checking-access" as const,
               error: null
             }

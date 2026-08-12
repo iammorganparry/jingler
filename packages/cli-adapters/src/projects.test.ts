@@ -1,4 +1,5 @@
-import { join } from "node:path"
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { delimiter, join } from "node:path"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { initGitRepo, mkTemp, runExit, withTempRoot } from "./test-support.js"
@@ -106,5 +107,44 @@ describe("ProjectService", () => {
     expect(listed.value).toEqual([
       expect.objectContaining({ id: registered.value.id, availability: "missing" })
     ])
+  })
+
+  it("clones projects without allowing interactive credential prompts", async () => {
+    const origin = initGitRepo(join(repos.dir, "origin"))
+    const destination = join(repos.dir, "checkout")
+    const bin = join(repos.dir, "bin")
+    const invocation = join(repos.dir, "git-invocation.txt")
+    mkdirSync(bin)
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/sh\nprintf '%s\\n%s\\n%s\\n%s\\n' "$GIT_TERMINAL_PROMPT" "$GCM_INTERACTIVE" "$SSH_ASKPASS_REQUIRE" "$*" > "$JINGLER_GIT_INVOCATION"\nexec /usr/bin/git "$@"\n`
+    )
+    chmodSync(join(bin, "git"), 0o755)
+    const previousPath = process.env.PATH
+    const previousInvocation = process.env.JINGLER_GIT_INVOCATION
+    process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`
+    process.env.JINGLER_GIT_INVOCATION = invocation
+
+    try {
+      const result = await runExit(
+        ProjectService.clone({ url: origin, destination }).pipe(
+          Effect.provide(ProjectService.Default)
+        ),
+        temp.layer
+      )
+      expect(result._tag).toBe("Success")
+      expect(readFileSync(invocation, "utf8")).toBe([
+        "0",
+        "Never",
+        "never",
+        `-c credential.interactive=never clone -- ${origin} ${destination}`,
+        ""
+      ].join("\n"))
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      if (previousInvocation === undefined) delete process.env.JINGLER_GIT_INVOCATION
+      else process.env.JINGLER_GIT_INVOCATION = previousInvocation
+    }
   })
 })
