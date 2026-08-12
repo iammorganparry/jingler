@@ -88,12 +88,12 @@ describe("configured release candidates", () => {
       },
       {
         providerId: "openai-codex",
-        modelId: "openai-codex/gpt-5.6-terra",
+        modelId: "openai-codex/gpt-5.6-sol",
         authKind: "openai-codex-oauth"
       }
     ])
     expect(getBuiltinModel("anthropic", "claude-opus-5")).toBeDefined()
-    expect(getBuiltinModel("openai-codex", "gpt-5.6-terra")).toBeDefined()
+    expect(getBuiltinModel("openai-codex", "gpt-5.6-sol")).toBeDefined()
   })
 })
 
