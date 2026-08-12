@@ -275,6 +275,12 @@ export interface LaunchOptions {
    * teardown.
    */
   readonly userDataDir?: string;
+  /**
+   * Point the launched process's home-directory discovery at this launch's
+   * throwaway home. Use when testing imports from ~/.agents, ~/.claude, or
+   * similar roots without reading or mutating the developer's real files.
+   */
+  readonly isolateSystemHome?: boolean;
   /** Seed config.json so the app boots configured (past first-run). */
   readonly configured?: boolean;
   /** Additional persisted workspace config for settings/routing scenarios. */
@@ -710,6 +716,7 @@ export const test = base.extend<{
           // the developer's PATH. In particular, a locally installed
           // GitHub CLI must not hide a built-in regression back to `gh`.
           PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+          ...(options.isolateSystemHome ? { HOME: home } : {}),
           JINGLER_HOME: home,
           ELECTRON_RENDERER_URL: "",
           // Auth: talk to the offline fake backend, and store the token as a plain

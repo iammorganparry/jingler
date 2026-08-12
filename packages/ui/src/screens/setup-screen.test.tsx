@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   ProviderCatalog,
+  ResourceDetectionResult,
   type GitHubConnection,
   type ProviderConnectionId,
 } from "@jingler/core";
@@ -47,6 +48,38 @@ const authenticatedCatalog = Schema.decodeSync(ProviderCatalog)({
   ],
   refreshedAt: "2026-08-12T08:00:00.000Z",
   stale: false,
+});
+
+const detectedResources = Schema.decodeSync(ResourceDetectionResult)({
+  candidates: [
+    {
+      id: "deploy",
+      kind: "skill",
+      name: "Deploy",
+      description: "Deploy the application.",
+      byteLength: 42,
+      provenance: {
+        origin: "shared",
+        sourceRoot: "/resources",
+        sourcePath: "/resources/deploy/SKILL.md",
+        importedAt: null,
+      },
+    },
+    {
+      id: "review",
+      kind: "prompt",
+      name: "Review",
+      description: "Review current changes.",
+      byteLength: 37,
+      provenance: {
+        origin: "claude",
+        sourceRoot: "/prompts",
+        sourcePath: "/prompts/review.md",
+        importedAt: null,
+      },
+    },
+  ],
+  skipped: [],
 });
 
 const props = (
@@ -149,5 +182,23 @@ describe("SetupScreen", () => {
     );
     expect(screen.getByText("ABCD-EFGH")).toBeTruthy();
     expect(screen.getByText("https://example.test/device")).toBeTruthy();
+  });
+
+  it("imports every detected resource with one action", () => {
+    const onImportResources = vi.fn();
+    render(
+      <SetupScreen
+        {...props({
+          step: "resources",
+          resourceDetection: detectedResources,
+          onImportResources,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Import all" }));
+    expect(onImportResources).toHaveBeenCalledWith(
+      detectedResources.candidates,
+    );
   });
 });

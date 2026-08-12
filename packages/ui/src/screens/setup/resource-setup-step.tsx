@@ -74,6 +74,9 @@ export function ResourceSetupStep({ detection, busy, error, onImport, onSkip, on
         <Button variant="primary" disabled={busy || chosen.length === 0} onClick={() => onImport(chosen)}>
           {busy ? <Spinner size={13} /> : <Boxes size={14} />} Import selected
         </Button>
+        <Button variant="secondary" disabled={busy || candidates.length === 0} onClick={() => onImport(candidates)}>
+          <Boxes size={14} /> Import all
+        </Button>
         {busy ? (
           <Button variant="ghost" onClick={onCancel}>Cancel import</Button>
         ) : (

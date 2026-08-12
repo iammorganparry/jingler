@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appShell, expect, test, type LaunchedApp } from "./fixtures.js";
 
@@ -217,4 +217,55 @@ test("skips provider setup and preserves that choice across restart", async ({
       name: "Connect a model provider",
     }),
   ).toHaveCount(0);
+});
+
+test("imports every detected agent resource in one action", async ({
+  launchApp,
+}) => {
+  const launched = await launchApp({
+    withRepo: true,
+    isolateSystemHome: true,
+    piFixture: {
+      scenarioId: "onboarding-import-all",
+      authRoute: "api-key",
+      seedConnection: false,
+    },
+    seed: ({ home }) => {
+      const skills = join(home, ".agents", "skills");
+      for (const [id, description] of [
+        ["deploy", "Deploy safely"],
+        ["review", "Review changes"],
+      ] as const) {
+        const directory = join(skills, id);
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(
+          join(directory, "SKILL.md"),
+          `name: ${id}\ndescription: ${description}\n`,
+        );
+      }
+    },
+  });
+  await chooseFixtureRepo(launched);
+  await launched.window.getByRole("button", { name: "Skip for now" }).click();
+
+  await expect(
+    launched.window.getByText("deploy", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    launched.window.getByText("review", { exact: true }),
+  ).toBeVisible();
+  await launched.window.getByRole("button", { name: "Import all" }).click();
+  await expect(appShell(launched.window)).toBeVisible();
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window
+    .getByRole("button", { name: "Agents & skills" })
+    .click();
+  await expect(
+    launched.window.getByText("deploy", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    launched.window.getByText("review", { exact: true }),
+  ).toBeVisible();
 });
