@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
 import { startFakeAuthServer } from "./fake-auth.js";
@@ -13,6 +15,9 @@ import {
 const runRealProviderQa = process.env.JINGLER_REAL_PROVIDER_QA === "1";
 const realProviderHome = process.env.JINGLER_REAL_PROVIDER_HOME;
 const realClaudeSetupToken = process.env.JINGLER_REAL_CLAUDE_SETUP_TOKEN;
+const realProviderExecutable = Schema.decodeUnknownOption(
+  Schema.String.pipe(Schema.minLength(1)),
+)(process.env.JINGLER_REAL_PROVIDER_EXECUTABLE);
 const PROVIDERS_SECTION = /^Providers/u;
 
 const openProviders = async (window: Page): Promise<void> => {
@@ -140,20 +145,32 @@ const launchRealProviderApp = async (home: string) => {
   // fixture, but leave the provider document on production safeStorage.
   const auth = await startFakeAuthServer();
   try {
-    const app = await electron.launch({
-      args: [MAIN_ENTRY],
-      env: {
-        ...process.env,
-        ELECTRON_RENDERER_URL: "",
-        JINGLER_AUTH_URL: auth.url,
-        JINGLER_E2E: "0",
-        JINGLER_E2E_HEADLESS:
-          process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
-        JINGLER_HOME: resolve(home),
-        JINGLER_SCRIPTED_AGENT: "0",
-        JINGLER_SECRET_STORE: "",
-      },
-    });
+    const env = {
+      ...process.env,
+      ELECTRON_RENDERER_URL: "",
+      JINGLER_AUTH_URL: auth.url,
+      JINGLER_E2E: "0",
+      JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
+      JINGLER_HOME: resolve(home),
+      JINGLER_SCRIPTED_AGENT: "0",
+      JINGLER_SECRET_STORE: "",
+    };
+    const app = await (async () => {
+      if (realProviderExecutable._tag === "None") {
+        return electron.launch({ args: [MAIN_ENTRY], env });
+      }
+      const executablePath = resolve(realProviderExecutable.value);
+      if (!existsSync(executablePath)) {
+        throw new Error(
+          `Packaged Jingler executable not found: ${executablePath}`,
+        );
+      }
+      return electron.launch({
+        executablePath,
+        args: [`--user-data-dir=${resolve(home, "chromium-real-provider")}`],
+        env,
+      });
+    })();
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
     await signInToProduct(app, window, auth.token);
