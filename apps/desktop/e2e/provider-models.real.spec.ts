@@ -1,46 +1,19 @@
 import { resolve } from "node:path";
-import { ProviderId, ProviderModelId } from "@jingler/core";
 import { expect, test } from "@playwright/test";
-import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
 import { startFakeAuthServer } from "./fake-auth.js";
 import { appShell } from "./fixtures.js";
 import { MAIN_ENTRY } from "./global-setup.js";
-
-const RealProviderTarget = Schema.Struct({
-  providerId: ProviderId,
-  modelId: ProviderModelId,
-  connectionLabel: Schema.String.pipe(Schema.minLength(1)),
-  label: Schema.String.pipe(Schema.minLength(1)),
-});
-type RealProviderTarget = Schema.Schema.Type<typeof RealProviderTarget>;
+import {
+  REAL_PROVIDER_TARGETS,
+  type RealProviderTarget,
+} from "./real-provider-targets.js";
 
 const runRealProviderQa = process.env.JINGLER_REAL_PROVIDER_QA === "1";
 const realProviderHome = process.env.JINGLER_REAL_PROVIDER_HOME;
 const realClaudeSetupToken = process.env.JINGLER_REAL_CLAUDE_SETUP_TOKEN;
 const PROVIDERS_SECTION = /^Providers/u;
-
-const target = (input: RealProviderTarget): RealProviderTarget =>
-  Schema.decodeUnknownSync(RealProviderTarget)(input);
-
-// These are the newest Claude and Codex families in the pinned pi 0.84.1
-// catalog. Keeping exact IDs here makes a pi catalog change a deliberate QA
-// update instead of silently certifying whichever row happens to render first.
-const TARGETS: ReadonlyArray<RealProviderTarget> = [
-  target({
-    providerId: "anthropic",
-    modelId: "anthropic/claude-opus-5",
-    connectionLabel: "Claude Pro / Max setup-token",
-    label: "Claude Opus 5",
-  }),
-  target({
-    providerId: "openai-codex",
-    modelId: "openai-codex/gpt-5.6-terra",
-    connectionLabel: "ChatGPT Codex subscription",
-    label: "GPT-5.6 Terra",
-  }),
-];
 
 const openProviders = async (window: Page): Promise<void> => {
   await expect(appShell(window)).toBeVisible({ timeout: 30_000 });
@@ -198,7 +171,7 @@ test.describe("real current provider models", () => {
     "Set JINGLER_REAL_PROVIDER_QA=1 and JINGLER_REAL_PROVIDER_HOME to a production-authenticated Jingler home.",
   );
 
-  for (const model of TARGETS) {
+  for (const model of REAL_PROVIDER_TARGETS) {
     test(`certifies ${model.label} through production pi`, async () => {
       test.setTimeout(12 * 60_000);
       if (!realProviderHome) throw new Error("Real provider home is required");
