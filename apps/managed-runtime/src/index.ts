@@ -30,6 +30,10 @@ import {
   destroyRuntimeSession,
   unregisterRuntimeSession,
 } from "./runtime-cleanup.js";
+import {
+  runtimeConfigurationForRegistration,
+  type RuntimeRegistrationInput,
+} from "./runtime-configuration.js";
 
 export { Sandbox } from "@cloudflare/sandbox";
 export { ManagedAccountObject } from "./account-runtime.js";
@@ -119,23 +123,7 @@ class RuntimeRegistrationError extends Error {
 
 const runtimeRegistration = async (
   env: ManagedRuntimeEnv,
-  input: {
-    readonly subject: string;
-    readonly environmentId: string;
-    readonly environmentGeneration: number;
-    readonly sessionId: string;
-    readonly reservationId: string | null;
-    readonly repositorySlug?: string;
-    readonly connectionId: Schema.Schema.Type<
-      typeof ManagedRuntimeProviderSelection
-    >["connectionId"];
-    readonly providerId: Schema.Schema.Type<
-      typeof ManagedRuntimeProviderSelection
-    >["providerId"];
-    readonly modelId: Schema.Schema.Type<
-      typeof ManagedRuntimeProviderSelection
-    >["modelId"];
-  },
+  input: RuntimeRegistrationInput,
 ): Promise<RuntimeRegistration> => {
   const accountResponse = await env.MANAGED_ACCOUNT.getByName(
     input.subject,
@@ -200,12 +188,13 @@ const runtimeRegistration = async (
   ).fetch("https://managed-session.internal/v1/configure", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...input,
-      authStateVersion: account.auth.authStateVersion,
-      providerConnection,
-      githubCapabilityHandle: account.githubCapabilityHandle,
-    }),
+    body: JSON.stringify(
+      runtimeConfigurationForRegistration(input, {
+        authStateVersion: account.auth.authStateVersion,
+        providerConnection,
+        githubCapabilityHandle: account.githubCapabilityHandle,
+      }),
+    ),
   });
   if (!sessionResponse.ok) {
     await releaseRegistration();

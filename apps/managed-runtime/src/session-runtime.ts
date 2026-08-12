@@ -1,5 +1,4 @@
 import {
-  ManagedProviderCapability,
   ManagedRuntimeProviderSelection,
   managedRuntimeActionForOperation,
   type ManagedProviderCapability as ManagedProviderCapabilityValue,
@@ -37,6 +36,7 @@ import { r2CheckpointStore } from "./r2-checkpoint-store.js";
 import { fields, json } from "./worker-http.js";
 import { managedProviderEnvironment } from "./provider-session-config.js";
 import { ManagedExecutionScheduler } from "./execution-scheduler.js";
+import { ManagedRuntimeConfiguration } from "./runtime-configuration.js";
 
 interface RuntimeMetadata {
   readonly subject: string;
@@ -100,25 +100,6 @@ const commandProviderSelection = (
   );
   return Either.isRight(decoded) ? decoded.right : null;
 };
-
-const RuntimeConfiguration = Schema.Struct({
-  subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  environmentId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-  sessionId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-  environmentGeneration: Schema.Int.pipe(Schema.positive()),
-  authStateVersion: Schema.Int.pipe(Schema.positive()),
-  providerConnection: ManagedProviderCapability,
-  githubCapabilityHandle: Schema.NullOr(
-    Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  ),
-  repositorySlug: Schema.optional(
-    Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  ),
-  reservationId: Schema.NullOr(
-    Schema.String.pipe(Schema.minLength(8), Schema.maxLength(128)),
-  ),
-  ...ManagedRuntimeProviderSelection.fields,
-});
 
 export const decodeManagedCommandFrame = (
   value: unknown,
@@ -592,7 +573,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/v1/configure" && request.method === "POST") {
-      const decoded = Schema.decodeUnknownEither(RuntimeConfiguration)(
+      const decoded = Schema.decodeUnknownEither(ManagedRuntimeConfiguration)(
         await request.json(),
         { onExcessProperty: "error" },
       );
