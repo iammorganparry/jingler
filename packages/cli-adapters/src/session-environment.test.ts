@@ -7,7 +7,11 @@ import {
   ProviderId,
   ProviderModelId
 } from "@jingler/core"
-import { continueSessionOnEnvironment, setSessionEnvironment } from "./session-environment.js"
+import {
+  continueSessionOnEnvironment,
+  environmentRuntimeIsCurrent,
+  setSessionEnvironment
+} from "./session-environment.js"
 
 const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
 const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
@@ -77,5 +81,37 @@ describe("session environment handoff", () => {
       setSessionEnvironment(canonical, "buildbox", d)
     )
     expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("requires the exact runtime contracts and target identity", () => {
+    expect(environmentRuntimeIsCurrent(target)).toBe(true)
+    expect(environmentRuntimeIsCurrent({
+      ...target,
+      capabilities: { ...target.capabilities, runtime: undefined }
+    })).toBe(false)
+    expect(environmentRuntimeIsCurrent({
+      ...target,
+      capabilities: {
+        ...target.capabilities,
+        runtime: {
+          versions: { ...CURRENT_RUNTIME_CONTRACTS, piSdk: "stale" },
+          toolIds: [],
+          resourceIds: [],
+          targetId: target.id
+        }
+      }
+    })).toBe(false)
+    expect(environmentRuntimeIsCurrent({
+      ...target,
+      capabilities: {
+        ...target.capabilities,
+        runtime: {
+          versions: CURRENT_RUNTIME_CONTRACTS,
+          toolIds: [],
+          resourceIds: [],
+          targetId: "another-target"
+        }
+      }
+    })).toBe(false)
   })
 })

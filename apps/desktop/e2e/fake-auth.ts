@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { MemoryDashboardSummary } from "@jingler/contracts";
-import { ManagedProviderCredential as ManagedProviderCredentialSchema } from "@jingler/core";
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  ManagedProviderCredential as ManagedProviderCredentialSchema,
+} from "@jingler/core";
 import { Either, Schema } from "effect";
 
 const MEMORY_PROTOCOL = "2026-07-28";
@@ -130,6 +133,7 @@ export interface FakeAuthServerOptions {
   readonly listenHost?: string;
   readonly publicHost?: string;
   readonly unavailableSocialProviders?: ReadonlyArray<"github" | "google">;
+  readonly managedRuntime?: "current" | "missing" | "stale";
 }
 
 /**
@@ -736,6 +740,8 @@ const normalizeOptions = (
         unavailable: false,
         acceptedLearningOrganizationIds: [],
         reviewProposals: true,
+        managedRuntime: "current",
+        unavailableSocialProviders: [],
         listenHost: "127.0.0.1",
         publicHost: "127.0.0.1",
       }
@@ -747,6 +753,7 @@ const normalizeOptions = (
         acceptedLearningOrganizationIds:
           value.acceptedLearningOrganizationIds ?? [],
         reviewProposals: value.reviewProposals ?? true,
+        managedRuntime: value.managedRuntime ?? "current",
         unavailableSocialProviders: value.unavailableSocialProviders ?? [],
         listenHost: value.listenHost ?? "127.0.0.1",
         publicHost: value.publicHost ?? "127.0.0.1",
@@ -914,6 +921,21 @@ export const startFakeAuthServer = async (
                   "session.observe",
                 ],
                 maxConcurrentSessions: 1,
+                ...(options.managedRuntime === "missing"
+                  ? {}
+                  : {
+                      runtime: {
+                        versions: {
+                          ...CURRENT_RUNTIME_CONTRACTS,
+                          ...(options.managedRuntime === "stale"
+                            ? { piSdk: "stale" }
+                            : {}),
+                        },
+                        toolIds: [],
+                        resourceIds: [],
+                        targetId: "managed_cloud_e2e_account",
+                      },
+                    }),
               },
               state: "online",
               agentVersion: null,

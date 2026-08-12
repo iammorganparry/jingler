@@ -15,6 +15,7 @@ export const runtimeCapabilitiesMatch = (
   expected: RuntimeCapabilityManifest,
   target: RuntimeCapabilityManifest
 ): boolean =>
+  expected.targetId === target.targetId &&
   Object.entries(expected.versions).every(
     ([key, value]) =>
       target.versions[key as keyof RuntimeContractVersions] === value

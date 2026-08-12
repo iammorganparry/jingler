@@ -54,6 +54,7 @@ import {
   SessionStore,
   setSessionEnvironment,
   continueSessionOnEnvironment,
+  environmentRuntimeIsCurrent,
   ContextManager,
   TerminalService,
   ThemeService,
@@ -1250,6 +1251,14 @@ const provisionRemoteSession = (
         repoName: remoteProject.name,
       };
     } else if (environment.kind === "managed") {
+      if (!environmentRuntimeIsCurrent(environment)) {
+        return yield* Effect.fail(
+          new GitError({
+            message:
+              "Cloud is running an incompatible agent runtime. Update Cloud before starting this pi session.",
+          }),
+        );
+      }
       yield* reportSessionCreation(progress, "resolving-repository");
       const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
       managedSessionId = sessionId;
@@ -1675,6 +1684,17 @@ export const continueOnEnvironment = (
           }
           let requestedSessionId: string | undefined;
           if (targetEnvironment?.kind === "managed") {
+            if (!environmentRuntimeIsCurrent(targetEnvironment)) {
+              return yield* Effect.fail(
+                new EnvironmentHandoffError({
+                  reason: "incompatible",
+                  message:
+                    "Cloud is running an incompatible agent runtime. Update Cloud before continuing this pi session.",
+                  sessionId: source.id,
+                  environmentId: target,
+                }),
+              );
+            }
             if (checkpoint.repositorySlug === null) {
               return yield* Effect.fail(
                 new EnvironmentHandoffError({

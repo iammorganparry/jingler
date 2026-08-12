@@ -20,19 +20,9 @@ export const sessionContainsWork = (
   session.semanticBranchPending === false ||
   session.chats.some((chat) => chat.piSessionId !== undefined)
 
-export const compatibleEnvironment = (
-  session: Session,
-  environment: Environment | undefined
-): boolean => {
-  if (environment === undefined || environment.state !== "online") return false
-  const chat = session.chats.find((candidate) => candidate.id === session.activeChatId)
-  const connectionId = chat?.connectionId ?? session.connectionId
-  const modelId = chat?.modelId ?? session.modelId
-  if (connectionId === undefined || modelId === undefined) return false
+/** A remote target may execute this build only when its pi contracts match exactly. */
+export const environmentRuntimeIsCurrent = (environment: Environment): boolean => {
   const runtime = environment.capabilities.runtime
-  const connection = environment.capabilities.providerConnections?.find(
-    (candidate) => candidate.id === connectionId
-  )
   return runtime !== undefined &&
     runtimeCapabilitiesMatch(
       {
@@ -42,7 +32,22 @@ export const compatibleEnvironment = (
         targetId: environment.id
       },
       runtime
-    ) &&
+    )
+}
+
+export const compatibleEnvironment = (
+  session: Session,
+  environment: Environment | undefined
+): boolean => {
+  if (environment === undefined || environment.state !== "online") return false
+  const chat = session.chats.find((candidate) => candidate.id === session.activeChatId)
+  const connectionId = chat?.connectionId ?? session.connectionId
+  const modelId = chat?.modelId ?? session.modelId
+  if (connectionId === undefined || modelId === undefined) return false
+  const connection = environment.capabilities.providerConnections?.find(
+    (candidate) => candidate.id === connectionId
+  )
+  return environmentRuntimeIsCurrent(environment) &&
     connection?.status === "authenticated"
 }
 

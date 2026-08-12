@@ -1,4 +1,8 @@
-import type { Environment, ManagedEnvironment } from "@jingler/core";
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  type Environment,
+  type ManagedEnvironment,
+} from "@jingler/core";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -116,6 +120,12 @@ describe("environment routes", () => {
     expect(response.status).toBe(200);
     expect(body.environments).toHaveLength(2);
     expect(body.environments[1].capabilities).not.toHaveProperty("harnesses");
+    expect(body.environments[1].capabilities.runtime).toEqual({
+      versions: CURRENT_RUNTIME_CONTRACTS,
+      toolIds: [],
+      resourceIds: [],
+      targetId: managed.id,
+    });
   });
 
   it("lists owned and managed environments in stable created order", async () => {

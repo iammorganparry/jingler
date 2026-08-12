@@ -7,6 +7,7 @@ import type {
 } from "@jingler/core";
 import {
   CreateManagedEnvironmentRequest,
+  CURRENT_RUNTIME_CONTRACTS,
   DeleteManagedEnvironmentRequest,
   EnvironmentInventoryResponse,
   ManagedProviderCredential,
@@ -480,7 +481,9 @@ const matchesProviderSelection = (
 export const managedCloudIdForUser = (userId: string): string =>
   `managed_cloud_${crypto.createHash("sha256").update(userId).digest("hex").slice(0, 32)}`;
 
-const managedCloudCapabilities = (): ManagedEnvironment["capabilities"] => ({
+const managedCloudCapabilities = (
+  targetId: string,
+): ManagedEnvironment["capabilities"] => ({
   version: 1,
   capabilities: [
     "session.start",
@@ -489,23 +492,32 @@ const managedCloudCapabilities = (): ManagedEnvironment["capabilities"] => ({
     "session.observe",
   ],
   maxConcurrentSessions: 1,
+  runtime: {
+    versions: CURRENT_RUNTIME_CONTRACTS,
+    toolIds: [],
+    resourceIds: [],
+    targetId,
+  },
 });
 
-const managedCloudEnvironment = (userId: string): ManagedEnvironment => ({
-  kind: "managed",
-  id: managedCloudIdForUser(userId),
-  name: "Cloud",
-  platform: { os: "linux", arch: "x64" },
-  capabilities: managedCloudCapabilities(),
-  state: "online",
-  agentVersion: null,
-  lastSeenAt: null,
-  region: null,
-  instanceType: "basic",
-  generation: 1,
-  createdAt: 0,
-  updatedAt: 0,
-});
+const managedCloudEnvironment = (userId: string): ManagedEnvironment => {
+  const id = managedCloudIdForUser(userId);
+  return {
+    kind: "managed",
+    id,
+    name: "Cloud",
+    platform: { os: "linux", arch: "x64" },
+    capabilities: managedCloudCapabilities(id),
+    state: "online",
+    agentVersion: null,
+    lastSeenAt: null,
+    region: null,
+    instanceType: "basic",
+    generation: 1,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+};
 
 const ensureManagedCloudEnvironment = async (
   dependencies: EnvironmentRoutesDependencies,
@@ -518,7 +530,7 @@ const ensureManagedCloudEnvironment = async (
       ...existing,
       name: "Cloud",
       state: "online",
-      capabilities: managedCloudCapabilities(),
+      capabilities: managedCloudCapabilities(environmentId),
     };
   }
   const created = await dependencies.store.create({
@@ -527,7 +539,7 @@ const ensureManagedCloudEnvironment = async (
     displayName: "Cloud",
     region: null,
     instanceType: "basic",
-    capabilities: managedCloudCapabilities(),
+    capabilities: managedCloudCapabilities(environmentId),
     idempotencyKey: MANAGED_CLOUD_IDEMPOTENCY_KEY,
     at: dependencies.now(),
   });
@@ -535,7 +547,7 @@ const ensureManagedCloudEnvironment = async (
     ...created,
     name: "Cloud",
     state: "online",
-    capabilities: managedCloudCapabilities(),
+    capabilities: managedCloudCapabilities(environmentId),
   };
 };
 

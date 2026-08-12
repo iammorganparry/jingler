@@ -20,5 +20,6 @@ describe("agent runtime contract", () => {
       versions: { ...CURRENT_RUNTIME_CONTRACTS, diff: "old" }
     })).toBe(false)
     expect(runtimeCapabilitiesMatch(local, { ...local, toolIds: [] })).toBe(false)
+    expect(runtimeCapabilitiesMatch(local, { ...local, targetId: "other-device" })).toBe(false)
   })
 })

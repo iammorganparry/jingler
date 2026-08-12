@@ -5,6 +5,7 @@ import {
   E2E_PI_MODEL_ID,
   E2E_PI_PROVIDER_ID,
 } from "../src/main/e2e/fixture-identity.js";
+import { startFakeAuthServer } from "./fake-auth.js";
 
 const DEVICES_SECTION = /^Devices/;
 const MESSAGE_BOX = /Message/;
@@ -147,4 +148,37 @@ test("selects the fixed authenticated Cloud execution target", async ({
       name: "Cancel environment continuation",
     })
     .click();
+});
+
+test("rejects an incompatible Cloud runtime before workspace provisioning", async ({
+  launchApp,
+}) => {
+  const authServer = await startFakeAuthServer({ managedRuntime: "missing" });
+  try {
+    const app = await launchApp({
+      authServer,
+      configured: true,
+      withRepo: true,
+      sessions: ({ repoPath }) => {
+        execFileSync(
+          "git",
+          ["remote", "add", "origin", "https://github.com/iammorganparry/jingler.git"],
+          { cwd: repoPath },
+        );
+        return [localSession(repoPath)];
+      },
+    });
+    await expect(appShell(app.window)).toBeVisible();
+    await app.window.getByTestId("new-session").click();
+    await app.window.getByRole("button", { name: "Execution environment" }).click();
+    await app.window.getByRole("option", { name: "Cloud" }).click();
+    await app.window.getByRole("button", { name: "Create workspace" }).click();
+
+    await expect(app.window.getByRole("alert")).toContainText(
+      "Cloud is running an incompatible agent runtime",
+    );
+    expect(authServer.managedRequests).toHaveLength(0);
+  } finally {
+    await authServer.close();
+  }
 });
