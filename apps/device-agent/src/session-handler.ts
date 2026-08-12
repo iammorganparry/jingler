@@ -49,6 +49,17 @@ export interface SessionCommandHandlerPolicy {
 
 export type PersistedEventCallback = (commandId: string) => Promise<void>
 
+const notifyPersisted = async (
+  callback: PersistedEventCallback | undefined,
+  commandId: string
+): Promise<void> => {
+  try {
+    await callback?.(commandId)
+  } catch {
+    // Persistence is authoritative. A replacement tunnel replays the durable event.
+  }
+}
+
 export const SESSION_COMMAND_HANDLER_POLICY: SessionCommandHandlerPolicy = {
   maxRetainedCommands: 256,
   maxEventsPerCommand: 4_096
@@ -357,7 +368,7 @@ export class SessionCommandHandler {
         event: Omit<RemoteSessionEvent, "version" | "commandId" | "sessionId" | "eventSequence">
       ) => {
         events.push(await this.#appendEvent(command, event, false))
-        await onEventPersisted?.(command.commandId)
+        await notifyPersisted(onEventPersisted, command.commandId)
       }
       let status: "complete" | "failed"
       let terminal: RemoteSessionEvent
@@ -377,7 +388,7 @@ export class SessionCommandHandler {
       }
       events.push(terminal)
       await this.#settle(command.commandId, status)
-      await onEventPersisted?.(command.commandId)
+      await notifyPersisted(onEventPersisted, command.commandId)
       return events
     })
 

@@ -165,6 +165,25 @@ describe("device session command handler", () => {
     expect((await handler.transportState()).acknowledgedDesktopSequence).toBe(2)
   })
 
+  it("keeps a durably recorded command running when its live tunnel flush fails", async () => {
+    const file = join(root, "ledger.json")
+    const handler = new SessionCommandHandler(file, {
+      execute: async (_input, emit) => {
+        await emit({ kind: "event", payload: { text: "persisted before reconnect" } })
+        return "done"
+      }
+    })
+
+    const events = await handler.handle(
+      command(),
+      1,
+      async () => Promise.reject(new Error("tunnel closed"))
+    )
+
+    expect(events.map((event) => event.kind)).toEqual(["event", "complete"])
+    expect(await handler.prepareOutgoingEnvelopes("command_1", encrypt)).toHaveLength(2)
+  })
+
   it("restores outgoing sequence and acknowledgements after process restart", async () => {
     const file = join(root, "ledger.json")
     const first = new SessionCommandHandler(file, { execute: async () => "one" })

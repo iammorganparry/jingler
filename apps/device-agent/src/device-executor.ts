@@ -25,6 +25,7 @@ import { SessionStore } from "@jingler/cli-adapters/sessions"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
 import { WorkspaceService } from "@jingler/cli-adapters/workspace"
 import {
+  checkoutWorkspaceHandoffBase,
   exportWorkspaceHandoff,
   importWorkspaceHandoff
 } from "@jingler/cli-adapters/workspace-handoff"
@@ -559,12 +560,13 @@ export const makeLiveDeviceSessionCommandExecutor = (
     ),
     importHandoff: (sessionId, checkpoint) => run(
       repoPath(sessionId).pipe(
-        Effect.flatMap((path) => Effect.tryPromise(() => importWorkspaceHandoff(
-          path,
-          Schema.decodeUnknownSync(WorkspaceTransferCheckpoint)(checkpoint, {
+        Effect.flatMap((path) => Effect.tryPromise(async () => {
+          const decoded = Schema.decodeUnknownSync(WorkspaceTransferCheckpoint)(checkpoint, {
             onExcessProperty: "error"
           })
-        )))
+          await checkoutWorkspaceHandoffBase(path, decoded)
+          await importWorkspaceHandoff(path, decoded)
+        }))
       )
     ),
     importConversation: (sessionId, messages) => run(
