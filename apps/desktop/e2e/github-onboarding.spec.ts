@@ -37,7 +37,7 @@ const finishProviderSetup = async (window: Page): Promise<void> => {
   await expect(
     window.getByRole("heading", { name: "Connect a model provider" })
   ).toBeVisible()
-  await window.getByRole("button", { name: "Use model" }).click()
+  await window.getByRole("button", { name: "Continue" }).click()
   await expect(
     window.getByRole("heading", { name: "Import agent resources" })
   ).toBeVisible()

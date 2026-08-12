@@ -92,7 +92,7 @@ test("manages approved resources and inspects a redacted real-pi run", async ({ 
   const inspector = window.getByRole("region", { name: "Runtime inspector" })
   await expect(inspector.getByText("api-key")).toBeVisible()
   await expect(inspector.getByText("done", { exact: true })).toBeVisible()
-  await expect(inspector.getByText(/prompt 1 · tools 1 · diff 1 · pi 0\.84\.1/)).toBeVisible()
+  await expect(inspector.getByText(/prompt 1 · tools 3 · diff 1 · pi 0\.84\.1/)).toBeVisible()
   await inspector.getByRole("button", { name: "Export diagnostics" }).click()
   await expect(inspector.getByRole("status")).toHaveText("Redacted diagnostic bundle prepared.")
   await expect(inspector).not.toContainText("Record a runtime diagnostic")

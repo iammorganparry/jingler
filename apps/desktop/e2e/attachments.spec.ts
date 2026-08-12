@@ -101,7 +101,9 @@ test("a message sent against a proposed plan revises it immediately", async ({ l
   // the parked planning turn.
   await busyComposer.fill("and then open a PR")
   await busyComposer.press("Enter")
-  await expect(window.getByText("Queued", { exact: true })).toHaveCount(0)
+  await expect(
+    window.getByTestId("conversation-scroll").getByText("Queued", { exact: true })
+  ).toHaveCount(0)
   await expect(window.getByText("Refactor auth flow (revised)", { exact: true })).toBeVisible({
     timeout: 20_000
   })

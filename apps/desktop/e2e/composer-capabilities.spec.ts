@@ -53,11 +53,9 @@ test("offers only certified connection models, never harness choices", async ({ 
   await expect(appShell(launched.window)).toBeVisible()
 
   await launched.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` }).click()
-  await expect(
-    launched.window.getByRole("option", {
-      name: new RegExp(`${MODEL_LABEL} ${MODEL_ID} · desktop`)
-    })
-  ).toBeVisible()
+  const modelOption = launched.window.getByRole("option", { name: new RegExp(`^${MODEL_LABEL}`) })
+  await expect(modelOption).toBeVisible()
+  await expect(modelOption).toContainText(`${MODEL_ID} · desktop`)
   await expect(launched.window.getByText(/Claude Code|Codex CLI|OpenCode|Cursor Agent/i)).toHaveCount(0)
 })
 

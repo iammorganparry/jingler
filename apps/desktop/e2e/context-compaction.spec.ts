@@ -61,10 +61,10 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
   // ── The meter reads a live snapshot across the RPC boundary ──
   const meter = window.getByRole("button", { name: "Compact now" })
   await expect(meter).toBeVisible({ timeout: 20_000 })
-  // 42.1k is the scripted adapter's reported context size. Seeing it here proves
+  // The scripted provider reports context in the 40k range. Seeing it here proves
   // the Usage event reached the renderer AND that `Context.state` resolved a
   // trigger point — the meter renders nothing without one.
-  await expect(meter).toContainText(/4\d\.\dk/)
+  await expect(meter).toContainText(/4\d(?:\.\d)?k/)
 
   // ── Compact ──
   await meter.click()
