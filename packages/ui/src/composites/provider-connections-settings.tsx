@@ -5,8 +5,9 @@ import {
   ProviderId,
   type ProviderModelId
 } from "@jingler/core"
-import { Check, LogOut, RefreshCw, ShieldCheck } from "lucide-react"
-import * as React from "react"
+import { useMachine } from "@xstate/react"
+import { Check, LogOut, Plus, RefreshCw, ShieldCheck } from "lucide-react"
+import { useEffect, useMemo } from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Spinner } from "../components/loading.js"
@@ -14,6 +15,9 @@ import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
 import { providerAuthRouteLabel, providerStatusTone } from "../lib/provider-connection-labels.js"
 import { ProviderAuthForms } from "./provider-auth-forms.js"
+import { providerConnectionsSettingsMachine } from "./provider-connections-settings-machine.js"
+
+const EMPTY_CONNECTIONS: ProviderCatalog["connections"] = []
 
 export interface ProviderConnectionsSettingsProps {
   catalog: ProviderCatalog | null
@@ -56,19 +60,41 @@ export function ProviderConnectionsSettings({
   onStartCodex,
   onSetApiKey
 }: ProviderConnectionsSettingsProps) {
-  const connections = catalog?.connections ?? []
-  const [selectedId, setSelectedId] = React.useState<ProviderConnectionId | null>(
-    defaultConnectionId ?? connections[0]?.connection.id ?? null
+  const connections = catalog?.connections ?? EMPTY_CONNECTIONS
+  const connectionIds = useMemo(
+    () => connections.map(({ connection }) => connection.id),
+    [connections]
   )
+  const [selection, sendSelection] = useMachine(providerConnectionsSettingsMachine, {
+    input: { connectionIds, defaultConnectionId }
+  })
+  useEffect(() => {
+    sendSelection({ type: "CATALOG_UPDATED", connectionIds })
+  }, [connectionIds, sendSelection])
+  const adding = selection.matches("adding")
   const selected =
-    connections.find(({ connection }) => connection.id === selectedId) ?? connections[0] ?? null
+    adding
+      ? null
+      : connections.find(
+          ({ connection }) => connection.id === selection.context.selectedId
+        ) ?? connections[0] ?? null
   const newConnectionId = () => ProviderConnectionId.make(crypto.randomUUID())
 
   return (
     <>
       <div className="flex w-[328px] max-w-[45%] flex-none flex-col border-r border-hairline">
-        <div className="flex flex-none flex-col gap-1 p-4 pb-3">
-          <span className="text-[15px] font-bold text-text-bright">Provider connections</span>
+        <div className="flex flex-none flex-col gap-3 p-4 pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[15px] font-bold text-text-bright">Provider connections</span>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => sendSelection({ type: "ADD" })}
+            >
+              <Plus size={12} /> Add connection
+            </Button>
+          </div>
           <span className="text-[11.5px] leading-relaxed text-muted-foreground">
             Each connection pins an account, target, and billing route. Jingler never falls through to another credential.
           </span>
@@ -78,7 +104,9 @@ export function ProviderConnectionsSettings({
             <button
               key={connection.id}
               type="button"
-              onClick={() => setSelectedId(connection.id)}
+              onClick={() =>
+                sendSelection({ type: "SELECT", connectionId: connection.id })
+              }
               className={cn(
                 "flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-left",
                 selected?.connection.id === connection.id

@@ -232,6 +232,28 @@ test("adds a provider from settings after provider onboarding was skipped", asyn
   ).toBeVisible();
 });
 
+test("adds a second provider connection from settings", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-second-connection",
+      authRoute: "openai-codex-oauth",
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: /Providers/u }).click();
+  await launched.window.getByRole("button", { name: "Add connection" }).click();
+  await launched.window.getByRole("button", { name: "Open browser" }).click();
+
+  await expect(
+    launched.window.getByText("ChatGPT Codex subscription", { exact: true }).last(),
+  ).toBeVisible();
+});
+
 test("reverifies the stale canonical default model from provider settings", async ({
   launchApp,
 }) => {

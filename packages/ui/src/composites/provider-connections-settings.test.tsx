@@ -90,6 +90,52 @@ describe("ProviderConnectionsSettings", () => {
     )
   })
 
+  it("adds another account when a provider connection already exists", () => {
+    const onStartCodex = vi.fn()
+    render(
+      <ProviderConnectionsSettings
+        catalog={catalog}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={vi.fn()}
+        onConnectClaude={vi.fn()}
+        onStartCodex={onStartCodex}
+        onSetApiKey={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open browser" }))
+
+    expect(onStartCodex).toHaveBeenCalledWith(expect.any(String), "browser")
+  })
+
+  it("selects a connection created while the add form is open", () => {
+    const empty = Schema.decodeSync(ProviderCatalog)({
+      connections: [],
+      refreshedAt: "2026-08-10T08:00:00.000Z",
+      stale: false
+    })
+    const props = {
+      onRefresh: vi.fn(),
+      onVerify: vi.fn(),
+      onMakeDefault: vi.fn(),
+      onLogout: vi.fn(),
+      onConnectClaude: vi.fn(),
+      onStartCodex: vi.fn(),
+      onSetApiKey: vi.fn()
+    }
+    const view = render(
+      <ProviderConnectionsSettings catalog={empty} {...props} />
+    )
+
+    view.rerender(<ProviderConnectionsSettings catalog={catalog} {...props} />)
+
+    expect(screen.getByText(/Max · desktop · billing: subscription/u)).toBeTruthy()
+    expect(screen.queryByText("Add a provider connection")).toBeNull()
+  })
+
   it("reconnects a subscription whose encrypted credential is unavailable", () => {
     const onConnectClaude = vi.fn()
     const unavailable = Schema.decodeSync(ProviderCatalog)({
