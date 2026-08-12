@@ -51,6 +51,36 @@ describe("pi event normalization", () => {
         } as never
       })
     ).toEqual({ _tag: "Failed", message: "rate limited" })
+
+    expect(
+      normalizePiEvent({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [],
+          api: "openai-codex-responses",
+          provider: "openai-codex",
+          model: "gpt-5.4",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              total: 0
+            }
+          },
+          stopReason: "error",
+          errorMessage: "invalid provider tool schema",
+          timestamp: 0
+        }
+      })
+    ).toEqual({ _tag: "Failed", message: "invalid provider tool schema" })
   })
 
   it("includes the resolved model context window in usage", () => {

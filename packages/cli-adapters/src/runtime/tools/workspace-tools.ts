@@ -12,6 +12,13 @@ const roles = [
   "background"
 ] as const
 const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
+const EmptyInput = Schema.Struct({})
+const EMPTY_PROVIDER_INPUT = {
+  type: "object",
+  properties: {},
+  required: [],
+  additionalProperties: false
+} as const
 
 export class WorkspaceInspectionError extends Data.TaggedError(
   "WorkspaceInspectionError"
@@ -73,7 +80,7 @@ export const makeWorkspaceInspectionPort = Effect.gen(function* () {
 const inspectionTool = <Input, Encoded>(
   definition: Pick<
     ToolDefinition<Input, Encoded>,
-    "id" | "description" | "input" | "execute"
+    "id" | "description" | "input" | "providerInputSchema" | "execute"
   >
 ): ToolDefinition<Input, Encoded> => ({
   ...definition,
@@ -97,7 +104,8 @@ export const registerWorkspaceInspectionTools = (
       id: "workspace_list_files",
       description:
         "List tracked and untracked non-ignored files in the current workspace.",
-      input: Schema.Struct({}),
+      input: EmptyInput,
+      providerInputSchema: EMPTY_PROVIDER_INPUT,
       execute: () => Effect.runPromise(workspace.listFiles(cwd))
     })
   )

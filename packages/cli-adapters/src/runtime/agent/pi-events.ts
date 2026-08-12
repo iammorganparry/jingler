@@ -102,14 +102,20 @@ const normalizeToolEnd = (
 const normalizeMessageEnd = (
   event: Extract<AgentSessionEvent, { readonly type: "message_end" }>,
   contextWindow?: number
-): StreamEvent | null =>
-  event.message.role === "assistant"
-    ? {
-        _tag: "Usage",
-        tokens: event.message.usage.totalTokens,
-        ...(contextWindow === undefined ? {} : { window: contextWindow })
-      }
-    : null
+): StreamEvent | null => {
+  if (event.message.role !== "assistant") return null
+  if (event.message.stopReason === "error") {
+    return {
+      _tag: "Failed",
+      message: event.message.errorMessage ?? "Provider request failed"
+    }
+  }
+  return {
+    _tag: "Usage",
+    tokens: event.message.usage.totalTokens,
+    ...(contextWindow === undefined ? {} : { window: contextWindow })
+  }
+}
 
 const normalizeCompactionEnd = (
   event: Extract<AgentSessionEvent, { readonly type: "compaction_end" }>

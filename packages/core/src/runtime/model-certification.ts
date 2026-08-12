@@ -17,7 +17,7 @@ export const CURRENT_RUNTIME_CONTRACTS: RuntimeContractVersions = {
   behavior: "3",
   authentication: "2",
   prompt: "1",
-  tools: "2",
+  tools: "3",
   diff: "1",
   policy: "1",
   capabilities: "1",

@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { ToolRegistry } from "../tools/tool-registry.js"
+import { registerWorkspaceInspectionTools } from "../tools/workspace-tools.js"
 import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 
@@ -72,6 +73,30 @@ describe("pi tool bridge", () => {
     expect(canUseTool).toHaveBeenCalledWith({ toolId: "workspace_edit", risk: "mutate" })
     expect(execute).toHaveBeenCalledOnce()
     expect(result?.details).toMatchObject({ status: "success" })
+  })
+
+  it("advertises no-argument tools as strict object schemas", () => {
+    const registry = new ToolRegistry()
+    registerWorkspaceInspectionTools(registry, "/workspace", {
+      listFiles: () => Effect.succeed([]),
+      readTextFile: (_cwd, path) =>
+        Effect.succeed({ path, text: "", language: null, revision: "rev-1" })
+    })
+
+    const tool = createPiTools(registry, spec, {
+      ...inactiveRuntimeActivity,
+      canUseTool: () => Effect.succeed("allow"),
+      askQuestion: () => Effect.succeed([]),
+      saveDraftPlan: () => Effect.void,
+      proposePlan: () => Effect.succeed({ _tag: "Reject" })
+    }).find(({ name }) => name === "workspace_list_files")
+
+    expect(tool?.parameters).toEqual({
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    })
   })
 })
 
