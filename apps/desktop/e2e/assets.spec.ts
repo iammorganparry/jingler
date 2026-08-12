@@ -5,6 +5,8 @@ import type { Page } from "@playwright/test"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
+const GRAMMAR_NOT_LOADED = /Grammar for language/u
+
 /**
  * Repository files are a session view, not Preview content. These scenarios
  * drive the real Asset RPC + Pierre editor path against a disposable worktree.
@@ -184,6 +186,10 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
     seed: seedAssets,
     sessions: ({ repoPath }) => [session(repoPath)]
   })
+  const grammarErrors: string[] = []
+  window.on("pageerror", (error) => {
+    if (GRAMMAR_NOT_LOADED.test(error.message)) grammarErrors.push(error.message)
+  })
 
   await expect(appShell(window)).toBeVisible()
   await filesTab(window).click()
@@ -233,6 +239,7 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   await expect.poll(() => readFileSync(join(repoPath, "src", "edit.ts"), "utf8")).toBe(
     "export const editable = 44\n"
   )
+  expect(grammarErrors).toEqual([])
 })
 
 test("quick-open fills the session with the repository tree and a changed-file diff", async ({
