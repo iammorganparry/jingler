@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { Schema } from "effect";
@@ -127,7 +128,7 @@ const certifyModel = async (
 const runConversation = async (
   window: Page,
   model: RealProviderTarget,
-): Promise<void> => {
+): Promise<string> => {
   await window.getByRole("button", { name: "Close settings" }).click();
   await createWorkspace(window, "Real pi provider canary");
   await expect(
@@ -135,7 +136,7 @@ const runConversation = async (
   ).toBeVisible();
   const composer = window.getByPlaceholder("Message the agent…");
   await expect(composer).toBeVisible({ timeout: 30_000 });
-  const expected = `${model.label} real pi turn passed.`;
+  const expected = `${model.label} real pi history ${randomUUID()}.`;
   await composer.fill(
     `Reply with exactly this sentence and nothing else: ${expected}`,
   );
@@ -143,6 +144,7 @@ const runConversation = async (
   await expect(window.getByText(expected, { exact: true }).last()).toBeVisible({
     timeout: 3 * 60_000,
   });
+  return expected;
 };
 
 const runWorkspaceMutation = async (
@@ -180,6 +182,22 @@ const runWorkspaceMutation = async (
   await expect(
     rail.locator(`[data-item-path="${path}"]`),
   ).toHaveAttribute("data-item-git-status", "added", { timeout: 30_000 });
+};
+
+const runRestartContinuation = async (
+  window: Page,
+  expected: string,
+): Promise<void> => {
+  await window.getByRole("button", { name: "Close settings" }).click();
+  const composer = window.getByPlaceholder("Message the agent…");
+  await expect(composer).toBeVisible({ timeout: 30_000 });
+  await composer.fill(
+    "Repeat the exact canary sentence from my first message. Reply with that sentence and nothing else.",
+  );
+  await composer.press("Enter");
+  await expect(window.getByText(expected, { exact: true }).last()).toBeVisible({
+    timeout: 3 * 60_000,
+  });
 };
 
 const launchRealProviderApp = async (home: string) => {
@@ -234,15 +252,23 @@ test.describe("real current provider models", () => {
     test(`certifies ${model.label} through production pi`, async () => {
       test.setTimeout(12 * 60_000);
       if (!realProviderHome) throw new Error("Real provider home is required");
-      const { app, auth, window } =
-        await launchRealProviderApp(realProviderHome);
+      const first = await launchRealProviderApp(realProviderHome);
+      let expected: string;
       try {
-        await certifyModel(window, model);
-        await runConversation(window, model);
-        await runWorkspaceMutation(window, model);
+        await certifyModel(first.window, model);
+        expected = await runConversation(first.window, model);
+        await runWorkspaceMutation(first.window, model);
       } finally {
-        await app.close();
-        await auth.close();
+        await first.app.close();
+        await first.auth.close();
+      }
+
+      const restarted = await launchRealProviderApp(realProviderHome);
+      try {
+        await runRestartContinuation(restarted.window, expected);
+      } finally {
+        await restarted.app.close();
+        await restarted.auth.close();
       }
     });
   }
