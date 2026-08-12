@@ -1,4 +1,5 @@
 import { clipboard, shell } from "electron"
+import { setTimeout as delay } from "node:timers/promises"
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai"
 import {
   AgentSecretStore,
@@ -73,8 +74,25 @@ const loginNotification = (event: AuthEvent): void => {
 }
 
 const e2eCodexOAuth: CodexOAuthFlow = {
-  login: async ({ signal }) => {
+  login: async ({ signal, prompt, notify }) => {
     if (signal.aborted) throw new Error("Login cancelled")
+    const method = await prompt({
+      type: "select",
+      message: "Choose a deterministic Codex login method",
+      options: [
+        { id: "browser", label: "Browser" },
+        { id: "device_code", label: "Device code" }
+      ]
+    })
+    if (method === "device_code") {
+      notify({
+        type: "device_code",
+        userCode: "JING-LER1",
+        verificationUri: "https://login.example.test/device",
+        expiresInSeconds: 600
+      })
+      await delay(100, undefined, { signal })
+    }
     return {
       access: "e2e-codex-access",
       refresh: "e2e-codex-refresh",

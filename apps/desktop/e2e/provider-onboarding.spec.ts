@@ -126,6 +126,28 @@ test("connects ChatGPT Codex with a pinned OAuth subscription route", async ({
   expectCertifiedRoute(launched, "openai-codex-oauth");
 });
 
+test("connects ChatGPT Codex with device-code OAuth through the main process", async ({
+  launchApp,
+}) => {
+  const launched = await launchApp({
+    withRepo: true,
+    piFixture: {
+      scenarioId: "onboarding-codex-device-code",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+    },
+  });
+  await chooseFixtureRepo(launched);
+
+  await launched.window.getByRole("button", { name: "Use device code" }).click();
+  await expect(launched.window.getByText("JING-LER1")).toBeVisible();
+  await expect(
+    launched.window.getByText("https://login.example.test/device"),
+  ).toBeVisible();
+  await finishProviderSetup(launched, "ChatGPT Codex subscription");
+  expectCertifiedRoute(launched, "openai-codex-oauth");
+});
+
 test("recovers a configured workspace that has no selectable provider", async ({
   launchApp,
 }) => {
