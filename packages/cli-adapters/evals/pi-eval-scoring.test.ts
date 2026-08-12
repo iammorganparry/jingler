@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
 import type { EvalObservation, EvalTrace } from "./behavior-contract.js"
-import { scoreScenario, assertReportRedacted, redactReport } from "./pi-eval.js"
+import {
+  scoreScenario,
+  assertReportRedacted,
+  redactErrorMessage,
+  redactReport
+} from "./pi-eval.js"
 import { scenarioById } from "./pi-scenarios.js"
 
 const scenario = (id: string) => {
@@ -85,5 +90,14 @@ describe("pi behavior scoring", () => {
     const secret = "sk-secret-value"
     expect(assertReportRedacted(`token=${secret}`, [secret])).toEqual(["report contains a configured secret"])
     expect(redactReport(`token=${secret}`, [secret])).toBe(`token=${"[REDACTED]"}`)
+  })
+
+  it("does not render nested provider causes", () => {
+    const secret = "sk-secret-value"
+    const error = new Error("provider verification failed", {
+      cause: new Error(`upstream rejected ${secret}`)
+    })
+
+    expect(redactErrorMessage(error, [secret])).toBe("provider verification failed")
   })
 })

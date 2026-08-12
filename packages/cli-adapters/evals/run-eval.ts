@@ -7,7 +7,7 @@ import {
 import { Effect, Schema } from "effect"
 import { EvalTrace } from "./behavior-contract.js"
 import { LiveEvalMatrix, runLiveMatrix } from "./live/live-matrix.js"
-import { redactReport, scoreScenario } from "./pi-eval.js"
+import { redactErrorMessage, redactReport, scoreScenario } from "./pi-eval.js"
 import { CORE_PI_SCENARIOS, scenarioById } from "./pi-scenarios.js"
 import { runDeterministicScenario } from "./deterministic-runtime.js"
 import { AtomicJsonFile } from "../src/runtime/persistence/atomic-json-file.js"
@@ -66,7 +66,12 @@ const traces = mode === "deterministic"
         const provenance = process.env.JINGLER_EVAL_REVIEWED === "1"
           ? "reviewed-release" as const
           : "local" as const
-        const live = await Effect.runPromise(runLiveMatrix(targets, provenance))
+        const live = await Effect.runPromise(runLiveMatrix(targets, provenance)).catch((cause) => {
+          const failure = cause instanceof Error ? cause : new Error("Live evaluation failed")
+          throw new Error(
+            redactErrorMessage(failure, [...secretValues(), ...liveCredentialValues])
+          )
+        })
         certifications = live.map((result) => result.certification)
         return live.flatMap((result) => result.traces)
       })()

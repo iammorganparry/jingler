@@ -70,6 +70,12 @@ export const redactReport = (
     .filter((secret) => secret.length > 0)
     .reduce((redacted, secret) => redacted.split(secret).join("[REDACTED]"), value)
 
+/** Render only an error's public message; nested provider causes may contain credentials. */
+export const redactErrorMessage = (
+  error: Error,
+  secrets: ReadonlyArray<string>
+): string => redactReport(error.message, secrets)
+
 export const assertReportRedacted = (
   value: string,
   secrets: ReadonlyArray<string>
