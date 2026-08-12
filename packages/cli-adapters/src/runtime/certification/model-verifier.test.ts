@@ -104,12 +104,6 @@ describe("provider model behavior verification", () => {
             { kind: "file-change", status: "R", path: "src/renamed.ts", oldPath: "src/old.ts" },
             { kind: "event", tag: "Done" }
           ] as const
-        case "resource.cleanup":
-          return [
-            { kind: "resource", name: "managed-mcp", state: "opened" },
-            { kind: "resource", name: "managed-mcp", state: "closed" },
-            { kind: "event", tag: "Done" }
-          ] as const
         case "capability.managed-resources":
           return [
             { kind: "tool-call", tool: "jingler_list_resources", risk: "read" },
@@ -163,7 +157,7 @@ describe("provider model behavior verification", () => {
       })
     )
 
-    expect(runScenario).toHaveBeenCalledTimes(8)
+    expect(runScenario).toHaveBeenCalledTimes(7)
     expect(certification).toMatchObject({
       providerId: "anthropic",
       modelId: "anthropic/claude-sonnet",
@@ -177,7 +171,7 @@ describe("provider model behavior verification", () => {
       capabilityProfiles: ["core"],
       certifiedAt: "2026-08-12T12:00:00.000Z"
     })
-    expect(certification.results).toHaveLength(8)
+    expect(certification.results).toHaveLength(7)
     expect(certification.results.every((result) => result.status === "passed")).toBe(true)
   })
 })

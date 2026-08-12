@@ -17,12 +17,6 @@ export const scriptedPiScenarioResponses = (
       fauxAssistantMessage("complete")
     ]
   }
-  if (scenarioId === "resource.cleanup") {
-    return [
-      fauxAssistantMessage(fauxToolCall("managed-mcp", {}), { stopReason: "toolUse" }),
-      fauxAssistantMessage("complete")
-    ]
-  }
   if (scenarioId === "capability.managed-resources") {
     return [
       fauxAssistantMessage(fauxToolCall("jingler_list_resources", { query: "managed" }), { stopReason: "toolUse" }),

@@ -67,10 +67,17 @@ describe("pi behavior scoring", () => {
   })
 
   it("fails resource cleanup when close is absent", () => {
-    const result = scoreScenario(scenario("resource.cleanup"), trace("resource.cleanup", [
-      { kind: "resource", name: "managed-mcp", state: "opened" },
-      { kind: "event", tag: "Done" }
-    ]))
+    const result = scoreScenario(
+      scenario("capability.managed-resources"),
+      trace("capability.managed-resources", [
+        { kind: "tool-call", tool: "jingler_list_resources", risk: "read" },
+        { kind: "tool-call", tool: "jingler_load_resource", risk: "read" },
+        { kind: "tool-call", tool: "mcp__managed__write_file", risk: "execute" },
+        { kind: "file-change", status: "A", path: "src/mcp-created.ts", oldPath: null },
+        { kind: "resource", name: "managed-mcp", state: "opened" },
+        { kind: "event", tag: "Done" }
+      ])
+    )
     expect(result.status).toBe("failed")
   })
 

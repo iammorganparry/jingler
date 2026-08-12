@@ -29,6 +29,15 @@ export interface ToolArtifactReference {
   readonly byteLength: number
 }
 
+/** JSON Schema subset accepted by pi for object-valued tool parameters. */
+export interface ToolProviderInputSchema {
+  readonly $schema?: string
+  readonly type: "object"
+  readonly properties?: Readonly<Record<string, object>>
+  readonly required?: ReadonlyArray<string>
+  readonly additionalProperties?: boolean
+}
+
 export interface ToolResultEnvelope {
   readonly status: "success" | "error" | "cancelled"
   readonly value: unknown | null
@@ -69,6 +78,8 @@ export interface ToolDefinition<Input, Encoded = Input> {
   readonly version: string
   readonly description: string
   readonly input: Schema.Schema<Input, Encoded>
+  /** Exact provider-visible schema when execution uses an external validator. */
+  readonly providerInputSchema?: ToolProviderInputSchema
   readonly risk: ToolRisk
   readonly roles: ReadonlyArray<AgentRole>
   readonly modes: ReadonlyArray<RuntimeMode>
@@ -287,6 +298,10 @@ export class ToolRegistry {
 
   inputSchemaFor(id: string): Schema.Schema<unknown, unknown> | null {
     return this.#tools.get(id)?.input ?? null
+  }
+
+  providerInputSchemaFor(id: string): ToolProviderInputSchema | null {
+    return this.#tools.get(id)?.providerInputSchema ?? null
   }
 
   hasMutatingTools(role: AgentRole, mode: RuntimeMode): boolean {

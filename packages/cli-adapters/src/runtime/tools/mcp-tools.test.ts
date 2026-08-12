@@ -115,6 +115,9 @@ it("discovers, namespaces, validates, invokes, and closes stateless MCP clients"
     expect(
       registry.capabilitiesFor("conversation", "ask").map(({ id }) => id)
     ).toEqual(["mcp__jingler-browser__navigate"])
+    expect(
+      registry.providerInputSchemaFor("mcp__jingler-browser__navigate")
+    ).toEqual(tool.inputSchema)
 
     const invalid = await Effect.runPromise(
       registry.execute({

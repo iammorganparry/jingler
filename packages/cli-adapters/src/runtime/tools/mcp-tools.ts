@@ -245,6 +245,7 @@ const registerTool = (
     version: "1",
     description: tool.description ?? `${source.server.name} MCP tool ${tool.name}`,
     input: argumentsSchema,
+    providerInputSchema: tool.inputSchema,
     risk: source.risk,
     roles,
     modes,

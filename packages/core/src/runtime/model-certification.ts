@@ -14,7 +14,7 @@ export const RuntimeContractVersions = Schema.Struct({
 export type RuntimeContractVersions = Schema.Schema.Type<typeof RuntimeContractVersions>
 
 export const CURRENT_RUNTIME_CONTRACTS: RuntimeContractVersions = {
-  behavior: "2",
+  behavior: "3",
   authentication: "2",
   prompt: "1",
   tools: "2",

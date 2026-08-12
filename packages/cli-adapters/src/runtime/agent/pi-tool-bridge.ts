@@ -86,12 +86,13 @@ export const createPiTools = (
     if (input === null) {
       throw new Error(`Active tool has no input schema: ${capability.id}`)
     }
+    const providerInput = registry.providerInputSchemaFor(capability.id)
     return defineTool({
       name: capability.id,
       label: capability.id,
       description: capability.description,
       promptSnippet: capability.description,
-      parameters: Type.Unsafe(JSONSchema.make(input)),
+      parameters: Type.Unsafe(providerInput ?? JSONSchema.make(input)),
       execute: (toolCallId, parameters, signal, onUpdate) =>
         executeTool({
           registry,

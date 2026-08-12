@@ -57,13 +57,6 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
     ordering: []
   }),
   scenario({
-    id: "resource.cleanup",
-    capability: "resources",
-    required: [resourceOpened("managed-mcp"), resourceClosed("managed-mcp"), event("Done")],
-    forbidden: [],
-    ordering: [before(resourceOpened("managed-mcp"), resourceClosed("managed-mcp"))]
-  }),
-  scenario({
     id: "capability.managed-resources",
     capability: "resources",
     required: [

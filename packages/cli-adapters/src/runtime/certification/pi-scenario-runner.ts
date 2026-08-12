@@ -42,8 +42,6 @@ const promptFor = (scenarioId: string): string => {
       return "Call workspace_edit once with path src/edit.ts. If permission is denied, stop without trying another tool."
     case "diff.create-edit-delete-rename":
       return "Call workspace_edit exactly once with path src/edit.ts, then finish."
-    case "resource.cleanup":
-      return "Call managed-mcp exactly once, then finish."
     case "capability.managed-resources":
       return "List managed resources, load managed-skill and managed-prompt by id, then call mcp__managed__write_file. Call each exactly once, then finish."
     case "structured.question-plan":
@@ -102,31 +100,6 @@ const fileChangeRegistry = (root: string, observations: Array<EvalObservation>):
         rename(join(root, "src/old.ts"), join(root, "src/renamed.ts"))
       ])
       return { changed: true }
-    }
-  })
-  return registry
-}
-
-const resourceRegistry = (observations: Array<EvalObservation>): ToolRegistry => {
-  const registry = new ToolRegistry()
-  registry.register({
-    id: "managed-mcp",
-    version: "1",
-    description: "Open and close the deterministic managed resource.",
-    input: Schema.Struct({}),
-    risk: "read",
-    roles: ALL_ROLES,
-    modes: ALL_MODES,
-    timeoutMs: 5_000,
-    outputBudget: 1_000,
-    cancellable: true,
-    idempotency: "safe",
-    execute: async () => {
-      observations.push(
-        { kind: "resource", name: "managed-mcp", state: "opened" },
-        { kind: "resource", name: "managed-mcp", state: "closed" }
-      )
-      return { closed: true }
     }
   })
   return registry
@@ -243,7 +216,6 @@ const registryFor = async (
   root: string,
   observations: Array<EvalObservation>
 ): Promise<ToolRegistry | undefined> => {
-  if (scenarioId === "resource.cleanup") return resourceRegistry(observations)
   if (scenarioId === "capability.managed-resources") {
     return managedResourceRegistry(root, observations)
   }
