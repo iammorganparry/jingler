@@ -168,12 +168,14 @@ test.describe("real managed environment canary", () => {
         .click();
       await window.getByRole("option", { name: "Cloud" }).click();
       await window.getByRole("button", { name: "Create workspace" }).click();
-      await expect(window.getByTestId("cloud-startup-progress")).toBeVisible();
-      const pendingCloud = window.getByTestId("pending-cloud-session");
+      await expect(
+        window.getByTestId("environment-startup-progress"),
+      ).toBeVisible();
+      const pendingCloud = window.getByTestId("pending-environment-session");
       await expect(pendingCloud).toBeVisible();
       const startupAlert = window.getByRole("alert");
       await Promise.race([
-        expect(window.getByTestId("cloud-startup-progress")).toHaveCount(0, {
+        expect(window.getByTestId("environment-startup-progress")).toHaveCount(0, {
           timeout: 5 * 60_000,
         }),
         startupAlert

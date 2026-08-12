@@ -94,10 +94,10 @@ test("selects the fixed authenticated Cloud execution target", async ({
       billingRoute: "api",
       credentialPresent: true,
     });
-  const startup = app.window.getByTestId("cloud-startup-progress");
+  const startup = app.window.getByTestId("environment-startup-progress");
   await expect(startup).toBeVisible();
   await expect(
-    startup.getByRole("heading", { name: "Starting your Cloud session" }),
+    startup.getByRole("heading", { name: "Starting your session on Cloud" }),
   ).toBeVisible();
   await expect(
     app.window.getByRole("button", { name: "Close new session" }),
@@ -108,8 +108,8 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await expect(
     startup.locator('[data-phase="starting-sandbox"]'),
   ).toHaveAttribute("data-status", "active");
-  const pendingCloud = app.window.getByTestId("pending-cloud-session");
-  await expect(pendingCloud).toContainText("Starting in Cloud · widget");
+  const pendingCloud = app.window.getByTestId("pending-environment-session");
+  await expect(pendingCloud).toContainText("Starting on Cloud · widget");
   await app.window
     .getByText("Managed environment picker", { exact: true })
     .click();

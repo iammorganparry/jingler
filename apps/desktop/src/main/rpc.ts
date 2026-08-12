@@ -136,6 +136,7 @@ import type {
   SettingContribution,
   PrMergeMethod,
   PublishCheckpoint,
+  Project,
   ReviewComment,
   ReviewSubmitKind,
   ReasoningSetting,
@@ -1155,46 +1156,10 @@ export const createSessionRouted = (
           (cause) => new GitError({ message: cause.message, cause }),
         ),
       );
-    const resolvedInput =
-      input.projectId === undefined
-        ? input
-        : environment.kind === "managed"
-          ? input
-          : yield* RemoteSessionService.requestOnEnvironment(
-              input.environmentId,
-              "Projects.list",
-              {},
-            ).pipe(
-              Effect.flatMap(Schema.decodeUnknown(Schema.Array(ProjectSchema))),
-              Effect.flatMap((projects) => {
-                const project = projects.find(
-                  (candidate) => candidate.id === input.projectId,
-                );
-                return project === undefined
-                  ? Effect.fail(
-                      new GitError({
-                        message: `Project not found: ${input.projectId}`,
-                      }),
-                    )
-                  : Effect.succeed({
-                      ...input,
-                      repoPath: project.path,
-                      repoName: project.name,
-                    });
-              }),
-              Effect.mapError((cause) =>
-                cause instanceof GitError
-                  ? cause
-                  : new GitError({
-                      message: "Could not resolve the remote project",
-                      cause,
-                    }),
-              ),
-            );
     return yield* provisionRemoteSession(
       input.environmentId,
       "Sessions.create",
-      resolvedInput,
+      input,
       progress,
       environment,
     );
@@ -1212,6 +1177,39 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
       sessionCreationOptions(input),
     );
   });
+
+/** Resolve or clone one local project on an owned device during session startup. */
+const ensureProjectOnOwnedEnvironment = (
+  project: Project,
+  environmentId: string,
+) => Effect.gen(function* () {
+  const url = yield* GitService.remoteUrl(project.path).pipe(
+    Effect.flatMap((value) =>
+      value === null
+        ? Effect.fail(new GitError({ message: `${project.name} has no origin remote to clone.` }))
+        : Effect.succeed(value)
+    )
+  )
+  return yield* RemoteSessionService.requestOnEnvironment(
+    environmentId,
+    "Projects.ensure",
+    { url, name: project.name },
+  ).pipe(
+    Effect.timeoutFail({
+      duration: "60 seconds",
+      onTimeout: () => new GitError({
+        message: `Timed out preparing ${project.name} on ${environmentId}. Check that the device is online and its Git credentials can access the origin.`
+      })
+    }),
+    Effect.flatMap(Schema.decodeUnknown(ProjectSchema)),
+    Effect.map((remoteProject) => ({ ...remoteProject, environmentId })),
+    Effect.mapError((cause) =>
+      cause instanceof GitError
+        ? cause
+        : new GitError({ message: `Could not prepare ${project.name} on the selected host`, cause })
+    )
+  )
+})
 
 const provisionRemoteSession = (
   environmentId: string,
@@ -1238,7 +1236,20 @@ const provisionRemoteSession = (
         ));
     let requestSession = { id: "", environmentId };
     let requestInput = input;
-    if (environment.kind === "managed") {
+    if (environment.kind === "owned" && input.projectId !== undefined) {
+      yield* reportSessionCreation(progress, "resolving-repository");
+      const localProject = yield* ProjectService.get(input.projectId);
+      const remoteProject = yield* ensureProjectOnOwnedEnvironment(
+        localProject,
+        environmentId,
+      );
+      requestInput = {
+        ...input,
+        projectId: remoteProject.id,
+        repoPath: remoteProject.path,
+        repoName: remoteProject.name,
+      };
+    } else if (environment.kind === "managed") {
       yield* reportSessionCreation(progress, "resolving-repository");
       const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
       managedSessionId = sessionId;
@@ -1305,7 +1316,7 @@ const provisionRemoteSession = (
     const value = yield* (
       environment.kind === "managed"
         ? remote.request(requestSession, operation, requestInput)
-        : remote.requestOnEnvironment(environmentId, operation, input)
+        : remote.requestOnEnvironment(environmentId, operation, requestInput)
     ).pipe(
       Effect.mapError(
         (cause) => new GitError({ message: cause.message, cause }),
@@ -4483,33 +4494,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Projects.ensureOnEnvironment": ({ projectId, environmentId }) =>
     Effect.gen(function* () {
       const project = yield* ProjectService.get(projectId);
-      const url = yield* GitService.remoteUrl(project.path).pipe(
-        Effect.flatMap((value) =>
-          value === null
-            ? Effect.fail(
-                new GitError({
-                  message: `${project.name} has no origin remote to clone.`,
-                }),
-              )
-            : Effect.succeed(value),
-        ),
-      );
-      return yield* RemoteSessionService.requestOnEnvironment(
-        environmentId,
-        "Projects.ensure",
-        { url, name: project.name },
-      ).pipe(
-        Effect.flatMap(Schema.decodeUnknown(ProjectSchema)),
-        Effect.map((remoteProject) => ({ ...remoteProject, environmentId })),
-        Effect.mapError((cause) =>
-          cause instanceof GitError
-            ? cause
-            : new GitError({
-                message: `Could not prepare ${project.name} on the selected host`,
-                cause,
-              }),
-        ),
-      );
+      return yield* ensureProjectOnOwnedEnvironment(project, environmentId);
     }),
   "Projects.remove": ({ id, environmentId }) =>
     environmentId === undefined
@@ -4885,6 +4870,18 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                     externalInstruction,
                   })
                   .pipe(
+                    Stream.tap((event) =>
+                      event.kind !== "complete"
+                        ? Effect.void
+                        : Schema.decodeUnknown(
+                            Schema.Struct({ session: SessionSchema }),
+                          )(event.payload).pipe(
+                            Effect.flatMap(({ session: remoteSession }) =>
+                              SessionStore.upsertRemote(remoteSession),
+                            ),
+                            Effect.ignore,
+                          ),
+                    ),
                     Stream.filter((event) => event.kind !== "complete"),
                     Stream.mapEffect((event) =>
                       event.kind === "failed"

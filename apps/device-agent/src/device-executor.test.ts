@@ -46,6 +46,7 @@ const services = (): DeviceExecutorServices => ({
   removeProject: vi.fn(async () => undefined),
   run: vi.fn(async (_sessionId, _input, emit) => {
     await emit({ _tag: "Assistant", text: "hello from device" })
+    return { ...resultSession, title: "Cloud title", branch: "fix/cloud-title" } as Session
   }),
   decideGate: vi.fn(async () => undefined),
   answerQuestion: vi.fn(async () => undefined),
@@ -146,7 +147,14 @@ describe("device session command executor", () => {
     expect(emitted).toEqual([
       { kind: "event", payload: { _tag: "Assistant", text: "hello from device" } }
     ])
-    expect(result).toEqual({ status: "complete" })
+    expect(result).toEqual({
+      status: "complete",
+      session: expect.objectContaining({
+        id: "session_1",
+        title: "Cloud title",
+        branch: "fix/cloud-title"
+      })
+    })
   })
 
   it("streams canonical file-change evidence from the target runtime", async () => {
@@ -181,6 +189,7 @@ describe("device session command executor", () => {
             reconciledAt: "2026-08-10T00:00:00.000Z"
           }
         })
+        return resultSession
       })
     } satisfies DeviceExecutorServices
     const emitted: Array<unknown> = []

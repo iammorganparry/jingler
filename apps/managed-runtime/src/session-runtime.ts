@@ -9,7 +9,7 @@ import {
   type RemoteSessionEvent,
 } from "@jingler/core";
 import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core";
-import { getSandbox, parseSSEStream, type LogEvent } from "@cloudflare/sandbox";
+import { getSandbox } from "@cloudflare/sandbox";
 import { DurableObject } from "cloudflare:workers";
 import { Either, Schema } from "effect";
 import {
@@ -36,6 +36,7 @@ import {
 import { r2CheckpointStore } from "./r2-checkpoint-store.js";
 import { fields, json } from "./worker-http.js";
 import { managedProviderEnvironment } from "./provider-session-config.js";
+import { ManagedExecutionScheduler } from "./execution-scheduler.js";
 
 interface RuntimeMetadata {
   readonly subject: string;
@@ -148,7 +149,9 @@ export const decodeManagedCommandFrame = (
 
 export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   #journalTail: Promise<void> = Promise.resolve();
-  #executionTail: Promise<void> = Promise.resolve();
+  readonly #execution = new ManagedExecutionScheduler<RemoteSessionCommand>(
+    (command) => this.#execute(command),
+  );
 
   async #metadata(): Promise<RuntimeMetadata | null> {
     return (await this.ctx.storage.get<RuntimeMetadata>(METADATA_KEY)) ?? null;
@@ -182,14 +185,12 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   }
 
   #scheduleExecution(command: RemoteSessionCommand): Promise<void> {
-    // A Sandbox has one mutable transport configuration. Opening transcript,
-    // file and diff reads concurrently used to let one command switch back to
-    // RPC while another was still consuming its HTTP log stream. Serialize the
-    // short-lived command runners per managed session; cancellation uses the
-    // dedicated /cancel endpoint and therefore never waits behind this queue.
-    const execution = this.#executionTail.then(() => this.#execute(command));
-    this.#executionTail = execution.catch(() => undefined);
-    return execution;
+    return this.#execution.schedule(
+      command,
+      managedRuntimeActionForOperation(command.operation) === "session.observe"
+        ? "observe"
+        : "mutate",
+    );
   }
 
   async #authorize(
@@ -499,73 +500,35 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         return;
       }
 
-      phase = "creating the execution session";
-      const session = await sandbox.createSession({
-        id: "jingler-session",
-        name: "Jingler managed session",
-        cwd: "/workspace",
-      });
       phase = "starting the pi runtime process";
-      const process = await session.startProcess(commandLine, {
+      let outputTail = Promise.resolve();
+      const process = await sandbox.startProcess(commandLine, {
         cwd: "/workspace",
+        sessionId: "jingler-session",
         processId: command.commandId,
         autoCleanup: false,
         env: processEnv,
+        onOutput: (stream, data) => {
+          if (stream !== "stdout") return;
+          outputTail = outputTail.then(() => admitOutput(data));
+        },
       });
-      // RPC is efficient for bounded lifecycle operations, but ReadableStream
-      // values can be disconnected when they cross the Worker↔DO RPC boundary.
-      // Use one HTTP/SSE request for the long-lived process log stream while
-      // retaining RPC for every other sandbox operation.
-      const streamSandbox = getSandbox(this.env.Sandbox, command.sessionId, {
-        transport: "http",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-      });
-      // getSandbox applies transport configuration asynchronously. Await the
-      // explicit switch so this stream cannot accidentally start over RPC.
-      await streamSandbox.setTransport("http");
-      try {
-        phase = "opening the pi runtime log stream";
-        const processSignal = AbortSignal.timeout(
-          Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS) * 1_000,
+      phase = "waiting for pi runtime completion";
+      const exited = await process.waitForExit(
+        Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS) * 1_000,
+      );
+      await outputTail;
+      if (buffered.trim().length > 0) await admitOutput("\n");
+      if (!settled) {
+        await this.#settle(
+          command.commandId,
+          "failed",
+          {
+            code: "runtime-protocol-ended",
+            message: `Managed command runner exited without a terminal frame (${exited.exitCode ?? "unknown"}).`,
+          },
+          checkpoint,
         );
-        const stream = await streamSandbox.streamProcessLogs(process.id);
-        let exitCode: number | null = null;
-        phase = "reading pi runtime output";
-        for await (const event of parseSSEStream<LogEvent>(
-          stream,
-          processSignal,
-        )) {
-          if (event.type === "stdout") {
-            await admitOutput(event.data ?? "");
-            // Jingler's terminal frame is the authoritative end of the
-            // command. Cloudflare's process-log SSE stream can remain open
-            // after the process has emitted that frame, so waiting for the
-            // transport-level exit event would pin the session and its
-            // container until the active-duration timeout.
-            if (settled) break;
-          } else if (event.type === "error") {
-            throw new Error(event.data || "Pi runtime log stream failed");
-          } else if (event.type === "exit") {
-            exitCode = event.exitCode ?? 1;
-            break;
-          }
-        }
-        if (buffered.trim().length > 0) await admitOutput("\n");
-        if (!settled) {
-          await this.#settle(
-            command.commandId,
-            "failed",
-            {
-              code: "runtime-protocol-ended",
-              message: `Managed command runner exited without a terminal frame (${exitCode ?? "unknown"}).`,
-            },
-            checkpoint,
-          );
-        }
-      } finally {
-        await streamSandbox.setTransport("rpc").catch(() => undefined);
       }
     } catch (cause) {
       await this.#settle(

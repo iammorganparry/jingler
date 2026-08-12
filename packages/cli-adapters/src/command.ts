@@ -101,14 +101,15 @@ export const runGitRaw = (
 
 /** Strict git command with explicit environment additions (values are never rendered in errors). */
 export const runGitWithEnv = (
-  cwd: string,
+  cwd: string | null,
   args: ReadonlyArray<string>,
   environment: Readonly<Record<string, string>>
 ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
   Effect.scoped(
     Effect.gen(function* () {
-      const proc = yield* Command.make("git", ...args).pipe(
-        Command.workingDirectory(cwd),
+      const base = Command.make("git", ...args)
+      const command = cwd === null ? base : base.pipe(Command.workingDirectory(cwd))
+      const proc = yield* command.pipe(
         Command.env({ ...process.env, ...environment }),
         Command.start
       )

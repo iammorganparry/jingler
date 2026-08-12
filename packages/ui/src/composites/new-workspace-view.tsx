@@ -20,6 +20,7 @@ import {
   MessageCircle,
   Monitor,
   LoaderCircle,
+  Server,
   Sparkles,
   X,
 } from "lucide-react";
@@ -40,7 +41,7 @@ import {
   PopoverTrigger,
 } from "../components/popover.js";
 import { cn } from "../lib/cn.js";
-import type { PendingCloudSession } from "../app/cloud-session-startup-machine.js";
+import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js";
 import { Composer } from "./composer.js";
 import { IssuePickerList } from "./issue-picker-list.js";
 import {
@@ -59,67 +60,63 @@ interface PickerOption<T extends string> {
   icon: React.ReactNode;
 }
 
-const CLOUD_STARTUP_STEPS: ReadonlyArray<{
+const startupSteps = (kind: Environment["kind"]): ReadonlyArray<{
   phase: SessionCreationPhase;
   label: string;
   description: string;
-}> = [
-  {
-    phase: "checking-access",
-    label: "Checking Cloud access",
-    description: "Validating your account and selected provider connection.",
-  },
-  {
-    phase: "resolving-repository",
-    label: "Resolving repository",
-    description: "Pinning the selected branch to an exact commit.",
-  },
-  {
-    phase: "starting-sandbox",
-    label: "Starting Cloud workspace",
-    description: "Booting an isolated sandbox and cloning the repository.",
-  },
-  {
-    phase: "creating-session",
-    label: "Creating session",
-    description: "Connecting Jingler to the hydrated workspace.",
-  },
-  { phase: "ready", label: "Ready", description: "Opening the session." },
-];
+}> => kind === "managed"
+  ? [
+      { phase: "checking-access", label: "Checking Cloud access", description: "Validating your account and selected provider connection." },
+      { phase: "resolving-repository", label: "Resolving repository", description: "Pinning the selected branch to an exact commit." },
+      { phase: "starting-sandbox", label: "Starting Cloud workspace", description: "Booting an isolated sandbox and cloning the repository." },
+      { phase: "creating-session", label: "Creating session", description: "Connecting Jingler to the hydrated workspace." },
+      { phase: "ready", label: "Ready", description: "Opening the session." }
+    ]
+  : [
+      { phase: "checking-access", label: "Checking device access", description: "Confirming the selected device is online and compatible." },
+      { phase: "resolving-repository", label: "Preparing repository", description: "Finding or cloning the repository on the device." },
+      { phase: "creating-session", label: "Creating session", description: "Creating the checkout and connecting Jingler." },
+      { phase: "ready", label: "Ready", description: "Opening the session." }
+    ];
 
-function CloudStartupProgress({
+function EnvironmentStartupProgress({
   phase,
   error,
+  environment,
 }: {
   phase: SessionCreationPhase | null;
   error?: string | null;
+  environment: Pick<Environment, "kind" | "name">;
 }) {
+  const steps = startupSteps(environment.kind);
   const activeIndex = Math.max(
     0,
-    CLOUD_STARTUP_STEPS.findIndex((step) => step.phase === phase),
+    steps.findIndex((step) => step.phase === phase),
   );
   return (
     <section
       className="m-auto w-full max-w-[560px] rounded-2xl border border-line bg-panel p-8"
-      aria-label="Cloud session startup"
+      aria-label={`${environment.name} session startup`}
       aria-live="polite"
-      data-testid="cloud-startup-progress"
+      data-testid="environment-startup-progress"
     >
       <div className="mb-7 flex items-center gap-3">
         <span className="flex size-10 items-center justify-center rounded-xl bg-selection text-blue">
-          <Cloud size={20} aria-hidden />
+          {environment.kind === "managed"
+            ? <Cloud size={20} aria-hidden />
+            : <Server size={20} aria-hidden />}
         </span>
         <div>
           <h2 className="text-[17px] font-semibold text-text-bright">
-            Starting your Cloud session
+            Starting your session on {environment.name}
           </h2>
           <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-            Keep this window open while Jingler prepares the workspace.
+            You can switch sessions while Jingler prepares the workspace.
           </p>
         </div>
       </div>
       <ol className="flex flex-col" aria-label="Startup steps">
-        {CLOUD_STARTUP_STEPS.map((step, index) => {
+        {steps.map((step, index) => {
           const complete = index < activeIndex || phase === "ready";
           const active = index === activeIndex && phase !== "ready";
           return (
@@ -131,7 +128,7 @@ function CloudStartupProgress({
                 complete ? "complete" : active ? "active" : "pending"
               }
             >
-              {index < CLOUD_STARTUP_STEPS.length - 1 && (
+              {index < steps.length - 1 && (
                 <span
                   className={cn(
                     "absolute left-[11px] top-7 h-[35px] w-px",
@@ -305,8 +302,8 @@ export interface NewWorkspaceViewProps {
   onCreate: NewWorkspaceDeps["onCreate"];
   onCreateFromPr?: NewWorkspaceDeps["onCreateFromPr"];
   onCreateFromIssue?: NewWorkspaceDeps["onCreateFromIssue"];
-  /** App-owned Cloud startup state survives navigation away from this view. */
-  cloudStartup?: PendingCloudSession | null;
+  /** App-owned remote startup state survives navigation away from this view. */
+  environmentStartup?: PendingEnvironmentSession | null;
   onAddProject?: () => void;
   onClose: () => void;
 }
@@ -513,18 +510,23 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
           variant="ghost"
           size="icon"
           aria-label="Close new session"
-          disabled={submitting && !props.cloudStartup?.error}
+          disabled={submitting && !props.environmentStartup?.error}
           onClick={() => send({ type: "CLOSE" })}
         >
           <X size={15} />
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">
-        {props.cloudStartup ||
-        (submitting && selectedEnvironment?.kind === "managed") ? (
-          <CloudStartupProgress
-            phase={props.cloudStartup?.phase ?? provisioningPhase}
-            error={props.cloudStartup?.error}
+        {props.environmentStartup || (submitting && selectedEnvironment !== undefined) ? (
+          <EnvironmentStartupProgress
+            phase={props.environmentStartup?.phase ?? provisioningPhase}
+            error={props.environmentStartup?.error}
+            environment={props.environmentStartup === undefined || props.environmentStartup === null
+              ? selectedEnvironment!
+              : {
+                  kind: props.environmentStartup.environmentKind,
+                  name: props.environmentStartup.environmentName
+                }}
           />
         ) : (
           <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">

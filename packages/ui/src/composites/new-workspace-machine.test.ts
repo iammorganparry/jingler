@@ -129,21 +129,43 @@ describe("newWorkspaceMachine", () => {
     })
   })
 
-  it("prepares a local project on a remote host before loading its branches", async () => {
-    const actor = actorFor().start()
+  it("defers owned-host preparation until session creation", async () => {
+    const prepareProject = vi.fn(async (projectId: string, environmentId?: string) => {
+      const project = projects.find((candidate) => candidate.id === projectId)!
+      return environmentId === undefined
+        ? project
+        : { ...project, environmentId, path: `/remote/${project.name}` }
+    })
+    const loadBranches = vi.fn(async (_path: string, environmentId?: string) =>
+      environmentId === undefined ? ["main", "feature"] : ["remote-only"]
+    )
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate, { prepareProject, loadBranches }).start()
     actor.send({ type: "OPEN", projectId: "p-local" })
     await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    prepareProject.mockClear()
+    loadBranches.mockClear()
     actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-1" })
     await waitFor(actor, (snapshot) => snapshot.matches("editing"))
 
+    expect(prepareProject).toHaveBeenCalledWith("p-local", undefined)
+    expect(loadBranches).toHaveBeenCalledWith("/repos/local", undefined)
     expect(actor.getSnapshot().context).toMatchObject({
       environmentId: "device-1",
       resolvedProject: {
-        id: "p-local-device-1",
+        id: "p-local",
         environmentId: "device-1",
-        path: "/remote/local"
+        path: "/repos/local"
       }
     })
+
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: "device-1", repoPath: "/repos/local" }),
+      [],
+      expect.any(Function)
+    )
   })
 
   it("defers managed workspace provisioning until session creation", async () => {
@@ -217,8 +239,13 @@ describe("newWorkspaceMachine", () => {
     expect(onCreate).toHaveBeenCalledOnce()
   })
 
-  it("can switch back to local while remote preparation is still pending", async () => {
-    let releaseRemote: (() => void) | undefined
+  it("can switch back to local without beginning remote preparation", async () => {
+    const prepareProject = vi.fn(async (projectId: string, environmentId?: string) => {
+      const project = projects.find((candidate) => candidate.id === projectId)!
+      return environmentId === undefined
+        ? project
+        : { ...project, environmentId, path: `/remote/${project.name}` }
+    })
     const actor = createActor(newWorkspaceMachine, {
       input: {
         getDeps: () => ({
@@ -226,14 +253,7 @@ describe("newWorkspaceMachine", () => {
           providerCatalog,
           defaultConnectionId: connectionId,
           defaultModelId: modelId,
-          prepareProject: async (projectId, environmentId) => {
-            const project = projects.find((candidate) => candidate.id === projectId)!
-            if (environmentId !== undefined) {
-              await new Promise<void>((resolve) => { releaseRemote = resolve })
-              return { ...project, environmentId, path: `/remote/${project.name}` }
-            }
-            return project
-          },
+          prepareProject,
           loadBranches: async () => ["main"],
           onCreate: async () => undefined,
           onClose: vi.fn()
@@ -244,7 +264,7 @@ describe("newWorkspaceMachine", () => {
     actor.send({ type: "OPEN", projectId: "p-local" })
     await waitFor(actor, (snapshot) => snapshot.matches("editing"))
     actor.send({ type: "SET_ENVIRONMENT", environmentId: "device-1" })
-    expect(actor.getSnapshot().matches("loading")).toBe(true)
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
     actor.send({ type: "SET_MODE", mode: "ask" })
     actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "high" } })
     actor.send({ type: "SET_ENVIRONMENT", environmentId: "local" })
@@ -257,7 +277,7 @@ describe("newWorkspaceMachine", () => {
       reasoning: { enabled: true, effort: "high" },
       resolvedProject: { id: "p-local", path: "/repos/local" }
     })
-    releaseRemote?.()
+    expect(prepareProject).not.toHaveBeenCalledWith("p-local", "device-1")
   })
 
   it("submits selected mode and reasoning with the new session", async () => {

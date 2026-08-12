@@ -5,7 +5,7 @@ import { GitError, Project as ProjectSchema } from "@jingler/core"
 import type { Project } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
-import { runGit } from "./command.js"
+import { runGit, runGitWithEnv } from "./command.js"
 
 const ProjectArray = Schema.Array(ProjectSchema)
 let projectWriteSequence = 0
@@ -172,7 +172,25 @@ export class ProjectService extends Effect.Service<ProjectService>()(
         Effect.gen(function* () {
           const path = yield* Path.Path
           const resolvedPath = path.resolve(input.destination)
-          yield* runGit(null, ["clone", "--", input.url, resolvedPath])
+          // Project preparation also runs on unattended owned-device daemons.
+          // Plain `git clone` may open an HTTPS credential prompt, SSH host-key
+          // confirmation, or key passphrase prompt with no terminal attached,
+          // leaving the desktop on "Preparing project on host" forever. Fail
+          // those boundaries promptly; an already-authenticated agent or SSH
+          // key continues to work normally.
+          yield* runGitWithEnv(
+            null,
+            [
+              "-c", "credential.interactive=never",
+              "clone", "--", input.url, resolvedPath
+            ],
+            {
+              GIT_TERMINAL_PROMPT: "0",
+              GCM_INTERACTIVE: "Never",
+              SSH_ASKPASS_REQUIRE: "never",
+              GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=10"
+            }
+          )
           return yield* register({
             path: resolvedPath,
             ...(input.name === undefined ? {} : { name: input.name }),

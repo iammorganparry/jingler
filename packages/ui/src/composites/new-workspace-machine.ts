@@ -161,10 +161,11 @@ export const newWorkspaceMachine = setup({
       environmentKind?: Environment["kind"]
     } }) => {
       if (input.project === undefined) return { project: null, branches: [] as ReadonlyArray<string> }
-      // A managed sandbox is session-scoped. Selecting Cloud must not start one
-      // merely to populate this form; use the local checkout for Git metadata
-      // and carry the target id into session creation, where provisioning begins.
-      const deferProvisioning = input.environmentKind === "managed"
+      // Remote preparation belongs to submission, not target selection. Use the
+      // local checkout for branch metadata and carry the environment identity
+      // into session creation. The backend then reports the same explicit
+      // startup phases for an owned host or a managed sandbox.
+      const deferProvisioning = input.environmentId !== undefined
       const project = await input.prepare(
         input.project.id,
         deferProvisioning ? undefined : input.environmentId

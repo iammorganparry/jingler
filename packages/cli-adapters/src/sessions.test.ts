@@ -1970,6 +1970,17 @@ describe("migrateRepoName", () => {
     expect(at("/", "starbase")).toBe("starbase")
   })
 
+  it("keeps the canonical repository name for a managed /workspace checkout", () => {
+    const migrated = migrateRepoName({
+      id: "s_cloud_1",
+      repo: "jingler",
+      repoPath: "/workspace",
+      environmentId: "managed_cloud_1"
+    }) as { repo: string }
+
+    expect(migrated.repo).toBe("jingler")
+  })
+
   it("preserves a directory name that contains dots", () => {
     // A real repo in this workspace: the whole basename is the name, and
     // splitting on "." would silently rename it.

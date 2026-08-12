@@ -196,7 +196,7 @@ export interface DeviceExecutorServices {
     sessionId: string,
     input: Schema.Schema.Type<typeof RunPayload>,
     emit: (event: StreamEventValue) => Promise<void>
-  ) => Promise<void>
+  ) => Promise<SessionValue>
   readonly decideGate: (
     sessionId: string,
     input: Schema.Schema.Type<typeof DecideGatePayload>
@@ -259,8 +259,12 @@ export const makeDeviceSessionCommandExecutor = (
         return services.removeProject(decodePayload(command, ProjectIdPayload).id)
       case "Agent.run": {
         const input = decodePayload(command, RunPayload)
-        await services.run(command.sessionId, input, (event) => emit({ kind: "event", payload: event }))
-        return { status: "complete" }
+        const session = await services.run(
+          command.sessionId,
+          input,
+          (event) => emit({ kind: "event", payload: event })
+        )
+        return { status: "complete", session }
       }
       case "Agent.decideGate":
         return services.decideGate(command.sessionId, decodePayload(command, DecideGatePayload))
@@ -516,6 +520,7 @@ export const makeLiveDeviceSessionCommandExecutor = (
           input.externalInstruction,
           input.displayText
         ).pipe(Stream.runForEach((event) => Effect.promise(() => emit(event))))
+        return yield* SessionStore.get(sessionId)
       })
     ),
     decideGate: (sessionId, input) => run(
