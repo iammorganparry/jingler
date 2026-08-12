@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
-const GRAMMAR_NOT_LOADED = /Grammar for language/u
+const HIGHLIGHTER_LANGUAGE_ERROR = /Grammar for language|resolveLanguage/u
 
 /**
  * Repository files are a session view, not Preview content. These scenarios
@@ -188,7 +188,7 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   })
   const grammarErrors: string[] = []
   window.on("pageerror", (error) => {
-    if (GRAMMAR_NOT_LOADED.test(error.message)) grammarErrors.push(error.message)
+    if (HIGHLIGHTER_LANGUAGE_ERROR.test(error.message)) grammarErrors.push(error.message)
   })
 
   await expect(appShell(window)).toBeVisible()

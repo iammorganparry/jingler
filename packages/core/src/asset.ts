@@ -274,7 +274,7 @@ export const extensionToLanguage = (path: string): string | null => {
   // have no extension to alias, so they resolve by basename or not at all.
   if (dot <= 0) return LANGUAGE_BY_BASENAME[name] ?? null
   const ext = name.slice(dot + 1)
-  return LANGUAGE_ALIASES[ext] ?? ext
+  return KIND_BY_EXT[ext] === "code" ? (LANGUAGE_ALIASES[ext] ?? ext) : null
 }
 
 /**
