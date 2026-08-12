@@ -2,7 +2,9 @@ import {
   CURRENT_RUNTIME_CONTRACTS,
   type Environment,
   type ManagedEnvironment,
+  ManagedProviderCredential,
 } from "@jingler/core";
+import { Schema } from "effect";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -52,18 +54,24 @@ const providerSelection = {
   providerId: "openai",
   modelId: "openai/gpt-5",
 } as const;
-const providerCredentialHeaders = () => ({
+type ProviderCredentialInput = Schema.Schema.Encoded<
+  typeof ManagedProviderCredential
+>;
+const apiCredential: ProviderCredentialInput = {
+  version: 1,
+  connectionId: providerSelection.connectionId,
+  providerId: providerSelection.providerId,
+  authKind: "api-key",
+  access: `sk-${"a".repeat(30)}`,
+  expiresAt: Date.now() + 60 * 60 * 1_000,
+  accountId: null,
+  billingRoute: "api",
+};
+const providerCredentialHeaders = (
+  credential: ProviderCredentialInput = apiCredential,
+) => ({
   "x-jingler-provider-credential": Buffer.from(
-    JSON.stringify({
-      version: 1,
-      connectionId: providerSelection.connectionId,
-      providerId: providerSelection.providerId,
-      authKind: "api-key",
-      access: `sk-${"a".repeat(30)}`,
-      expiresAt: Date.now() + 60 * 60 * 1_000,
-      accountId: null,
-      billingRoute: "api",
-    }),
+    JSON.stringify(Schema.decodeSync(ManagedProviderCredential)(credential)),
   ).toString("base64url"),
 });
 
@@ -175,7 +183,7 @@ describe("environment routes", () => {
     expect(managedStore.create).not.toHaveBeenCalled();
   });
 
-  it("syncs the desktop Codex capability before managed creation", async () => {
+  it("syncs the desktop OpenAI API capability before managed creation", async () => {
     const syncCapabilities = vi.fn(async () => undefined);
     const { app } = harness({ syncCapabilities });
     const response = await app.request("/api/environments/managed", {
@@ -210,6 +218,141 @@ describe("environment routes", () => {
       includeGitHub: true,
     });
   });
+
+  it.each([
+    {
+      label: "ChatGPT Codex subscription",
+      selection: {
+        connectionId: "connection_codex_subscription",
+        providerId: "openai-codex",
+        modelId: "openai-codex/gpt-5.6-sol",
+      },
+      credential: {
+        version: 1,
+        connectionId: "connection_codex_subscription",
+        providerId: "openai-codex",
+        authKind: "openai-codex-oauth",
+        access: `oauth-${"c".repeat(30)}`,
+        expiresAt: Date.now() + 60 * 60 * 1_000,
+        accountId: "account_codex",
+        billingRoute: "subscription",
+      },
+      expected: {
+        proxy: "codex",
+        provider: "codex",
+        upstream: "chatgpt-codex",
+        authorizationHeader: `Bearer oauth-${"c".repeat(30)}`,
+        accountId: "account_codex",
+      },
+    },
+    {
+      label: "Claude setup-token subscription",
+      selection: {
+        connectionId: "connection_claude_subscription",
+        providerId: "anthropic",
+        modelId: "anthropic/claude-opus-5",
+      },
+      credential: {
+        version: 1,
+        connectionId: "connection_claude_subscription",
+        providerId: "anthropic",
+        authKind: "claude-setup-token",
+        access: `setup-${"a".repeat(30)}`,
+        expiresAt: Date.now() + 60 * 60 * 1_000,
+        accountId: null,
+        billingRoute: "subscription",
+      },
+      expected: {
+        proxy: "claude",
+        provider: "claude",
+        upstream: "anthropic-api",
+        authorizationHeader: `Bearer setup-${"a".repeat(30)}`,
+      },
+    },
+  ] satisfies ReadonlyArray<{
+    label: string;
+    selection: {
+      connectionId: string;
+      providerId: string;
+      modelId: string;
+    };
+    credential: ProviderCredentialInput;
+    expected: Record<string, string>;
+  }>)("pins the $label model and billing route", async ({
+    selection,
+    credential,
+    expected,
+  }) => {
+    const syncCapabilities = vi.fn(async () => undefined);
+    const { app } = harness({ syncCapabilities });
+
+    const response = await app.request(`${managedRoute}/grants`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...providerCredentialHeaders(credential),
+      },
+      body: JSON.stringify({
+        version: 1,
+        sessionId: `session_${credential.connectionId}`,
+        usageIntervalId: `usage_${credential.connectionId}`,
+        expectedGeneration: 1,
+        ...selection,
+        actions: ["session.start"],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(syncCapabilities).toHaveBeenCalledWith({
+      userId: "user_one",
+      providerCredential: expect.objectContaining({
+        connectionId: credential.connectionId,
+        providerId: credential.providerId,
+        authKind: credential.authKind,
+        billingRoute: "subscription",
+        expiresAt: expect.any(Date),
+        ...expected,
+      }),
+      includeGitHub: false,
+    });
+  });
+
+  it.each([
+    ["openai-codex-oauth", "openai-codex"],
+    ["claude-setup-token", "anthropic"],
+  ] as const)(
+    "rejects %s credentials mislabeled as API billing",
+    async (authKind, providerId) => {
+      const syncCapabilities = vi.fn(async () => undefined);
+      const { app } = harness({ syncCapabilities });
+      const response = await app.request("/api/environments/managed", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...providerCredentialHeaders({
+            version: 1,
+            connectionId: `connection_${providerId}`,
+            providerId,
+            authKind,
+            access: `credential-${"x".repeat(30)}`,
+            expiresAt: Date.now() + 60 * 60 * 1_000,
+            accountId: authKind === "openai-codex-oauth" ? "account_codex" : null,
+            billingRoute: "api",
+          }),
+        },
+        body: JSON.stringify({
+          version: 1,
+          name: "Cloud workspace",
+          region: "wnam",
+          instanceType: "basic",
+          idempotencyKey: `reject_${providerId}`,
+        }),
+      });
+
+      expect(response.status).toBe(409);
+      expect(syncCapabilities).not.toHaveBeenCalled();
+    },
+  );
 
   it("refuses managed creation without an explicit provider connection", async () => {
     const managedStore = store();
