@@ -6,7 +6,7 @@ import {
   type ProviderConnection,
   type ProviderModelId
 } from "@jingler/core"
-import { Data, Effect } from "effect"
+import { Data, Duration, Effect } from "effect"
 import type { AuthBrokerOptions, EntitlementProbeResult } from "../auth/auth-broker.js"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import { probePiEntitlement } from "../providers/pi-provider-access.js"
@@ -36,6 +36,7 @@ export interface VerifyProviderModelBehaviorInput {
   readonly provenance?: ModelCertification["provenance"]
   readonly probe?: AuthBrokerOptions["probe"]
   readonly runScenario?: ScenarioRunner
+  readonly entitlementTimeoutMs?: number
   readonly now?: () => Date
 }
 
@@ -77,6 +78,14 @@ const observeRoute = (
         })
       }),
     (controller) => Effect.sync(() => controller.abort())
+  ).pipe(
+    Effect.timeoutFail({
+      duration: Duration.millis(input.entitlementTimeoutMs ?? 60_000),
+      onTimeout: () =>
+        new ModelVerificationError({
+          message: `${input.connection.id} entitlement probe timed out`
+        })
+    })
   )
 
 const requireObservedRoute = (

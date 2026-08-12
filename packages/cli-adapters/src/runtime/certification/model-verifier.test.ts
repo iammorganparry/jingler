@@ -81,6 +81,34 @@ describe("provider model behavior verification", () => {
     expect(runScenario).not.toHaveBeenCalled()
   })
 
+  it("aborts an entitlement probe that exceeds its deadline", async () => {
+    let aborted = false
+    const probe = ({ signal }: { readonly signal: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          aborted = true
+          reject(new Error("aborted"))
+        }, { once: true })
+      })
+
+    const error = await Effect.runPromise(
+      verifyProviderModelBehavior({
+        connection: connection(),
+        access: "secret-not-for-reports",
+        credentials: new InMemoryProviderCredentialStore(),
+        modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
+        probe,
+        entitlementTimeoutMs: 10
+      }).pipe(Effect.flip)
+    )
+
+    expect(error).toMatchObject({
+      _tag: "ModelVerificationError",
+      message: "claude-max entitlement probe timed out"
+    })
+    expect(aborted).toBe(true)
+  })
+
   it("certifies the exact connection route only after every core scenario passes", async () => {
     const observations = (scenarioId: string) => {
       switch (scenarioId) {
