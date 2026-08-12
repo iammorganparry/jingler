@@ -21,7 +21,11 @@ export interface BuildReleaseManifestInput {
   readonly generatedAt: string
 }
 
-const routeKey = (value: ReleaseModelCandidate): string =>
+const routeKey = (value: {
+  readonly providerId: string
+  readonly modelId: string
+  readonly authKind: string
+}): string =>
   `${value.providerId}:${value.modelId}:${value.authKind}`
 
 const certificationRouteKey = (value: ModelCertification): string =>
@@ -90,6 +94,54 @@ const validateCertification = (
   return issues
 }
 
+interface CandidateValidationInput {
+  readonly candidate: ReleaseModelCandidate
+  readonly certifications: ReadonlyArray<ModelCertification>
+  readonly profiles: ReadonlyMap<string, CapabilityProfile>
+  readonly requiredProfiles: ReadonlyArray<CapabilityProfile>
+  readonly requiredScenarioIds: ReadonlyArray<string>
+  readonly versions: RuntimeContractVersions
+}
+
+const validateCandidate = (
+  input: CandidateValidationInput
+): { readonly model: ModelCertification | null; readonly issues: ReadonlyArray<string> } => {
+  const {
+    candidate,
+    certifications,
+    profiles,
+    requiredProfiles,
+    requiredScenarioIds,
+    versions
+  } = input
+  const key = routeKey(candidate)
+  const matches = certifications.filter(
+    (certification) => certificationRouteKey(certification) === key
+  )
+  if (matches.length !== 1) {
+    return {
+      model: null,
+      issues: [matches.length === 0
+        ? `${key} has no certification`
+        : `${key} has multiple certifications`]
+    }
+  }
+
+  const model = matches[0]
+  if (model === undefined) return { model: null, issues: [`${key} has no certification`] }
+  const issues = [...validateCertification(model, profiles, versions)]
+  const missingCore = missingScenarios(model, requiredScenarioIds)
+  if (missingCore.length > 0) {
+    issues.push(`${key} is missing required scenarios: ${missingCore.join(", ")}`)
+  }
+  for (const profile of requiredProfiles) {
+    if (!model.capabilityProfiles.includes(profile.id)) {
+      issues.push(`${key} is missing required capability profile ${profile.id}`)
+    }
+  }
+  return { model, issues }
+}
+
 export const buildReleaseCertificationManifest = (
   input: BuildReleaseManifestInput
 ): Effect.Effect<ReleaseCertificationManifest, ReleaseCertificationError> =>
@@ -116,33 +168,16 @@ export const buildReleaseCertificationManifest = (
     }
 
     const models = input.candidates.flatMap((candidate) => {
-      const key = routeKey(candidate)
-      const matches = input.certifications.filter(
-        (certification) => certificationRouteKey(certification) === key
-      )
-      if (matches.length !== 1) {
-        issues.push(
-          matches.length === 0
-            ? `${key} has no certification`
-            : `${key} has multiple certifications`
-        )
-        return []
-      }
-
-      const certification = matches[0]
-      if (!certification) return []
-      issues.push(...validateCertification(certification, profiles, versions))
-
-      const missingCore = missingScenarios(certification, requiredScenarioIds)
-      if (missingCore.length > 0) {
-        issues.push(`${key} is missing required scenarios: ${missingCore.join(", ")}`)
-      }
-      for (const profile of requiredProfiles) {
-        if (!certification.capabilityProfiles.includes(profile.id)) {
-          issues.push(`${key} is missing required capability profile ${profile.id}`)
-        }
-      }
-      return [certification]
+      const result = validateCandidate({
+        candidate,
+        certifications: input.certifications,
+        profiles,
+        requiredProfiles,
+        requiredScenarioIds,
+        versions
+      })
+      issues.push(...result.issues)
+      return result.model === null ? [] : [result.model]
     })
 
     if (issues.length > 0) {

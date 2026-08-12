@@ -5,10 +5,11 @@ import {
   ModelCertification,
   RuntimeContractVersions
 } from "./model-certification.js"
+import { ProviderId, ProviderModelId } from "./provider-connection.js"
 
 export const ReleaseModelCandidate = Schema.Struct({
-  providerId: Schema.String,
-  modelId: Schema.String,
+  providerId: ProviderId,
+  modelId: ProviderModelId,
   authKind: AuthRouteKind
 })
 export type ReleaseModelCandidate = Schema.Schema.Type<typeof ReleaseModelCandidate>

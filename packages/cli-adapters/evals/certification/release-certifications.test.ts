@@ -1,11 +1,13 @@
 import {
   CURRENT_RUNTIME_CONTRACTS,
+  ReleaseModelCandidate,
   type CapabilityProfile,
-  type ModelCertification,
-  type ReleaseModelCandidate
+  type ModelCertification
 } from "@jingler/core"
-import { Effect, Either } from "effect"
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all"
+import { Effect, Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import configuredCandidates from "../../../../config/pi-release-candidates.json" with { type: "json" }
 import { buildReleaseCertificationManifest } from "./release-certifications.js"
 
 const coreProfile: CapabilityProfile = {
@@ -14,11 +16,11 @@ const coreProfile: CapabilityProfile = {
   scenarioIds: ["lifecycle.complete", "auth.route-pinned", "diff.complete"]
 }
 
-const candidate: ReleaseModelCandidate = {
+const candidate = Schema.decodeUnknownSync(ReleaseModelCandidate)({
   providerId: "openai-codex",
   modelId: "openai-codex/gpt-test",
   authKind: "openai-codex-oauth"
-}
+})
 
 const certification = (
   overrides: Partial<ModelCertification> = {}
@@ -72,6 +74,28 @@ const buildIssues = async (
   if (Either.isRight(result)) throw new Error("expected release manifest validation to fail")
   return result.left.issues
 }
+
+describe("configured release candidates", () => {
+  it("pins the newest supported subscription models from the pi catalog", () => {
+    const candidates = Schema.decodeUnknownSync(Schema.Array(ReleaseModelCandidate))(
+      configuredCandidates
+    )
+    expect(candidates).toEqual([
+      {
+        providerId: "anthropic",
+        modelId: "anthropic/claude-opus-5",
+        authKind: "claude-setup-token"
+      },
+      {
+        providerId: "openai-codex",
+        modelId: "openai-codex/gpt-5.6-terra",
+        authKind: "openai-codex-oauth"
+      }
+    ])
+    expect(getBuiltinModel("anthropic", "claude-opus-5")).toBeDefined()
+    expect(getBuiltinModel("openai-codex", "gpt-5.6-terra")).toBeDefined()
+  })
+})
 
 describe("release certifications", () => {
   it("generates a deterministic manifest from exact reviewed route passes", async () => {

@@ -1,0 +1,12 @@
+[
+  {
+    "providerId": "anthropic",
+    "modelId": "anthropic/claude-opus-5",
+    "authKind": "claude-setup-token"
+  },
+  {
+    "providerId": "openai-codex",
+    "modelId": "openai-codex/gpt-5.6-terra",
+    "authKind": "openai-codex-oauth"
+  }
+]

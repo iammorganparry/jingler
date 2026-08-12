@@ -2,11 +2,16 @@ import { readFile, writeFile } from "node:fs/promises"
 import {
   CURRENT_RUNTIME_CONTRACTS,
   ModelCertification,
+  ReleaseModelCandidate,
   type EvalResult
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { EvalTrace } from "./behavior-contract.js"
-import { LiveEvalMatrix, runLiveMatrix } from "./live/live-matrix.js"
+import {
+  LiveEvalMatrix,
+  requireReleaseCandidateMatrix,
+  runLiveMatrix
+} from "./live/live-matrix.js"
 import { redactErrorMessage, redactReport, scoreScenario } from "./pi-eval.js"
 import { CORE_PI_SCENARIOS, scenarioById } from "./pi-scenarios.js"
 import { runDeterministicScenario } from "./deterministic-runtime.js"
@@ -57,6 +62,16 @@ const traces = mode === "deterministic"
           JSON.parse(await readFile(path, "utf8"))
         )
         if (targets.length === 0) throw new Error("live eval matrix is empty")
+        if (process.env.JINGLER_EVAL_REVIEWED === "1") {
+          const candidatesPath = process.env.JINGLER_RELEASE_CANDIDATES
+          if (!candidatesPath) {
+            throw new Error("reviewed live eval requires JINGLER_RELEASE_CANDIDATES")
+          }
+          const candidates = Schema.decodeUnknownSync(Schema.Array(ReleaseModelCandidate))(
+            JSON.parse(await readFile(candidatesPath, "utf8"))
+          )
+          await Effect.runPromise(requireReleaseCandidateMatrix(targets, candidates))
+        }
         liveCredentialValues = targets.flatMap((target) => [
           process.env[target.accessCredentialEnv] ?? "",
           target.refreshCredentialEnv === null

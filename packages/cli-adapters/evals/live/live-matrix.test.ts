@@ -1,12 +1,19 @@
 import {
   CURRENT_RUNTIME_CONTRACTS,
   ProviderConnection,
-  ProviderModelId
+  ProviderModelId,
+  ReleaseModelCandidate
 } from "@jingler/core"
 import { Effect, Either, Schema } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
-import { runLiveTarget, type LiveEvalTarget } from "./live-matrix.js"
+import {
+  requireReleaseCandidateMatrix,
+  runLiveTarget,
+  type LiveEvalTarget
+} from "./live-matrix.js"
 import { CORE_PI_SCENARIOS } from "../pi-scenarios.js"
+
+const MATRIX_MISMATCH = /missing release candidates.*unexpected live targets/u
 
 const target = (declaredRoute: "subscription" | "api"): LiveEvalTarget => ({
   connection: Schema.decodeUnknownSync(ProviderConnection)({
@@ -33,12 +40,34 @@ const target = (declaredRoute: "subscription" | "api"): LiveEvalTarget => ({
   expiresAt: Date.now() + 60_000
 })
 
-describe("live provider matrix", () => {
-  afterEach(() => {
-    delete process.env.JINGLER_TEST_LIVE_ACCESS
-    delete process.env.JINGLER_TEST_LIVE_REFRESH
-  })
+afterEach(() => {
+  delete process.env.JINGLER_TEST_LIVE_ACCESS
+  delete process.env.JINGLER_TEST_LIVE_REFRESH
+})
 
+describe("live provider release policy", () => {
+  it("requires reviewed live targets to match the exact release candidate routes", async () => {
+    const liveTarget = target("subscription")
+    const currentCandidate = Schema.decodeUnknownSync(ReleaseModelCandidate)({
+      providerId: liveTarget.connection.providerId,
+      modelId: liveTarget.modelId,
+      authKind: liveTarget.connection.authKind
+    })
+    await expect(Effect.runPromise(
+      requireReleaseCandidateMatrix([liveTarget], [currentCandidate])
+    )).resolves.toBeUndefined()
+
+    const staleCandidate = Schema.decodeUnknownSync(ReleaseModelCandidate)({
+      ...currentCandidate,
+      modelId: "openai-codex/gpt-older"
+    })
+    await expect(Effect.runPromise(
+      requireReleaseCandidateMatrix([liveTarget], [staleCandidate])
+    )).rejects.toThrow(MATRIX_MISMATCH)
+  })
+})
+
+describe("live provider route safeguards", () => {
   it("rejects an API billing route observed by the live credential probe", async () => {
     process.env.JINGLER_TEST_LIVE_ACCESS = "access-fixture"
     process.env.JINGLER_TEST_LIVE_REFRESH = "refresh-fixture"
@@ -69,7 +98,9 @@ describe("live provider matrix", () => {
       expect(result.left.message).toContain("JINGLER_TEST_LIVE_ACCESS")
     }
   })
+})
 
+describe("live provider certification evidence", () => {
   it("builds route-specific evidence from the observed probe and every core scenario", async () => {
     process.env.JINGLER_TEST_LIVE_ACCESS = "access-fixture"
     process.env.JINGLER_TEST_LIVE_REFRESH = "refresh-fixture"
@@ -112,7 +143,9 @@ describe("live provider matrix", () => {
     })
     expect(result.certification.results).toHaveLength(CORE_PI_SCENARIOS.length)
   })
+})
 
+describe("live provider observed metadata", () => {
   it("does not trust stale billing metadata supplied by the matrix", async () => {
     process.env.JINGLER_TEST_LIVE_ACCESS = "access-fixture"
     process.env.JINGLER_TEST_LIVE_REFRESH = "refresh-fixture"

@@ -1,7 +1,8 @@
 import {
   ProviderConnection,
   ProviderModelId,
-  type ModelCertification
+  type ModelCertification,
+  type ReleaseModelCandidate
 } from "@jingler/core"
 import { Data, Effect, Schema } from "effect"
 import { InMemoryProviderCredentialStore } from "../../src/runtime/auth/credential-store.js"
@@ -32,6 +33,39 @@ export class LiveEvalError extends Data.TaggedError("LiveEvalError")<{
 export interface LiveTargetResult {
   readonly certification: ModelCertification
   readonly traces: ReadonlyArray<EvalTrace>
+}
+
+const routeKey = (value: {
+  readonly providerId: string
+  readonly modelId: string
+  readonly authKind: string
+}): string => `${value.providerId}:${value.modelId}:${value.authKind}`
+
+/**
+ * Reviewed runs must evaluate exactly the checked-in release candidates. This
+ * prevents a stale or extra model in the environment-owned credential matrix
+ * from silently becoming release evidence.
+ */
+export const requireReleaseCandidateMatrix = (
+  targets: LiveEvalMatrix,
+  candidates: ReadonlyArray<ReleaseModelCandidate>
+): Effect.Effect<void, LiveEvalError> => {
+  const targetKeys = new Set(targets.map((target) => routeKey({
+    providerId: target.connection.providerId,
+    modelId: target.modelId,
+    authKind: target.connection.authKind
+  })))
+  const candidateKeys = new Set(candidates.map(routeKey))
+  const missing = [...candidateKeys].filter((key) => !targetKeys.has(key))
+  const unexpected = [...targetKeys].filter((key) => !candidateKeys.has(key))
+  return missing.length === 0 && unexpected.length === 0
+    ? Effect.void
+    : Effect.fail(new LiveEvalError({
+        message: [
+          missing.length === 0 ? null : `missing release candidates: ${missing.join(", ")}`,
+          unexpected.length === 0 ? null : `unexpected live targets: ${unexpected.join(", ")}`
+        ].filter((issue): issue is string => issue !== null).join("; ")
+      }))
 }
 
 const requiredCredential = (

@@ -45,9 +45,9 @@ jobs:
           gh run download "$CERTIFICATION_RUN_ID" --name pi-provider-certification --dir .artifacts/pi-certification
       - name: Revalidate reviewed release manifest inputs
         env:
-          JINGLER_RELEASE_CANDIDATES: .artifacts/pi-certification/candidates.json
-          JINGLER_RELEASE_CERTIFICATIONS: .artifacts/pi-certification/certifications.json
-          JINGLER_RELEASE_MANIFEST: .artifacts/pi-certification/revalidated-manifest.json
+          JINGLER_RELEASE_CANDIDATES: ${{ github.workspace }}/config/pi-release-candidates.json
+          JINGLER_RELEASE_CERTIFICATIONS: ${{ github.workspace }}/.artifacts/pi-certification/certifications.json
+          JINGLER_RELEASE_MANIFEST: ${{ github.workspace }}/.artifacts/pi-certification/revalidated-manifest.json
         run: pnpm --filter @jingler/cli-adapters eval:pi:release-manifest
       - name: Install Electron runtime dependencies
         run: pnpm --filter @jingler/desktop exec playwright install --with-deps chromium

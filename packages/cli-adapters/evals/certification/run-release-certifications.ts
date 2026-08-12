@@ -40,9 +40,9 @@ const readJson = (file: string): Effect.Effect<unknown, ReleaseManifestCommandEr
     }))
   )
 
-const decodeFile = <A>(
+const decodeFile = <A, I>(
   file: string,
-  schema: Schema.Schema<A>
+  schema: Schema.Schema<A, I>
 ): Effect.Effect<A, ReleaseManifestCommandError> =>
   readJson(file).pipe(
     Effect.flatMap(Schema.decodeUnknown(schema)),
