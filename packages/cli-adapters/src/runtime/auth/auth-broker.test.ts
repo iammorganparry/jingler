@@ -20,6 +20,29 @@ const oauth = (expires: number): CodexOAuthFlow => ({
 })
 
 describe("AuthBroker", () => {
+  it("requires reauthentication when restored metadata has no encrypted credential", async () => {
+    const source = await Effect.runPromise(makeAuthBroker({
+      credentials: new InMemoryProviderCredentialStore(),
+      codexOAuth: oauth(Date.now() + 60_000),
+      probe: activeProbe
+    }))
+    const connection = await Effect.runPromise(source.connectClaudeToken({
+      id: "claude-1",
+      token: "sk-ant-oat-fixture-value",
+      targetId: "desktop"
+    }))
+    const restored = await Effect.runPromise(makeAuthBroker({
+      credentials: new InMemoryProviderCredentialStore(),
+      codexOAuth: oauth(Date.now() + 60_000),
+      probe: activeProbe
+    }))
+
+    await Effect.runPromise(restored.restore([connection]))
+
+    expect((await Effect.runPromise(restored.get(connection.id)))?.status)
+      .toBe("reauthentication-required")
+  })
+
   it("validates a Claude setup-token and exposes only an account fingerprint", async () => {
     const credentials = new InMemoryProviderCredentialStore()
     const broker = await Effect.runPromise(makeAuthBroker({ credentials, codexOAuth: oauth(Date.now() + 60_000), probe: activeProbe }))

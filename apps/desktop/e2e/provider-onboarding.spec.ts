@@ -138,6 +138,69 @@ test("recovers a configured workspace that has no selectable provider", async ({
   await finishProviderSetup(launched, "Claude Pro / Max setup-token");
 });
 
+test("reconnects a restored subscription whose encrypted credential is missing", async ({
+  launchApp,
+}) => {
+  const connectionId = "codex-missing-credential";
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-reauthentication",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+    },
+    seed: ({ home }) => {
+      const runtime = join(home, "jingler", "runtime");
+      mkdirSync(runtime, { recursive: true });
+      writeFileSync(
+        join(runtime, "provider-connections.json"),
+        JSON.stringify([
+          {
+            id: connectionId,
+            providerId: "openai-codex",
+            authKind: "openai-codex-oauth",
+            account: { fingerprint: "missing123456", displayLabel: null },
+            targetId: "desktop",
+            status: "authenticated",
+            subscription: {
+              entitlement: "active",
+              planLabel: "Test subscription",
+              expiresAt: "2026-08-22T09:32:34.581Z",
+              quotaLabel: null,
+              rateLimitLabel: null,
+              confirmedBillingRoute: "subscription",
+            },
+            createdAt: "2026-08-12T09:32:36.863Z",
+            updatedAt: "2026-08-12T09:32:36.863Z",
+          },
+        ]),
+      );
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: /Providers/u }).click();
+  await expect(
+    launched.window.getByText(
+      "Reauthentication required. Jingler has not retained usable credentials for this connection.",
+    ),
+  ).toBeVisible();
+
+  await launched.window
+    .getByRole("button", { name: "Reconnect in browser" })
+    .click();
+
+  await expect(
+    launched.window.getByText(SUBSCRIPTION_BILLING),
+  ).toBeVisible();
+  await expect(
+    launched.window.getByRole("button", { name: "Verify" }),
+  ).toBeVisible();
+});
+
 test("provider onboarding remains reachable at the minimum window height", async ({
   launchApp,
 }) => {

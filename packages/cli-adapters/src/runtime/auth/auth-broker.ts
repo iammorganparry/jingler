@@ -162,11 +162,39 @@ class LiveAuthBroker implements AuthBrokerShape {
     )
 
   restore = (restored: ReadonlyArray<ProviderConnection>) =>
-    Ref.update(this.connections, (current) => {
-      const next = new Map(current)
-      for (const connection of restored) next.set(connection.id, connection)
-      return next
-    })
+    Effect.forEach(
+      restored,
+      (connection) =>
+        connection.status === "disconnected"
+          ? Effect.succeed(connection)
+          : this.options.credentials.read(connection.id).pipe(
+              Effect.map((credential) =>
+                credential !== null && credential.authKind === connection.authKind
+                  ? connection
+                  : {
+                      ...connection,
+                      status: "reauthentication-required" as const,
+                      updatedAt: new Date(this.now()).toISOString()
+                    }
+              ),
+              Effect.catchAll(() =>
+                Effect.succeed({
+                  ...connection,
+                  status: "reauthentication-required" as const,
+                  updatedAt: new Date(this.now()).toISOString()
+                })
+              )
+            ),
+      { concurrency: "unbounded" }
+    ).pipe(
+      Effect.flatMap((connections) =>
+        Ref.update(this.connections, (current) => {
+          const next = new Map(current)
+          for (const connection of connections) next.set(connection.id, connection)
+          return next
+        })
+      )
+    )
 
   setApiKey: AuthBrokerShape["setApiKey"] = (input) =>
     Effect.gen(this, function* () {

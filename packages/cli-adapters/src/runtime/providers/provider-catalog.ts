@@ -118,19 +118,21 @@ const loadCatalog = (
         const catalogConnections = yield* Effect.forEach(
           connections,
           (connection) =>
-            options.discover(connection, controller.signal).pipe(
-              Effect.map((models) => ({
-                connection,
-                models: models.map((model) =>
-                  decorate(
-                    model,
+            connection.status !== "authenticated"
+              ? Effect.succeed({ connection, models: [] })
+              : options.discover(connection, controller.signal).pipe(
+                  Effect.map((models) => ({
                     connection,
-                    certifications,
-                    options.targetAvailable
-                  )
-                )
-              }))
-            ),
+                    models: models.map((model) =>
+                      decorate(
+                        model,
+                        connection,
+                        certifications,
+                        options.targetAvailable
+                      )
+                    )
+                  }))
+                ),
           { concurrency: "unbounded" }
         )
         return {

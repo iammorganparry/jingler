@@ -81,7 +81,9 @@ const serviceError = (message: string) => (cause: unknown) =>
   new ProviderConnectionsError({ message, cause })
 const brokerCall = <A>(operation: Effect.Effect<A, { readonly message: string }>) =>
   operation.pipe(
-    Effect.mapError(serviceError("Provider authentication failed"))
+    Effect.mapError((cause) =>
+      new ProviderConnectionsError({ message: cause.message, cause })
+    )
   )
 const persistConnection =
   (document: ReturnType<typeof connectionDocument>) =>

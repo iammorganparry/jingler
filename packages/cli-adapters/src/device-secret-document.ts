@@ -19,7 +19,12 @@ export interface DeviceSecretDocument {
   readonly [key: string]: unknown
 }
 
-const serialByStore = new WeakMap<SecretStoreShape, Promise<unknown>>()
+// Effect's application graph can materialize more than one SecretStore service
+// over the same encrypted device file. Serializing by service identity therefore
+// permits a stale read from one service to overwrite another service's update.
+// One process-wide queue protects the single device document across every
+// environment, remote-session, provider, and managed-resource writer.
+let serialQueue: Promise<unknown> = Promise.resolve()
 
 const decode = (raw: string | null): DeviceSecretDocument => {
   if (!raw) return {}
@@ -33,22 +38,22 @@ const decode = (raw: string | null): DeviceSecretDocument => {
   }
 }
 
-const serial = <A>(store: SecretStoreShape, operation: () => Promise<A>): Promise<A> => {
-  const pending = (serialByStore.get(store) ?? Promise.resolve()).then(operation)
-  serialByStore.set(store, pending.catch(() => undefined))
+const serial = <A>(operation: () => Promise<A>): Promise<A> => {
+  const pending = serialQueue.then(operation, operation)
+  serialQueue = pending.catch(() => undefined)
   return pending
 }
 
 export const readDeviceSecretDocument = (
   store: SecretStoreShape
 ): Promise<DeviceSecretDocument> =>
-  serial(store, async () => decode(await Effect.runPromise(store.getDeviceSecrets)))
+  serial(async () => decode(await Effect.runPromise(store.getDeviceSecrets)))
 
 export const updateDeviceSecretDocument = (
   store: SecretStoreShape,
   update: (document: DeviceSecretDocument) => DeviceSecretDocument
 ): Promise<DeviceSecretDocument> =>
-  serial(store, async () => {
+  serial(async () => {
     const document = decode(await Effect.runPromise(store.getDeviceSecrets))
     const next = update(document)
     if (next !== document) {

@@ -8,6 +8,7 @@ import { Check, LogOut, RefreshCw, ShieldCheck } from "lucide-react"
 import * as React from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
+import { Input } from "../components/input.js"
 import { Spinner } from "../components/loading.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
@@ -28,6 +29,13 @@ export interface ProviderConnectionsSettingsProps {
     modelId: ProviderModelId
   }) => void
   onLogout: (connectionId: ProviderConnectionId) => void
+  onConnectClaude: (connectionId: ProviderConnectionId, token: string) => void
+  onStartCodex: (connectionId: ProviderConnectionId) => void
+  onSetApiKey: (
+    connectionId: ProviderConnectionId,
+    providerId: ProviderId,
+    apiKey: string
+  ) => void
 }
 
 export function ProviderConnectionsSettings({
@@ -39,7 +47,10 @@ export function ProviderConnectionsSettings({
   onRefresh,
   onVerify,
   onMakeDefault,
-  onLogout
+  onLogout,
+  onConnectClaude,
+  onStartCodex,
+  onSetApiKey
 }: ProviderConnectionsSettingsProps) {
   const connections = catalog?.connections ?? []
   const [selectedId, setSelectedId] = React.useState<ProviderConnectionId | null>(
@@ -47,6 +58,22 @@ export function ProviderConnectionsSettings({
   )
   const selected =
     connections.find(({ connection }) => connection.id === selectedId) ?? connections[0] ?? null
+  const credential = React.useRef<HTMLInputElement>(null)
+  const reconnectWithSecret = () => {
+    if (selected === null) return
+    const secret = credential.current?.value.trim() ?? ""
+    if (secret.length === 0) return
+    if (credential.current) credential.current.value = ""
+    if (selected.connection.authKind === "claude-setup-token") {
+      onConnectClaude(selected.connection.id, secret)
+    } else if (selected.connection.authKind === "api-key") {
+      onSetApiKey(
+        selected.connection.id,
+        selected.connection.providerId,
+        secret
+      )
+    }
+  }
 
   return (
     <>
@@ -105,13 +132,59 @@ export function ProviderConnectionsSettings({
                     {selected.connection.subscription.planLabel ?? "Plan not reported"} · {selected.connection.targetId} · billing: {selected.connection.subscription.confirmedBillingRoute ?? "unconfirmed"}
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => onRefresh(selected.connection.id)}>
+                <Button variant="ghost" size="sm" disabled={busy || selected.connection.status !== "authenticated"} onClick={() => onRefresh(selected.connection.id)}>
                   {busy ? <Spinner size={12} /> : <RefreshCw size={12} />} Refresh
                 </Button>
                 <Button variant="ghost" size="sm" disabled={busy} onClick={() => onLogout(selected.connection.id)}>
                   <LogOut size={12} /> Log out
                 </Button>
               </div>
+
+              {selected.connection.status !== "authenticated" && (
+                <div className="flex flex-col gap-3 rounded-lg border border-yellow/30 bg-yellow/[0.04] p-3">
+                  <Callout tone="yellow">
+                    Reauthentication required. Jingler has not retained usable credentials for this connection.
+                  </Callout>
+                  {selected.connection.authKind === "claude-setup-token" && (
+                    <div className="flex gap-2">
+                      <Input
+                        ref={credential}
+                        type="password"
+                        autoComplete="off"
+                        placeholder="Claude setup-token"
+                        disabled={busy}
+                      />
+                      <Button variant="primary" disabled={busy} onClick={reconnectWithSecret}>
+                        Reconnect Claude
+                      </Button>
+                    </div>
+                  )}
+                  {selected.connection.authKind === "openai-codex-oauth" && (
+                    <Button
+                      className="self-start"
+                      variant="primary"
+                      disabled={busy}
+                      onClick={() => onStartCodex(selected.connection.id)}
+                    >
+                      Reconnect in browser
+                    </Button>
+                  )}
+                  {selected.connection.authKind === "api-key" && (
+                    <div className="flex gap-2">
+                      <Input
+                        ref={credential}
+                        type="password"
+                        autoComplete="off"
+                        placeholder="Provider API key"
+                        disabled={busy}
+                      />
+                      <Button variant="primary" disabled={busy} onClick={reconnectWithSecret}>
+                        Reconnect API key
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex flex-col gap-2">
                 <div className="text-[12px] font-semibold text-text-bright">Models</div>

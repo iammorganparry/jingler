@@ -1532,6 +1532,9 @@ function AuthedApp({
           onVerify: providerCatalog.verify,
           onMakeDefault: providerCatalog.makeDefault,
           onLogout: providerCatalog.logout,
+          onConnectClaude: providerCatalog.connectClaude,
+          onStartCodex: providerCatalog.startCodex,
+          onSetApiKey: providerCatalog.setApiKey,
         }}
         agents={{
           resources: agentsSettings.snapshot.context.resources,

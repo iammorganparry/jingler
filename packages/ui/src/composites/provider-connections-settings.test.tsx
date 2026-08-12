@@ -55,6 +55,42 @@ const catalog = Schema.decodeSync(ProviderCatalog)({
 })
 
 describe("ProviderConnectionsSettings", () => {
+  it("reconnects a subscription whose encrypted credential is unavailable", () => {
+    const onConnectClaude = vi.fn()
+    const unavailable = Schema.decodeSync(ProviderCatalog)({
+      ...catalog,
+      connections: catalog.connections.map(({ connection, models }) => ({
+        connection: { ...connection, status: "reauthentication-required" },
+        models
+      }))
+    })
+    render(
+      <ProviderConnectionsSettings
+        catalog={unavailable}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={vi.fn()}
+        onConnectClaude={onConnectClaude}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
+      />
+    )
+
+    fireEvent.change(screen.getByPlaceholderText("Claude setup-token"), {
+      target: { value: "sk-ant-oat-replacement" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect Claude" }))
+
+    expect(onConnectClaude).toHaveBeenCalledWith(
+      "claude-max",
+      "sk-ant-oat-replacement"
+    )
+    expect(
+      (screen.getByPlaceholderText("Claude setup-token") as HTMLInputElement).value
+    ).toBe("")
+  })
+
   it("shows the pinned account, target, plan, and billing route", () => {
     render(
       <ProviderConnectionsSettings
@@ -63,6 +99,9 @@ describe("ProviderConnectionsSettings", () => {
         onVerify={vi.fn()}
         onMakeDefault={vi.fn()}
         onLogout={vi.fn()}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
       />
     )
     expect(screen.getAllByText("Claude Pro / Max setup-token").length).toBeGreaterThan(0)
@@ -80,6 +119,9 @@ describe("ProviderConnectionsSettings", () => {
         onVerify={onVerify}
         onMakeDefault={vi.fn()}
         onLogout={onLogout}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "Verify" }))
@@ -100,6 +142,9 @@ describe("ProviderConnectionsSettings", () => {
         onVerify={vi.fn()}
         onMakeDefault={onMakeDefault}
         onLogout={vi.fn()}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "Make default" }))

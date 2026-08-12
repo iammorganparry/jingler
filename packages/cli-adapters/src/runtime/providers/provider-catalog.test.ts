@@ -8,7 +8,7 @@ import {
 import { Effect, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { InMemoryModelCertificationStore } from "../certification/model-certification-store.js"
-import { makeProviderCatalogService } from "./provider-catalog.js"
+import { makeProviderCatalogService, ProviderCatalogError } from "./provider-catalog.js"
 import type { DiscoveredProviderModel } from "./provider-catalog.js"
 
 const connection = Schema.decodeUnknownSync(ProviderConnection)({
@@ -77,6 +77,35 @@ const make = async (input?: {
 }
 
 describe("ProviderCatalogService", () => {
+  it("skips unavailable connections without hiding healthy provider models", async () => {
+    const unavailable = {
+      ...connection,
+      id: Schema.decodeUnknownSync(ProviderConnection)(
+        { ...connection, id: "missing-credential" }
+      ).id,
+      status: "reauthentication-required" as const
+    }
+    const discover = vi.fn((candidate: typeof connection) =>
+      candidate.status === "authenticated"
+        ? Effect.succeed([model])
+        : Effect.fail(new ProviderCatalogError({ message: "missing credential" }))
+    )
+    const service = await Effect.runPromise(makeProviderCatalogService({
+      connections: Effect.succeed([unavailable, connection]),
+      certifications: new InMemoryModelCertificationStore(),
+      discover,
+      targetAvailable: () => true
+    }))
+
+    const catalog = await Effect.runPromise(service.refresh)
+
+    expect(discover).toHaveBeenCalledOnce()
+    expect(catalog.connections).toEqual([
+      { connection: unavailable, models: [] },
+      expect.objectContaining({ connection, models: [expect.any(Object)] })
+    ])
+  })
+
   it("lists certified pi models without consulting executable discovery", async () => {
     const discover = vi.fn(async (_signal: AbortSignal) => [model])
     const catalog = await Effect.runPromise((await make({ discover })).refresh)

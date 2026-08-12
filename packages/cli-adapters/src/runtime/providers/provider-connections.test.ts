@@ -18,6 +18,41 @@ afterEach(async () =>
 )
 
 describe("ProviderConnections", () => {
+  it("preserves safe broker failure messages for reauthentication", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-connections-"))
+    roots.push(root)
+    const broker = await Effect.runPromise(makeAuthBroker({
+      credentials: new InMemoryProviderCredentialStore(),
+      codexOAuth: {
+        login: async () => ({ access: "oauth", refresh: "refresh", expires: 1 }),
+        refresh: async (credential) => credential
+      },
+      probe: async () => ({
+        entitlement: "active",
+        planLabel: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        billingRoute: "subscription",
+        observedRoute: "fixture-subscription"
+      })
+    }))
+    const service = await Effect.runPromise(makeProviderConnections({
+      file: join(root, "connections.json"),
+      broker,
+      catalog: {
+        list: Effect.succeed({ connections: [], refreshedAt: "now", stale: false }),
+        refresh: Effect.succeed({ connections: [], refreshedAt: "now", stale: false }),
+        selectable: Effect.succeed([])
+      },
+      codexInteraction: () => ({ prompt: async () => "browser", notify: () => undefined }),
+      verifyModel: () => Effect.die("unused")
+    }))
+
+    await expect(Effect.runPromise(
+      service.refresh(Schema.decodeUnknownSync(ProviderConnectionId)("missing"))
+    )).rejects.toMatchObject({ message: "Provider connection not found" })
+  })
+
   it("persists only redacted connection metadata", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-connections-"))
     roots.push(root)

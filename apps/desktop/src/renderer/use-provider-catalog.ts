@@ -32,6 +32,39 @@ export function useProviderCatalog() {
     mutationFn: rpc.providerLogout,
     onSuccess: refreshCatalog
   })
+  const connectClaude = useMutation({
+    mutationFn: ({ connectionId, token }: {
+      connectionId: ProviderConnectionId
+      token: string
+    }) => rpc.providerConnectClaudeToken({
+      id: connectionId,
+      token,
+      targetId: "desktop"
+    }),
+    onSuccess: refreshCatalog
+  })
+  const startCodex = useMutation({
+    mutationFn: (connectionId: ProviderConnectionId) =>
+      rpc.providerStartCodexLogin({
+        id: connectionId,
+        targetId: "desktop",
+        method: "browser"
+      }),
+    onSuccess: refreshCatalog
+  })
+  const setApiKey = useMutation({
+    mutationFn: ({ connectionId, providerId, apiKey }: {
+      connectionId: ProviderConnectionId
+      providerId: ProviderId
+      apiKey: string
+    }) => rpc.providerSetApiKey({
+      id: connectionId,
+      providerId,
+      apiKey,
+      targetId: "desktop"
+    }),
+    onSuccess: refreshCatalog
+  })
   const makeDefault = useMutation({
     mutationFn: ({ connectionId, providerId, modelId }: {
       connectionId: ProviderConnectionId
@@ -41,13 +74,29 @@ export function useProviderCatalog() {
     onSuccess: (config) => queryClient.setQueryData(["config"], config)
   })
 
-  const activeMutation = [refresh, verify, logout, makeDefault].find(
+  const activeMutation = [
+    refresh,
+    verify,
+    logout,
+    connectClaude,
+    startCodex,
+    setApiKey,
+    makeDefault
+  ].find(
     ({ isPending, error }) => isPending || error !== null
   )
 
   return {
     catalog: catalog.data ?? null,
-    busy: catalog.isLoading || refresh.isPending || verify.isPending || logout.isPending || makeDefault.isPending,
+    busy:
+      catalog.isLoading ||
+      refresh.isPending ||
+      verify.isPending ||
+      logout.isPending ||
+      connectClaude.isPending ||
+      startCodex.isPending ||
+      setApiKey.isPending ||
+      makeDefault.isPending,
     error: catalog.error
       ? messageOf(catalog.error)
       : activeMutation?.error
@@ -58,6 +107,16 @@ export function useProviderCatalog() {
     verify: (connectionId: ProviderConnectionId, modelId: ProviderModelId) =>
       verify.mutate({ connectionId, modelId }),
     logout: logout.mutate,
+    connectClaude: (
+      connectionId: ProviderConnectionId,
+      token: string
+    ) => connectClaude.mutate({ connectionId, token }),
+    startCodex: startCodex.mutate,
+    setApiKey: (
+      connectionId: ProviderConnectionId,
+      providerId: ProviderId,
+      apiKey: string
+    ) => setApiKey.mutate({ connectionId, providerId, apiKey }),
     makeDefault: makeDefault.mutate
   }
 }
