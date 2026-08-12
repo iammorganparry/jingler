@@ -3,10 +3,7 @@ import type {
   DetectedResourceCandidate,
   GitHubConnection,
   ProviderCatalog,
-  ProviderConnectionId,
-  ProviderId,
   ProviderLoginEvent,
-  ProviderModelId,
   Repo,
   ResourceDetectionResult
 } from "@jingler/core"
@@ -38,11 +35,8 @@ export interface SetupScreenProps {
   onConnectClaude: (token: string) => void
   onStartCodex: (method: CodexLoginMethod) => void
   onConnectApi: (providerId: string, apiKey: string) => void
-  onSelectModel: (selection: {
-    connectionId: ProviderConnectionId
-    providerId: ProviderId
-    modelId: ProviderModelId
-  }) => void
+  onContinueProvider: () => void
+  onSkipProvider: () => void
   onCancelAuth: () => void
   onRetryProvider: () => void
   onImportResources: (candidates: ReadonlyArray<DetectedResourceCandidate>) => void
@@ -86,7 +80,8 @@ export function SetupScreen({
   onConnectClaude,
   onStartCodex,
   onConnectApi,
-  onSelectModel,
+  onContinueProvider,
+  onSkipProvider,
   onCancelAuth,
   onRetryProvider,
   onImportResources,
@@ -210,7 +205,8 @@ export function SetupScreen({
             onConnectClaude={onConnectClaude}
             onStartCodex={onStartCodex}
             onConnectApi={onConnectApi}
-            onSelectModel={onSelectModel}
+            onContinue={onContinueProvider}
+            onSkip={onSkipProvider}
             onCancel={onCancelAuth}
             onRetry={onRetryProvider}
           />

@@ -118,6 +118,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.connectionSelectionRequired !== undefined
               ? { connectionSelectionRequired: existing.connectionSelectionRequired }
               : {}),
+            ...(existing?.providerSetupCompleted !== undefined
+              ? { providerSetupCompleted: existing.providerSetupCompleted }
+              : {}),
             ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
             ...(existing?.notifications ? { notifications: existing.notifications } : {}),
             // Booleans are checked against `undefined`, not truthiness — a saved
@@ -137,6 +140,8 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         })
 
       const setReposDir = (dir: string) => patch({ reposDir: dir })
+
+      const completeProviderSetup = () => patch({ providerSetupCompleted: true })
 
       const setGithub = (github: GithubConfig) => patch({ github })
 
@@ -258,6 +263,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       return {
         get,
         setReposDir,
+        completeProviderSetup,
         setGithub,
         setGit,
         setNotifications,

@@ -5171,6 +5171,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ConfigService.setFontScale(fontScale),
   "Config.setDefaultProviderModel": ({ connectionId, providerId, modelId }) =>
     ConfigService.setDefaultProviderModel(connectionId, providerId, modelId),
+  "Config.completeProviderSetup": () => ConfigService.completeProviderSetup(),
   /**
    * Deliver an OS notification. Main decides whether to actually show it: it
    * owns the window's focus state, which the renderer cannot observe reliably,

@@ -3,9 +3,6 @@ import {
   type DetectedResourceCandidate,
   type ProviderCatalog,
   type ProviderConnection,
-  type ProviderConnectionId,
-  type ProviderId,
-  type ProviderModelId,
   type ResourceDetectionResult,
   type ResourceImportResult,
   type Session,
@@ -18,7 +15,6 @@ import {
   type ChosenRepositoryDirectory,
   type InitialData,
   type ProviderAuthInput,
-  type SelectedProviderModel,
 } from "./app-machine.js";
 
 vi.mock("./rpc-client.js", () => ({ rpc: {} }));
@@ -67,11 +63,31 @@ const providerCatalog = Schema.decodeSync(ProviderCatalogSchema)({
 
 const emptyDetection: ResourceDetectionResult = { candidates: [], skipped: [] };
 const emptyImport: ResourceImportResult = { imported: [], skipped: [] };
-const selection: SelectedProviderModel = {
-  connectionId: providerCatalog.connections[0]!.connection.id,
-  providerId: providerCatalog.connections[0]!.connection.providerId,
-  modelId: providerCatalog.connections[0]!.models[0]!.id,
-};
+const authenticatedCatalogWithoutModels = Schema.decodeSync(
+  ProviderCatalogSchema,
+)({
+  ...providerCatalog,
+  connections: providerCatalog.connections.map(({ connection }) => ({
+    connection,
+    models: [],
+  })),
+});
+
+const disconnectedCatalog = Schema.decodeSync(ProviderCatalogSchema)({
+  ...providerCatalog,
+  connections: providerCatalog.connections.map(({ connection }) => ({
+    connection: {
+      ...connection,
+      status: "disconnected",
+      subscription: {
+        ...connection.subscription,
+        entitlement: "unavailable",
+        confirmedBillingRoute: null,
+      },
+    },
+    models: [],
+  })),
+});
 
 const unconfigured = () =>
   appMachine.provide({
@@ -96,9 +112,7 @@ const unconfigured = () =>
       connectProvider: fromPromise<ProviderConnection, ProviderAuthInput>(
         async () => providerCatalog.connections[0]!.connection,
       ),
-      verifyProviderModel: fromPromise<ProviderCatalog, SelectedProviderModel>(
-        async () => providerCatalog,
-      ),
+      completeProviderSetup: fromPromise<void>(async () => undefined),
       detectResources: fromPromise<ResourceDetectionResult>(
         async () => emptyDetection,
       ),
@@ -184,10 +198,10 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
-  it("coordinates workspace, GitHub, certified provider, resources, and startup", async () => {
+  it("coordinates workspace, GitHub, provider auth, resources, and startup", async () => {
     const actor = createActor(unconfigured()).start();
     await reachProvider(actor);
-    actor.send({ type: "SELECT_MODEL", ...selection });
+    actor.send({ type: "CONTINUE_PROVIDER" });
     await waitFor(actor, (snapshot) =>
       snapshot.matches({ setup: { resources: "reviewing" } }),
     );
@@ -196,14 +210,63 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
-  it("does not start until a selectable provider model has been verified", async () => {
-    const actor = createActor(unconfigured()).start();
+  it("continues after authentication without requiring model discovery or certification", async () => {
+    const completeProviderSetup = vi.fn(async () => undefined);
+    const machine = unconfigured().provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => ({
+          configured: false,
+          providerReady: false,
+          reposDir: null,
+          repos: [],
+          sessions: [],
+          providerCatalog: authenticatedCatalogWithoutModels,
+        })),
+        loadProviderCatalog: fromPromise<ProviderCatalog>(
+          async () => authenticatedCatalogWithoutModels,
+        ),
+        completeProviderSetup: fromPromise<void>(completeProviderSetup),
+      },
+    });
+    const actor = createActor(machine).start();
     await reachProvider(actor);
 
+    actor.send({ type: "CONTINUE_PROVIDER" });
+
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { resources: "reviewing" } }),
+    );
+    expect(completeProviderSetup).toHaveBeenCalledOnce();
+    actor.stop();
+  });
+
+  it("requires authentication to continue but allows setup to be skipped", async () => {
+    const machine = unconfigured().provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => ({
+          configured: false,
+          providerReady: false,
+          reposDir: null,
+          repos: [],
+          sessions: [],
+          providerCatalog: disconnectedCatalog,
+        })),
+        loadProviderCatalog: fromPromise<ProviderCatalog>(
+          async () => disconnectedCatalog,
+        ),
+      },
+    });
+    const actor = createActor(machine).start();
+    await reachProvider(actor);
+
+    actor.send({ type: "CONTINUE_PROVIDER" });
     expect(actor.getSnapshot().matches({ setup: { provider: "idle" } })).toBe(
       true,
     );
-    expect(actor.getSnapshot().matches("starting")).toBe(false);
+    actor.send({ type: "SKIP_PROVIDER" });
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { resources: "reviewing" } }),
+    );
     actor.stop();
   });
 
@@ -240,27 +303,23 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
-  it("retries model verification independently from authentication", async () => {
+  it("retries provider setup persistence independently from authentication", async () => {
     let attempts = 0;
     const machine = unconfigured().provide({
       actors: {
-        verifyProviderModel: fromPromise<
-          ProviderCatalog,
-          SelectedProviderModel
-        >(async () => {
+        completeProviderSetup: fromPromise<void>(async () => {
           attempts += 1;
-          if (attempts === 1) throw new Error("Scenario failed");
-          return providerCatalog;
+          if (attempts === 1) throw new Error("Config unavailable");
         }),
       },
     });
     const actor = createActor(machine).start();
     await reachProvider(actor);
-    actor.send({ type: "SELECT_MODEL", ...selection });
+    actor.send({ type: "CONTINUE_PROVIDER" });
     await waitFor(actor, (snapshot) =>
-      snapshot.matches({ setup: { provider: "verificationFailed" } }),
+      snapshot.matches({ setup: { provider: "completionFailed" } }),
     );
-    actor.send({ type: "RETRY_VERIFICATION" });
+    actor.send({ type: "RETRY_PROVIDER" });
     await waitFor(actor, (snapshot) =>
       snapshot.matches({ setup: { resources: "reviewing" } }),
     );
@@ -280,7 +339,7 @@ describe("appMachine first-run coordination", () => {
     });
     const actor = createActor(machine).start();
     await reachProvider(actor);
-    actor.send({ type: "SELECT_MODEL", ...selection });
+    actor.send({ type: "CONTINUE_PROVIDER" });
     await waitFor(actor, (snapshot) =>
       snapshot.matches({ setup: { resources: "reviewing" } }),
     );
@@ -352,7 +411,7 @@ describe("appMachine first-run coordination", () => {
     await waitFor(actor, (snapshot) =>
       snapshot.matches({ setup: { provider: "idle" } }),
     );
-    actor.send({ type: "SELECT_MODEL", ...selection });
+    actor.send({ type: "CONTINUE_PROVIDER" });
     await waitFor(actor, (snapshot) =>
       snapshot.matches({ setup: { resources: "reviewing" } }),
     );

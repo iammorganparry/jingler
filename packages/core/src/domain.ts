@@ -943,6 +943,8 @@ export const WorkspaceConfig = Schema.Struct({
   defaultProviderId: Schema.optional(ProviderId),
   defaultModelId: Schema.optional(ProviderModelId),
   connectionSelectionRequired: Schema.optional(Schema.Boolean),
+  /** First-run provider authentication was completed or explicitly skipped. */
+  providerSetupCompleted: Schema.optional(Schema.Boolean),
   /** Custom PRD/MDX structure injected into every native planning turn. */
   planTemplate: Schema.optional(PlanTemplateConfig),
   /**

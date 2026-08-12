@@ -1558,6 +1558,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: SetDefaultProviderModelInput
   }),
 
+  /** Persist that first-run provider authentication was completed or skipped. */
+  Rpc.make("Config.completeProviderSetup", {
+    success: WorkspaceConfig,
+    error: ConfigError
+  }),
+
   /**
    * Raise an OS notification for a session.
    *

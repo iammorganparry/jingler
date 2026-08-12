@@ -649,7 +649,8 @@ function AuthedApp({
   ) => {
     const session = await rpc.sessionsCreateFromPr(input, onProgress);
     void rememberLastRepo(input.repoPath);
-    if (input.initialPrompt || images.length > 0) setFirstMessage(session.id, images);
+    if (input.initialPrompt || images.length > 0)
+      setFirstMessage(session.id, images);
     send({ type: "SESSION_CREATED", session });
     return session;
   };
@@ -660,7 +661,8 @@ function AuthedApp({
   ) => {
     const session = await rpc.sessionsCreateFromIssue(input, onProgress);
     void rememberLastRepo(input.repoPath);
-    if (input.task.trim() || images.length > 0) setFirstMessage(session.id, images);
+    if (input.task.trim() || images.length > 0)
+      setFirstMessage(session.id, images);
     send({ type: "SESSION_CREATED", session });
     return session;
   };
@@ -794,7 +796,9 @@ function AuthedApp({
             installation.id,
             installation.status,
             installation.repositorySelection,
-            ...(installation.repositories ?? []).map((repository) => repository.id).sort(),
+            ...(installation.repositories ?? [])
+              .map((repository) => repository.id)
+              .sort(),
           ].join(":"),
         )
         .sort()
@@ -1336,7 +1340,7 @@ function AuthedApp({
     const providerBusy =
       state.matches({ setup: { provider: "refreshing" } }) ||
       state.matches({ setup: { provider: "authenticating" } }) ||
-      state.matches({ setup: { provider: "verifying" } });
+      state.matches({ setup: { provider: "completing" } });
     const resourcesBusy =
       state.matches({ setup: { resources: "detecting" } }) ||
       state.matches({ setup: { resources: "importing" } });
@@ -1362,8 +1366,8 @@ function AuthedApp({
           github.connection.connected ? github.manage : github.connect
         }
         onSkipGithub={() => {
-          github.cancel()
-          send({ type: "SKIP_GITHUB" })
+          github.cancel();
+          send({ type: "SKIP_GITHUB" });
         }}
         onConnectClaude={(token) =>
           send({
@@ -1393,13 +1397,12 @@ function AuthedApp({
             targetId: "desktop",
           })
         }
-        onSelectModel={(selection) => send({ type: "SELECT_MODEL", ...selection })}
+        onContinueProvider={() => send({ type: "CONTINUE_PROVIDER" })}
+        onSkipProvider={() => send({ type: "SKIP_PROVIDER" })}
         onCancelAuth={() => send({ type: "CANCEL_AUTH" })}
         onRetryProvider={() => {
           if (state.matches({ setup: { provider: "authFailed" } })) {
             send({ type: "RETRY_AUTH" });
-          } else if (state.matches({ setup: { provider: "verificationFailed" } })) {
-            send({ type: "RETRY_VERIFICATION" });
           } else {
             send({ type: "RETRY_PROVIDER" });
           }
@@ -1533,7 +1536,8 @@ function AuthedApp({
         agents={{
           resources: agentsSettings.snapshot.context.resources,
           detection: agentsSettings.snapshot.context.detection,
-          selectedCandidateIds: agentsSettings.snapshot.context.selectedCandidateIds,
+          selectedCandidateIds:
+            agentsSettings.snapshot.context.selectedCandidateIds,
           loading:
             agentsSettings.snapshot.matches("loading") ||
             agentsSettings.snapshot.matches("detecting") ||
@@ -1542,10 +1546,14 @@ function AuthedApp({
           reviewing: agentsSettings.snapshot.matches("reviewing"),
           error: agentsSettings.snapshot.context.error,
           onDetect: () => agentsSettings.send({ type: "DETECT" }),
-          onToggleCandidate: (id) => agentsSettings.send({ type: "TOGGLE_CANDIDATE", id }),
-          onImportSelected: () => agentsSettings.send({ type: "IMPORT_SELECTED" }),
-          onCancelDetection: () => agentsSettings.send({ type: "CANCEL_DETECTION" }),
-          onSetEnabled: (id, enabled) => agentsSettings.send({ type: "SET_ENABLED", id, enabled }),
+          onToggleCandidate: (id) =>
+            agentsSettings.send({ type: "TOGGLE_CANDIDATE", id }),
+          onImportSelected: () =>
+            agentsSettings.send({ type: "IMPORT_SELECTED" }),
+          onCancelDetection: () =>
+            agentsSettings.send({ type: "CANCEL_DETECTION" }),
+          onSetEnabled: (id, enabled) =>
+            agentsSettings.send({ type: "SET_ENABLED", id, enabled }),
           onReveal: (id) => agentsSettings.send({ type: "REVEAL", id }),
           onRemove: (id) => agentsSettings.send({ type: "REMOVE", id }),
           onRetry: () => agentsSettings.send({ type: "RETRY" }),
@@ -1570,16 +1578,28 @@ function AuthedApp({
         environments={environmentController.environments}
         loadEnvironmentDiscovery={rpc.environmentsDiscovery}
         loadBranches={async (repoPath, environmentId) => {
-          return rpc.workspaceBranches(repoPath, environmentId)
+          return rpc.workspaceBranches(repoPath, environmentId);
         }}
         issueProviders={issueProviders}
         loadPullRequests={(project, search, mine) => {
-          const githubSlug = repos.find((repo) => repo.path === project.path)?.githubSlug ?? undefined;
-          return rpc.githubListPrs(project.path, { search, mine, ...(githubSlug ? { githubSlug } : {}) });
+          const githubSlug =
+            repos.find((repo) => repo.path === project.path)?.githubSlug ??
+            undefined;
+          return rpc.githubListPrs(project.path, {
+            search,
+            mine,
+            ...(githubSlug ? { githubSlug } : {}),
+          });
         }}
         loadGithubIssues={(project, search, mine) => {
-          const githubSlug = repos.find((repo) => repo.path === project.path)?.githubSlug ?? undefined;
-          return rpc.githubListIssues(project.path, { search, mine, ...(githubSlug ? { githubSlug } : {}) });
+          const githubSlug =
+            repos.find((repo) => repo.path === project.path)?.githubSlug ??
+            undefined;
+          return rpc.githubListIssues(project.path, {
+            search,
+            mine,
+            ...(githubSlug ? { githubSlug } : {}),
+          });
         }}
         loadProviderIssues={(providerId, project, search, mine) =>
           rpc.pluginsIssueProviderList({
@@ -1587,7 +1607,8 @@ function AuthedApp({
             repository: { name: project.name, path: project.path },
             search,
             mine,
-          })}
+          })
+        }
         onCreateSession={createSession}
         onCreateSessionFromPr={createSessionFromPr}
         onCreateSessionFromIssue={createSessionFromIssue}

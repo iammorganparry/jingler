@@ -10,9 +10,7 @@ import type {
   ProviderCatalog,
   ProviderConnection,
   ProviderConnectionId,
-  ProviderId,
   ProviderLoginEvent,
-  ProviderModelId,
   PublishCheckpoint,
   Repo,
   ResourceDetectionResult,
@@ -29,7 +27,6 @@ export interface AppContext {
   readonly sessions: ReadonlyArray<Session>;
   readonly providerCatalog: ProviderCatalog | null;
   readonly providerLoginEvent: ProviderLoginEvent | null;
-  readonly selectedProviderModel: SelectedProviderModel | null;
   readonly resourceDetection: ResourceDetectionResult | null;
   readonly selectedResourceCandidates: ReadonlyArray<DetectedResourceCandidate>;
   readonly error: string | null;
@@ -88,7 +85,9 @@ const initialLoad = fromPromise<InitialData>(async () => {
     ]);
     return {
       configured: true,
-      providerReady: hasSelectableDefault(config, providerCatalog),
+      providerReady:
+        config.providerSetupCompleted === true ||
+        hasSelectableDefault(config, providerCatalog),
       reposDir: config.reposDir,
       repos,
       sessions,
@@ -139,15 +138,13 @@ export type ProviderAuthInput =
       readonly targetId: string;
     };
 
-export interface SelectedProviderModel {
-  readonly connectionId: ProviderConnectionId;
-  readonly providerId: ProviderId;
-  readonly modelId: ProviderModelId;
-}
-
 const loadProviderCatalog = fromPromise<ProviderCatalog>(async () =>
   rpc.providerList(),
 );
+
+const completeProviderSetup = fromPromise<void>(async () => {
+  await rpc.configCompleteProviderSetup();
+});
 
 const watchProviderLoginEvents = fromCallback<{
   readonly type: "PROVIDER_LOGIN_EVENT";
@@ -179,39 +176,6 @@ const connectProvider = fromPromise<ProviderConnection, ProviderAuthInput>(
     } finally {
       signal.removeEventListener("abort", cancel);
     }
-  },
-);
-
-const verifyProviderModel = fromPromise<ProviderCatalog, SelectedProviderModel>(
-  async ({ input }) => {
-    const current = await rpc.providerList();
-    const currentConnection = current.connections.find(
-      ({ connection }) => connection.id === input.connectionId,
-    );
-    const currentModel = currentConnection?.models.find(
-      ({ id }) => id === input.modelId,
-    );
-    if (!currentModel?.selectable) {
-      await rpc.providerVerifyModel(input.connectionId, input.modelId);
-    }
-    const catalog = currentModel?.selectable
-      ? current
-      : await rpc.providerList();
-    const connection = catalog.connections.find(
-      ({ connection }) => connection.id === input.connectionId,
-    );
-    const model = connection?.models.find(({ id }) => id === input.modelId);
-    if (!(connection && model?.selectable)) {
-      throw new Error(
-        "The model did not produce a current selectable certification.",
-      );
-    }
-    await rpc.configSetDefaultProviderModel(
-      input.connectionId,
-      input.providerId,
-      input.modelId,
-    );
-    return catalog;
   },
 );
 
@@ -252,13 +216,12 @@ export const appMachine = setup({
           ProviderAuthInput,
           { kind: "api-key" }
         >)
-      | ({ type: "SELECT_MODEL" } & SelectedProviderModel)
+      | { type: "CONTINUE_PROVIDER" }
+      | { type: "SKIP_PROVIDER" }
       | { type: "CANCEL_AUTH" }
       | { type: "RETRY_AUTH" }
       | { type: "RETRY_PROVIDER" }
-      | { type: "RETRY_VERIFICATION" }
       | { type: "PROVIDER_LOGIN_EVENT"; event: ProviderLoginEvent }
-      | { type: "CHANGE_MODEL" }
       | {
           type: "IMPORT_RESOURCES";
           candidates: ReadonlyArray<DetectedResourceCandidate>;
@@ -282,9 +245,9 @@ export const appMachine = setup({
     chooseDir,
     loadSessions,
     loadProviderCatalog,
+    completeProviderSetup,
     watchProviderLoginEvents,
     connectProvider,
-    verifyProviderModel,
     detectResources,
     importResources,
   },
@@ -297,7 +260,6 @@ export const appMachine = setup({
     sessions: [],
     providerCatalog: null,
     providerLoginEvent: null,
-    selectedProviderModel: null,
     resourceDetection: null,
     selectedResourceCandidates: [],
     error: null,
@@ -418,6 +380,14 @@ export const appMachine = setup({
             loadFailed: { on: { RETRY_PROVIDER: "refreshing" } },
             idle: {
               on: {
+                CONTINUE_PROVIDER: {
+                  target: "completing",
+                  guard: ({ context }) =>
+                    context.providerCatalog?.connections.some(
+                      ({ connection }) => connection.status === "authenticated",
+                    ) === true,
+                },
+                SKIP_PROVIDER: "completing",
                 CONNECT_CLAUDE: {
                   target: "authenticating",
                   actions: assign({ providerLoginEvent: null, error: null }),
@@ -430,18 +400,22 @@ export const appMachine = setup({
                   target: "authenticating",
                   actions: assign({ providerLoginEvent: null, error: null }),
                 },
-                SELECT_MODEL: {
-                  target: "verifying",
+              },
+            },
+            completing: {
+              invoke: {
+                src: "completeProviderSetup",
+                onDone: "#app.setup.resources",
+                onError: {
+                  target: "completionFailed",
                   actions: assign(({ event }) => ({
-                    selectedProviderModel: {
-                      connectionId: event.connectionId,
-                      providerId: event.providerId,
-                      modelId: event.modelId,
-                    },
-                    error: null,
+                    error: messageOf(event.error),
                   })),
                 },
               },
+            },
+            completionFailed: {
+              on: { RETRY_PROVIDER: "completing" },
             },
             authenticating: {
               invoke: {
@@ -492,38 +466,6 @@ export const appMachine = setup({
               },
             },
             authFailed: { on: { RETRY_AUTH: "idle" } },
-            verifying: {
-              invoke: {
-                src: "verifyProviderModel",
-                input: ({ context }) => {
-                  if (!context.selectedProviderModel) {
-                    throw new Error(
-                      "Model verification requires a selected connection and model.",
-                    );
-                  }
-                  return context.selectedProviderModel;
-                },
-                onDone: {
-                  target: "#app.setup.resources",
-                  actions: assign(({ event }) => ({
-                    providerCatalog: event.output,
-                    error: null,
-                  })),
-                },
-                onError: {
-                  target: "verificationFailed",
-                  actions: assign(({ event }) => ({
-                    error: messageOf(event.error),
-                  })),
-                },
-              },
-            },
-            verificationFailed: {
-              on: {
-                RETRY_VERIFICATION: "verifying",
-                CHANGE_MODEL: "idle",
-              },
-            },
           },
         },
         resources: {

@@ -42,6 +42,20 @@ describe("ConfigService", () => {
     if (exit._tag === "Success") expect(exit.value?.reposDir).toBe("/Users/me/repos")
   })
 
+  it("persists completed provider onboarding across unrelated saves", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.completeProviderSetup()
+        yield* ConfigService.setReposDir("/repos/team")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value?.providerSetupCompleted).toBe(true)
+    }
+  })
+
   it("persists memory enablement and organization selection across unrelated saves", async () => {
     const exit = await provided(
       Effect.gen(function* () {

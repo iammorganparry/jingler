@@ -1,43 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ModelCertification, type AuthKind } from "@jingler/core";
-import { Schema } from "effect";
 import { appShell, expect, test, type LaunchedApp } from "./fixtures.js";
 
 const SUBSCRIPTION_ENTITLEMENT = /Test subscription · subscription/;
 const SUBSCRIPTION_BILLING = /billing: subscription/;
-const CertificationDocument = Schema.Array(ModelCertification);
-
-const expectCertifiedRoute = (
-  launched: LaunchedApp,
-  authKind: AuthKind,
-): void => {
-  const certifications = Schema.decodeUnknownSync(CertificationDocument)(
-    JSON.parse(
-      readFileSync(
-        join(launched.home, "jingler", "runtime", "certifications.json"),
-        "utf8",
-      ),
-    ),
-  );
-  const certification = certifications.find(
-    (candidate) => candidate.authRoute.kind === authKind,
-  );
-  expect(certification).toMatchObject({
-    authRoute: {
-      kind: authKind,
-      subscription: true,
-      entitlementConfirmed: true,
-      apiBillingFallbackObserved: false,
-    },
-    capabilityProfiles: ["core"],
-  });
-  expect(certification?.results).toHaveLength(8);
-  expect(
-    certification?.results.every((result) => result.status === "passed"),
-  ).toBe(true);
-};
-
 const chooseFixtureRepo = async (launched: LaunchedApp): Promise<void> => {
   await launched.app.evaluate(({ dialog }, selected) => {
     dialog.showOpenDialog = async () => ({
@@ -65,7 +31,10 @@ const finishProviderSetup = async (
   await expect(
     launched.window.getByText(SUBSCRIPTION_ENTITLEMENT),
   ).toBeVisible();
-  await launched.window.getByRole("button", { name: "Verify model" }).click();
+  await expect(
+    launched.window.getByRole("button", { name: "Verify model" }),
+  ).toHaveCount(0);
+  await launched.window.getByRole("button", { name: "Continue" }).click();
   await expect(
     launched.window.getByRole("heading", { name: "Import agent resources" }),
   ).toBeVisible();
@@ -99,7 +68,6 @@ test("connects Claude Max with a pinned setup-token subscription route", async (
   await launched.window.getByRole("button", { name: "Connect Claude" }).click();
   await expect(input).toHaveValue("");
   await finishProviderSetup(launched, "Claude Pro / Max setup-token");
-  expectCertifiedRoute(launched, "claude-setup-token");
 
   const metadata = readFileSync(
     join(launched.home, "jingler", "runtime", "provider-connections.json"),
@@ -123,7 +91,6 @@ test("connects ChatGPT Codex with a pinned OAuth subscription route", async ({
 
   await launched.window.getByRole("button", { name: "Open browser" }).click();
   await finishProviderSetup(launched, "ChatGPT Codex subscription");
-  expectCertifiedRoute(launched, "openai-codex-oauth");
 });
 
 test("connects ChatGPT Codex with device-code OAuth through the main process", async ({
@@ -139,13 +106,14 @@ test("connects ChatGPT Codex with device-code OAuth through the main process", a
   });
   await chooseFixtureRepo(launched);
 
-  await launched.window.getByRole("button", { name: "Use device code" }).click();
+  await launched.window
+    .getByRole("button", { name: "Use device code" })
+    .click();
   await expect(launched.window.getByText("JING-LER1")).toBeVisible();
   await expect(
     launched.window.getByText("https://login.example.test/device"),
   ).toBeVisible();
   await finishProviderSetup(launched, "ChatGPT Codex subscription");
-  expectCertifiedRoute(launched, "openai-codex-oauth");
 });
 
 test("recovers a configured workspace that has no selectable provider", async ({
@@ -194,16 +162,59 @@ test("provider onboarding remains reachable at the minimum window height", async
   const heading = launched.window.getByRole("heading", {
     name: "Connect a model provider",
   });
-  await heading.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await heading.evaluate((element) =>
+    element.scrollIntoView({ block: "start" }),
+  );
   const headingBox = await heading.boundingBox();
   expect(headingBox).not.toBeNull();
   expect(headingBox?.y ?? -1).toBeGreaterThanOrEqual(0);
 
-  const verify = launched.window.getByRole("button", { name: "Verify model" }).first();
-  await verify.scrollIntoViewIfNeeded();
-  await expect(verify).toBeVisible();
-  await verify.click();
+  const continueButton = launched.window.getByRole("button", {
+    name: "Continue",
+  });
+  await continueButton.scrollIntoViewIfNeeded();
+  await expect(continueButton).toBeVisible();
+  await continueButton.click();
   await expect(
     launched.window.getByRole("heading", { name: "Import agent resources" }),
   ).toBeVisible();
+});
+
+test("skips provider setup and preserves that choice across restart", async ({
+  launchApp,
+}) => {
+  const first = await launchApp({
+    withRepo: true,
+    piFixture: {
+      scenarioId: "onboarding-provider-skip",
+      authRoute: "api-key",
+      seedConnection: false,
+    },
+  });
+  await chooseFixtureRepo(first);
+
+  await expect(
+    first.window.getByRole("button", { name: "Continue" }),
+  ).toBeDisabled();
+  await first.window.getByRole("button", { name: "Skip for now" }).click();
+  await expect(
+    first.window.getByRole("heading", { name: "Import agent resources" }),
+  ).toBeVisible();
+  await first.window.getByRole("button", { name: "Skip for now" }).click();
+  await expect(appShell(first.window)).toBeVisible();
+  await first.app.close();
+
+  const restarted = await launchApp({
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    configured: true,
+    withRepo: true,
+  });
+  await expect(appShell(restarted.window)).toBeVisible();
+  await expect(
+    restarted.window.getByRole("heading", {
+      name: "Connect a model provider",
+    }),
+  ).toHaveCount(0);
 });
