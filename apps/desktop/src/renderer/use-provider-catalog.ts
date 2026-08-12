@@ -1,4 +1,5 @@
 import type {
+  CodexLoginMethod,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId
@@ -44,11 +45,14 @@ export function useProviderCatalog() {
     onSuccess: refreshCatalog
   })
   const startCodex = useMutation({
-    mutationFn: (connectionId: ProviderConnectionId) =>
+    mutationFn: ({ connectionId, method }: {
+      connectionId: ProviderConnectionId
+      method: CodexLoginMethod
+    }) =>
       rpc.providerStartCodexLogin({
         id: connectionId,
         targetId: "desktop",
-        method: "browser"
+        method
       }),
     onSuccess: refreshCatalog
   })
@@ -111,7 +115,10 @@ export function useProviderCatalog() {
       connectionId: ProviderConnectionId,
       token: string
     ) => connectClaude.mutate({ connectionId, token }),
-    startCodex: startCodex.mutate,
+    startCodex: (
+      connectionId: ProviderConnectionId,
+      method: CodexLoginMethod
+    ) => startCodex.mutate({ connectionId, method }),
     setApiKey: (
       connectionId: ProviderConnectionId,
       providerId: ProviderId,

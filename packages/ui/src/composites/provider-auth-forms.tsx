@@ -1,0 +1,140 @@
+import type { AuthKind, CodexLoginMethod, ProviderId } from "@jingler/core"
+import { ExternalLink, KeyRound } from "lucide-react"
+import { useRef } from "react"
+import { Button } from "../components/button.js"
+import { Input } from "../components/input.js"
+
+export interface ProviderAuthFormsProps {
+  busy: boolean
+  mode?: "connect" | "reconnect"
+  authKinds?: ReadonlyArray<AuthKind>
+  apiProviderId?: ProviderId
+  onConnectClaude: (token: string) => void
+  onStartCodex: (method: CodexLoginMethod) => void
+  onConnectApi: (providerId: string, apiKey: string) => void
+}
+
+const ALL_AUTH_KINDS: ReadonlyArray<AuthKind> = [
+  "claude-setup-token",
+  "openai-codex-oauth",
+  "api-key"
+]
+
+/** Shared credential-entry surface for onboarding and provider recovery. */
+export function ProviderAuthForms({
+  busy,
+  mode = "connect",
+  authKinds = ALL_AUTH_KINDS,
+  apiProviderId,
+  onConnectClaude,
+  onStartCodex,
+  onConnectApi
+}: ProviderAuthFormsProps) {
+  const claudeToken = useRef<HTMLInputElement>(null)
+  const apiKey = useRef<HTMLInputElement>(null)
+  const apiProvider = useRef<HTMLSelectElement>(null)
+  const allows = (kind: AuthKind) => authKinds.includes(kind)
+
+  const submitClaude = () => {
+    const token = claudeToken.current?.value.trim() ?? ""
+    if (!token) return
+    if (claudeToken.current) claudeToken.current.value = ""
+    onConnectClaude(token)
+  }
+
+  const submitApiKey = () => {
+    const key = apiKey.current?.value.trim() ?? ""
+    const providerId = apiProviderId ?? apiProvider.current?.value ?? "anthropic"
+    if (!key) return
+    if (apiKey.current) apiKey.current.value = ""
+    onConnectApi(providerId, key)
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {allows("claude-setup-token") && (
+        <div className="flex flex-col gap-3 rounded-lg border border-line bg-sunken p-3">
+          <div className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
+            <KeyRound size={14} className="text-blue" /> Claude Pro / Max
+          </div>
+          <p className="text-[11px] leading-[1.55] text-muted-foreground">
+            Run <code className="font-mono text-text">claude setup-token</code>,
+            then paste the token once. Jingler sends it directly to encrypted
+            main-process storage and clears this field.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              ref={claudeToken}
+              type="password"
+              autoComplete="off"
+              placeholder="Claude setup-token"
+              disabled={busy}
+            />
+            <Button variant="primary" onClick={submitClaude} disabled={busy}>
+              {mode === "reconnect" ? "Reconnect Claude" : "Connect Claude"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {allows("openai-codex-oauth") && (
+        <div className="flex flex-col gap-3 rounded-lg border border-line bg-sunken p-3">
+          <div className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
+            <ExternalLink size={14} className="text-cyan" /> ChatGPT Codex subscription
+          </div>
+          <p className="text-[11px] leading-[1.55] text-muted-foreground">
+            Sign in through the browser or use a device code. The main process owns polling and token storage.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              onClick={() => onStartCodex("browser")}
+              disabled={busy}
+            >
+              {mode === "reconnect" ? "Reconnect in browser" : "Open browser"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => onStartCodex("device-code")}
+              disabled={busy}
+            >
+              Use device code
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {allows("api-key") && (
+        <details className="rounded-lg border border-line bg-sunken p-3">
+          <summary className="cursor-pointer text-[12px] font-medium text-text-body">
+            {mode === "reconnect" ? "Replace API key" : "Use an API key instead"}
+          </summary>
+          <div className="mt-3 flex gap-2">
+            {apiProviderId === undefined && (
+              <select
+                ref={apiProvider}
+                className="rounded-md border border-line bg-canvas px-2 text-[12px] text-text"
+                disabled={busy}
+              >
+                <option value="anthropic">Anthropic API</option>
+                <option value="openai">OpenAI API</option>
+                <option value="google">Google API</option>
+                <option value="openrouter">OpenRouter API</option>
+              </select>
+            )}
+            <Input
+              ref={apiKey}
+              type="password"
+              autoComplete="off"
+              placeholder="Provider API key"
+              disabled={busy}
+            />
+            <Button variant="secondary" onClick={submitApiKey} disabled={busy}>
+              {mode === "reconnect" ? "Reconnect API key" : "Save API key"}
+            </Button>
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}

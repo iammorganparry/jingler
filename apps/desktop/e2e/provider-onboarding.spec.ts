@@ -201,6 +201,37 @@ test("reconnects a restored subscription whose encrypted credential is missing",
   ).toBeVisible();
 });
 
+test("adds a provider from settings after provider onboarding was skipped", async ({
+  launchApp,
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "provider-settings-add-connection",
+      authRoute: "openai-codex-oauth",
+      seedConnection: false,
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: /Providers/u }).click();
+  await expect(
+    launched.window.getByText("Add a provider connection"),
+  ).toBeVisible();
+
+  await launched.window.getByRole("button", { name: "Open browser" }).click();
+
+  await expect(
+    launched.window.getByText("ChatGPT Codex subscription", { exact: true }).last(),
+  ).toBeVisible();
+  await expect(
+    launched.window.getByRole("button", { name: "Verify" }),
+  ).toBeVisible();
+});
+
 test("provider onboarding remains reachable at the minimum window height", async ({
   launchApp,
 }) => {

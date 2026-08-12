@@ -55,6 +55,41 @@ const catalog = Schema.decodeSync(ProviderCatalog)({
 })
 
 describe("ProviderConnectionsSettings", () => {
+  it("adds a provider from settings after onboarding was skipped", () => {
+    const onStartCodex = vi.fn()
+    render(
+      <ProviderConnectionsSettings
+        catalog={Schema.decodeSync(ProviderCatalog)({
+          connections: [],
+          refreshedAt: "2026-08-10T08:00:00.000Z",
+          stale: false
+        })}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={vi.fn()}
+        onConnectClaude={vi.fn()}
+        onStartCodex={onStartCodex}
+        onSetApiKey={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Open browser" }))
+    fireEvent.click(screen.getByRole("button", { name: "Use device code" }))
+
+    expect(onStartCodex).toHaveBeenCalledTimes(2)
+    expect(onStartCodex).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      "browser"
+    )
+    expect(onStartCodex).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      "device-code"
+    )
+  })
+
   it("reconnects a subscription whose encrypted credential is unavailable", () => {
     const onConnectClaude = vi.fn()
     const unavailable = Schema.decodeSync(ProviderCatalog)({

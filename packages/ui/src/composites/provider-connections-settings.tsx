@@ -1,18 +1,19 @@
-import type {
-  ProviderCatalog,
+import {
+  type CodexLoginMethod,
   ProviderConnectionId,
+  type ProviderCatalog,
   ProviderId,
-  ProviderModelId
+  type ProviderModelId
 } from "@jingler/core"
 import { Check, LogOut, RefreshCw, ShieldCheck } from "lucide-react"
 import * as React from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
-import { Input } from "../components/input.js"
 import { Spinner } from "../components/loading.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
 import { providerAuthRouteLabel, providerStatusTone } from "../lib/provider-connection-labels.js"
+import { ProviderAuthForms } from "./provider-auth-forms.js"
 
 export interface ProviderConnectionsSettingsProps {
   catalog: ProviderCatalog | null
@@ -30,7 +31,10 @@ export interface ProviderConnectionsSettingsProps {
   }) => void
   onLogout: (connectionId: ProviderConnectionId) => void
   onConnectClaude: (connectionId: ProviderConnectionId, token: string) => void
-  onStartCodex: (connectionId: ProviderConnectionId) => void
+  onStartCodex: (
+    connectionId: ProviderConnectionId,
+    method: CodexLoginMethod
+  ) => void
   onSetApiKey: (
     connectionId: ProviderConnectionId,
     providerId: ProviderId,
@@ -58,22 +62,7 @@ export function ProviderConnectionsSettings({
   )
   const selected =
     connections.find(({ connection }) => connection.id === selectedId) ?? connections[0] ?? null
-  const credential = React.useRef<HTMLInputElement>(null)
-  const reconnectWithSecret = () => {
-    if (selected === null) return
-    const secret = credential.current?.value.trim() ?? ""
-    if (secret.length === 0) return
-    if (credential.current) credential.current.value = ""
-    if (selected.connection.authKind === "claude-setup-token") {
-      onConnectClaude(selected.connection.id, secret)
-    } else if (selected.connection.authKind === "api-key") {
-      onSetApiKey(
-        selected.connection.id,
-        selected.connection.providerId,
-        secret
-      )
-    }
-  }
+  const newConnectionId = () => ProviderConnectionId.make(crypto.randomUUID())
 
   return (
     <>
@@ -108,7 +97,7 @@ export function ProviderConnectionsSettings({
           ))}
           {connections.length === 0 && (
             <div className="rounded-lg border border-line bg-sunken p-3 text-[11.5px] text-muted-foreground">
-              No provider connection is configured. Complete provider setup to add one.
+              No provider connection is configured. Add one here when you are ready.
             </div>
           )}
         </div>
@@ -145,44 +134,25 @@ export function ProviderConnectionsSettings({
                   <Callout tone="yellow">
                     Reauthentication required. Jingler has not retained usable credentials for this connection.
                   </Callout>
-                  {selected.connection.authKind === "claude-setup-token" && (
-                    <div className="flex gap-2">
-                      <Input
-                        ref={credential}
-                        type="password"
-                        autoComplete="off"
-                        placeholder="Claude setup-token"
-                        disabled={busy}
-                      />
-                      <Button variant="primary" disabled={busy} onClick={reconnectWithSecret}>
-                        Reconnect Claude
-                      </Button>
-                    </div>
-                  )}
-                  {selected.connection.authKind === "openai-codex-oauth" && (
-                    <Button
-                      className="self-start"
-                      variant="primary"
-                      disabled={busy}
-                      onClick={() => onStartCodex(selected.connection.id)}
-                    >
-                      Reconnect in browser
-                    </Button>
-                  )}
-                  {selected.connection.authKind === "api-key" && (
-                    <div className="flex gap-2">
-                      <Input
-                        ref={credential}
-                        type="password"
-                        autoComplete="off"
-                        placeholder="Provider API key"
-                        disabled={busy}
-                      />
-                      <Button variant="primary" disabled={busy} onClick={reconnectWithSecret}>
-                        Reconnect API key
-                      </Button>
-                    </div>
-                  )}
+                  <ProviderAuthForms
+                    busy={busy}
+                    mode="reconnect"
+                    authKinds={[selected.connection.authKind]}
+                    apiProviderId={selected.connection.providerId}
+                    onConnectClaude={(token) =>
+                      onConnectClaude(selected.connection.id, token)
+                    }
+                    onStartCodex={(method) =>
+                      onStartCodex(selected.connection.id, method)
+                    }
+                    onConnectApi={(_providerId, apiKey) =>
+                      onSetApiKey(
+                        selected.connection.id,
+                        selected.connection.providerId,
+                        apiKey
+                      )
+                    }
+                  />
                 </div>
               )}
 
@@ -210,7 +180,30 @@ export function ProviderConnectionsSettings({
               </div>
             </>
           ) : (
-            <div className="text-[12px] text-muted-foreground">Connect a provider to browse certified models.</div>
+            <div className="flex max-w-2xl flex-col gap-4">
+              <div>
+                <div className="text-[15px] font-semibold text-text-bright">Add a provider connection</div>
+                <div className="mt-1 text-[12px] text-muted-foreground">
+                  Authenticate an account now; choose and certify models separately.
+                </div>
+              </div>
+              <ProviderAuthForms
+                busy={busy}
+                onConnectClaude={(token) =>
+                  onConnectClaude(newConnectionId(), token)
+                }
+                onStartCodex={(method) =>
+                  onStartCodex(newConnectionId(), method)
+                }
+                onConnectApi={(providerId, apiKey) =>
+                  onSetApiKey(
+                    newConnectionId(),
+                    ProviderId.make(providerId),
+                    apiKey
+                  )
+                }
+              />
+            </div>
           )}
         </div>
       </div>

@@ -3,14 +3,13 @@ import type {
   ProviderCatalog,
   ProviderLoginEvent,
 } from "@jingler/core";
-import { ExternalLink, KeyRound, ShieldCheck, X } from "lucide-react";
-import { useRef } from "react";
+import { ShieldCheck, X } from "lucide-react";
 import { Button } from "../../components/button.js";
 import { Callout } from "../../components/callout.js";
 import { Eyebrow } from "../../components/eyebrow.js";
-import { Input } from "../../components/input.js";
 import { Spinner } from "../../components/loading.js";
 import { StatusDot } from "../../components/status-dot.js";
+import { ProviderAuthForms } from "../../composites/provider-auth-forms.js";
 import {
   providerAuthRouteLabel,
   providerStatusTone,
@@ -43,28 +42,10 @@ export function ProviderSetupStep({
   onCancel,
   onRetry,
 }: ProviderSetupStepProps) {
-  const claudeToken = useRef<HTMLInputElement>(null);
-  const apiKey = useRef<HTMLInputElement>(null);
-  const apiProvider = useRef<HTMLSelectElement>(null);
   const canContinue =
     catalog?.connections.some(
       ({ connection }) => connection.status === "authenticated",
     ) === true;
-
-  const submitClaude = () => {
-    const token = claudeToken.current?.value.trim() ?? "";
-    if (!token) return;
-    if (claudeToken.current) claudeToken.current.value = "";
-    onConnectClaude(token);
-  };
-
-  const submitApiKey = () => {
-    const key = apiKey.current?.value.trim() ?? "";
-    const providerId = apiProvider.current?.value ?? "anthropic";
-    if (!key) return;
-    if (apiKey.current) apiKey.current.value = "";
-    onConnectApi(providerId, key);
-  };
 
   return (
     <>
@@ -90,83 +71,12 @@ export function ProviderSetupStep({
         </Callout>
       )}
 
-      <div className="flex flex-col gap-3 rounded-lg border border-line bg-sunken p-3">
-        <div className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
-          <KeyRound size={14} className="text-blue" /> Claude Pro / Max
-        </div>
-        <p className="text-[11px] leading-[1.55] text-muted-foreground">
-          Run <code className="font-mono text-text">claude setup-token</code>,
-          then paste the token once. Jingler sends it directly to encrypted
-          main-process storage and clears this field.
-        </p>
-        <div className="flex gap-2">
-          <Input
-            ref={claudeToken}
-            type="password"
-            autoComplete="off"
-            placeholder="Claude setup-token"
-            disabled={busy}
-          />
-          <Button variant="primary" onClick={submitClaude} disabled={busy}>
-            Connect Claude
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 rounded-lg border border-line bg-sunken p-3">
-        <div className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
-          <ExternalLink size={14} className="text-cyan" /> ChatGPT Codex
-          subscription
-        </div>
-        <p className="text-[11px] leading-[1.55] text-muted-foreground">
-          Sign in through the browser or use a device code. The main process
-          owns polling and token storage.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="primary"
-            onClick={() => onStartCodex("browser")}
-            disabled={busy}
-          >
-            Open browser
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => onStartCodex("device-code")}
-            disabled={busy}
-          >
-            Use device code
-          </Button>
-        </div>
-      </div>
-
-      <details className="rounded-lg border border-line bg-sunken p-3">
-        <summary className="cursor-pointer text-[12px] font-medium text-text-body">
-          Use an API key instead
-        </summary>
-        <div className="mt-3 flex gap-2">
-          <select
-            ref={apiProvider}
-            className="rounded-md border border-line bg-canvas px-2 text-[12px] text-text"
-            disabled={busy}
-          >
-            <option value="anthropic">Anthropic API</option>
-            <option value="openai">OpenAI API</option>
-            <option value="google">Google API</option>
-            <option value="openrouter">OpenRouter API</option>
-          </select>
-          <Input
-            ref={apiKey}
-            type="password"
-            autoComplete="off"
-            placeholder="API key"
-            disabled={busy}
-          />
-          <Button variant="secondary" onClick={submitApiKey} disabled={busy}>
-            Save API key
-          </Button>
-        </div>
-      </details>
+      <ProviderAuthForms
+        busy={busy}
+        onConnectClaude={onConnectClaude}
+        onStartCodex={onStartCodex}
+        onConnectApi={onConnectApi}
+      />
 
       {busy && (
         <div className="flex items-center justify-between rounded-lg border border-line bg-hover px-3 py-2 text-[12px] text-muted-foreground">
