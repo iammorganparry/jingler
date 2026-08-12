@@ -453,7 +453,12 @@ if (!gotPrimaryLock) {
     createWindow()
 
     // Self-update only makes sense in a packaged build (dev has no update feed).
-    if (app.isPackaged) initAutoUpdater()
+    if (
+      app.isPackaged &&
+      process.env.JINGLER_DISABLE_AUTO_UPDATE !== "1"
+    ) {
+      initAutoUpdater()
+    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

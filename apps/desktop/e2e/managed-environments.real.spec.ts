@@ -1,14 +1,17 @@
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { WorkspaceConfig } from "@jingler/core";
 import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
@@ -22,6 +25,7 @@ import {
 
 const runRealManagedQa = process.env.JINGLER_REAL_MANAGED_QA === "1";
 const realAuthToken = process.env.JINGLER_REAL_AUTH_TOKEN;
+const realAuthDocument = process.env.JINGLER_REAL_AUTH_DOCUMENT;
 const realAuthUrl =
   process.env.JINGLER_REAL_AUTH_URL ?? "https://api.jingler.dev";
 const realProviderRoute = Schema.decodeUnknownOption(RealProviderRoute)(
@@ -29,6 +33,10 @@ const realProviderRoute = Schema.decodeUnknownOption(RealProviderRoute)(
 );
 const realClaudeSetupToken = process.env.JINGLER_REAL_CLAUDE_SETUP_TOKEN;
 const realCertificationsFile = process.env.JINGLER_REAL_CERTIFICATIONS_FILE;
+const realProviderHome = process.env.JINGLER_REAL_PROVIDER_HOME;
+const realManagedExecutable = Schema.decodeUnknownOption(
+  Schema.String.pipe(Schema.minLength(1)),
+)(process.env.JINGLER_REAL_MANAGED_EXECUTABLE);
 const repositoryUrl =
   process.env.JINGLER_REAL_MANAGED_REPOSITORY ??
   "https://github.com/iammorganparry/jingler.git";
@@ -40,8 +48,11 @@ const DIRECT_MARKER = "docs/direct-cloud-qa-marker.md";
 const HANDOFF_MARKER = "docs/managed-cloud-qa-marker.md";
 
 interface ManagedQaConfig {
-  readonly authToken: string;
+  readonly auth:
+    | { readonly kind: "encrypted-document"; readonly path: string }
+    | { readonly kind: "token"; readonly value: string };
   readonly certificationsFile: string;
+  readonly providerHome: string | undefined;
   readonly route: RealProviderRoute;
   readonly setupToken: string | undefined;
 }
@@ -54,24 +65,59 @@ interface ManagedQaApp {
 
 const managedQaEnabled = (): boolean =>
   runRealManagedQa &&
-  realAuthToken !== undefined &&
+  (realAuthToken !== undefined || realAuthDocument !== undefined) &&
   realCertificationsFile !== undefined &&
   realProviderRoute._tag === "Some" &&
-  (realProviderRoute.value === "codex" || realClaudeSetupToken !== undefined);
+  (realProviderHome !== undefined ||
+    realProviderRoute.value === "codex" ||
+    realClaudeSetupToken !== undefined);
 
 const managedQaConfig = (): ManagedQaConfig => {
   if (
-    !(realAuthToken && realCertificationsFile) ||
+    !((realAuthToken || realAuthDocument) && realCertificationsFile) ||
     realProviderRoute._tag === "None" ||
-    (realProviderRoute.value === "claude" && !realClaudeSetupToken)
+    (!realProviderHome &&
+      realProviderRoute.value === "claude" &&
+      !realClaudeSetupToken)
   ) {
     throw new Error("Real managed QA configuration is incomplete");
   }
+  const auth: ManagedQaConfig["auth"] = realAuthDocument
+    ? { kind: "encrypted-document", path: resolve(realAuthDocument) }
+    : realAuthToken
+      ? { kind: "token", value: realAuthToken }
+      : (() => {
+          throw new Error("Real managed QA authentication is missing");
+        })();
   return {
-    authToken: realAuthToken,
+    auth,
     certificationsFile: realCertificationsFile,
+    providerHome: realProviderHome,
     route: realProviderRoute.value,
     setupToken: realClaudeSetupToken,
+  };
+};
+
+const copyRequired = (source: string, destination: string): void => {
+  if (!existsSync(source)) {
+    throw new Error(`Required real QA document not found: ${source}`);
+  }
+  copyFileSync(source, destination);
+};
+
+const providerState = (
+  providerHome: string,
+  reposDir: string,
+  repoPath: string,
+): WorkspaceConfig => {
+  const sourceRoot = join(resolve(providerHome), "jingler");
+  const sourceConfig = Schema.decodeUnknownSync(Schema.parseJson(WorkspaceConfig))(
+    readFileSync(join(sourceRoot, "config.json"), "utf8"),
+  );
+  return {
+    ...sourceConfig,
+    reposDir,
+    lastRepoPath: repoPath,
   };
 };
 
@@ -111,16 +157,23 @@ const seedManagedQaHome = (
   execFileSync("git", ["clone", "--depth=1", repositoryUrl, repoPath], {
     stdio: "inherit",
   });
-  writeFileSync(join(jinglerHome, "auth.enc"), config.authToken, {
-    mode: 0o600,
-  });
+  if (config.auth.kind === "encrypted-document") {
+    copyRequired(config.auth.path, join(jinglerHome, "auth.enc"));
+  } else {
+    writeFileSync(join(jinglerHome, "auth.enc"), config.auth.value, {
+      mode: 0o600,
+    });
+  }
+  const workspaceConfig = config.providerHome
+    ? providerState(config.providerHome, reposDir, repoPath)
+    : {
+        reposDir,
+        createdAt: new Date().toISOString(),
+        lastRepoPath: repoPath,
+      };
   writeFileSync(
     join(jinglerHome, "config.json"),
-    JSON.stringify({
-      reposDir,
-      createdAt: new Date().toISOString(),
-      lastRepoPath: repoPath,
-    }),
+    JSON.stringify(workspaceConfig),
   );
   writeFileSync(
     join(jinglerHome, "projects.json"),
@@ -137,6 +190,17 @@ const seedManagedQaHome = (
   );
   writeFileSync(join(jinglerHome, "sessions.json"), "[]\n");
   mkdirSync(join(jinglerHome, "runtime"), { recursive: true });
+  if (config.providerHome) {
+    const providerRoot = join(resolve(config.providerHome), "jingler");
+    copyRequired(
+      join(providerRoot, "auth.enc.devices"),
+      join(jinglerHome, "auth.enc.devices"),
+    );
+    copyRequired(
+      join(providerRoot, "runtime", "provider-connections.json"),
+      join(jinglerHome, "runtime", "provider-connections.json"),
+    );
+  }
   copyFileSync(
     config.certificationsFile,
     join(jinglerHome, "runtime", "certifications.json"),
@@ -150,20 +214,38 @@ const launchManagedQaApp = async (
   const root = mkdtempSync(join(tmpdir(), "jingler-real-managed-"));
   try {
     const { home, userDataDir } = seedManagedQaHome(root, config);
-    const app = await electron.launch({
-      args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
-      env: {
-        ...process.env,
-        ELECTRON_RENDERER_URL: "",
-        JINGLER_AUTH_URL: realAuthUrl,
-        JINGLER_E2E: "0",
-        JINGLER_E2E_HEADLESS:
-          process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
-        JINGLER_HOME: home,
-        JINGLER_SECRET_STORE: "memory",
-        JINGLER_SCRIPTED_AGENT: "0",
-      },
-    });
+    const env = {
+      ...process.env,
+      ELECTRON_RENDERER_URL: "",
+      JINGLER_AUTH_URL: realAuthUrl,
+      JINGLER_DISABLE_AUTO_UPDATE: "1",
+      JINGLER_E2E: "0",
+      JINGLER_E2E_HEADLESS:
+        process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
+      JINGLER_HOME: home,
+      JINGLER_SECRET_STORE:
+        config.auth.kind === "token" && !config.providerHome ? "memory" : "",
+      JINGLER_SCRIPTED_AGENT: "0",
+    };
+    const app = await (async () => {
+      if (realManagedExecutable._tag === "None") {
+        return electron.launch({
+          args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
+          env,
+        });
+      }
+      const executablePath = resolve(realManagedExecutable.value);
+      if (!existsSync(executablePath)) {
+        throw new Error(
+          `Packaged Jingler executable not found: ${executablePath}`,
+        );
+      }
+      return electron.launch({
+        executablePath,
+        args: [`--user-data-dir=${userDataDir}`],
+        env,
+      });
+    })();
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
     return { app, root, window };
@@ -177,9 +259,13 @@ const authenticateProvider = async (
   window: Page,
   config: ManagedQaConfig,
 ): Promise<void> => {
+  if (config.providerHome) {
+    await expect(appShell(window)).toBeVisible({ timeout: 30_000 });
+    return;
+  }
   await expect(
     window.getByRole("heading", { name: "Connect a model provider" }),
-  ).toBeVisible({ timeout: 30_000 });
+  ).toBeVisible({ timeout: 90_000 });
   if (config.route === "claude") {
     if (!config.setupToken) throw new Error("Claude setup-token is required");
     const token = window.getByPlaceholder("Claude setup-token");
@@ -354,7 +440,7 @@ const closeManagedQaApp = async ({
 test.describe("real managed environment canary", () => {
   test.skip(
     !managedQaEnabled(),
-    "Set the real managed QA flag, Jingler auth token, reviewed certifications file, and an explicit Claude or Codex provider route.",
+    "Set the real managed QA flag, a token or encrypted auth document, reviewed certifications, and an explicit provider route.",
   );
 
   test("runs directly in Cloud, then stops local work and continues it there", async () => {
