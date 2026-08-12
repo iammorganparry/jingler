@@ -5,7 +5,7 @@ import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
 import { startFakeAuthServer } from "./fake-auth.js";
-import { appShell } from "./fixtures.js";
+import { appShell, createWorkspace } from "./fixtures.js";
 import { MAIN_ENTRY } from "./global-setup.js";
 import {
   REAL_PROVIDER_TARGETS,
@@ -21,6 +21,8 @@ const realProviderExecutable = Schema.decodeUnknownOption(
   Schema.String.pipe(Schema.minLength(1)),
 )(process.env.JINGLER_REAL_PROVIDER_EXECUTABLE);
 const PROVIDERS_SECTION = /^Providers/u;
+const ASK_BEFORE_ACTIONS = /^Ask Before Actions\b/u;
+const ALLOW_ONCE = /Allow once/u;
 
 const openProviders = async (window: Page): Promise<void> => {
   await expect(appShell(window)).toBeVisible({ timeout: 30_000 });
@@ -127,14 +129,10 @@ const runConversation = async (
   model: RealProviderTarget,
 ): Promise<void> => {
   await window.getByRole("button", { name: "Close settings" }).click();
-  await window.getByTestId("new-session").click();
-  await expect(
-    window.getByRole("heading", { name: "New session" }),
-  ).toBeVisible();
+  await createWorkspace(window, "Real pi provider canary");
   await expect(
     window.getByRole("button", { name: `Model: ${model.label}` }),
   ).toBeVisible();
-  await window.getByRole("button", { name: "Create workspace" }).click();
   const composer = window.getByPlaceholder("Message the agent…");
   await expect(composer).toBeVisible({ timeout: 30_000 });
   const expected = `${model.label} real pi turn passed.`;
@@ -145,6 +143,43 @@ const runConversation = async (
   await expect(window.getByText(expected, { exact: true }).last()).toBeVisible({
     timeout: 3 * 60_000,
   });
+};
+
+const runWorkspaceMutation = async (
+  window: Page,
+  model: RealProviderTarget,
+): Promise<void> => {
+  const path = `docs/real-pi-${model.route}-canary.md`;
+  const content = `${model.label} wrote this through Jingler's pi runtime.\n`;
+  const composer = window.getByPlaceholder("Message the agent…");
+
+  await window.getByRole("button", { name: "Accept Edits", exact: true }).click();
+  await window.getByRole("option", { name: ASK_BEFORE_ACTIONS }).click();
+  await composer.fill(
+    `Call workspace_write exactly once with path ${path} and this exact content: ${JSON.stringify(content)}. Do not use command_execute.`,
+  );
+  await composer.press("Enter");
+
+  await expect(window.getByRole("button", { name: ALLOW_ONCE })).toBeVisible({
+    timeout: 3 * 60_000,
+  });
+  await window.getByRole("button", { name: ALLOW_ONCE }).click();
+
+  const change = window.locator(
+    `[data-file-change="A"][data-file-path="${path}"]`,
+  );
+  await expect(change).toBeVisible({ timeout: 3 * 60_000 });
+  await expect(change).toContainText(path);
+  await expect(change).toContainText("Created");
+
+  await window.getByRole("button", { name: "Changes" }).first().click();
+  const rail = window.getByTestId("review-file-rail");
+  if (!(await rail.isVisible())) {
+    await window.getByRole("button", { name: "Changed files" }).click();
+  }
+  await expect(
+    rail.locator(`[data-item-path="${path}"]`),
+  ).toHaveAttribute("data-item-git-status", "added", { timeout: 30_000 });
 };
 
 const launchRealProviderApp = async (home: string) => {
@@ -204,6 +239,7 @@ test.describe("real current provider models", () => {
       try {
         await certifyModel(window, model);
         await runConversation(window, model);
+        await runWorkspaceMutation(window, model);
       } finally {
         await app.close();
         await auth.close();
