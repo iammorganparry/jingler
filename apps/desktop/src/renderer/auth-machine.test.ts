@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   magicLinkOk: true,
   sentEmails: [] as Array<string>,
   signInUrl: "https://provider.example/oauth",
+  signInError: null as Error | null,
   openedUrls: [] as Array<string>,
   signOutCalls: 0
 }))
@@ -25,7 +26,10 @@ vi.mock("./rpc-client.js", () => ({
       h.sentEmails.push(email)
       if (!h.magicLinkOk) throw new Error("send failed")
     },
-    authStartSignIn: async () => h.signInUrl,
+    authStartSignIn: async () => {
+      if (h.signInError) throw h.signInError
+      return h.signInUrl
+    },
     authSignOut: async () => {
       h.signOutCalls += 1
     }
@@ -42,6 +46,7 @@ beforeEach(() => {
   h.magicLinkOk = true
   h.sentEmails = []
   h.openedUrls = []
+  h.signInError = null
   h.signOutCalls = 0
   vi.stubGlobal("window", {
     jingler: { openExternal: async (url: string) => void h.openedUrls.push(url) }
@@ -98,6 +103,19 @@ describe("authMachine", () => {
     h.session = SESSION
     actor.send({ type: "CALLBACK" })
     await waitFor(actor, (s) => s.matches("signedIn"))
+  })
+
+  it("shows the typed OAuth failure instead of replacing it with generic copy", async () => {
+    h.signInError = new Error("GitHub sign-in is unavailable. Use email instead.")
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("signedOut"))
+    actor.send({ type: "OAUTH", provider: "github" })
+    await waitFor(actor, (s) => s.matches({ signedOut: "error" }))
+
+    expect(actor.getSnapshot().context.error).toBe(
+      "GitHub sign-in is unavailable. Use email instead."
+    )
+    expect(h.openedUrls).toEqual([])
   })
 
   it("signs out back to the wall", async () => {

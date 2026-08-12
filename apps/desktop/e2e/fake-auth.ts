@@ -129,6 +129,7 @@ export interface FakeAuthServerOptions {
   readonly deviceRelayUrl?: string;
   readonly listenHost?: string;
   readonly publicHost?: string;
+  readonly unavailableSocialProviders?: ReadonlyArray<"github" | "google">;
 }
 
 /**
@@ -746,6 +747,7 @@ const normalizeOptions = (
         acceptedLearningOrganizationIds:
           value.acceptedLearningOrganizationIds ?? [],
         reviewProposals: value.reviewProposals ?? true,
+        unavailableSocialProviders: value.unavailableSocialProviders ?? [],
         listenHost: value.listenHost ?? "127.0.0.1",
         publicHost: value.publicHost ?? "127.0.0.1",
         ...(value.deviceRelayUrl
@@ -1430,10 +1432,23 @@ export const startFakeAuthServer = async (
     }
 
     if (url.pathname === "/api/auth/sign-in/social" && req.method === "POST") {
-      return json(200, {
-        url: `http://${host}/desktop/callback?token=${options.token}`,
-        redirect: true,
+      readJson().then((value) => {
+        const provider = jsonBody(value).provider;
+        if (
+          (provider === "github" || provider === "google") &&
+          options.unavailableSocialProviders.includes(provider)
+        ) {
+          return json(404, {
+            message: "Provider not found",
+            code: "PROVIDER_NOT_FOUND",
+          });
+        }
+        return json(200, {
+          url: `http://${host}/desktop/callback?token=${options.token}`,
+          redirect: true,
+        });
       });
+      return;
     }
     if (url.pathname === "/desktop/callback") {
       res.writeHead(302, {

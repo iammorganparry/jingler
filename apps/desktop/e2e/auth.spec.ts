@@ -1,5 +1,6 @@
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
+import { startFakeAuthServer } from "./fake-auth.js"
 
 /**
  * The sign-in wall. The whole app is gated behind BetterAuth, so these assert the
@@ -75,6 +76,24 @@ test("OAuth opens the provider URL and the callback signs in", async ({ launchAp
   // The browser flow returns via the deep link → signed in → app shell.
   await completeDeepLinkSignIn()
   await expect(appShell(window)).toBeVisible()
+})
+
+test("an unavailable OAuth provider explains that email sign-in still works", async ({
+  launchApp,
+}) => {
+  const authServer = await startFakeAuthServer({
+    unavailableSocialProviders: ["github"],
+  })
+  try {
+    const { window } = await launchApp({ signedIn: false, authServer })
+    await window.getByRole("button", { name: /continue with github/i }).click()
+    await expect(
+      window.getByText("GitHub sign-in is unavailable. Use email instead."),
+    ).toBeVisible()
+    await expect(window.getByPlaceholder("you@company.com")).toBeVisible()
+  } finally {
+    await authServer.close()
+  }
 })
 
 test("a deep-link callback signs in and reaches the app shell", async ({ launchApp }) => {
