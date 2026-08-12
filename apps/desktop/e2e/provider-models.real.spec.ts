@@ -15,6 +15,8 @@ import {
 const runRealProviderQa = process.env.JINGLER_REAL_PROVIDER_QA === "1";
 const realProviderHome = process.env.JINGLER_REAL_PROVIDER_HOME;
 const realClaudeSetupToken = process.env.JINGLER_REAL_CLAUDE_SETUP_TOKEN;
+const allowCodexReauthentication =
+  process.env.JINGLER_REAL_CODEX_REAUTH === "1";
 const realProviderExecutable = Schema.decodeUnknownOption(
   Schema.String.pipe(Schema.minLength(1)),
 )(process.env.JINGLER_REAL_PROVIDER_EXECUTABLE);
@@ -59,6 +61,11 @@ const ensureAuthenticated = async (
   if (!(await reauthentication.isVisible())) return;
 
   if (model.providerId === "openai-codex") {
+    test.skip(
+      !allowCodexReauthentication,
+      "Set JINGLER_REAL_CODEX_REAUTH=1 to explicitly start interactive Codex browser login.",
+    );
+    if (!allowCodexReauthentication) return;
     await window.getByRole("button", { name: "Reconnect in browser" }).click();
   } else {
     test.skip(
