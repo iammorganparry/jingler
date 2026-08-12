@@ -129,6 +129,9 @@ importers:
       '@jingler/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      '@jingler/server':
+        specifier: workspace:*
+        version: link:../server
       '@jingler/themes':
         specifier: workspace:*
         version: link:../../packages/themes

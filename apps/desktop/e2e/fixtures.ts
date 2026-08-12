@@ -4,7 +4,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -324,6 +323,15 @@ export interface LaunchOptions {
    * itself (auth.spec).
    */
   readonly signedIn?: boolean;
+  /**
+   * Replace only the product Better Auth session boundary. This lets a test use
+   * Better Auth's official test account while the existing offline server keeps
+   * supplying unrelated memory/environment fixtures. The caller owns teardown.
+   */
+  readonly authSessionServer?: {
+    readonly url: string;
+    readonly token: string;
+  };
   /**
    * Reuse one stateful offline auth/MCP/memory fake across several launches.
    * This is the teammate and organization-isolation boundary: accepted state
@@ -655,11 +663,12 @@ export const test = base.extend<{
         });
       }
       const signedIn = options.signedIn ?? true;
+      const authSessionServer = options.authSessionServer ?? authServer;
       if (signedIn) {
         mkdirSync(jinglerDir, { recursive: true });
         writeFileSync(
           join(jinglerDir, "auth.enc"),
-          deviceRelay?.token ?? authServer.token,
+          deviceRelay?.token ?? authSessionServer.token,
         );
       }
 
@@ -721,7 +730,7 @@ export const test = base.extend<{
           ELECTRON_RENDERER_URL: "",
           // Auth: talk to the offline fake backend, and store the token as a plain
           // file (no OS keychain prompts under headless Playwright).
-          JINGLER_AUTH_URL: authServer.url,
+          JINGLER_AUTH_URL: authSessionServer.url,
           ...(deviceRelay
             ? {
                 JINGLER_DEVICE_RELAY_URL: deviceRelay.url,
@@ -761,7 +770,7 @@ export const test = base.extend<{
       const completeDeepLinkSignIn = async () => {
         await app.evaluate(({ app: electronApp }, url) => {
           electronApp.emit("open-url", { preventDefault() {} }, url);
-        }, `jingler://auth/callback?token=${authServer.token}`);
+        }, `jingler://auth/callback?token=${authSessionServer.token}`);
       };
 
       const completeGitHubConnection = async () => {

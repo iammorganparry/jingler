@@ -49,6 +49,7 @@
     "@jingler/core": "workspace:*",
     "@jingler/device-agent": "workspace:*",
     "@jingler/plugin-sdk": "workspace:*",
+    "@jingler/server": "workspace:*",
     "@jingler/themes": "workspace:*",
     "@jingler/tsconfig": "workspace:*",
     "@jingler/ui": "workspace:*",
