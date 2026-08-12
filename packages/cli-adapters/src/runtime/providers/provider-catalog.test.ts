@@ -177,4 +177,20 @@ describe("ProviderCatalogService", () => {
     expect((await Effect.runPromise(service.refresh)).stale).toBe(true)
     expect(discoveryAborted).toBe(true)
   })
+
+  it("retries discovery after serving stale fallback data", async () => {
+    let hang = false
+    const discover = vi.fn(() =>
+      hang ? new Promise<ReadonlyArray<typeof model>>(() => undefined) : Promise.resolve([model])
+    )
+    const service = await make({ discover, timeoutMs: 5 })
+
+    await Effect.runPromise(service.refresh)
+    hang = true
+    expect((await Effect.runPromise(service.refresh)).stale).toBe(true)
+    hang = false
+
+    expect((await Effect.runPromise(service.list)).stale).toBe(false)
+    expect(discover).toHaveBeenCalledTimes(3)
+  })
 })

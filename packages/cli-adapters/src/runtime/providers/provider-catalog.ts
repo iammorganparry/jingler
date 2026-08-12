@@ -164,14 +164,16 @@ export const makeProviderCatalogService = (
           Effect.flatMap((catalog) =>
             catalog === null
               ? Effect.fail(error)
-              : Effect.succeed({ ...catalog, stale: true })
+              : Effect.succeed({ ...catalog, stale: true }).pipe(
+                  Effect.tap((stale) => Ref.set(lastGood, stale))
+                )
           )
         )
       )
     )
     const list = Ref.get(lastGood).pipe(
       Effect.flatMap((catalog) =>
-        catalog === null ? refresh : Effect.succeed(catalog)
+        catalog === null || catalog.stale ? refresh : Effect.succeed(catalog)
       )
     )
 
