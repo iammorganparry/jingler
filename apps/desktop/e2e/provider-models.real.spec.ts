@@ -6,6 +6,7 @@ import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
 import { startFakeAuthServer } from "./fake-auth.js";
+import { showElectronWindow } from "./electron-window.js";
 import { appShell, createWorkspace } from "./fixtures.js";
 import { MAIN_ENTRY } from "./global-setup.js";
 import {
@@ -15,7 +16,8 @@ import {
 
 const runRealProviderQa = process.env.JINGLER_REAL_PROVIDER_QA === "1";
 const realProviderHome = process.env.JINGLER_REAL_PROVIDER_HOME;
-const realClaudeSetupToken = process.env.JINGLER_REAL_CLAUDE_SETUP_TOKEN;
+const allowClaudeReauthentication =
+  process.env.JINGLER_REAL_CLAUDE_REAUTH === "1";
 const allowCodexReauthentication =
   process.env.JINGLER_REAL_CODEX_REAUTH === "1";
 const realProviderExecutable = Schema.decodeUnknownOption(
@@ -72,14 +74,13 @@ const ensureAuthenticated = async (
     await window.getByRole("button", { name: "Reconnect in browser" }).click();
   } else {
     test.skip(
-      !realClaudeSetupToken,
-      "Set JINGLER_REAL_CLAUDE_SETUP_TOKEN to explicitly reconnect Claude through production safeStorage.",
+      !allowClaudeReauthentication,
+      "Set JINGLER_REAL_CLAUDE_REAUTH=1 to explicitly allow headed Claude setup-token entry.",
     );
-    if (!realClaudeSetupToken) return;
+    if (!allowClaudeReauthentication) return;
     const token = window.getByPlaceholder("Claude setup-token");
-    await token.fill(realClaudeSetupToken);
-    await window.getByRole("button", { name: "Reconnect Claude" }).click();
-    await expect(token).toHaveValue("");
+    await window.bringToFront();
+    await token.focus();
   }
 
   await expect(reauthentication).toHaveCount(0, { timeout: 5 * 60_000 });
@@ -240,6 +241,9 @@ const launchRealProviderApp = async (home: string) => {
     })();
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
+    if (process.env.JINGLER_E2E_HEADED === "1") {
+      await showElectronWindow(app);
+    }
     await signInToProduct(app, window, auth.token);
     await openProviders(window);
     return { app, auth, window };

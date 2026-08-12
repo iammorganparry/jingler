@@ -23,9 +23,9 @@ export const REAL_PROVIDER_TARGETS: ReadonlyArray<RealProviderTarget> = [
   target({
     route: "claude",
     providerId: "anthropic",
-    modelId: "anthropic/claude-opus-5",
+    modelId: "anthropic/claude-fable-5",
     connectionLabel: "Claude Pro / Max setup-token",
-    label: "Claude Opus 5",
+    label: "Claude Fable 5",
   }),
   target({
     route: "codex",

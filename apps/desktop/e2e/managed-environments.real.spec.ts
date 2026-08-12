@@ -15,6 +15,7 @@ import { WorkspaceConfig } from "@jingler/core";
 import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
+import { showElectronWindow } from "./electron-window.js";
 import { appShell, sessionRow } from "./fixtures.js";
 import { MAIN_ENTRY } from "./global-setup.js";
 import {
@@ -31,7 +32,8 @@ const realAuthUrl =
 const realProviderRoute = Schema.decodeUnknownOption(RealProviderRoute)(
   process.env.JINGLER_REAL_PROVIDER_ROUTE,
 );
-const realClaudeSetupToken = process.env.JINGLER_REAL_CLAUDE_SETUP_TOKEN;
+const allowClaudeReauthentication =
+  process.env.JINGLER_REAL_CLAUDE_REAUTH === "1";
 const realCertificationsFile = process.env.JINGLER_REAL_CERTIFICATIONS_FILE;
 const realProviderHome = process.env.JINGLER_REAL_PROVIDER_HOME;
 const realManagedExecutable = Schema.decodeUnknownOption(
@@ -54,7 +56,7 @@ interface ManagedQaConfig {
   readonly certificationsFile: string;
   readonly providerHome: string | undefined;
   readonly route: RealProviderRoute;
-  readonly setupToken: string | undefined;
+  readonly allowClaudeReauthentication: boolean;
 }
 
 interface ManagedQaApp {
@@ -70,7 +72,7 @@ const managedQaEnabled = (): boolean =>
   realProviderRoute._tag === "Some" &&
   (realProviderHome !== undefined ||
     realProviderRoute.value === "codex" ||
-    realClaudeSetupToken !== undefined);
+    allowClaudeReauthentication);
 
 const managedQaConfig = (): ManagedQaConfig => {
   if (
@@ -78,7 +80,7 @@ const managedQaConfig = (): ManagedQaConfig => {
     realProviderRoute._tag === "None" ||
     (!realProviderHome &&
       realProviderRoute.value === "claude" &&
-      !realClaudeSetupToken)
+      !allowClaudeReauthentication)
   ) {
     throw new Error("Real managed QA configuration is incomplete");
   }
@@ -94,7 +96,7 @@ const managedQaConfig = (): ManagedQaConfig => {
     certificationsFile: realCertificationsFile,
     providerHome: realProviderHome,
     route: realProviderRoute.value,
-    setupToken: realClaudeSetupToken,
+    allowClaudeReauthentication,
   };
 };
 
@@ -248,6 +250,9 @@ const launchManagedQaApp = async (
     })();
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
+    if (process.env.JINGLER_E2E_HEADED === "1") {
+      await showElectronWindow(app);
+    }
     return { app, root, window };
   } catch (cause) {
     rmSync(root, { recursive: true, force: true });
@@ -267,14 +272,15 @@ const authenticateProvider = async (
     window.getByRole("heading", { name: "Connect a model provider" }),
   ).toBeVisible({ timeout: 90_000 });
   if (config.route === "claude") {
-    if (!config.setupToken) throw new Error("Claude setup-token is required");
+    if (!config.allowClaudeReauthentication) {
+      throw new Error("Claude reauthentication was not explicitly enabled");
+    }
     const token = window.getByPlaceholder("Claude setup-token");
-    await token.fill(config.setupToken);
-    await window.getByRole("button", { name: "Connect Claude" }).click();
-    await expect(token).toHaveValue("");
+    await window.bringToFront();
+    await token.focus();
     await expect(
       window.getByText("Claude Pro / Max setup-token", { exact: true }).last(),
-    ).toBeVisible({ timeout: 90_000 });
+    ).toBeVisible({ timeout: 5 * 60_000 });
   } else {
     await window.getByRole("button", { name: "Open browser" }).click();
     await expect(

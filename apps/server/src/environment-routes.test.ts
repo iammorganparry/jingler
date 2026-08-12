@@ -49,6 +49,8 @@ const owned: Environment = {
   lastSeenAt: 190,
 };
 const managedRoute = `/api/environments/managed/${managed.id}`;
+const SENSITIVE_RUNTIME_DATA =
+  /signed-runtime-grant|credential|providerToken|secret/u;
 const providerSelection = {
   connectionId: "connection_one",
   providerId: "openai",
@@ -152,9 +154,7 @@ describe("environment routes", () => {
     const response = await app.request("/api/environments");
     const body = await response.text();
 
-    expect(body).not.toMatch(
-      /signed-runtime-grant|credential|providerToken|secret/,
-    );
+    expect(body).not.toMatch(SENSITIVE_RUNTIME_DATA);
   });
 
   it("returns the fixed Cloud target to authenticated create clients", async () => {
@@ -250,7 +250,7 @@ describe("environment routes", () => {
       selection: {
         connectionId: "connection_claude_subscription",
         providerId: "anthropic",
-        modelId: "anthropic/claude-opus-5",
+        modelId: "anthropic/claude-fable-5",
       },
       credential: {
         version: 1,
