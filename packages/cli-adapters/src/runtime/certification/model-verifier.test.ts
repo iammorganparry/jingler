@@ -112,8 +112,8 @@ describe("provider model behavior verification", () => {
           ] as const
         case "capability.managed-resources":
           return [
-            { kind: "tool-call", tool: "resource__managed-skill", risk: "read" },
-            { kind: "tool-call", tool: "resource__managed-prompt", risk: "read" },
+            { kind: "tool-call", tool: "jingler_list_resources", risk: "read" },
+            { kind: "tool-call", tool: "jingler_load_resource", risk: "read" },
             { kind: "tool-call", tool: "mcp__managed__write_file", risk: "execute" },
             { kind: "file-change", status: "A", path: "src/mcp-created.ts", oldPath: null },
             { kind: "resource", name: "managed-mcp", state: "opened" },

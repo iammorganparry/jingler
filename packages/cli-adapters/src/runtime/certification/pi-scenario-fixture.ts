@@ -25,8 +25,9 @@ export const scriptedPiScenarioResponses = (
   }
   if (scenarioId === "capability.managed-resources") {
     return [
-      fauxAssistantMessage(fauxToolCall("resource__managed-skill", {}), { stopReason: "toolUse" }),
-      fauxAssistantMessage(fauxToolCall("resource__managed-prompt", {}), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("jingler_list_resources", { query: "managed" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("jingler_load_resource", { id: "managed-skill" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage(fauxToolCall("jingler_load_resource", { id: "managed-prompt" }), { stopReason: "toolUse" }),
       fauxAssistantMessage(fauxToolCall("mcp__managed__write_file", {}), { stopReason: "toolUse" }),
       fauxAssistantMessage("complete")
     ]

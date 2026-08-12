@@ -45,7 +45,7 @@ const promptFor = (scenarioId: string): string => {
     case "resource.cleanup":
       return "Call managed-mcp exactly once, then finish."
     case "capability.managed-resources":
-      return "Call resource__managed-skill, then resource__managed-prompt, then mcp__managed__write_file. Call each exactly once, then finish."
+      return "List managed resources, load managed-skill and managed-prompt by id, then call mcp__managed__write_file. Call each exactly once, then finish."
     case "structured.question-plan":
       return "Ask the structured question Continue?, then submit a one-step plan after it is answered."
     default:

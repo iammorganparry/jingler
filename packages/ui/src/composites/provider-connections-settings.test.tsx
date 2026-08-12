@@ -189,4 +189,42 @@ describe("ProviderConnectionsSettings", () => {
       modelId: "anthropic/claude-test"
     })
   })
+
+  it("offers verification when the canonical default certification is stale", () => {
+    const onVerify = vi.fn()
+    const stale = Schema.decodeSync(ProviderCatalog)({
+      ...catalog,
+      connections: [
+        {
+          ...catalog.connections[0]!,
+          models: [
+            {
+              ...catalog.connections[0]!.models[0]!,
+              verification: "stale",
+              selectable: false,
+              certificationKey: null
+            }
+          ]
+        }
+      ]
+    })
+    render(
+      <ProviderConnectionsSettings
+        catalog={stale}
+        defaultConnectionId={"claude-max" as ProviderConnectionId}
+        defaultModelId={"anthropic/claude-test" as ProviderModelId}
+        onRefresh={vi.fn()}
+        onVerify={onVerify}
+        onMakeDefault={vi.fn()}
+        onLogout={vi.fn()}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }))
+    expect(onVerify).toHaveBeenCalledWith("claude-max", "anthropic/claude-test")
+    expect(screen.queryByText("Default")).toBeNull()
+  })
 })

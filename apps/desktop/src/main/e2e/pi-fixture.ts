@@ -41,6 +41,7 @@ const E2ePiFixture = Schema.Struct({
   authRoute: AuthKind,
   reasoning: Schema.optional(Schema.Array(ReasoningEffort)),
   seedConnection: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  staleCertification: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   modelCount: Schema.optionalWith(Schema.Int.pipe(Schema.between(1, 100)), {
     default: () => 1
   })
@@ -162,7 +163,9 @@ export const e2eCertification = (
     entitlementConfirmed: true,
     apiBillingFallbackObserved: false
   },
-  versions: CURRENT_RUNTIME_CONTRACTS,
+  versions: fixture.staleCertification
+    ? { ...CURRENT_RUNTIME_CONTRACTS, tools: "stale" }
+    : CURRENT_RUNTIME_CONTRACTS,
   provenance: "local",
   capabilityProfiles: ["core", "managed-resources"],
   results: [
@@ -629,7 +632,7 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
       return Array.from({ length: 12 }, () => planModeResponse)
     case "managed-resources":
       return [
-        fauxAssistantMessage(fauxToolCall("resource__managed-skill", {}), {
+        fauxAssistantMessage(fauxToolCall("jingler_load_resource", { id: "managed-skill" }), {
           stopReason: "toolUse"
         }),
         fauxAssistantMessage("Managed skill loaded through pi.")

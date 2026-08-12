@@ -67,8 +67,8 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
     id: "capability.managed-resources",
     capability: "resources",
     required: [
-      toolCall("resource__managed-skill"),
-      toolCall("resource__managed-prompt"),
+      toolCall("jingler_list_resources"),
+      toolCall("jingler_load_resource"),
       toolCall("mcp__managed__write_file"),
       fileChange("A", "src/mcp-created.ts"),
       resourceOpened("managed-mcp"),

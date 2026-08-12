@@ -232,6 +232,38 @@ test("adds a provider from settings after provider onboarding was skipped", asyn
   ).toBeVisible();
 });
 
+test("reverifies the stale canonical default model from provider settings", async ({
+  launchApp,
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: {
+      scenarioId: "provider-stale-default",
+      authRoute: "claude-setup-token",
+      staleCertification: true,
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    launched.window.getByRole("heading", { name: "Import agent resources" }),
+  ).toBeVisible();
+  await launched.window.getByRole("button", { name: "Skip for now" }).click();
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: /Providers/u }).click();
+  await expect(launched.window.getByText("jingler-e2e/eval-model · stale")).toBeVisible();
+
+  await launched.window.getByRole("button", { name: "Verify" }).click();
+
+  await expect(launched.window.getByText("jingler-e2e/eval-model · certified")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(launched.window.getByText("Default", { exact: true })).toBeVisible();
+});
+
 test("provider onboarding remains reachable at the minimum window height", async ({
   launchApp,
 }) => {

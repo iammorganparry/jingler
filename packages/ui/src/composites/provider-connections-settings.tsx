@@ -167,12 +167,12 @@ export function ProviderConnectionsSettings({
                         <div className="text-[12.5px] font-medium text-text-body">{model.label}</div>
                         <div className="font-mono text-[10px] text-dim">{model.id} · {model.verification}</div>
                       </div>
-                      {isDefault ? (
-                        <span className="flex items-center gap-1 rounded-md bg-blue/10 px-2 py-1 text-[10.5px] font-medium text-blue"><Check size={11} /> Default</span>
-                      ) : model.selectable ? (
-                        <Button variant="ghost" size="sm" disabled={busy} onClick={() => onMakeDefault({ connectionId: selected.connection.id, providerId: model.providerId, modelId: model.id })}>Make default</Button>
-                      ) : (
+                      {!model.selectable ? (
                         <Button variant="secondary" size="sm" disabled={busy || selected.connection.status !== "authenticated"} onClick={() => onVerify(selected.connection.id, model.id)}>Verify</Button>
+                      ) : isDefault ? (
+                        <span className="flex items-center gap-1 rounded-md bg-blue/10 px-2 py-1 text-[10.5px] font-medium text-blue"><Check size={11} /> Default</span>
+                      ) : (
+                        <Button variant="ghost" size="sm" disabled={busy} onClick={() => onMakeDefault({ connectionId: selected.connection.id, providerId: model.providerId, modelId: model.id })}>Make default</Button>
                       )}
                     </div>
                   )

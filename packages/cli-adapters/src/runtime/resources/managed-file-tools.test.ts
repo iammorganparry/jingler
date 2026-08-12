@@ -31,16 +31,31 @@ describe("managed file tools", () => {
     registerManagedFileTools(registry, service, resources)
     await writeFile(join(managedRoot, "skills", "release", "SKILL.md"), "Updated at invocation")
 
-    expect(registry.capabilitiesFor("conversation", "ask")).toEqual([
-      expect.objectContaining({ id: "resource__release", description: "Load skill: Release safely" })
+    expect(registry.capabilitiesFor("conversation", "ask").map(({ id }) => id)).toEqual([
+      "jingler_list_resources",
+      "jingler_load_resource"
     ])
-    const result = await Effect.runPromise(registry.execute({
-      id: "resource__release",
-      arguments: {},
+    const listed = await Effect.runPromise(registry.execute({
+      id: "jingler_list_resources",
+      arguments: { query: "release" },
       role: "conversation",
       mode: "ask"
     }))
-    expect(result).toMatchObject({
+    expect(listed).toMatchObject({
+      status: "success",
+      value: {
+        total: 1,
+        truncated: false,
+        resources: [{ id: "release", kind: "skill", description: "Release safely" }]
+      }
+    })
+    const loaded = await Effect.runPromise(registry.execute({
+      id: "jingler_load_resource",
+      arguments: { id: "release" },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(loaded).toMatchObject({
       status: "success",
       value: { instructions: "Updated at invocation", truncated: false }
     })
