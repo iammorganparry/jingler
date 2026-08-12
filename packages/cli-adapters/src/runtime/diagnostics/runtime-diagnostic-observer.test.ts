@@ -28,46 +28,30 @@ const connection: ProviderConnection = {
   updatedAt: "2026-08-10T00:00:00.000Z"
 }
 
-describe("runtime diagnostic observer", () => {
-  it("records only redacted contract, mutation, diff, retry, and terminal metadata", () => {
-    const registry = new ToolRegistry()
-    registry.register({
-      id: "workspace_write",
-      version: "1",
-      description: "Write a file",
-      input: Schema.Struct({ path: Schema.String, content: Schema.String }),
-      risk: "mutate",
-      roles: ["conversation"],
-      modes: ["ask"],
-      timeoutMs: 1_000,
-      outputBudget: 1_000,
-      cancellable: true,
-      idempotency: "keyed",
-      execute: async () => ({ ok: true })
-    })
-    const observer = makeRuntimeDiagnosticObserver({
-      runId: "run-1",
-      sessionId: "session-1",
-      connection,
-      mode: "ask",
-      manifest: {
-        contractVersion: "1",
-        hash: "prompt-hash",
-        estimatedTokens: 12,
-        sections: [{
-          id: "runtime.safety",
-          kind: "safety",
-          trust: "immutable",
-          hash: "section-hash",
-          estimatedTokens: 12,
-          truncated: false
-        }],
-        activeTools: ["workspace_write"]
-      },
-      registry,
-      now: () => new Date("2026-08-10T00:00:00.000Z")
-    })
-    const events: ReadonlyArray<StreamEvent> = [
+const registry = (): ToolRegistry => {
+  const result = new ToolRegistry()
+  result.register({
+    id: "workspace_write",
+    version: "1",
+    description: "Write a file",
+    input: Schema.Struct({ path: Schema.String, content: Schema.String }),
+    risk: "mutate",
+    roles: ["conversation"],
+    modes: ["ask"],
+    timeoutMs: 1_000,
+    outputBudget: 1_000,
+    cancellable: true,
+    idempotency: "keyed",
+    execute: async () => ({ ok: true })
+  })
+  result.setMcpHealth([
+    { name: "jingler-browser", status: "healthy" },
+    { name: "jingler-memory", status: "failed" }
+  ])
+  return result
+}
+
+const events: ReadonlyArray<StreamEvent> = [
       { _tag: "ToolStart", id: "call-1", name: "workspace_write", target: "src/new.ts" },
       {
         _tag: "ToolEnd",
@@ -92,13 +76,47 @@ describe("runtime diagnostic observer", () => {
       },
       { _tag: "RetryScheduled", operation: "provider", attempt: 2, maxAttempts: 3, delayMs: 10, message: "retry" },
       { _tag: "Done", costUsd: 0, tokens: 4 }
-    ]
-    const result = events.reduce((_, event) => observer.observe(event), observer.initial)
+]
+
+const observer = () => makeRuntimeDiagnosticObserver({
+  runId: "run-1",
+  sessionId: "session-1",
+  connection,
+  mode: "ask",
+  manifest: {
+    contractVersion: "1",
+    hash: "prompt-hash",
+    estimatedTokens: 12,
+    sections: [{
+      id: "runtime.safety",
+      kind: "safety",
+      trust: "immutable",
+      hash: "section-hash",
+      estimatedTokens: 12,
+      truncated: false
+    }],
+    activeTools: ["workspace_write"]
+  },
+  registry: registry(),
+  now: () => new Date("2026-08-10T00:00:00.000Z")
+})
+
+describe("runtime diagnostic observer", () => {
+  it("records only redacted contract, mutation, diff, retry, and terminal metadata", () => {
+    const diagnosticObserver = observer()
+    const result = events.reduce(
+      (_, event) => diagnosticObserver.observe(event),
+      diagnosticObserver.initial
+    )
     expect(result).toMatchObject({
       authRoute: "claude-setup-token",
       promptHash: "prompt-hash",
       retries: 2,
       fileChangeStatuses: ["A"],
+      mcpHealth: [
+        { name: "jingler-browser", status: "healthy" },
+        { name: "jingler-memory", status: "failed" }
+      ],
       terminalCause: "done",
       mutations: [{ callId: "call-1", toolId: "workspace_write", status: "settled", fileChangeSetIds: ["changes-1"] }]
     })

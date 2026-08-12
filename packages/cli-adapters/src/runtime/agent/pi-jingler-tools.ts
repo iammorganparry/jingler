@@ -92,9 +92,10 @@ export const createJinglerTools = (
     }
     const mcpSources = input.mcp ? jinglerMcpSources(input.mcp) : []
     if (mcpSources.length > 0) {
-      yield* input.mcpClientFactory
+      const report = yield* (input.mcpClientFactory
         ? registerMcpTools(registry, mcpSources, input.mcpClientFactory)
-        : registerMcpTools(registry, mcpSources)
+        : registerMcpTools(registry, mcpSources))
+      registry.setMcpHealth(report.health)
     }
     return registry
   })

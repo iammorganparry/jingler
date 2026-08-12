@@ -1,4 +1,9 @@
-import type { AgentRole, FileChangeSet, RuntimeMode } from "@jingler/core"
+import type {
+  AgentRole,
+  FileChangeSet,
+  RuntimeDiagnosticMcpHealth,
+  RuntimeMode
+} from "@jingler/core"
 import type { PromptToolCapability } from "../prompt/prompt-compiler.js"
 import type { WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { Effect, Either, Schema } from "effect"
@@ -241,6 +246,7 @@ const executeDefinition = async (
 export class ToolRegistry {
   readonly #tools = new Map<string, AnyToolDefinition>()
   readonly #options: ToolRegistryOptions
+  #mcpHealth: ReadonlyArray<RuntimeDiagnosticMcpHealth> = []
 
   constructor(options: ToolRegistryOptions = {}) {
     this.#options = options
@@ -255,6 +261,18 @@ export class ToolRegistry {
       throw new Error(`invalid limits for tool: ${definition.id}`)
     }
     this.#tools.set(definition.id, definition as AnyToolDefinition)
+  }
+
+  canRegister(id: string): boolean {
+    return isProviderToolId(id) && !this.#tools.has(id)
+  }
+
+  setMcpHealth(health: ReadonlyArray<RuntimeDiagnosticMcpHealth>): void {
+    this.#mcpHealth = [...health]
+  }
+
+  mcpHealth(): ReadonlyArray<RuntimeDiagnosticMcpHealth> {
+    return this.#mcpHealth
   }
 
   capabilitiesFor(role: AgentRole, mode: RuntimeMode): ReadonlyArray<PromptToolCapability> {

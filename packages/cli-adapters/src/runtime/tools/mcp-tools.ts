@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js"
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
+import type { RuntimeDiagnosticMcpHealth } from "@jingler/core"
 import { Data, Effect, Schema } from "effect"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { ToolError, type ToolRegistry, type ToolRisk } from "./tool-registry.js"
@@ -56,6 +57,17 @@ export interface McpToolSource {
   readonly server: RuntimeMcpServer
   /** Explicit source policy; untrusted MCP annotations never lower this risk. */
   readonly risk: ToolRisk
+}
+
+export interface McpToolRegistrationReport {
+  readonly health: ReadonlyArray<RuntimeDiagnosticMcpHealth>
+  readonly failures: ReadonlyArray<McpToolBridgeError>
+}
+
+interface McpDiscovery {
+  readonly source: McpToolSource
+  readonly tools: ReadonlyArray<Tool> | null
+  readonly error: McpToolBridgeError | null
 }
 
 export interface JinglerMcpAttachments {
@@ -264,30 +276,79 @@ const registerTool = (
   })
 }
 
+const discoverSource = (
+  factory: McpToolClientFactory,
+  source: McpToolSource
+): Effect.Effect<McpDiscovery> =>
+  discoverTools(factory, source.server).pipe(
+    Effect.match({
+      onFailure: (error) => ({ source, error, tools: null }),
+      onSuccess: (tools) => ({ source, error: null, tools })
+    })
+  )
+
+const availableDiscoveries = (
+  discovered: ReadonlyArray<McpDiscovery>
+): ReadonlyArray<McpDiscovery & { readonly tools: ReadonlyArray<Tool> }> =>
+  discovered.filter(
+    (entry): entry is McpDiscovery & { readonly tools: ReadonlyArray<Tool> } =>
+      entry.tools !== null
+  )
+
+const validateDiscoveries = (
+  registry: ToolRegistry,
+  discovered: ReadonlyArray<McpDiscovery & { readonly tools: ReadonlyArray<Tool> }>
+): void => {
+  const names = new Set<string>()
+  for (const { source, tools } of discovered) {
+    for (const tool of tools) {
+      const name = registeredName(source.server.name, tool.name)
+      if (names.has(name) || !registry.canRegister(name)) {
+        throw new Error(`duplicate or invalid MCP tool id: ${name}`)
+      }
+      validator.getValidator(tool.inputSchema)
+      names.add(name)
+    }
+  }
+}
+
+const registerDiscoveries = (
+  registry: ToolRegistry,
+  discovered: ReadonlyArray<McpDiscovery & { readonly tools: ReadonlyArray<Tool> }>,
+  factory: McpToolClientFactory
+): void => {
+  for (const { source, tools } of discovered) {
+    for (const tool of tools) registerTool(registry, source, tool, factory)
+  }
+}
+
+const registrationReport = (
+  discovered: ReadonlyArray<McpDiscovery>
+): McpToolRegistrationReport => ({
+  health: discovered.map(({ source, error }) => ({
+    name: source.server.name,
+    status: error === null ? "healthy" : "failed"
+  })),
+  failures: discovered.flatMap(({ error }) => error === null ? [] : [error])
+})
+
 /** Discover and namespace MCP tools into the authoritative Jingler registry. */
 export const registerMcpTools = (
   registry: ToolRegistry,
   sources: ReadonlyArray<McpToolSource>,
   factory: McpToolClientFactory = makeMcpToolClient
-): Effect.Effect<void, McpToolBridgeError> =>
+): Effect.Effect<McpToolRegistrationReport, McpToolBridgeError> =>
   Effect.forEach(
     sources,
-    (source) => discoverTools(factory, source.server).pipe(
-      Effect.map((tools) => ({ source, tools }))
-    ),
+    (source) => discoverSource(factory, source),
     { concurrency: 4 }
   ).pipe(
     Effect.flatMap((discovered) => Effect.try({
       try: () => {
-        const names = new Set<string>()
-        for (const { source, tools } of discovered) {
-          for (const tool of tools) {
-            const name = registeredName(source.server.name, tool.name)
-            if (names.has(name)) throw new Error(`duplicate MCP tool id: ${name}`)
-            names.add(name)
-            registerTool(registry, source, tool, factory)
-          }
-        }
+        const available = availableDiscoveries(discovered)
+        validateDiscoveries(registry, available)
+        registerDiscoveries(registry, available, factory)
+        return registrationReport(discovered)
       },
       catch: (cause) => clientFailure(
         "managed-mcp",

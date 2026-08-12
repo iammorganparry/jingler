@@ -188,6 +188,51 @@ it("turns MCP error results into structured tool failures", async () => {
   expect(state.closes).toBe(2)
 })
 
+it("isolates discovery failures to the unavailable MCP server", async () => {
+  const unavailable = { ...server, name: "unavailable-memory" }
+  const state: FakeClientState = { calls: [], closes: 0 }
+  const registry = new ToolRegistry()
+  const factory: McpToolClientFactory = (requested) =>
+    Effect.succeed({
+      listTools: () =>
+        requested.name === unavailable.name
+          ? Effect.fail(
+              new McpToolBridgeError({
+                serverName: requested.name,
+                message: `Could not list tools from ${requested.name}`
+              })
+            )
+          : Effect.succeed({ tools: [tool] }),
+      callTool: () => Effect.succeed({ content: [] }),
+      close: Effect.sync(() => {
+        state.closes += 1
+      })
+    })
+
+  const report = await Effect.runPromise(
+    registerMcpTools(
+      registry,
+      [
+        { server, risk: "network" },
+        { server: unavailable, risk: "network" }
+      ],
+      factory
+    )
+  )
+
+  expect(
+    registry.capabilitiesFor("conversation", "ask").map(({ id }) => id)
+  ).toEqual(["mcp__jingler-browser__navigate"])
+  expect(report.health).toEqual([
+    { name: "jingler-browser", status: "healthy" },
+    { name: "unavailable-memory", status: "failed" }
+  ])
+  expect(report.failures).toEqual([
+    expect.objectContaining({ serverName: "unavailable-memory" })
+  ])
+  expect(state.closes).toBe(2)
+})
+
 it("connects to target-local stdio servers and supplies only resolved launch values", async () => {
   const fixture = fileURLToPath(new URL("./fixtures/stdio-mcp-server.mjs", import.meta.url))
   const stdio: RuntimeMcpServer = {
@@ -260,16 +305,23 @@ it("reconciles actual file changes made by mutating MCP tools", async () => {
 })
 
 it("rejects sanitized duplicate MCP tool ids deterministically", async () => {
-  const duplicate = { ...server, name: "jingler.browser" }
+  const first = { ...server, name: "jingler.browser" }
+  const duplicate = { ...server, name: "jingler/browser" }
   const registry = new ToolRegistry()
   const state: FakeClientState = { calls: [], closes: 0 }
   const result = await Effect.runPromise(Effect.either(registerMcpTools(
     registry,
     [
-      { server: { ...server, name: "jingler-browser" }, risk: "network" },
+      { server: first, risk: "network" },
       { server: duplicate, risk: "network" }
     ],
-    (requested) => fakeFactory(state)({ ...server, name: requested.name })
+    () => Effect.succeed({
+      listTools: () => Effect.succeed({ tools: [tool] }),
+      callTool: () => Effect.succeed({ content: [] }),
+      close: Effect.sync(() => {
+        state.closes += 1
+      })
+    })
   )))
 
   expect(result._tag).toBe("Left")

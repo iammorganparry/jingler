@@ -2,6 +2,9 @@ import type { SeedSession } from "./fixtures.js"
 import { appShell, expect, test } from "./fixtures.js"
 import { type FakeMemoryRequest, startFakeAuthServer } from "./fake-auth.js"
 
+const COMPLETED_PI_REPLY = /^Completed through deterministic pi\./u
+const FAILED_MEMORY_MCP = /jingler-memory: failed/u
+
 const memoryRequestCount = (
   requests: ReadonlyArray<FakeMemoryRequest>,
   name: "memory_search" | "memory_read"
@@ -84,6 +87,44 @@ test("pi receives accepted memory without raw settled-turn capture", async ({ la
     expect(sourceIngestRequests(fake.memoryRequests)).toEqual([])
 
     await app.app.close()
+  } finally {
+    await fake.close()
+  }
+})
+
+test("an unavailable memory MCP does not abort Jingler's real pi tools", async ({
+  launchApp
+}) => {
+  const fake = await startFakeAuthServer()
+  try {
+    const app = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "memory-mcp-isolation", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    const completed = app.window.getByText(COMPLETED_PI_REPLY)
+    const composer = app.window.getByPlaceholder("Message the agent…")
+
+    await composer.fill("Warm the managed memory attachment.")
+    await composer.press("Enter")
+    await expect(completed).toHaveCount(1, { timeout: 30_000 })
+
+    fake.setMemoryAvailable(false)
+    await composer.fill("Continue with Jingler's available tools.")
+    await composer.press("Enter")
+    await expect(completed).toHaveCount(2, { timeout: 30_000 })
+
+    await app.window.getByRole("button", { name: "Account menu" }).click()
+    await app.window.getByRole("menuitem", { name: "Settings" }).click()
+    await app.window.getByRole("button", { name: "Runtime" }).click()
+    await expect(
+      app.window
+        .getByRole("region", { name: "Runtime inspector" })
+        .getByText(FAILED_MEMORY_MCP)
+    ).toBeVisible()
   } finally {
     await fake.close()
   }
