@@ -44,7 +44,7 @@ export interface AdversarialReviewState {
   /** The message from a failed run, or null. */
   readonly error: string | null
   /** Run a fresh review, ignoring the stored one for this head. */
-  readonly runReview: () => Promise<void>
+  readonly runReview: () => void
   /** Hand a finding to the session's agent to address. */
   readonly sendFindingToAgent: (findingId: string) => void
   /**
@@ -92,10 +92,10 @@ export function useAdversarialReview(
     }
   })
 
-  const runReview = useCallback(
-    () => runMutation.mutateAsync().then(() => undefined),
-    [runMutation]
-  )
+  // This is a UI command, so keep failure inside the mutation state consumed
+  // below. Returning `mutateAsync` to React's void event handler leaves its
+  // rejection unobserved when the window closes during an active review.
+  const runReview = useCallback(() => runMutation.mutate(), [runMutation])
 
   // Live progress comes from the session's conversation actor, which watches the
   // reviewer's event stream for this session. Reading it here (rather than from
