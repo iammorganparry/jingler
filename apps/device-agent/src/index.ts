@@ -23,9 +23,13 @@ const option = (name: string): string | undefined => {
   return index >= 0 ? args[index + 1] : undefined
 }
 
-const print = (value: unknown): void => {
-  process.stdout.write(`${JSON.stringify(value)}\n`)
-}
+const print = (value: unknown): Promise<void> =>
+  new Promise((resolve, reject) => {
+    process.stdout.write(`${JSON.stringify(value)}\n`, (error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
 
 const usage = (): never => {
   process.stderr.write("Usage: jingler-device <enroll|serve|managed-command|install-service|status|rotate-key|revoke-local> [options]\n")
