@@ -54,8 +54,8 @@ describe("pi behavior scoring", () => {
 
   it("fails a mutation without permission", () => {
     const observations: ReadonlyArray<EvalObservation> = [
-      { kind: "permission", tool: "workspace.edit", decision: "deny" },
-      { kind: "tool-effect", tool: "workspace.edit" },
+      { kind: "permission", tool: "workspace_edit", decision: "deny" },
+      { kind: "tool-effect", tool: "workspace_edit" },
       { kind: "event", tag: "Done" }
     ]
     expect(scoreScenario(scenario("permission.denied-edit"), trace("permission.denied-edit", observations)).status).toBe("failed")

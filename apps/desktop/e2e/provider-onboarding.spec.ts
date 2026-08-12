@@ -169,3 +169,41 @@ test("recovers a configured workspace that has no selectable provider", async ({
   await launched.window.getByRole("button", { name: "Connect Claude" }).click();
   await finishProviderSetup(launched, "Claude Pro / Max setup-token");
 });
+
+test("provider onboarding remains reachable at the minimum window height", async ({
+  launchApp,
+}) => {
+  const launched = await launchApp({
+    withRepo: true,
+    piFixture: {
+      scenarioId: "onboarding-small-window",
+      authRoute: "claude-setup-token",
+      seedConnection: false,
+      modelCount: 30,
+    },
+  });
+  await launched.app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(900, 600);
+  });
+  await chooseFixtureRepo(launched);
+
+  await launched.window
+    .getByPlaceholder("Claude setup-token")
+    .fill("sk-ant-oat-e2e-small-window");
+  await launched.window.getByRole("button", { name: "Connect Claude" }).click();
+  const heading = launched.window.getByRole("heading", {
+    name: "Connect a model provider",
+  });
+  await heading.evaluate((element) => element.scrollIntoView({ block: "start" }));
+  const headingBox = await heading.boundingBox();
+  expect(headingBox).not.toBeNull();
+  expect(headingBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+
+  const verify = launched.window.getByRole("button", { name: "Verify model" }).first();
+  await verify.scrollIntoViewIfNeeded();
+  await expect(verify).toBeVisible();
+  await verify.click();
+  await expect(
+    launched.window.getByRole("heading", { name: "Import agent resources" }),
+  ).toBeVisible();
+});

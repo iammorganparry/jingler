@@ -44,13 +44,19 @@ const matchingCertification = (
   certifications: ReadonlyArray<ModelCertification>,
   connection: ProviderConnection,
   model: DiscoveredProviderModel
-): ModelCertification | null =>
-  certifications.find(
+): ModelCertification | null => {
+  const matching = certifications.filter(
     (item) =>
       item.providerId === model.providerId &&
       item.modelId === model.id &&
       item.authRoute.kind === connection.authKind
-  ) ?? null
+  )
+  return matching.find((item) => isCurrentCertification(item)) ?? matching.reduce<ModelCertification | null>(
+    (latest, item) =>
+      latest === null || item.certifiedAt > latest.certifiedAt ? item : latest,
+    null
+  )
+}
 
 const decorate = (
   model: DiscoveredProviderModel,

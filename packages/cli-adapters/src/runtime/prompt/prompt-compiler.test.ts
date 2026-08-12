@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { PromptCompiler, type PromptLayer } from "./prompt-compiler.js"
 import { promptLayer, runtimeInvariantLayers } from "./role-profiles.js"
 
-const tool = { id: "workspace.read", version: "1", description: "Read a bounded project file." }
+const tool = { id: "workspace_read", version: "1", description: "Read a bounded project file." }
 
 describe("PromptCompiler", () => {
   it("compiles immutable policy before role, tools, workspace, preferences, and turn context", () => {
@@ -27,9 +27,9 @@ describe("PromptCompiler", () => {
       tools: [tool],
       tokenBudget: 2_000
     })
-    expect(result.manifest.activeTools).toEqual(["workspace.read"])
-    expect(result.text).toContain("workspace.read: Read a bounded project file.")
-    expect(result.text).not.toContain("workspace.edit")
+    expect(result.manifest.activeTools).toEqual(["workspace_read"])
+    expect(result.text).toContain("workspace_read: Read a bounded project file.")
+    expect(result.text).not.toContain("workspace_edit")
   })
 
   it("trims lower-priority optional context without removing required layers", () => {

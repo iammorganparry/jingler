@@ -40,7 +40,10 @@ const E2ePiFixture = Schema.Struct({
   scenarioId: Schema.String,
   authRoute: AuthKind,
   reasoning: Schema.optional(Schema.Array(ReasoningEffort)),
-  seedConnection: Schema.optionalWith(Schema.Boolean, { default: () => true })
+  seedConnection: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  modelCount: Schema.optionalWith(Schema.Int.pipe(Schema.between(1, 100)), {
+    default: () => 1
+  })
 })
 
 export type E2ePiFixture = Schema.Schema.Type<typeof E2ePiFixture>
@@ -120,19 +123,30 @@ export const e2eProviderConnection = (fixture: E2ePiFixture) =>
     updatedAt: "2026-08-10T00:00:00.000Z"
   })
 
-export const e2eDiscoveredModel = (
+const e2eDiscoveredModel = (
   fixture: E2ePiFixture,
-  providerId: ProviderId = PROVIDER_ID
+  providerId: ProviderId,
+  index: number
 ): DiscoveredProviderModel => ({
   providerId,
-  id: Schema.decodeUnknownSync(ProviderModelId)(`${providerId}/eval-model`),
-  label: "Deterministic pi model",
+  id: Schema.decodeUnknownSync(ProviderModelId)(
+    `${providerId}/${index === 0 ? "eval-model" : `eval-model-${index + 1}`}`
+  ),
+  label: `Deterministic pi model ${index + 1}`,
   capabilities: {
     contextWindow: E2E_CONTEXT_WINDOW,
     reasoning: fixture.reasoning ?? [],
     vision: false
   }
 })
+
+export const e2eDiscoveredModels = (
+  fixture: E2ePiFixture,
+  providerId: ProviderId = PROVIDER_ID
+): ReadonlyArray<DiscoveredProviderModel> =>
+  Array.from({ length: fixture.modelCount }, (_, index) =>
+    e2eDiscoveredModel(fixture, providerId, index)
+  )
 
 export const e2eCertification = (
   fixture: E2ePiFixture,

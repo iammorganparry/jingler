@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { ToolRegistry, type ToolDefinition } from "./tool-registry.js"
 
 const definition = (overrides: Partial<ToolDefinition<{ readonly path: string }>> = {}): ToolDefinition<{ readonly path: string }> => ({
-  id: "workspace.read",
+  id: "workspace_read",
   version: "1",
   description: "Read a workspace file.",
   input: Schema.Struct({ path: Schema.String }),
@@ -19,18 +19,26 @@ const definition = (overrides: Partial<ToolDefinition<{ readonly path: string }>
 })
 
 describe("ToolRegistry", () => {
+  it("rejects tool ids that provider APIs cannot expose", () => {
+    const registry = new ToolRegistry()
+
+    expect(() => registry.register(definition({ id: "workspace.edit" }))).toThrow(
+      "invalid tool id: workspace.edit"
+    )
+  })
+
   it("rejects invalid arguments before execution", async () => {
     const execute = vi.fn(async () => "never")
     const registry = new ToolRegistry()
     registry.register(definition({ execute }))
-    const result = await Effect.runPromise(registry.execute({ id: "workspace.read", arguments: {}, role: "conversation", mode: "ask" }))
+    const result = await Effect.runPromise(registry.execute({ id: "workspace_read", arguments: {}, role: "conversation", mode: "ask" }))
     expect(result.error?.code).toBe("invalid-input")
     expect(execute).not.toHaveBeenCalled()
   })
 
   it("omits mutation and execution tools from plan and review roles", () => {
     const registry = new ToolRegistry()
-    registry.register(definition({ id: "workspace.edit", risk: "mutate" }))
+    registry.register(definition({ id: "workspace_edit", risk: "mutate" }))
     expect(registry.capabilitiesFor("plan", "read-only")).toEqual([])
     expect(registry.capabilitiesFor("review", "read-only")).toEqual([])
   })
@@ -41,7 +49,7 @@ describe("ToolRegistry", () => {
     })
     registry.register(definition({ outputBudget: 8, execute: async () => ({ content: "large output" }) }))
     const result = await Effect.runPromise(registry.execute({
-      id: "workspace.read",
+      id: "workspace_read",
       arguments: { path: "README.md" },
       role: "conversation",
       mode: "ask"
@@ -57,7 +65,7 @@ describe("ToolRegistry", () => {
     }))
     const abort = new AbortController()
     const result = Effect.runPromise(registry.execute({
-      id: "workspace.read",
+      id: "workspace_read",
       arguments: { path: "README.md" },
       role: "conversation",
       mode: "ask",
@@ -70,7 +78,7 @@ describe("ToolRegistry", () => {
   it("requires idempotency keys for keyed tools", async () => {
     const registry = new ToolRegistry()
     registry.register(definition({ idempotency: "keyed" }))
-    const result = await Effect.runPromise(registry.execute({ id: "workspace.read", arguments: { path: "a" }, role: "conversation", mode: "ask" }))
+    const result = await Effect.runPromise(registry.execute({ id: "workspace_read", arguments: { path: "a" }, role: "conversation", mode: "ask" }))
     expect(result.error?.code).toBe("invalid-input")
   })
 
@@ -78,11 +86,11 @@ describe("ToolRegistry", () => {
     const execute = vi.fn(async () => null)
     const registry = new ToolRegistry()
     registry.register(
-      definition({ id: "workspace.edit", risk: "mutate", execute })
+      definition({ id: "workspace_edit", risk: "mutate", execute })
     )
     const result = await Effect.runPromise(
       registry.execute({
-        id: "workspace.edit",
+        id: "workspace_edit",
         arguments: { path: "a" },
         role: "conversation",
         mode: "ask"

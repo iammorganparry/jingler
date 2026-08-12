@@ -255,6 +255,7 @@ export interface LaunchOptions {
       "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
     >;
     readonly seedConnection?: boolean;
+    readonly modelCount?: number;
   };
   /**
    * Relaunch against an EXISTING `~/jingler` (a previous launch's `home`) —

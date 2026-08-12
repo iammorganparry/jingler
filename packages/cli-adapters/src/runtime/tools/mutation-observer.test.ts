@@ -44,7 +44,7 @@ describe("mutation observer", () => {
       })
     })
     registry.register({
-      id: "workspace.write",
+      id: "workspace_write",
       version: "1",
       description: "Write a file.",
       input: Schema.Struct({ path: Schema.String, content: Schema.String }),
@@ -60,7 +60,7 @@ describe("mutation observer", () => {
 
     const result = await Effect.runPromise(
       registry.execute({
-        id: "workspace.write",
+        id: "workspace_write",
         arguments: { path: "created.ts", content: "export const value = 1\n" },
         role: "conversation",
         mode: "ask",

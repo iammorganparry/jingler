@@ -32,7 +32,7 @@ describe("runtime diagnostic observer", () => {
   it("records only redacted contract, mutation, diff, retry, and terminal metadata", () => {
     const registry = new ToolRegistry()
     registry.register({
-      id: "workspace.write",
+      id: "workspace_write",
       version: "1",
       description: "Write a file",
       input: Schema.Struct({ path: Schema.String, content: Schema.String }),
@@ -62,13 +62,13 @@ describe("runtime diagnostic observer", () => {
           estimatedTokens: 12,
           truncated: false
         }],
-        activeTools: ["workspace.write"]
+        activeTools: ["workspace_write"]
       },
       registry,
       now: () => new Date("2026-08-10T00:00:00.000Z")
     })
     const events: ReadonlyArray<StreamEvent> = [
-      { _tag: "ToolStart", id: "call-1", name: "workspace.write", target: "src/new.ts" },
+      { _tag: "ToolStart", id: "call-1", name: "workspace_write", target: "src/new.ts" },
       {
         _tag: "ToolEnd",
         id: "call-1",
@@ -100,7 +100,7 @@ describe("runtime diagnostic observer", () => {
       retries: 2,
       fileChangeStatuses: ["A"],
       terminalCause: "done",
-      mutations: [{ callId: "call-1", toolId: "workspace.write", status: "settled", fileChangeSetIds: ["changes-1"] }]
+      mutations: [{ callId: "call-1", toolId: "workspace_write", status: "settled", fileChangeSetIds: ["changes-1"] }]
     })
     expect(JSON.stringify(result)).not.toContain("secret")
   })

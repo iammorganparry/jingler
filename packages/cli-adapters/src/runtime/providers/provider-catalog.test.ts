@@ -101,6 +101,27 @@ describe("ProviderCatalogService", () => {
     expect(await Effect.runPromise(service.selectable)).toStrictEqual([])
   })
 
+  it("prefers a current re-verification over older stale evidence", async () => {
+    const certifications = new InMemoryModelCertificationStore([
+      certification({
+        versions: { ...CURRENT_RUNTIME_CONTRACTS, behavior: "old" },
+        certifiedAt: "2026-08-09T00:00:00.000Z"
+      }),
+      certification({ certifiedAt: "2026-08-10T00:00:00.000Z" })
+    ])
+    const service = await Effect.runPromise(makeProviderCatalogService({
+      connections: Effect.succeed([connection]),
+      certifications,
+      discover: () => Effect.succeed([model]),
+      targetAvailable: () => true
+    }))
+
+    expect((await Effect.runPromise(service.refresh)).connections[0]?.models[0]).toMatchObject({
+      verification: "certified",
+      selectable: true
+    })
+  })
+
   it("filters a certified model when the execution target is unavailable", async () => {
     const service = await make({ targetAvailable: false })
     expect((await Effect.runPromise(service.refresh)).connections[0]?.models[0]).toMatchObject({

@@ -88,7 +88,7 @@ describe("provider model behavior verification", () => {
           return [{ kind: "event", tag: "Started" }, { kind: "event", tag: "Done" }] as const
         case "permission.denied-edit":
           return [
-            { kind: "permission", tool: "workspace.edit", decision: "deny" },
+            { kind: "permission", tool: "workspace_edit", decision: "deny" },
             { kind: "event", tag: "Done" }
           ] as const
         case "auth.route-pinned":

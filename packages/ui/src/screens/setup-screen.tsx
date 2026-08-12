@@ -101,8 +101,8 @@ export function SetupScreen({
   const hasConnection = github.connected && github.user !== null
 
   return (
-    <div className="flex h-full flex-1 items-center justify-center overflow-auto bg-editor px-6 py-10">
-      <div className="flex w-full max-w-[520px] flex-col gap-6">
+    <div className="flex h-full flex-1 justify-center overflow-auto bg-editor px-6 py-10">
+      <div className="my-auto flex w-full max-w-[520px] flex-col gap-6">
         <div className="flex size-12 items-center justify-center rounded-xl bg-brand">
           <JinglerMark className="h-6 w-auto text-white" />
         </div>

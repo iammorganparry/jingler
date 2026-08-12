@@ -1,2 +1,3 @@
-2026/08/12-10:26:04.083 20c7bd Creating DB /Users/morganparry/jingler/worktrees/jingler/cosmic-johnson/tmp/real-qa-chromium/Session Storage since it was missing.
-2026/08/12-10:26:04.097 20c7bd Reusing MANIFEST /Users/morganparry/jingler/worktrees/jingler/cosmic-johnson/tmp/real-qa-chromium/Session Storage/MANIFEST-000001
+2026/08/12-10:58:00.415 22c263 Reusing MANIFEST /Users/morganparry/jingler/worktrees/jingler/cosmic-johnson/tmp/real-qa-chromium/Session Storage/MANIFEST-000001
+2026/08/12-10:58:00.419 22c263 Recovering log #3
+2026/08/12-10:58:00.419 22c263 Reusing old log /Users/morganparry/jingler/worktrees/jingler/cosmic-johnson/tmp/real-qa-chromium/Session Storage/000003.log 

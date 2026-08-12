@@ -6,6 +6,13 @@ import { Effect, Either, Schema } from "effect"
 export type ToolRisk = "read" | "network" | "mutate" | "execute"
 export type ToolIdempotency = "safe" | "keyed" | "unsafe"
 
+const ProviderToolId = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(64),
+  Schema.pattern(/^[A-Za-z0-9_-]+$/u)
+)
+const isProviderToolId = Schema.is(ProviderToolId)
+
 export interface ToolProgress {
   readonly message: string
   readonly completed: number | null
@@ -240,6 +247,9 @@ export class ToolRegistry {
   }
 
   register<Input, Encoded>(definition: ToolDefinition<Input, Encoded>): void {
+    if (!isProviderToolId(definition.id)) {
+      throw new Error(`invalid tool id: ${definition.id}`)
+    }
     if (this.#tools.has(definition.id)) throw new Error(`duplicate tool id: ${definition.id}`)
     if (definition.timeoutMs <= 0 || definition.outputBudget <= 0) {
       throw new Error(`invalid limits for tool: ${definition.id}`)

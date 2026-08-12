@@ -21,6 +21,7 @@
  */
 import type { AuthProvider, AuthSession } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
+import { rpcFailureMessage } from "./rpc-failure.js"
 import { rpc } from "./rpc-client.js"
 
 export interface AuthContext {
@@ -134,7 +135,10 @@ export const authMachine = setup({
             }),
             onError: {
               target: "error",
-              actions: assign({ error: () => "Couldn't start sign-in. Please try again." })
+              actions: assign({
+                error: ({ event }) =>
+                  rpcFailureMessage(event.error, "Couldn't start sign-in. Please try again.")
+              })
             }
           }
         },

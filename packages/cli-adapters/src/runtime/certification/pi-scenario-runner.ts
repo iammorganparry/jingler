@@ -39,9 +39,9 @@ const ALL_MODES = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 const promptFor = (scenarioId: string): string => {
   switch (scenarioId) {
     case "permission.denied-edit":
-      return "Call workspace.edit once with path src/edit.ts. If permission is denied, stop without trying another tool."
+      return "Call workspace_edit once with path src/edit.ts. If permission is denied, stop without trying another tool."
     case "diff.create-edit-delete-rename":
-      return "Call workspace.edit exactly once with path src/edit.ts, then finish."
+      return "Call workspace_edit exactly once with path src/edit.ts, then finish."
     case "resource.cleanup":
       return "Call managed-mcp exactly once, then finish."
     case "capability.managed-resources":
@@ -82,7 +82,7 @@ const fileChangeRegistry = (root: string, observations: Array<EvalObservation>):
     })
   })
   registry.register({
-    id: "workspace.edit",
+    id: "workspace_edit",
     version: "1",
     description: "Apply the deterministic file-change fixture.",
     input: Schema.Struct({ path: Schema.String }),
@@ -94,7 +94,7 @@ const fileChangeRegistry = (root: string, observations: Array<EvalObservation>):
     cancellable: true,
     idempotency: "keyed",
     execute: async () => {
-      observations.push({ kind: "tool-effect", tool: "workspace.edit" })
+      observations.push({ kind: "tool-effect", tool: "workspace_edit" })
       await Promise.all([
         writeFile(join(root, "src/new.ts"), "export const created = true\n"),
         writeFile(join(root, "src/edit.ts"), "export const edited = true\n"),

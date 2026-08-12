@@ -1,0 +1,482 @@
+[
+  {
+    "id": "p_c0ddbd34348eb1dc1dcf",
+    "name": "YoutubeApi",
+    "path": "/Users/morganparry/repos/YoutubeApi",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.269Z",
+    "updatedAt": "2026-08-12T09:58:32.889Z"
+  },
+  {
+    "id": "p_a1148e9dd0f6a207dc52",
+    "name": "wowlogs-mcp",
+    "path": "/Users/morganparry/repos/wowlogs-mcp",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.268Z",
+    "updatedAt": "2026-08-12T09:58:32.888Z"
+  },
+  {
+    "id": "p_20bf033b5746d15c2517",
+    "name": "workflow-kit",
+    "path": "/Users/morganparry/repos/workflow-kit",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.267Z",
+    "updatedAt": "2026-08-12T09:58:32.888Z"
+  },
+  {
+    "id": "p_1bb9c4a3ed875e0e13d3",
+    "name": "weakaura-ai",
+    "path": "/Users/morganparry/repos/weakaura-ai",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.266Z",
+    "updatedAt": "2026-08-12T09:58:32.887Z"
+  },
+  {
+    "id": "p_920da5a1cfb9614116a1",
+    "name": "trigify-component-library",
+    "path": "/Users/morganparry/repos/trigify-component-library",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.265Z",
+    "updatedAt": "2026-08-12T09:58:32.886Z"
+  },
+  {
+    "id": "p_4c730608e4ae7406eb5a",
+    "name": "trigify-app.fix-trial-days",
+    "path": "/Users/morganparry/repos/trigify-app.fix-trial-days",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.264Z",
+    "updatedAt": "2026-08-12T09:58:32.885Z"
+  },
+  {
+    "id": "p_1d167b84a0dce603cb8b",
+    "name": "trigify-app.fix-inngest-version",
+    "path": "/Users/morganparry/repos/trigify-app.fix-inngest-version",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.263Z",
+    "updatedAt": "2026-08-12T09:58:32.884Z"
+  },
+  {
+    "id": "p_d786e6f66e2df28ba1e0",
+    "name": "trigify-app.feat-signal-enhancement",
+    "path": "/Users/morganparry/repos/trigify-app.feat-signal-enhancement",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.263Z",
+    "updatedAt": "2026-08-12T09:58:32.883Z"
+  },
+  {
+    "id": "p_3083d9394a4d127041f5",
+    "name": "trigify-app.feat-LI-official",
+    "path": "/Users/morganparry/repos/trigify-app.feat-LI-official",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.262Z",
+    "updatedAt": "2026-08-12T09:58:32.882Z"
+  },
+  {
+    "id": "p_446e613d0528abe8c3a6",
+    "name": "signals-v3-app",
+    "path": "/Users/morganparry/repos/trigify-app-worktrees/signals-v3-app",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.258Z",
+    "updatedAt": "2026-08-12T09:58:32.882Z"
+  },
+  {
+    "id": "p_3c17ceea272dabab6543",
+    "name": "signal-sync-with-hubspot",
+    "path": "/Users/morganparry/repos/trigify-app-worktrees/signal-sync-with-hubspot",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.257Z",
+    "updatedAt": "2026-08-12T09:58:32.881Z"
+  },
+  {
+    "id": "p_eeaf6cbf7af579b548ff",
+    "name": "redesign-base",
+    "path": "/Users/morganparry/repos/trigify-app-worktrees/redesign-base",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.257Z",
+    "updatedAt": "2026-08-12T09:58:32.880Z"
+  },
+  {
+    "id": "p_f9f95c40bf58c7d80a31",
+    "name": "per-source-search-endpoints",
+    "path": "/Users/morganparry/repos/trigify-app-worktrees/per-source-search-endpoints",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.256Z",
+    "updatedAt": "2026-08-12T09:58:32.879Z"
+  },
+  {
+    "id": "p_d824173cb345b5b56127",
+    "name": "inngest-ci-fix",
+    "path": "/Users/morganparry/repos/trigify-app-worktrees/inngest-ci-fix",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.255Z",
+    "updatedAt": "2026-08-12T09:58:32.878Z"
+  },
+  {
+    "id": "p_10485efb87a5f547349b",
+    "name": "env-rotation-breach-2026-04",
+    "path": "/Users/morganparry/repos/trigify-app-worktrees/env-rotation-breach-2026-04",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.254Z",
+    "updatedAt": "2026-08-12T09:58:32.877Z"
+  },
+  {
+    "id": "p_fa82ad2c55062ba3c2f7",
+    "name": "trigify-app",
+    "path": "/Users/morganparry/repos/trigify-app",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.253Z",
+    "updatedAt": "2026-08-12T09:58:32.877Z"
+  },
+  {
+    "id": "p_cce73d3d481341b190ab",
+    "name": "thatrundown",
+    "path": "/Users/morganparry/repos/thatrundown",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.251Z",
+    "updatedAt": "2026-08-12T09:58:32.876Z"
+  },
+  {
+    "id": "p_ecf9e76f2accdf67371c",
+    "name": "talent-talker",
+    "path": "/Users/morganparry/repos/talent-talker",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.250Z",
+    "updatedAt": "2026-08-12T09:58:32.875Z"
+  },
+  {
+    "id": "p_a86c5d9925b7df660279",
+    "name": "superday-interview-full-stack-morgan-parry-20251205",
+    "path": "/Users/morganparry/repos/superday-interview-full-stack-morgan-parry-20251205",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.249Z",
+    "updatedAt": "2026-08-12T09:58:32.874Z"
+  },
+  {
+    "id": "p_3e3a5539cc5740aa8e62",
+    "name": "supabase-grafana",
+    "path": "/Users/morganparry/repos/supabase-grafana",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.248Z",
+    "updatedAt": "2026-08-12T09:58:32.874Z"
+  },
+  {
+    "id": "p_a55c0131db71980802fb",
+    "name": "storyblok-mcp",
+    "path": "/Users/morganparry/repos/storyblok-mcp",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.247Z",
+    "updatedAt": "2026-08-12T09:58:32.873Z"
+  },
+  {
+    "id": "p_0fecdba7c6535f33a16a",
+    "name": "smuggler-public-signup",
+    "path": "/Users/morganparry/repos/smuggler-public-signup",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.246Z",
+    "updatedAt": "2026-08-12T09:58:32.872Z"
+  },
+  {
+    "id": "p_05c72c9d67d91fa904be",
+    "name": "smuggler-fix-company-logos",
+    "path": "/Users/morganparry/repos/smuggler-fix-company-logos",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.246Z",
+    "updatedAt": "2026-08-12T09:58:32.871Z"
+  },
+  {
+    "id": "p_05915211422df0f3ed31",
+    "name": "smuggler",
+    "path": "/Users/morganparry/repos/smuggler",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.245Z",
+    "updatedAt": "2026-08-12T09:58:32.870Z"
+  },
+  {
+    "id": "p_74654706db194f356404",
+    "name": "skills",
+    "path": "/Users/morganparry/repos/skills",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.244Z",
+    "updatedAt": "2026-08-12T09:58:32.868Z"
+  },
+  {
+    "id": "p_10cab49f5dfde21b97ea",
+    "name": "shannon",
+    "path": "/Users/morganparry/repos/shannon",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.243Z",
+    "updatedAt": "2026-08-12T09:58:32.867Z"
+  },
+  {
+    "id": "p_f2ff6e9cd357f1358bd5",
+    "name": "rosy",
+    "path": "/Users/morganparry/repos/rosy",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.242Z",
+    "updatedAt": "2026-08-12T09:58:32.866Z"
+  },
+  {
+    "id": "p_24acf9585bce03b82d43",
+    "name": "qualiflow",
+    "path": "/Users/morganparry/repos/qualiflow",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.240Z",
+    "updatedAt": "2026-08-12T09:58:32.865Z"
+  },
+  {
+    "id": "p_358880eb873881c2698f",
+    "name": "posthog-code",
+    "path": "/Users/morganparry/repos/posthog-code",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.239Z",
+    "updatedAt": "2026-08-12T09:58:32.862Z"
+  },
+  {
+    "id": "p_45b1a5bfc1ffc92bcff1",
+    "name": "node-ytdl-core",
+    "path": "/Users/morganparry/repos/node-ytdl-core",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.238Z",
+    "updatedAt": "2026-08-12T09:58:32.861Z"
+  },
+  {
+    "id": "p_2103029eb52b1755bd08",
+    "name": "my-test",
+    "path": "/Users/morganparry/repos/my-test",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.237Z",
+    "updatedAt": "2026-08-12T09:58:32.860Z"
+  },
+  {
+    "id": "p_1f848663c93904cbaa6e",
+    "name": "honeyflo",
+    "path": "/Users/morganparry/repos/max/honeyflo",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.232Z",
+    "updatedAt": "2026-08-12T09:58:32.859Z"
+  },
+  {
+    "id": "p_9ea94bc0bf411aead193",
+    "name": "linkedin-messages",
+    "path": "/Users/morganparry/repos/linkedin-messages",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.230Z",
+    "updatedAt": "2026-08-12T09:58:32.858Z"
+  },
+  {
+    "id": "p_96b9a41ae217f007dde6",
+    "name": "linkedin-filter",
+    "path": "/Users/morganparry/repos/linkedin-filter",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.227Z",
+    "updatedAt": "2026-08-12T09:58:32.857Z"
+  },
+  {
+    "id": "p_0e97b59d0b791dbd9a4f",
+    "name": "leadmagic",
+    "path": "/Users/morganparry/repos/leadmagic",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.225Z",
+    "updatedAt": "2026-08-12T09:58:32.857Z"
+  },
+  {
+    "id": "p_07db0ddf5ee6726edebe",
+    "name": "jingler-plan-ux",
+    "path": "/Users/morganparry/repos/jingler-plan-ux",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.223Z",
+    "updatedAt": "2026-08-12T09:58:32.855Z"
+  },
+  {
+    "id": "p_9343bfe9e84994d90053",
+    "name": "jingler-gc",
+    "path": "/Users/morganparry/repos/jingler-gc",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.222Z",
+    "updatedAt": "2026-08-12T09:58:32.854Z"
+  },
+  {
+    "id": "p_5f654e11f721953c01c5",
+    "name": "jingler",
+    "path": "/Users/morganparry/repos/jingler",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.220Z",
+    "updatedAt": "2026-08-12T09:58:32.853Z"
+  },
+  {
+    "id": "p_44089e453ce3a2c6f344",
+    "name": "jaye-prototype",
+    "path": "/Users/morganparry/repos/jaye-prototype",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.217Z",
+    "updatedAt": "2026-08-12T09:58:32.852Z"
+  },
+  {
+    "id": "p_591f51f919bd40179c07",
+    "name": "inngest-mcp",
+    "path": "/Users/morganparry/repos/inngest-mcp",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.214Z",
+    "updatedAt": "2026-08-12T09:58:32.851Z"
+  },
+  {
+    "id": "p_3381043b6183b33f8513",
+    "name": "i-have-adhd",
+    "path": "/Users/morganparry/repos/i-have-adhd",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.213Z",
+    "updatedAt": "2026-08-12T09:58:32.850Z"
+  },
+  {
+    "id": "p_b4efb2c5d942fcacb7c2",
+    "name": "honeyflo",
+    "path": "/Users/morganparry/repos/honeyflo",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.211Z",
+    "updatedAt": "2026-08-12T09:58:32.848Z"
+  },
+  {
+    "id": "p_aecaf979fdf73b694fda",
+    "name": "hamburger",
+    "path": "/Users/morganparry/repos/hamburger",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.206Z",
+    "updatedAt": "2026-08-12T09:58:32.847Z"
+  },
+  {
+    "id": "p_07ea91b00218b3e1166e",
+    "name": "gtm-grid",
+    "path": "/Users/morganparry/repos/gtm-grid",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.169Z",
+    "updatedAt": "2026-08-12T09:58:32.846Z"
+  },
+  {
+    "id": "p_e594360ae823115e3c4d",
+    "name": "gene-conversion",
+    "path": "/Users/morganparry/repos/gene-conversion",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.166Z",
+    "updatedAt": "2026-08-12T09:58:32.843Z"
+  },
+  {
+    "id": "p_2539e623681f5439b393",
+    "name": "Flooencer-Main",
+    "path": "/Users/morganparry/repos/Flooencer-Main",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.164Z",
+    "updatedAt": "2026-08-12T09:58:32.842Z"
+  },
+  {
+    "id": "p_90b9280dcbd0d20943c3",
+    "name": "eland",
+    "path": "/Users/morganparry/repos/eland",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.158Z",
+    "updatedAt": "2026-08-12T09:58:32.841Z"
+  },
+  {
+    "id": "p_cfb3770a8c4b441f7534",
+    "name": "effect",
+    "path": "/Users/morganparry/repos/effect",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.152Z",
+    "updatedAt": "2026-08-12T09:58:32.839Z"
+  },
+  {
+    "id": "p_e9bc8b1cd6dd99891c9a",
+    "name": "drizzle-prisma-generator",
+    "path": "/Users/morganparry/repos/drizzle-prisma-generator",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.150Z",
+    "updatedAt": "2026-08-12T09:58:32.835Z"
+  },
+  {
+    "id": "p_a2e939d6df0957024db7",
+    "name": "docs",
+    "path": "/Users/morganparry/repos/docs",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.145Z",
+    "updatedAt": "2026-08-12T09:58:32.817Z"
+  },
+  {
+    "id": "p_463fb9fcdb79f58e8425",
+    "name": "dahling-ldn",
+    "path": "/Users/morganparry/repos/dahling-ldn",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.141Z",
+    "updatedAt": "2026-08-12T09:58:32.813Z"
+  },
+  {
+    "id": "p_90b0a6f54017add8bb99",
+    "name": "cobalt",
+    "path": "/Users/morganparry/repos/cobalt",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.138Z",
+    "updatedAt": "2026-08-12T09:58:32.789Z"
+  },
+  {
+    "id": "p_83b87a5d074597912b64",
+    "name": "clive-contract-graph",
+    "path": "/Users/morganparry/repos/clive-contract-graph",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.135Z",
+    "updatedAt": "2026-08-12T09:58:32.775Z"
+  },
+  {
+    "id": "p_6b2cd9d2dfc0c64b2add",
+    "name": "clive",
+    "path": "/Users/morganparry/repos/clive",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.132Z",
+    "updatedAt": "2026-08-12T09:58:32.763Z"
+  },
+  {
+    "id": "p_b00f94f5a0872c055b27",
+    "name": "cline",
+    "path": "/Users/morganparry/repos/cline",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.126Z",
+    "updatedAt": "2026-08-12T09:58:32.735Z"
+  },
+  {
+    "id": "p_45e8affd31b3e416a7ca",
+    "name": "claude-code",
+    "path": "/Users/morganparry/repos/claude-code",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.091Z",
+    "updatedAt": "2026-08-12T09:58:32.723Z"
+  },
+  {
+    "id": "p_ce8e948c3de5f887c7ad",
+    "name": "buffet-line",
+    "path": "/Users/morganparry/repos/buffet-line",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.058Z",
+    "updatedAt": "2026-08-12T09:58:32.675Z"
+  },
+  {
+    "id": "p_6568bb49ffeea102fb0d",
+    "name": "avatarz",
+    "path": "/Users/morganparry/repos/avatarz",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.050Z",
+    "updatedAt": "2026-08-12T09:58:32.671Z"
+  },
+  {
+    "id": "p_960cffcfde013b65f876",
+    "name": "athena",
+    "path": "/Users/morganparry/repos/athena",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.033Z",
+    "updatedAt": "2026-08-12T09:58:32.663Z"
+  },
+  {
+    "id": "p_788aa25a9f68c5647db4",
+    "name": "cto-agent",
+    "path": "/Users/morganparry/repos/agents/cto-agent",
+    "availability": "available",
+    "createdAt": "2026-08-12T09:44:41.011Z",
+    "updatedAt": "2026-08-12T09:58:32.650Z"
+  }
+]

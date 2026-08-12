@@ -27,7 +27,7 @@ import {
 import { Effect, Layer } from "effect"
 import {
   e2eCertification,
-  e2eDiscoveredModel,
+  e2eDiscoveredModels,
   e2eProviderConnection,
   configureE2eVerificationProvider,
   loadE2ePiFixture
@@ -173,7 +173,7 @@ export const ProviderConnectionsLive = Layer.effect(
       certifications,
       discover: (connection, signal) =>
         e2eFixture !== null
-          ? Effect.succeed([e2eDiscoveredModel(e2eFixture, connection.providerId)])
+          ? Effect.succeed(e2eDiscoveredModels(e2eFixture, connection.providerId))
           : discoverPiModels(credentials, connection, signal),
       targetAvailable: (connection) => connection.targetId === "desktop"
     })

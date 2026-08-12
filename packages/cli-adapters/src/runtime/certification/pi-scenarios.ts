@@ -32,8 +32,8 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
   scenario({
     id: "permission.denied-edit",
     capability: "permissions",
-    required: [permission("workspace.edit", "deny"), event("Done")],
-    forbidden: [toolEffect("workspace.edit")],
+    required: [permission("workspace_edit", "deny"), event("Done")],
+    forbidden: [toolEffect("workspace_edit")],
     ordering: []
   }),
   scenario({

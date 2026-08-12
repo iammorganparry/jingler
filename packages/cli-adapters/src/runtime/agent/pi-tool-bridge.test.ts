@@ -26,7 +26,7 @@ const mutationRegistry = (execute: () => Promise<unknown>): ToolRegistry => {
     }
   })
   registry.register({
-    id: "workspace.edit",
+    id: "workspace_edit",
     version: "1",
     description: "Edit a file.",
     input: Schema.Struct({ path: Schema.String }),
@@ -69,7 +69,7 @@ describe("pi tool bridge", () => {
       undefined,
       {} as never
     )
-    expect(canUseTool).toHaveBeenCalledWith({ toolId: "workspace.edit", risk: "mutate" })
+    expect(canUseTool).toHaveBeenCalledWith({ toolId: "workspace_edit", risk: "mutate" })
     expect(execute).toHaveBeenCalledOnce()
     expect(result?.details).toMatchObject({ status: "success" })
   })

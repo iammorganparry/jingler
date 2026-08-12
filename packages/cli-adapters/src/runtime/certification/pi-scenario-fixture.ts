@@ -11,7 +11,7 @@ export const scriptedPiScenarioResponses = (
 ): ReadonlyArray<FauxResponseStep> => {
   if (scenarioId === "permission.denied-edit" || scenarioId === "diff.create-edit-delete-rename") {
     return [
-      fauxAssistantMessage(fauxToolCall("workspace.edit", { path: "src/edit.ts" }), {
+      fauxAssistantMessage(fauxToolCall("workspace_edit", { path: "src/edit.ts" }), {
         stopReason: "toolUse"
       }),
       fauxAssistantMessage("complete")
