@@ -150,7 +150,7 @@ const runConversation = async (
 const runWorkspaceMutation = async (
   window: Page,
   model: RealProviderTarget,
-): Promise<void> => {
+): Promise<string> => {
   const path = `docs/real-pi-${model.route}-canary.md`;
   const content = `${model.label} wrote this through Jingler's pi runtime.\n`;
   const composer = window.getByPlaceholder("Message the agent…");
@@ -182,13 +182,20 @@ const runWorkspaceMutation = async (
   await expect(
     rail.locator(`[data-item-path="${path}"]`),
   ).toHaveAttribute("data-item-git-status", "added", { timeout: 30_000 });
+  return path;
 };
 
 const runRestartContinuation = async (
   window: Page,
   expected: string,
+  changedPath: string,
 ): Promise<void> => {
   await window.getByRole("button", { name: "Close settings" }).click();
+  await expect(
+    window.locator(
+      `[data-file-change="A"][data-file-path="${changedPath}"]`,
+    ),
+  ).toBeVisible({ timeout: 30_000 });
   const composer = window.getByPlaceholder("Message the agent…");
   await expect(composer).toBeVisible({ timeout: 30_000 });
   await composer.fill(
@@ -254,10 +261,11 @@ test.describe("real current provider models", () => {
       if (!realProviderHome) throw new Error("Real provider home is required");
       const first = await launchRealProviderApp(realProviderHome);
       let expected: string;
+      let changedPath: string;
       try {
         await certifyModel(first.window, model);
         expected = await runConversation(first.window, model);
-        await runWorkspaceMutation(first.window, model);
+        changedPath = await runWorkspaceMutation(first.window, model);
       } finally {
         await first.app.close();
         await first.auth.close();
@@ -265,7 +273,7 @@ test.describe("real current provider models", () => {
 
       const restarted = await launchRealProviderApp(realProviderHome);
       try {
-        await runRestartContinuation(restarted.window, expected);
+        await runRestartContinuation(restarted.window, expected, changedPath);
       } finally {
         await restarted.app.close();
         await restarted.auth.close();
