@@ -359,6 +359,13 @@ type ConversationEvent =
       hasMore: boolean
       cursor: string | null
     }
+  /** The re-read tail for an over-cap live array — REPLACES `messages`, never prepends. */
+  | {
+      type: "HISTORY_TRIMMED"
+      messages: ReadonlyArray<Message>
+      hasMore: boolean
+      cursor: string | null
+    }
 
 /**
  * How many messages a page holds — both the tail loaded on open and each older
@@ -367,6 +374,27 @@ type ConversationEvent =
  * in the renderer as one parsed array (the memory this windowing exists to save).
  */
 const HISTORY_PAGE_SIZE = 200
+
+/**
+ * When the resident live array is re-windowed from disk.
+ *
+ * A settled turn's messages are never dropped in flight — `foldEvent` keeps
+ * every `ToolEnd`'s full output, diff and preview forever — so a session whose
+ * actor stays alive (the residency cap keeps a busy background session running)
+ * grows without bound. Past this cap the tail is re-read from disk and the head
+ * dropped; see `trimmedTailState` and `awaitingInput`'s `requestHistoryTrim`.
+ *
+ * 2× the page size, not 1×: an ordinary back-and-forth must never trip it, so
+ * the trim fires only on genuinely long-lived sessions, and the operator keeps a
+ * generous on-screen window either side of the boundary.
+ */
+export const LIVE_HISTORY_CAP = 2 * HISTORY_PAGE_SIZE
+
+/** Whether the live array has grown far enough past its window to re-window it. */
+export const shouldTrimLiveHistory = (
+  messageCount: number,
+  cap: number = LIVE_HISTORY_CAP
+): boolean => messageCount > cap
 
 const projectLoadedPlan = (
   messages: ReadonlyArray<Message>,
@@ -743,6 +771,57 @@ const beginSteer = (
  */
 const keepReviewer = (reviewer: Subagent | null): Subagent | null =>
   reviewer?.status === "working" ? reviewer : null
+
+/**
+ * Rebuild the resident transcript from a freshly re-read on-disk tail.
+ *
+ * The trim is a TAIL REFETCH, not a positional head-slice, and the cursor
+ * semantics force that choice: `Sessions.transcriptPage`'s cursor is an opaque
+ * POSITIONAL offset into the on-disk message index (`v1:${start}`, see
+ * `TranscriptStore.listPage`) and never an id — so a local `u_local_*` /
+ * `a_local_*` id is not a usable cursor. A head-slice would have to DERIVE the
+ * new cursor from how many messages it dropped, which is sound only if the
+ * resident array is positionally 1:1 with disk, and it is not: `loadConversation`
+ * and `applySharedPlan` append a synthetic `a_shared_plan_*` message that exists
+ * on no disk row, and `applyHistory` filters and prepends. Re-reading the tail
+ * sidesteps every alignment question — the messages AND the `hasMore`/`cursor`
+ * that page "Load earlier" all come from the same disk read, so they cannot
+ * disagree. Sound only because main persists the whole settled turn BEFORE it
+ * forwards `Done`/`Failed` (agent-runner `emit`: `patchLast` then `out.offer`),
+ * so a tail read taken at the idle turn boundary always includes the last turn.
+ *
+ * The shared plan is re-grafted exactly as on load: its canonical body lives in
+ * `sharedPlan`, and when the plan's own message has been trimmed out of the tail
+ * a synthetic card is re-appended so the inline plan bubble survives. The Plan
+ * panel reads `sharedPlan`/`Plan.watch`, not this message, so it is unaffected
+ * either way.
+ */
+export const trimmedTailState = (
+  tail: ReadonlyArray<Message>,
+  hasMore: boolean,
+  cursor: string | null,
+  sharedPlan: Plan | null
+): {
+  readonly messages: ReadonlyArray<Message>
+  readonly hasMoreHistory: boolean
+  readonly historyCursor: string | null
+} => {
+  const { messages, grafted } = projectLoadedPlan(tail, sharedPlan)
+  const withPlan =
+    sharedPlan === null || grafted
+      ? messages
+      : [
+          ...messages,
+          {
+            ...applyStreamEvent(
+              assistantMessage(`a_shared_plan_${stamp()}`, new Date().toISOString()),
+              { _tag: "PlanProposed", plan: sharedPlan }
+            ),
+            streaming: false
+          }
+        ]
+  return { messages: withPlan, hasMoreHistory: hasMore, historyCursor: cursor }
+}
 
 export const conversationMachine = setup({
   types: {
@@ -1417,6 +1496,43 @@ export const conversationMachine = setup({
       }
     }),
     /**
+     * Re-read the on-disk tail when the live array has outgrown its window, and
+     * swap it in (`applyTrimmedTail`). Fire-and-forget like `loadCatalog`: the
+     * reply is a plain event, silently dropped if the machine has since left idle
+     * — the next idle boundary re-fires. Skipped while a "Load earlier" page is
+     * in flight, whose positional cursor the swap would strand.
+     */
+    requestHistoryTrim: ({ context, self }) => {
+      if (context.loadingHistory || !shouldTrimLiveHistory(context.messages.length)) return
+      void rpc
+        .sessionsTranscriptPage(
+          context.session.id,
+          context.chatId,
+          undefined,
+          HISTORY_PAGE_SIZE
+        )
+        .then((page) =>
+          self.send({
+            type: "HISTORY_TRIMMED",
+            messages: page.messages,
+            hasMore: page.hasMore,
+            cursor: page.cursor ?? null
+          })
+        )
+        .catch(() => {})
+    },
+    applyTrimmedTail: assign(({ context, event }) => {
+      if (event.type !== "HISTORY_TRIMMED") return {}
+      // Only ever swaps the array SMALLER, and only from idle (this action is
+      // reachable only in `awaitingInput`, so `messages` holds no streaming turn).
+      // Re-check the cap so a reply that raced the array back under the window is a
+      // no-op, and the history load so its cursor is never stranded.
+      if (context.loadingHistory || !shouldTrimLiveHistory(context.messages.length)) {
+        return {}
+      }
+      return trimmedTailState(event.messages, event.hasMore, event.cursor, context.sharedPlan)
+    }),
+    /**
      * Ask the harness to kill ONE sub-agent. Fire-and-forget, and with NO
      * optimistic status change: the pill stays `working` until the harness's own
      * `task_notification` settles it to `stopped`, which is the only moment the
@@ -1997,9 +2113,21 @@ export const conversationMachine = setup({
     },
     awaitingInput: {
       // Nothing is running here — this is the one place the session's persisted
-      // status can be recorded truthfully.
-      entry: "persistSettledStatus",
+      // status can be recorded truthfully, and the only turn boundary at which the
+      // live array may be re-windowed (no streaming message to disturb, and the
+      // queued-turn path targets `running` instead, bypassing this entry).
+      //
+      // Re-windowing here does not yank the transcript: a turn settles with the
+      // view pinned to the bottom (its own stream scrolled there), the re-read tail
+      // keeps the newest messages — the whole visible viewport — identical, and the
+      // list keys rows by message id and re-pins to the last one on every `messages`
+      // change (`conversation-view` sticky-bottom). Only the far-off-screen head is
+      // dropped, and it pages back through "Load earlier".
+      entry: ["persistSettledStatus", "requestHistoryTrim"],
       on: {
+        // The re-read tail lands here or not at all: a new turn moves the machine
+        // to `running`, where this event is unhandled and dropped. See `applyTrimmedTail`.
+        HISTORY_TRIMMED: { actions: "applyTrimmedTail" },
         SESSION_EVENT_ENVELOPE: {
           guard: "isAcceptedStreamEnvelope",
           target: "remoteRunning",
