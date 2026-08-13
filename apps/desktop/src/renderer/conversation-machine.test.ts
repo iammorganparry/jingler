@@ -19,7 +19,10 @@ import {
 import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { conversationMachine } from "./conversation-machine.js"
+import {
+  CONVERSATION_LOAD_TIMEOUT_MS,
+  conversationMachine
+} from "./conversation-machine.js"
 
 /**
  * The renderer's conversation flow is a deterministic XState chart. Its only
@@ -62,6 +65,7 @@ const h = vi.hoisted(() => ({
   approvalRefused: false,
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
   transcriptGate: Promise.resolve() as Promise<void>,
+  filesGate: Promise.resolve() as Promise<void>,
   transcript: [] as ReadonlyArray<Message>,
   transcriptPageCalls: [] as Array<{ before: string | undefined; limit: number }>,
   currentPlan: null as PlanDocument | null,
@@ -108,6 +112,7 @@ vi.mock("./rpc-client.js", () => ({
     },
     workspaceFiles: async () => {
       h.filesCalls += 1
+      await h.filesGate
       return h.filesValue
     },
     sessionsDiff: async () => {
@@ -274,6 +279,7 @@ beforeEach(() => {
   h.setModelCalls.length = 0
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
+  h.filesGate = Promise.resolve()
   h.transcript = []
   h.transcriptPageCalls.length = 0
   h.currentPlan = null
@@ -1164,6 +1170,20 @@ describe("conversationMachine — nothing gates the transcript on a CLI probe", 
     await waitFor(actor, (s) => s.matches("running"), { timeout: 3000 })
     expect(h.agentRunCalls[0]!.text).toBe("typed on open")
     actor.stop()
+  })
+
+  it("runs a held prompt when an auxiliary remote read never settles", async () => {
+    vi.useFakeTimers()
+    h.filesGate = new Promise<void>(() => {})
+
+    const actor = start()
+    actor.send({ type: "SEND", text: "typed while Cloud wakes" })
+    await vi.advanceTimersByTimeAsync(CONVERSATION_LOAD_TIMEOUT_MS)
+
+    expect(actor.getSnapshot().matches("running")).toBe(true)
+    expect(h.agentRunCalls[0]?.text).toBe("typed while Cloud wakes")
+    actor.stop()
+    vi.useRealTimers()
   })
 
   it("reaches idle and accepts a send while the skills probe is still in flight", async () => {

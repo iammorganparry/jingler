@@ -113,9 +113,9 @@ const providerState = (
   repoPath: string,
 ): WorkspaceConfig => {
   const sourceRoot = join(resolve(providerHome), "jingler");
-  const sourceConfig = Schema.decodeUnknownSync(Schema.parseJson(WorkspaceConfig))(
-    readFileSync(join(sourceRoot, "config.json"), "utf8"),
-  );
+  const sourceConfig = Schema.decodeUnknownSync(
+    Schema.parseJson(WorkspaceConfig),
+  )(readFileSync(join(sourceRoot, "config.json"), "utf8"));
   return {
     ...sourceConfig,
     reposDir,
@@ -161,10 +161,6 @@ const seedManagedQaHome = (
   });
   if (config.auth.kind === "encrypted-document") {
     copyRequired(config.auth.path, join(jinglerHome, "auth.enc"));
-  } else {
-    writeFileSync(join(jinglerHome, "auth.enc"), config.auth.value, {
-      mode: 0o600,
-    });
   }
   const workspaceConfig = config.providerHome
     ? providerState(config.providerHome, reposDir, repoPath)
@@ -222,8 +218,7 @@ const launchManagedQaApp = async (
       JINGLER_AUTH_URL: realAuthUrl,
       JINGLER_DISABLE_AUTO_UPDATE: "1",
       JINGLER_E2E: "0",
-      JINGLER_E2E_HEADLESS:
-        process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
+      JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
       JINGLER_HOME: home,
       JINGLER_SECRET_STORE:
         config.auth.kind === "token" && !config.providerHome ? "memory" : "",
@@ -250,6 +245,15 @@ const launchManagedQaApp = async (
     })();
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
+    if (config.auth.kind === "token") {
+      await app.evaluate(({ app: electronApp }, token) => {
+        electronApp.emit(
+          "open-url",
+          { preventDefault() {} },
+          `jingler://auth/callback?token=${encodeURIComponent(token)}`,
+        );
+      }, config.auth.value);
+    }
     if (process.env.JINGLER_E2E_HEADED === "1") {
       await showElectronWindow(app);
     }
@@ -376,6 +380,11 @@ const runDirectCloudTurn = async (
     window.getByRole("button", { name: "Execution environment" }),
   ).toContainText("Cloud");
   const prompt = window.getByRole("textbox", { name: MESSAGE_BOX });
+  if (!(await prompt.isVisible())) {
+    throw new Error(
+      `Cloud session opened without a composer. Visible UI:\n${await window.locator("body").innerText()}`,
+    );
+  }
   await prompt.fill(
     `Create ${DIRECT_MARKER} containing exactly \`direct cloud QA passed\`. Do not commit or push.`,
   );
@@ -430,17 +439,43 @@ const finishCloudHandoff = async (window: Page): Promise<void> => {
   await waitForTurn(window);
 };
 
-const closeManagedQaApp = async ({
-  app,
-  root,
-}: ManagedQaApp): Promise<void> => {
-  await app.close().catch(() => undefined);
-  rmSync(root, {
-    recursive: true,
-    force: true,
-    maxRetries: 5,
-    retryDelay: 100,
-  });
+const deleteQaSessions = async (window: Page): Promise<void> => {
+  const rows = window.locator("[data-testid^='session-row-']");
+  while ((await rows.count()) > 0) {
+    const row = rows.first();
+    const testId = await row.getAttribute("data-testid");
+    if (testId === null) throw new Error("QA session row has no test id");
+    await row.click({ button: "right" });
+    await window.getByRole("menuitem", { name: "Delete" }).click();
+    await window
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+    await expect(window.getByTestId(testId)).toHaveCount(0, {
+      timeout: 90_000,
+    });
+  }
+};
+
+const closeManagedQaApp = async (
+  { app, root, window }: ManagedQaApp,
+  requireCleanup: boolean,
+): Promise<void> => {
+  let cleanupError: unknown;
+  try {
+    if (await appShell(window).isVisible()) await deleteQaSessions(window);
+  } catch (cause) {
+    cleanupError = cause;
+  } finally {
+    await app.close().catch(() => undefined);
+    rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+  }
+  if (requireCleanup && cleanupError !== undefined) throw cleanupError;
 };
 
 test.describe("real managed environment canary", () => {
@@ -454,6 +489,7 @@ test.describe("real managed environment canary", () => {
     const config = managedQaConfig();
     const model = realProviderTarget(config.route);
     const qa = await launchManagedQaApp(config);
+    let completed = false;
     try {
       await authenticateProvider(qa.window, config);
       await configureCurrentModel(qa.window, model);
@@ -464,8 +500,9 @@ test.describe("real managed environment canary", () => {
       await qa.window.screenshot({
         path: resolve(qa.root, "managed-cloud-handoff.png"),
       });
+      completed = true;
     } finally {
-      await closeManagedQaApp(qa);
+      await closeManagedQaApp(qa, completed);
     }
   });
 });

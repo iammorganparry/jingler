@@ -83,7 +83,9 @@ export const makePiAgentRuntimeLive = (
             return yield* Effect.fail(
               new AgentRuntimeError({
                 reason: "incompatible-target",
-                message: "Provider connection is unavailable on this execution target"
+                message:
+                  `Provider connection targets ${connection.targetId}, ` +
+                  `but this run targets ${spec.targetCapabilities.targetId}`
               })
             )
           }

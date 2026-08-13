@@ -47,6 +47,7 @@ import {
 } from "./code-reference.js"
 import { useConversation } from "./use-conversation.js"
 import { usePlanDocument } from "./use-plan-document.js"
+import { matchesCanonicalPlan } from "./plan-document-machine.js"
 import {
   runWithDirectPlanThreadDispatch,
   shouldRecoverPendingPlanMessage
@@ -66,78 +67,9 @@ import {
   rpcFailureReason,
   rpcFailureTag
 } from "./rpc-failure.js"
+import { providerRecoveryOf } from "./provider-recovery.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
-
-interface ProviderRecovery {
-  readonly title: string
-  readonly message: string
-}
-
-export const providerRecoveryOf = (
-  catalog: ProviderCatalog,
-  selection: {
-    connectionId: Session["connectionId"] | null
-    modelId: Session["modelId"] | null
-    connectionSelectionRequired?: boolean
-    modelSelectionRequired?: boolean
-    targetId: string
-    target?: Environment
-  }
-): ProviderRecovery | undefined => {
-  if (selection.connectionSelectionRequired || selection.modelSelectionRequired) {
-    return {
-      title: "Choose a runtime connection",
-      message: "This migrated conversation is readable, but needs a certified connection and model before it can continue."
-    }
-  }
-  if (selection.connectionId == null || selection.modelId == null) {
-    return {
-      title: "Runtime connection required",
-      message: "Choose a certified provider connection and model to continue."
-    }
-  }
-  const connection = catalog.connections.find(
-    (candidate) => candidate.connection.id === selection.connectionId
-  )
-  if (connection === undefined) {
-    return {
-      title: "Provider connection unavailable",
-      message: "Reconnect this account or choose another certified connection."
-    }
-  }
-  const targetConnection = selection.target?.capabilities.providerConnections?.find(
-    (candidate) => candidate.id === selection.connectionId
-  )
-  if (
-    connection.connection.targetId !== selection.targetId &&
-    targetConnection?.status !== "authenticated"
-  ) {
-    return {
-      title: "Connection unavailable on this device",
-      message: "Connect the same provider account on the selected execution device, or move the session to a compatible target."
-    }
-  }
-  if (connection.connection.status !== "authenticated") {
-    const reauthenticate = ["expired", "revoked", "reauthentication-required"].includes(
-      connection.connection.status
-    )
-    return {
-      title: reauthenticate ? "Provider authentication expired" : "Provider entitlement unavailable",
-      message: reauthenticate
-        ? "Reconnect the pinned billing route before continuing. Jingler will not fall back to another credential."
-        : "Refresh this connection and confirm its subscription or API entitlement before continuing."
-    }
-  }
-  const model = connection.models.find((candidate) => candidate.id === selection.modelId)
-  if (model?.selectable === true) return undefined
-  return {
-    title: model?.verification === "stale" ? "Model certification is stale" : "Model unavailable",
-    message: model?.verification === "stale"
-      ? "Reverify this exact model and authentication route, or choose another certified model."
-      : "Choose a model certified for this connection and execution target."
-  }
-}
 
 const initialPlanSplitRatio = (): number => {
   try {
@@ -282,6 +214,9 @@ export function ConversationPane({
     }
   }, [convo.planDraftPresentationNonce, onPlanDraftAvailable, session.id])
   const canonicalPlan = usePlanDocument(session.id)
+  const canApprovePlan =
+    canonicalPlan.canApprove &&
+    matchesCanonicalPlan(canonicalPlan.document, convo.plan)
   const initialThreadDispatches = useRef(new Set<string>())
   // A direct reply RPC persists its pending message before it finishes routing.
   // Plan.watch can publish that intermediate revision, so tell the recovery
@@ -712,7 +647,7 @@ export function ConversationPane({
       draft={canonicalPlan.draft}
       syncState={canonicalPlan.state}
       syncError={canonicalPlan.error ?? convo.planActionError}
-      canApprove={canonicalPlan.canApprove}
+      canApprove={canApprovePlan}
       compact={view === "split"}
       patch={convo.patch}
       knownFiles={knownFiles}
@@ -1055,13 +990,13 @@ export function ConversationPane({
           question={convo.question}
           onAnswerQuestion={convo.answerQuestion}
           onApprovePlan={
-            canonicalPlan.canApprove && canonicalPlan.document !== null
+            canApprovePlan && canonicalPlan.document !== null
               ? (id, executionMode) =>
                   convo.approvePlan(id, executionMode, canonicalPlan.document?.revision)
               : undefined
           }
           onResumePlan={
-            canonicalPlan.canApprove && canonicalPlan.document !== null
+            canApprovePlan && canonicalPlan.document !== null
               ? (id) => convo.resumePlan(id, canonicalPlan.document?.revision)
               : undefined
           }

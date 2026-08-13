@@ -1,7 +1,4 @@
-import {
-  ManagedRuntimeAction,
-  ManagedRuntimeProviderSelection
-} from "@jingler/core"
+import { ManagedRuntimeAction, ManagedRuntimeProviderSelection } from "@jingler/core"
 import { Either, Schema } from "effect"
 
 export const ManagedGrantRegistrationRequest = Schema.Struct({
@@ -9,19 +6,17 @@ export const ManagedGrantRegistrationRequest = Schema.Struct({
   subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   environmentId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
   sessionId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-  reservationId: Schema.NullOr(
-    Schema.String.pipe(Schema.minLength(8), Schema.maxLength(128))
-  ),
-  actions: Schema.Array(ManagedRuntimeAction).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(4)
-  ),
+  reservationId: Schema.NullOr(Schema.String.pipe(Schema.minLength(8), Schema.maxLength(128))),
+  actions: Schema.Array(ManagedRuntimeAction).pipe(Schema.minItems(1), Schema.maxItems(4)),
   environmentGeneration: Schema.Int.pipe(Schema.positive()),
   ...ManagedRuntimeProviderSelection.fields
 })
 export type ManagedGrantRegistrationRequest = Schema.Schema.Type<
   typeof ManagedGrantRegistrationRequest
 >
+
+export const claimsManagedSessionSlot = (actions: ReadonlyArray<ManagedRuntimeAction>): boolean =>
+  actions.some((action) => action === "session.start" || action === "session.input")
 
 export const decodeManagedGrantRequest = (
   value: unknown

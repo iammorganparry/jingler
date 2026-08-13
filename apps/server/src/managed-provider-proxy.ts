@@ -49,9 +49,12 @@ export const proxyManagedCodexRequest = async (
   for (const name of [
     "accept",
     "chatgpt-account-id",
+    "content-encoding",
     "content-type",
     "openai-beta",
     "originator",
+    "session-id",
+    "x-client-request-id",
     "user-agent"
   ]) {
     const value = allowedHeader(request, name)

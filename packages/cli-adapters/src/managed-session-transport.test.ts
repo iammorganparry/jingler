@@ -255,4 +255,61 @@ describe("managed session transport", () => {
       "complete",
     ]);
   });
+
+  it("reconnects and durably replays when an open observer silently misses completion", async () => {
+    const server = new WebSocketServer({ port: 0 });
+    servers.push(server);
+    await once(server, "listening");
+    const address = server.address();
+    if (address === null || typeof address === "string")
+      throw new Error("missing address");
+    const runtimeUrl = `http://127.0.0.1:${address.port}`;
+    let observers = 0;
+    server.on("connection", (socket) => {
+      observers += 1;
+      if (observers === 2) {
+        socket.send(
+          JSON.stringify({
+            version: 1,
+            commandId: "command_idle_replay_abcdef",
+            sessionId: "session_idle_replay_abcdef",
+            eventSequence: 0,
+            kind: "complete",
+            payload: { status: "ready" },
+          }),
+        );
+      }
+    });
+    const grant = vi.fn(() =>
+      Effect.succeed({
+        version: 1 as const,
+        runtimeUrl,
+        grant: "grant_idle_replay_abcdefghijkl",
+        expiresAt: 9_999_999_999,
+      }),
+    );
+    const transport = makeManagedSessionTransport({
+      environment: () => Effect.succeed(managedEnvironment),
+      grant,
+      observerIdleMs: 10,
+      fetch: async () => Response.json({ accepted: true }, { status: 202 }),
+    });
+
+    const events = await Effect.runPromise(
+      transport
+        .execute(
+          managedSession("session_idle_replay_abcdef"),
+          "Sessions.diff",
+          {},
+          "command_idle_replay_abcdef",
+        )
+        .pipe(Stream.runCollect),
+    );
+
+    expect(observers).toBe(2);
+    expect(grant).toHaveBeenCalledTimes(2);
+    expect(Chunk.toReadonlyArray(events).map((event) => event.kind)).toEqual([
+      "complete",
+    ]);
+  });
 });

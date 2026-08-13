@@ -1,3 +1,11 @@
+import { readFile } from "node:fs/promises"
+import { createConnection } from "node:net"
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth"
+import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
+import { Schema } from "effect"
+import { installDeviceService, removeDeviceService } from "./device-service.js"
+import { makeLiveDeviceSessionCommandExecutor } from "./device-executor.js"
+import { runManagedCommand } from "./managed-command.js"
 import {
   deviceAgentPaths,
   deviceStatus,
@@ -7,13 +15,11 @@ import {
   rotateLocalDeviceKey,
   serveDevice
 } from "./runtime.js"
-import { installDeviceService, removeDeviceService } from "./device-service.js"
-import { createConnection } from "node:net"
-import { readFile } from "node:fs/promises"
-import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
-import { Schema } from "effect"
-import { makeLiveDeviceSessionCommandExecutor } from "./device-executor.js"
-import { runManagedCommand } from "./managed-command.js"
+
+// pi-ai deliberately keeps OAuth implementations behind bundler-opaque
+// imports. The device agent is a standalone bundle, so register the package's
+// static loaders before ModelRuntime can resolve a subscription credential.
+registerBunOAuthFlows()
 
 const args = process.argv.slice(2)
 const command = args[0]
@@ -61,8 +67,11 @@ const main = async (): Promise<void> => {
     case "managed-command": {
       const inputFile = option("--input")
       const root = option("--root")
-      if (!inputFile || !root) {
-        throw new Error("managed-command requires --input and --root")
+      const targetId = option("--target-id")
+      if (!inputFile || !root || !targetId) {
+        throw new Error(
+          "managed-command requires --input, --root and --target-id"
+        )
       }
       const command = Schema.decodeUnknownSync(RemoteSessionCommandSchema)(
         JSON.parse(await readFile(inputFile, "utf8")),
@@ -70,7 +79,7 @@ const main = async (): Promise<void> => {
       )
       await runManagedCommand(
         command,
-        makeLiveDeviceSessionCommandExecutor(root),
+        makeLiveDeviceSessionCommandExecutor(root, targetId),
         print
       )
       // This entrypoint is deliberately one-shot. The shared cli-adapters

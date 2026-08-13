@@ -47,7 +47,7 @@ describe("device provider runtime", () => {
   });
 
   it("registers the managed proxy on the exact pi provider", () => {
-    const layers = makeDeviceProviderLayers("device-1", {
+    const layers = makeDeviceProviderLayers("managed_cloud_1", {
       JINGLER_PROVIDER_CONNECTION_ID: "connection-1",
       JINGLER_PROVIDER_ID: "openai-codex",
       JINGLER_PROVIDER_AUTH_KIND: "openai-codex-oauth",
@@ -69,6 +69,7 @@ describe("device provider runtime", () => {
         },
       ],
     ]);
+    expect(layers.connections[0]?.targetId).toBe("managed_cloud_1");
   });
 
   it("rejects an explicit provider connection without a proxy URL", () => {

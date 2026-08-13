@@ -31,6 +31,8 @@ export interface ManagedSessionTransportDependencies {
     actions: ReadonlyArray<ManagedRuntimeAction>
   ) => Effect.Effect<ManagedEnvironmentGrantResponse, RemoteSessionError>
   readonly fetch?: typeof fetch
+  /** Test seam; production observers replay after a silent open socket stalls. */
+  readonly observerIdleMs?: number
 }
 
 const eventsUrl = (
@@ -50,6 +52,7 @@ const eventsUrl = (
 }
 
 const MAX_OBSERVER_RECONNECTS = 5
+const OBSERVER_IDLE_MS = 15_000
 
 const observerFailureMessage = (error: unknown): string =>
   error instanceof Error && error.message.trim().length > 0
@@ -129,6 +132,7 @@ class ManagedSessionObserver {
   #disposed = false
   #reconnecting = false
   #reconnects = 0
+  #idleTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(
     dependencies: ManagedSessionTransportDependencies,
@@ -142,11 +146,29 @@ class ManagedSessionObserver {
 
   async start(grant: ManagedEnvironmentGrantResponse): Promise<void> {
     this.#sockets.add(await this.#connect(grant))
+    this.#armIdleReplay()
   }
 
   close(): void {
     this.#disposed = true
+    this.#clearIdleReplay()
     for (const socket of this.#sockets) socket.close()
+  }
+
+  #clearIdleReplay(): void {
+    if (this.#idleTimer !== undefined) clearTimeout(this.#idleTimer)
+    this.#idleTimer = undefined
+  }
+
+  #armIdleReplay(): void {
+    this.#clearIdleReplay()
+    if (this.#terminal || this.#disposed) return
+    this.#idleTimer = setTimeout(() => {
+      this.#idleTimer = undefined
+      for (const socket of this.#sockets) {
+        if (socket.readyState === WebSocket.OPEN) socket.close(1012, "idle-replay")
+      }
+    }, this.#dependencies.observerIdleMs ?? OBSERVER_IDLE_MS)
   }
 
   #connect(grant: ManagedEnvironmentGrantResponse): Promise<WebSocket> {
@@ -177,6 +199,9 @@ class ManagedSessionObserver {
       }
       this.#expectedSequence += 1
       this.#terminal = event.kind === "complete" || event.kind === "failed"
+      this.#reconnects = 0
+      if (this.#terminal) this.#clearIdleReplay()
+      else this.#armIdleReplay()
       Effect.runFork(Queue.offer(this.#output, { _tag: "event", event }))
     } catch (cause) {
       this.#fail("Managed runtime returned an invalid session event.", cause)
@@ -185,6 +210,7 @@ class ManagedSessionObserver {
 
   #reconnect(cause?: unknown): void {
     if (this.#terminal || this.#disposed || this.#reconnecting) return
+    this.#clearIdleReplay()
     if (this.#reconnects >= MAX_OBSERVER_RECONNECTS) {
       this.#fail("Managed session event stream closed before completion.", cause)
       return
@@ -195,7 +221,10 @@ class ManagedSessionObserver {
     Effect.runPromise(this.#reconnectEffect(delayMs)).then((socket) => {
       this.#reconnecting = false
       if (this.#disposed || this.#terminal) socket.close()
-      else this.#sockets.add(socket)
+      else {
+        this.#sockets.add(socket)
+        this.#armIdleReplay()
+      }
     }).catch((error) => {
       this.#reconnecting = false
       this.#reconnect(error)

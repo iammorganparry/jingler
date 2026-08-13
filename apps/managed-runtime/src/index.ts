@@ -1,15 +1,15 @@
 import { getSandbox } from "@cloudflare/sandbox";
-import type {
-  ManagedProviderCapability as ManagedProviderCapabilityValue,
-  ManagedRuntimeAction,
-} from "@jingler/core";
+import type { ManagedProviderCapability as ManagedProviderCapabilityValue } from "@jingler/core";
 import {
   ManagedProviderCapability,
   ManagedRuntimeProviderSelection,
   WorkspaceProvisioningPlan,
 } from "@jingler/core";
 import { Either, Schema } from "effect";
-import { decodeManagedGrantRequest } from "./grant-request.js";
+import {
+  claimsManagedSessionSlot,
+  decodeManagedGrantRequest,
+} from "./grant-request.js";
 import { matchesGitRepositoryScope } from "./git-scope.js";
 import { issueManagedRuntimeGrant } from "./grant.js";
 import { hydrateWorkspace } from "./workspace-hydration.js";
@@ -23,7 +23,10 @@ import {
   proxyProviderRequest,
   resolveProviderCredential,
 } from "./provider-proxy.js";
-import type { ManagedRuntimeEnv } from "./runtime-env.js";
+import {
+  managedRuntimeSandboxOrigin,
+  type ManagedRuntimeEnv,
+} from "./runtime-env.js";
 import { r2CheckpointStore } from "./r2-checkpoint-store.js";
 import { json } from "./worker-http.js";
 import {
@@ -34,6 +37,7 @@ import {
   runtimeConfigurationForRegistration,
   type RuntimeRegistrationInput,
 } from "./runtime-configuration.js";
+import { sandboxIdForSession } from "./runtime-identity.js";
 
 export { Sandbox } from "@cloudflare/sandbox";
 export { ManagedAccountObject } from "./account-runtime.js";
@@ -110,6 +114,9 @@ const AccountRegistration = Schema.Struct({
 const SessionRegistration = Schema.Struct({
   sessionGeneration: Schema.Int.pipe(Schema.positive()),
 });
+const GitTokenResponse = Schema.Struct({
+  token: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(16_384)),
+});
 
 class RuntimeRegistrationError extends Error {
   readonly status: number;
@@ -124,6 +131,7 @@ class RuntimeRegistrationError extends Error {
 const runtimeRegistration = async (
   env: ManagedRuntimeEnv,
   input: RuntimeRegistrationInput,
+  claimSlot: boolean,
 ): Promise<RuntimeRegistration> => {
   const accountResponse = await env.MANAGED_ACCOUNT.getByName(
     input.subject,
@@ -133,6 +141,7 @@ const runtimeRegistration = async (
     body: JSON.stringify({
       subject: input.subject,
       sessionId: input.sessionId,
+      claimSlot,
     }),
   });
   if (!accountResponse.ok) {
@@ -244,7 +253,11 @@ export default {
       if (input === null) return json({ error: "Invalid grant request" }, 400);
       let registration: RuntimeRegistration;
       try {
-        registration = await runtimeRegistration(env, input);
+        registration = await runtimeRegistration(
+          env,
+          input,
+          claimsManagedSessionSlot(input.actions),
+        );
       } catch (cause) {
         return cause instanceof RuntimeRegistrationError
           ? json({ error: cause.message }, cause.status)
@@ -287,7 +300,8 @@ export default {
       const sessionId = `checkpoint_probe_${suffix}`;
       const checkpointId = `checkpoint_${suffix}`;
       const store = r2CheckpointStore(env.WORKSPACE_CHECKPOINTS);
-      let sandbox = getSandbox(env.Sandbox, sessionId, {
+      const sandboxId = await sandboxIdForSession(sessionId);
+      let sandbox = getSandbox(env.Sandbox, sandboxId, {
         transport: "rpc",
         normalizeId: true,
         enableDefaultSession: false,
@@ -315,7 +329,7 @@ export default {
         });
         archiveKey = created.manifest.backup.key;
         await sandbox.destroy();
-        sandbox = getSandbox(env.Sandbox, sessionId, {
+        sandbox = getSandbox(env.Sandbox, sandboxId, {
           transport: "rpc",
           normalizeId: true,
           enableDefaultSession: false,
@@ -427,29 +441,37 @@ export default {
       if (body === null) {
         return json({ error: "Invalid workspace hydration request" }, 400);
       }
-      const sandbox = getSandbox(env.Sandbox, body.sessionId, {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        // Hydration can legitimately outlive the settled-session idle window:
-        // a cold VM plus an exact-SHA Git fetch must remain active until the
-        // workspace is ready. Subsequent session commands reapply the short
-        // idle policy, and every failure path below destroys the sandbox.
-        sleepAfter: `${env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS}s`,
-      });
+      const sandbox = getSandbox(
+        env.Sandbox,
+        await sandboxIdForSession(body.sessionId),
+        {
+          transport: "rpc",
+          normalizeId: true,
+          enableDefaultSession: false,
+          // Hydration can legitimately outlive the settled-session idle window:
+          // a cold VM plus an exact-SHA Git fetch must remain active until the
+          // workspace is ready. Subsequent session commands reapply the short
+          // idle policy, and every failure path below destroys the sandbox.
+          sleepAfter: `${env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS}s`,
+        },
+      );
       let registration: RuntimeRegistration;
       try {
-        registration = await runtimeRegistration(env, {
-          subject: body.subject,
-          environmentId: body.environmentId,
-          environmentGeneration: body.environmentGeneration,
-          sessionId: body.sessionId,
-          connectionId: body.connectionId,
-          providerId: body.providerId,
-          modelId: body.modelId,
-          reservationId: null,
-          repositorySlug: body.plan.repository.slug,
-        });
+        registration = await runtimeRegistration(
+          env,
+          {
+            subject: body.subject,
+            environmentId: body.environmentId,
+            environmentGeneration: body.environmentGeneration,
+            sessionId: body.sessionId,
+            connectionId: body.connectionId,
+            providerId: body.providerId,
+            modelId: body.modelId,
+            reservationId: null,
+            repositorySlug: body.plan.repository.slug,
+          },
+          true,
+        );
       } catch (cause) {
         return cause instanceof RuntimeRegistrationError
           ? json({ error: cause.message }, cause.status)
@@ -461,42 +483,39 @@ export default {
           environmentId: body.environmentId,
           sessionId: body.sessionId,
         });
-      if (registration.githubCapabilityHandle === null) {
-        await cleanup().catch(() => undefined);
-        return json({ error: "GitHub authorization unavailable" }, 403);
-      }
       const sessionStub = env.MANAGED_SESSION.getByName(body.sessionId);
-      const tokenResponse = await sessionStub.fetch(
-        "https://managed-session.internal/v1/git-token",
-        { method: "POST" },
-      );
-      if (!tokenResponse.ok) {
-        await cleanup().catch(() => undefined);
-        return json({ error: "GitHub authorization unavailable" }, 403);
-      }
-      let tokenBody: unknown;
-      try {
-        tokenBody = await tokenResponse.json();
-      } catch {
-        await cleanup().catch(() => undefined);
-        return json({ error: "GitHub authorization unavailable" }, 403);
-      }
-      const tokenFields =
-        typeof tokenBody === "object" && tokenBody !== null
-          ? Object.fromEntries(Object.entries(tokenBody))
-          : null;
-      if (typeof tokenFields?.token !== "string") {
-        await cleanup().catch(() => undefined);
-        return json({ error: "GitHub authorization unavailable" }, 403);
+      let gitAuthorization: string | undefined;
+      if (registration.githubCapabilityHandle !== null) {
+        const tokenResponse = await sessionStub.fetch(
+          "https://managed-session.internal/v1/git-token",
+          { method: "POST" },
+        );
+        if (!tokenResponse.ok) {
+          await cleanup().catch(() => undefined);
+          return json({ error: "GitHub authorization unavailable" }, 403);
+        }
+        const tokenFields = decodeOrNull(
+          GitTokenResponse,
+          await tokenResponse.json().catch(() => null),
+        );
+        if (tokenFields === null) {
+          await cleanup().catch(() => undefined);
+          return json({ error: "GitHub authorization unavailable" }, 403);
+        }
+        gitAuthorization = `Bearer ${tokenFields.token}`;
       }
       try {
         const repositorySlug = body.plan.repository.slug;
         const identity = await hydrateWorkspace(
           sandbox,
           body.plan,
-          `${env.MANAGED_RUNTIME_ORIGIN}/v1/git/${encodeURIComponent(body.sessionId)}/${repositorySlug}.git`,
+          gitAuthorization === undefined
+            ? body.repositoryUrl
+            : `${managedRuntimeSandboxOrigin(env)}/v1/git/${encodeURIComponent(body.sessionId)}/${repositorySlug}.git`,
           {
-            authorizationHeader: `Bearer ${tokenFields.token}`,
+            ...(gitAuthorization === undefined
+              ? {}
+              : { authorizationHeader: gitAuthorization }),
             canonicalRepositoryUrl: body.repositoryUrl,
           },
         );
@@ -520,10 +539,12 @@ export default {
           409,
         );
       } finally {
-        await sessionStub.fetch(
-          "https://managed-session.internal/v1/git-token/revoke",
-          { method: "POST" },
-        );
+        if (gitAuthorization !== undefined) {
+          await sessionStub.fetch(
+            "https://managed-session.internal/v1/git-token/revoke",
+            { method: "POST" },
+          );
+        }
       }
     }
     const providerProxyMatch = url.pathname.match(
@@ -570,11 +591,14 @@ export default {
           method: request.method === "GET" ? "GET" : "POST",
           body: request.body,
           contentType: request.headers.get("content-type"),
+          contentEncoding: request.headers.get("content-encoding"),
           accept: request.headers.get("accept"),
           userAgent: request.headers.get("user-agent"),
           originator: request.headers.get("originator"),
           openAiBeta: request.headers.get("openai-beta"),
           anthropicBeta: request.headers.get("anthropic-beta"),
+          sessionId: request.headers.get("session-id"),
+          clientRequestId: request.headers.get("x-client-request-id"),
           contentLength: Number(request.headers.get("content-length") ?? 0),
         },
         {

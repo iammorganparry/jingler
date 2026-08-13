@@ -1235,7 +1235,13 @@ const provisionRemoteSession = (
             (cause) => new GitError({ message: cause.message, cause }),
           ),
         ));
-    let requestSession = { id: "", environmentId };
+    let requestSession = {
+      id: "",
+      environmentId,
+      connectionId: input.connectionId,
+      providerId: input.providerId,
+      modelId: input.modelId,
+    };
     let requestInput = input;
     if (environment.kind === "owned" && input.projectId !== undefined) {
       yield* reportSessionCreation(progress, "resolving-repository");
@@ -1314,7 +1320,13 @@ const provisionRemoteSession = (
             (cause) => new GitError({ message: cause.message, cause }),
           ),
         );
-      requestSession = { id: sessionId, environmentId };
+      requestSession = {
+        id: sessionId,
+        environmentId,
+        connectionId: input.connectionId,
+        providerId: input.providerId,
+        modelId: input.modelId,
+      };
       requestInput = {
         ...input,
         requestedSessionId: sessionId,
@@ -1744,7 +1756,13 @@ export const continueOnEnvironment = (
               );
           }
           const targetSession = requestedSessionId
-            ? { id: requestedSessionId, environmentId: target }
+            ? {
+                id: requestedSessionId,
+                environmentId: target,
+                connectionId: source.connectionId,
+                providerId: source.providerId,
+                modelId: source.modelId,
+              }
             : null;
           const value = yield* (
             targetSession

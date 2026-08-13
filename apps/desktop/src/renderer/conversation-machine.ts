@@ -443,6 +443,26 @@ interface LoadedData {
   readonly cursor: string | null
 }
 
+export const CONVERSATION_LOAD_TIMEOUT_MS = 30_000
+
+const withLoadDeadline = <Value>(operation: Promise<Value>): Promise<Value> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Timed out loading the conversation.")),
+      CONVERSATION_LOAD_TIMEOUT_MS
+    )
+    operation.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (cause) => {
+        clearTimeout(timer)
+        reject(cause)
+      }
+    )
+  })
+
 /**
  * Load the persisted transcript, worktree files + diff.
  *
@@ -458,7 +478,7 @@ const loadConversation = fromPromise<
   LoadedData,
   { session: Session; chatId: string }
 >(async ({ input }) => {
-  const [page, artifact, files, patch] = await Promise.all([
+  const [page, artifact, files, patch] = await withLoadDeadline(Promise.all([
     // Only the tail — older turns page in via LOAD_OLDER. A whole 46MB
     // transcript held as one parsed array was the renderer's high-water mark.
     rpc.sessionsTranscriptPage(input.session.id, input.chatId, undefined, HISTORY_PAGE_SIZE),
@@ -471,7 +491,7 @@ const loadConversation = fromPromise<
         )
       : Promise.resolve([] as ReadonlyArray<string>),
     rpc.sessionsDiff(input.session.id)
-  ])
+  ]))
   const rawTranscript = page.messages
   // A loaded transcript has no live run — settle any turn left mid-stream (the
   // app was closed mid-response) so it doesn't show the typing indicator forever,

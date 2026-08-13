@@ -44,6 +44,10 @@ export const compatibleEnvironment = (
   const connectionId = chat?.connectionId ?? session.connectionId
   const modelId = chat?.modelId ?? session.modelId
   if (connectionId === undefined || modelId === undefined) return false
+  // Managed Cloud receives the exact session connection through a short-lived,
+  // server-validated capability grant. It intentionally does not advertise the
+  // operator's provider account as a device-local saved connection.
+  if (environment.kind === "managed") return environmentRuntimeIsCurrent(environment)
   const connection = environment.capabilities.providerConnections?.find(
     (candidate) => candidate.id === connectionId
   )

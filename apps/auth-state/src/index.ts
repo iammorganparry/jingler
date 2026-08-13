@@ -1,17 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 import {
-  AuthKind,
-  ManagedProviderProxy,
-  ProviderConnectionId,
-  ProviderId,
-} from "@jingler/core";
-import {
   readBoundedJson,
   workerFields as fields,
   workerJson as json,
 } from "@jingler/core/worker-http";
 import { Either, Schema } from "effect";
 import { openCredential, sealCredential } from "./credential-envelope.js";
+import {
+  capabilityRouteMetadata,
+  CapabilityProviderSchema,
+  validateCapability,
+  type ValidatedCapability,
+} from "./provider-capability.js";
 import {
   credentialStorageKey,
   emptyAuthState,
@@ -21,7 +21,6 @@ import {
   type AuthSession,
   type AuthStateRecord,
   type CapabilityUpstream,
-  type CapabilityProvider,
   type StoredCredential,
 } from "./state.js";
 
@@ -43,16 +42,8 @@ const STATE_KEY = "auth-state";
 const SUBSCRIBER_KEY = "managed-subscriber";
 const SUBSCRIPTION_SECONDS = 5 * 60;
 const SUBJECT_PATH = /^\/v1\/internal\/users\/([^/]+)(\/.*)?$/u;
-const CODEX_ACCOUNT_ID = /^[0-9a-f-]{36}$/iu;
 const Subject = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256));
 const Identifier = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256));
-const CapabilityProviderSchema = Schema.Literal("github", "codex", "claude");
-const CapabilityUpstreamSchema = Schema.Literal(
-  "github-api",
-  "openai-api",
-  "chatgpt-codex",
-  "anthropic-api",
-);
 const SubjectInput = Schema.Struct({ subject: Subject });
 const SubscriptionInput = Schema.Struct({
   subject: Subject,
@@ -69,19 +60,6 @@ const SessionInput = Schema.Struct({
   subject: Subject,
   sessionId: Identifier,
   expiresAt: Schema.Int,
-});
-const CapabilityInput = Schema.Struct({
-  subject: Subject,
-  provider: CapabilityProviderSchema,
-  authorizationHeader: Schema.String,
-  expiresAt: Schema.Int,
-  upstream: Schema.optional(CapabilityUpstreamSchema),
-  accountId: Schema.optional(Schema.String),
-  proxy: Schema.optional(ManagedProviderProxy),
-  connectionId: Schema.optional(ProviderConnectionId),
-  providerId: Schema.optional(ProviderId),
-  authKind: Schema.optional(AuthKind),
-  billingRoute: Schema.optional(Schema.Literal("subscription", "api")),
 });
 const DeleteCapabilityInput = Schema.Struct({
   subject: Subject,
@@ -123,132 +101,6 @@ const credentialFingerprint = async (
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-};
-
-const upstreamOf = (
-  provider: CapabilityProvider,
-  value: CapabilityUpstream | undefined,
-): CapabilityUpstream | null => {
-  if (provider === "github")
-    return value === undefined || value === "github-api" ? "github-api" : null;
-  if (provider === "codex") {
-    return value === undefined || value === "openai-api"
-      ? "openai-api"
-      : value === "chatgpt-codex"
-        ? value
-        : null;
-  }
-  return value === undefined || value === "anthropic-api"
-    ? "anthropic-api"
-    : null;
-};
-
-const ProviderConnectionCapabilityInput = Schema.Struct({
-  proxy: ManagedProviderProxy,
-  connectionId: ProviderConnectionId,
-  providerId: ProviderId,
-  authKind: AuthKind,
-  billingRoute: Schema.Literal("subscription", "api"),
-});
-type ProviderConnectionCapabilityInput = Schema.Schema.Type<
-  typeof ProviderConnectionCapabilityInput
->;
-
-const matchesProviderRoute = (
-  provider: Exclude<CapabilityProvider, "github">,
-  connection: ProviderConnectionCapabilityInput,
-  upstream: CapabilityUpstream,
-): boolean => {
-  if (provider === "codex") {
-    return (
-      connection.proxy === "codex" &&
-      ((connection.providerId === "openai-codex" &&
-        connection.authKind === "openai-codex-oauth" &&
-        connection.billingRoute === "subscription" &&
-        upstream === "chatgpt-codex") ||
-        (connection.providerId === "openai" &&
-          connection.authKind === "api-key" &&
-          connection.billingRoute === "api" &&
-          upstream === "openai-api"))
-    );
-  }
-  return (
-    connection.proxy === "claude" &&
-    connection.providerId === "anthropic" &&
-    upstream === "anthropic-api" &&
-    ((connection.authKind === "claude-setup-token" &&
-      connection.billingRoute === "subscription") ||
-      (connection.authKind === "api-key" && connection.billingRoute === "api"))
-  );
-};
-
-interface ValidatedCapability {
-  readonly provider: CapabilityProvider;
-  readonly upstream: CapabilityUpstream;
-  readonly authorizationHeader: string;
-  readonly accountId: string | null;
-  readonly expiresAt: number;
-  readonly providerConnection?: ProviderConnectionCapabilityInput;
-}
-
-type CapabilityValidation =
-  | { readonly ok: true; readonly value: ValidatedCapability }
-  | { readonly ok: false; readonly error: string };
-
-const hasSupportedAuthorization = (value: string): boolean =>
-  value.startsWith("Bearer ") || value.startsWith("X-Api-Key ");
-
-const hasValidAccountScope = (
-  upstream: CapabilityUpstream,
-  accountId: string | null,
-): boolean =>
-  upstream === "chatgpt-codex"
-    ? accountId !== null && CODEX_ACCOUNT_ID.test(accountId)
-    : accountId === null;
-
-const validateCapability = (
-  body: unknown,
-  now: number,
-): CapabilityValidation => {
-  const input = decode(CapabilityInput, body);
-  if (
-    input === null ||
-    !hasSupportedAuthorization(input.authorizationHeader) ||
-    input.expiresAt <= now
-  ) {
-    return { ok: false, error: "Invalid capability" };
-  }
-  const upstream = upstreamOf(input.provider, input.upstream);
-  if (upstream === null) return { ok: false, error: "Invalid capability" };
-  const providerConnection =
-    input.provider === "github"
-      ? undefined
-      : decode(ProviderConnectionCapabilityInput, input);
-  if (
-    input.provider !== "github" &&
-    (providerConnection === null ||
-      providerConnection === undefined ||
-      !matchesProviderRoute(input.provider, providerConnection, upstream))
-  ) {
-    return { ok: false, error: "Invalid provider connection capability" };
-  }
-  const accountId = input.accountId ?? null;
-  if (!hasValidAccountScope(upstream, accountId)) {
-    return { ok: false, error: "Invalid capability scope" };
-  }
-  return {
-    ok: true,
-    value: {
-      provider: input.provider,
-      upstream,
-      authorizationHeader: input.authorizationHeader,
-      accountId,
-      expiresAt: input.expiresAt,
-      ...(providerConnection === null || providerConnection === undefined
-        ? {}
-        : { providerConnection }),
-    },
-  };
 };
 
 const authorized = (request: Request, env: AuthStateEnv): boolean =>
@@ -468,7 +320,17 @@ export class AuthStateObject extends DurableObject<AuthStateEnv> {
     state: AuthStateRecord,
   ): Promise<Response> {
     const validated = validateCapability(body, nowSeconds());
-    if (!validated.ok) return json({ error: validated.error }, 400);
+    if (!validated.ok) {
+      console.warn(
+        JSON.stringify({
+          component: "auth-state",
+          event: "capability_rejected",
+          reason: validated.error,
+          route: capabilityRouteMetadata(body),
+        }),
+      );
+      return json({ error: validated.error }, 400);
+    }
     const input = validated.value;
     const connectionId = input.providerConnection?.connectionId ?? null;
     const storageKey = credentialStorageKey(input.provider, connectionId);

@@ -1,4 +1,4 @@
-import type { AuthKind } from "@jingler/core";
+import type { AuthKind, ManagedProviderProxy } from "@jingler/core";
 
 export interface AuthStateClientConfig {
   readonly enabled: boolean;
@@ -20,6 +20,7 @@ export type AuthCapabilityUpstream =
 interface AuthCapabilityState {
   readonly userId: string;
   readonly provider: AuthCapabilityProvider;
+  readonly proxy?: ManagedProviderProxy;
   readonly authorizationHeader: string;
   readonly expiresAt: Date;
   readonly upstream?: AuthCapabilityUpstream;
@@ -95,6 +96,7 @@ export const upsertAuthStateCapability = async (
       },
       body: JSON.stringify({
         provider: input.provider,
+        ...(input.proxy === undefined ? {} : { proxy: input.proxy }),
         authorizationHeader: input.authorizationHeader,
         expiresAt: Math.floor(input.expiresAt.getTime() / 1_000),
         ...(input.upstream === undefined ? {} : { upstream: input.upstream }),

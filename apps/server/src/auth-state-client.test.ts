@@ -70,6 +70,7 @@ describe("auth-state client", () => {
       {
         userId: "user/1",
         provider: "codex",
+        proxy: "codex",
         authorizationHeader: "Bearer cloud-provider-key",
         expiresAt: new Date("2026-08-11T18:00:00Z"),
         upstream: "chatgpt-codex",
@@ -86,6 +87,7 @@ describe("auth-state client", () => {
     );
     expect(sentBody).toEqual({
       provider: "codex",
+      proxy: "codex",
       authorizationHeader: "Bearer cloud-provider-key",
       expiresAt: 1_786_471_200,
       upstream: "chatgpt-codex",

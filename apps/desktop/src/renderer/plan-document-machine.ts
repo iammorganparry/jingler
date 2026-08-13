@@ -1,4 +1,4 @@
-import type { PlanDocument } from "@jingler/core"
+import { type Plan, type PlanDocument, planDocumentToPlan } from "@jingler/core"
 import { assign, fromCallback, fromPromise, setup } from "xstate"
 
 export interface PlanDocumentInput {
@@ -18,6 +18,25 @@ export type PlanDocumentEvent =
   | { readonly type: "RETRY" }
   | { readonly type: "REVISION_STARTED"; readonly stageId: string | null }
   | { readonly type: "REMOTE"; readonly document: PlanDocument }
+
+/**
+ * Approval is revision-sensitive, so the transcript card and canonical document
+ * must describe the same projection before the renderer enables it. PlanUpdated
+ * and Plan.watch use separate streams; either may arrive first.
+ */
+export const matchesCanonicalPlan = (
+  document: PlanDocument | null,
+  visiblePlan: Plan | null
+): boolean => {
+  if (document === null || visiblePlan === null) return false
+  const canonical = planDocumentToPlan(document)
+  return (
+    canonical.id === visiblePlan.id &&
+    canonical.summary === visiblePlan.summary &&
+    canonical.raw === visiblePlan.raw &&
+    canonical.status === visiblePlan.status
+  )
+}
 
 const messageFrom = (event: unknown): string => {
   const error =

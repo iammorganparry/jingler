@@ -29,7 +29,11 @@ describe("session environment handoff", () => {
   const deps = () => {
     const persist = vi.fn((id: string, environmentId?: string) => Effect.succeed({ ...source(), id, environmentId }))
     const continueSession = vi.fn((session: Session, environmentId?: string) => Effect.succeed({ ...session, id: "s_continuation", environmentId }))
-    return { persist, continueSession, environments: () => Effect.succeed([target]) }
+    return {
+      persist,
+      continueSession,
+      environments: (): Effect.Effect<ReadonlyArray<Environment>> => Effect.succeed([target])
+    }
   }
   it("re-provisions a pristine session in place", async () => {
     const d = deps(); const result = await Effect.runPromise(setSessionEnvironment(source(), "buildbox", d)); expect(result.id).toBe("s_source"); expect(d.persist).toHaveBeenCalledOnce()
@@ -45,6 +49,25 @@ describe("session environment handoff", () => {
   })
   it("rejects a target missing the authenticated connection", async () => {
     const d = deps(); d.environments = () => Effect.succeed([{ ...target, capabilities: { ...target.capabilities, providerConnections: [] } }]); const exit = await Effect.runPromiseExit(continueSessionOnEnvironment(source(), "buildbox", d)); expect(Exit.isFailure(exit)).toBe(true); expect(d.continueSession).not.toHaveBeenCalled()
+  })
+  it("admits managed Cloud through its current runtime and just-in-time provider grant", async () => {
+    const d = deps()
+    d.environments = () => Effect.succeed([{
+      ...target,
+      kind: "managed" as const,
+      state: "online" as const,
+      agentVersion: null,
+      capabilities: { ...target.capabilities, providerConnections: undefined },
+      region: null,
+      instanceType: "basic",
+      generation: 1,
+      createdAt: 1,
+      updatedAt: 1
+    }])
+
+    await expect(
+      Effect.runPromise(continueSessionOnEnvironment(source(), "buildbox", d))
+    ).resolves.toMatchObject({ environmentId: "buildbox" })
   })
   it("requires the exact authenticated connection for a canonical pi session", async () => {
     const canonical = source({ connectionId, providerId, modelId })

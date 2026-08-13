@@ -26,7 +26,10 @@ import {
   ManagedSessionJournal,
   type ManagedSessionJournalState,
 } from "./session-journal.js";
-import type { ManagedRuntimeEnv } from "./runtime-env.js";
+import {
+  managedRuntimeSandboxOrigin,
+  type ManagedRuntimeEnv,
+} from "./runtime-env.js";
 import { redactedUsageTelemetry, shouldSampleUsage } from "./usage-policy.js";
 import {
   createWorkspaceCheckpoint,
@@ -38,6 +41,8 @@ import { managedProviderEnvironment } from "./provider-session-config.js";
 import { ManagedExecutionScheduler } from "./execution-scheduler.js";
 import { ManagedRuntimeConfiguration } from "./runtime-configuration.js";
 import { unstreamedProcessOutput } from "./process-output.js";
+import { sandboxIdForSession, sha256Hex } from "./runtime-identity.js";
+import { managedCertificationDocument } from "./certification-config.js";
 
 interface RuntimeMetadata {
   readonly subject: string;
@@ -66,13 +71,6 @@ const PROVIDER_AUTHORIZATION_PATH =
 
 const shellQuote = (value: string): string =>
   `'${value.replaceAll("'", "'\\''")}'`;
-
-const sha256 = async (value: string): Promise<string> => {
-  const bytes = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
-  );
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-};
 
 const ContinuationProviderSelection = Schema.Struct({
   sourceSession: ManagedRuntimeProviderSelection,
@@ -255,12 +253,16 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   async #checkpoint(eventCursor: number): Promise<void> {
     const metadata = await this.#metadata();
     if (metadata === null) return;
-    const sandbox = getSandbox(this.env.Sandbox, metadata.sessionId, {
-      transport: "rpc",
-      normalizeId: true,
-      enableDefaultSession: false,
-      sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-    });
+    const sandbox = getSandbox(
+      this.env.Sandbox,
+      await sandboxIdForSession(metadata.sessionId),
+      {
+        transport: "rpc",
+        normalizeId: true,
+        enableDefaultSession: false,
+        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
+      },
+    );
     try {
       const result = await createWorkspaceCheckpoint(
         sandbox,
@@ -360,20 +362,39 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   }
 
   async #execute(command: RemoteSessionCommand): Promise<void> {
-    const sandbox = getSandbox(this.env.Sandbox, command.sessionId, {
-      transport: "rpc",
-      normalizeId: true,
-      enableDefaultSession: false,
-      sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-    });
+    const sandbox = getSandbox(
+      this.env.Sandbox,
+      await sandboxIdForSession(command.sessionId),
+      {
+        transport: "rpc",
+        normalizeId: true,
+        enableDefaultSession: false,
+        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
+      },
+    );
     const inputDirectory = "/tmp/jingler-commands";
-    const inputFile = `${inputDirectory}/${await sha256(command.commandId)}.json`;
+    const inputFile = `${inputDirectory}/${await sha256Hex(command.commandId)}.json`;
     let phase = "preparing command input";
     const checkpoint =
       managedRuntimeActionForOperation(command.operation) !== "session.observe";
+    let disposeProcess: (() => void) | null = null;
     try {
       await sandbox.mkdir(inputDirectory, { recursive: true });
       await sandbox.writeFile(inputFile, JSON.stringify(command));
+      const certifications = managedCertificationDocument(
+        this.env.MANAGED_RUNTIME_CERTIFICATIONS_BASE64,
+      );
+      if (this.env.MANAGED_RUNTIME_CERTIFICATIONS_BASE64 && !certifications) {
+        throw new Error("Managed runtime certifications are invalid");
+      }
+      if (certifications) {
+        const runtimeDirectory = "/workspace/.jingler-runtime/runtime";
+        await sandbox.mkdir(runtimeDirectory, { recursive: true });
+        await sandbox.writeFile(
+          `${runtimeDirectory}/certifications.json`,
+          certifications,
+        );
+      }
       const metadata = await this.#metadata();
       if (metadata === null)
         throw new Error("Managed runtime metadata disappeared");
@@ -396,14 +417,14 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       }
       const processEnv = managedProviderEnvironment({
         capability: metadata.providerConnection,
-        origin: this.env.MANAGED_RUNTIME_ORIGIN,
+        origin: managedRuntimeSandboxOrigin(this.env),
         sessionId: command.sessionId,
         nonce: crypto.randomUUID().replaceAll("-", ""),
       });
       await this.ctx.storage.put(METADATA_KEY, {
         ...metadata,
         processId: command.commandId,
-        providerTokenHash: await sha256(processEnv.JINGLER_PROVIDER_ACCESS),
+        providerTokenHash: await sha256Hex(processEnv.JINGLER_PROVIDER_ACCESS),
         usageStartedAt: metadata.usageStartedAt ?? Date.now(),
       });
       const commandLine = [
@@ -412,6 +433,8 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         "managed-command",
         "--root",
         "/workspace/.jingler-runtime",
+        "--target-id",
+        shellQuote(metadata.environmentId),
         "--input",
         shellQuote(inputFile),
       ].join(" ");
@@ -498,6 +521,10 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           outputTail = outputTail.then(() => admitOutput(data));
         },
       });
+      const dispose = Reflect.get(process, Symbol.dispose);
+      if (typeof dispose === "function") {
+        disposeProcess = () => Reflect.apply(dispose, process, []);
+      }
       phase = "waiting for pi runtime completion";
       const exited = await process.waitForExit(
         Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS) * 1_000,
@@ -534,6 +561,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         checkpoint,
       ).catch(() => undefined);
     } finally {
+      disposeProcess?.();
       await sandbox.deleteFile(inputFile).catch(() => undefined);
     }
   }
@@ -557,12 +585,16 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     reason: string,
   ): Promise<void> {
     if (metadata.processId === null) return;
-    const sandbox = getSandbox(this.env.Sandbox, metadata.sessionId, {
-      transport: "rpc",
-      normalizeId: true,
-      enableDefaultSession: false,
-      sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-    });
+    const sandbox = getSandbox(
+      this.env.Sandbox,
+      await sandboxIdForSession(metadata.sessionId),
+      {
+        transport: "rpc",
+        normalizeId: true,
+        enableDefaultSession: false,
+        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
+      },
+    );
     await sandbox.killProcess(metadata.processId).catch(() => undefined);
     try {
       const terminal = await this.#settleJournal(
@@ -698,12 +730,16 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       }
       await this.#terminateProcess(metadata, "environment-destroyed");
       await this.#settleUsage();
-      const sandbox = getSandbox(this.env.Sandbox, metadata.sessionId, {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-      });
+      const sandbox = getSandbox(
+        this.env.Sandbox,
+        await sandboxIdForSession(metadata.sessionId),
+        {
+          transport: "rpc",
+          normalizeId: true,
+          enableDefaultSession: false,
+          sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
+        },
+      );
       await sandbox.destroy().catch(() => undefined);
       await this.#unregisterSession(metadata);
       await this.ctx.storage.deleteAll();
@@ -743,7 +779,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       const tokenMatches =
         token !== null &&
         metadata.providerTokenHash !== null &&
-        (await sha256(token)) === metadata.providerTokenHash;
+        (await sha256Hex(token)) === metadata.providerTokenHash;
       if (
         !metadata.authorized ||
         metadata.providerConnection.proxy !== providerAuthorization[1] ||
@@ -782,7 +818,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       const token = `git_${crypto.randomUUID().replaceAll("-", "")}`;
       await this.ctx.storage.put(METADATA_KEY, {
         ...metadata,
-        gitTokenHash: await sha256(token),
+        gitTokenHash: await sha256Hex(token),
       });
       return json({ token });
     }
@@ -801,7 +837,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         !metadata.authorized ||
         token === null ||
         metadata.gitTokenHash === null ||
-        (await sha256(token)) !== metadata.gitTokenHash ||
+        (await sha256Hex(token)) !== metadata.gitTokenHash ||
         metadata.githubCapabilityHandle === null
       ) {
         return json({ error: "Git authorization unavailable" }, 403);

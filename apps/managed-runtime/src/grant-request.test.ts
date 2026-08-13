@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest"
 
-import { decodeManagedGrantRequest } from "./grant-request.js";
+import { claimsManagedSessionSlot, decodeManagedGrantRequest } from "./grant-request.js"
 
 describe("decodeManagedGrantRequest", () => {
   it("accepts cancellation grants without a usage reservation", () => {
@@ -15,8 +15,8 @@ describe("decodeManagedGrantRequest", () => {
         environmentGeneration: 1,
         connectionId: "connection_one",
         providerId: "openai",
-        modelId: "openai/gpt-5",
-      }),
+        modelId: "openai/gpt-5"
+      })
     ).toEqual({
       version: 1,
       subject: "user_one",
@@ -27,7 +27,14 @@ describe("decodeManagedGrantRequest", () => {
       environmentGeneration: 1,
       connectionId: "connection_one",
       providerId: "openai",
-      modelId: "openai/gpt-5",
-    });
-  });
-});
+      modelId: "openai/gpt-5"
+    })
+  })
+
+  it("claims concurrency only for execution grants", () => {
+    expect(claimsManagedSessionSlot(["session.start"])).toBe(true)
+    expect(claimsManagedSessionSlot(["session.input"])).toBe(true)
+    expect(claimsManagedSessionSlot(["session.observe"])).toBe(false)
+    expect(claimsManagedSessionSlot(["session.cancel"])).toBe(false)
+  })
+})
