@@ -37,6 +37,7 @@ import { fields, json } from "./worker-http.js";
 import { managedProviderEnvironment } from "./provider-session-config.js";
 import { ManagedExecutionScheduler } from "./execution-scheduler.js";
 import { ManagedRuntimeConfiguration } from "./runtime-configuration.js";
+import { unstreamedProcessOutput } from "./process-output.js";
 
 interface RuntimeMetadata {
   readonly subject: string;
@@ -483,6 +484,8 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
 
       phase = "starting the pi runtime process";
       let outputTail = Promise.resolve();
+      let streamedStdout = "";
+      let acceptStreamOutput = true;
       const process = await sandbox.startProcess(commandLine, {
         cwd: "/workspace",
         sessionId: "jingler-session",
@@ -490,7 +493,8 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         autoCleanup: false,
         env: processEnv,
         onOutput: (stream, data) => {
-          if (stream !== "stdout") return;
+          if (stream !== "stdout" || !acceptStreamOutput) return;
+          streamedStdout += data;
           outputTail = outputTail.then(() => admitOutput(data));
         },
       });
@@ -498,7 +502,12 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       const exited = await process.waitForExit(
         Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS) * 1_000,
       );
+      const retained = await process.getLogs();
+      acceptStreamOutput = false;
       await outputTail;
+      await admitOutput(
+        unstreamedProcessOutput(streamedStdout, retained.stdout),
+      );
       if (buffered.trim().length > 0) await admitOutput("\n");
       if (!settled) {
         await this.#settle(

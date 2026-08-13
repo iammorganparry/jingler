@@ -17,15 +17,19 @@ import { runManagedCommand } from "./managed-command.js"
 
 const args = process.argv.slice(2)
 const command = args[0]
+const writeProtocolOutput = process.stdout.write.bind(process.stdout)
 
 const option = (name: string): string | undefined => {
   const index = args.indexOf(name)
   return index >= 0 ? args[index + 1] : undefined
 }
 
-const print = (value: unknown): Promise<void> =>
+const print = (value: object): Promise<void> =>
   new Promise((resolve, reject) => {
-    process.stdout.write(`${JSON.stringify(value)}\n`, (error) => {
+    // pi redirects process.stdout while an agent is running so model noise is
+    // kept off the protocol stream. Retain the original writer for the device
+    // protocol itself, including its terminal frame.
+    writeProtocolOutput(`${JSON.stringify(value)}\n`, (error) => {
       if (error) reject(error)
       else resolve()
     })
@@ -106,7 +110,7 @@ const main = async (): Promise<void> => {
           ...(process.env.JINGLER_HOME ? { jinglerHome: process.env.JINGLER_HOME } : {})
         })
       }
-      print(result)
+      await print(result)
       return
     }
     case "serve": {
@@ -138,7 +142,7 @@ const main = async (): Promise<void> => {
         throw new Error("install-service requires --subject, --device-id and --server")
       }
       await persistEnrollment(deviceAgentPaths(), { subject, deviceId, serverUrl })
-      print(
+      await print(
         await installDeviceService({
           ...(process.env.JINGLER_HOME ? { jinglerHome: process.env.JINGLER_HOME } : {})
         })
@@ -146,15 +150,15 @@ const main = async (): Promise<void> => {
       return
     }
     case "status":
-      print(await deviceStatus())
+      await print(await deviceStatus())
       return
     case "rotate-key":
-      print({ version: 1, publicKey: await rotateLocalDeviceKey() })
+      await print({ version: 1, publicKey: await rotateLocalDeviceKey() })
       return
     case "revoke-local":
       await removeDeviceService()
       await revokeLocalDevice()
-      print({ version: 1, state: "unpaired" })
+      await print({ version: 1, state: "unpaired" })
       return
     default:
       usage()
