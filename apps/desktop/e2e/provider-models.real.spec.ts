@@ -1,14 +1,14 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
-import { startFakeAuthServer } from "./fake-auth.js";
+import { startBetterAuthTestServer } from "@jingler/server/test-support/better-auth-account";
 import { showElectronWindow } from "./electron-window.js";
 import { appShell, createWorkspace } from "./fixtures.js";
-import { MAIN_ENTRY } from "./global-setup.js";
+import { DESKTOP_ROOT, MAIN_ENTRY } from "./global-setup.js";
 import {
   REAL_PROVIDER_TARGETS,
   type RealProviderTarget,
@@ -35,6 +35,39 @@ const openProviders = async (window: Page): Promise<void> => {
   await expect(
     window.getByText("Provider connections", { exact: true }),
   ).toBeVisible();
+};
+
+const finishFreshOnboarding = async (window: Page): Promise<void> => {
+  const providerStep = window.getByRole("heading", {
+    name: "Connect a model provider",
+  });
+  await expect(providerStep.or(appShell(window))).toBeVisible({
+    timeout: 30_000,
+  });
+  if (!(await providerStep.isVisible())) return;
+
+  await window.bringToFront();
+  await expect(appShell(window)).toBeVisible({ timeout: 10 * 60_000 });
+};
+
+const prepareRealProviderHome = (home: string): void => {
+  const root = join(resolve(home), "jingler");
+  const config = join(root, "config.json");
+  if (existsSync(config)) return;
+
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    config,
+    JSON.stringify(
+      {
+        reposDir: resolve(DESKTOP_ROOT, "../../.."),
+        createdAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
 };
 
 const selectConnection = async (
@@ -156,7 +189,9 @@ const runWorkspaceMutation = async (
   const content = `${model.label} wrote this through Jingler's pi runtime.\n`;
   const composer = window.getByPlaceholder("Message the agent…");
 
-  await window.getByRole("button", { name: "Accept Edits", exact: true }).click();
+  await window
+    .getByRole("button", { name: "Accept Edits", exact: true })
+    .click();
   await window.getByRole("option", { name: ASK_BEFORE_ACTIONS }).click();
   await composer.fill(
     `Call workspace_write exactly once with path ${path} and this exact content: ${JSON.stringify(content)}. Do not use command_execute.`,
@@ -180,9 +215,11 @@ const runWorkspaceMutation = async (
   if (!(await rail.isVisible())) {
     await window.getByRole("button", { name: "Changed files" }).click();
   }
-  await expect(
-    rail.locator(`[data-item-path="${path}"]`),
-  ).toHaveAttribute("data-item-git-status", "added", { timeout: 30_000 });
+  await expect(rail.locator(`[data-item-path="${path}"]`)).toHaveAttribute(
+    "data-item-git-status",
+    "added",
+    { timeout: 30_000 },
+  );
   return path;
 };
 
@@ -193,9 +230,7 @@ const runRestartContinuation = async (
 ): Promise<void> => {
   await window.getByRole("button", { name: "Close settings" }).click();
   await expect(
-    window.locator(
-      `[data-file-change="A"][data-file-path="${changedPath}"]`,
-    ),
+    window.locator(`[data-file-change="A"][data-file-path="${changedPath}"]`),
   ).toBeVisible({ timeout: 30_000 });
   const composer = window.getByPlaceholder("Message the agent…");
   await expect(composer).toBeVisible({ timeout: 30_000 });
@@ -209,9 +244,11 @@ const runRestartContinuation = async (
 };
 
 const launchRealProviderApp = async (home: string) => {
-  // Product sign-in is orthogonal to provider billing. Keep the local auth
-  // fixture, but leave the provider document on production safeStorage.
-  const auth = await startFakeAuthServer();
+  // Product sign-in is orthogonal to provider billing. Use Better Auth's real
+  // test-account support, but leave provider credentials on production
+  // safeStorage and make first-run provider authentication explicitly manual.
+  prepareRealProviderHome(home);
+  const auth = await startBetterAuthTestServer();
   try {
     const env = {
       ...process.env,
@@ -245,6 +282,7 @@ const launchRealProviderApp = async (home: string) => {
       await showElectronWindow(app);
     }
     await signInToProduct(app, window, auth.token);
+    await finishFreshOnboarding(window);
     await openProviders(window);
     return { app, auth, window };
   } catch (cause) {
