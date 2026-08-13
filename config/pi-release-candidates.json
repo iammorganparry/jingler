@@ -1,7 +1,7 @@
 [
   {
     "providerId": "anthropic",
-    "modelId": "anthropic/claude-fable-5",
+    "modelId": "anthropic/claude-sonnet-5",
     "authKind": "claude-setup-token"
   },
   {

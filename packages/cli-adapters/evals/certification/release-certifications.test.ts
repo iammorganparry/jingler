@@ -80,7 +80,7 @@ describe("configured release candidates", () => {
     expect(candidates).toEqual([
       {
         providerId: "anthropic",
-        modelId: "anthropic/claude-fable-5",
+        modelId: "anthropic/claude-sonnet-5",
         authKind: "claude-setup-token"
       },
       {
@@ -89,7 +89,7 @@ describe("configured release candidates", () => {
         authKind: "openai-codex-oauth"
       }
     ])
-    expect(getBuiltinModel("anthropic", "claude-fable-5")).toBeDefined()
+    expect(getBuiltinModel("anthropic", "claude-sonnet-5")).toBeDefined()
     expect(getBuiltinModel("openai-codex", "gpt-5.6-sol")).toBeDefined()
   })
 })
