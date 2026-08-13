@@ -57,15 +57,27 @@ const isolatedCredentialStore = (
   }
 }
 
-const firstAvailableModel = async (
+const CLAUDE_SETUP_TOKEN_ENTITLEMENT_MODEL = "claude-haiku-4-5"
+
+export const selectEntitlementModel = <Model extends { readonly id: string }>(
+  models: ReadonlyArray<Model>,
+  authKind: AuthKind
+): Model => {
+  const model = authKind === "claude-setup-token"
+    ? models.find(({ id }) => id === CLAUDE_SETUP_TOKEN_ENTITLEMENT_MODEL) ?? models[0]
+    : models[0]
+  if (!model) throw new Error("No authenticated model is available")
+  return model
+}
+
+const entitlementModel = async (
   runtime: ModelRuntime,
   providerId: string,
+  authKind: AuthKind,
   signal: AbortSignal
 ) => {
   const models = await runtime.getAvailable(providerId, { signal })
-  const model = models[0]
-  if (!model) throw new Error("No authenticated model is available")
-  return model
+  return selectEntitlementModel(models, authKind)
 }
 
 const routeLabel = (authKind: AuthKind): string => {
@@ -92,7 +104,7 @@ const redactedEndpoint = (baseUrl: string): string => {
 
 const observedRoute = (
   authKind: AuthKind,
-  model: Awaited<ReturnType<typeof firstAvailableModel>>
+  model: Awaited<ReturnType<typeof entitlementModel>>
 ): string =>
   `${routeLabel(authKind)}:${model.api}:${redactedEndpoint(model.baseUrl)}`
 
@@ -112,7 +124,12 @@ export const probePiEntitlement = async (input: {
     refreshOnCreate: true,
     signal: input.signal
   })
-  const model = await firstAvailableModel(runtime, input.providerId, input.signal)
+  const model = await entitlementModel(
+    runtime,
+    input.providerId,
+    input.authKind,
+    input.signal
+  )
   const response = await runtime.completeSimple(
     model,
     {

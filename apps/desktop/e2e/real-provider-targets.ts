@@ -16,9 +16,9 @@ export type RealProviderTarget = Schema.Schema.Type<typeof RealProviderTarget>;
 const target = (input: RealProviderTarget): RealProviderTarget =>
   Schema.decodeUnknownSync(RealProviderTarget)(input);
 
-// Newest Claude and Codex families in the pinned pi 0.84.1 catalog. Exact IDs
-// make catalog upgrades deliberate: the real local and Cloud canaries fail
-// together instead of silently testing whichever model happens to sort first.
+// Current subscription-capable Claude and Codex families in the pinned pi
+// 0.84.1 catalog. Exact IDs make catalog upgrades deliberate: the real local
+// and Cloud canaries fail together instead of silently testing catalog order.
 export const REAL_PROVIDER_TARGETS: ReadonlyArray<RealProviderTarget> = [
   target({
     route: "codex",
@@ -30,9 +30,9 @@ export const REAL_PROVIDER_TARGETS: ReadonlyArray<RealProviderTarget> = [
   target({
     route: "claude",
     providerId: "anthropic",
-    modelId: "anthropic/claude-fable-5",
+    modelId: "anthropic/claude-sonnet-5",
     connectionLabel: "Claude Pro / Max setup-token",
-    label: "Claude Fable 5",
+    label: "Claude Sonnet 5",
   }),
 ];
 
