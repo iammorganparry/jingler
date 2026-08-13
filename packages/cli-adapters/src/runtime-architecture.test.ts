@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 const sourceRoots = [
   "packages/cli-adapters/src",
+  "packages/core/src",
   "packages/contracts/src",
   "apps/desktop/src",
   "apps/device-agent/src"
@@ -35,7 +36,8 @@ describe("production runtime architecture", () => {
       "packages/cli-adapters/src/codex-adapter.ts",
       "packages/cli-adapters/src/opencode-adapter.ts",
       "packages/cli-adapters/src/discovery.ts",
-      "packages/cli-adapters/src/subscription.ts"
+      "packages/cli-adapters/src/subscription.ts",
+      "packages/cli-adapters/src/codex-file-change.ts"
     ]) {
       expect(existsSync(resolve(root, path)), path).toBe(false)
     }
@@ -48,6 +50,16 @@ describe("production runtime architecture", () => {
 
   it("exposes no legacy harness RPC", () => {
     expect(offenders(/Agent\.setHarness|Discovery\.list|Models\.(?:list|catalog|capabilities)/)).toStrictEqual([])
+    expect(offenders(/\b(?:CliKind|CliInfo|binPath|setHarness)\b/)).toStrictEqual([])
+  })
+
+  it("isolates legacy identity migration from production runtime modules", () => {
+    const allowedImporters = new Set([
+      "packages/cli-adapters/src/config.ts",
+      "packages/cli-adapters/src/sessions.ts"
+    ])
+    const migrationImporters = offenders(/runtime\/migration\/legacy-runtime-identity/)
+    expect(migrationImporters.filter((path) => !allowedImporters.has(path))).toStrictEqual([])
   })
 
   it("keeps provider harness SDKs out of production dependencies", () => {
