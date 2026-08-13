@@ -76,18 +76,27 @@ const finishFreshOnboarding = async (
   const providerStep = window.getByRole("heading", {
     name: "Connect a model provider",
   });
-  await expect(providerStep.or(appShell(window))).toBeVisible({
+  const resourcesStep = window.getByRole("heading", {
+    name: "Import agent resources",
+  });
+  await expect(providerStep.or(resourcesStep).or(appShell(window))).toBeVisible({
     timeout: 30_000,
   });
-  if (!(await providerStep.isVisible())) return;
-
-  await window.bringToFront();
-  await startProviderAuthentication(window, model);
-  await window.getByRole("button", { name: "Continue" }).click();
-  await expect(
-    window.getByRole("heading", { name: "Import agent resources" }),
-  ).toBeVisible({ timeout: 30_000 });
-  await window.getByRole("button", { name: "Skip for now" }).click();
+  if (await providerStep.isVisible()) {
+    await window.bringToFront();
+    await startProviderAuthentication(window, model);
+    const continueButton = window.getByRole("button", { name: "Continue" });
+    await expect(
+      continueButton.or(resourcesStep).or(appShell(window)),
+    ).toBeVisible({ timeout: 30_000 });
+    if (await continueButton.isVisible()) await continueButton.click();
+    await expect(resourcesStep.or(appShell(window))).toBeVisible({
+      timeout: 30_000,
+    });
+  }
+  if (await resourcesStep.isVisible()) {
+    await window.getByRole("button", { name: "Skip for now" }).click();
+  }
   await expect(appShell(window)).toBeVisible({ timeout: 10 * 60_000 });
 };
 

@@ -99,6 +99,44 @@ export class ProviderCatalogService extends Context.Tag(
   "@jingler/ProviderCatalogService"
 )<ProviderCatalogService, ProviderCatalogShape>() {}
 
+const loadCertifications = (
+  options: ProviderCatalogOptions
+): Effect.Effect<ReadonlyArray<ModelCertification>, ProviderCatalogError> =>
+  Effect.tryPromise({
+    try: () => options.certifications.list(),
+    catch: (cause) =>
+      new ProviderCatalogError({
+        message: "Failed to read model certifications",
+        cause
+      })
+  })
+
+const refreshCachedDecorations = (
+  options: ProviderCatalogOptions,
+  cached: ProviderCatalog
+): Effect.Effect<ProviderCatalog> =>
+  Effect.all({
+    certifications: loadCertifications(options),
+    connections: options.connections
+  }).pipe(
+    Effect.map(({ certifications, connections }) => ({
+      connections: connections.map((connection) => {
+        const cachedConnection = cached.connections.find(
+          (entry) => entry.connection.id === connection.id
+        )
+        return {
+          connection,
+          models: (cachedConnection?.models ?? []).map((model) =>
+            decorate(model, connection, certifications, options.targetAvailable)
+          )
+        }
+      }),
+      refreshedAt: cached.refreshedAt,
+      stale: true
+    })),
+    Effect.catchAll(() => Effect.succeed({ ...cached, stale: true }))
+  )
+
 const loadCatalog = (
   options: ProviderCatalogOptions
 ): Effect.Effect<ProviderCatalog, ProviderCatalogError> =>
@@ -106,14 +144,7 @@ const loadCatalog = (
     Effect.sync(() => new AbortController()),
     (controller) =>
       Effect.gen(function* () {
-        const certifications = yield* Effect.tryPromise({
-          try: () => options.certifications.list(),
-          catch: (cause) =>
-            new ProviderCatalogError({
-              message: "Failed to read model certifications",
-              cause
-            })
-        })
+        const certifications = yield* loadCertifications(options)
         const connections = yield* options.connections
         const catalogConnections = yield* Effect.forEach(
           connections,
@@ -164,7 +195,7 @@ export const makeProviderCatalogService = (
           Effect.flatMap((catalog) =>
             catalog === null
               ? Effect.fail(error)
-              : Effect.succeed({ ...catalog, stale: true }).pipe(
+              : refreshCachedDecorations(options, catalog).pipe(
                   Effect.tap((stale) => Ref.set(lastGood, stale))
                 )
           )

@@ -115,7 +115,9 @@ describe("ProviderCatalogService", () => {
       selectable: true
     })
   })
+})
 
+describe("ProviderCatalogService certification", () => {
   it("surfaces unverified and stale models but does not select them", async () => {
     const certifications = new InMemoryModelCertificationStore()
     const service = await Effect.runPromise(makeProviderCatalogService({
@@ -158,7 +160,9 @@ describe("ProviderCatalogService", () => {
       selectable: false
     })
   })
+})
 
+describe("ProviderCatalogService refresh recovery", () => {
   it("returns the last good catalog as stale after a bounded refresh timeout", async () => {
     let hang = false
     let discoveryAborted = false
@@ -178,6 +182,34 @@ describe("ProviderCatalogService", () => {
     expect(discoveryAborted).toBe(true)
   })
 
+  it("redecorates cached models when certification changes during a failed refresh", async () => {
+    const certifications = new InMemoryModelCertificationStore()
+    let discoveryFails = false
+    const service = await Effect.runPromise(makeProviderCatalogService({
+      connections: Effect.succeed([connection]),
+      certifications,
+      discover: () =>
+        discoveryFails
+          ? Effect.fail(new ProviderCatalogError({ message: "discovery unavailable" }))
+          : Effect.succeed([model]),
+      targetAvailable: () => true
+    }))
+
+    expect((await Effect.runPromise(service.refresh)).connections[0]?.models[0]).toMatchObject({
+      verification: "unverified",
+      selectable: false
+    })
+    await certifications.put(certification())
+    discoveryFails = true
+
+    expect((await Effect.runPromise(service.refresh))).toMatchObject({
+      stale: true,
+      connections: [{ models: [{ verification: "certified", selectable: true }] }]
+    })
+  })
+})
+
+describe("ProviderCatalogService stale retries", () => {
   it("retries discovery after serving stale fallback data", async () => {
     let hang = false
     const discover = vi.fn(() =>
