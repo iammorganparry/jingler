@@ -997,8 +997,12 @@ describe("ReviewService — reset is atomic", () => {
 
   it("never replays the previous transcript in front of a starting run", async () => {
     let releaseClear: () => void = () => {}
+    let markClearStarted: () => void = () => {}
     const clearing = new Promise<void>((resolve) => {
       releaseClear = resolve
+    })
+    const clearStarted = new Promise<void>((resolve) => {
+      markClearStarted = resolve
     })
     // The last run's transcript, as it would sit on disk.
     let stored: ReadonlyArray<StreamEvent> = [
@@ -1020,7 +1024,8 @@ describe("ReviewService — reset is atomic", () => {
           }),
         // Parks INSIDE the reset — precisely the window under test.
         clearTranscript: () =>
-          Effect.promise(() => clearing).pipe(
+          Effect.sync(() => markClearStarted()).pipe(
+            Effect.zipRight(Effect.promise(() => clearing)),
             // biome-ignore lint/suspicious/useIterableCallbackReturn: Effect.map, not Array#map
             Effect.map(() => {
               stored = []
@@ -1033,7 +1038,7 @@ describe("ReviewService — reset is atomic", () => {
       Effect.gen(function* () {
         const run = yield* Effect.fork(ReviewService.run(INPUT))
         // The run is now parked mid-reset: buffer cleared, transcript not yet.
-        yield* Effect.sleep("50 millis")
+        yield* Effect.promise(() => clearStarted)
         const watcher = yield* Effect.fork(
           watchStream(INPUT.sessionId).pipe(
             Stream.timeout("250 millis"),
