@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -6,9 +7,10 @@ import { Schema } from "effect";
 import type { Page } from "@playwright/test";
 import { _electron as electron, type ElectronApplication } from "playwright";
 import { startBetterAuthTestServer } from "@jingler/server/test-support/better-auth-account";
+import { WorkspaceConfig } from "@jingler/core";
 import { showElectronWindow } from "./electron-window.js";
 import { appShell, createWorkspace } from "./fixtures.js";
-import { DESKTOP_ROOT, MAIN_ENTRY } from "./global-setup.js";
+import { MAIN_ENTRY } from "./global-setup.js";
 import {
   REAL_PROVIDER_TARGETS,
   type RealProviderTarget,
@@ -37,7 +39,40 @@ const openProviders = async (window: Page): Promise<void> => {
   ).toBeVisible();
 };
 
-const finishFreshOnboarding = async (window: Page): Promise<void> => {
+const startProviderAuthentication = async (
+  window: Page,
+  model: RealProviderTarget,
+): Promise<void> => {
+  if (model.route === "codex") {
+    test.skip(
+      !allowCodexReauthentication,
+      "Set JINGLER_REAL_CODEX_REAUTH=1 to explicitly start interactive Codex browser login.",
+    );
+    if (!allowCodexReauthentication) return;
+    await window.getByRole("button", { name: "Open browser" }).click();
+  } else {
+    test.skip(
+      !allowClaudeReauthentication,
+      "Set JINGLER_REAL_CLAUDE_REAUTH=1 to explicitly allow headed Claude setup-token entry.",
+    );
+    if (!allowClaudeReauthentication) return;
+    const token = window.getByPlaceholder("Claude setup-token");
+    await window.bringToFront();
+    await token.focus();
+  }
+
+  await expect
+    .poll(
+      () => window.getByText(model.connectionLabel, { exact: true }).count(),
+      { timeout: 5 * 60_000 },
+    )
+    .toBeGreaterThan(1);
+};
+
+const finishFreshOnboarding = async (
+  window: Page,
+  model: RealProviderTarget,
+): Promise<void> => {
   const providerStep = window.getByRole("heading", {
     name: "Connect a model provider",
   });
@@ -47,22 +82,66 @@ const finishFreshOnboarding = async (window: Page): Promise<void> => {
   if (!(await providerStep.isVisible())) return;
 
   await window.bringToFront();
+  await startProviderAuthentication(window, model);
+  await window.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    window.getByRole("heading", { name: "Import agent resources" }),
+  ).toBeVisible({ timeout: 30_000 });
+  await window.getByRole("button", { name: "Skip for now" }).click();
   await expect(appShell(window)).toBeVisible({ timeout: 10 * 60_000 });
+};
+
+const prepareCanaryRepo = (home: string): string => {
+  const repo = join(resolve(home), "repos", "pi-real-canary");
+  mkdirSync(repo, { recursive: true, mode: 0o700 });
+  if (existsSync(join(repo, ".git"))) return repo;
+
+  execFileSync("git", ["init", "--quiet", repo]);
+  execFileSync("git", ["-C", repo, "config", "user.name", "Jingler QA"]);
+  execFileSync("git", ["-C", repo, "config", "user.email", "qa@jingler.test"]);
+  writeFileSync(join(repo, "README.md"), "# Jingler real pi canary\n");
+  execFileSync("git", ["-C", repo, "add", "README.md"]);
+  execFileSync("git", [
+    "-C",
+    repo,
+    "commit",
+    "--quiet",
+    "-m",
+    "Initial QA fixture",
+  ]);
+  return repo;
 };
 
 const prepareRealProviderHome = (home: string): void => {
   const root = join(resolve(home), "jingler");
-  const config = join(root, "config.json");
-  if (existsSync(config)) return;
-
+  const reposDir = join(resolve(home), "repos");
+  const repo = prepareCanaryRepo(home);
+  const configFile = join(root, "config.json");
+  const now = new Date().toISOString();
   mkdirSync(root, { recursive: true, mode: 0o700 });
+  const current = existsSync(configFile)
+    ? Schema.decodeUnknownSync(Schema.parseJson(WorkspaceConfig))(
+        readFileSync(configFile, "utf8"),
+      )
+    : { reposDir, createdAt: now };
   writeFileSync(
-    config,
+    configFile,
+    JSON.stringify({ ...current, reposDir, lastRepoPath: repo }, null, 2),
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(root, "projects.json"),
     JSON.stringify(
-      {
-        reposDir: resolve(DESKTOP_ROOT, "../../.."),
-        createdAt: new Date().toISOString(),
-      },
+      [
+        {
+          id: "p_real_pi_canary",
+          name: "pi-real-canary",
+          path: repo,
+          availability: "available",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
       null,
       2,
     ),
@@ -72,11 +151,15 @@ const prepareRealProviderHome = (home: string): void => {
 
 const selectConnection = async (
   window: Page,
-  connectionLabel: string,
+  model: RealProviderTarget,
 ): Promise<void> => {
   const connection = window
     .getByRole("button")
-    .filter({ hasText: connectionLabel });
+    .filter({ hasText: model.connectionLabel });
+  if (!(await connection.count())) {
+    await window.getByRole("button", { name: "Add connection" }).click();
+    await startProviderAuthentication(window, model);
+  }
   await expect(connection).toBeVisible();
   await connection.click();
 };
@@ -143,7 +226,7 @@ const certifyModel = async (
   window: Page,
   model: RealProviderTarget,
 ): Promise<void> => {
-  await selectConnection(window, model.connectionLabel);
+  await selectConnection(window, model);
   await ensureAuthenticated(window, model);
   const row = modelRow(window, model);
   await expect(row).toContainText(model.label);
@@ -243,7 +326,10 @@ const runRestartContinuation = async (
   });
 };
 
-const launchRealProviderApp = async (home: string) => {
+const launchRealProviderApp = async (
+  home: string,
+  model: RealProviderTarget,
+) => {
   // Product sign-in is orthogonal to provider billing. Use Better Auth's real
   // test-account support, but leave provider credentials on production
   // safeStorage and make first-run provider authentication explicitly manual.
@@ -262,7 +348,13 @@ const launchRealProviderApp = async (home: string) => {
     };
     const app = await (async () => {
       if (realProviderExecutable._tag === "None") {
-        return electron.launch({ args: [MAIN_ENTRY], env });
+        return electron.launch({
+          args: [
+            MAIN_ENTRY,
+            `--user-data-dir=${resolve(home, "chromium-real-provider")}`,
+          ],
+          env,
+        });
       }
       const executablePath = resolve(realProviderExecutable.value);
       if (!existsSync(executablePath)) {
@@ -282,7 +374,7 @@ const launchRealProviderApp = async (home: string) => {
       await showElectronWindow(app);
     }
     await signInToProduct(app, window, auth.token);
-    await finishFreshOnboarding(window);
+    await finishFreshOnboarding(window, model);
     await openProviders(window);
     return { app, auth, window };
   } catch (cause) {
@@ -301,7 +393,7 @@ test.describe("real current provider models", () => {
     test(`certifies ${model.label} through production pi`, async () => {
       test.setTimeout(12 * 60_000);
       if (!realProviderHome) throw new Error("Real provider home is required");
-      const first = await launchRealProviderApp(realProviderHome);
+      const first = await launchRealProviderApp(realProviderHome, model);
       let expected: string;
       let changedPath: string;
       try {
@@ -313,7 +405,7 @@ test.describe("real current provider models", () => {
         await first.auth.close();
       }
 
-      const restarted = await launchRealProviderApp(realProviderHome);
+      const restarted = await launchRealProviderApp(realProviderHome, model);
       try {
         await runRestartContinuation(restarted.window, expected, changedPath);
       } finally {

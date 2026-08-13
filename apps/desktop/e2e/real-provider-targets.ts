@@ -21,18 +21,18 @@ const target = (input: RealProviderTarget): RealProviderTarget =>
 // together instead of silently testing whichever model happens to sort first.
 export const REAL_PROVIDER_TARGETS: ReadonlyArray<RealProviderTarget> = [
   target({
-    route: "claude",
-    providerId: "anthropic",
-    modelId: "anthropic/claude-fable-5",
-    connectionLabel: "Claude Pro / Max setup-token",
-    label: "Claude Fable 5",
-  }),
-  target({
     route: "codex",
     providerId: "openai-codex",
     modelId: "openai-codex/gpt-5.6-sol",
     connectionLabel: "ChatGPT Codex subscription",
     label: "GPT-5.6 Sol",
+  }),
+  target({
+    route: "claude",
+    providerId: "anthropic",
+    modelId: "anthropic/claude-fable-5",
+    connectionLabel: "Claude Pro / Max setup-token",
+    label: "Claude Fable 5",
   }),
 ];
 
