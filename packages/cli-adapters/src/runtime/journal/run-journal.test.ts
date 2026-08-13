@@ -54,4 +54,18 @@ describe("RunJournal", () => {
     ], { concurrency: "unbounded" }))
     expect(await Effect.runPromise(value.list())).toHaveLength(2)
   })
+
+  it("atomically records a denied mutation as terminal and non-retryable", async () => {
+    const { value } = await journal()
+    await Effect.runPromise(value.denied({ ...identity, callId: "denied-1", runId: "run-1", toolId: "workspace.edit", risk: "mutate" }))
+    expect(await Effect.runPromise(value.list())).toEqual([
+      expect.objectContaining({
+        callId: "denied-1",
+        status: "denied",
+        failureCode: "permission-denied",
+        fileChangeSetIds: [],
+        safeToRetry: false
+      })
+    ])
+  })
 })

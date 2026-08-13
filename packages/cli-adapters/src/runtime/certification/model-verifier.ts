@@ -189,7 +189,13 @@ export const evaluateProviderModelBehavior = (
     const connection = verifiedConnection(input.connection, observation, verifiedAt)
     const target = {
       providerId: connection.providerId,
-      modelId: providerModelId
+      modelId: providerModelId,
+      capabilities: {
+        versions: CURRENT_RUNTIME_CONTRACTS,
+        toolIds: [],
+        resourceIds: [],
+        targetId: connection.targetId
+      }
     }
     const execute = input.runScenario ?? runPiScenario
     const traces = yield* Effect.forEach(

@@ -14,13 +14,13 @@ export const RuntimeContractVersions = Schema.Struct({
 export type RuntimeContractVersions = Schema.Schema.Type<typeof RuntimeContractVersions>
 
 export const CURRENT_RUNTIME_CONTRACTS: RuntimeContractVersions = {
-  behavior: "4",
-  authentication: "2",
+  behavior: "5",
+  authentication: "3",
   prompt: "1",
-  tools: "3",
+  tools: "4",
   diff: "1",
   policy: "1",
-  capabilities: "2",
+  capabilities: "3",
   piSdk: "0.84.1"
 }
 

@@ -11,6 +11,7 @@ import {
   type AuthKind,
   type PiRunSpec,
   type ProviderConnection as ProviderConnectionType,
+  type RuntimeCapabilityManifest,
   type StreamEvent
 } from "@jingler/core"
 import { Effect, Schema, Stream } from "effect"
@@ -252,7 +253,7 @@ const specFor = (input: {
       versions: CURRENT_RUNTIME_CONTRACTS,
       toolIds: registry?.capabilitiesFor("conversation", "ask").map((tool) => tool.id) ?? [],
       resourceIds: [],
-      targetId: "desktop"
+      targetId: target.capabilities.targetId
     }
   }
 }
@@ -293,16 +294,27 @@ const recordPreflight = (
   scenarioId: string,
   authKind: AuthKind,
   spec: PiRunSpec,
+  targetCapabilities: RuntimeCapabilityManifest,
   observations: Array<EvalObservation>
 ): void => {
   if (scenarioId === "auth.route-pinned") {
     observations.push({ kind: "auth-route", route: authKind })
   }
   if (scenarioId !== "remote.contract-compatible") return
-  if (!runtimeCapabilitiesMatch(spec.targetCapabilities, spec.targetCapabilities)) {
-    throw new Error("deterministic target contract did not match itself")
+  observations.push(recordRemoteContractObservation(
+    spec.targetCapabilities,
+    targetCapabilities
+  ))
+}
+
+export const recordRemoteContractObservation = (
+  expected: RuntimeCapabilityManifest,
+  actual: RuntimeCapabilityManifest
+): EvalObservation => {
+  if (!runtimeCapabilitiesMatch(expected, actual)) {
+    throw new Error("execution target runtime contract mismatch")
   }
-  observations.push({ kind: "event", tag: "RemoteContractAccepted" })
+  return { kind: "event", tag: "RemoteContractAccepted" }
 }
 
 interface ScenarioExecution {
@@ -315,13 +327,20 @@ interface ScenarioExecution {
   readonly registry: ToolRegistry | undefined
   readonly spec: PiRunSpec
   readonly context: AgentRuntimeContext
+  readonly targetCapabilities: RuntimeCapabilityManifest
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
 }
 
 const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => {
   const { scenarioId, startedAt, root, observations, connection } = input
   const { credentials, registry, spec, context } = input
-  recordPreflight(scenarioId, connection.authKind, spec, observations)
+  recordPreflight(
+    scenarioId,
+    connection.authKind,
+    spec,
+    input.targetCapabilities,
+    observations
+  )
   const tracker = registry?.hasMutatingTools(spec.role, spec.mode)
     ? new FileChangeTracker({
         artifactDir: join(root, ".jingler/terminal-diffs"),
@@ -354,6 +373,7 @@ const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => 
 export interface PiScenarioTarget {
   readonly providerId: string
   readonly modelId: string
+  readonly capabilities: RuntimeCapabilityManifest
 }
 
 export interface RunPiScenarioInput {
@@ -384,6 +404,7 @@ export const runPiScenario = async (input: RunPiScenarioInput): Promise<EvalTrac
       registry,
       spec,
       context,
+      targetCapabilities: target.capabilities,
       ...(input.configureModelRuntime ? { configureModelRuntime: input.configureModelRuntime } : {})
     })
   } finally {

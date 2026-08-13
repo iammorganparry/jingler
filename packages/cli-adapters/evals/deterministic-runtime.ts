@@ -1,4 +1,5 @@
 import {
+  CURRENT_RUNTIME_CONTRACTS,
   ProviderConnection,
   type AuthKind,
   type ProviderConnection as ProviderConnectionType
@@ -66,7 +67,16 @@ export const runDeterministicScenario = async (scenarioId: string) => {
     scenarioId,
     connection,
     credentials,
-    target: { providerId: fake.providerId, modelId: fake.modelId },
+    target: {
+      providerId: fake.providerId,
+      modelId: fake.modelId,
+      capabilities: {
+        versions: CURRENT_RUNTIME_CONTRACTS,
+        toolIds: [],
+        resourceIds: [],
+        targetId: "desktop"
+      }
+    },
     configureModelRuntime: (runtime) => fake.install(runtime)
   })
 }

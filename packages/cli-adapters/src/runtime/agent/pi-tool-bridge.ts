@@ -6,7 +6,11 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import type { PiRunSpec } from "@jingler/core"
 import { Effect, JSONSchema } from "effect"
-import type { ToolRegistry, ToolResultEnvelope } from "../tools/tool-registry.js"
+import type {
+  ToolExecutionRequest,
+  ToolRegistry,
+  ToolResultEnvelope
+} from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 
 const renderResult = (result: ToolResultEnvelope): string => {
@@ -34,6 +38,26 @@ const executeTool = async (
   const { registry, spec, context, id, toolCallId, parameters, signal, onUpdate } =
     input
   const risk = registry.riskFor(id)
+  const request: ToolExecutionRequest = {
+    id,
+    arguments: parameters,
+    role: spec.role,
+    mode: spec.mode,
+    signal,
+    callId: toolCallId,
+    idempotencyKey: toolCallId,
+    progress: (progress) =>
+      onUpdate?.({
+        content: [{ type: "text", text: progress.message }],
+        details: {
+          status: "success",
+          value: progress,
+          preview: progress.message,
+          artifact: null,
+          error: null
+        }
+      })
+  }
   const requiresPermission = risk !== null && risk !== "read"
   const permitted = requiresPermission
     ? await Effect.runPromise(
@@ -41,37 +65,10 @@ const executeTool = async (
       )
     : "allow"
   if (permitted !== "allow") {
-    const denied: ToolResultEnvelope = {
-      status: "error",
-      value: null,
-      preview: null,
-      artifact: null,
-      error: { code: "forbidden", message: "Permission denied", retryable: false }
-    }
+    const denied = await Effect.runPromise(registry.deny(request))
     return { content: [{ type: "text", text: renderResult(denied) }], details: denied }
   }
-  const result = await Effect.runPromise(
-    registry.execute({
-      id,
-      arguments: parameters,
-      role: spec.role,
-      mode: spec.mode,
-      signal,
-      callId: toolCallId,
-      idempotencyKey: toolCallId,
-      progress: (progress) =>
-        onUpdate?.({
-          content: [{ type: "text", text: progress.message }],
-          details: {
-            status: "success",
-            value: progress,
-            preview: progress.message,
-            artifact: null,
-            error: null
-          }
-        })
-    })
-  )
+  const result = await Effect.runPromise(registry.execute(request))
   return { content: [{ type: "text", text: renderResult(result) }], details: result }
 }
 

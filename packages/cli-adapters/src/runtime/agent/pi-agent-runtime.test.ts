@@ -136,6 +136,90 @@ describe("PiAgentRuntime", () => {
     expect([...events].map((event) => event._tag)).toEqual(["Started", "Assistant", "Done"])
   })
 
+  it("keeps a provider error provisional when pi retries successfully", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    const handle: PiSessionHandle = {
+      id: "pi-session-retry",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt: async () => {
+        listener?.({
+          type: "message_update",
+          message: {} as never,
+          assistantMessageEvent: {
+            type: "error",
+            reason: "error",
+            error: { errorMessage: "rate limited" }
+          } as never
+        })
+        listener?.({
+          type: "auto_retry_end",
+          attempt: 1,
+          success: true
+        })
+        listener?.({ type: "agent_settled" })
+      },
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      usage: () => ({ costUsd: 0, tokens: 3 })
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
+
+    expect(events.map((event) => event._tag)).toEqual([
+      "Started",
+      "RetryFinished",
+      "Done"
+    ])
+  })
+
+  it("reconciles before settling an unrecovered provider failure", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    const reconcile = vi.fn(async () => null)
+    const handle: PiSessionHandle = {
+      id: "pi-session-provider-failure",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt: async () => {
+        listener?.({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "provider unavailable"
+          } as never
+        })
+        listener?.({ type: "agent_settled" })
+      },
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      usage: () => ({ costUsd: 0, tokens: 0 }),
+      reconcile
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
+
+    expect(reconcile).toHaveBeenCalledOnce()
+    expect(events.at(-1)).toEqual({
+      _tag: "Failed",
+      message: "provider unavailable"
+    })
+  })
+
   it("streams schema-validated plan tool arguments as volatile plan drafts", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const plan = {

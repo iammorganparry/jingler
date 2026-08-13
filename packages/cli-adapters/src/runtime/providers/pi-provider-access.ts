@@ -6,7 +6,8 @@ import {
   type Credential,
   type CredentialInfo,
   type CredentialStore,
-  type Model
+  type Model,
+  type ProviderResponse
 } from "@earendil-works/pi-ai"
 import {
   ProviderId,
@@ -88,19 +89,6 @@ const entitlementModel = async (
   return selectEntitlementModel(models, authKind)
 }
 
-const routeLabel = (authKind: AuthKind): string => {
-  switch (authKind) {
-    case "claude-setup-token":
-      return "claude-oauth"
-    case "openai-codex-oauth":
-      return "chatgpt-subscription"
-    case "api-key":
-      return "api-key"
-    case "device-environment":
-      return "device-environment"
-  }
-}
-
 const redactedEndpoint = (baseUrl: string): string => {
   const endpoint = new URL(baseUrl)
   endpoint.username = ""
@@ -110,11 +98,42 @@ const redactedEndpoint = (baseUrl: string): string => {
   return endpoint.toString().replace(/\/$/u, "")
 }
 
-const observedRoute = (
+interface ObservedProviderRoute {
+  readonly provider: string
+  readonly api: string
+  readonly baseUrl: string
+}
+
+/** Classify only routes established by the actual provider response path. */
+export const classifyObservedBillingRoute = (
   authKind: AuthKind,
-  model: Awaited<ReturnType<typeof entitlementModel>>
+  model: ObservedProviderRoute
+): EntitlementProbeResult["billingRoute"] => {
+  if (authKind === "api-key") return "api"
+  if (authKind === "device-environment") return "device-environment"
+  const endpoint = new URL(model.baseUrl)
+  if (
+    authKind === "openai-codex-oauth" &&
+    model.provider === "openai-codex" &&
+    model.api === "openai-codex-responses" &&
+    endpoint.hostname === "chatgpt.com" &&
+    endpoint.pathname.startsWith("/backend-api")
+  ) return "subscription"
+  // pi warns this route uses paid per-token extra usage, not Claude plan limits.
+  if (
+    authKind === "claude-setup-token" &&
+    model.provider === "anthropic" &&
+    model.api === "anthropic-messages" &&
+    endpoint.hostname === "api.anthropic.com"
+  ) return "api"
+  return null
+}
+
+const observedRoute = (
+  model: ObservedProviderRoute,
+  response: ProviderResponse
 ): string =>
-  `${routeLabel(authKind)}:${model.api}:${redactedEndpoint(model.baseUrl)}`
+  `${model.provider}:${model.api}:${redactedEndpoint(model.baseUrl)}:http-${response.status}`
 
 /** Verify entitlement with a minimal request through only the selected auth route. */
 export const probePiEntitlement = async (input: {
@@ -138,6 +157,7 @@ export const probePiEntitlement = async (input: {
     input.authKind,
     input.signal
   )
+  let providerResponse: ProviderResponse | null = null
   const response = await runtime.completeSimple(
     model,
     {
@@ -145,23 +165,37 @@ export const probePiEntitlement = async (input: {
         { role: "user", content: "Reply with OK.", timestamp: Date.now() }
       ]
     },
-    { signal: input.signal }
+    {
+      signal: input.signal,
+      onResponse: (observed, responseModel) => {
+        if (
+          responseModel.provider === model.provider &&
+          responseModel.api === model.api &&
+          responseModel.baseUrl === model.baseUrl
+        ) providerResponse = observed
+      }
+    }
   )
   if (response.stopReason === "error" || response.stopReason === "aborted") {
     throw new Error(response.errorMessage ?? "Provider entitlement probe failed")
   }
+  if (providerResponse === null) {
+    throw new Error("Provider entitlement probe returned no observable HTTP route")
+  }
+  const billingRoute = classifyObservedBillingRoute(input.authKind, model)
+  const intendedSubscription =
+    input.authKind === "claude-setup-token" ||
+    input.authKind === "openai-codex-oauth"
   return {
-    entitlement: "active",
+    entitlement:
+      intendedSubscription && billingRoute !== "subscription"
+        ? "requires-api-credits"
+        : "active",
     planLabel: null,
     quotaLabel: null,
     rateLimitLabel: null,
-    billingRoute:
-      input.authKind === "api-key"
-        ? "api"
-        : input.authKind === "device-environment"
-          ? "device-environment"
-          : "subscription",
-    observedRoute: observedRoute(input.authKind, model)
+    billingRoute,
+    observedRoute: observedRoute(model, providerResponse)
   }
 }
 

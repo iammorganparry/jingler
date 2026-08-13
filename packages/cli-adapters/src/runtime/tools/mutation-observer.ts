@@ -103,11 +103,40 @@ const settleMutation = (
     return changes
   })
 
+const denyMutation = (
+  options: MutationObserverOptions,
+  request: ToolExecutionRequest,
+  risk: ToolRisk
+): Effect.Effect<void, ToolError> => {
+  const callId = callIdFor(request)
+  if (!callId) {
+    return Effect.fail(
+      new ToolError("invalid-input", "Mutation tool requires a call id")
+    )
+  }
+  return options.journal
+    .denied({
+      callId,
+      runId: options.runId,
+      sessionId: options.sessionId,
+      chatId: options.chatId,
+      toolId: request.id,
+      risk,
+      targetCategory: "workspace"
+    })
+    .pipe(
+      Effect.mapError(
+        (cause) => new ToolError("execution-failed", cause.message, false)
+      )
+    )
+}
+
 /** Couple actual worktree evidence and durable receipts around mutating tools. */
 export const createMutationObserver = (
   options: MutationObserverOptions
 ): ToolExecutionObserver => ({
   started: (request, risk) => startMutation(options, request, risk),
   settled: (request, _risk, state, result) =>
-    settleMutation(options, request, state, result)
+    settleMutation(options, request, state, result),
+  denied: (request, risk) => denyMutation(options, request, risk)
 })

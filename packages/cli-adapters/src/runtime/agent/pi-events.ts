@@ -74,11 +74,26 @@ const normalizeMessageUpdate = (
   if (update.type === "thinking_end") {
     return { _tag: "Thinking", text: "", seconds: null, done: true }
   }
-  if (update.type === "error") {
-    return {
-      _tag: "Failed",
-      message: update.error.errorMessage ?? "Provider request failed"
-    }
+  return null
+}
+
+/** Provider errors are provisional until pi settles after its retry policy. */
+export const piProviderFailure = (event: AgentSessionEvent): string | null => {
+  if (
+    event.type === "message_update" &&
+    event.assistantMessageEvent.type === "error"
+  ) {
+    return event.assistantMessageEvent.error.errorMessage ?? "Provider request failed"
+  }
+  if (
+    event.type === "message_end" &&
+    event.message.role === "assistant" &&
+    event.message.stopReason === "error"
+  ) {
+    return event.message.errorMessage ?? "Provider request failed"
+  }
+  if (event.type === "auto_retry_end" && !event.success) {
+    return event.finalError ?? "Provider request failed"
   }
   return null
 }
@@ -104,12 +119,7 @@ const normalizeMessageEnd = (
   contextWindow?: number
 ): StreamEvent | null => {
   if (event.message.role !== "assistant") return null
-  if (event.message.stopReason === "error") {
-    return {
-      _tag: "Failed",
-      message: event.message.errorMessage ?? "Provider request failed"
-    }
-  }
+  if (event.message.stopReason === "error") return null
   return {
     _tag: "Usage",
     tokens: event.message.usage.totalTokens,

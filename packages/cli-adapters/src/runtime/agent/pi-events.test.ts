@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizePiEvent } from "./pi-events.js"
+import { normalizePiEvent, piProviderFailure } from "./pi-events.js"
 
 describe("pi event normalization", () => {
   it("normalizes streamed text and tool lifecycle", () => {
@@ -39,9 +39,9 @@ describe("pi event normalization", () => {
     })
   })
 
-  it("normalizes provider failures without exposing reasoning", () => {
+  it("holds provider failures outside the stream until pi settles", () => {
     expect(
-      normalizePiEvent({
+      piProviderFailure({
         type: "message_update",
         message: {} as never,
         assistantMessageEvent: {
@@ -50,10 +50,10 @@ describe("pi event normalization", () => {
           error: { errorMessage: "rate limited" }
         } as never
       })
-    ).toEqual({ _tag: "Failed", message: "rate limited" })
+    ).toBe("rate limited")
 
     expect(
-      normalizePiEvent({
+      piProviderFailure({
         type: "message_end",
         message: {
           role: "assistant",
@@ -80,7 +80,7 @@ describe("pi event normalization", () => {
           timestamp: 0
         }
       })
-    ).toEqual({ _tag: "Failed", message: "invalid provider tool schema" })
+    ).toBe("invalid provider tool schema")
   })
 
   it("includes the resolved model context window in usage", () => {

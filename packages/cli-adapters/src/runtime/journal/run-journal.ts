@@ -93,6 +93,36 @@ export class RunJournal {
     )
   }
 
+  denied(input: {
+    readonly callId: string
+    readonly runId: string
+    readonly sessionId: string
+    readonly chatId: string
+    readonly toolId: string
+    readonly risk: ToolRisk
+    readonly targetCategory?: string | null
+  }): Effect.Effect<void, RunJournalError> {
+    const timestamp = this.#now().toISOString()
+    const receipt: RunReceipt = {
+      ...input,
+      targetCategory: input.targetCategory ?? null,
+      status: "denied",
+      startedAt: timestamp,
+      settledAt: timestamp,
+      resultSummary: "permission denied",
+      failureCode: "permission-denied",
+      fileChangeSetIds: [],
+      safeToRetry: false
+    }
+    return journalEffect("Failed to record denied run receipt", () =>
+      this.#document.update((current) => {
+        if (current.some((item) => item.callId === input.callId))
+          throw new Error(`duplicate call id: ${input.callId}`)
+        return [...current, receipt]
+      })
+    )
+  }
+
   settle(input: {
     readonly callId: string
     readonly status: Exclude<RunReceiptStatus, "started" | "uncertain">

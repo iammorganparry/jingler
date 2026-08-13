@@ -11,7 +11,10 @@ const spec = {
   mode: "ask"
 } as const
 
-const mutationRegistry = (execute: () => Promise<unknown>): ToolRegistry => {
+const mutationRegistry = (
+  execute: () => Promise<unknown>,
+  denied: () => Effect.Effect<void> = () => Effect.void
+): ToolRegistry => {
   const registry = new ToolRegistry({
     observer: {
       started: () => Effect.succeed({ cwd: "/workspace", tree: "tree-before" }),
@@ -23,7 +26,8 @@ const mutationRegistry = (execute: () => Promise<unknown>): ToolRegistry => {
           totals: { added: 0, removed: 0 },
           authoritative: true,
           reconciledAt: "2026-08-10T00:00:00.000Z"
-        })
+        }),
+      denied
     }
   })
   registry.register({
@@ -103,7 +107,8 @@ describe("pi tool bridge", () => {
 describe("pi tool permission denial", () => {
   it("does not execute a denied mutation", async () => {
     const execute = vi.fn(async () => null)
-    const registry = mutationRegistry(execute)
+    const denied = vi.fn(() => Effect.void)
+    const registry = mutationRegistry(execute, denied)
     const context: AgentRuntimeContext = {
       ...inactiveRuntimeActivity,
       canUseTool: () => Effect.succeed("deny"),
@@ -121,6 +126,7 @@ describe("pi tool permission denial", () => {
       {} as never
     )
     expect(execute).not.toHaveBeenCalled()
+    expect(denied).toHaveBeenCalledOnce()
     expect(result?.details).toMatchObject({
       status: "error",
       error: { code: "forbidden" }

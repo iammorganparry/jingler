@@ -119,6 +119,10 @@ export interface ToolExecutionObserver {
     state: WorktreeSnapshot,
     result: ToolResultEnvelope
   ) => Effect.Effect<FileChangeSet, ToolError>
+  readonly denied?: (
+    request: ToolExecutionRequest,
+    risk: ToolRisk
+  ) => Effect.Effect<void, ToolError>
 }
 
 const readOnlyRole = (role: AgentRole): boolean => role === "plan" || role === "review"
@@ -312,6 +316,27 @@ export class ToolRegistry {
 
   execute(input: ToolExecutionRequest): Effect.Effect<ToolResultEnvelope> {
     return Effect.promise(() => this.#execute(input))
+  }
+
+  deny(input: ToolExecutionRequest): Effect.Effect<ToolResultEnvelope> {
+    return Effect.promise(() => this.#deny(input))
+  }
+
+  async #deny(input: ToolExecutionRequest): Promise<ToolResultEnvelope> {
+    const tool = this.#tools.get(input.id)
+    if (!tool) return errorEnvelope(new ToolError("forbidden", `Unknown tool: ${input.id}`))
+    if (mutatingRisk(tool.risk) && this.#options.observer?.denied) {
+      try {
+        await Effect.runPromise(this.#options.observer.denied(input, tool.risk))
+      } catch (error) {
+        return errorEnvelope(
+          error instanceof ToolError
+            ? error
+            : new ToolError("execution-failed", "Failed to journal permission denial")
+        )
+      }
+    }
+    return errorEnvelope(new ToolError("forbidden", "Permission denied"))
   }
 
   async #execute(input: ToolExecutionRequest): Promise<ToolResultEnvelope> {

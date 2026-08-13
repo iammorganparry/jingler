@@ -4,7 +4,7 @@ import { Effect, Option, Queue, Ref, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
-import { normalizePiEvent } from "./pi-events.js"
+import { normalizePiEvent, piProviderFailure } from "./pi-events.js"
 
 export interface PiSessionHandle {
   readonly id: string
@@ -30,6 +30,9 @@ export interface PiSessionFactory {
 interface EventSink {
   readonly emit: (event: StreamEvent) => void
   readonly beginSettling: () => boolean
+  readonly noteProviderFailure: (message: string) => void
+  readonly noteProviderRecovery: () => void
+  readonly terminalEvent: (usage: ReturnType<PiSessionHandle["usage"]>) => StreamEvent
 }
 
 const makeEventSink = (
@@ -38,6 +41,7 @@ const makeEventSink = (
 ): EventSink => {
   let terminal = false
   let settling = false
+  let providerFailure: string | null = null
   let emissions: Promise<void> = Promise.resolve()
   return {
     emit: (event) => {
@@ -53,7 +57,17 @@ const makeEventSink = (
       if (terminal || settling) return false
       settling = true
       return true
-    }
+    },
+    noteProviderFailure: (message) => {
+      providerFailure = message
+    },
+    noteProviderRecovery: () => {
+      providerFailure = null
+    },
+    terminalEvent: (usage) =>
+      providerFailure === null
+        ? { _tag: "Done", ...usage }
+        : { _tag: "Failed", message: providerFailure }
   }
 }
 
@@ -123,6 +137,16 @@ const subscribeToSession = (
   planDraft: PlanToolDraftStream
 ): (() => void) =>
   handle.subscribe((event) => {
+    const providerFailure = piProviderFailure(event)
+    if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
+    if (
+      (event.type === "auto_retry_end" && event.success) ||
+      (event.type === "message_end" &&
+        event.message.role === "assistant" &&
+        event.message.stopReason !== "error")
+    ) {
+      sink.noteProviderRecovery()
+    }
     const draft = projectPlanDraft(event, planDraft)
     if (draft) sink.emit(draft)
     const normalized = normalizePiEvent(event, handle.contextWindow ?? undefined)
@@ -131,7 +155,7 @@ const subscribeToSession = (
       Effect.runFork(
         reconcileWorkspace(handle, sink).pipe(
           Effect.tap(() =>
-            Effect.sync(() => sink.emit({ _tag: "Done", ...handle.usage() }))
+            Effect.sync(() => sink.emit(sink.terminalEvent(handle.usage())))
           ),
           Effect.catchAll((error) =>
             Effect.sync(() => sink.emit({ _tag: "Failed", message: error.message }))

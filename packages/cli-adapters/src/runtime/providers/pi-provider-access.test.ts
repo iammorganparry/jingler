@@ -1,9 +1,33 @@
 import type { Api, Model } from "@earendil-works/pi-ai"
 import { describe, expect, it } from "vitest"
 import {
+  classifyObservedBillingRoute,
   modelReasoningCapabilities,
   selectEntitlementModel,
 } from "./pi-provider-access.js"
+
+describe("observed provider billing routes", () => {
+  it("confirms Codex subscription only on the ChatGPT backend", () => {
+    expect(classifyObservedBillingRoute("openai-codex-oauth", {
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api"
+    })).toBe("subscription")
+    expect(classifyObservedBillingRoute("openai-codex-oauth", {
+      provider: "openai-codex",
+      api: "openai-responses",
+      baseUrl: "https://api.openai.com/v1"
+    })).toBeNull()
+  })
+
+  it("does not mislabel Anthropic paid extra usage as Claude plan usage", () => {
+    expect(classifyObservedBillingRoute("claude-setup-token", {
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com"
+    })).toBe("api")
+  })
+})
 
 const models = [
   { id: "claude-fable-5" },
