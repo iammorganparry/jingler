@@ -26,10 +26,10 @@ import type { SeedSession } from "./fixtures.js"
  * locator did: the rail opens and lists the file.
  */
 const expectFileRail = async (window: Page): Promise<void> => {
-  const heading = window.getByText("Changed files", { exact: true })
-  if (await heading.isVisible()) return
+  const rail = window.getByTestId("review-file-rail")
+  if (await rail.isVisible()) return
   await window.getByRole("button", { name: "Changed files" }).click({ timeout: 20_000 })
-  await expect(heading).toBeVisible({ timeout: 20_000 })
+  await expect(rail).toBeVisible({ timeout: 20_000 })
 }
 
 const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [

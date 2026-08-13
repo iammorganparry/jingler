@@ -33,6 +33,7 @@ const addProject = async (window: Page, projectPath: string) => {
   const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…")
   await directorySearch.fill(projectPath)
   await directorySearch.press("Enter")
+  await expect(window.getByText(projectPath, { exact: true })).toBeVisible()
   await window.getByRole("button", { name: "Choose current folder" }).click()
   await window.getByRole("button", { name: "Add project" }).click()
 }
