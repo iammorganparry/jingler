@@ -35,7 +35,12 @@ const model: DiscoveredProviderModel = {
   providerId,
   id: modelId,
   label: "Claude Sonnet",
-  capabilities: { contextWindow: 200_000, reasoning: ["medium"], vision: true }
+  capabilities: {
+    contextWindow: 200_000,
+    reasoning: ["medium"],
+    reasoningCanDisable: true,
+    vision: true
+  }
 }
 
 const certification = (overrides: Partial<ModelCertification> = {}): ModelCertification => ({

@@ -5,6 +5,10 @@ import { ProviderConnection, ProviderId, ProviderModelId } from "./provider-conn
 export const ProviderModelCapabilities = Schema.Struct({
   contextWindow: Schema.NullOr(Schema.Number),
   reasoning: Schema.Array(ReasoningEffort),
+  /** Whether pi reports the explicit `off` thinking level for this model. */
+  reasoningCanDisable: Schema.optional(Schema.Boolean),
+  /** Pi's resolved default after clamping its `medium` default to this model. */
+  reasoningDefault: Schema.optional(ReasoningEffort),
   vision: Schema.Boolean
 })
 export type ProviderModelCapabilities = Schema.Schema.Type<typeof ProviderModelCapabilities>

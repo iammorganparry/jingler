@@ -137,6 +137,7 @@ const e2eDiscoveredModel = (
   capabilities: {
     contextWindow: E2E_CONTEXT_WINDOW,
     reasoning: fixture.reasoning ?? [],
+    reasoningCanDisable: true,
     vision: false
   }
 })

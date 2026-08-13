@@ -1,5 +1,13 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent"
-import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai"
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+  type Api,
+  type Credential,
+  type CredentialInfo,
+  type CredentialStore,
+  type Model
+} from "@earendil-works/pi-ai"
 import {
   ProviderId,
   ProviderModelId,
@@ -157,8 +165,19 @@ export const probePiEntitlement = async (input: {
   }
 }
 
-const reasoningLevels = (enabled: boolean): ReadonlyArray<ReasoningEffort> =>
-  enabled ? ["low", "medium", "high"] : []
+export const modelReasoningCapabilities = (model: Model<Api>) => {
+  const levels = getSupportedThinkingLevels(model)
+  const resolvedDefault = clampThinkingLevel(model, "medium")
+  return {
+    reasoning: levels.filter(
+      (level): level is ReasoningEffort => level !== "off"
+    ),
+    reasoningCanDisable: levels.includes("off"),
+    ...(resolvedDefault === "off"
+      ? {}
+      : { reasoningDefault: resolvedDefault as ReasoningEffort })
+  }
+}
 
 /** Discover models through the connection-pinned credential store, never PATH. */
 export const discoverPiModels = (
@@ -183,7 +202,7 @@ export const discoverPiModels = (
           label: model.name,
           capabilities: {
             contextWindow: model.contextWindow,
-            reasoning: reasoningLevels(model.reasoning),
+            ...modelReasoningCapabilities(model),
             vision: model.input.includes("image")
           }
         })

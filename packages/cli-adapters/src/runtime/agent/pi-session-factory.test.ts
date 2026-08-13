@@ -133,6 +133,29 @@ describe("pi session creation", () => {
       })
     ])
   })
+
+  it("forwards the operator's model-native reasoning choice into pi", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-pi-reasoning-"))
+    roots.push(root)
+    const captured: CreateAgentSessionOptions[] = []
+    const factory = makePiSessionFactory({
+      agentDir: join(root, "agent"),
+      sessionsDir: join(root, "sessions"),
+      credentials: new InMemoryProviderCredentialStore(),
+      resolveConnection: () => Effect.succeed(connection),
+      createSession: async (options) => {
+        captured.push(options)
+        return { session: fakeSession(), extensionsResult: {} as never }
+      }
+    })
+
+    await Effect.runPromise(factory.create({
+      ...makeSpec(root),
+      reasoning: { enabled: true, effort: "high" }
+    }, {} as never))
+
+    expect(captured[0]?.thinkingLevel).toBe("high")
+  })
 })
 
 describe("pi session connection validation", () => {

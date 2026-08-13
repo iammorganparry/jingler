@@ -130,26 +130,35 @@ export function AgentsSettings(props: AgentsSettingsProps) {
           ) : props.resources.length === 0 ? (
             <p className="px-4 py-10 text-center text-[12px] text-muted-foreground">No managed resources imported.</p>
           ) : props.resources.map((resource) => (
-            <div key={resource.id} className="flex items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0">
+            <div
+              key={resource.id}
+              className="grid grid-cols-[36px_minmax(0,1fr)_44px_88px_88px] items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0"
+            >
               <span className="flex size-9 items-center justify-center rounded-md bg-sunken text-blue"><Boxes size={17} /></span>
               <div className="min-w-0 flex-1">
                 <strong className="block truncate text-[12px] text-text-bright">{resource.name}</strong>
                 <span className="text-[10px] text-muted-foreground">{resource.kind} · {scopeLabel(resource)} · {resource.trust}</span>
               </div>
-              <Toggle
-                checked={resource.enabled}
-                onCheckedChange={(enabled) => props.onSetEnabled(resource.id, enabled)}
-                aria-label={`${resource.enabled ? "Disable" : "Enable"} ${resource.name}`}
-                disabled={props.loading}
-              />
-              {resource.kind !== "mcp" && (
-                <Button variant="ghost" size="sm" onClick={() => props.onReveal(resource.id)} disabled={props.loading}>
-                  <FolderOpen size={13} /> Reveal
+              <span className="flex justify-center">
+                <Toggle
+                  checked={resource.enabled}
+                  onCheckedChange={(enabled) => props.onSetEnabled(resource.id, enabled)}
+                  aria-label={`${resource.enabled ? "Disable" : "Enable"} ${resource.name}`}
+                  disabled={props.loading}
+                />
+              </span>
+              <span className="flex justify-end">
+                {resource.kind !== "mcp" && (
+                  <Button variant="ghost" size="sm" onClick={() => props.onReveal(resource.id)} disabled={props.loading}>
+                    <FolderOpen size={13} /> Reveal
+                  </Button>
+                )}
+              </span>
+              <span className="flex justify-end">
+                <Button variant="ghost" size="sm" onClick={() => props.onRemove(resource.id)} disabled={props.loading}>
+                  <Trash2 size={13} /> Remove
                 </Button>
-              )}
-              <Button variant="ghost" size="sm" onClick={() => props.onRemove(resource.id)} disabled={props.loading}>
-                <Trash2 size={13} /> Remove
-              </Button>
+              </span>
             </div>
           ))}
         </div>

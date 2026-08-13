@@ -1,4 +1,5 @@
 import type {
+  AuthKind,
   CodexLoginMethod,
   DetectedResourceCandidate,
   GitHubConnection,
@@ -23,6 +24,7 @@ export interface SetupScreenProps {
   github: GitHubConnection
   providerCatalog?: ProviderCatalog | null
   providerLoginEvent?: ProviderLoginEvent | null
+  providerPendingAuthKind?: AuthKind | null
   resourceDetection?: ResourceDetectionResult | null
   error?: string | null
   repos?: ReadonlyArray<Repo>
@@ -68,6 +70,7 @@ export function SetupScreen({
   github,
   providerCatalog = null,
   providerLoginEvent = null,
+  providerPendingAuthKind = null,
   resourceDetection = null,
   error = null,
   repos = [],
@@ -201,6 +204,7 @@ export function SetupScreen({
             catalog={providerCatalog}
             loginEvent={providerLoginEvent}
             busy={busy}
+            pendingAuthKind={providerPendingAuthKind}
             error={error}
             onConnectClaude={onConnectClaude}
             onStartCodex={onStartCodex}

@@ -71,7 +71,7 @@ test("offers the same Jingler permission modes for every certified model", async
   await launched.window.getByRole("button", { name: "Accept Edits", exact: true }).click()
   await expect(launched.window.getByRole("option", { name: /^Ask Before Actions\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Accept Edits\b/ })).toBeVisible()
-  await expect(launched.window.getByRole("option", { name: /^Full Access\b/ })).toBeVisible()
+  await expect(launched.window.getByRole("option", { name: /^Auto\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Enhanced Plan\b/ })).toBeVisible()
 })
 
@@ -99,7 +99,7 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
   })
   await expect(appShell(first.window)).toBeVisible()
   await first.window.getByRole("button", { name: "Accept Edits", exact: true }).click()
-  await first.window.getByRole("option", { name: /^Full Access\b/ }).click()
+  await first.window.getByRole("option", { name: /^Auto\b/ }).click()
   await first.window.getByRole("button", { name: "Thinking strength" }).click()
   await first.window.getByRole("option", { name: "High", exact: true }).click()
 
@@ -129,7 +129,7 @@ test("persists mode and chat reasoning across restart", async ({ launchApp }) =>
   })
   await expect(appShell(reopened.window)).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })).toBeVisible()
-  await expect(reopened.window.getByRole("button", { name: "Full Access" })).toBeVisible()
+  await expect(reopened.window.getByRole("button", { name: "Auto" })).toBeVisible()
   await expect(reopened.window.getByRole("button", { name: "Thinking strength" })).toContainText("High")
 })
 

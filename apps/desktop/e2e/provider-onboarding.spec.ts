@@ -4,6 +4,10 @@ import { appShell, expect, test, type LaunchedApp } from "./fixtures.js";
 
 const SUBSCRIPTION_ENTITLEMENT = /Test subscription · subscription/;
 const SUBSCRIPTION_BILLING = /billing: subscription/;
+const DETERMINISTIC_MODEL = /^Deterministic pi model 1/u;
+const PROVIDERS_NAV = /Providers/u;
+const STALE_MODEL_TITLE = / · stale$/u;
+const CERTIFIED_MODEL_TITLE = / · certified$/u;
 const chooseFixtureRepo = async (launched: LaunchedApp): Promise<void> => {
   await launched.app.evaluate(({ dialog }, selected) => {
     dialog.showOpenDialog = async () => ({
@@ -34,6 +38,13 @@ const finishProviderSetup = async (
   await expect(
     launched.window.getByRole("button", { name: "Verify model" }),
   ).toHaveCount(0);
+  await expect(launched.window.getByText("Add another account")).toBeVisible();
+  await expect(
+    launched.window.getByPlaceholder("Claude setup-token"),
+  ).toBeHidden();
+  await expect(
+    launched.window.getByRole("button", { name: "Open browser" }),
+  ).toBeHidden();
   await launched.window.getByRole("button", { name: "Continue" }).click();
   await expect(
     launched.window.getByRole("heading", { name: "Import agent resources" }),
@@ -161,7 +172,7 @@ test("reconnects a restored subscription whose encrypted credential is missing",
             id: connectionId,
             providerId: "openai-codex",
             authKind: "openai-codex-oauth",
-            account: { fingerprint: "missing123456", displayLabel: null },
+            account: { fingerprint: "missing-credential", displayLabel: null },
             targetId: "desktop",
             status: "authenticated",
             subscription: {
@@ -182,7 +193,7 @@ test("reconnects a restored subscription whose encrypted credential is missing",
 
   await launched.window.getByRole("button", { name: "Account menu" }).click();
   await launched.window.getByRole("menuitem", { name: "Settings" }).click();
-  await launched.window.getByRole("button", { name: /Providers/u }).click();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
   await expect(
     launched.window.getByText(
       "Reauthentication required. Jingler has not retained usable credentials for this connection.",
@@ -197,7 +208,7 @@ test("reconnects a restored subscription whose encrypted credential is missing",
     launched.window.getByText(SUBSCRIPTION_BILLING),
   ).toBeVisible();
   await expect(
-    launched.window.getByRole("button", { name: "Verify" }),
+    launched.window.getByRole("button", { name: DETERMINISTIC_MODEL }),
   ).toBeVisible();
 });
 
@@ -217,7 +228,7 @@ test("adds a provider from settings after provider onboarding was skipped", asyn
 
   await launched.window.getByRole("button", { name: "Account menu" }).click();
   await launched.window.getByRole("menuitem", { name: "Settings" }).click();
-  await launched.window.getByRole("button", { name: /Providers/u }).click();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
   await expect(
     launched.window.getByText("Add a provider connection"),
   ).toBeVisible();
@@ -228,7 +239,7 @@ test("adds a provider from settings after provider onboarding was skipped", asyn
     launched.window.getByText("ChatGPT Codex subscription", { exact: true }).last(),
   ).toBeVisible();
   await expect(
-    launched.window.getByRole("button", { name: "Verify" }),
+    launched.window.getByRole("button", { name: DETERMINISTIC_MODEL }),
   ).toBeVisible();
 });
 
@@ -245,8 +256,8 @@ test("adds a second provider connection from settings", async ({ launchApp }) =>
 
   await launched.window.getByRole("button", { name: "Account menu" }).click();
   await launched.window.getByRole("menuitem", { name: "Settings" }).click();
-  await launched.window.getByRole("button", { name: /Providers/u }).click();
-  await launched.window.getByRole("button", { name: "Add connection" }).click();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
+  await launched.window.getByRole("button", { name: "Add account" }).click();
   await launched.window.getByRole("button", { name: "Open browser" }).click();
 
   await expect(
@@ -275,15 +286,19 @@ test("reverifies the stale canonical default model from provider settings", asyn
 
   await launched.window.getByRole("button", { name: "Account menu" }).click();
   await launched.window.getByRole("menuitem", { name: "Settings" }).click();
-  await launched.window.getByRole("button", { name: /Providers/u }).click();
-  await expect(launched.window.getByText("jingler-e2e/eval-model · stale")).toBeVisible();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
+  const modelChip = launched.window.getByRole("button", {
+    name: DETERMINISTIC_MODEL,
+  });
+  await expect(modelChip).toBeVisible();
+  await expect(modelChip).toHaveAttribute("title", STALE_MODEL_TITLE);
 
-  await launched.window.getByRole("button", { name: "Verify" }).click();
+  await modelChip.click();
 
-  await expect(launched.window.getByText("jingler-e2e/eval-model · certified")).toBeVisible({
+  await expect(modelChip).toHaveAttribute("title", CERTIFIED_MODEL_TITLE, {
     timeout: 30_000,
   });
-  await expect(launched.window.getByText("Default", { exact: true })).toBeVisible();
+  await expect(modelChip).toHaveAttribute("aria-pressed", "true");
 });
 
 test("provider onboarding remains reachable at the minimum window height", async ({
@@ -380,10 +395,10 @@ test("imports every detected agent resource in one action", async ({
     },
     seed: ({ home }) => {
       const skills = join(home, ".agents", "skills");
-      for (const [id, description] of [
-        ["deploy", "Deploy safely"],
-        ["review", "Review changes"],
-      ] as const) {
+      for (const [id, description] of Array.from({ length: 12 }, (_, index) => [
+        `resource-${String(index + 1).padStart(2, "0")}`,
+        `Agent resource ${index + 1}`,
+      ] as const)) {
         const directory = join(skills, id);
         mkdirSync(directory, { recursive: true });
         writeFileSync(
@@ -396,12 +411,21 @@ test("imports every detected agent resource in one action", async ({
   await chooseFixtureRepo(launched);
   await launched.window.getByRole("button", { name: "Skip for now" }).click();
 
+  const list = launched.window.getByTestId("resource-candidate-list");
+  await expect(list).toBeVisible();
+  expect(
+    await list.evaluate((element) => element.scrollHeight > element.clientHeight),
+  ).toBe(true);
+  const search = launched.window.getByRole("searchbox", {
+    name: "Search agent resources",
+  });
+  await search.fill("resource-12");
   await expect(
-    launched.window.getByText("deploy", { exact: true }),
+    launched.window.getByText("resource-12", { exact: true }),
   ).toBeVisible();
   await expect(
-    launched.window.getByText("review", { exact: true }),
-  ).toBeVisible();
+    launched.window.getByText("resource-01", { exact: true }),
+  ).toHaveCount(0);
   await launched.window.getByRole("button", { name: "Import all" }).click();
   await expect(appShell(launched.window)).toBeVisible();
 
@@ -411,9 +435,9 @@ test("imports every detected agent resource in one action", async ({
     .getByRole("button", { name: "Agents & skills" })
     .click();
   await expect(
-    launched.window.getByText("deploy", { exact: true }),
+    launched.window.getByText("resource-01", { exact: true }),
   ).toBeVisible();
   await expect(
-    launched.window.getByText("review", { exact: true }),
+    launched.window.getByText("resource-12", { exact: true }),
   ).toBeVisible();
 });

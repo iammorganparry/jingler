@@ -33,7 +33,11 @@ const catalog = Schema.decodeSync(ProviderCatalog)({
           providerId: "anthropic",
           id: "anthropic/claude-test",
           label: "Claude Test",
-          capabilities: { contextWindow: 200_000, reasoning: [], vision: false },
+          capabilities: {
+            contextWindow: 200_000,
+            reasoning: ["low", "medium", "high"],
+            vision: true
+          },
           verification: "certified",
           selectable: true,
           certificationKey: "current-certification"
@@ -105,7 +109,7 @@ describe("ProviderConnectionsSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Add connection" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }))
     fireEvent.click(screen.getByRole("button", { name: "Open browser" }))
 
     expect(onStartCodex).toHaveBeenCalledWith(expect.any(String), "browser")
@@ -188,9 +192,12 @@ describe("ProviderConnectionsSettings", () => {
     expect(screen.getAllByText("Claude Pro / Max setup-token").length).toBeGreaterThan(0)
     expect(screen.getByText(/account-ab12/u)).toBeTruthy()
     expect(screen.getByText(/Max · desktop · billing: subscription/u)).toBeTruthy()
+    expect(
+      screen.getByText("200K context · Vision · Reasoning up to High")
+    ).toBeTruthy()
   })
 
-  it("verifies unverified models and logs out the selected connection", () => {
+  it("checks an unverified model from its chip and logs out the selected connection", () => {
     const onVerify = vi.fn()
     const onLogout = vi.fn()
     render(
@@ -205,7 +212,8 @@ describe("ProviderConnectionsSettings", () => {
         onSetApiKey={vi.fn()}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }))
+    expect(screen.queryByRole("button", { name: "Verify" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /^Claude New/u }))
     fireEvent.click(screen.getByRole("button", { name: "Log out" }))
     expect(onVerify).toHaveBeenCalledWith(
       "claude-max" as ProviderConnectionId,
@@ -228,7 +236,8 @@ describe("ProviderConnectionsSettings", () => {
         onSetApiKey={vi.fn()}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Make default" }))
+    expect(screen.queryByRole("button", { name: "Make default" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /^Claude Test/u }))
     expect(onMakeDefault).toHaveBeenCalledWith({
       connectionId: "claude-max",
       providerId: "anthropic",
@@ -236,7 +245,7 @@ describe("ProviderConnectionsSettings", () => {
     })
   })
 
-  it("offers verification when the canonical default certification is stale", () => {
+  it("checks availability when the canonical default certification is stale", () => {
     const onVerify = vi.fn()
     const stale = Schema.decodeSync(ProviderCatalog)({
       ...catalog,
@@ -269,7 +278,7 @@ describe("ProviderConnectionsSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Claude Test/u }))
     expect(onVerify).toHaveBeenCalledWith("claude-max", "anthropic/claude-test")
     expect(screen.queryByText("Default")).toBeNull()
   })

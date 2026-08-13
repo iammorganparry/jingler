@@ -1,9 +1,10 @@
 import type { DetectedResourceCandidate, ResourceDetectionResult } from "@jingler/core"
-import { Boxes, Check, SkipForward } from "lucide-react"
-import { useState } from "react"
+import { Boxes, Check, Search, SkipForward } from "lucide-react"
+import { useMemo, useState } from "react"
 import { Button } from "../../components/button.js"
 import { Callout } from "../../components/callout.js"
 import { Eyebrow } from "../../components/eyebrow.js"
+import { Input } from "../../components/input.js"
 import { Spinner } from "../../components/loading.js"
 
 export interface ResourceSetupStepProps {
@@ -20,8 +21,21 @@ export function ResourceSetupStep({ detection, busy, error, onImport, onSkip, on
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set(detection?.candidates.map(({ id }) => id) ?? [])
   )
+  const [query, setQuery] = useState("")
   const candidates = detection?.candidates ?? []
   const chosen = candidates.filter(({ id }) => selected.has(id))
+  const visibleCandidates = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    if (normalized.length === 0) return candidates
+    return candidates.filter((candidate) =>
+      [
+        candidate.name,
+        candidate.kind,
+        candidate.description,
+        candidate.provenance.sourcePath
+      ].some((value) => value.toLowerCase().includes(normalized))
+    )
+  }, [candidates, query])
 
   return (
     <>
@@ -40,29 +54,53 @@ export function ResourceSetupStep({ detection, busy, error, onImport, onSkip, on
       ) : candidates.length === 0 ? (
         <div className="rounded-lg border border-line bg-sunken p-4 text-[12px] text-muted-foreground">No importable resources were detected.</div>
       ) : (
-        <div className="flex max-h-64 flex-col gap-1 overflow-auto rounded-lg border border-line bg-sunken p-2">
-          {candidates.map((candidate) => {
-            const checked = selected.has(candidate.id)
-            return (
-              <button
-                key={candidate.id}
-                type="button"
-                className="flex items-start gap-3 rounded-md px-2 py-2 text-left hover:bg-hover"
-                onClick={() => setSelected((current) => {
-                  const next = new Set(current)
-                  if (next.has(candidate.id)) next.delete(candidate.id)
-                  else next.add(candidate.id)
-                  return next
-                })}
-              >
-                <span className="mt-0.5 flex size-4 items-center justify-center rounded border border-line-strong bg-canvas text-green">{checked && <Check size={12} />}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[12px] font-medium text-text-body">{candidate.name}</span>
-                  <span className="block truncate font-mono text-[10px] text-dim">{candidate.kind} · {candidate.provenance.sourcePath}</span>
-                </span>
-              </button>
-            )
-          })}
+        <div className="flex flex-col overflow-hidden rounded-lg border border-line bg-sunken">
+          <div className="flex items-center gap-2 border-b border-line p-2">
+            <Search size={13} className="ml-1 shrink-0 text-dim" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              type="search"
+              placeholder="Search skills and prompts"
+              aria-label="Search agent resources"
+              className="h-8 border-0 bg-transparent px-1 shadow-none"
+            />
+            <span className="shrink-0 px-1 font-mono text-[10px] text-dim">
+              {visibleCandidates.length} of {candidates.length}
+            </span>
+          </div>
+          <div
+            data-testid="resource-candidate-list"
+            className="flex max-h-[min(480px,45vh)] flex-col gap-1 overflow-y-auto p-2"
+          >
+            {visibleCandidates.map((candidate) => {
+              const checked = selected.has(candidate.id)
+              return (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  className="flex min-h-12 shrink-0 items-start gap-3 rounded-md px-2 py-2 text-left hover:bg-hover"
+                  onClick={() => setSelected((current) => {
+                    const next = new Set(current)
+                    if (next.has(candidate.id)) next.delete(candidate.id)
+                    else next.add(candidate.id)
+                    return next
+                  })}
+                >
+                  <span className="mt-0.5 flex size-4 items-center justify-center rounded border border-line-strong bg-canvas text-green">{checked && <Check size={12} />}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[12px] font-medium text-text-body">{candidate.name}</span>
+                    <span className="block truncate font-mono text-[10px] text-dim">{candidate.kind} · {candidate.provenance.sourcePath}</span>
+                  </span>
+                </button>
+              )
+            })}
+            {visibleCandidates.length === 0 && (
+              <div className="px-3 py-6 text-center text-[11.5px] text-muted-foreground">
+                No resources match “{query.trim()}”.
+              </div>
+            )}
+          </div>
         </div>
       )}
 

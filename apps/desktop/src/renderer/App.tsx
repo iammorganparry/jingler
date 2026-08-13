@@ -1350,6 +1350,7 @@ function AuthedApp({
         github={github.connection}
         providerCatalog={state.context.providerCatalog}
         providerLoginEvent={state.context.providerLoginEvent}
+        providerPendingAuthKind={state.context.providerPendingAuthKind}
         resourceDetection={state.context.resourceDetection}
         error={state.context.error}
         repos={repos}
@@ -1526,6 +1527,7 @@ function AuthedApp({
           defaultConnectionId: configQuery.data?.defaultConnectionId ?? null,
           defaultModelId: configQuery.data?.defaultModelId ?? null,
           busy: providerCatalog.busy,
+          pendingAuthKind: providerCatalog.pendingAuthKind,
           error: providerCatalog.error,
           onReload: providerCatalog.reload,
           onRefresh: providerCatalog.refresh,

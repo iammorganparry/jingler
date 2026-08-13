@@ -769,6 +769,6 @@ test("Shift+Tab cycles the mode of only the focused pane", async ({ launchApp })
 
   // Only the focused pane moved; the other keeps its mode. Before the fix, both
   // chips would read "plan" here.
-  await expect(pane1.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
+  await expect(pane1.getByRole("button", { name: "Auto", exact: true })).toBeVisible()
   await expect(pane0.getByRole("button", { name: "Accept Edits", exact: true })).toBeVisible()
 })

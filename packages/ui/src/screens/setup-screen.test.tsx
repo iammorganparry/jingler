@@ -152,6 +152,40 @@ describe("SetupScreen", () => {
     expect(onContinueProvider).toHaveBeenCalledOnce();
   });
 
+  it("collapses credential forms after connection and can add another account", () => {
+    render(
+      <SetupScreen
+        {...props({
+          step: "provider",
+          providerCatalog: authenticatedCatalog,
+        })}
+      />,
+    );
+
+    const accountDetails = screen
+      .getByPlaceholderText("Claude setup-token")
+      .closest("details");
+    expect(accountDetails?.open).toBe(false);
+    fireEvent.click(screen.getByText("Add another account"));
+    expect(accountDetails?.open).toBe(true);
+    expect(screen.getByRole("button", { name: "Open browser" })).toBeTruthy();
+  });
+
+  it("shows the provider-specific connecting state", () => {
+    render(
+      <SetupScreen
+        {...props({
+          step: "provider",
+          busy: true,
+          providerPendingAuthKind: "openai-codex-oauth",
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Connecting Codex…", { selector: "button" })).toBeTruthy();
+    expect(screen.getByText("Connecting Codex…", { selector: "span" })).toBeTruthy();
+  });
+
   it("keeps Continue disabled without auth and exposes Skip for now", () => {
     const onSkipProvider = vi.fn();
     render(<SetupScreen {...props({ step: "provider", onSkipProvider })} />);
@@ -200,5 +234,26 @@ describe("SetupScreen", () => {
     expect(onImportResources).toHaveBeenCalledWith(
       detectedResources.candidates,
     );
+  });
+
+  it("searches resources without discarding hidden selections", () => {
+    const onImportResources = vi.fn();
+    render(
+      <SetupScreen
+        {...props({
+          step: "resources",
+          resourceDetection: detectedResources,
+          onImportResources,
+        })}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search agent resources" }), {
+      target: { value: "review" },
+    });
+    expect(screen.queryByText("Deploy", { exact: true })).toBeNull();
+    expect(screen.getByText("Review", { exact: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Import selected" }));
+    expect(onImportResources).toHaveBeenCalledWith(detectedResources.candidates);
   });
 });

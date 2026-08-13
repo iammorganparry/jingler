@@ -38,7 +38,6 @@ import {
 } from "../components/dropdown-menu.js";
 import { Pill } from "../components/pill.js";
 import { SignalBars } from "../components/signal-bars.js";
-import { StatusDot } from "../components/status-dot.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
 import {
@@ -88,7 +87,7 @@ const readAttachment = async (
 const MODE_OPTIONS: ReadonlyArray<ChipOption<PermissionMode>> = [
   { value: "ask", label: "Ask Before Actions" },
   { value: "accept-edits", label: "Accept Edits" },
-  { value: "auto", label: "Full Access" },
+  { value: "auto", label: "Auto" },
 ];
 type ReasoningChoice = "default" | ReasoningEffort;
 /**
@@ -280,12 +279,17 @@ export function Composer({
       description: option.description,
     }));
   const reasoningEfforts = selectedModel?.capabilities.reasoning ?? [];
+  const reasoningDefault = selectedModel?.capabilities.reasoningDefault;
+  const reasoningDefaultLabel = reasoningDefault
+    ? `${reasoningDefault[0]!.toUpperCase()}${reasoningDefault.slice(1)} (default)`
+    : "Default";
   const reasoningOptions: ReadonlyArray<ChipOption<ReasoningChoice | "off">> = [
-    { value: "default", label: "Default" },
-    ...(reasoningEfforts.length > 0
+    { value: "default", label: reasoningDefaultLabel },
+    ...(reasoningEfforts.length > 0 &&
+    selectedModel?.capabilities.reasoningCanDisable !== false
       ? [{ value: "off" as const, label: "Off" }]
       : []),
-    ...reasoningEfforts.map((effort) => ({
+    ...reasoningEfforts.filter((effort) => effort !== reasoningDefault).map((effort) => ({
       value: effort,
       label: effort[0]!.toUpperCase() + effort.slice(1),
     })),
@@ -810,29 +814,31 @@ export function Composer({
             // permanent toolbar space; cap long modes inside narrow panes.
             className="max-w-[104px]"
           />
-          <ChipMenu
-            value={reasoningChoice}
-            options={reasoningOptions}
-            onSelect={(value) =>
-              onSetReasoning?.(
-                value === "default"
-                  ? undefined
-                  : value === "off"
-                    ? { enabled: false }
-                    : { enabled: true, effort: value },
-              )
-            }
-            appearance="quiet"
-            ariaLabel="Thinking strength"
-            icon={
-              <SignalBars
-                level={reasoningLevel(reasoningEfforts, reasoningChoice)}
-                total={reasoningEfforts.length}
-                slashed={thinkingEnabled === false}
-              />
-            }
-            className="max-w-[112px]"
-          />
+          {(!selectedModel || reasoningEfforts.length > 0) && (
+            <ChipMenu
+              value={reasoningChoice}
+              options={reasoningOptions}
+              onSelect={(value) =>
+                onSetReasoning?.(
+                  value === "default"
+                    ? undefined
+                    : value === "off"
+                      ? { enabled: false }
+                      : { enabled: true, effort: value },
+                )
+              }
+              appearance="quiet"
+              ariaLabel="Thinking strength"
+              icon={
+                <SignalBars
+                  level={reasoningLevel(reasoningEfforts, reasoningChoice)}
+                  total={reasoningEfforts.length}
+                  slashed={thinkingEnabled === false}
+                />
+              }
+              className="max-w-[132px]"
+            />
+          )}
           {/* `min-w-[8px]` so the spacer still exists after a wrap — a bare
               `flex-1` on a wrapped line collapses to nothing and the send button
               ends up butted against the last chip. */}

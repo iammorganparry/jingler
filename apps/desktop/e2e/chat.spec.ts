@@ -145,7 +145,7 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
   await composer.click()
   // Switch to Auto via the composer's mode chip (seeded as accept-edits).
   await window.getByText("Accept Edits", { exact: true }).click()
-  await window.getByRole("option", { name: /^Full Access\b/ }).click()
+  await window.getByRole("option", { name: /^Auto\b/ }).click()
 
   await composer.pressSequentially("Add rate limiting.")
   await composer.press("Enter")
@@ -203,7 +203,7 @@ test("the mode chip lives in the composer and Shift+Tab cycles all modes", async
 
   // Shift+Tab cycles accept-edits → auto → plan → ask for every pi model.
   await window.keyboard.press("Shift+Tab")
-  await expect(window.getByRole("button", { name: "Full Access", exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Auto", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "auto")
 
   await window.keyboard.press("Shift+Tab")

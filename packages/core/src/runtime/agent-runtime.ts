@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { Message } from "../conversation.js"
+import { ReasoningSetting } from "../domain.js"
 import {
   ProviderConnectionId,
   ProviderModelId
@@ -53,6 +54,8 @@ export const PiRunSpec = Schema.Struct({
   modelId: ProviderModelId,
   role: AgentRole,
   mode: RuntimeMode,
+  /** Optional operator override; omitted preserves pi's model-native default. */
+  reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
   cwd: Schema.String,
   prompt: Schema.String,
   priorMessages: Schema.Array(Message),

@@ -134,15 +134,12 @@ const configureCurrentModel = async (
     .getByRole("button")
     .filter({ hasText: model.connectionLabel })
     .click();
-  const row = window
-    .getByText(model.modelId, { exact: false })
-    .filter({ hasText: model.modelId })
-    .locator("..")
-    .locator("..");
-  await expect(row).toContainText(`${model.modelId} · certified`);
-  const makeDefault = row.getByRole("button", { name: "Make default" });
-  if (await makeDefault.isVisible()) await makeDefault.click();
-  await expect(row.getByText("Default", { exact: true })).toBeVisible();
+  const modelChip = window.locator(`button[title="${model.modelId} · certified"]`);
+  await expect(modelChip).toBeVisible();
+  if ((await modelChip.getAttribute("aria-pressed")) !== "true") {
+    await modelChip.click();
+  }
+  await expect(modelChip).toHaveAttribute("aria-pressed", "true");
   await window.getByRole("button", { name: "Close settings" }).click();
 };
 

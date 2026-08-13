@@ -42,7 +42,7 @@ import {
   workspaceModeOf,
   type PlanPrd
 } from "@jingler/core"
-import { FileSystem, Path } from "@effect/platform"
+import { FileSystem, type Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
@@ -1104,6 +1104,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ),
             images,
             mode,
+            reasoning: reasoning ?? chat.reasoning ?? null,
             mcp
           }
 

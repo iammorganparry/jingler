@@ -62,6 +62,15 @@ const modelIdForProvider = (spec: PiRunSpec, connection: ProviderConnection) => 
   return qualified.startsWith(prefix) ? qualified.slice(prefix.length) : qualified
 }
 
+const thinkingLevelFor = (
+  reasoning: PiRunSpec["reasoning"]
+): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined =>
+  reasoning === null || reasoning === undefined
+    ? undefined
+    : reasoning.enabled
+      ? reasoning.effort
+      : "off"
+
 const transcriptText = (messages: ReadonlyArray<Message>): string =>
   messages
     .map((message) => {
@@ -179,11 +188,13 @@ const createEmbeddedSession = (
         })
       }
       const customTools = registry ? [...createPiTools(registry, spec, context)] : []
+      const thinkingLevel = thinkingLevelFor(spec.reasoning)
       const result = await (options.createSession ?? createAgentSession)({
         cwd: spec.cwd,
         agentDir: options.agentDir,
         modelRuntime,
         model,
+        ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
         resourceLoader: resources,
         sessionManager: sessionManagerFor(spec, options.sessionsDir),
         settingsManager: SettingsManager.inMemory({

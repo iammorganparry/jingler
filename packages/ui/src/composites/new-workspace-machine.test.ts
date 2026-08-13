@@ -39,7 +39,7 @@ const providerCatalog: ProviderCatalog = {
       providerId,
       id: modelId,
       label: "Claude Sonnet",
-      capabilities: { contextWindow: 200_000, reasoning: [], vision: false },
+      capabilities: { contextWindow: 200_000, reasoning: [], reasoningCanDisable: true, vision: false },
       verification: "certified",
       selectable: true,
       certificationKey: "certified"
@@ -47,7 +47,7 @@ const providerCatalog: ProviderCatalog = {
       providerId,
       id: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus"),
       label: "Claude Opus",
-      capabilities: { contextWindow: 200_000, reasoning: [], vision: false },
+      capabilities: { contextWindow: 200_000, reasoning: [], reasoningCanDisable: true, vision: false },
       verification: "certified",
       selectable: true,
       certificationKey: "certified-opus"
@@ -340,8 +340,10 @@ describe("newWorkspaceMachine", () => {
     const actor = actorFor(onCreate).start()
     actor.send({ type: "OPEN", projectId: "p-local" })
     await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "high" } })
     const opusId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus")
     actor.send({ type: "SET_MODEL", connectionId, providerId, modelId: opusId })
+    expect(actor.getSnapshot().context.reasoning).toBeUndefined()
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("closed"))
 

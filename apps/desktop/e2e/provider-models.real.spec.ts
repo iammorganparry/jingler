@@ -166,7 +166,7 @@ const selectConnection = async (
     .getByRole("button")
     .filter({ hasText: model.connectionLabel });
   if (!(await connection.count())) {
-    await window.getByRole("button", { name: "Add connection" }).click();
+    await window.getByRole("button", { name: "Add account" }).click();
     await startProviderAuthentication(window, model);
   }
   await expect(connection).toBeVisible();
@@ -174,11 +174,7 @@ const selectConnection = async (
 };
 
 const modelRow = (window: Page, model: RealProviderTarget) =>
-  window
-    .getByText(model.modelId, { exact: false })
-    .filter({ hasText: model.modelId })
-    .locator("..")
-    .locator("..");
+  window.locator(`button[title^="${model.modelId} ·"]`);
 
 const ensureAuthenticated = async (
   window: Page,
@@ -236,16 +232,14 @@ const certifyModel = async (
   await ensureAuthenticated(window, model);
   const row = modelRow(window, model);
   await expect(row).toContainText(model.label);
-  const certified = row.getByText(`${model.modelId} · certified`, {
-    exact: true,
-  });
-  if (!(await certified.count())) {
-    await row.getByRole("button", { name: "Verify" }).click();
+  if ((await row.getAttribute("title")) !== `${model.modelId} · certified`) {
+    await row.click();
   }
-  await expect(certified).toBeVisible({ timeout: 8 * 60_000 });
-  const makeDefault = row.getByRole("button", { name: "Make default" });
-  if (await makeDefault.isVisible()) await makeDefault.click();
-  await expect(row.getByText("Default", { exact: true })).toBeVisible();
+  await expect(row).toHaveAttribute("title", `${model.modelId} · certified`, {
+    timeout: 8 * 60_000,
+  });
+  if ((await row.getAttribute("aria-pressed")) !== "true") await row.click();
+  await expect(row).toHaveAttribute("aria-pressed", "true");
 };
 
 const runConversation = async (

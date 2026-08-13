@@ -1,4 +1,5 @@
 import type {
+  AuthKind,
   CodexLoginMethod,
   ProviderConnectionId,
   ProviderId,
@@ -89,6 +90,13 @@ export function useProviderCatalog() {
   ].find(
     ({ isPending, error }) => isPending || error !== null
   )
+  const pendingAuthKind: AuthKind | null = connectClaude.isPending
+    ? "claude-setup-token"
+    : startCodex.isPending
+      ? "openai-codex-oauth"
+      : setApiKey.isPending
+        ? "api-key"
+        : null
 
   return {
     catalog: catalog.data ?? null,
@@ -101,6 +109,7 @@ export function useProviderCatalog() {
       startCodex.isPending ||
       setApiKey.isPending ||
       makeDefault.isPending,
+    pendingAuthKind,
     error: catalog.error
       ? messageOf(catalog.error)
       : activeMutation?.error

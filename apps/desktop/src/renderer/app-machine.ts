@@ -5,6 +5,7 @@
  * data-fetching `useEffect`s, minimal `useState`.
  */
 import type {
+  AuthKind,
   CodexLoginMethod,
   DetectedResourceCandidate,
   ProviderCatalog,
@@ -27,6 +28,7 @@ export interface AppContext {
   readonly sessions: ReadonlyArray<Session>;
   readonly providerCatalog: ProviderCatalog | null;
   readonly providerLoginEvent: ProviderLoginEvent | null;
+  readonly providerPendingAuthKind: AuthKind | null;
   readonly resourceDetection: ResourceDetectionResult | null;
   readonly selectedResourceCandidates: ReadonlyArray<DetectedResourceCandidate>;
   readonly error: string | null;
@@ -260,6 +262,7 @@ export const appMachine = setup({
     sessions: [],
     providerCatalog: null,
     providerLoginEvent: null,
+    providerPendingAuthKind: null,
     resourceDetection: null,
     selectedResourceCandidates: [],
     error: null,
@@ -390,15 +393,27 @@ export const appMachine = setup({
                 SKIP_PROVIDER: "completing",
                 CONNECT_CLAUDE: {
                   target: "authenticating",
-                  actions: assign({ providerLoginEvent: null, error: null }),
+                  actions: assign({
+                    providerLoginEvent: null,
+                    providerPendingAuthKind: "claude-setup-token",
+                    error: null,
+                  }),
                 },
                 START_CODEX: {
                   target: "authenticating",
-                  actions: assign({ providerLoginEvent: null, error: null }),
+                  actions: assign({
+                    providerLoginEvent: null,
+                    providerPendingAuthKind: "openai-codex-oauth",
+                    error: null,
+                  }),
                 },
                 CONNECT_API: {
                   target: "authenticating",
-                  actions: assign({ providerLoginEvent: null, error: null }),
+                  actions: assign({
+                    providerLoginEvent: null,
+                    providerPendingAuthKind: "api-key",
+                    error: null,
+                  }),
                 },
               },
             },
@@ -450,18 +465,25 @@ export const appMachine = setup({
                     "Provider authentication requires a typed connection event.",
                   );
                 },
-                onDone: { target: "refreshing" },
+                onDone: {
+                  target: "refreshing",
+                  actions: assign({ providerPendingAuthKind: null }),
+                },
                 onError: {
                   target: "authFailed",
                   actions: assign(({ event }) => ({
                     error: messageOf(event.error),
+                    providerPendingAuthKind: null,
                   })),
                 },
               },
               on: {
                 CANCEL_AUTH: {
                   target: "idle",
-                  actions: assign({ providerLoginEvent: null }),
+                  actions: assign({
+                    providerLoginEvent: null,
+                    providerPendingAuthKind: null,
+                  }),
                 },
               },
             },

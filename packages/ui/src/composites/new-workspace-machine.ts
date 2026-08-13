@@ -199,7 +199,7 @@ export const newWorkspaceMachine = setup({
         return { pullRequests: [] as ReadonlyArray<PrSummary>, issues: await input.deps.loadGithubIssues(input.project, input.search, input.mine) }
       }
       const providerId = input.source.startsWith("provider:") ? input.source.slice("provider:".length) : ""
-      if (!providerId || !input.deps.loadProviderIssues) throw new Error("This issue provider is unavailable.")
+      if (!(providerId && input.deps.loadProviderIssues)) throw new Error("This issue provider is unavailable.")
       return { pullRequests: [] as ReadonlyArray<PrSummary>, issues: await input.deps.loadProviderIssues(providerId, input.project, input.search, input.mine) }
     }),
     submit: fromCallback(({ input, sendBack }: { input: {
@@ -259,7 +259,8 @@ export const newWorkspaceMachine = setup({
         ? {
             connectionId: event.connectionId,
             providerId: event.providerId,
-            modelId: event.modelId
+            modelId: event.modelId,
+            reasoning: undefined
           }
         : {}
     ),
@@ -425,12 +426,12 @@ export const newWorkspaceMachine = setup({
             }
             if (context.source === "pr") {
               const createFromPr = context.getDeps().onCreateFromPr
-              if (!context.selectedPr || !createFromPr) return Promise.reject(new Error("Select a pull request."))
+              if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
               return createFromPr({ ...common, ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}), pr: context.selectedPr }, context.attachments, onProgress)
             }
             if (context.source === "github" || context.source.startsWith("provider:")) {
               const createFromIssue = context.getDeps().onCreateFromIssue
-              if (!context.selectedIssue || !createFromIssue) return Promise.reject(new Error("Select an issue."))
+              if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
               return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
             }
             return context.getDeps().onCreate({

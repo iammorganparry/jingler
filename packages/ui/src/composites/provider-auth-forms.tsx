@@ -1,14 +1,16 @@
 import type { AuthKind, CodexLoginMethod, ProviderId } from "@jingler/core"
-import { ExternalLink, KeyRound } from "lucide-react"
 import { useRef } from "react"
 import { Button } from "../components/button.js"
 import { Input } from "../components/input.js"
+import { Spinner } from "../components/loading.js"
+import { ProviderIcon } from "../components/provider-icon.js"
 
 export interface ProviderAuthFormsProps {
   busy: boolean
   mode?: "connect" | "reconnect"
   authKinds?: ReadonlyArray<AuthKind>
   apiProviderId?: ProviderId
+  pendingAuthKind?: AuthKind | null
   onConnectClaude: (token: string) => void
   onStartCodex: (method: CodexLoginMethod) => void
   onConnectApi: (providerId: string, apiKey: string) => void
@@ -26,6 +28,7 @@ export function ProviderAuthForms({
   mode = "connect",
   authKinds = ALL_AUTH_KINDS,
   apiProviderId,
+  pendingAuthKind = null,
   onConnectClaude,
   onStartCodex,
   onConnectApi
@@ -34,6 +37,7 @@ export function ProviderAuthForms({
   const apiKey = useRef<HTMLInputElement>(null)
   const apiProvider = useRef<HTMLSelectElement>(null)
   const allows = (kind: AuthKind) => authKinds.includes(kind)
+  const isPending = (kind: AuthKind) => pendingAuthKind === kind
 
   const submitClaude = () => {
     const token = claudeToken.current?.value.trim() ?? ""
@@ -54,8 +58,13 @@ export function ProviderAuthForms({
     <div className="flex flex-col gap-3">
       {allows("claude-setup-token") && (
         <div className="flex flex-col gap-3 rounded-lg border border-line bg-sunken p-3">
-          <div className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
-            <KeyRound size={14} className="text-blue" /> Claude Pro / Max
+          <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-text-bright">
+            <span className="flex size-7 items-center justify-center rounded-md border border-line bg-canvas">
+              <ProviderIcon providerId={"anthropic" as ProviderId} size={16} />
+            </span>
+            <span>
+              Claude <span className="text-muted-foreground">Pro / Max</span>
+            </span>
           </div>
           <p className="text-[11px] leading-[1.55] text-muted-foreground">
             Run <code className="font-mono text-text">claude setup-token</code>,
@@ -71,7 +80,12 @@ export function ProviderAuthForms({
               disabled={busy}
             />
             <Button variant="primary" onClick={submitClaude} disabled={busy}>
-              {mode === "reconnect" ? "Reconnect Claude" : "Connect Claude"}
+              {isPending("claude-setup-token") && <Spinner size={13} />}
+              {isPending("claude-setup-token")
+                ? "Connecting Claude…"
+                : mode === "reconnect"
+                  ? "Reconnect Claude"
+                  : "Connect Claude"}
             </Button>
           </div>
         </div>
@@ -79,8 +93,13 @@ export function ProviderAuthForms({
 
       {allows("openai-codex-oauth") && (
         <div className="flex flex-col gap-3 rounded-lg border border-line bg-sunken p-3">
-          <div className="flex items-center gap-2 text-[12.5px] font-medium text-text-bright">
-            <ExternalLink size={14} className="text-cyan" /> ChatGPT Codex subscription
+          <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-text-bright">
+            <span className="flex size-7 items-center justify-center rounded-md border border-line bg-canvas">
+              <ProviderIcon providerId={"openai-codex" as ProviderId} size={17} />
+            </span>
+            <span>
+              Codex <span className="text-muted-foreground">with ChatGPT</span>
+            </span>
           </div>
           <p className="text-[11px] leading-[1.55] text-muted-foreground">
             Sign in through the browser or use a device code. The main process owns polling and token storage.
@@ -91,7 +110,12 @@ export function ProviderAuthForms({
               onClick={() => onStartCodex("browser")}
               disabled={busy}
             >
-              {mode === "reconnect" ? "Reconnect in browser" : "Open browser"}
+              {isPending("openai-codex-oauth") && <Spinner size={13} />}
+              {isPending("openai-codex-oauth")
+                ? "Connecting Codex…"
+                : mode === "reconnect"
+                  ? "Reconnect in browser"
+                  : "Open browser"}
             </Button>
             <Button
               variant="secondary"
@@ -130,7 +154,12 @@ export function ProviderAuthForms({
               disabled={busy}
             />
             <Button variant="secondary" onClick={submitApiKey} disabled={busy}>
-              {mode === "reconnect" ? "Reconnect API key" : "Save API key"}
+              {isPending("api-key") && <Spinner size={13} />}
+              {isPending("api-key")
+                ? "Saving API key…"
+                : mode === "reconnect"
+                  ? "Reconnect API key"
+                  : "Save API key"}
             </Button>
           </div>
         </details>

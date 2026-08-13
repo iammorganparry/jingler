@@ -1,24 +1,23 @@
 import type {
+  AuthKind,
   CodexLoginMethod,
   ProviderCatalog,
   ProviderLoginEvent,
 } from "@jingler/core";
-import { ShieldCheck, X } from "lucide-react";
+import { Plus, ShieldCheck, X } from "lucide-react";
 import { Button } from "../../components/button.js";
 import { Callout } from "../../components/callout.js";
 import { Eyebrow } from "../../components/eyebrow.js";
 import { Spinner } from "../../components/loading.js";
-import { StatusDot } from "../../components/status-dot.js";
+import { ProviderIcon } from "../../components/provider-icon.js";
 import { ProviderAuthForms } from "../../composites/provider-auth-forms.js";
-import {
-  providerAuthRouteLabel,
-  providerStatusTone,
-} from "../../lib/provider-connection-labels.js";
+import { providerAuthRouteLabel } from "../../lib/provider-connection-labels.js";
 
 export interface ProviderSetupStepProps {
   catalog: ProviderCatalog | null;
   loginEvent: ProviderLoginEvent | null;
   busy: boolean;
+  pendingAuthKind?: AuthKind | null;
   error: string | null;
   onConnectClaude: (token: string) => void;
   onStartCodex: (method: CodexLoginMethod) => void;
@@ -33,6 +32,7 @@ export function ProviderSetupStep({
   catalog,
   loginEvent,
   busy,
+  pendingAuthKind = null,
   error,
   onConnectClaude,
   onStartCodex,
@@ -46,6 +46,28 @@ export function ProviderSetupStep({
     catalog?.connections.some(
       ({ connection }) => connection.status === "authenticated",
     ) === true;
+  const authenticatedConnections =
+    catalog?.connections.filter(
+      ({ connection }) => connection.status === "authenticated",
+    ) ?? [];
+  const progressLabel =
+    pendingAuthKind === "claude-setup-token"
+      ? "Connecting Claude…"
+      : pendingAuthKind === "openai-codex-oauth"
+        ? "Connecting Codex…"
+        : pendingAuthKind === "api-key"
+          ? "Saving API key…"
+          : "Updating provider connections…";
+
+  const authForms = (
+    <ProviderAuthForms
+      busy={busy}
+      pendingAuthKind={pendingAuthKind}
+      onConnectClaude={onConnectClaude}
+      onStartCodex={onStartCodex}
+      onConnectApi={onConnectApi}
+    />
+  );
 
   return (
     <>
@@ -71,17 +93,55 @@ export function ProviderSetupStep({
         </Callout>
       )}
 
-      <ProviderAuthForms
-        busy={busy}
-        onConnectClaude={onConnectClaude}
-        onStartCodex={onStartCodex}
-        onConnectApi={onConnectApi}
-      />
+      {authenticatedConnections.length === 0 ? (
+        authForms
+      ) : (
+        <>
+          <div className="flex flex-col gap-2">
+            {authenticatedConnections.map(({ connection }) => (
+              <div
+                key={connection.id}
+                className="flex items-center gap-3 rounded-lg border border-line bg-hover px-3 py-2.5"
+              >
+                <span className="flex size-8 items-center justify-center rounded-md border border-line bg-canvas">
+                  <ProviderIcon providerId={connection.providerId} size={17} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[12.5px] font-medium text-text-bright">
+                    {providerAuthRouteLabel(connection.authKind)}
+                  </div>
+                  <div className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground">
+                    {connection.account?.displayLabel ??
+                      connection.account?.fingerprint ??
+                      connection.id}
+                    {connection.subscription.planLabel
+                      ? ` · ${connection.subscription.planLabel}`
+                      : ""}
+                    {connection.subscription.confirmedBillingRoute
+                      ? ` · ${connection.subscription.confirmedBillingRoute}`
+                      : ""}
+                  </div>
+                </div>
+                <ShieldCheck size={15} className="text-green" />
+              </div>
+            ))}
+          </div>
+          <details
+            key={authenticatedConnections.length}
+            className="rounded-lg border border-line bg-sunken p-3"
+          >
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-[12px] font-medium text-text-body">
+              <Plus size={13} className="text-blue" /> Add another account
+            </summary>
+            <div className="mt-3 border-t border-line pt-3">{authForms}</div>
+          </details>
+        </>
+      )}
 
       {busy && (
         <div className="flex items-center justify-between rounded-lg border border-line bg-hover px-3 py-2 text-[12px] text-muted-foreground">
           <span className="flex items-center gap-2">
-            <Spinner size={13} /> Connecting…
+            <Spinner size={13} /> {progressLabel}
           </span>
           <Button variant="ghost" size="sm" onClick={onCancel}>
             <X size={13} /> Cancel
@@ -107,40 +167,6 @@ export function ProviderSetupStep({
           {loginEvent.message}
         </div>
       )}
-
-      {catalog?.connections.map(({ connection }) => (
-        <div
-          key={connection.id}
-          className="flex flex-col gap-3 rounded-lg border border-line bg-hover p-3"
-        >
-          <div className="flex items-start gap-2">
-            <StatusDot
-              tone={providerStatusTone(connection.status)}
-              size={8}
-              glow={connection.status === "authenticated"}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="text-[12.5px] font-medium text-text-bright">
-                {providerAuthRouteLabel(connection.authKind)}
-              </div>
-              <div className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">
-                {connection.account?.displayLabel ??
-                  connection.account?.fingerprint ??
-                  connection.id}
-                {connection.subscription.planLabel
-                  ? ` · ${connection.subscription.planLabel}`
-                  : ""}
-                {connection.subscription.confirmedBillingRoute
-                  ? ` · ${connection.subscription.confirmedBillingRoute}`
-                  : ""}
-              </div>
-            </div>
-            {connection.status === "authenticated" && (
-              <ShieldCheck size={15} className="text-green" />
-            )}
-          </div>
-        </div>
-      ))}
 
       <div className="flex flex-wrap items-center gap-2.5 pt-1">
         <Button

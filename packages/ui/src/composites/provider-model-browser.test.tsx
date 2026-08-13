@@ -36,7 +36,7 @@ const catalog: ProviderCatalog = {
         providerId,
         id: modelId,
         label: "Claude Sonnet",
-        capabilities: { contextWindow: 200_000, reasoning: [], vision: false },
+        capabilities: { contextWindow: 200_000, reasoning: [], reasoningCanDisable: true, vision: false },
         verification: "certified",
         selectable: true,
         certificationKey: "certified"
@@ -45,7 +45,7 @@ const catalog: ProviderCatalog = {
         providerId,
         id: staleModelId,
         label: "Claude Opus stale",
-        capabilities: { contextWindow: 200_000, reasoning: [], vision: false },
+        capabilities: { contextWindow: 200_000, reasoning: [], reasoningCanDisable: true, vision: false },
         verification: "stale",
         selectable: false,
         certificationKey: null

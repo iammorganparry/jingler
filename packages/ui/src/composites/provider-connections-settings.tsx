@@ -1,7 +1,9 @@
 import {
+  type AuthKind,
   type CodexLoginMethod,
   ProviderConnectionId,
   type ProviderCatalog,
+  type ProviderCatalogModel,
   ProviderId,
   type ProviderModelId
 } from "@jingler/core"
@@ -11,19 +13,78 @@ import { useEffect, useMemo } from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Spinner } from "../components/loading.js"
-import { StatusDot } from "../components/status-dot.js"
+import { ProviderIcon } from "../components/provider-icon.js"
 import { cn } from "../lib/cn.js"
-import { providerAuthRouteLabel, providerStatusTone } from "../lib/provider-connection-labels.js"
+import { providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
 import { ProviderAuthForms } from "./provider-auth-forms.js"
 import { providerConnectionsSettingsMachine } from "./provider-connections-settings-machine.js"
 
 const EMPTY_CONNECTIONS: ProviderCatalog["connections"] = []
+
+const compactNumber = new Intl.NumberFormat("en", {
+  maximumFractionDigits: 1,
+  notation: "compact"
+})
+
+const modelDescription = (model: ProviderCatalogModel): string => {
+  const details: string[] = []
+  if (model.capabilities.contextWindow !== null) {
+    details.push(`${compactNumber.format(model.capabilities.contextWindow)} context`)
+  }
+  if (model.capabilities.vision) details.push("Vision")
+  const highestReasoning = model.capabilities.reasoning.at(-1)
+  if (highestReasoning) {
+    details.push(
+      `Reasoning up to ${highestReasoning[0]?.toUpperCase()}${highestReasoning.slice(1)}`
+    )
+  }
+  return details.join(" · ") || "Text generation"
+}
+
+const ModelChip = ({
+  model,
+  isDefault,
+  disabled,
+  onSelect
+}: {
+  readonly model: ProviderCatalogModel
+  readonly isDefault: boolean
+  readonly disabled: boolean
+  readonly onSelect: () => void
+}) => (
+  <button
+    type="button"
+    title={`${model.id} · ${model.verification}`}
+    aria-pressed={isDefault}
+    disabled={disabled || isDefault}
+    onClick={onSelect}
+    className={cn(
+      "inline-flex min-h-14 min-w-44 max-w-60 flex-col items-start justify-center gap-1 rounded-xl border px-3 py-2 text-left transition-colors",
+      isDefault
+        ? "border-blue/50 bg-blue/10 text-blue"
+        : "border-line bg-sunken text-text-body hover:border-line-strong hover:bg-hover",
+      disabled && "cursor-not-allowed opacity-50"
+    )}
+  >
+    <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium">
+      {isDefault && <Check size={11} />}
+      {model.label}
+    </span>
+    <span className={cn("text-[9.5px] text-dim", isDefault && "text-blue/80")}>
+      {modelDescription(model)}
+    </span>
+    <span className="sr-only">
+      {isDefault ? " default" : ` ${model.verification}`}
+    </span>
+  </button>
+)
 
 export interface ProviderConnectionsSettingsProps {
   catalog: ProviderCatalog | null
   defaultConnectionId?: ProviderConnectionId | null
   defaultModelId?: ProviderModelId | null
   busy?: boolean
+  pendingAuthKind?: AuthKind | null
   error?: string | null
   onReload?: () => void
   onRefresh: (connectionId: ProviderConnectionId) => void
@@ -51,6 +112,7 @@ export function ProviderConnectionsSettings({
   defaultConnectionId = null,
   defaultModelId = null,
   busy = false,
+  pendingAuthKind = null,
   error = null,
   onRefresh,
   onVerify,
@@ -92,7 +154,7 @@ export function ProviderConnectionsSettings({
               disabled={busy}
               onClick={() => sendSelection({ type: "ADD" })}
             >
-              <Plus size={12} /> Add connection
+              <Plus size={12} /> Add account
             </Button>
           </div>
           <span className="text-[11.5px] leading-relaxed text-muted-foreground">
@@ -115,7 +177,7 @@ export function ProviderConnectionsSettings({
               )}
             >
               <span className="flex items-center gap-2 text-[12px] font-medium text-text-bright">
-                <StatusDot tone={providerStatusTone(connection.status)} size={7} glow={connection.status === "authenticated"} />
+                <ProviderIcon providerId={connection.providerId} size={13} />
                 {providerAuthRouteLabel(connection.authKind)}
               </span>
               <span className="font-mono text-[10px] text-dim">
@@ -165,6 +227,7 @@ export function ProviderConnectionsSettings({
                   <ProviderAuthForms
                     busy={busy}
                     mode="reconnect"
+                    pendingAuthKind={pendingAuthKind}
                     authKinds={[selected.connection.authKind]}
                     apiProviderId={selected.connection.providerId}
                     onConnectClaude={(token) =>
@@ -186,25 +249,32 @@ export function ProviderConnectionsSettings({
 
               <div className="flex flex-col gap-2">
                 <div className="text-[12px] font-semibold text-text-bright">Models</div>
-                {selected.models.map((model) => {
-                  const isDefault =
-                    selected.connection.id === defaultConnectionId && model.id === defaultModelId
-                  return (
-                    <div key={model.id} className="flex items-center gap-3 rounded-lg border border-line bg-sunken px-3 py-2.5">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[12.5px] font-medium text-text-body">{model.label}</div>
-                        <div className="font-mono text-[10px] text-dim">{model.id} · {model.verification}</div>
-                      </div>
-                      {!model.selectable ? (
-                        <Button variant="secondary" size="sm" disabled={busy || selected.connection.status !== "authenticated"} onClick={() => onVerify(selected.connection.id, model.id)}>Verify</Button>
-                      ) : isDefault ? (
-                        <span className="flex items-center gap-1 rounded-md bg-blue/10 px-2 py-1 text-[10.5px] font-medium text-blue"><Check size={11} /> Default</span>
-                      ) : (
-                        <Button variant="ghost" size="sm" disabled={busy} onClick={() => onMakeDefault({ connectionId: selected.connection.id, providerId: model.providerId, modelId: model.id })}>Make default</Button>
-                      )}
-                    </div>
-                  )
-                })}
+                <div className="flex flex-wrap gap-2">
+                  {selected.models.map((model) => {
+                    const isDefault =
+                      selected.connection.id === defaultConnectionId && model.id === defaultModelId
+                      && model.verification === "certified"
+                    return (
+                      <ModelChip
+                        key={model.id}
+                        model={model}
+                        isDefault={isDefault}
+                        disabled={busy || selected.connection.status !== "authenticated"}
+                        onSelect={() => {
+                          if (model.verification !== "certified") {
+                            onVerify(selected.connection.id, model.id)
+                            return
+                          }
+                          onMakeDefault({
+                            connectionId: selected.connection.id,
+                            providerId: model.providerId,
+                            modelId: model.id
+                          })
+                        }}
+                      />
+                    )
+                  })}
+                </div>
               </div>
             </>
           ) : (
@@ -212,11 +282,12 @@ export function ProviderConnectionsSettings({
               <div>
                 <div className="text-[15px] font-semibold text-text-bright">Add a provider connection</div>
                 <div className="mt-1 text-[12px] text-muted-foreground">
-                  Authenticate an account now; choose and certify models separately.
+                  Authenticate an account now; model availability is checked automatically when selected.
                 </div>
               </div>
               <ProviderAuthForms
                 busy={busy}
+                pendingAuthKind={pendingAuthKind}
                 onConnectClaude={(token) =>
                   onConnectClaude(newConnectionId(), token)
                 }

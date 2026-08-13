@@ -289,6 +289,9 @@ describe("appMachine first-run coordination", () => {
       token: "short-lived-secret",
       targetId: "local",
     });
+    expect(actor.getSnapshot().context.providerPendingAuthKind).toBe(
+      "claude-setup-token",
+    );
     await waitFor(actor, (snapshot) =>
       snapshot.matches({ setup: { provider: "authFailed" } }),
     );
@@ -296,6 +299,7 @@ describe("appMachine first-run coordination", () => {
     expect(JSON.stringify(actor.getSnapshot().context)).not.toContain(
       "short-lived-secret",
     );
+    expect(actor.getSnapshot().context.providerPendingAuthKind).toBeNull();
     actor.send({ type: "RETRY_AUTH" });
     expect(actor.getSnapshot().matches({ setup: { provider: "idle" } })).toBe(
       true,
