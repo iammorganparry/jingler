@@ -1,7 +1,9 @@
 import { SecretStore } from "@jingler/cli-adapters/secret-store";
 import { AgentSecretStore } from "@jingler/cli-adapters/runtime/auth/agent-secret-store";
+import { ProviderConnections } from "@jingler/cli-adapters/runtime/providers/provider-connections";
+import { withTempRoot } from "@jingler/cli-adapters/test-support";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeDeviceProviderLayers } from "./provider-runtime.js";
 
@@ -45,7 +47,9 @@ describe("device provider runtime", () => {
       access: "unrelated-api-key",
     });
   });
+});
 
+describe("managed provider proxy", () => {
   it("registers the managed proxy on the exact pi provider", () => {
     const layers = makeDeviceProviderLayers("managed_cloud_1", {
       JINGLER_PROVIDER_CONNECTION_ID: "connection-1",
@@ -81,5 +85,41 @@ describe("device provider runtime", () => {
         JINGLER_PROVIDER_ACCESS: "managed-provider-access-token",
       }),
     ).toThrow("JINGLER_PROVIDER_BASE_URL is required");
+  });
+});
+
+describe("device provider contract", () => {
+  it("exposes the typed provider contract without permitting remote credential mutation", async () => {
+    const temp = withTempRoot();
+    const layers = makeDeviceProviderLayers("device-1", {
+      JINGLER_CLAUDE_SETUP_TOKEN: "sk-ant-oat-subscription-token",
+    });
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const providers = yield* ProviderConnections;
+        const status = yield* providers.status;
+        const mutation = yield* Effect.either(
+          providers.connectClaudeToken({
+            id: "device-test-connection",
+            token: "must-not-be-persisted-remotely",
+            targetId: "device-1",
+          }),
+        );
+        return { status, mutation };
+      }).pipe(
+        Effect.provide(layers.ProviderConnectionsLive),
+        Effect.provide(layers.SecretStoreLive),
+        Effect.provide(temp.layer),
+        Effect.ensuring(Effect.sync(temp.cleanup)),
+      ),
+    );
+
+    expect(result.status).toEqual(layers.connections);
+    expect(Either.isLeft(result.mutation)).toBe(true);
+    if (Either.isLeft(result.mutation)) {
+      expect(result.mutation.left.message).toContain(
+        "Configure Claude subscription credentials on the target device",
+      );
+    }
   });
 });
