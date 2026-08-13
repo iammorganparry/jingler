@@ -213,7 +213,15 @@ export const makeImportedMcpService = (
           }).pipe(
             Effect.zipRight(
               options.secrets.deleteMcp(id, server.availability.targetId).pipe(
-                Effect.mapError(() => error("remove", `Could not remove encrypted values for "${id}"`))
+                Effect.mapError(() => error("remove", `Could not remove encrypted values for "${id}"`)),
+                Effect.tapError(() =>
+                  Effect.tryPromise({
+                    try: () => catalog.update((current) =>
+                      current.some((item) => item.id === id) ? current : [...current, server]
+                    ),
+                    catch: () => error("remove", `Could not restore MCP metadata for "${id}"`)
+                  }).pipe(Effect.ignore)
+                )
               )
             ),
             Effect.zipRight(publishCatalog)

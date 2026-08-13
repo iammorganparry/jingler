@@ -10,6 +10,7 @@ import { Effect, Schema, Stream } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeInMemorySecretStore } from "../../secret-store.js"
 import { AgentSecretStore } from "../auth/agent-secret-store.js"
+import { ProviderCredentialStoreError } from "../auth/credential-store.js"
 import { makeImportedMcpService } from "./imported-mcp-service.js"
 
 const roots: string[] = []
@@ -138,5 +139,34 @@ describe("ImportedMcpService", () => {
     await Effect.runPromise(service.remove(resourceId("docs")))
     expect(await Effect.runPromise(service.list)).toEqual([])
     expect(await Effect.runPromise(secrets.readMcp("docs", "desktop"))).toBeNull()
+  })
+
+  it("keeps metadata when encrypted-value removal fails", async () => {
+    const root = await temporary()
+    const backing = await Effect.runPromise(makeInMemorySecretStore())
+    const stored = new AgentSecretStore(backing)
+    const service = await Effect.runPromise(makeImportedMcpService({
+      metadataFile: join(root, "mcp.json"),
+      secrets: {
+        readMcp: stored.readMcp,
+        writeMcp: stored.writeMcp,
+        deleteMcp: () => Effect.fail(new ProviderCredentialStoreError({
+          message: "secure store unavailable"
+        }))
+      }
+    }))
+    await Effect.runPromise(service.importServer(input({
+      transport: "http",
+      url: "https://example.test",
+      headers: { Authorization: "private" }
+    })))
+
+    const removed = await Effect.runPromise(Effect.either(service.remove(resourceId("docs"))))
+
+    expect(removed._tag).toBe("Left")
+    expect(await Effect.runPromise(service.list)).toEqual([
+      expect.objectContaining({ id: "docs" })
+    ])
+    expect(await Effect.runPromise(stored.readMcp("docs", "desktop"))).not.toBeNull()
   })
 })

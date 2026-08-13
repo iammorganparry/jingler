@@ -85,4 +85,21 @@ describe("AgentSecretStore", () => {
 
     expect(await Effect.runPromise(new AgentSecretStore(backing).read(id("invalid")))).toBeNull()
   })
+
+  it("rejects oversized provider and MCP secret payloads", async () => {
+    const backing = await Effect.runPromise(makeInMemorySecretStore())
+    const store = new AgentSecretStore(backing)
+
+    await expect(Effect.runPromise(store.write({
+      connectionId: id("oversized"),
+      authKind: "api-key",
+      access: "x".repeat(16_385),
+      refresh: null,
+      expiresAt: null
+    }))).rejects.toThrow()
+    await expect(Effect.runPromise(store.writeMcp("docs", "desktop", {
+      headers: { Authorization: "x".repeat(65_537) },
+      env: {}
+    }))).rejects.toThrow()
+  })
 })

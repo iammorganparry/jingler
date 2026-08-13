@@ -7,20 +7,20 @@ import type {
   ProviderCredentialStore,
   StoredProviderCredential
 } from "./credential-store.js"
-import { AuthKind } from "@jingler/core"
+import { AuthKind, ManagedSecretValues } from "@jingler/core"
 import { Effect, Either, Schema } from "effect"
 import { ProviderCredentialStoreError as CredentialStoreError } from "./credential-store.js"
 
 const StoredCredentialPayload = Schema.Struct({
   authKind: AuthKind,
-  access: Schema.String,
-  refresh: Schema.NullOr(Schema.String),
+  access: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(16_384)),
+  refresh: Schema.NullOr(Schema.String.pipe(Schema.maxLength(16_384))),
   expiresAt: Schema.NullOr(Schema.Number)
 })
 
 const ManagedMcpSecretPayload = Schema.Struct({
-  headers: Schema.Record({ key: Schema.String, value: Schema.String }),
-  env: Schema.Record({ key: Schema.String, value: Schema.String })
+  headers: ManagedSecretValues,
+  env: ManagedSecretValues
 })
 export type ManagedMcpSecretPayload = Schema.Schema.Type<typeof ManagedMcpSecretPayload>
 
@@ -68,16 +68,17 @@ export class AgentSecretStore implements ProviderCredentialStore {
   write = (credential: StoredProviderCredential) =>
     Effect.tryPromise({
       try: async () => {
+        const payload = Schema.decodeUnknownSync(StoredCredentialPayload)({
+          authKind: credential.authKind,
+          access: credential.access,
+          refresh: credential.refresh,
+          expiresAt: credential.expiresAt
+        })
         await updateDeviceSecretDocument(this.#store, (document) => ({
           ...document,
           agentCredentials: {
             ...document.agentCredentials,
-            [credential.connectionId]: {
-              authKind: credential.authKind,
-              access: credential.access,
-              refresh: credential.refresh,
-              expiresAt: credential.expiresAt
-            }
+            [credential.connectionId]: payload
           }
         }))
       },

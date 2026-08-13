@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
+  ManagedMcpImportInput,
   ManagedMcpServer,
   ManagedResourceScope,
   ResourceImportResult
@@ -31,6 +32,23 @@ describe("managed resource schemas", () => {
       headerKeys: ["Authorization"],
       headers: { Authorization: "Bearer secret" }
     }, { onExcessProperty: "error" })).toThrow()
+  })
+
+  it("bounds short-lived MCP secrets and persisted paths", () => {
+    expect(() => Schema.decodeUnknownSync(ManagedMcpImportInput)({
+      ...base,
+      targetId: "desktop",
+      transport: "http",
+      url: "https://mcp.example.test",
+      headers: { Authorization: "x".repeat(65_537) }
+    })).toThrow()
+    expect(() => Schema.decodeUnknownSync(ManagedMcpServer)({
+      ...base,
+      provenance: { ...base.provenance, sourcePath: "x".repeat(8_193) },
+      transport: "http",
+      url: "https://mcp.example.test",
+      headerKeys: []
+    })).toThrow()
   })
 
   it("distinguishes portable and target-local scopes", () => {

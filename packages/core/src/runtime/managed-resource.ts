@@ -24,10 +24,19 @@ export const ManagedResourceOrigin = Schema.Literal(
 )
 export type ManagedResourceOrigin = Schema.Schema.Type<typeof ManagedResourceOrigin>
 
+const ManagedPath = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192))
+const ManagedSecretKey = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))
+
+export const ManagedSecretValues = Schema.Record({
+  key: ManagedSecretKey,
+  value: Schema.String.pipe(Schema.maxLength(65_536))
+})
+export type ManagedSecretValues = Schema.Schema.Type<typeof ManagedSecretValues>
+
 export const ManagedResourceProvenance = Schema.Struct({
   origin: ManagedResourceOrigin,
-  sourceRoot: Schema.String,
-  sourcePath: Schema.String,
+  sourceRoot: ManagedPath,
+  sourcePath: ManagedPath,
   importedAt: Schema.NullOr(Schema.String)
 })
 export type ManagedResourceProvenance = Schema.Schema.Type<
@@ -41,7 +50,7 @@ export const ManagedResourceScope = Schema.Union(
   }),
   Schema.Struct({
     kind: Schema.Literal("device-local"),
-    targetId: Schema.String
+    targetId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))
   })
 )
 export type ManagedResourceScope = Schema.Schema.Type<typeof ManagedResourceScope>
@@ -68,7 +77,7 @@ export const ManagedFileResource = Schema.Struct({
   ...ManagedResourceBase,
   kind: Schema.Literal("skill", "prompt"),
   description: Schema.String.pipe(Schema.maxLength(2_000)),
-  managedPath: Schema.String,
+  managedPath: ManagedPath,
   byteLength: Schema.Int.pipe(Schema.nonNegative())
 })
 export type ManagedFileResource = Schema.Schema.Type<typeof ManagedFileResource>
@@ -83,23 +92,18 @@ export const ManagedMcpServer = Schema.Union(
   Schema.Struct({
     ...ManagedMcpBase,
     transport: Schema.Literal("http", "sse"),
-    url: Schema.String,
-    headerKeys: Schema.Array(Schema.String).pipe(Schema.maxItems(64))
+    url: ManagedPath,
+    headerKeys: Schema.Array(ManagedSecretKey).pipe(Schema.maxItems(64))
   }),
   Schema.Struct({
     ...ManagedMcpBase,
     transport: Schema.Literal("stdio"),
-    command: Schema.String,
-    args: Schema.Array(Schema.String).pipe(Schema.maxItems(256)),
-    envKeys: Schema.Array(Schema.String).pipe(Schema.maxItems(128))
+    command: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+    args: Schema.Array(Schema.String.pipe(Schema.maxLength(8_192))).pipe(Schema.maxItems(256)),
+    envKeys: Schema.Array(ManagedSecretKey).pipe(Schema.maxItems(128))
   })
 )
 export type ManagedMcpServer = Schema.Schema.Type<typeof ManagedMcpServer>
-
-const SecretValues = Schema.Record({
-  key: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  value: Schema.String
-})
 
 const ManagedMcpImportBase = {
   id: ManagedResourceId,
@@ -115,14 +119,14 @@ export const ManagedMcpImportInput = Schema.Union(
     ...ManagedMcpImportBase,
     transport: Schema.Literal("http", "sse"),
     url: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192)),
-    headers: SecretValues
+    headers: ManagedSecretValues
   }),
   Schema.Struct({
     ...ManagedMcpImportBase,
     transport: Schema.Literal("stdio"),
     command: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
     args: Schema.Array(Schema.String.pipe(Schema.maxLength(8_192))).pipe(Schema.maxItems(256)),
-    env: SecretValues
+    env: ManagedSecretValues
   })
 )
 export type ManagedMcpImportInput = Schema.Schema.Type<typeof ManagedMcpImportInput>
