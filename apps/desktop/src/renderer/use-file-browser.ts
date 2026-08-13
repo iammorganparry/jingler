@@ -11,6 +11,7 @@ import {
 } from "./file-browser-machine.js"
 import { rpc } from "./rpc-client.js"
 import { listRepositoryFiles } from "./repository-file-list.js"
+import { lruKeysToEvict } from "./registry-eviction.js"
 
 export type FileBrowserActor = ActorRefFrom<FileBrowserMachine>
 
@@ -23,12 +24,74 @@ const api: FileBrowserApi = {
 }
 const actors = new Map<string, FileBrowserActor>()
 
+/**
+ * How many mounted `useFileBrowser` hooks reference each session's actor.
+ *
+ * A ref-count, not a flag, because one session's browser is mounted from several
+ * places at once (the conversation pane, the Files tab, the session's chat-tab
+ * strip). An actor is "mounted" — and never evictable — while any of them holds
+ * it; it drops to zero only once the whole session is off-screen.
+ */
+const mounts = new Map<string, number>()
+
+/**
+ * How many actors stay resident. Six matches the conversation registry's cap
+ * (`MAX_LIVE_ACTORS`): the same deepest session grid plus a couple of recent
+ * sessions, bounding the retained worktree diff strings and open-file payloads
+ * rather than letting one accumulate per session the operator ever opened.
+ */
+export const MAX_FILE_BROWSER_ACTORS = 6
+
+/**
+ * Whether dropping this actor would lose unrecoverable work: a dirty or mid-save
+ * draft (the edit exists nowhere else), or a surface still mounted (evicting
+ * would blank a browser the operator is looking at and immediately rebuild it).
+ * A clean, unmounted actor re-creates on demand from disk, so it is safe to drop.
+ */
+export const isFileBrowserActorPinned = (
+  actor: FileBrowserActor,
+  mounted: boolean
+): boolean => {
+  if (mounted) return true
+  const snapshot = actor.getSnapshot()
+  if (snapshot.matches({ document: "saving" })) return true
+  const { draft, payload } = snapshot.context
+  if (draft === null) return false
+  // A draft that no longer differs from the file is not work worth pinning for;
+  // one with no text payload to compare against is unsaved by default.
+  return payload !== null && "text" in payload ? draft !== payload.text : true
+}
+
+/** Drop the least-recently-used unpinned actors once residency exceeds the cap. */
+const evictFileBrowserActors = (keep: string): void => {
+  // `actors` insertion order IS recency order — `getFileBrowserActor` re-inserts
+  // on every hit — so iterating it yields the LRU-first list the policy wants.
+  const candidates = [...actors.entries()].map(([sessionId, actor]) => ({
+    key: sessionId,
+    pinned: isFileBrowserActorPinned(actor, (mounts.get(sessionId) ?? 0) > 0)
+  }))
+  for (const key of lruKeysToEvict(candidates, { keep, max: MAX_FILE_BROWSER_ACTORS })) {
+    const actor = actors.get(key)
+    if (actor === undefined) continue
+    actors.delete(key)
+    actor.stop()
+  }
+}
+
 const getFileBrowserActor = (
   sessionId: string,
   worktreePath?: string
 ): FileBrowserActor => {
   const existing = actors.get(sessionId)
-  if (existing !== undefined) return existing
+  if (existing !== undefined) {
+    // Re-insert to move this key to the most-recently-used end (see
+    // `evictFileBrowserActors`): `Map` keeps insertion order, and `set` on an
+    // existing key leaves it in place, so without the delete the policy would
+    // read creation order and drop the session just switched back to.
+    actors.delete(sessionId)
+    actors.set(sessionId, existing)
+    return existing
+  }
   const actor = createActor(createFileBrowserMachine(api), {
     input: {
       sessionId,
@@ -37,7 +100,19 @@ const getFileBrowserActor = (
   })
   actor.start()
   actors.set(sessionId, actor)
+  evictFileBrowserActors(sessionId)
   return actor
+}
+
+/** Ref-count a mounted hook onto its session's actor; released on unmount. */
+const retainFileBrowserActor = (sessionId: string): void => {
+  mounts.set(sessionId, (mounts.get(sessionId) ?? 0) + 1)
+}
+
+const releaseFileBrowserActor = (sessionId: string): void => {
+  const next = (mounts.get(sessionId) ?? 0) - 1
+  if (next <= 0) mounts.delete(sessionId)
+  else mounts.set(sessionId, next)
 }
 
 /** Open a path even while the Files tab is unmounted (transcript/quick-open route). */
@@ -47,6 +122,7 @@ export const openSessionFile = (sessionId: string, path: string): void => {
 
 /** Persistent actors are session resources; collect one after permanent deletion. */
 export const disposeFileBrowserActor = (sessionId: string): void => {
+  mounts.delete(sessionId)
   const actor = actors.get(sessionId)
   if (actor === undefined) return
   actors.delete(sessionId)
@@ -117,6 +193,12 @@ export function useFileBrowser(
     [sessionId, worktreePath]
   )
   const snapshot = useSelector(actor, (state) => state)
+  // Pin this session's actor against eviction for as long as a browser is
+  // mounted on it, across however many components mount one at once.
+  useEffect(() => {
+    retainFileBrowserActor(sessionId)
+    return () => releaseFileBrowserActor(sessionId)
+  }, [sessionId])
   useEffect(() => {
     if (worktreePath === undefined) return
     actor.send({ type: "SYNC_WORKTREE", worktreePath })

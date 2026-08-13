@@ -1,8 +1,12 @@
 import type { PlanDocument } from "@jingler/core"
 import type { PlanEditorSyncState } from "@jingler/ui"
 import { useSelector } from "@xstate/react"
-import { useCallback, useMemo } from "react"
-import { getPlanDocumentActor } from "./plan-document-registry.js"
+import { useCallback, useEffect, useMemo } from "react"
+import {
+  getPlanDocumentActor,
+  releasePlanDocumentActor,
+  retainPlanDocumentActor
+} from "./plan-document-registry.js"
 import { rpc } from "./rpc-client.js"
 
 const listeners = new Map<string, Set<(document: PlanDocument) => void>>()
@@ -52,6 +56,11 @@ export function usePlanDocument(sessionId: string) {
     }),
     [sessionId]
   )
+  // Pin this session's actor against eviction while the pane consuming it is mounted.
+  useEffect(() => {
+    retainPlanDocumentActor(sessionId)
+    return () => releasePlanDocumentActor(sessionId)
+  }, [sessionId])
   const snapshot = useSelector(actor, (state) => state)
 
   // Create a blank draft from the template so the operator can start authoring a

@@ -3,26 +3,83 @@ import {
   planDocumentMachine,
   type PlanDocumentInput
 } from "./plan-document-machine.js"
+import { lruKeysToEvict } from "./registry-eviction.js"
 
 export type PlanDocumentActor = ActorRefFrom<typeof planDocumentMachine>
 
 const actors = new Map<string, PlanDocumentActor>()
 
 /**
+ * How many mounted `usePlanDocument` hooks reference each session's actor. Only
+ * the (visible) conversation pane consumes a plan actor, so this reaches zero
+ * exactly when the session goes off-screen. Background plan-tab presence is NOT
+ * sourced from here — it is derived from the conversation actor's messages in
+ * `conversation-registry.recomputeSession` — so evicting an unmounted plan actor
+ * stales no surface; it reloads from `Plan.watch` when the pane returns.
+ */
+const mounts = new Map<string, number>()
+
+/**
+ * How many actors stay resident, matching the conversation registry's cap. Plan
+ * documents are small, but the actor also holds a live `Plan.watch` stream, and
+ * one per session the operator ever opened is the same unbounded retention the
+ * conversation and file-browser registries cap.
+ */
+export const MAX_PLAN_DOCUMENT_ACTORS = 6
+
+/** Drop the least-recently-used unmounted actors once residency exceeds the cap. */
+const evictPlanDocumentActors = (keep: string): void => {
+  // `actors` insertion order IS recency order — `getPlanDocumentActor` re-inserts
+  // on every hit — so iterating it yields the LRU-first list the policy wants.
+  // The plan is read-only, so the only thing worth pinning for is a live mount.
+  const candidates = [...actors.keys()].map((sessionId) => ({
+    key: sessionId,
+    pinned: (mounts.get(sessionId) ?? 0) > 0
+  }))
+  for (const key of lruKeysToEvict(candidates, { keep, max: MAX_PLAN_DOCUMENT_ACTORS })) {
+    const actor = actors.get(key)
+    if (actor === undefined) continue
+    actors.delete(key)
+    actor.stop()
+  }
+}
+
+/**
  * Plan documents are session resources, not view resources. Keeping their actors
  * here lets the loaded document and its `Plan.watch` subscription survive tab
- * changes and pane remounts.
+ * changes and pane remounts. Residency is capped, so an actor for a session left
+ * alone long enough may have been evicted — this rebuilds it, reloading from
+ * `Plan.watch`, exactly as on a cold start.
  */
 export const getPlanDocumentActor = (
   sessionId: string,
   input: PlanDocumentInput
 ): PlanDocumentActor => {
   const existing = actors.get(sessionId)
-  if (existing !== undefined) return existing
+  if (existing !== undefined) {
+    // Re-insert to move this key to the most-recently-used end (see
+    // `evictPlanDocumentActors`): `set` on an existing key leaves its position,
+    // so without the delete the policy would read creation order.
+    actors.delete(sessionId)
+    actors.set(sessionId, existing)
+    return existing
+  }
   const actor = createActor(planDocumentMachine, { input })
   actor.start()
   actors.set(sessionId, actor)
+  evictPlanDocumentActors(sessionId)
   return actor
+}
+
+/** Ref-count a mounted hook onto its session's actor; released on unmount. */
+export const retainPlanDocumentActor = (sessionId: string): void => {
+  mounts.set(sessionId, (mounts.get(sessionId) ?? 0) + 1)
+}
+
+export const releasePlanDocumentActor = (sessionId: string): void => {
+  const next = (mounts.get(sessionId) ?? 0) - 1
+  if (next <= 0) mounts.delete(sessionId)
+  else mounts.set(sessionId, next)
 }
 
 /**
@@ -42,6 +99,7 @@ export const flushAllPlanDocuments = (): Promise<void> => Promise.resolve()
 
 /** Stop a session actor only after its session has been permanently removed. */
 export const stopPlanDocument = (sessionId: string): void => {
+  mounts.delete(sessionId)
   const actor = actors.get(sessionId)
   if (actor === undefined) return
   actors.delete(sessionId)
