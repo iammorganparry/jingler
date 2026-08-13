@@ -61,6 +61,16 @@ export const AgentTurnDriverLive = Layer.effect(
   Effect.gen(function* () {
     const runtime = yield* AgentRuntime
     const active = yield* Ref.make(new Map<string, string>())
+    const interruptRun = (runId: string) =>
+      Ref.get(active).pipe(
+        Effect.flatMap((current) => {
+          const piSessionId = current.get(runId)
+          return piSessionId === undefined ? Effect.void : runtime.interrupt(piSessionId)
+        }),
+        Effect.mapError(
+          (error) => new AgentRunError({ kind: "runtime", message: error.message })
+        )
+      )
 
     return AgentTurnDriver.of({
       run: (runId, spec, context) => {
@@ -83,6 +93,7 @@ export const AgentTurnDriverLive = Layer.effect(
             })
           ),
           Effect.mapError((error) => runtimeFailure(spec, error.message)),
+          Effect.onInterrupt(() => interruptRun(runId).pipe(Effect.ignore)),
           Effect.ensuring(context.registerTurnSteer?.(null) ?? Effect.void),
           Effect.ensuring(
             Ref.update(active, (current) => {
@@ -93,14 +104,7 @@ export const AgentTurnDriverLive = Layer.effect(
           )
         )
       },
-      stop: (runId) =>
-        Ref.get(active).pipe(
-          Effect.flatMap((current) => {
-            const piSessionId = current.get(runId)
-            return piSessionId === undefined ? Effect.void : runtime.interrupt(piSessionId)
-          }),
-          Effect.mapError((error) => new AgentRunError({ kind: "runtime", message: error.message }))
-        )
+      stop: interruptRun
     })
   })
 )

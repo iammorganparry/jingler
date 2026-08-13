@@ -4,7 +4,7 @@ import {
   ProviderModelId,
   type StreamEvent
 } from "@jingler/core"
-import { Effect, Layer, Schema, Stream } from "effect"
+import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
   type AgentContext,
@@ -104,13 +104,10 @@ describe("AgentRuntimeAdapter", () => {
     expect(registerTurnSteer).toHaveBeenCalled()
   })
 
-  it("interrupts the active pi session", async () => {
+  it("interrupts the active pi session when the run fiber is interrupted", async () => {
     const interrupt = vi.fn(() => Effect.void)
-    let release!: () => void
     let markStarted!: () => void
-    const held = new Promise<void>((resolve) => {
-      release = resolve
-    })
+    const held = new Promise<void>(() => undefined)
     const started = new Promise<void>((resolve) => {
       markStarted = resolve
     })
@@ -139,9 +136,7 @@ describe("AgentRuntimeAdapter", () => {
       const adapter = yield* AgentTurnDriver
       const fiber = yield* Effect.fork(adapter.run("run-1", spec(), context()))
       yield* Effect.promise(() => started)
-      yield* adapter.stop("run-1")
-      release()
-      return yield* fiber.await
+      return yield* Fiber.interrupt(fiber)
     }).pipe(Effect.provide(layer))
 
     await Effect.runPromise(program)
