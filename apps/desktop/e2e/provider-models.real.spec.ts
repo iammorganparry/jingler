@@ -208,10 +208,7 @@ const signInToProduct = async (
   token: string,
 ): Promise<void> => {
   const signIn = window.getByRole("heading", { name: "Sign in to Jingler" });
-  await Promise.race([
-    signIn.waitFor({ state: "visible", timeout: 30_000 }),
-    appShell(window).waitFor({ state: "visible", timeout: 30_000 }),
-  ]);
+  await expect(signIn.or(appShell(window))).toBeVisible({ timeout: 30_000 });
   if (!(await signIn.isVisible())) return;
   await app.evaluate(({ app: electronApp }, value) => {
     electronApp.emit(
@@ -340,6 +337,7 @@ const launchRealProviderApp = async (
       ...process.env,
       ELECTRON_RENDERER_URL: "",
       JINGLER_AUTH_URL: auth.url,
+      JINGLER_DISABLE_AUTO_UPDATE: "1",
       JINGLER_E2E: "0",
       JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
       JINGLER_HOME: resolve(home),
