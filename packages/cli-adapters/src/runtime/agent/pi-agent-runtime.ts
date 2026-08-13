@@ -57,21 +57,37 @@ const makeEventSink = (
   }
 }
 
-const reconcileWorkspace = async (handle: PiSessionHandle, sink: EventSink): Promise<void> => {
-  const changes = await handle.reconcile?.()
-  if (!(changes && changes.changes.length > 0)) return
-  const id = `reconcile:${changes.id}`
-  sink.emit({ _tag: "ToolStart", id, name: "Workspace changes", target: null })
-  sink.emit({
-    _tag: "ToolEnd",
-    id,
-    status: "success",
-    meta: "Final workspace reconciliation",
-    diff: changes.totals,
-    preview: changes.changes.find((change) => change.preview)?.preview ?? null,
-    fileChanges: changes
-  })
-}
+const reconcileWorkspace = (
+  handle: PiSessionHandle,
+  sink: EventSink
+): Effect.Effect<void, AgentRuntimeError> =>
+  Effect.tryPromise({
+    try: () => handle.reconcile?.() ?? Promise.resolve(null),
+    catch: (cause) =>
+      new AgentRuntimeError({
+        reason: "runtime",
+        message: "Final workspace reconciliation failed",
+        cause
+      })
+  }).pipe(
+    Effect.tap((changes) =>
+      Effect.sync(() => {
+        if (!(changes && changes.changes.length > 0)) return
+        const id = `reconcile:${changes.id}`
+        sink.emit({ _tag: "ToolStart", id, name: "Workspace changes", target: null })
+        sink.emit({
+          _tag: "ToolEnd",
+          id,
+          status: "success",
+          meta: "Final workspace reconciliation",
+          diff: changes.totals,
+          preview: changes.changes.find((change) => change.preview)?.preview ?? null,
+          fileChanges: changes
+        })
+      })
+    ),
+    Effect.asVoid
+  )
 
 const PLAN_TOOLS = new Set(["jingler_save_draft_plan", "jingler_submit_plan"])
 const PlanToolArguments = Schema.Struct({ plan: PlanPrd })
@@ -112,14 +128,16 @@ const subscribeToSession = (
     const normalized = normalizePiEvent(event, handle.contextWindow ?? undefined)
     if (normalized) sink.emit(normalized)
     if (event.type === "agent_settled" && sink.beginSettling()) {
-      reconcileWorkspace(handle, sink)
-        .then(() => sink.emit({ _tag: "Done", ...handle.usage() }))
-        .catch(() =>
-          sink.emit({
-            _tag: "Failed",
-            message: "Final workspace reconciliation failed"
-          })
+      Effect.runFork(
+        reconcileWorkspace(handle, sink).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => sink.emit({ _tag: "Done", ...handle.usage() }))
+          ),
+          Effect.catchAll((error) =>
+            Effect.sync(() => sink.emit({ _tag: "Failed", message: error.message }))
+          )
         )
+      )
     }
   })
 
@@ -135,7 +153,7 @@ const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): 
         })
     }).pipe(
       Effect.catchAll((error) =>
-        Effect.promise(() => reconcileWorkspace(handle, sink)).pipe(
+        reconcileWorkspace(handle, sink).pipe(
           Effect.catchAll(() => Effect.void),
           Effect.tap(() => Effect.sync(() => sink.emit({ _tag: "Failed", message: error.message })))
         )

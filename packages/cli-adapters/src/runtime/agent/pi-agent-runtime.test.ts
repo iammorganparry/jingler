@@ -206,7 +206,7 @@ describe("PiAgentRuntime", () => {
     ).toEqual(["composing", "complete"])
   })
 
-  it("surfaces prompt rejection as a single failed terminal", async () => {
+  it("surfaces prompt rejection when final reconciliation also rejects", async () => {
     const handle: PiSessionHandle = {
       id: "pi-session-2",
       modelId: "anthropic/claude-sonnet",
@@ -218,7 +218,10 @@ describe("PiAgentRuntime", () => {
       steer: async () => undefined,
       interrupt: async () => undefined,
       dispose: vi.fn(),
-      usage: () => ({ costUsd: 0, tokens: 0 })
+      usage: () => ({ costUsd: 0, tokens: 0 }),
+      reconcile: async () => {
+        throw new Error("snapshot unavailable")
+      }
     }
     const runtime = await Effect.runPromise(
       makePiAgentRuntime({ create: () => Effect.succeed(handle) })
