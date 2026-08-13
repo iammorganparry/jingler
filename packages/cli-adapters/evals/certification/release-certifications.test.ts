@@ -8,13 +8,10 @@ import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all"
 import { Effect, Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import configuredCandidates from "../../../../config/pi-release-candidates.json" with { type: "json" }
+import { CORE_CAPABILITY_PROFILE } from "../pi-scenarios.js"
 import { buildReleaseCertificationManifest } from "./release-certifications.js"
 
-const coreProfile: CapabilityProfile = {
-  id: "core",
-  required: true,
-  scenarioIds: ["lifecycle.complete", "auth.route-pinned", "diff.complete"]
-}
+const coreProfile = CORE_CAPABILITY_PROFILE
 
 const candidate = Schema.decodeUnknownSync(ReleaseModelCandidate)({
   providerId: "openai-codex",
@@ -130,6 +127,16 @@ describe("release certifications", () => {
         expect.stringContaining("has no confirmed provider route"),
         expect.stringContaining("is missing required scenarios")
       ]))
+  })
+
+  it("rejects a route without complete create, edit, delete, and rename evidence", async () => {
+    expect(await buildIssues([certification({
+      results: certification().results.filter(
+        (result) => result.scenarioId !== "diff.create-edit-delete-rename"
+      )
+    })])).toEqual(expect.arrayContaining([
+      expect.stringContaining("diff.create-edit-delete-rename")
+    ]))
   })
 
   it("validates optional capability claims before publishing them", async () => {
