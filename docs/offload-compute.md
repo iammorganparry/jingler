@@ -62,6 +62,24 @@ rules into a compressed format with an initial 64 MiB uncompressed cap. It
 excludes `.git`, dependencies, caches, build output, sockets, devices, symlinks,
 and known local secret files.
 
+## Effect-TS architecture
+
+All backend Offload Compute business logic uses Effect-TS in the repository's
+established style. Cross-process and persisted values are Effect `Schema`
+contracts. Snapshot, admission, runtime-client, and routing services are
+`Effect.Service` implementations with explicit Layer dependencies. Expected
+failures use typed tagged errors and stay in the Effect error channel; filesystem,
+network, compression, R2, Workflow, and Sandbox promises enter through
+`Effect.tryPromise` at narrow adapters. Multi-step admission, upload, execution,
+and cleanup programs use `Effect.gen`, scoped resource finalizers, interruption,
+and structured Effect logging.
+
+Cloudflare Worker `fetch`, Workflow `run`, Electron RPC, and renderer Promise
+methods are transport adapters only: they provide Layers, run one Effect program,
+and encode its typed result. Pure schema refinements, state-transition predicates,
+and command classification remain deterministic functions in `packages/core`;
+they do not acquire side effects merely to appear effectful.
+
 ## Trust boundaries
 
 The authenticated API derives the subject, account eligibility, session, and
