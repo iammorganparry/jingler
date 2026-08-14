@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
-import { routeWebSearch } from "./web-search.js"
+import { browserWebSearchPort, routeWebSearch } from "./web-search.js"
+import { WebSearchError } from "@jingler/core"
 import { searchWithProvider } from "./web-search-providers.js"
 
 const signal = () => new AbortController().signal
@@ -42,6 +43,50 @@ describe("WebSearch target routing", () => {
       signal: signal(),
       resolveKey: async () => null
     })).rejects.toMatchObject({ reason: "unavailable" })
+  })
+
+  it("propagates cancellation without starting native or browser fallbacks", async () => {
+    const native = vi.fn(async () => response("native"))
+    const browser = vi.fn(async () => response("browser"))
+    await expect(routeWebSearch({
+      config: { setup: "configured", provider: "exa" },
+      query,
+      signal: signal(),
+      resolveKey: async () => "exa-secret",
+      providerSearch: async () => {
+        throw new WebSearchError({
+          reason: "cancelled",
+          message: "cancelled",
+          retryable: true
+        })
+      },
+      native: { search: native },
+      browser: { search: browser }
+    })).rejects.toMatchObject({ reason: "cancelled" })
+    expect(native).not.toHaveBeenCalled()
+    expect(browser).not.toHaveBeenCalled()
+  })
+
+  it("stops browser extraction when cancellation interrupts navigation", async () => {
+    const controller = new AbortController()
+    let finishNavigate: (() => void) | undefined
+    const navigate = vi.fn(() => new Promise<void>((resolve) => {
+      finishNavigate = resolve
+    }))
+    const evaluate = vi.fn(async () => ({ result: "[]" }))
+    const pending = browserWebSearchPort({
+      navigate,
+      evaluate,
+      screenshot: vi.fn(),
+      click: vi.fn(),
+      type: vi.fn(),
+      readText: vi.fn(),
+      waitForSelector: vi.fn()
+    }).search(query, controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ reason: "cancelled" })
+    finishNavigate?.()
+    expect(evaluate).not.toHaveBeenCalled()
   })
 
   it("does not wait for setup when no target route exists", async () => {
@@ -115,6 +160,29 @@ describe("WebSearch provider adapters", () => {
       input: { query: "query", maxResults: 5 },
       signal: signal()
     }, { fetch: async () => new Response("error", { status }) })).rejects.toMatchObject({ reason })
+  })
+
+  it("cancels a chunked response as soon as its streamed byte limit is exceeded", async () => {
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let index = 0; index < 513; index += 1) {
+          controller.enqueue(new Uint8Array(1_024))
+        }
+      },
+      cancel() {
+        cancelled = true
+      }
+    })
+    await expect(searchWithProvider({
+      provider: "exa",
+      apiKey: "exa-secret",
+      input: { query: "query", maxResults: 5 },
+      signal: signal()
+    }, { fetch: async () => new Response(body) })).rejects.toMatchObject({
+      reason: "invalid-response"
+    })
+    expect(cancelled).toBe(true)
   })
 
   it("rejects oversized responses before decoding", async () => {

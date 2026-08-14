@@ -24,12 +24,30 @@ describe("WebSearch settings", () => {
         onSkip={vi.fn()}
       />
     )
+    expect(document.querySelectorAll("img[data-provider-logo]")).toHaveLength(2)
     const input = screen.getByLabelText("EXA API key") as HTMLInputElement
     fireEvent.change(input, { target: { value: "exa-secret-key" } })
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(save).toHaveBeenCalledWith("exa", "exa-secret-key"))
     expect(input.value).toBe("")
     expect(screen.queryByDisplayValue("exa-secret-key")).toBeNull()
+  })
+
+  it("clears a typed key when switching providers", () => {
+    render(
+      <WebSearchSettings
+        status={status}
+        onSave={vi.fn()}
+        onClear={vi.fn()}
+        onSkip={vi.fn()}
+      />
+    )
+    fireEvent.change(screen.getByLabelText("EXA API key"), {
+      target: { value: "exa-secret-key" }
+    })
+    fireEvent.click(screen.getByRole("tab", { name: "Firecrawl" }))
+    expect((screen.getByLabelText("Firecrawl API key") as HTMLInputElement).value).toBe("")
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it("shows cloud sync state without displaying a saved key", () => {

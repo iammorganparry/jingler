@@ -65,13 +65,42 @@ export const managedWebSearchServiceFromEnvironment = (
   }
 }
 
+const cancelled = () => new WebSearchError({
+  reason: "cancelled",
+  message: "Search was cancelled",
+  retryable: true
+})
+
+const throwIfAborted = (signal: AbortSignal): void => {
+  if (signal.aborted) throw cancelled()
+}
+
+const abortable = async <A>(operation: Promise<A>, signal: AbortSignal): Promise<A> => {
+  throwIfAborted(signal)
+  return new Promise<A>((resolve, reject) => {
+    const onAbort = () => reject(cancelled())
+    signal.addEventListener("abort", onAbort, { once: true })
+    operation.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort)
+        resolve(value)
+      },
+      (cause) => {
+        signal.removeEventListener("abort", onAbort)
+        reject(cause)
+      }
+    )
+  })
+}
+
 export const browserWebSearchPort = (
   browser: BrowserControlSessionPortShape
 ): WebSearchFallbackPort => ({
-  search: async (input) => {
+  search: async (input, signal) => {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(input.query)}`
-    await browser.navigate(url)
-    const { result } = await browser.evaluate(`JSON.stringify(
+    await abortable(browser.navigate(url), signal)
+    throwIfAborted(signal)
+    const { result } = await abortable(browser.evaluate(`JSON.stringify(
       Array.from(document.querySelectorAll('.result')).slice(0, ${input.maxResults}).map((node) => {
         const link = node.querySelector('.result__a');
         const snippet = node.querySelector('.result__snippet');
@@ -82,7 +111,8 @@ export const browserWebSearchPort = (
           publishedAt: null
         };
       })
-    )`)
+    )`), signal)
+    throwIfAborted(signal)
     let results: unknown
     try {
       results = JSON.parse(result)
@@ -107,7 +137,11 @@ export const withWebSearchFallback = (
   ...(primary.chooseSetup ? { chooseSetup: primary.chooseSetup } : {}),
   search: (input, signal) =>
     primary.search(input, signal).pipe(
-      Effect.catchAll(() => fromPromise(() => fallback.search(input, signal)))
+      Effect.catchAll((cause) =>
+        signal.aborted || cause.reason === "cancelled"
+          ? Effect.fail(cause)
+          : fromPromise(() => fallback.search(input, signal))
+      )
     )
 })
 
@@ -155,30 +189,46 @@ export const routeWebSearch = async (
   input: RouteWebSearchInput
 ): Promise<WebSearchResponse> => {
   const fallback = async (setupRequired: boolean): Promise<WebSearchResponse> => {
+    throwIfAborted(input.signal)
     if (input.native) {
       try {
         return await input.native.search(input.query, input.signal)
-      } catch {
+      } catch (cause) {
+        if (
+          input.signal.aborted ||
+          (cause instanceof WebSearchError && cause.reason === "cancelled")
+        ) throw cancelled()
         // A target may continue only through a fallback it actually owns.
       }
     }
+    throwIfAborted(input.signal)
     if (input.browser) return input.browser.search(input.query, input.signal)
     throw unavailable(setupRequired)
   }
 
+  throwIfAborted(input.signal)
   if (input.config.setup !== "configured" || input.config.provider === null) {
     return fallback(input.config.setup === "pending")
   }
   const apiKey = await input.resolveKey(input.config.provider)
+  throwIfAborted(input.signal)
   if (apiKey === null) return fallback(true)
+  const providerTimeout = AbortSignal.timeout(30_000)
+  const providerSignal = AbortSignal.any([input.signal, providerTimeout])
   try {
     return await (input.providerSearch ?? searchWithProvider)({
       provider: input.config.provider,
       apiKey,
       input: input.query,
-      signal: input.signal
+      signal: providerSignal
     })
-  } catch {
+  } catch (cause) {
+    if (input.signal.aborted) throw cancelled()
+    if (
+      cause instanceof WebSearchError &&
+      cause.reason === "cancelled" &&
+      !providerTimeout.aborted
+    ) throw cancelled()
     return fallback(false)
   }
 }

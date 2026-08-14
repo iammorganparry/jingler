@@ -10,6 +10,11 @@ const MAX_CAPABILITIES = 32;
 const MAX_ACTIVE_SESSIONS = 1;
 const ACTIVE_SESSION_LEASE_SECONDS = 2 * 60 * 60;
 
+export const managedWebSearchRouteChanged = (
+  previous: ReadonlyArray<ManagedWebSearchCapability> | undefined,
+  next: ReadonlyArray<ManagedWebSearchCapability> | undefined,
+): boolean => previous?.[0]?.provider !== next?.[0]?.provider;
+
 const CredentialCapability = Schema.Struct({
   provider: Schema.Literal("github", "codex", "claude", "exa", "firecrawl"),
   handle: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),

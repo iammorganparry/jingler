@@ -106,6 +106,7 @@ import {
   skillsList,
   transcriptHasGitHubFeedback,
   uninstallPlugin,
+  updateWebSearchAtomically,
   githubAckEvent,
   workspaceRevertFile,
   withoutAttachmentData,
@@ -410,6 +411,22 @@ describe("RPC handlers", () => {
       chooseDirectory: () => Effect.succeed(chosen),
       saveFile: () => Effect.succeed(saveDestination),
     });
+
+  it("restores WebSearch configuration when its credential mutation fails", async () => {
+    await Effect.runPromise(ConfigService.setWebSearch({
+      setup: "skipped",
+      provider: null,
+    }).pipe(Effect.provide(base)));
+
+    const exit = await Effect.runPromiseExit(updateWebSearchAtomically(
+      { setup: "configured", provider: "exa" },
+      Effect.fail("simulated credential failure"),
+    ).pipe(Effect.provide(base)));
+    expect(exit._tag).toBe("Failure");
+
+    const config = await Effect.runPromise(ConfigService.get().pipe(Effect.provide(base)));
+    expect(config?.webSearch).toEqual({ setup: "skipped", provider: null });
+  });
 
   it("keeps a plugin installed when credential cleanup fails", async () => {
     const pluginDir = join(root, "plugins", "linear");

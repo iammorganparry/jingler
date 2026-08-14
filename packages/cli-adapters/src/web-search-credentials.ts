@@ -43,13 +43,33 @@ export class WebSearchCredentialService extends Effect.Service<WebSearchCredenti
               body: JSON.stringify({
                 provider,
                 ...(apiKey === null ? {} : { apiKey })
-              })
+              }),
+              signal: AbortSignal.timeout(10_000)
             })
           ).pipe(
+            Effect.timeout("10 seconds"),
             Effect.map((response) => response.ok),
             Effect.orElseSucceed(() => false)
           )
         })
+
+      const revokeCloud = (provider: WebSearchProvider) =>
+        resolve(provider).pipe(
+          Effect.flatMap((credential) =>
+            credential?.cloudSynced !== true
+              ? Effect.void
+              : syncCloud(provider, null).pipe(
+                  Effect.flatMap((revoked) =>
+                    revoked
+                      ? Effect.void
+                      : Effect.fail(credentialError(
+                          "Could not revoke the Cloud WebSearch credential; no local changes were made",
+                          true
+                        ))
+                  )
+                )
+          )
+        )
 
       const resolve = (provider: WebSearchProvider) =>
         credentials.readWebSearch(provider).pipe(
@@ -91,12 +111,14 @@ export class WebSearchCredentialService extends Effect.Service<WebSearchCredenti
                 ? cause
                 : credentialError("Could not validate WebSearch credentials", true)
           }).pipe(
+            Effect.zipRight(revokeCloud(other)),
             Effect.zipRight(credentials.writeWebSearch(input.provider, {
               apiKey: input.apiKey,
               validatedAt,
               cloudSynced: false
-            })),
-            Effect.mapError(() => credentialError("Could not save WebSearch credentials")),
+            }).pipe(
+              Effect.mapError(() => credentialError("Could not save WebSearch credentials"))
+            )),
             Effect.zipRight(syncCloud(input.provider, input.apiKey)),
             Effect.flatMap((cloudSynced) =>
               credentials.writeWebSearch(input.provider, {
@@ -109,8 +131,9 @@ export class WebSearchCredentialService extends Effect.Service<WebSearchCredenti
                 )
               )
             ),
-            Effect.zipRight(syncCloud(other, null)),
-            Effect.zipRight(credentials.deleteWebSearch(other).pipe(Effect.ignore)),
+            Effect.zipRight(credentials.deleteWebSearch(other).pipe(
+              Effect.mapError(() => credentialError("Could not remove the previous WebSearch credential"))
+            )),
             Effect.zipRight(statusFor(input.provider))
           )
         },
@@ -135,9 +158,13 @@ export class WebSearchCredentialService extends Effect.Service<WebSearchCredenti
             )
           ),
         clear: (provider: WebSearchProvider) =>
-          syncCloud(provider, null).pipe(
+          revokeCloud(provider).pipe(
             Effect.zipRight(credentials.deleteWebSearch(provider)),
-            Effect.mapError(() => credentialError("Could not clear WebSearch credentials"))
+            Effect.mapError((cause) =>
+              cause instanceof WebSearchError
+                ? cause
+                : credentialError("Could not clear WebSearch credentials")
+            )
           )
       }
     })

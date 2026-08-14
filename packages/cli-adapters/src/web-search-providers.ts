@@ -30,15 +30,41 @@ const failure = (
 const boundedJson = async (response: Response): Promise<unknown> => {
   const declared = Number(response.headers.get("content-length") ?? 0)
   if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+    await response.body?.cancel().catch(() => undefined)
     throw failure("invalid-response", "Search response exceeded its size limit", false)
   }
-  const text = await response.text()
-  if (Buffer.byteLength(text) > MAX_RESPONSE_BYTES) {
-    throw failure("invalid-response", "Search response exceeded its size limit", false)
+
+  const reader = response.body?.getReader()
+  if (reader === undefined) {
+    throw failure("invalid-response", "Search provider returned an empty response", false)
+  }
+  const chunks: Uint8Array[] = []
+  let received = 0
+  try {
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      received += chunk.value.byteLength
+      if (received > MAX_RESPONSE_BYTES) {
+        await reader.cancel("response-size-limit").catch(() => undefined)
+        throw failure("invalid-response", "Search response exceeded its size limit", false)
+      }
+      chunks.push(chunk.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const bytes = new Uint8Array(received)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
   }
   try {
-    return JSON.parse(text)
-  } catch {
+    return JSON.parse(new TextDecoder().decode(bytes))
+  } catch (cause) {
+    if (cause instanceof WebSearchError) throw cause
     throw failure("invalid-response", "Search provider returned invalid JSON", false)
   }
 }

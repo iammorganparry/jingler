@@ -15,6 +15,7 @@ import { Either, Schema } from "effect";
 import {
   decodeManagedAuthSnapshot,
   hasSameProviderRoute,
+  managedWebSearchRouteChanged,
 } from "./auth-subscription.js";
 import {
   bearerManagedGrant,
@@ -705,27 +706,37 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           authorized ? (snapshot?.version ?? null) : null,
           async () => this.#terminateProcess(metadata, "authorization-revoked"),
         );
+        const webSearchCapabilities =
+          snapshot?.credentialCapabilities.flatMap((capability) =>
+            (capability.provider === "exa" || capability.provider === "firecrawl") &&
+            capability.expiresAt > now
+              ? [{
+                  provider: capability.provider,
+                  handle: capability.handle,
+                  expiresAt: capability.expiresAt
+                }]
+              : []
+          ) ?? [];
+        const searchRouteChanged = managedWebSearchRouteChanged(
+          metadata.webSearchCapabilities,
+          webSearchCapabilities,
+        );
+        if (searchRouteChanged && next.processId !== null) {
+          await this.#terminateProcess(metadata, "web-search-route-changed");
+        }
+        const processId = searchRouteChanged ? null : next.processId;
         await this.ctx.storage.put(METADATA_KEY, {
           ...next,
+          processId,
           providerConnection: providerConnection ?? metadata.providerConnection,
-          webSearchCapabilities:
-            snapshot?.credentialCapabilities.flatMap((capability) =>
-              (capability.provider === "exa" || capability.provider === "firecrawl") &&
-              capability.expiresAt > now
-                ? [{
-                    provider: capability.provider,
-                    handle: capability.handle,
-                    expiresAt: capability.expiresAt
-                  }]
-                : []
-            ) ?? [],
+          webSearchCapabilities,
           githubCapabilityHandle:
             snapshot?.credentialCapabilities.find(
               (capability) =>
                 capability.provider === "github" && capability.expiresAt > now,
             )?.handle ?? null,
         });
-        if (metadata.processId !== null && next.processId === null) {
+        if (metadata.processId !== null && processId === null) {
           await this.#settleUsage();
           await this.#unregisterSession(metadata);
         }

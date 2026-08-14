@@ -90,7 +90,9 @@ export const registerWebSearchTool = (
     risk: "network",
     roles: ["conversation", "plan", "plan-execution", "review", "context-digest", "background"],
     modes,
-    timeoutMs: 30_000,
+    // Interactive first-use setup shares this invocation. Keep it bounded but
+    // long enough for an operator response; route-level network calls remain 30s.
+    timeoutMs: 15 * 60_000,
     outputBudget: 32_000,
     cancellable: true,
     idempotency: "safe",
@@ -139,7 +141,8 @@ export const registerWebSearchTool = (
               })
             )
           })
-        )
+        ),
+        { signal: toolContext.signal }
       )
   })
 }

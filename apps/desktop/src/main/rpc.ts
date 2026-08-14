@@ -115,6 +115,7 @@ import {
   ProviderConnectionError,
   AgentResourceRpcError,
   WEB_SEARCH_CONFIG_DEFAULT,
+  type WebSearchConfig,
   WebSearchError,
 } from "@jingler/core";
 import type {
@@ -4254,6 +4255,35 @@ const webSearchSettingsStatus = Effect.gen(function* () {
   };
 });
 
+export const updateWebSearchAtomically = <A, E, R>(
+  next: WebSearchConfig,
+  mutateCredential: Effect.Effect<A, E, R>,
+) => Effect.gen(function* () {
+  const current = yield* ConfigService.get().pipe(
+    Effect.map((config) => config?.webSearch ?? WEB_SEARCH_CONFIG_DEFAULT),
+    Effect.mapError(() => new WebSearchError({
+      reason: "unavailable",
+      message: "Could not read WebSearch settings before updating credentials",
+      retryable: true,
+    })),
+  );
+  yield* ConfigService.setWebSearch(next).pipe(
+    Effect.mapError(() => new WebSearchError({
+      reason: "unavailable",
+      message: "Could not save WebSearch settings",
+      retryable: true,
+    })),
+  );
+  return yield* mutateCredential.pipe(
+    Effect.catchAll((cause) =>
+      ConfigService.setWebSearch(current).pipe(
+        Effect.catchAll(() => Effect.void),
+        Effect.zipRight(Effect.fail(cause)),
+      ),
+    ),
+  );
+});
+
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
   "RuntimeDiagnostics.latest": () => RuntimeDiagnostics.latest(),
@@ -5233,34 +5263,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setWebSearch": (webSearch) => ConfigService.setWebSearch(webSearch),
   "WebSearch.get": () => webSearchSettingsStatus,
   "WebSearch.setCredential": (input) =>
-    WebSearchCredentialService.set(input).pipe(
-      Effect.zipRight(
-        ConfigService.setWebSearch({
-          setup: "configured",
-          provider: input.provider,
-        }).pipe(
-          Effect.mapError(() => new WebSearchError({
-            reason: "unavailable",
-            message: "Could not save WebSearch settings",
-            retryable: true,
-          })),
-        ),
-      ),
-      Effect.zipRight(webSearchSettingsStatus),
-    ),
+    updateWebSearchAtomically(
+      { setup: "configured", provider: input.provider },
+      WebSearchCredentialService.set(input),
+    ).pipe(Effect.zipRight(webSearchSettingsStatus)),
   "WebSearch.clearCredential": ({ provider }) =>
-    WebSearchCredentialService.clear(provider).pipe(
-      Effect.zipRight(
-        ConfigService.setWebSearch({ setup: "pending", provider: null }).pipe(
-          Effect.mapError(() => new WebSearchError({
-            reason: "unavailable",
-            message: "Could not reset WebSearch settings",
-            retryable: true,
-          })),
-        ),
-      ),
-      Effect.zipRight(webSearchSettingsStatus),
-    ),
+    updateWebSearchAtomically(
+      { setup: "pending", provider: null },
+      WebSearchCredentialService.clear(provider),
+    ).pipe(Effect.zipRight(webSearchSettingsStatus)),
   "WebSearch.skip": () =>
     ConfigService.setWebSearch({ setup: "skipped", provider: null }).pipe(
       Effect.mapError(() => new WebSearchError({

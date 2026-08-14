@@ -40,6 +40,57 @@ describe("WebSearch credential storage", () => {
     expect(await run(credentials.readWebSearch("firecrawl"))).not.toBeNull()
   })
 
+  it("keeps a cloud-synced key when revocation cannot be confirmed", async () => {
+    const secretStore = await run(makeInMemorySecretStore("desktop-bearer"))
+    const credentials = new AgentSecretStore(secretStore)
+    await run(credentials.writeWebSearch("exa", {
+      apiKey: "exa-cloud-secret",
+      validatedAt: null,
+      cloudSynced: true
+    }))
+    const request = vi.fn(async () => new Response("unavailable", { status: 503 }))
+    vi.stubGlobal("fetch", request)
+
+    await expect(run(WebSearchCredentialService.clear("exa").pipe(
+      Effect.provide(WebSearchCredentialService.Default),
+      Effect.provide(Layer.succeed(SecretStore, secretStore))
+    ))).rejects.toThrow("Could not revoke the Cloud WebSearch credential")
+    expect(await run(credentials.readWebSearch("exa"))).toMatchObject({
+      apiKey: "exa-cloud-secret",
+      cloudSynced: true
+    })
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("/api/environments/web-search-credential"),
+      expect.objectContaining({ method: "DELETE", signal: expect.any(AbortSignal) })
+    )
+  })
+
+  it("does not replace a provider until the previous Cloud capability is revoked", async () => {
+    const secretStore = await run(makeInMemorySecretStore("desktop-bearer"))
+    const credentials = new AgentSecretStore(secretStore)
+    await run(credentials.writeWebSearch("firecrawl", {
+      apiKey: "firecrawl-cloud-secret",
+      validatedAt: null,
+      cloudSynced: true
+    }))
+    const request = vi.fn()
+      .mockResolvedValueOnce(Response.json({ results: [] }))
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+    vi.stubGlobal("fetch", request)
+
+    await expect(run(WebSearchCredentialService.set({
+      provider: "exa",
+      apiKey: "exa-new-secret"
+    }).pipe(
+      Effect.provide(WebSearchCredentialService.Default),
+      Effect.provide(Layer.succeed(SecretStore, secretStore))
+    ))).rejects.toThrow("Could not revoke the Cloud WebSearch credential")
+    expect(await run(credentials.readWebSearch("exa"))).toBeNull()
+    expect(await run(credentials.readWebSearch("firecrawl"))).toMatchObject({
+      apiKey: "firecrawl-cloud-secret"
+    })
+  })
+
   it("syncs through authenticated server transport and returns redacted status", async () => {
     const secretStore = await run(makeInMemorySecretStore("desktop-bearer"))
     const request = vi.fn(async () => Response.json({ synced: true }))

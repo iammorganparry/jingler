@@ -3,6 +3,8 @@ import type {
   WebSearchSettingsStatus
 } from "@jingler/core"
 import { useEffect, useState } from "react"
+import exaLogo from "../brand/assets/exa-logo.png"
+import firecrawlLogo from "../brand/assets/firecrawl-logo.png"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Input } from "../components/input.js"
@@ -36,7 +38,10 @@ export function WebSearchSettings({
   const [apiKey, setApiKey] = useState("")
 
   useEffect(() => {
-    if (status?.config.provider) setProvider(status.config.provider)
+    if (status?.config.provider) {
+      setProvider(status.config.provider)
+      setApiKey("")
+    }
   }, [status?.config.provider])
 
   const credential = status?.credentials.find(
@@ -65,10 +70,43 @@ export function WebSearchSettings({
         <SegmentedControl
           value={provider}
           items={[
-            { value: "exa", label: "EXA" },
-            { value: "firecrawl", label: "Firecrawl" }
+            {
+              value: "exa",
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <img
+                    src={exaLogo}
+                    alt=""
+                    width={16}
+                    height={16}
+                    data-provider-logo="exa"
+                    className="size-4 rounded-[3px] object-contain"
+                  />
+                  EXA
+                </span>
+              )
+            },
+            {
+              value: "firecrawl",
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <img
+                    src={firecrawlLogo}
+                    alt=""
+                    width={16}
+                    height={16}
+                    data-provider-logo="firecrawl"
+                    className="size-4 rounded-[3px] object-contain"
+                  />
+                  Firecrawl
+                </span>
+              )
+            }
           ]}
-          onChange={(value) => setProvider(value as WebSearchProvider)}
+          onChange={(value) => {
+            setProvider(value as WebSearchProvider)
+            setApiKey("")
+          }}
         />
 
         <div className="flex gap-2">

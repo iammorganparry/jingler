@@ -51,6 +51,37 @@ describe("Jingler target-owned tools", () => {
     expect(chooseSetup).toHaveBeenCalledWith(null)
   })
 
+  it("interrupts an open setup question when the tool is cancelled", async () => {
+    let questionInterrupted = false
+    const askQuestion = vi.fn(() => Effect.async<never, never>(() =>
+      Effect.sync(() => { questionInterrupted = true })
+    ))
+    const chooseSetup = vi.fn(() => Effect.void)
+    const registry = new ToolRegistry()
+    registerWebSearchTool(registry, {
+      chooseSetup,
+      search: () => Effect.fail(new WebSearchError({
+        reason: "setup-required",
+        message: "setup",
+        retryable: false
+      }))
+    }, runtimeContext({ askQuestion }), true)
+    const controller = new AbortController()
+    const pending = Effect.runPromise(registry.execute({
+      id: "web_search",
+      arguments: { query: "research", maxResults: 5 },
+      role: "conversation",
+      mode: "ask",
+      signal: controller.signal
+    }))
+    await vi.waitFor(() => expect(askQuestion).toHaveBeenCalledOnce())
+    controller.abort()
+    const result = await pending
+    expect(result.status).toBe("cancelled")
+    await vi.waitFor(() => expect(questionInterrupted).toBe(true))
+    expect(chooseSetup).not.toHaveBeenCalled()
+  })
+
   it("never waits for setup when no interactive host is attached", async () => {
     const askQuestion = vi.fn(() => Effect.succeed([]))
     const registry = new ToolRegistry()

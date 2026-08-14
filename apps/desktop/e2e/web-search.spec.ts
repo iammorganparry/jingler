@@ -49,6 +49,12 @@ test("configures, redacts, syncs, and clears WebSearch", async ({ launchApp }) =
 
     const section = window.getByRole("region", { name: "Web search" })
     await expect(section).toBeVisible()
+    await expect(section.locator("img[data-provider-logo='exa']")).toBeVisible()
+    await expect(section.locator("img[data-provider-logo='firecrawl']")).toBeVisible()
+    await section.getByLabel("EXA API key").fill("exa-draft-that-must-clear")
+    await section.getByRole("tab", { name: "Firecrawl" }).click()
+    await expect(section.getByLabel("Firecrawl API key")).toHaveValue("")
+    await section.getByRole("tab", { name: "EXA" }).click()
     await section.getByLabel("EXA API key").fill("exa-e2e-secret")
     await section.getByRole("button", { name: "Save" }).click()
     await expect(section.getByText("Encrypted locally · synced for Cloud")).toBeVisible()
