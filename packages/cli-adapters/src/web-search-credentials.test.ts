@@ -40,6 +40,27 @@ describe("WebSearch credential storage", () => {
     expect(await run(credentials.readWebSearch("firecrawl"))).not.toBeNull()
   })
 
+  it("preserves provider authentication failures without writing the key", async () => {
+    const secretStore = await run(makeInMemorySecretStore("desktop-bearer"))
+    const credentials = new AgentSecretStore(secretStore)
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })))
+
+    const error = await run(WebSearchCredentialService.set({
+      provider: "exa",
+      apiKey: "invalid-exa-key"
+    }).pipe(
+      Effect.flip,
+      Effect.provide(WebSearchCredentialService.Default),
+      Effect.provide(Layer.succeed(SecretStore, secretStore))
+    ))
+    expect(error).toMatchObject({
+      reason: "authentication",
+      message: "Search provider rejected its credential",
+      retryable: false
+    })
+    expect(await run(credentials.readWebSearch("exa"))).toBeNull()
+  })
+
   it("keeps a cloud-synced key when revocation cannot be confirmed", async () => {
     const secretStore = await run(makeInMemorySecretStore("desktop-bearer"))
     const credentials = new AgentSecretStore(secretStore)
