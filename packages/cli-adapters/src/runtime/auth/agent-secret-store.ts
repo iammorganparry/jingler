@@ -7,7 +7,11 @@ import type {
   ProviderCredentialStore,
   StoredProviderCredential
 } from "./credential-store.js"
-import { AuthKind, ManagedSecretValues } from "@jingler/core"
+import {
+  AuthKind,
+  ManagedSecretValues,
+  type WebSearchProvider
+} from "@jingler/core"
 import { Effect, Either, Schema } from "effect"
 import { ProviderCredentialStoreError as CredentialStoreError } from "./credential-store.js"
 
@@ -23,6 +27,15 @@ const ManagedMcpSecretPayload = Schema.Struct({
   env: ManagedSecretValues
 })
 export type ManagedMcpSecretPayload = Schema.Schema.Type<typeof ManagedMcpSecretPayload>
+
+const WebSearchCredentialPayload = Schema.Struct({
+  apiKey: Schema.String.pipe(Schema.minLength(8), Schema.maxLength(16_384)),
+  validatedAt: Schema.NullOr(Schema.String),
+  cloudSynced: Schema.Boolean
+})
+export type WebSearchCredentialPayload = Schema.Schema.Type<
+  typeof WebSearchCredentialPayload
+>
 
 const mcpSecretKey = (resourceId: string, targetId: string): string =>
   `${encodeURIComponent(targetId)}:${encodeURIComponent(resourceId)}`
@@ -129,6 +142,57 @@ export class AgentSecretStore implements ProviderCredentialStore {
         }))
       },
       catch: (cause) => new CredentialStoreError({ message: "Failed to persist MCP secrets", cause })
+    })
+
+  readWebSearch = (provider: WebSearchProvider) =>
+    Effect.tryPromise({
+      try: async () => {
+        const document = await readDeviceSecretDocument(this.#store)
+        const decoded = Schema.decodeUnknownEither(
+          WebSearchCredentialPayload
+        )(document.webSearchCredentials?.[provider])
+        return Either.isLeft(decoded) ? null : decoded.right
+      },
+      catch: (cause) => new CredentialStoreError({
+        message: "Failed to read WebSearch credential",
+        cause
+      })
+    })
+
+  writeWebSearch = (
+    provider: WebSearchProvider,
+    value: WebSearchCredentialPayload
+  ) =>
+    Effect.tryPromise({
+      try: async () => {
+        const payload = Schema.decodeUnknownSync(WebSearchCredentialPayload)(value)
+        await updateDeviceSecretDocument(this.#store, (document) => ({
+          ...document,
+          webSearchCredentials: {
+            ...document.webSearchCredentials,
+            [provider]: payload
+          }
+        }))
+      },
+      catch: (cause) => new CredentialStoreError({
+        message: "Failed to persist WebSearch credential",
+        cause
+      })
+    })
+
+  deleteWebSearch = (provider: WebSearchProvider) =>
+    Effect.tryPromise({
+      try: async () => {
+        await updateDeviceSecretDocument(this.#store, (document) => {
+          const credentials = { ...document.webSearchCredentials }
+          delete credentials[provider]
+          return { ...document, webSearchCredentials: credentials }
+        })
+      },
+      catch: (cause) => new CredentialStoreError({
+        message: "Failed to delete WebSearch credential",
+        cause
+      })
     })
 
   deleteMcp = (resourceId: string, targetId: string) =>

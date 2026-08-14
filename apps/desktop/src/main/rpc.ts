@@ -21,6 +21,7 @@ import {
   BrowserControlMcpService,
   type AgentTurnDriver,
   ConfigService,
+  WebSearchCredentialService,
   makeAgentRuntimeTitleGenerator,
   EnvironmentService,
   RemoteSessionService,
@@ -113,6 +114,9 @@ import {
   RemotePublishPrepared as RemotePublishPreparedSchema,
   ProviderConnectionError,
   AgentResourceRpcError,
+  WEB_SEARCH_CONFIG_DEFAULT,
+  type WebSearchConfig,
+  WebSearchError,
 } from "@jingler/core";
 import type {
   BrowserBounds,
@@ -4236,6 +4240,50 @@ const resourceEnabledForTarget = (targetId: string) =>
     return [...managedFiles, ...managedMcp];
   }).pipe(Effect.mapError((cause) => agentResourceError("resolve", cause)));
 
+const webSearchSettingsStatus = Effect.gen(function* () {
+  const config = yield* ConfigService.get().pipe(
+    Effect.mapError(() => new WebSearchError({
+      reason: "unavailable",
+      message: "Could not read WebSearch settings",
+      retryable: true,
+    })),
+  );
+  const credentials = yield* WebSearchCredentialService.status;
+  return {
+    config: config?.webSearch ?? WEB_SEARCH_CONFIG_DEFAULT,
+    credentials,
+  };
+});
+
+export const updateWebSearchAtomically = <A, E, R>(
+  next: WebSearchConfig,
+  mutateCredential: Effect.Effect<A, E, R>,
+) => Effect.gen(function* () {
+  const current = yield* ConfigService.get().pipe(
+    Effect.map((config) => config?.webSearch ?? WEB_SEARCH_CONFIG_DEFAULT),
+    Effect.mapError(() => new WebSearchError({
+      reason: "unavailable",
+      message: "Could not read WebSearch settings before updating credentials",
+      retryable: true,
+    })),
+  );
+  yield* ConfigService.setWebSearch(next).pipe(
+    Effect.mapError(() => new WebSearchError({
+      reason: "unavailable",
+      message: "Could not save WebSearch settings",
+      retryable: true,
+    })),
+  );
+  return yield* mutateCredential.pipe(
+    Effect.catchAll((cause) =>
+      ConfigService.setWebSearch(current).pipe(
+        Effect.catchAll(() => Effect.void),
+        Effect.zipRight(Effect.fail(cause)),
+      ),
+    ),
+  );
+});
+
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
   "RuntimeDiagnostics.latest": () => RuntimeDiagnostics.latest(),
@@ -5212,6 +5260,27 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setDefaultProviderModel": ({ connectionId, providerId, modelId }) =>
     ConfigService.setDefaultProviderModel(connectionId, providerId, modelId),
   "Config.completeProviderSetup": () => ConfigService.completeProviderSetup(),
+  "Config.setWebSearch": (webSearch) => ConfigService.setWebSearch(webSearch),
+  "WebSearch.get": () => webSearchSettingsStatus,
+  "WebSearch.setCredential": (input) =>
+    updateWebSearchAtomically(
+      { setup: "configured", provider: input.provider },
+      WebSearchCredentialService.set(input),
+    ).pipe(Effect.zipRight(webSearchSettingsStatus)),
+  "WebSearch.clearCredential": ({ provider }) =>
+    updateWebSearchAtomically(
+      { setup: "pending", provider: null },
+      WebSearchCredentialService.clear(provider),
+    ).pipe(Effect.zipRight(webSearchSettingsStatus)),
+  "WebSearch.skip": () =>
+    ConfigService.setWebSearch({ setup: "skipped", provider: null }).pipe(
+      Effect.mapError(() => new WebSearchError({
+        reason: "unavailable",
+        message: "Could not skip WebSearch setup",
+        retryable: true,
+      })),
+      Effect.zipRight(webSearchSettingsStatus),
+    ),
   /**
    * Deliver an OS notification. Main decides whether to actually show it: it
    * owns the window's focus state, which the renderer cannot observe reliably,
@@ -5866,6 +5935,7 @@ export type RpcServerRequirements =
   | AgentTurnDriver
   | CommandExecutor.CommandExecutor
   | ConfigService
+  | WebSearchCredentialService
   | ContextManager
   | DialogService
   | EnvironmentService

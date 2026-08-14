@@ -56,6 +56,35 @@ describe("ConfigService", () => {
     }
   })
 
+  it("recovers contradictory persisted WebSearch state to pending setup", async () => {
+    mkdirSync(temp.root, { recursive: true })
+    writeFileSync(`${temp.root}/config.json`, JSON.stringify({
+      reposDir: "/repos/search",
+      createdAt: "2026-01-01",
+      webSearch: { setup: "configured", provider: null }
+    }))
+    const exit = await provided(ConfigService.get())
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value?.webSearch).toStrictEqual({ setup: "pending", provider: null })
+    }
+  })
+
+  it("persists secret-free WebSearch setup across unrelated saves", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setWebSearch({ setup: "configured", provider: "exa" })
+        yield* ConfigService.setReposDir("/repos/search")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value?.webSearch).toStrictEqual({ setup: "configured", provider: "exa" })
+      expect(JSON.stringify(exit.value)).not.toContain("apiKey")
+    }
+  })
+
   it("persists memory enablement and organization selection across unrelated saves", async () => {
     const exit = await provided(
       Effect.gen(function* () {

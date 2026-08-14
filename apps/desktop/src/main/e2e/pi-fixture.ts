@@ -616,6 +616,30 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
   )
 }
 
+const liveWebSearchResponse = (
+  context: PiContext
+): ReturnType<typeof fauxAssistantMessage> => {
+  const lastMessage = context.messages.at(-1)
+  if (lastMessage?.role !== "toolResult" || lastMessage.toolName !== "web_search") {
+    return callTool(
+      "web_search",
+      {
+        query: "Jingler coding agent research tool",
+        maxResults: 3
+      },
+      "live-web-search"
+    )
+  }
+  const toolResult = toolResultText(lastMessage)
+  const route = toolResult.match(/"route"\s*:\s*"([^"]+)"/u)?.[1] ?? "missing"
+  const citations = [...toolResult.matchAll(/"url"\s*:\s*"([^"]+)"/gu)]
+    .map((match) => match[1])
+    .filter((url): url is string => url !== undefined)
+  return fauxAssistantMessage(
+    `Live WebSearch result: Route: ${route}. Citations: ${citations.join(", ") || "missing"}.`
+  )
+}
+
 const contextCompactionResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   if (latestOperatorText(context).includes("You are compacting a coding session's context")) {
     return fauxAssistantMessage(
@@ -652,6 +676,8 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
         ),
         fauxAssistantMessage("Completed through deterministic pi.")
       ]
+    case "live-web-search":
+      return Array.from({ length: 8 }, () => liveWebSearchResponse)
     case "browser-control":
       return [
         (context) =>

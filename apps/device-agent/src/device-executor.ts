@@ -20,6 +20,10 @@ import { GitService } from "@jingler/cli-adapters/git"
 import { GitHubApi, parseGitHubRemote } from "@jingler/cli-adapters/github-api"
 import { GitHubAuth } from "@jingler/cli-adapters/github-auth"
 import { OpenConnectorService } from "@jingler/cli-adapters/open-connector"
+import {
+  managedWebSearchServiceFromEnvironment,
+  WebSearchService
+} from "@jingler/cli-adapters/web-search"
 import { PlanStore } from "@jingler/cli-adapters/plan-store"
 import { ProjectService } from "@jingler/cli-adapters/projects"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
@@ -367,7 +371,13 @@ const deviceRuntime = (root: string, targetId: string) => {
       await e2eRuntime?.configureModelRuntime(runtime)
     }
   })
-  const piRuntime = embeddedPi.pipe(
+  const managedWebSearch = managedWebSearchServiceFromEnvironment(process.env)
+  const embeddedWithSearch = managedWebSearch === null
+    ? embeddedPi
+    : embeddedPi.pipe(
+        Layer.provide(Layer.succeed(WebSearchService, managedWebSearch))
+      )
+  const piRuntime = embeddedWithSearch.pipe(
     Layer.provide(RuntimeDiagnostics.Default),
     Layer.provide(assets),
     Layer.provide(AgentResourcesLive),

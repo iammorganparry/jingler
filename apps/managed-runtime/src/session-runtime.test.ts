@@ -1,5 +1,6 @@
 import type { RemoteSessionCommand } from "@jingler/core"
 import { describe, expect, it } from "vitest"
+import { managedWebSearchRouteChanged } from "./auth-subscription.js"
 import {
   MAX_COMMANDS,
   MAX_EVENTS_PER_COMMAND,
@@ -15,6 +16,18 @@ const command = (commandId = "command_1"): RemoteSessionCommand => ({
 })
 
 describe("managed session runtime", () => {
+  it("restarts only when the active WebSearch provider route changes", () => {
+    const exa = [{ provider: "exa" as const, handle: "handle-1", expiresAt: 100 }]
+    expect(managedWebSearchRouteChanged([], exa)).toBe(true)
+    expect(managedWebSearchRouteChanged(exa, [
+      { provider: "exa", handle: "handle-2", expiresAt: 200 }
+    ])).toBe(false)
+    expect(managedWebSearchRouteChanged(exa, [
+      { provider: "firecrawl", handle: "handle-3", expiresAt: 200 }
+    ])).toBe(true)
+    expect(managedWebSearchRouteChanged(exa, [])).toBe(true)
+  })
+
   it("streams ordered shared session events from a managed sandbox", () => {
     const journal = new ManagedSessionJournal()
     journal.admit(command())

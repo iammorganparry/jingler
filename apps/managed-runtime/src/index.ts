@@ -2,6 +2,7 @@ import { getSandbox } from "@cloudflare/sandbox";
 import type { ManagedProviderCapability as ManagedProviderCapabilityValue } from "@jingler/core";
 import {
   ManagedProviderCapability,
+  ManagedWebSearchCapability,
   ManagedRuntimeProviderSelection,
   WorkspaceProvisioningPlan,
 } from "@jingler/core";
@@ -19,6 +20,7 @@ import {
 } from "./workspace-checkpoint.js";
 import {
   createControlPlaneProviderFetch,
+  decodeManagedPathComponent,
   providerAuthorizationScope,
   proxyProviderRequest,
   resolveProviderCredential,
@@ -93,6 +95,9 @@ interface RuntimeRegistration {
   readonly authStateVersion: number;
   readonly sessionGeneration: number;
   readonly providerConnection: ManagedProviderCapabilityValue;
+  readonly webSearchCapabilities: ReadonlyArray<
+    Schema.Schema.Type<typeof ManagedWebSearchCapability>
+  >;
   readonly githubCapabilityHandle: string | null;
 }
 
@@ -105,6 +110,10 @@ const AccountRegistration = Schema.Struct({
   providerConnections: Schema.Array(ManagedProviderCapability).pipe(
     Schema.minItems(1),
     Schema.maxItems(8),
+  ),
+  webSearchCapabilities: Schema.optionalWith(
+    Schema.Array(ManagedWebSearchCapability).pipe(Schema.maxItems(2)),
+    { default: () => [] },
   ),
   githubCapabilityHandle: Schema.NullOr(
     Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
@@ -201,6 +210,7 @@ const runtimeRegistration = async (
       runtimeConfigurationForRegistration(input, {
         authStateVersion: account.auth.authStateVersion,
         providerConnection,
+        webSearchCapabilities: account.webSearchCapabilities,
         githubCapabilityHandle: account.githubCapabilityHandle,
       }),
     ),
@@ -229,6 +239,7 @@ const runtimeRegistration = async (
     authStateVersion: account.auth.authStateVersion,
     sessionGeneration: session.right.sessionGeneration,
     providerConnection,
+    webSearchCapabilities: account.webSearchCapabilities,
     githubCapabilityHandle: account.githubCapabilityHandle,
   };
 };
@@ -547,12 +558,69 @@ export default {
         }
       }
     }
+    const webSearchProxyMatch = url.pathname.match(
+      /^\/v1\/web-search\/(exa|firecrawl)\/([^/]+)$/u,
+    );
+    if (webSearchProxyMatch !== null && request.method === "POST") {
+      const provider = webSearchProxyMatch[1] as "exa" | "firecrawl";
+      const sessionId = decodeManagedPathComponent(webSearchProxyMatch[2] ?? "");
+      if (sessionId === null) {
+        return json({ error: "Malformed session identifier" }, 400);
+      }
+      const authorization = await env.MANAGED_SESSION.getByName(
+        sessionId,
+      ).fetch(
+        `https://managed-session.internal/v1/web-search-authorization/${provider}`,
+        {
+          method: "POST",
+          headers: {
+            authorization: request.headers.get("authorization") ?? "",
+          },
+        },
+      );
+      if (!authorization.ok) {
+        return json({ error: "WebSearch authorization unavailable" }, 403);
+      }
+      const scope = providerAuthorizationScope(await authorization.json());
+      if (scope === null) {
+        return json({ error: "WebSearch authorization unavailable" }, 403);
+      }
+      return proxyProviderRequest(
+        {
+          provider,
+          subject: scope.subject,
+          capabilityHandle: scope.capabilityHandle,
+          upstreamUrl:
+            provider === "exa"
+              ? "https://api.exa.ai/search"
+              : "https://api.firecrawl.dev/v1/search",
+          method: "POST",
+          body: request.body,
+          contentType: request.headers.get("content-type"),
+          accept: request.headers.get("accept"),
+          contentLength: Number(request.headers.get("content-length") ?? 0),
+        },
+        {
+          resolve: (subject, handle) =>
+            resolveProviderCredential(env, subject, handle, provider),
+          fetch,
+          maxEgressBytes: Math.min(
+            Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES),
+            512 * 1_024,
+          ),
+        },
+      );
+    }
+
     const providerProxyMatch = url.pathname.match(
       /^\/v1\/provider\/(codex|claude)\/([^/]+)(\/.*)$/u,
     );
     if (providerProxyMatch !== null) {
       const provider = providerProxyMatch[1] as "codex" | "claude";
-      const sessionId = decodeURIComponent(providerProxyMatch[2] ?? "");
+      const sessionId = decodeManagedPathComponent(providerProxyMatch[2] ?? "");
+      if (sessionId === null) {
+        return json({ error: "Malformed session identifier" }, 400);
+      }
       const authorization = await env.MANAGED_SESSION.getByName(
         sessionId,
       ).fetch(
@@ -620,7 +688,10 @@ export default {
       gitProxyMatch !== null &&
       (request.method === "GET" || request.method === "POST")
     ) {
-      const sessionId = decodeURIComponent(gitProxyMatch[1] ?? "");
+      const sessionId = decodeManagedPathComponent(gitProxyMatch[1] ?? "");
+      if (sessionId === null) {
+        return json({ error: "Malformed session identifier" }, 400);
+      }
       const authorization = await env.MANAGED_SESSION.getByName(
         sessionId,
       ).fetch("https://managed-session.internal/v1/git-authorization", {
@@ -678,7 +749,10 @@ export default {
       if (!hasServiceAuthorization(request, env)) {
         return json({ error: "Unauthorized" }, 401);
       }
-      const subject = decodeURIComponent(authMatch[1] ?? "");
+      const subject = decodeManagedPathComponent(authMatch[1] ?? "");
+      if (subject === null) {
+        return json({ error: "Malformed subject identifier" }, 400);
+      }
       const body: unknown = await request.json();
       return env.MANAGED_ACCOUNT.getByName(subject).fetch(
         "https://managed-account.internal/v1/auth-state",
@@ -699,7 +773,10 @@ export default {
       if (!hasBearerServiceAuthorization(request, env)) {
         return json({ error: "Unauthorized" }, 401);
       }
-      const subject = decodeURIComponent(capabilityMatch[1] ?? "");
+      const subject = decodeManagedPathComponent(capabilityMatch[1] ?? "");
+      if (subject === null) {
+        return json({ error: "Malformed subject identifier" }, 400);
+      }
       return env.MANAGED_ACCOUNT.getByName(subject).fetch(
         "https://managed-account.internal/v1/capabilities",
         {
@@ -713,7 +790,10 @@ export default {
       /^\/v1\/sessions\/([^/]+)\/(commands|events|cancel)$/u,
     );
     if (sessionMatch !== null) {
-      const sessionId = decodeURIComponent(sessionMatch[1] ?? "");
+      const sessionId = decodeManagedPathComponent(sessionMatch[1] ?? "");
+      if (sessionId === null) {
+        return json({ error: "Malformed session identifier" }, 400);
+      }
       const operation = sessionMatch[2] ?? "";
       const target = new URL(
         `https://managed-session.internal/v1/${operation}`,

@@ -11,6 +11,7 @@ import {
 } from "./runtime/provider-connection.js";
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js";
 import { RuntimeRecoveryState } from "./runtime/runtime-recovery.js";
+import { WebSearchConfig } from "./web-search.js";
 
 /**
  * Domain schemas for Jingler. These are Effect `Schema`s so they can be reused
@@ -994,6 +995,11 @@ export const WorkspaceConfig = Schema.Struct({
    * the bearer token is NEVER stored here — it lives in `SecretStore`.
    */
   openConnector: Schema.optional(OpenConnectorConfig),
+  /**
+   * Secret-free WebSearch setup choice. API keys live only in encrypted
+   * credential storage and never cross this persistence boundary.
+   */
+  webSearch: Schema.optional(WebSearchConfig),
   /**
    * Stateless team-memory attachment. Older configs omit it, which is the same
    * as `MEMORY_CONFIG_DEFAULT`: disabled and with no selected organization.

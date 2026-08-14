@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   createControlPlaneProviderFetch,
+  decodeManagedPathComponent,
   providerAuthorizationScope,
   proxyProviderRequest
 } from "./provider-proxy.js"
 
 describe("managed provider credential proxy", () => {
+  it("rejects malformed encoded path identifiers without throwing", () => {
+    expect(decodeManagedPathComponent("session%2Fone")).toBe("session/one")
+    expect(decodeManagedPathComponent("session%ZZone")).toBeNull()
+    expect(decodeManagedPathComponent("session%")).toBeNull()
+  })
+
   it("routes ChatGPT Codex egress through the authenticated control plane", async () => {
     const upstream = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const request = input instanceof Request ? input : new Request(input)
@@ -88,6 +95,39 @@ describe("managed provider credential proxy", () => {
     )
     expect(await response.text()).toBe("pack-data")
     expect(JSON.stringify([...response.headers])).not.toContain(providerToken)
+  })
+
+  it.each([
+    ["exa", "exa-api", "https://api.exa.ai/search", "X-Api-Key search-secret", "x-api-key"],
+    ["firecrawl", "firecrawl-api", "https://api.firecrawl.dev/v1/search", "Bearer search-secret", "authorization"]
+  ] as const)("scopes %s credentials to its exact search host", async (
+    provider,
+    credentialUpstream,
+    upstreamUrl,
+    authorizationHeader,
+    headerName
+  ) => {
+    const upstream = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const request = input instanceof Request ? input : new Request(input)
+      expect(request.url).toBe(upstreamUrl)
+      expect(request.headers.get(headerName)).toContain("search-secret")
+      return Response.json({ results: [] })
+    })
+    const response = await proxyProviderRequest({
+      provider,
+      subject: "user_1",
+      capabilityHandle: `capability_${provider}`,
+      upstreamUrl,
+      method: "POST"
+    }, {
+      resolve: async () => ({
+        authorizationHeader,
+        upstream: credentialUpstream
+      }),
+      fetch: upstream
+    })
+    expect(response.status).toBe(200)
+    expect(upstream).toHaveBeenCalledOnce()
   })
 
   it("rejects arbitrary destinations before resolving credentials", async () => {

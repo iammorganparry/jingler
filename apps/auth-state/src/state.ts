@@ -5,9 +5,19 @@ import type {
   ProviderId,
 } from "@jingler/core";
 
-export type CapabilityProvider = "github" | "codex" | "claude";
+export type CapabilityProvider =
+  | "github"
+  | "codex"
+  | "claude"
+  | "exa"
+  | "firecrawl";
 export type CapabilityUpstream =
-  "github-api" | "openai-api" | "chatgpt-codex" | "anthropic-api";
+  | "github-api"
+  | "openai-api"
+  | "chatgpt-codex"
+  | "anthropic-api"
+  | "exa-api"
+  | "firecrawl-api";
 
 export interface AuthSession {
   readonly id: string;

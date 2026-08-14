@@ -1,5 +1,6 @@
 import {
   ManagedProviderCapability,
+  ManagedWebSearchCapability,
   ManagedRuntimeProviderSelection,
   type ManagedProviderCapability as ManagedProviderCapabilityValue,
   type ManagedRuntimeProviderSelection as ManagedRuntimeProviderSelectionValue,
@@ -13,6 +14,9 @@ export const ManagedRuntimeConfiguration = Schema.Struct({
   environmentGeneration: Schema.Int.pipe(Schema.positive()),
   authStateVersion: Schema.Int.pipe(Schema.positive()),
   providerConnection: ManagedProviderCapability,
+  webSearchCapabilities: Schema.Array(ManagedWebSearchCapability).pipe(
+    Schema.maxItems(2),
+  ),
   githubCapabilityHandle: Schema.NullOr(
     Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   ),
@@ -42,6 +46,9 @@ export interface RuntimeRegistrationInput
 interface RuntimeRegistrationCapabilities {
   readonly authStateVersion: number;
   readonly providerConnection: ManagedProviderCapabilityValue;
+  readonly webSearchCapabilities?: ReadonlyArray<
+    Schema.Schema.Type<typeof ManagedWebSearchCapability>
+  >;
   readonly githubCapabilityHandle: string | null;
 }
 
@@ -59,6 +66,7 @@ export const runtimeConfigurationForRegistration = (
   modelId: input.modelId,
   authStateVersion: capabilities.authStateVersion,
   providerConnection: capabilities.providerConnection,
+  webSearchCapabilities: capabilities.webSearchCapabilities ?? [],
   githubCapabilityHandle: capabilities.githubCapabilityHandle,
   ...(input.repositorySlug === undefined
     ? {}

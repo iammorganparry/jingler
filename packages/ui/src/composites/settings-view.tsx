@@ -69,6 +69,10 @@ import {
 } from "./environment-dialog.js"
 import { AgentsSettings, type AgentsSettingsProps } from "./agents-settings.js"
 import { RuntimeInspector, type RuntimeInspectorProps } from "./runtime-inspector.js"
+import {
+  WebSearchSettings,
+  type WebSearchSettingsProps
+} from "./web-search-settings.js"
 
 // ── Section registry ─────────────────────────────────────────────────────────
 
@@ -156,6 +160,8 @@ export interface SettingsViewProps {
   providerConnections?: ProviderConnectionsSettingsProps
   /** Operator-controlled skills, prompts, and MCP resources. */
   agents?: AgentsSettingsProps
+  /** Redacted WebSearch status and write-only credential actions. */
+  webSearch?: WebSearchSettingsProps
   /** Redacted metadata for the latest embedded pi run. */
   runtimeInspector?: RuntimeInspectorProps
   /**
@@ -240,6 +246,7 @@ export interface SettingsViewProps {
 export function SettingsView({
   providerConnections,
   agents,
+  webSearch,
   runtimeInspector,
   themes,
   plugins,
@@ -373,6 +380,7 @@ export function SettingsView({
           onSaveAdhdMode={onSaveAdhdMode}
           fontScale={fontScale}
           onSaveFontScale={onSaveFontScale}
+          webSearch={webSearch}
         />
       ) : section === "providers" ? (
         providerConnections ? (
@@ -901,7 +909,8 @@ function GeneralSection({
   adhdMode,
   onSaveAdhdMode,
   fontScale,
-  onSaveFontScale
+  onSaveFontScale,
+  webSearch
 }: {
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
@@ -911,6 +920,7 @@ function GeneralSection({
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
+  webSearch?: WebSearchSettingsProps
 }) {
   // Absent means ON, matching `PLAN_AUTO_RUN_DEFAULT` in the domain.
   const [planDraft, setPlanDraft] = React.useState<boolean>(planAutoRun ?? true)
@@ -984,6 +994,8 @@ function GeneralSection({
             }}
           />
         </div>
+
+        {webSearch ? <WebSearchSettings {...webSearch} /> : null}
 
         <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
           <span className="text-[13px] font-semibold text-text-bright">

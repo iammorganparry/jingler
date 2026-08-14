@@ -13,9 +13,19 @@ interface AuthSessionState {
   readonly expiresAt: Date;
 }
 
-export type AuthCapabilityProvider = "github" | "codex" | "claude";
+export type AuthCapabilityProvider =
+  | "github"
+  | "codex"
+  | "claude"
+  | "exa"
+  | "firecrawl";
 export type AuthCapabilityUpstream =
-  "github-api" | "openai-api" | "chatgpt-codex" | "anthropic-api";
+  | "github-api"
+  | "openai-api"
+  | "chatgpt-codex"
+  | "anthropic-api"
+  | "exa-api"
+  | "firecrawl-api";
 
 interface AuthCapabilityState {
   readonly userId: string;
