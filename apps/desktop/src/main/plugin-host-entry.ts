@@ -33,6 +33,8 @@ import type {
   ToHostMessage
 } from "@jingler/cli-adapters"
 import type {
+  AgentToolDefinition,
+  AgentToolset,
   AuthSession,
   Disposable,
   HostContext,
@@ -53,6 +55,7 @@ declare const process: NodeJS.Process & {
 }
 
 const send = (message: FromHostMessage): void => process.parentPort.postMessage(message)
+const PROVIDER_TOOL_ID = /^[A-Za-z0-9_-]{1,64}$/u
 
 // ── Asking main for things ───────────────────────────────────────────────────
 
@@ -84,7 +87,9 @@ interface LivePlugin {
   readonly pluginId: string
   readonly declaredCommands: ReadonlySet<string>
   readonly declaredIssueProviders: ReadonlySet<string>
+  readonly declaredAgentToolsets: ReadonlySet<string>
   readonly commands: Map<string, (input?: unknown) => unknown | Promise<unknown>>
+  readonly agentToolsets: Map<string, AgentToolset>
   readonly issueProviders: Map<string, IssueProvider>
   readonly subscriptions: Disposable[]
   readonly deactivate?: () => void | Promise<void>
@@ -145,6 +150,33 @@ const buildContext = (plugin: LivePlugin): HostContext => ({
     }
   },
   subscriptions: plugin.subscriptions,
+
+  agentTools: {
+    registerToolset: (toolset) => {
+      if (!plugin.declaredAgentToolsets.has(toolset.id)) {
+        throw new Error(
+          `Plugin "${plugin.pluginId}" tried to register agent toolset "${toolset.id}", which its manifest does not contribute. Add it to contributes.agentToolsets.`
+        )
+      }
+      if (plugin.agentToolsets.has(toolset.id)) {
+        throw new Error(`Plugin "${plugin.pluginId}" registered agent toolset "${toolset.id}" more than once.`)
+      }
+      const ids = new Set<string>()
+      for (const tool of toolset.tools) {
+        if (!PROVIDER_TOOL_ID.test(tool.id)) {
+          throw new Error(`Agent tool "${tool.id}" must be a provider-safe id of at most 64 letters, digits, underscores, or hyphens.`)
+        }
+        if (ids.has(tool.id)) throw new Error(`Agent toolset "${toolset.id}" contains duplicate tool id "${tool.id}".`)
+        ids.add(tool.id)
+      }
+      plugin.agentToolsets.set(toolset.id, toolset)
+      return {
+        dispose: () => {
+          if (plugin.agentToolsets.get(toolset.id) === toolset) plugin.agentToolsets.delete(toolset.id)
+        }
+      }
+    }
+  },
 
   commands: {
     register: (commandId, handler) => {
@@ -328,7 +360,7 @@ const activate = async (message: Extract<ToHostMessage, { kind: "activate" }>) =
 const runActivation = async (
   message: Extract<ToHostMessage, { kind: "activate" }>
 ): Promise<void> => {
-  const { pluginId, entry, declaredCommands, declaredIssueProviders } = message
+  const { pluginId, entry, declaredCommands, declaredIssueProviders, declaredAgentToolsets } = message
 
   if (live.has(pluginId)) {
     // Already activated. Idempotent rather than an error: several activation
@@ -341,7 +373,9 @@ const runActivation = async (
     pluginId,
     declaredCommands: new Set(declaredCommands),
     declaredIssueProviders: new Set(declaredIssueProviders),
+    declaredAgentToolsets: new Set(declaredAgentToolsets),
     commands: new Map(),
+    agentToolsets: new Map(),
     issueProviders: new Map(),
     subscriptions: []
   }
@@ -368,6 +402,14 @@ const runActivation = async (
     if (missingProvider) {
       throw new Error(
         `Plugin "${pluginId}" declares the issue provider "${missingProvider}" but activate() did not register it with issues.registerProvider.`
+      )
+    }
+    const missingToolset = [...plugin.declaredAgentToolsets].find(
+      (toolsetId) => !plugin.agentToolsets.has(toolsetId)
+    )
+    if (missingToolset) {
+      throw new Error(
+        `Plugin "${pluginId}" declares agent toolset "${missingToolset}" but activate() did not register it with agentTools.registerToolset.`
       )
     }
   } catch (cause) {
@@ -438,6 +480,60 @@ const invoke = async (message: Extract<ToHostMessage, { kind: "invoke" }>) => {
   }
 }
 
+const descriptorOf = (tool: AgentToolDefinition) => ({
+  id: tool.id,
+  description: tool.description,
+  inputSchema: tool.inputSchema,
+  risk: tool.risk,
+  timeoutMs: tool.timeoutMs ?? 30_000,
+  outputBudget: tool.outputBudget ?? 16_000,
+  cancellable: tool.cancellable ?? true,
+  idempotency: tool.idempotency ?? "unsafe" as const
+})
+
+const loadAgentToolset = (
+  message: Extract<ToHostMessage, { kind: "agent-toolset-load" }>
+): void => {
+  const toolset = live.get(message.pluginId)?.agentToolsets.get(message.toolsetId)
+  if (!toolset) {
+    send({
+      kind: "agent-toolset-result",
+      requestId: message.requestId,
+      ok: false,
+      message: `Agent toolset "${message.toolsetId}" is not registered by plugin "${message.pluginId}".`
+    })
+    return
+  }
+  send({
+    kind: "agent-toolset-result",
+    requestId: message.requestId,
+    ok: true,
+    tools: toolset.tools.map(descriptorOf)
+  })
+}
+
+const invokeAgentTool = async (
+  message: Extract<ToHostMessage, { kind: "agent-tool-invoke" }>
+): Promise<void> => {
+  const toolset = live.get(message.pluginId)?.agentToolsets.get(message.toolsetId)
+  const tool = toolset?.tools.find((candidate) => candidate.id === message.toolId)
+  if (!tool) {
+    send({
+      kind: "agent-tool-result",
+      requestId: message.requestId,
+      ok: false,
+      message: `Agent tool "${message.toolId}" is not registered in toolset "${message.toolsetId}".`
+    })
+    return
+  }
+  try {
+    const value = await tool.execute(message.input, new AbortController().signal)
+    send({ kind: "agent-tool-result", requestId: message.requestId, ok: true, value })
+  } catch (cause) {
+    send({ kind: "agent-tool-result", requestId: message.requestId, ok: false, message: messageOf(cause) })
+  }
+}
+
 const invokeIssueProvider = async (
   message: Extract<ToHostMessage, { kind: "issue-provider-invoke" }>
 ) => {
@@ -489,6 +585,12 @@ process.parentPort.on("message", ({ data }) => {
       break
     case "invoke":
       void invoke(data)
+      break
+    case "agent-toolset-load":
+      loadAgentToolset(data)
+      break
+    case "agent-tool-invoke":
+      void invokeAgentTool(data)
       break
     case "issue-provider-invoke":
       void invokeIssueProvider(data)

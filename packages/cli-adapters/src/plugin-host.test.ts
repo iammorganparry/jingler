@@ -156,6 +156,7 @@ describe("activation", () => {
     // manifest — the thing shown in Settings — the actual contract.
     expect(message.declaredCommands).toEqual(["linear.sync"])
     expect(message.declaredIssueProviders).toEqual([])
+    expect(message.declaredAgentToolsets).toEqual([])
 
     procs[0]!.emit({ kind: "activated", requestId: message.requestId, pluginId: "linear" })
     await p
@@ -238,6 +239,58 @@ describe("invoke", () => {
       message: "rate limited"
     })
     await expect(result).rejects.toThrow(/rate limited/)
+  })
+})
+
+describe("agent toolsets", () => {
+  const toolPlugin = () =>
+    plugin({
+      contributes: {
+        agentToolsets: [
+          { id: "linear.issues", label: "Linear issues", description: "Work with Linear issues." }
+        ]
+      }
+    })
+
+  it("materializes full schemas only after a toolset is selected", async () => {
+    const { runtime, procs } = setup()
+    const result = runtime.loadAgentToolset(toolPlugin(), "linear.issues")
+    await tick()
+    procs[0]!.ready()
+    await tick()
+    const activate = procs[0]!.sent.find((message) => message.kind === "activate")
+    if (activate?.kind !== "activate") throw new Error("expected activate")
+    expect(activate.declaredAgentToolsets).toEqual(["linear.issues"])
+    procs[0]!.emit({ kind: "activated", requestId: activate.requestId, pluginId: "linear" })
+    await tick()
+
+    const load = procs[0]!.sent.find((message) => message.kind === "agent-toolset-load")
+    if (load?.kind !== "agent-toolset-load") throw new Error("expected toolset load")
+    expect(load.toolsetId).toBe("linear.issues")
+    const tools = [{
+      id: "linear_get_issue",
+      description: "Get one issue.",
+      inputSchema: { type: "object" as const, properties: { id: { type: "string" } }, required: ["id"] },
+      risk: "network" as const,
+      timeoutMs: 30_000,
+      outputBudget: 8_000,
+      cancellable: true,
+      idempotency: "safe" as const
+    }]
+    procs[0]!.emit({ kind: "agent-toolset-result", requestId: load.requestId, ok: true, tools })
+    await expect(result).resolves.toEqual(tools)
+  })
+
+  it("routes a selected native tool invocation", async () => {
+    const { runtime, procs } = setup()
+    await activateFully(runtime, procs[0]!, toolPlugin())
+    const result = runtime.invokeAgentTool(toolPlugin(), "linear.issues", "linear_get_issue", { id: "ENG-1" })
+    await tick()
+    const invoke = procs[0]!.sent.find((message) => message.kind === "agent-tool-invoke")
+    if (invoke?.kind !== "agent-tool-invoke") throw new Error("expected agent tool invoke")
+    expect(invoke).toMatchObject({ toolsetId: "linear.issues", toolId: "linear_get_issue", input: { id: "ENG-1" } })
+    procs[0]!.emit({ kind: "agent-tool-result", requestId: invoke.requestId, ok: true, value: { title: "Fix it" } })
+    await expect(result).resolves.toEqual({ title: "Fix it" })
   })
 })
 

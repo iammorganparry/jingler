@@ -35,6 +35,7 @@ import {
   HOST_READY_TIMEOUT_MS,
   type FromHostMessage,
   type IssueProviderMethod,
+  type PluginAgentToolDescriptor,
   type ToHostMessage
 } from "./plugin-host-protocol.js"
 
@@ -265,7 +266,11 @@ export class PluginHostRuntime {
         this.settle(message.requestId, false, undefined, message.message)
         this.events.onActivationFailed?.(message.pluginId, message.message)
         break
+      case "agent-toolset-result":
+        this.settle(message.requestId, message.ok, message.tools, message.message)
+        break
       case "invoke-result":
+      case "agent-tool-result":
       case "issue-provider-result":
         this.settle(message.requestId, message.ok, message.value, message.message)
         break
@@ -417,7 +422,8 @@ export class PluginHostRuntime {
       pluginId: manifest.id,
       entry: `${plugin.dir}/${manifest.main}`,
       declaredCommands: (manifest.contributes?.commands ?? []).map((c) => c.id),
-      declaredIssueProviders: (manifest.contributes?.issueProviders ?? []).map((p) => p.id)
+      declaredIssueProviders: (manifest.contributes?.issueProviders ?? []).map((p) => p.id),
+      declaredAgentToolsets: (manifest.contributes?.agentToolsets ?? []).map((t) => t.id)
     })
 
     // A plugin awaiting a network call it will never get must not hold the
@@ -460,6 +466,38 @@ export class PluginHostRuntime {
       pluginId: plugin.manifest.id,
       commandId,
       arg
+    })
+  }
+
+  /** Activate a plugin and materialize one selected toolset's full definitions. */
+  async loadAgentToolset(
+    plugin: LoadedPlugin,
+    toolsetId: string
+  ): Promise<ReadonlyArray<PluginAgentToolDescriptor>> {
+    await this.activate(plugin)
+    return await this.send<ReadonlyArray<PluginAgentToolDescriptor>>({
+      kind: "agent-toolset-load",
+      requestId: this.id(),
+      pluginId: plugin.manifest.id,
+      toolsetId
+    })
+  }
+
+  /** Dispatch one native plugin tool through the supervised host. */
+  async invokeAgentTool(
+    plugin: LoadedPlugin,
+    toolsetId: string,
+    toolId: string,
+    input: unknown
+  ): Promise<unknown> {
+    await this.activate(plugin)
+    return await this.send<unknown>({
+      kind: "agent-tool-invoke",
+      requestId: this.id(),
+      pluginId: plugin.manifest.id,
+      toolsetId,
+      toolId,
+      input
     })
   }
 

@@ -62,6 +62,8 @@ export type ToHostMessage =
       readonly declaredCommands: ReadonlyArray<string>
       /** Issue-provider ids the manifest declares, so registration is enforceable. */
       readonly declaredIssueProviders: ReadonlyArray<string>
+      /** Agent-toolset ids the manifest declares; full schemas remain lazy. */
+      readonly declaredAgentToolsets: ReadonlyArray<string>
     }
   | { readonly kind: "deactivate"; readonly requestId: string; readonly pluginId: string }
   | {
@@ -70,6 +72,20 @@ export type ToHostMessage =
       readonly pluginId: string
       readonly commandId: string
       readonly arg?: unknown
+    }
+  | {
+      readonly kind: "agent-toolset-load"
+      readonly requestId: string
+      readonly pluginId: string
+      readonly toolsetId: string
+    }
+  | {
+      readonly kind: "agent-tool-invoke"
+      readonly requestId: string
+      readonly pluginId: string
+      readonly toolsetId: string
+      readonly toolId: string
+      readonly input: unknown
     }
   | {
       readonly kind: "issue-provider-invoke"
@@ -106,6 +122,20 @@ export type FromHostMessage =
       readonly message?: string
     }
   | {
+      readonly kind: "agent-toolset-result"
+      readonly requestId: string
+      readonly ok: boolean
+      readonly tools?: ReadonlyArray<PluginAgentToolDescriptor>
+      readonly message?: string
+    }
+  | {
+      readonly kind: "agent-tool-result"
+      readonly requestId: string
+      readonly ok: boolean
+      readonly value?: unknown
+      readonly message?: string
+    }
+  | {
       readonly kind: "issue-provider-result"
       readonly requestId: string
       readonly ok: boolean
@@ -135,6 +165,27 @@ export type FromHostMessage =
     }
   /** The host finished booting and is ready for `activate`. */
   | { readonly kind: "ready" }
+
+export type PluginAgentToolRisk = "read" | "network" | "mutate" | "execute"
+export type PluginAgentToolIdempotency = "safe" | "keyed" | "unsafe"
+
+/** JSON-safe full definition returned only when an agent selects a toolset. */
+export interface PluginAgentToolDescriptor {
+  readonly id: string
+  readonly description: string
+  readonly inputSchema: {
+    readonly $schema?: string
+    readonly type: "object"
+    readonly properties?: Readonly<Record<string, object>>
+    readonly required?: ReadonlyArray<string>
+    readonly additionalProperties?: boolean
+  }
+  readonly risk: PluginAgentToolRisk
+  readonly timeoutMs: number
+  readonly outputBudget: number
+  readonly cancellable: boolean
+  readonly idempotency: PluginAgentToolIdempotency
+}
 
 /**
  * What a plugin can ask main to do.

@@ -390,6 +390,14 @@ export type IssueProviderDescriptor = Schema.Schema.Type<
   typeof IssueProviderDescriptor
 >
 
+/** Compact manifest metadata for a native agent toolset. Full schemas stay in the host. */
+export const AgentToolsetContribution = Schema.Struct({
+  id: ContributionId,
+  label: Schema.String.pipe(Schema.minLength(1)),
+  description: Schema.String.pipe(Schema.minLength(1))
+})
+export type AgentToolsetContribution = Schema.Schema.Type<typeof AgentToolsetContribution>
+
 /** Everything a plugin can add to the app. */
 export const PluginContributes = Schema.Struct({
   tabs: Schema.optional(Schema.Array(TabContribution)),
@@ -400,7 +408,8 @@ export const PluginContributes = Schema.Struct({
   authenticationProviders: Schema.optional(
     Schema.Array(AuthProviderContribution)
   ),
-  issueProviders: Schema.optional(Schema.Array(IssueProviderContribution))
+  issueProviders: Schema.optional(Schema.Array(IssueProviderContribution)),
+  agentToolsets: Schema.optional(Schema.Array(AgentToolsetContribution))
 })
 export type PluginContributes = Schema.Schema.Type<typeof PluginContributes>
 
@@ -544,7 +553,8 @@ const contributionIds = (
     ...(c.tabs ?? []).map((t) => t.id),
     ...(c.panes ?? []).map((p) => p.id),
     ...(c.commands ?? []).map((x) => x.id),
-    ...(c.settings ?? []).map((s) => s.id)
+    ...(c.settings ?? []).map((s) => s.id),
+    ...(c.agentToolsets ?? []).map((t) => t.id)
   ]
 }
 

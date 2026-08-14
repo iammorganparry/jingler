@@ -138,6 +138,8 @@ export interface HostContext {
   readonly issues: HostIssues
   /** The consent-gated door to accounts, and where a plugin registers a provider. */
   readonly authentication: Authentication
+  /** Register the native agent toolsets declared by this plugin's manifest. */
+  readonly agentTools: HostAgentTools
   /** Register handlers for the commands the manifest contributes. */
   readonly commands: HostCommands
   /** Subscribe to session-lifecycle events. */
@@ -222,6 +224,45 @@ export interface IssueProvider {
 export interface HostIssues {
   /** Register one declared provider until its returned handle is disposed. */
   registerProvider(provider: IssueProvider): Disposable
+}
+
+// ── Agent tools ──────────────────────────────────────────────────────────────
+
+export type AgentToolRisk = "read" | "network" | "mutate" | "execute"
+export type AgentToolIdempotency = "safe" | "keyed" | "unsafe"
+
+/** JSON Schema object accepted as a native agent tool's input contract. */
+export interface AgentToolInputSchema {
+  readonly $schema?: string
+  readonly type: "object"
+  readonly properties?: Readonly<Record<string, object>>
+  readonly required?: readonly string[]
+  readonly additionalProperties?: boolean
+}
+
+/** One full tool definition, materialized only after its toolset is selected. */
+export interface AgentToolDefinition {
+  /** Provider-safe globally unique id, conventionally `<plugin>_<action>`. */
+  readonly id: string
+  readonly description: string
+  readonly inputSchema: AgentToolInputSchema
+  readonly risk: AgentToolRisk
+  readonly timeoutMs?: number
+  readonly outputBudget?: number
+  readonly cancellable?: boolean
+  readonly idempotency?: AgentToolIdempotency
+  readonly execute: (input: unknown, signal: AbortSignal) => unknown | Promise<unknown>
+}
+
+/** Full host-side implementation of one manifest-declared toolset. */
+export interface AgentToolset {
+  readonly id: string
+  readonly tools: readonly AgentToolDefinition[]
+}
+
+export interface HostAgentTools {
+  /** Register one declared toolset until its returned handle is disposed. */
+  registerToolset(toolset: AgentToolset): Disposable
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
