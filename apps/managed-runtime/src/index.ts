@@ -52,6 +52,7 @@ import {
 } from "./offload-grant.js";
 import {
   OffloadJobStore,
+  OffloadStoreError,
   makeOffloadJobStoreLayer
 } from "./offload-store.js";
 import { primeOffloadWorkspace } from "./offload-workspace.js";
@@ -328,102 +329,26 @@ const primeOffloadSession = async (
   env: ManagedRuntimeEnv,
   body: Schema.Schema.Type<typeof OffloadPrimeRequest>
 ): Promise<void> => {
-  const idempotencyKey = `prime_${(await sha256Hex(`${body.sessionId}:${body.headSha}`)).slice(0, 32)}`;
-  const jobId = await offloadJobId(body.subject, idempotencyKey);
-  const request: OffloadAdmissionRequestValue = {
-    version: 1,
-    sessionId: body.sessionId,
-    idempotencyKey,
-    repositorySlug: body.repositorySlug,
-    snapshot: {
-      version: 1,
-      headSha: body.headSha,
-      digest: "0".repeat(64),
-      bytes: 1
-    },
-    command: {
-      source: { kind: "preset", preset: "typecheck" },
-      executable: "pnpm",
-      args: ["typecheck"],
-      cwd: "."
-    },
-    clientTimings: { snapshotMs: 0 },
-    limits: { timeoutSeconds: 1, snapshotBytes: 1, outputBytes: 1 }
-  };
-  const registration = await authorizeOffloadPrimer(env, body.subject);
-  const layer = makeOffloadJobStoreLayer(env.OFFLOAD_JOBS);
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const store = yield* OffloadJobStore;
-      yield* store.create({
-        jobId,
-        subject: body.subject,
-        request,
-        githubCapabilityHandle: registration.githubCapabilityHandle,
-        nowSeconds: Math.floor(Date.now() / 1_000)
-      });
-    }).pipe(Effect.provide(layer))
+  await authorizeOffloadPrimer(env, body.subject);
+  await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(body.sessionId).fetch(
+    INTERNAL_ROUTES.offloadLifecycle.touch,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject: body.subject, sessionId: body.sessionId })
+    }
   );
-  try {
-    const issued = await Effect.runPromise(issueOffloadGrant(
-      {
-        subject: body.subject,
-        sessionId: body.sessionId,
-        jobId,
-        idempotencyKey,
-        repositorySlug: body.repositorySlug,
-        snapshotDigest: request.snapshot.digest,
-        actions: ["git.read"]
-      },
-      env.MANAGED_RUNTIME_GRANT_SECRET
-    ));
-    await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(body.sessionId).fetch(
-      INTERNAL_ROUTES.offloadLifecycle.touch,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ subject: body.subject, sessionId: body.sessionId })
-      }
-    );
-    const sandbox = getSandbox(
-      env.Sandbox,
-      await sandboxIdForSession(`offload_${body.sessionId}`),
-      {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: "10m"
-      }
-    );
-    await Effect.runPromise(primeOffloadWorkspace(
-      sandbox,
-      {
-        version: 1,
-        jobId,
-        subject: body.subject,
-        request,
-        githubCapabilityHandle: registration.githubCapabilityHandle,
-        state: "preparing",
-        cancelRequested: false,
-        sequence: 0,
-        events: [],
-        execution: "available",
-        result: null,
-        createdAt: Math.floor(Date.now() / 1_000),
-        updatedAt: Math.floor(Date.now() / 1_000),
-        expiresAt: Math.floor(Date.now() / 1_000) + 24 * 60 * 60
-      },
-      env.MANAGED_RUNTIME_ORIGIN,
-      issued.grant
-    ));
-  } finally {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const store = yield* OffloadJobStore;
-        yield* store.remove(jobId);
-      }).pipe(Effect.provide(layer), Effect.catchAll(() => Effect.void))
-    );
-  }
+  const sandbox = getSandbox(
+    env.Sandbox,
+    await sandboxIdForSession(`offload_${body.sessionId}`),
+    {
+      transport: "rpc",
+      normalizeId: true,
+      enableDefaultSession: false,
+      sleepAfter: "10m"
+    }
+  );
+  await Effect.runPromise(primeOffloadWorkspace(sandbox));
 };
 
 const authorizeOffloadRequest = (
@@ -587,7 +512,7 @@ export default {
             idempotencyKey: body.idempotencyKey,
             repositorySlug: body.repositorySlug,
             snapshotDigest: body.snapshot.digest,
-            actions: ["snapshot.upload", "job.run", "job.read", "job.cancel"]
+            actions: ["snapshot.upload", "job.read", "job.cancel"]
           },
           env.MANAGED_RUNTIME_GRANT_SECRET
         ));
@@ -599,8 +524,10 @@ export default {
           grant: issued.grant,
           expiresAt: issued.claims.expiresAt
         });
-      } catch {
-        return json({ error: "Offload grant could not be issued" }, 503);
+      } catch (cause) {
+        return cause instanceof OffloadStoreError && cause.reason === "conflict"
+          ? json({ error: cause.message }, 409)
+          : json({ error: "Offload grant could not be issued" }, 503);
       }
     }
     if (url.pathname === "/v1/grants" && request.method === "POST") {
@@ -694,7 +621,11 @@ export default {
         await env.OFFLOAD_JOBS.put(key, "offload-r2-ready");
         const stored = await env.OFFLOAD_JOBS.get(key);
         const image = await sandbox.exec(
-          "test -x /opt/jingler/offload-exec.mjs && node --version",
+          "test -x /opt/jingler/offload-exec.mjs -a -x /opt/jingler/offload-launch && node --version",
+          { cwd: "/workspace", timeout: 30_000, origin: "internal" }
+        );
+        const isolation = await sandbox.exec(
+          "printf locked > /workspace/offload-probe-source && chmod 0444 /workspace/offload-probe-source && /opt/jingler/offload-launch node -e \"const fs=require('node:fs'),net=require('node:net');let denied=0;try{fs.writeFileSync('/workspace/offload-probe-source','changed')}catch(e){if(e.code==='EACCES')denied++}const s=net.connect(443,'1.1.1.1');s.on('error',e=>{if(e.code==='EPERM')denied++;process.exit(denied===2?0:1)});setTimeout(()=>process.exit(2),2000)\"",
           { cwd: "/workspace", timeout: 30_000, origin: "internal" }
         );
         const touched = await lifecycle.fetch(INTERNAL_ROUTES.offloadLifecycle.touch, {
@@ -703,12 +634,13 @@ export default {
           body: JSON.stringify({ subject, sessionId })
         });
         const success = stored !== null && await stored.text() === "offload-r2-ready" &&
-          image.success && touched.ok;
+          image.success && isolation.success && touched.ok;
         return json({
           success,
           checks: {
             r2: stored !== null,
             sandboxImage: image.success,
+            commandIsolation: isolation.success,
             lifecycle: touched.ok
           }
         }, success ? 200 : 500);

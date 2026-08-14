@@ -3,7 +3,6 @@ import type {
   OffloadJobResult
 } from "@jingler/core"
 import { Data, Effect } from "effect"
-import type { OffloadJobRecord } from "./offload-store.js"
 
 const WORKSPACE = "/workspace"
 const EXECUTOR = "/opt/jingler/offload-exec.mjs"
@@ -59,58 +58,24 @@ const run = (
   )
 
 export const primeOffloadWorkspace = (
-  sandbox: OffloadSandbox,
-  record: OffloadJobRecord,
-  gitProxyOrigin: string,
-  gitGrant: string
+  sandbox: OffloadSandbox
 ): Effect.Effect<
-  { readonly hydrationMs: number; readonly dependencyMs: number; readonly warmDependencies: boolean },
+  { readonly hydrationMs: number; readonly dependencyMs: number; readonly warmSandbox: boolean },
   OffloadWorkspaceError
 > =>
   Effect.gen(function* () {
-    const hydrationStarted = Date.now()
-    const repositoryUrl = new URL(
-      `/v1/offload/git/${encodeURIComponent(record.jobId)}/${record.request.repositorySlug}.git`,
-      gitProxyOrigin
-    ).toString()
-    const sha = record.request.snapshot.headSha
-    yield* run(
+    const started = Date.now()
+    const state = yield* run(
       sandbox,
-      [
-        "if test -d /workspace/.git; then git -C /workspace reset --hard --quiet && git -C /workspace clean -fd --quiet; else rm -rf /workspace/* /workspace/.[!.]* /workspace/..?* 2>/dev/null || true; git init --quiet /workspace; fi",
-        `git -C /workspace remote get-url origin >/dev/null 2>&1 && git -C /workspace remote set-url origin ${quote(repositoryUrl)} || git -C /workspace remote add origin ${quote(repositoryUrl)}`,
-        `git -C /workspace --config-env=http.extraHeader=JINGLER_GIT_AUTHORIZATION fetch --no-tags --depth=1 origin ${quote(sha)}`,
-        `git -C /workspace checkout --quiet --detach ${quote(sha)}`
-      ].join(" && "),
-      {
-        cwd: WORKSPACE,
-        timeout: 180_000,
-        env: { JINGLER_GIT_AUTHORIZATION: `Authorization: Bearer ${gitGrant}` },
-        origin: "internal"
-      },
-      "hydration-failed",
-      "Exact Git revision could not be hydrated"
-    )
-    const hydrationMs = Date.now() - hydrationStarted
-    const dependencyStarted = Date.now()
-    const dependencyState = yield* run(
-      sandbox,
-      [
-        "lockfile=''; install='';",
-        "if test -f pnpm-lock.yaml; then lockfile=pnpm-lock.yaml; install='corepack pnpm install --frozen-lockfile --prefer-offline';",
-        "elif test -f package-lock.json; then lockfile=package-lock.json; install='npm ci';",
-        "elif test -f yarn.lock; then lockfile=yarn.lock; install='corepack yarn install --immutable'; fi;",
-        "if test -z \"$lockfile\"; then printf none; else key=$(sha256sum \"$lockfile\" | cut -d' ' -f1); marker=/tmp/jingler-offload-deps-$key;",
-        "if test -f \"$marker\"; then printf warm; else sh -lc \"$install\" && touch \"$marker\" && printf cold; fi; fi"
-      ].join(" "),
-      { cwd: WORKSPACE, timeout: 10 * 60_000, origin: "internal" },
-      "dependency-failed",
-      "Dependencies could not be prepared"
+      "if test -f /tmp/jingler-offload-sandbox-ready; then printf warm; else touch /tmp/jingler-offload-sandbox-ready && chmod 0400 /tmp/jingler-offload-sandbox-ready && printf cold; fi",
+      { cwd: WORKSPACE, timeout: 30_000, origin: "internal" },
+      "runtime-failed",
+      "Sandbox could not be primed"
     )
     return {
-      hydrationMs,
-      dependencyMs: Date.now() - dependencyStarted,
-      warmDependencies: dependencyState === "warm"
+      hydrationMs: Date.now() - started,
+      dependencyMs: 0,
+      warmSandbox: state === "warm"
     }
   })
 
@@ -118,8 +83,13 @@ export const restoreOffloadSnapshot = (
   sandbox: OffloadSandbox,
   jobId: string,
   snapshot: Uint8Array
-): Effect.Effect<string, OffloadWorkspaceError> =>
+): Effect.Effect<{
+  readonly sourceDigest: string
+  readonly hydrationMs: number
+  readonly dependencyMs: number
+}, OffloadWorkspaceError> =>
   Effect.gen(function* () {
+    const hydrationStarted = Date.now()
     const snapshotPath = fixedPath(jobId, "snapshot.gz")
     yield* Effect.tryPromise({
       try: () => sandbox.writeFile(
@@ -131,62 +101,7 @@ export const restoreOffloadSnapshot = (
         message: "Snapshot could not be written to the sandbox"
       })
     })
-    return yield* run(
-      sandbox,
-      `node ${EXECUTOR} restore ${quote(snapshotPath)}`,
-      { cwd: WORKSPACE, timeout: 120_000, origin: "internal" },
-      "hydration-failed",
-      "Workspace snapshot could not be restored"
-    )
-  })
-
-export const hydrateOffloadWorkspace = (
-  sandbox: OffloadSandbox,
-  record: OffloadJobRecord,
-  snapshot: Uint8Array,
-  gitProxyOrigin: string,
-  gitGrant: string
-): Effect.Effect<
-  { readonly sourceDigest: string; readonly hydrationMs: number; readonly dependencyMs: number },
-  OffloadWorkspaceError
-> =>
-  Effect.gen(function* () {
-    const hydrationStarted = Date.now()
-    const snapshotPath = fixedPath(record.jobId, "snapshot.gz")
-    yield* Effect.tryPromise({
-      try: () => sandbox.writeFile(
-        snapshotPath,
-        new Blob([snapshot]).stream() as ReadableStream<Uint8Array>
-      ),
-      catch: () => new OffloadWorkspaceError({
-        reason: "hydration-failed",
-        message: "Snapshot could not be written to the sandbox"
-      })
-    })
-    const repositoryUrl = new URL(
-      `/v1/offload/git/${encodeURIComponent(record.jobId)}/${record.request.repositorySlug}.git`,
-      gitProxyOrigin
-    ).toString()
-    const sha = record.request.snapshot.headSha
     yield* run(
-      sandbox,
-      [
-        "rm -rf /workspace/* /workspace/.[!.]* /workspace/..?* 2>/dev/null || true",
-        "git init --quiet /workspace",
-        `git -C /workspace remote add origin ${quote(repositoryUrl)}`,
-        `git -C /workspace --config-env=http.extraHeader=JINGLER_GIT_AUTHORIZATION fetch --no-tags --depth=1 origin ${quote(sha)}`,
-        `git -C /workspace checkout --quiet --detach ${quote(sha)}`
-      ].join(" && "),
-      {
-        cwd: WORKSPACE,
-        timeout: 180_000,
-        env: { JINGLER_GIT_AUTHORIZATION: `Authorization: Bearer ${gitGrant}` },
-        origin: "internal"
-      },
-      "hydration-failed",
-      "Exact Git revision could not be hydrated"
-    )
-    const sourceDigest = yield* run(
       sandbox,
       `node ${EXECUTOR} restore ${quote(snapshotPath)}`,
       { cwd: WORKSPACE, timeout: 120_000, origin: "internal" },
@@ -197,10 +112,22 @@ export const hydrateOffloadWorkspace = (
     const dependencyStarted = Date.now()
     yield* run(
       sandbox,
-      "if test -f pnpm-lock.yaml; then corepack pnpm install --frozen-lockfile --prefer-offline; elif test -f package-lock.json; then npm ci; elif test -f yarn.lock; then corepack yarn install --immutable; fi",
+      [
+        "rm -rf node_modules",
+        "if test -f pnpm-lock.yaml; then corepack pnpm install --frozen-lockfile --prefer-offline --ignore-scripts;",
+        "elif test -f package-lock.json; then npm ci --ignore-scripts;",
+        "elif test -f yarn.lock; then corepack yarn install --immutable --mode=skip-builds; fi"
+      ].join("; "),
       { cwd: WORKSPACE, timeout: 10 * 60_000, origin: "internal" },
       "dependency-failed",
       "Dependencies could not be prepared"
+    )
+    const sourceDigest = yield* run(
+      sandbox,
+      `node ${EXECUTOR} manifest`,
+      { cwd: WORKSPACE, timeout: 30_000, origin: "internal" },
+      "hydration-failed",
+      "Prepared workspace manifest could not be captured"
     )
     return {
       sourceDigest,
@@ -252,6 +179,7 @@ export const executeOffloadCommand = (
   jobId: string,
   request: OffloadAdmissionRequest,
   sourceDigest: string,
+  allowStart: boolean,
   timings: { readonly queuedMs: number; readonly snapshotMs: number; readonly hydrationMs: number; readonly dependencyMs: number }
 ): Effect.Effect<OffloadJobResult, OffloadWorkspaceError> =>
   Effect.gen(function* () {
@@ -263,7 +191,8 @@ export const executeOffloadCommand = (
       cwd: request.command.cwd,
       timeoutMs: request.limits.timeoutSeconds * 1_000,
       outputBytes: request.limits.outputBytes,
-      sourceDigest
+      sourceDigest,
+      startAllowed: allowStart
     })
     yield* Effect.tryPromise({
       try: () => sandbox.writeFile(commandPath, command),

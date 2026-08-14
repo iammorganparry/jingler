@@ -108,6 +108,25 @@ describe("offload job store", () => {
     if (Exit.isFailure(exit)) {
       expect(Option.getOrThrow(Cause.failureOption(exit.cause)).reason).toBe("conflict")
     }
+    const payloadConflict = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const store = yield* OffloadJobStore
+        yield* store.create({
+          jobId: result.jobId,
+          subject: "user_one",
+          request: {
+            ...request,
+            command: { ...request.command, args: ["test"] }
+          },
+          githubCapabilityHandle: "github_aaaaaaaaaaaaaaaa",
+          nowSeconds: 1_900_000_000
+        })
+      }).pipe(Effect.provide(makeOffloadJobStoreLayer(bucket as unknown as R2Bucket)))
+    )
+    expect(Exit.isFailure(payloadConflict)).toBe(true)
+    if (Exit.isFailure(payloadConflict)) {
+      expect(Option.getOrThrow(Cause.failureOption(payloadConflict.cause)).reason).toBe("conflict")
+    }
   })
 
   it("persists snapshots and ordered resumable events", async () => {

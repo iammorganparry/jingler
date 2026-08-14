@@ -15,25 +15,31 @@ snapshots and result chunks that are too large for Workflow parameters.
 
 ### Alternatives considered
 
-| Design | Outcome |
-| --- | --- |
-| GitHub Actions dispatch | Rejected for interactive use. It requires pushed state, loses dirty worktree fidelity, and adds queue/setup latency. |
-| Direct Sandbox request | Retained as the execution primitive, but rejected as the sole coordinator because disconnect and retry races are not durable. |
-| Workflow without Sandbox | Rejected because Workflows coordinate durable steps but do not replace an isolated Linux command environment. |
-| Workflow plus Sandbox | Selected. It reuses Jingler's deployed trust boundary and supports durable, low-latency execution against current source state. |
+| Design                   | Outcome                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub Actions dispatch  | Rejected for interactive use. It requires pushed state, loses dirty worktree fidelity, and adds queue/setup latency.            |
+| Direct Sandbox request   | Retained as the execution primitive, but rejected as the sole coordinator because disconnect and retry races are not durable.   |
+| Workflow without Sandbox | Rejected because Workflows coordinate durable steps but do not replace an isolated Linux command environment.                   |
+| Workflow plus Sandbox    | Selected. It reuses Jingler's deployed trust boundary and supports durable, low-latency execution against current source state. |
 
 ## Product contract
 
 - Enabling Offload Compute authorizes automatic routing; it does not make every
   shell command remotely eligible.
 - Built-in presets resolve to shell-free executable/argument vectors. Projects
-  may add explicit executable/argument vectors to an allowlist.
+  may add explicit executable/argument vectors to an allowlist. This classifier
+  prevents accidental shell interpretation; it does not treat a package script,
+  test runner, compiler plugin, or build tool as trusted code.
 - Pipelines, redirects, command substitution, interactive processes, stateful
-  commands, secret-bearing environments, and unknown scripts remain local.
+  commands, secret-bearing environments, and unrecognized top-level commands
+  remain local. Eligible repository tooling is still arbitrary code and is
+  contained by the Sandbox filesystem, identity, and network boundaries below.
 - Once a remote job is admitted, a failure is returned to the agent and operator.
   Jingler never retries it locally without an explicit operator action.
-- The remote source tree is read-only from the product's perspective. A command
-  that changes tracked or untracked source fails; remote changes are discarded.
+- Tracked source is owned by root and made read-only before the admitted command
+  runs as uid 65532. Only designated cache/build-output directories and a private
+  temporary home are writable. Any remaining source mutation fails and all
+  remote state is discarded.
 
 Automatic routing occurs at the canonical agent command boundary before the
 local command executor. The classifier is pure and returns `local` with a reason
@@ -44,26 +50,33 @@ bash text into a supposedly safe argument vector.
 
 1. Resolve the eligible preset or project allowlist entry to an executable,
    argument vector, and repository-relative working directory.
-2. Capture the exact `HEAD`, staged and unstaged binary patches, and allowed
-   untracked regular files. Re-read Git state after capture and reject a moving
-   worktree, unsafe path, symlink, excluded secret file, or size overflow.
+2. Capture a bounded self-contained archive of the exact local `HEAD` plus
+   staged and unstaged binary patches. This reproduces local-only commits without
+   a push or Git-proxy lookup. Ignored and untracked files are excluded by
+   default; an operator must explicitly stage a new file to authorize transfer.
+   Re-read Git state after capture and reject a moving worktree, unsafe path,
+   symlink/submodule, excluded or secret-prone staged file, or size overflow.
 3. Stream a compressed and hashed snapshot to private R2 with a single-use grant
    scoped to the account, session, repository, job, and digest.
 4. Start the session-scoped Sandbox and Workflow as soon as admission succeeds.
-   While the desktop captures/uploads the dirty snapshot, the Workflow hydrates
-   the exact clean commit and primes the lockfile-keyed dependency installation;
-   a durable `snapshot-ready` event releases execution when upload completes.
-5. Restore and verify the snapshot, then execute the literal executable and
-   arguments with no shell interpolation.
-   Compare source manifests afterwards and discard the Sandbox state if source
-   changed.
+   A durable `snapshot-ready` event releases restoration when upload completes;
+   no remote Git object is required for correctness.
+5. Verify and restore the archive and patches, create a synthetic Git baseline,
+   and perform a fresh dependency installation with lifecycle scripts disabled.
+   Mutable `node_modules` state is never reused between jobs.
+6. Make source and dependencies read-only, create only designated writable output
+   directories, then launch the literal executable/arguments through a static
+   seccomp wrapper as uid 65532. The wrapper denies Internet, packet, and netlink
+   sockets for the command and descendants. Compare source manifests afterwards
+   as defense in depth and discard all remote job state.
 
 The existing `WorkspaceTransferCheckpoint` remains the continuation format. Its
 4 MiB JSON limit is appropriate for interactive continuation but not dependency-
 free snapshot streaming. Offload Compute extracts its safe path and Git identity
 rules into a compressed format with an initial 64 MiB uncompressed cap. It
 excludes `.git`, dependencies, caches, build output, sockets, devices, symlinks,
-and known local secret files.
+submodules, ignored files, and all untracked files. Explicitly staged files still
+pass secret-prone path checks before transfer.
 
 ## Effect-TS architecture
 
@@ -87,19 +100,29 @@ they do not acquire side effects merely to appear effectful.
 
 The authenticated API derives the subject, account eligibility, session, and
 repository. The renderer and agent cannot assert authoritative ownership. It
-mints a short-lived, single-job capability with separate upload, run, read, and
-cancel actions. The capability includes the snapshot digest and is single use.
+mints a short-lived, single-job capability with upload, read, and cancel actions.
+The capability includes the immutable job scope and snapshot digest. Upload and
+cancel are consumed once per grant/action pair; resumable reads are reusable only
+until expiry. Workflow execution is internal and has no client `run` capability.
 
 Cloudflare service credentials, GitHub installation credentials, and provider
 credentials never enter renderer state, Workflow payloads, command arguments,
-snapshots, logs, or R2 metadata. Git hydration continues to use the existing
-session-scoped Git proxy. Command output is bounded and redacted before durable
-storage.
+snapshots, logs, or R2 metadata. Job hydration is self-contained and does not
+expose a Git-proxy capability to the command. Dependency fetching happens before
+the unprivileged command with lifecycle scripts disabled. The command and all of
+its descendants inherit a seccomp network filter that denies new Internet,
+packet, and netlink sockets, so they cannot reach control-plane, metadata, Git,
+R2, or arbitrary exfiltration endpoints. Command output is bounded and redacted
+before durable storage.
 
-Each desktop request carries an idempotency key. The Workflow instance id is
-stable for that key, and command execution obtains a durable lease before the
-Sandbox starts. Workflow step retries recover the executor's durable result
-marker instead of executing the argv twice. Event sequence numbers provide
+Each desktop request carries an idempotency key namespaced by authenticated
+subject. Admission persists the complete immutable session/repository/snapshot/
+command/limit request and rejects reuse if any field differs. The Workflow
+instance id is stable for that authenticated scope. Before spawn, the executor
+atomically creates a job-specific marker in the session Sandbox. A retry may
+recover a durable terminal result or wait on an existing marker, but it may not
+start when durable ownership is already `running`; loss of the Sandbox therefore
+fails indeterminately instead of executing twice. Event sequence numbers provide
 resumable, deduplicated logs after a desktop disconnect. Short-lived scoped
 capabilities are standard HS256 JWTs issued and verified by `jose`; Jingler does
 not implement JWT encoding, parsing, or signature verification itself.
@@ -107,11 +130,15 @@ not implement JWT encoding, parsing, or signature verification itself.
 ## Limits and lifecycle
 
 Initial limits are 64 MiB of snapshot input, 4 MiB of returned output, 30 minutes
-per command, one active job per account, and the managed runtime's global
-Sandbox cap. Production values remain server-controlled and may be lower by
-account tier. A warm Sandbox may reuse a dependency installation only when its
-runtime image and lockfile digests match; every job still revalidates `HEAD`, the
-snapshot, and the clean source baseline. Enabling offload primes the active
+per command, one outstanding job per account (including upload and execution),
+and the managed runtime's global Sandbox cap. Admission claims that slot before
+returning an upload capability, so additional jobs are rejected rather than
+queued. An abandoned slot expires after 35 minutes; job/snapshot objects expire
+after one day. Production values remain server-controlled and may be lower by
+account tier. A warm Sandbox reuses only container startup state and package-
+manager download caches; each job deletes and freshly installs `node_modules`
+from its own manifests and lockfile before making dependencies read-only.
+Enabling offload primes the active
 session asynchronously, and resuming it refreshes that primer. Archiving or
 deleting the session destroys its Sandbox immediately. A Durable Object activity
 lease destroys any remaining Sandbox after three inactive hours; a later resume
@@ -126,7 +153,7 @@ without recording repository paths or raw command text in telemetry.
 
 The aggregate-only `offload_compute_settled` event measures queue, snapshot,
 hydration, dependency, and command durations separately and records only outcome,
-typed failure reason, warm-dependency state, and output truncation. It never
+typed failure reason, warm-Sandbox state, and output truncation. It never
 contains account/session/job identity, repository, command, argv, output, or path.
 The initial targets are a warm p95 under five seconds from handoff to command
 start and a cold p95 under twenty seconds excluding dependency installation and

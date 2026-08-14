@@ -15,7 +15,8 @@ The managed-runtime deployment owns these resources:
 `.github/workflows/deploy-workers.yml` checks the secrets before deployment,
 creates missing buckets/lifecycle rules, runs Wrangler's dry-run, deploys, and
 calls the authenticated offload smoke probe. A deployment is not healthy until
-that probe confirms R2, the Sandbox image/executor, and the lifecycle object.
+that probe confirms R2, the Sandbox image/executor, seccomp egress denial,
+unprivileged read-only source enforcement, and the lifecycle object.
 
 ## Manual smoke and benchmark
 
@@ -43,7 +44,7 @@ outcome, typed failure reason, warm-dependency flag, output-truncation flag, and
 queued/snapshot/hydration/dependency/command milliseconds. It deliberately has
 no account, session, job, repository, command, argv, output, or path.
 
-Create Cloudflare dashboard charts split by `warmDependencies`, `outcome`, and
+Create Cloudflare dashboard charts split by `warmSandbox`, `outcome`, and
 `failureReason`, with p50/p95 for every timing field. Configure these alerts:
 
 1. Warm `queuedMs + hydrationMs` p95 at or above 5,000 ms for 15 minutes (minimum

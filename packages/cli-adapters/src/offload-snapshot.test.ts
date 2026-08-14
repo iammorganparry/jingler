@@ -29,9 +29,11 @@ const repository = () => {
 const payloadOf = (compressedBytes: Uint8Array) =>
   JSON.parse(gunzipSync(compressedBytes).toString("utf8")) as {
     headSha: string
+    headArchiveBase64: string
+    headArchiveBytes: number
+    headArchiveDigest: string
     stagedPatch: string
     unstagedPatch: string
-    files: ReadonlyArray<{ path: string; contentBase64: string }>
   }
 
 afterEach(() => {
@@ -39,7 +41,7 @@ afterEach(() => {
 })
 
 describe("OffloadSnapshotService capture", () => {
-  it("captures deterministic staged, unstaged, and untracked state", async () => {
+  it("captures a self-contained deterministic HEAD plus staged and unstaged state", async () => {
     const root = repository()
     writeFileSync(join(root, "staged.txt"), "staged change\n")
     execFileSync("git", ["add", "staged.txt"], { cwd: root })
@@ -53,10 +55,11 @@ describe("OffloadSnapshotService capture", () => {
     expect(first.identity).toEqual(second.identity)
     expect(payload.stagedPatch).toContain("staged change")
     expect(payload.unstagedPatch).toContain("unstaged change")
-    expect(payload.files.map((file) => file.path)).toEqual(["new.txt"])
-    expect(Buffer.from(payload.files[0]!.contentBase64, "base64").toString()).toBe(
-      "untracked\n"
+    expect(payload.headArchiveBytes).toBeGreaterThan(0)
+    expect(Buffer.from(payload.headArchiveBase64, "base64")).toHaveLength(
+      payload.headArchiveBytes
     )
+    expect(gunzipSync(first.compressedBytes).toString()).not.toContain("untracked")
   })
 
   it("detects a worktree mutation during capture", async () => {
@@ -78,16 +81,28 @@ describe("OffloadSnapshotService capture", () => {
 })
 
 describe("Offload snapshot safeguards", () => {
+  it("excludes ignored and untracked files unless the operator stages them", async () => {
+    const root = repository()
+    writeFileSync(join(root, "arbitrary-private-fixture.json"), "super-secret-local-value\n")
+    writeFileSync(join(root, ".gitignore"), "ignored-private.txt\n")
+    writeFileSync(join(root, "ignored-private.txt"), "ignored-secret\n")
+    const snapshot = await Effect.runPromise(captureOffloadSnapshot(root))
+    const payload = gunzipSync(snapshot.compressedBytes).toString("utf8")
+    expect(payload).not.toContain("super-secret-local-value")
+    expect(payload).not.toContain("ignored-secret")
+  })
+
   it.each([
     ["secret-prone", ".env", "secret-path"],
     ["excluded", "node_modules/leak.txt", "unsafe-path"]
-  ])("rejects %s untracked paths", async (_label, path, reason) => {
+  ])("rejects %s explicitly staged paths", async (_label, path, reason) => {
     const root = repository()
     const absolute = join(root, path)
     if (path.includes("/")) {
       execFileSync("mkdir", ["-p", join(root, path.split("/")[0]!)])
     }
     writeFileSync(absolute, "not-a-real-secret\n")
+    execFileSync("git", ["add", "--force", path], { cwd: root })
     const exit = await Effect.runPromiseExit(captureOffloadSnapshot(root))
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
@@ -98,11 +113,13 @@ describe("Offload snapshot safeguards", () => {
   it("rejects symlinks and snapshots over the configured bound", async () => {
     const root = repository()
     symlinkSync("staged.txt", join(root, "linked.txt"))
+    execFileSync("git", ["add", "linked.txt"], { cwd: root })
     const linked = await Effect.runPromiseExit(captureOffloadSnapshot(root))
     expect(Exit.isFailure(linked)).toBe(true)
 
-    rmSync(join(root, "linked.txt"))
+    execFileSync("git", ["reset", "--hard", "--quiet"], { cwd: root })
     writeFileSync(join(root, "large.txt"), "x".repeat(512))
+    execFileSync("git", ["add", "large.txt"], { cwd: root })
     const large = await Effect.runPromiseExit(
       captureOffloadSnapshot(root, { maxBytes: 128 })
     )

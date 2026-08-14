@@ -6,7 +6,6 @@ import {
   type WorkflowStep
 } from "cloudflare:workers"
 import { Effect } from "effect"
-import { issueOffloadGrant } from "./offload-grant.js"
 import { INTERNAL_ROUTES } from "./internal-routes.js"
 import { redactedOffloadTelemetry } from "./offload-telemetry.js"
 import {
@@ -142,7 +141,7 @@ export const runOffloadWorkflow = async (
   step: WorkflowStep
 ): Promise<OffloadJobResult> => {
   const storeLayer = makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)
-  let warmDependencies = false
+  let warmSandbox = false
   try {
     const prepared = await step.do("hydrate exact workspace", retry, () =>
       Effect.runPromise(
@@ -158,18 +157,6 @@ export const runOffloadWorkflow = async (
             kind: "state",
             state: "preparing"
           })
-          const gitGrant = yield* issueOffloadGrant(
-            {
-              subject: record.subject,
-              sessionId: record.request.sessionId,
-              jobId: record.jobId,
-              idempotencyKey: record.request.idempotencyKey,
-              repositorySlug: record.request.repositorySlug,
-              snapshotDigest: record.request.snapshot.digest,
-              actions: ["git.read"]
-            },
-            env.MANAGED_RUNTIME_GRANT_SECRET
-          )
           const sandboxId = yield* Effect.tryPromise(() =>
             sandboxIdForSession(`offload_${record.request.sessionId}`)
           )
@@ -193,17 +180,12 @@ export const runOffloadWorkflow = async (
             enableDefaultSession: false,
             sleepAfter: "10m"
           })
-          const workspace = yield* primeOffloadWorkspace(
-            sandbox,
-            record,
-            env.MANAGED_RUNTIME_ORIGIN,
-            gitGrant.grant
-          )
+          const workspace = yield* primeOffloadWorkspace(sandbox)
           return {
             cancelled: false as const,
             hydrationMs: workspace.hydrationMs,
             dependencyMs: workspace.dependencyMs,
-            warmDependencies: workspace.warmDependencies,
+            warmSandbox: workspace.warmSandbox,
             sandboxId,
             queuedMs: Math.max(0, Date.now() - record.createdAt * 1_000)
           }
@@ -215,13 +197,13 @@ export const runOffloadWorkflow = async (
       console.log(JSON.stringify(redactedOffloadTelemetry(prepared.result, false)))
       return prepared.result
     }
-    warmDependencies = prepared.warmDependencies
+    warmSandbox = prepared.warmSandbox
 
     await step.waitForEvent("wait for exact snapshot", {
       type: "snapshot-ready",
       timeout: "10 minutes"
     })
-    const sourceDigest = await step.do("restore exact snapshot", retry, () =>
+    const workspace = await step.do("restore exact snapshot", retry, () =>
       Effect.runPromise(
         Effect.gen(function* () {
           const store = yield* OffloadJobStore
@@ -272,12 +254,13 @@ export const runOffloadWorkflow = async (
             sandbox,
             record.jobId,
             record.request,
-            sourceDigest,
+            workspace.sourceDigest,
+            lease === "acquired",
             {
               queuedMs: prepared.queuedMs,
               snapshotMs: record.request.clientTimings?.snapshotMs ?? 0,
-              hydrationMs: prepared.hydrationMs,
-              dependencyMs: prepared.dependencyMs
+              hydrationMs: prepared.hydrationMs + workspace.hydrationMs,
+              dependencyMs: workspace.dependencyMs
             }
           )
         }).pipe(Effect.provide(storeLayer))
@@ -295,7 +278,7 @@ export const runOffloadWorkflow = async (
       )
     )
     await releaseOffloadSlot(env, input.jobId)
-    console.log(JSON.stringify(redactedOffloadTelemetry(result, warmDependencies)))
+    console.log(JSON.stringify(redactedOffloadTelemetry(result, warmSandbox)))
     return result
   } catch (cause) {
     const result = failedResult(
@@ -319,7 +302,7 @@ export const runOffloadWorkflow = async (
       )
     )
     await releaseOffloadSlot(env, input.jobId)
-    console.log(JSON.stringify(redactedOffloadTelemetry(result, warmDependencies)))
+    console.log(JSON.stringify(redactedOffloadTelemetry(result, warmSandbox)))
     return result
   }
 }

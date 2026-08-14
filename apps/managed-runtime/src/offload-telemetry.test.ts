@@ -25,7 +25,7 @@ describe("offload telemetry", () => {
     expect(telemetry).toMatchObject({
       event: "offload_compute_settled",
       outcome: "succeeded",
-      warmDependencies: true,
+      warmSandbox: true,
       timings: result.timings
     })
     const serialized = JSON.stringify(telemetry)

@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process"
+import { createHash } from "node:crypto"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -47,7 +48,8 @@ const runCommand = (
     cwd: ".",
     timeoutMs: command.timeoutMs ?? 5_000,
     outputBytes: 64 * 1024,
-    sourceDigest: manifest(root)
+    sourceDigest: manifest(root),
+    startAllowed: true
   }))
   const executed = runner(root, ["run", commandPath, resultPath])
   if (executed.status !== 0) throw new Error(executed.stderr)
@@ -65,6 +67,7 @@ afterEach(() => {
     rmSync(root, { recursive: true, force: true })
     rmSync(`${root}.command.json`, { force: true })
     rmSync(`${root}.result.json`, { force: true })
+    rmSync(`${root}.result.json.lock`, { force: true })
   }
 })
 
@@ -97,12 +100,32 @@ describe("offload argv executor", () => {
       cwd: ".",
       timeoutMs: 5_000,
       outputBytes: 1024,
-      sourceDigest: manifest(root)
+      sourceDigest: manifest(root),
+      startAllowed: true
     }))
     expect(runner(root, ["run", commandPath, resultPath]).status).toBe(0)
     expect(runner(root, ["run", commandPath, resultPath]).status).toBe(0)
     expect(readFileSync(counter, "utf8")).toBe("1")
     rmSync(counter, { force: true })
+  })
+
+  it("refuses to restart a command when durable execution ownership is already running", () => {
+    const root = repository()
+    const marker = `${root}.must-not-run`
+    const commandPath = `${root}.command.json`
+    const resultPath = `${root}.result.json`
+    writeFileSync(commandPath, JSON.stringify({
+      executable: "node",
+      args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`],
+      cwd: ".",
+      timeoutMs: 100,
+      outputBytes: 1024,
+      sourceDigest: manifest(root),
+      startAllowed: false
+    }))
+    expect(runner(root, ["run", commandPath, resultPath]).status).not.toBe(0)
+    expect(() => readFileSync(marker)).toThrow()
+    rmSync(marker, { force: true })
   })
 
   it("detects source mutation and timeout as structured outcomes", () => {
@@ -125,28 +148,38 @@ describe("offload argv executor", () => {
     expect(timedOut.timedOut).toBe(true)
   })
 
-  it("restores patches and verified untracked files", () => {
+  it("restores a self-contained local-only HEAD and staged patch", () => {
     const root = repository()
+    writeFileSync(join(root, "local-head.txt"), "only in the local commit\n")
+    execFileSync("git", ["add", "local-head.txt"], { cwd: root })
+    execFileSync("git", ["commit", "--quiet", "-m", "local only"], { cwd: root })
     const headSha = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: root,
       encoding: "utf8"
     }).trim()
-    const content = Buffer.from("new file\n")
-    const snapshotPath = join(root, "snapshot.gz")
+    const archive = execFileSync("git", ["archive", "--format=tar", "HEAD"], { cwd: root })
+    writeFileSync(join(root, "staged.txt"), "staged file\n")
+    execFileSync("git", ["add", "staged.txt"], { cwd: root })
+    const stagedPatch = execFileSync(
+      "git",
+      ["diff", "--binary", "--cached", "--no-ext-diff"],
+      { cwd: root, encoding: "utf8" }
+    )
+    const snapshotPath = `${root}.snapshot.gz`
     writeFileSync(snapshotPath, gzipSync(JSON.stringify({
       version: 1,
       headSha,
-      stagedPatch: "",
-      unstagedPatch: "",
-      files: [{
-        path: "new.txt",
-        contentBase64: content.toString("base64"),
-        bytes: content.byteLength,
-        digest: "0f15384d18789b1ebf3043dc7b6bc27273c8576373fbeb6f3e15854b588141c0"
-      }]
+      headArchiveBase64: archive.toString("base64"),
+      headArchiveBytes: archive.byteLength,
+      headArchiveDigest: createHash("sha256").update(archive).digest("hex"),
+      headFileCount: 2,
+      stagedPatch,
+      unstagedPatch: ""
     })))
     const restored = runner(root, ["restore", snapshotPath])
     expect(restored.status).toBe(0)
-    expect(readFileSync(join(root, "new.txt"), "utf8")).toBe("new file\n")
+    expect(readFileSync(join(root, "local-head.txt"), "utf8")).toBe("only in the local commit\n")
+    expect(readFileSync(join(root, "staged.txt"), "utf8")).toBe("staged file\n")
+    rmSync(snapshotPath, { force: true })
   })
 })

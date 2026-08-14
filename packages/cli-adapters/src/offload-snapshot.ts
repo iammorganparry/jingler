@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
-import { lstat, readFile, realpath } from "node:fs/promises"
-import { isAbsolute, relative, resolve, sep } from "node:path"
+import { lstat, realpath } from "node:fs/promises"
+import { isAbsolute, resolve } from "node:path"
 import { promisify } from "node:util"
 import { gzipSync } from "node:zlib"
 import {
@@ -33,19 +33,15 @@ const EXCLUDED_SEGMENTS = new Set([
   "build"
 ])
 
-interface SnapshotFile {
-  readonly path: string
-  readonly contentBase64: string
-  readonly bytes: number
-  readonly digest: string
-}
-
 interface SnapshotPayload {
   readonly version: 1
   readonly headSha: string
+  readonly headArchiveBase64: string
+  readonly headArchiveBytes: number
+  readonly headArchiveDigest: string
+  readonly headFileCount: number
   readonly stagedPatch: string
   readonly unstagedPatch: string
-  readonly files: ReadonlyArray<SnapshotFile>
 }
 
 export interface CapturedOffloadSnapshot {
@@ -90,8 +86,31 @@ const git = (
     catch: () => failure("capture-failed", "Git could not capture the workspace snapshot")
   }).pipe(Effect.map((result) => trim ? result.stdout.trimEnd() : result.stdout))
 
+const gitBytes = (
+  cwd: string,
+  args: ReadonlyArray<string>
+): Effect.Effect<Buffer, OffloadSnapshotError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const result = await execFileAsync("git", [...args], {
+        cwd,
+        encoding: "buffer",
+        maxBuffer: GIT_BUFFER_BYTES
+      })
+      return Buffer.from(result.stdout)
+    },
+    catch: () => failure("capture-failed", "Git could not capture the workspace snapshot")
+  })
+
 const nulPaths = (value: string): ReadonlyArray<string> =>
   value.length === 0 ? [] : value.split("\0").filter(Boolean).sort()
+
+const treeEntries = (value: string): ReadonlyArray<{ readonly mode: string; readonly path: string }> =>
+  value.split("\0").filter(Boolean).map((entry) => {
+    const tab = entry.indexOf("\t")
+    const metadata = entry.slice(0, tab).split(" ")
+    return { mode: metadata[0] ?? "", path: entry.slice(tab + 1) }
+  })
 
 const isSecretPath = (path: string): boolean => {
   const name = path.split("/").at(-1)?.toLocaleLowerCase("en-US") ?? ""
@@ -113,16 +132,15 @@ const safePath = (path: string): boolean =>
 
 const changedPaths = (cwd: string): Effect.Effect<ReadonlyArray<string>, OffloadSnapshotError> =>
   Effect.gen(function* () {
-    const [staged, unstaged, untracked] = yield* Effect.all([
+    const [staged, unstaged] = yield* Effect.all([
       git(cwd, ["diff", "--cached", "--name-only", "-z"], false),
-      git(cwd, ["diff", "--name-only", "-z"], false),
-      git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"], false)
-    ], { concurrency: 3 })
-    return [...new Set([...nulPaths(staged), ...nulPaths(unstaged), ...nulPaths(untracked)])]
-      .sort()
+      git(cwd, ["diff", "--name-only", "-z"], false)
+    ], { concurrency: 2 })
+    return [...new Set([...nulPaths(staged), ...nulPaths(unstaged)])].sort()
   })
 
 const validatePaths = (
+  cwd: string,
   paths: ReadonlyArray<string>
 ): Effect.Effect<void, OffloadSnapshotError> =>
   Effect.gen(function* () {
@@ -137,62 +155,59 @@ const validatePaths = (
           failure("secret-path", `Offload snapshot rejected secret-prone path: ${path}`)
         )
       }
+      const stat = yield* Effect.tryPromise({
+        try: () => lstat(resolve(cwd, path)).catch((cause: NodeJS.ErrnoException) =>
+          cause.code === "ENOENT" ? null : Promise.reject(cause)
+        ),
+        catch: () => failure("capture-failed", `Offload snapshot could not inspect: ${path}`)
+      })
+      if (stat?.isSymbolicLink() || (stat !== null && !stat.isFile())) {
+        return yield* Effect.fail(
+          failure("unsupported-file", `Offload snapshot supports regular files only: ${path}`)
+        )
+      }
     }
   })
 
-const readUntrackedFiles = (
-  cwd: string,
-  paths: ReadonlyArray<string>
-): Effect.Effect<ReadonlyArray<SnapshotFile>, OffloadSnapshotError> =>
-  Effect.forEach(
-    paths,
-    (path) =>
-      Effect.tryPromise({
-        try: async () => {
-          const absolute = resolve(cwd, path)
-          const inside = relative(cwd, absolute)
-          if (inside === ".." || inside.startsWith(`..${sep}`)) {
-            throw failure("unsafe-path", `Offload snapshot path escapes its repository: ${path}`)
-          }
-          const stat = await lstat(absolute)
-          if (!stat.isFile() || stat.isSymbolicLink()) {
-            throw failure("unsupported-file", `Offload snapshot supports regular files only: ${path}`)
-          }
-          const content = await readFile(absolute)
-          return {
-            path,
-            contentBase64: content.toString("base64"),
-            bytes: content.byteLength,
-            digest: sha256(content)
-          }
-        },
-        catch: (cause) =>
-          cause instanceof OffloadSnapshotError
-            ? cause
-            : failure("capture-failed", `Offload snapshot could not read: ${path}`)
-      }),
-    { concurrency: 4 }
-  )
+const validateHeadTree = (
+  entries: ReadonlyArray<{ readonly mode: string; readonly path: string }>
+): Effect.Effect<void, OffloadSnapshotError> =>
+  Effect.gen(function* () {
+    for (const entry of entries) {
+      if (!safePath(entry.path) || isExcludedPath(entry.path)) {
+        return yield* Effect.fail(
+          failure("unsafe-path", `Offload snapshot rejected unsafe tracked path: ${entry.path}`)
+        )
+      }
+      if (entry.mode === "120000" || entry.mode === "160000") {
+        return yield* Effect.fail(
+          failure("unsupported-file", `Offload snapshot rejects links and submodules: ${entry.path}`)
+        )
+      }
+    }
+  })
 
 const capturePayload = (
   cwd: string,
   maxBytes: number
 ): Effect.Effect<SnapshotPayload, OffloadSnapshotError> =>
   Effect.gen(function* () {
-    const [headSha, stagedPatch, unstagedPatch, untrackedText, paths] =
+    const [headSha, headArchive, headTree, stagedPatch, unstagedPatch, paths] =
       yield* Effect.all([
         git(cwd, ["rev-parse", "--verify", "HEAD"]),
+        gitBytes(cwd, ["archive", "--format=tar", "HEAD"]),
+        git(cwd, ["ls-tree", "-rz", "HEAD"], false),
         git(cwd, ["diff", "--binary", "--cached", "--no-ext-diff"], false),
         git(cwd, ["diff", "--binary", "--no-ext-diff"], false),
-        git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"], false),
         changedPaths(cwd)
-      ], { concurrency: 5 })
-    yield* validatePaths(paths)
-    const files = yield* readUntrackedFiles(cwd, nulPaths(untrackedText))
+      ], { concurrency: 6 })
+    const entries = treeEntries(headTree)
+    yield* validateHeadTree(entries)
+    yield* validatePaths(cwd, paths)
     const uncompressedBytes =
+      headArchive.byteLength +
       Buffer.byteLength(stagedPatch) +
-      Buffer.byteLength(unstagedPatch) +
-      files.reduce((total, file) => total + file.bytes, 0)
+      Buffer.byteLength(unstagedPatch)
     if (uncompressedBytes > maxBytes) {
       return yield* Effect.fail(
         failure("too-large", "Offload snapshot exceeds the 64 MiB transfer limit")
@@ -201,22 +216,22 @@ const capturePayload = (
     return {
       version: OFFLOAD_COMPUTE_PROTOCOL_VERSION,
       headSha,
+      headArchiveBase64: headArchive.toString("base64"),
+      headArchiveBytes: headArchive.byteLength,
+      headArchiveDigest: sha256(headArchive),
+      headFileCount: entries.length,
       stagedPatch,
-      unstagedPatch,
-      files
+      unstagedPatch
     }
   })
 
 const payloadFingerprint = (payload: SnapshotPayload): string =>
   sha256(JSON.stringify({
     headSha: payload.headSha,
+    headArchiveBytes: payload.headArchiveBytes,
+    headArchiveDigest: payload.headArchiveDigest,
     stagedPatch: sha256(payload.stagedPatch),
-    unstagedPatch: sha256(payload.unstagedPatch),
-    files: payload.files.map((file) => ({
-      path: file.path,
-      bytes: file.bytes,
-      digest: file.digest
-    }))
+    unstagedPatch: sha256(payload.unstagedPatch)
   }))
 
 export interface CaptureOffloadSnapshotOptions {
@@ -257,7 +272,7 @@ export const captureOffloadSnapshot = (
         bytes: encoded.byteLength
       },
       compressedBytes: compressed,
-      fileCount: initial.files.length,
+      fileCount: initial.headFileCount,
       uncompressedBytes: encoded.byteLength
     }
   })

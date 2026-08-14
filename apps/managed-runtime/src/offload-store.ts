@@ -184,8 +184,7 @@ export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJ
         if (existing !== null) {
           if (
             existing.subject === input.subject &&
-            existing.request.idempotencyKey === input.request.idempotencyKey &&
-            existing.request.snapshot.digest === input.request.snapshot.digest
+            JSON.stringify(existing.request) === JSON.stringify(input.request)
           ) return existing
           return yield* Effect.fail(new OffloadStoreError({
             reason: "conflict",
