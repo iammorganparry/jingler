@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   createControlPlaneProviderFetch,
+  decodeManagedPathComponent,
   providerAuthorizationScope,
   proxyProviderRequest
 } from "./provider-proxy.js"
 
 describe("managed provider credential proxy", () => {
+  it("rejects malformed encoded path identifiers without throwing", () => {
+    expect(decodeManagedPathComponent("session%2Fone")).toBe("session/one")
+    expect(decodeManagedPathComponent("session%ZZone")).toBeNull()
+    expect(decodeManagedPathComponent("session%")).toBeNull()
+  })
+
   it("routes ChatGPT Codex egress through the authenticated control plane", async () => {
     const upstream = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const request = input instanceof Request ? input : new Request(input)

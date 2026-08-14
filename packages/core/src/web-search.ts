@@ -8,10 +8,20 @@ export type WebSearchProvider = Schema.Schema.Type<typeof WebSearchProvider>
  * Persisted operator choice only. API keys are deliberately excluded and live in
  * encrypted credential storage.
  */
-export const WebSearchConfig = Schema.Struct({
-  setup: Schema.Literal("pending", "skipped", "configured"),
-  provider: Schema.NullOr(WebSearchProvider)
-})
+export const WebSearchConfig = Schema.Union(
+  Schema.Struct({
+    setup: Schema.Literal("pending"),
+    provider: Schema.NullOr(WebSearchProvider)
+  }),
+  Schema.Struct({
+    setup: Schema.Literal("skipped"),
+    provider: Schema.Null
+  }),
+  Schema.Struct({
+    setup: Schema.Literal("configured"),
+    provider: WebSearchProvider
+  })
+)
 export type WebSearchConfig = Schema.Schema.Type<typeof WebSearchConfig>
 
 export const WEB_SEARCH_CONFIG_DEFAULT: WebSearchConfig = {

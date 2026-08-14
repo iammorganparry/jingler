@@ -29,6 +29,14 @@ const ProviderCredential = Schema.Struct({
 })
 type ProviderCredential = Schema.Schema.Type<typeof ProviderCredential>
 
+export const decodeManagedPathComponent = (value: string): string | null => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return null
+  }
+}
+
 export interface ProviderAuthorizationScope {
   readonly subject: string
   readonly capabilityHandle: string

@@ -11,7 +11,12 @@ import type {
   ProviderModelId,
   WebSearchConfig,
 } from "@jingler/core"
-import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
+import {
+  clampFontScale,
+  DEFAULT_THEME_ID,
+  WEB_SEARCH_CONFIG_DEFAULT,
+  WorkspaceConfig
+} from "@jingler/core"
 import { ConfigError } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
 import { Effect, Either, Schema } from "effect"
@@ -40,6 +45,21 @@ const migrateProviderReasoning = (value: unknown): unknown => {
     default:
       return value
   }
+}
+
+export const migrateConfigWebSearch = (value: unknown): unknown => {
+  if (!isRecord(value) || !("webSearch" in value)) return value
+  const webSearch = value.webSearch
+  if (!isRecord(webSearch)) {
+    return { ...value, webSearch: WEB_SEARCH_CONFIG_DEFAULT }
+  }
+  const provider = webSearch.provider
+  const validProvider = provider === "exa" || provider === "firecrawl"
+  const valid =
+    (webSearch.setup === "pending" && (provider === null || validProvider)) ||
+    (webSearch.setup === "skipped" && provider === null) ||
+    (webSearch.setup === "configured" && validProvider)
+  return valid ? value : { ...value, webSearch: WEB_SEARCH_CONFIG_DEFAULT }
 }
 
 export const migrateConfigReasoning = (value: unknown): unknown => {
@@ -80,7 +100,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             Effect.mapError((cause) => new ConfigError({ message: "Config file is malformed", cause }))
           )
           return yield* Schema.decodeUnknown(WorkspaceConfig)(
-            migrateLegacyConfigIdentity(migrateConfigReasoning(parsed))
+            migrateLegacyConfigIdentity(
+              migrateConfigWebSearch(migrateConfigReasoning(parsed))
+            )
           ).pipe(
             Effect.mapError(
               (cause) => new ConfigError({ message: "Config file is malformed", cause })
