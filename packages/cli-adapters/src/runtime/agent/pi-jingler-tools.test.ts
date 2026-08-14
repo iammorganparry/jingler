@@ -82,6 +82,34 @@ describe("Jingler target-owned tools", () => {
     expect(chooseSetup).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ["rate-limited", true, "error", "execution-failed"],
+    ["authentication", false, "error", "execution-failed"],
+    ["cancelled", true, "cancelled", "cancelled"]
+  ] as const)(
+    "preserves %s retryability and cancellation at the tool boundary",
+    async (reason, retryable, status, code) => {
+      const registry = new ToolRegistry()
+      registerWebSearchTool(registry, {
+        search: () => Effect.fail(new WebSearchError({
+          reason,
+          message: `search ${reason}`,
+          retryable
+        }))
+      }, runtimeContext(), false)
+      const result = await Effect.runPromise(registry.execute({
+        id: "web_search",
+        arguments: { query: "research", maxResults: 5 },
+        role: "conversation",
+        mode: "ask"
+      }))
+      expect(result).toMatchObject({
+        status,
+        error: { code, message: `search ${reason}`, retryable }
+      })
+    }
+  )
+
   it("never waits for setup when no interactive host is attached", async () => {
     const askQuestion = vi.fn(() => Effect.succeed([]))
     const registry = new ToolRegistry()

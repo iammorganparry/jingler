@@ -4,7 +4,7 @@ import {
   WebSearchError,
   WebSearchQuery
 } from "@jingler/core"
-import { Effect, Schema } from "effect"
+import { Effect, Either, Schema } from "effect"
 import {
   type McpToolBridgeError,
   jinglerMcpSources,
@@ -13,6 +13,7 @@ import {
   type JinglerMcpAttachments
 } from "../tools/mcp-tools.js"
 import {
+  ToolError,
   ToolRegistry,
   type ToolDefinition,
   type ToolRegistryOptions
@@ -98,7 +99,7 @@ export const registerWebSearchTool = (
     idempotency: "safe",
     execute: (input, toolContext) =>
       Effect.runPromise(
-        service.search(input, toolContext.signal).pipe(
+        Effect.either(service.search(input, toolContext.signal).pipe(
           Effect.catchTag("WebSearchError", (error) => {
             if (
               error.reason !== "setup-required" ||
@@ -141,9 +142,17 @@ export const registerWebSearchTool = (
               })
             )
           })
-        ),
+        )),
         { signal: toolContext.signal }
-      )
+      ).then((result) => {
+        if (Either.isRight(result)) return result.right
+        const error = result.left
+        throw new ToolError(
+          error.reason === "cancelled" ? "cancelled" : "execution-failed",
+          error.message,
+          error.retryable
+        )
+      })
   })
 }
 
