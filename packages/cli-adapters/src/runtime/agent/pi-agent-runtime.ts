@@ -14,7 +14,7 @@ export interface PiSessionHandle {
   readonly prompt: (text: string) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>
-  readonly dispose: () => void
+  readonly dispose: () => void | Promise<void>
   readonly usage: () => { readonly costUsd: number; readonly tokens: number }
   readonly observe?: (event: StreamEvent) => void
   readonly reconcile?: () => Promise<FileChangeSet | null>
@@ -211,9 +211,12 @@ const runSession = (
         Stream.ensuring(
           Queue.shutdown(queue).pipe(
             Effect.zipRight(
-              Effect.sync(() => {
-                unsubscribe()
-                handle.dispose()
+              Effect.promise(async () => {
+                try {
+                  unsubscribe()
+                } finally {
+                  await handle.dispose()
+                }
               })
             ),
             Effect.zipRight(

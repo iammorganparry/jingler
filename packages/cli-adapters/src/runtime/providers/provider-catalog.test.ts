@@ -24,7 +24,8 @@ const connection = Schema.decodeUnknownSync(ProviderConnection)({
     expiresAt: null,
     quotaLabel: null,
     rateLimitLabel: null,
-    confirmedBillingRoute: "subscription"
+    confirmedBillingRoute: "subscription",
+    observedRoute: "subscription"
   },
   createdAt: "2026-08-10T00:00:00.000Z",
   updatedAt: "2026-08-10T00:00:00.000Z"
@@ -42,6 +43,9 @@ const model: DiscoveredProviderModel = {
     vision: true
   }
 }
+
+const connectionFor = (id: string): ProviderConnection =>
+  Schema.decodeUnknownSync(ProviderConnection)({ ...connection, id })
 
 const certification = (overrides: Partial<ModelCertification> = {}): ModelCertification => ({
   providerId: "anthropic",
@@ -118,6 +122,98 @@ describe("ProviderCatalogService", () => {
     expect(catalog.connections[0]?.models[0]).toMatchObject({
       verification: "certified",
       selectable: true
+    })
+  })
+})
+
+describe("ProviderCatalogService refresh coalescing", () => {
+  it("coalesces concurrent cold list consumers into one discovery", async () => {
+    let releaseDiscovery: (() => void) | undefined
+    const blocked = new Promise<void>((resolve) => {
+      releaseDiscovery = resolve
+    })
+    const discover = vi.fn(() =>
+      Effect.promise(async () => {
+        await blocked
+        return [model]
+      })
+    )
+    const service = await Effect.runPromise(makeProviderCatalogService({
+      connections: Effect.succeed([connection]),
+      certifications: new InMemoryModelCertificationStore(),
+      discover,
+      targetAvailable: () => true
+    }))
+    const requests = Array.from({ length: 12 }, () =>
+      Effect.runPromise(service.list)
+    )
+
+    await vi.waitFor(() => expect(discover).toHaveBeenCalledOnce())
+    releaseDiscovery?.()
+    const catalogs = await Promise.all(requests)
+
+    expect(discover).toHaveBeenCalledOnce()
+    expect(new Set(catalogs).size).toBe(1)
+  })
+})
+
+describe("ProviderCatalogService discovery concurrency", () => {
+  it("bounds provider discovery concurrency", async () => {
+    const connections = Array.from({ length: 8 }, (_, index) =>
+      connectionFor(`connection-${index}`)
+    )
+    let active = 0
+    let maximumActive = 0
+    const discover = vi.fn(() =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          active += 1
+          maximumActive = Math.max(maximumActive, active)
+        }),
+        () => Effect.sleep("10 millis").pipe(Effect.as([model])),
+        () => Effect.sync(() => {
+          active -= 1
+        })
+      )
+    )
+    const service = await Effect.runPromise(makeProviderCatalogService({
+      connections: Effect.succeed(connections),
+      certifications: new InMemoryModelCertificationStore(),
+      discover,
+      discoveryConcurrency: 2,
+      targetAvailable: () => true
+    }))
+
+    await Effect.runPromise(service.refresh)
+
+    expect(discover).toHaveBeenCalledTimes(connections.length)
+    expect(maximumActive).toBe(2)
+  })
+})
+
+describe("ProviderCatalogService route certification", () => {
+  it.each([
+    ["managed proxy", { observedRoute: "managed-proxy" }],
+    ["API billing", { subscription: false }]
+  ] as const)("does not apply %s certification to a subscription route", async (_label, route) => {
+    const certifications = new InMemoryModelCertificationStore([
+      certification({
+        authRoute: {
+          ...certification().authRoute,
+          ...route
+        }
+      })
+    ])
+    const service = await Effect.runPromise(makeProviderCatalogService({
+      connections: Effect.succeed([connection]),
+      certifications,
+      discover: () => Effect.succeed([model]),
+      targetAvailable: () => true
+    }))
+
+    expect((await Effect.runPromise(service.refresh)).connections[0]?.models[0]).toMatchObject({
+      verification: "unverified",
+      selectable: false
     })
   })
 })

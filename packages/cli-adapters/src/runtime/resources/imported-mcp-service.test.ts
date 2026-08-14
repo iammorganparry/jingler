@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -6,7 +6,7 @@ import {
   ManagedResourceId,
   type ManagedMcpImportInput as ManagedMcpImportInputType
 } from "@jingler/core"
-import { Effect, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Schema, Stream } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeInMemorySecretStore } from "../../secret-store.js"
 import { AgentSecretStore } from "../auth/agent-secret-store.js"
@@ -168,5 +168,106 @@ describe("ImportedMcpService", () => {
       expect.objectContaining({ id: "docs" })
     ])
     expect(await Effect.runPromise(stored.readMcp("docs", "desktop"))).not.toBeNull()
+  })
+
+  it("restores metadata and encrypted values when removal is interrupted", async () => {
+    const root = await temporary()
+    const backing = await Effect.runPromise(makeInMemorySecretStore())
+    const stored = new AgentSecretStore(backing)
+
+    await Effect.runPromise(Effect.gen(function* () {
+      const secretDeleted = yield* Deferred.make<void>()
+      const releaseDelete = yield* Deferred.make<void>()
+      const service = yield* makeImportedMcpService({
+        metadataFile: join(root, "mcp.json"),
+        secrets: {
+          readMcp: stored.readMcp,
+          writeMcp: stored.writeMcp,
+          deleteMcp: (id, targetId) => stored.deleteMcp(id, targetId).pipe(
+            Effect.tap(() => Deferred.succeed(secretDeleted, undefined)),
+            Effect.zipRight(Deferred.await(releaseDelete))
+          )
+        }
+      })
+      yield* service.importServer(input({
+        transport: "http",
+        url: "https://example.test",
+        headers: { Authorization: "private" }
+      }))
+
+      const removeFiber = yield* Effect.fork(service.remove(resourceId("docs")))
+      yield* Deferred.await(secretDeleted)
+      const interruption = yield* Effect.fork(Fiber.interrupt(removeFiber))
+      yield* Deferred.succeed(releaseDelete, undefined)
+      yield* Fiber.join(interruption)
+
+      expect(yield* service.list).toEqual([expect.objectContaining({ id: "docs" })])
+      expect(yield* stored.readMcp("docs", "desktop")).toMatchObject({
+        headers: { Authorization: "private" }
+      })
+    }))
+  })
+
+  it("rolls back encrypted values when metadata persistence fails", async () => {
+    const root = await temporary()
+    const metadataFile = join(root, "mcp.json")
+    const backing = await Effect.runPromise(makeInMemorySecretStore())
+    const stored = new AgentSecretStore(backing)
+    const service = await Effect.runPromise(makeImportedMcpService({
+      metadataFile,
+      secrets: {
+        readMcp: stored.readMcp,
+        writeMcp: (id, targetId, value) => stored.writeMcp(id, targetId, value).pipe(
+          Effect.tap(() => Effect.tryPromise({
+            try: () => mkdir(metadataFile),
+            catch: (cause) => new ProviderCredentialStoreError({ message: "fixture setup failed", cause })
+          }))
+        ),
+        deleteMcp: stored.deleteMcp
+      }
+    }))
+
+    const imported = await Effect.runPromise(Effect.either(service.importServer(input({
+      transport: "http",
+      url: "https://example.test",
+      headers: { Authorization: "private" }
+    }))))
+
+    expect(imported._tag).toBe("Left")
+    expect(await Effect.runPromise(stored.readMcp("docs", "desktop"))).toBeNull()
+  })
+
+  it("rolls back encrypted values when import is interrupted during acquisition", async () => {
+    const root = await temporary()
+    const backing = await Effect.runPromise(makeInMemorySecretStore())
+    const stored = new AgentSecretStore(backing)
+
+    await Effect.runPromise(Effect.gen(function* () {
+      const secretWritten = yield* Deferred.make<void>()
+      const releaseWrite = yield* Deferred.make<void>()
+      const service = yield* makeImportedMcpService({
+        metadataFile: join(root, "mcp.json"),
+        secrets: {
+          readMcp: stored.readMcp,
+          writeMcp: (id, targetId, value) => stored.writeMcp(id, targetId, value).pipe(
+            Effect.tap(() => Deferred.succeed(secretWritten, undefined)),
+            Effect.zipRight(Deferred.await(releaseWrite))
+          ),
+          deleteMcp: stored.deleteMcp
+        }
+      })
+      const importFiber = yield* Effect.fork(service.importServer(input({
+        transport: "http",
+        url: "https://example.test",
+        headers: { Authorization: "private" }
+      })))
+      yield* Deferred.await(secretWritten)
+      const interruption = yield* Effect.fork(Fiber.interrupt(importFiber))
+      yield* Deferred.succeed(releaseWrite, undefined)
+      yield* Fiber.join(interruption)
+
+      expect(yield* stored.readMcp("docs", "desktop")).toBeNull()
+      expect(yield* service.list).toEqual([])
+    }))
   })
 })

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai"
 import {
+  authStatusForObservedBillingRoute,
   ProviderConnectionId,
   ProviderId,
   type AuthKind,
@@ -121,6 +122,10 @@ export interface AuthBrokerShape {
     id: ProviderConnectionId
   ) => Effect.Effect<ProviderConnection, AuthBrokerError>
   readonly logout: (
+    id: ProviderConnectionId
+  ) => Effect.Effect<void, AuthBrokerError>
+  /** Irreversibly removes a partially-created connection and its credential. */
+  readonly delete: (
     id: ProviderConnectionId
   ) => Effect.Effect<void, AuthBrokerError>
 }
@@ -305,14 +310,7 @@ class LiveAuthBroker implements AuthBrokerShape {
   logout: AuthBrokerShape["logout"] = (id) =>
     Effect.gen(this, function* () {
       yield* this.cancelLogin(id)
-      yield* this.options.credentials.delete(id).pipe(
-        Effect.mapError((cause) =>
-          new AuthBrokerError({
-            message: "Failed to delete provider credentials",
-            cause
-          })
-        )
-      )
+      yield* this.deleteCredential(id)
       yield* Ref.update(this.connections, (current) => {
         const connection = current.get(id)
         if (connection === undefined) return current
@@ -322,6 +320,18 @@ class LiveAuthBroker implements AuthBrokerShape {
           status: "disconnected",
           updatedAt: new Date(this.now()).toISOString()
         })
+        return next
+      })
+    })
+
+  delete: AuthBrokerShape["delete"] = (id) =>
+    Effect.gen(this, function* () {
+      yield* this.cancelLogin(id)
+      yield* this.deleteCredential(id)
+      yield* Ref.update(this.connections, (current) => {
+        if (!current.has(id)) return current
+        const next = new Map(current)
+        next.delete(id)
         return next
       })
     })
@@ -387,11 +397,6 @@ class LiveAuthBroker implements AuthBrokerShape {
     provider: ProviderId,
     result: EntitlementProbeResult
   ): ProviderConnection {
-    const subscription =
-      input.credential.authKind === "claude-setup-token" ||
-      input.credential.authKind === "openai-codex-oauth"
-    const routeConfirmed =
-      !subscription || result.billingRoute === "subscription"
     const timestamp = new Date(this.now()).toISOString()
     return {
       id: input.id,
@@ -402,10 +407,11 @@ class LiveAuthBroker implements AuthBrokerShape {
         displayLabel: result.planLabel
       },
       targetId: input.targetId,
-      status:
-        routeConfirmed && result.entitlement === "active"
-          ? "authenticated"
-          : "entitlement-unconfirmed",
+      status: authStatusForObservedBillingRoute(
+        input.credential.authKind,
+        result.entitlement,
+        result.billingRoute
+      ),
       subscription: {
         entitlement: result.entitlement,
         planLabel: result.planLabel,
@@ -415,7 +421,8 @@ class LiveAuthBroker implements AuthBrokerShape {
             : new Date(input.credential.expiresAt).toISOString(),
         quotaLabel: result.quotaLabel,
         rateLimitLabel: result.rateLimitLabel,
-        confirmedBillingRoute: result.billingRoute
+        confirmedBillingRoute: result.billingRoute,
+        observedRoute: result.observedRoute.trim()
       },
       createdAt: timestamp,
       updatedAt: timestamp
@@ -477,6 +484,17 @@ class LiveAuthBroker implements AuthBrokerShape {
       Effect.mapError((cause) =>
         new AuthBrokerError({
           message: "Failed to persist provider credentials",
+          cause
+        })
+      )
+    )
+  }
+
+  private deleteCredential(id: ProviderConnectionId) {
+    return this.options.credentials.delete(id).pipe(
+      Effect.mapError((cause) =>
+        new AuthBrokerError({
+          message: "Failed to delete provider credentials",
           cause
         })
       )

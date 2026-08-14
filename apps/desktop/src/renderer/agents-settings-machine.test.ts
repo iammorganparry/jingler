@@ -59,8 +59,15 @@ describe("agents settings machine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("ready"))
     expect(api.importFiles).toHaveBeenCalledWith([expect.objectContaining({ id: "review" })])
 
-    actor.send({ type: "SET_ENABLED", id: resource.id, enabled: false })
+    actor.send({
+      type: "SET_ENABLED",
+      selector: { kind: resource.kind, id: resource.id },
+      enabled: false
+    })
     await waitFor(actor, (snapshot) => snapshot.matches("ready"))
-    expect(api.setEnabled).toHaveBeenCalledWith(resource.id, false)
+    expect(api.setEnabled).toHaveBeenCalledWith(
+      { kind: resource.kind, id: resource.id },
+      false
+    )
   })
 })

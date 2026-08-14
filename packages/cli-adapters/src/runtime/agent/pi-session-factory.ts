@@ -221,13 +221,16 @@ const createEmbeddedSession = (
       })
   })
 
-const toHandle = (
-  embedded: EmbeddedSession,
-  spec: PiRunSpec,
-  tracker: FileChangeTracker | undefined,
-  snapshot: WorktreeSnapshot | null,
-  observe?: (event: StreamEvent) => void
-): PiSessionHandle => {
+interface SessionHandleInput {
+  readonly embedded: EmbeddedSession
+  readonly spec: PiRunSpec
+  readonly tracker: FileChangeTracker | undefined
+  readonly snapshot: WorktreeSnapshot | null
+  readonly observe?: (event: StreamEvent) => void
+}
+
+const toHandle = (input: SessionHandleInput): PiSessionHandle => {
+  const { embedded, spec, tracker, snapshot, observe } = input
   const { session } = embedded.result
   return {
     id: session.sessionFile ?? session.sessionId,
@@ -237,7 +240,13 @@ const toHandle = (
     prompt: (text) => session.prompt(text),
     steer: (text) => session.steer(text),
     interrupt: () => session.abort(),
-    dispose: () => session.dispose(),
+    dispose: async () => {
+      try {
+        session.dispose()
+      } finally {
+        if (tracker) await Effect.runPromise(tracker.dispose())
+      }
+    },
     usage: () => {
       const stats = session.getSessionStats()
       return { costUsd: stats.cost, tokens: stats.tokens.total }
@@ -251,65 +260,75 @@ const toHandle = (
   }
 }
 
+const createSessionHandle = (
+  options: PiSessionFactoryOptions,
+  spec: PiRunSpec,
+  context: AgentRuntimeContext,
+  tracker: FileChangeTracker | undefined
+): Effect.Effect<PiSessionHandle, AgentRuntimeError> =>
+  Effect.gen(function* () {
+    const connection = yield* options.resolveConnection(spec)
+    yield* validateConnection(spec, connection)
+    const registry = options.createToolRegistry
+      ? yield* options.createToolRegistry(spec, context, tracker)
+      : typeof options.toolRegistry === "function"
+        ? options.toolRegistry(context)
+        : (options.toolRegistry ?? createJinglerControlTools(context))
+    if (registry.hasMutatingTools(spec.role, spec.mode) && !tracker) {
+      return yield* Effect.fail(
+        new AgentRuntimeError({
+          reason: "runtime",
+          message: "Mutating tools require final workspace reconciliation"
+        })
+      )
+    }
+    const prepared = yield* createResources(options, spec, registry)
+    const snapshot = tracker
+      ? yield* tracker.capture(spec.cwd).pipe(
+          Effect.mapError(
+            (cause) => new AgentRuntimeError({
+              reason: "runtime",
+              message: cause.message,
+              cause
+            })
+          )
+        )
+      : null
+    const embedded = yield* createEmbeddedSession({
+      options,
+      spec,
+      connection,
+      resources: prepared.loader,
+      context,
+      registry
+    })
+    const diagnostic = makeRuntimeDiagnosticObserver({
+      runId: spec.runId,
+      sessionId: spec.sessionId,
+      connection,
+      mode: spec.mode,
+      manifest: prepared.manifest,
+      registry
+    })
+    const recordDiagnostic = options.recordDiagnostic
+    yield* recordDiagnostic?.(diagnostic.initial) ?? Effect.void
+    const observe = recordDiagnostic
+      ? (event: StreamEvent) => {
+          Effect.runFork(recordDiagnostic(diagnostic.observe(event)))
+        }
+      : undefined
+    return toHandle({ embedded, spec, tracker, snapshot, observe })
+  })
+
 /** Construct the real embedded pi session from Jingler-owned contracts only. */
 export const makePiSessionFactory = (options: PiSessionFactoryOptions): PiSessionFactory => ({
-  create: (spec, context: AgentRuntimeContext) =>
-    Effect.gen(function* () {
-      const connection = yield* options.resolveConnection(spec)
-      yield* validateConnection(spec, connection)
-      const tracker =
-        typeof options.terminalTracker === "function"
-          ? options.terminalTracker(spec)
-          : options.terminalTracker
-      const registry = options.createToolRegistry
-        ? yield* options.createToolRegistry(spec, context, tracker)
-        : typeof options.toolRegistry === "function"
-          ? options.toolRegistry(context)
-          : (options.toolRegistry ?? createJinglerControlTools(context))
-      if (registry.hasMutatingTools(spec.role, spec.mode) && !tracker) {
-        return yield* Effect.fail(
-          new AgentRuntimeError({
-            reason: "runtime",
-            message: "Mutating tools require final workspace reconciliation"
-          })
-        )
-      }
-      const prepared = yield* createResources(options, spec, registry)
-      const terminalSnapshot = tracker
-        ? yield* tracker.capture(spec.cwd).pipe(
-            Effect.mapError(
-              (cause) =>
-                new AgentRuntimeError({
-                  reason: "runtime",
-                  message: cause.message,
-                  cause
-                })
-            )
-          )
-        : null
-      const embedded = yield* createEmbeddedSession({
-        options,
-        spec,
-        connection,
-        resources: prepared.loader,
-        context,
-        registry
-      })
-      const diagnostic = makeRuntimeDiagnosticObserver({
-        runId: spec.runId,
-        sessionId: spec.sessionId,
-        connection,
-        mode: spec.mode,
-        manifest: prepared.manifest,
-        registry
-      })
-      const recordDiagnostic = options.recordDiagnostic
-      yield* recordDiagnostic?.(diagnostic.initial) ?? Effect.void
-      const observe = recordDiagnostic
-        ? (event: StreamEvent) => {
-            Effect.runFork(recordDiagnostic(diagnostic.observe(event)))
-          }
-        : undefined
-      return toHandle(embedded, spec, tracker, terminalSnapshot, observe)
-    })
+  create: (spec, context: AgentRuntimeContext) => {
+    const tracker =
+      typeof options.terminalTracker === "function"
+        ? options.terminalTracker(spec)
+        : options.terminalTracker
+    return createSessionHandle(options, spec, context, tracker).pipe(
+      Effect.onError(() => tracker?.dispose().pipe(Effect.ignore) ?? Effect.void)
+    )
+  }
 })

@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import currentRuntimeContracts from "./runtime-contract-versions.json" with { type: "json" }
 
 /** Versions every model certification is bound to. */
 export const RuntimeContractVersions = Schema.Struct({
@@ -13,16 +14,8 @@ export const RuntimeContractVersions = Schema.Struct({
 })
 export type RuntimeContractVersions = Schema.Schema.Type<typeof RuntimeContractVersions>
 
-export const CURRENT_RUNTIME_CONTRACTS: RuntimeContractVersions = {
-  behavior: "5",
-  authentication: "3",
-  prompt: "1",
-  tools: "4",
-  diff: "1",
-  policy: "1",
-  capabilities: "3",
-  piSdk: "0.84.1"
-}
+export const CURRENT_RUNTIME_CONTRACTS =
+  Schema.decodeUnknownSync(RuntimeContractVersions)(currentRuntimeContracts)
 
 export const AuthRouteKind = Schema.Literal(
   "claude-setup-token",
@@ -51,6 +44,15 @@ export const AuthRouteProfile = Schema.Struct({
   apiBillingFallbackObserved: Schema.Boolean
 })
 export type AuthRouteProfile = Schema.Schema.Type<typeof AuthRouteProfile>
+
+export type AuthRouteIdentityInput = Pick<
+  AuthRouteProfile,
+  "observedRoute" | "subscription"
+>
+
+/** Stable, unambiguous identity for the provider route that was actually used. */
+export const authRouteIdentity = (route: AuthRouteIdentityInput): string =>
+  JSON.stringify([route.observedRoute.trim(), route.subscription])
 
 export const DiffContract = Schema.Struct({
   statuses: Schema.Array(Schema.Literal("A", "M", "D", "R")),
@@ -91,6 +93,7 @@ export const certificationKey = (
     certification.providerId,
     certification.modelId,
     certification.authRoute.kind,
+    authRouteIdentity(certification.authRoute),
     ...Object.values(certification.versions)
   ].join(":")
 

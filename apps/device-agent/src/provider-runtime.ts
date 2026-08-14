@@ -18,7 +18,10 @@ import {
 } from "@jingler/cli-adapters/runtime/providers/provider-connections";
 import { discoverPiModels } from "@jingler/cli-adapters/runtime/providers/pi-provider-access";
 import {
+  AuthKind,
   BUNDLED_RELEASE_CERTIFICATION_MANIFEST,
+  authStatusForObservedBillingRoute,
+  type ConfirmedBillingRoute,
   ProviderConnection,
 } from "@jingler/core";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -26,6 +29,11 @@ import { Effect, Layer, Ref, Schema, Stream } from "effect";
 
 const OptionalCredential = Schema.Union(
   Schema.String.pipe(Schema.minLength(1)),
+  Schema.Undefined,
+);
+
+const OptionalConfirmedBillingRoute = Schema.Union(
+  Schema.Literal("subscription", "api", "device-environment"),
   Schema.Undefined,
 );
 
@@ -39,6 +47,7 @@ interface DeviceEnvironment {
   readonly JINGLER_PROVIDER_CONNECTION_ID?: string;
   readonly JINGLER_PROVIDER_ID?: string;
   readonly JINGLER_PROVIDER_AUTH_KIND?: string;
+  readonly JINGLER_PROVIDER_CONFIRMED_BILLING_ROUTE?: string;
   readonly JINGLER_PROVIDER_ACCESS?: string;
   readonly JINGLER_PROVIDER_EXPIRES_AT?: string;
   readonly JINGLER_PROVIDER_BASE_URL?: string;
@@ -54,6 +63,10 @@ export interface DeviceProviderOverrides {
   ) => Effect.Effect<ReadonlyArray<DiscoveredProviderModel>, never>;
 }
 
+export type DeviceSecretStoreLayerFactory = (
+  initialDeviceSecrets: string,
+) => Layer.Layer<SecretStore, SecretStoreUnavailable>;
+
 const credential = (value: string | undefined): string | undefined =>
   Schema.decodeUnknownSync(OptionalCredential)(value?.trim());
 
@@ -62,6 +75,11 @@ const decodeExpiry = (value: string | undefined): number | null => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
+
+const decodeConfirmedBillingRoute = (
+  value: string | undefined,
+): ConfirmedBillingRoute | null =>
+  Schema.decodeUnknownSync(OptionalConfirmedBillingRoute)(value?.trim()) ?? null;
 
 const providerBaseUrl = (value: string | undefined): string => {
   const decoded = credential(value);
@@ -80,8 +98,9 @@ const providerBaseUrl = (value: string | undefined): string => {
 const connection = (
   id: string,
   providerId: string,
-  authKind: "claude-setup-token" | "openai-codex-oauth" | "device-environment",
+  authKind: AuthKind,
   targetId: string,
+  confirmedBillingRoute: ConfirmedBillingRoute | null = null,
 ) =>
   Schema.decodeUnknownSync(ProviderConnection)({
     id,
@@ -89,9 +108,19 @@ const connection = (
     authKind,
     account: null,
     targetId,
-    status: "authenticated",
+    status:
+      authKind === "device-environment"
+        ? "authenticated"
+        : authStatusForObservedBillingRoute(
+            authKind,
+            confirmedBillingRoute === null ? "unknown" : "active",
+            confirmedBillingRoute,
+          ),
     subscription: {
-      entitlement: "unknown",
+      entitlement:
+        authKind !== "device-environment" && confirmedBillingRoute !== null
+          ? "active"
+          : "unknown",
       planLabel: null,
       expiresAt: null,
       quotaLabel: null,
@@ -99,7 +128,7 @@ const connection = (
       confirmedBillingRoute:
         authKind === "device-environment"
           ? "device-environment"
-          : "subscription",
+          : confirmedBillingRoute,
     },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -112,29 +141,18 @@ const environmentState = (
   const explicitAccess = credential(environment.JINGLER_PROVIDER_ACCESS);
   if (explicitAccess !== undefined) {
     const baseUrl = providerBaseUrl(environment.JINGLER_PROVIDER_BASE_URL);
-    const explicitConnection = Schema.decodeUnknownSync(ProviderConnection)({
-      id: environment.JINGLER_PROVIDER_CONNECTION_ID,
-      providerId: environment.JINGLER_PROVIDER_ID,
-      authKind: environment.JINGLER_PROVIDER_AUTH_KIND,
-      account: null,
+    const authKind = Schema.decodeUnknownSync(AuthKind)(
+      environment.JINGLER_PROVIDER_AUTH_KIND,
+    );
+    const explicitConnection = connection(
+      environment.JINGLER_PROVIDER_CONNECTION_ID ?? "",
+      environment.JINGLER_PROVIDER_ID ?? "",
+      authKind,
       targetId,
-      status: "authenticated",
-      subscription: {
-        entitlement: "unknown",
-        planLabel: null,
-        expiresAt: null,
-        quotaLabel: null,
-        rateLimitLabel: null,
-        confirmedBillingRoute:
-          environment.JINGLER_PROVIDER_AUTH_KIND === "api-key"
-            ? "api"
-            : environment.JINGLER_PROVIDER_AUTH_KIND === "device-environment"
-              ? "device-environment"
-              : "subscription",
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
+      decodeConfirmedBillingRoute(
+        environment.JINGLER_PROVIDER_CONFIRMED_BILLING_ROUTE,
+      ),
+    );
     return {
       connections: [explicitConnection],
       baseUrl,
@@ -227,6 +245,7 @@ export const makeDeviceProviderLayers = (
   targetId: string,
   environment: DeviceEnvironment = process.env,
   overrides?: DeviceProviderOverrides,
+  persistentSecretStore?: DeviceSecretStoreLayerFactory,
 ) => {
   const environmentRuntime = environmentState(targetId, environment);
   const state =
@@ -237,7 +256,7 @@ export const makeDeviceProviderLayers = (
           baseUrl: null,
           document: overrides.credentialsDocument,
         };
-  const SecretStoreLive = Layer.effect(
+  const EphemeralSecretStoreLive = Layer.effect(
     SecretStore,
     Effect.gen(function* () {
       const document = yield* Ref.make<string | null>(state.document);
@@ -264,6 +283,14 @@ export const makeDeviceProviderLayers = (
       });
     }),
   );
+  // Managed proxy credentials are deliberately session-scoped. Only an owned
+  // device may persist provider refresh rotations in its target-local vault.
+  const SecretStoreLive =
+    overrides === undefined &&
+    environmentRuntime.baseUrl === null &&
+    persistentSecretStore !== undefined
+      ? persistentSecretStore(state.document)
+      : EphemeralSecretStoreLive;
   const ProviderConnectionsLive = Layer.effect(
     ProviderConnections,
     Effect.gen(function* () {

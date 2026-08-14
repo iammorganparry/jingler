@@ -62,7 +62,11 @@ describe("PiAgentRuntime", () => {
 
   it("streams one terminal event and disposes the pi session", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
-    const dispose = vi.fn()
+    let disposed = false
+    const dispose = vi.fn(async () => {
+      await Effect.runPromise(Effect.sleep("10 millis"))
+      disposed = true
+    })
     const handle: PiSessionHandle = {
       id: "pi-session-1",
       modelId: "anthropic/claude-sonnet",
@@ -96,6 +100,7 @@ describe("PiAgentRuntime", () => {
       [...events].filter((event) => event._tag === "Done" || event._tag === "Failed")
     ).toHaveLength(1)
     expect(dispose).toHaveBeenCalledOnce()
+    expect(disposed).toBe(true)
   })
 
   it("delivers the terminal event before closing a slow consumer", async () => {

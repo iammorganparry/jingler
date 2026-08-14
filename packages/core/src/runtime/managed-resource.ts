@@ -11,6 +11,13 @@ export type ManagedResourceId = Schema.Schema.Type<typeof ManagedResourceId>
 export const ManagedResourceKind = Schema.Literal("skill", "prompt", "mcp")
 export type ManagedResourceKind = Schema.Schema.Type<typeof ManagedResourceKind>
 
+/** Stable identity across the file-resource and MCP catalogs. */
+export const ManagedResourceSelector = Schema.Struct({
+  kind: ManagedResourceKind,
+  id: ManagedResourceId
+})
+export type ManagedResourceSelector = Schema.Schema.Type<typeof ManagedResourceSelector>
+
 export const ManagedResourceTrust = Schema.Literal("untrusted", "operator-approved")
 export type ManagedResourceTrust = Schema.Schema.Type<typeof ManagedResourceTrust>
 

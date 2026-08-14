@@ -64,11 +64,11 @@ const createWorkspace = async (): Promise<string> => {
   return root
 }
 
-const fileChangeRegistry = (root: string, observations: Array<EvalObservation>): ToolRegistry => {
-  const tracker = new FileChangeTracker({
-    artifactDir: join(root, ".jingler/diffs"),
-    sessionId: "eval-session"
-  })
+const fileChangeRegistry = (
+  root: string,
+  observations: Array<EvalObservation>,
+  tracker: FileChangeTracker
+): ToolRegistry => {
   const journal = new RunJournal({ file: join(root, ".jingler/run-journal.json") })
   const registry = new ToolRegistry({
     observer: createMutationObserver({
@@ -108,7 +108,8 @@ const fileChangeRegistry = (root: string, observations: Array<EvalObservation>):
 
 const managedResourceRegistry = async (
   root: string,
-  observations: Array<EvalObservation>
+  observations: Array<EvalObservation>,
+  tracker: FileChangeTracker
 ): Promise<ToolRegistry> => {
   const skillDir = join(root, ".agents", "skills", "managed-skill")
   const promptDir = join(root, ".pi", "agent", "prompts")
@@ -136,10 +137,6 @@ const managedResourceRegistry = async (
       { kind: "portable", allowedTargets: [] }
     )
   )
-  const tracker = new FileChangeTracker({
-    artifactDir: join(root, ".jingler", "managed-diffs"),
-    sessionId: "eval-session"
-  })
   const registry = new ToolRegistry({
     observer: createMutationObserver({
       cwd: root,
@@ -215,15 +212,24 @@ const observeStreamEvent = (
 const registryFor = async (
   scenarioId: string,
   root: string,
-  observations: Array<EvalObservation>
+  observations: Array<EvalObservation>,
+  tracker: FileChangeTracker | undefined
 ): Promise<ToolRegistry | undefined> => {
   if (scenarioId === "capability.managed-resources") {
-    return managedResourceRegistry(root, observations)
+    if (!tracker) throw new Error("managed-resource scenario requires file-change tracking")
+    return managedResourceRegistry(root, observations, tracker)
   }
-  return scenarioId === "permission.denied-edit" || scenarioId === "diff.create-edit-delete-rename"
-    ? fileChangeRegistry(root, observations)
-    : undefined
+  if (scenarioId !== "permission.denied-edit" && scenarioId !== "diff.create-edit-delete-rename") {
+    return
+  }
+  if (!tracker) throw new Error("workspace-mutation scenario requires file-change tracking")
+  return fileChangeRegistry(root, observations, tracker)
 }
+
+const scenarioMutatesWorkspace = (scenarioId: string): boolean =>
+  scenarioId === "permission.denied-edit" ||
+  scenarioId === "diff.create-edit-delete-rename" ||
+  scenarioId === "capability.managed-resources"
 
 const specFor = (input: {
   readonly scenarioId: string
@@ -325,6 +331,7 @@ interface ScenarioExecution {
   readonly connection: ProviderConnectionType
   readonly credentials: ProviderCredentialStore
   readonly registry: ToolRegistry | undefined
+  readonly tracker: FileChangeTracker | undefined
   readonly spec: PiRunSpec
   readonly context: AgentRuntimeContext
   readonly targetCapabilities: RuntimeCapabilityManifest
@@ -333,7 +340,7 @@ interface ScenarioExecution {
 
 const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => {
   const { scenarioId, startedAt, root, observations, connection } = input
-  const { credentials, registry, spec, context } = input
+  const { credentials, registry, tracker, spec, context } = input
   recordPreflight(
     scenarioId,
     connection.authKind,
@@ -341,12 +348,6 @@ const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => 
     input.targetCapabilities,
     observations
   )
-  const tracker = registry?.hasMutatingTools(spec.role, spec.mode)
-    ? new FileChangeTracker({
-        artifactDir: join(root, ".jingler/terminal-diffs"),
-        sessionId: "eval-session"
-      })
-    : undefined
   const factory = makePiSessionFactory({
     agentDir: join(root, ".jingler/agent"),
     sessionsDir: join(root, ".jingler/sessions"),
@@ -389,11 +390,18 @@ export const runPiScenario = async (input: RunPiScenarioInput): Promise<EvalTrac
   const startedAt = performance.now()
   const root = await createWorkspace()
   const observations: Array<EvalObservation> = []
-  const registry = await registryFor(scenarioId, root, observations)
-  const spec = specFor({ scenarioId, root, connection, target, registry })
-  const context = contextFor(scenarioId, observations)
+  const tracker = scenarioMutatesWorkspace(scenarioId)
+    ? new FileChangeTracker({
+        artifactDir: join(root, ".jingler/terminal-diffs"),
+        sessionId: "eval-session",
+        shadowIndexRoot: root
+      })
+    : undefined
 
   try {
+    const registry = await registryFor(scenarioId, root, observations, tracker)
+    const spec = specFor({ scenarioId, root, connection, target, registry })
+    const context = contextFor(scenarioId, observations)
     return await executeScenario({
       scenarioId,
       startedAt,
@@ -402,12 +410,14 @@ export const runPiScenario = async (input: RunPiScenarioInput): Promise<EvalTrac
       connection,
       credentials,
       registry,
+      tracker,
       spec,
       context,
       targetCapabilities: target.capabilities,
       ...(input.configureModelRuntime ? { configureModelRuntime: input.configureModelRuntime } : {})
     })
   } finally {
+    if (tracker) await Effect.runPromise(tracker.dispose().pipe(Effect.ignore))
     await rm(root, { recursive: true, force: true })
   }
 }

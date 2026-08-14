@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AppPaths } from "./app-paths.js"
+import { makeAppPaths } from "./app-paths-factory.js"
 import { PluginAuth, type AuthProvider, type ConsentPrompt } from "./plugin-auth.js"
 
 /**
@@ -22,28 +23,7 @@ const tempPaths = async () => {
   const root = join(home, "jingler")
   return {
     home,
-    layer: Layer.succeed(AppPaths, {
-      root,
-      configFile: join(root, "config.json"),
-      sessionsFile: join(root, "sessions.json"),
-      projectsFile: join(root, "projects.json"),
-      worktreesDir: join(root, "worktrees"),
-      transcriptsDir: join(root, "transcripts"),
-      reviewsDir: join(root, "reviews"),
-      plansDir: join(root, ".jingler"),
-      themesDir: join(root, "themes"),
-      pluginsDir: join(root, "plugins"),
-      pluginStorageDir: join(root, "plugin-storage"),
-      authFile: join(root, "auth.enc"),
-      openConnectorFile: join(root, "open-connector.enc"),
-      piSessionsDir: join(root, "pi-sessions"),
-      managedResourcesDir: join(root, "agent-resources"),
-      importedMcpFile: join(root, "agent-resources", "mcp.json"),
-      certificationsFile: join(root, "runtime", "certifications.json"),
-      providerConnectionsFile: join(root, "runtime", "provider-connections.json"),
-      runJournalsDir: join(root, "runtime", "journals"),
-      diagnosticsDir: join(root, "runtime", "diagnostics")
-    } as never)
+    layer: Layer.succeed(AppPaths, makeAppPaths(root))
   }
 }
 

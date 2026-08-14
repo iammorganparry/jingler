@@ -73,6 +73,28 @@ describe("model certification store", () => {
     ]))
     expect(await store.list()).toHaveLength(2)
   })
+})
+
+describe("model certification route identity", () => {
+  it("keeps API, proxy, and subscription observations as independent records", async () => {
+    const store = new InMemoryModelCertificationStore()
+    const subscription = certification("openai-codex-oauth")
+    const proxy = {
+      ...subscription,
+      authRoute: { ...subscription.authRoute, observedRoute: "managed-proxy" }
+    }
+    const api = {
+      ...subscription,
+      authRoute: { ...subscription.authRoute, subscription: false }
+    }
+
+    await store.putAll([subscription, proxy, api])
+
+    expect(await store.list()).toHaveLength(3)
+    expect(await store.get(certificationKey(subscription))).toEqual(subscription)
+    expect(await store.get(certificationKey(proxy))).toEqual(proxy)
+    expect(await store.get(certificationKey(api))).toEqual(api)
+  })
 
   it("persists concurrent updates atomically without losing a route", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-certifications-"))

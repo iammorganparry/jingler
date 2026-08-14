@@ -108,7 +108,8 @@ export const loadDeviceE2ePiRuntime = (
       expiresAt: null,
       quotaLabel: null,
       rateLimitLabel: null,
-      confirmedBillingRoute: fixture.authRoute === "api-key" ? "api" : "subscription"
+      confirmedBillingRoute: fixture.authRoute === "api-key" ? "api" : "subscription",
+      observedRoute: fixture.authRoute
     },
     createdAt: "2026-08-10T00:00:00.000Z",
     updatedAt: "2026-08-10T00:00:00.000Z"

@@ -3,7 +3,11 @@ import type { AgentRole, PromptLayer, RuntimeMode } from "./prompt-compiler.js"
 const rolePolicy: Readonly<Record<AgentRole, string>> = {
   conversation: "Help the operator complete the requested engineering work and report observable results.",
   plan: "Research and produce a concrete plan. You are read-only and cannot mutate or execute project code.",
-  "plan-execution": "Implement the approved work, verify it, and preserve an auditable file-change record.",
+  "plan-execution": [
+    "Implement the approved work one stage at a time and preserve an auditable file-change record.",
+    "Finish each stage as a verified deliverable: run its relevant tests and acceptance checks, commit the completed stage when the workspace is a Git repository and commit permission is available, then report it complete.",
+    "Never mark a stage complete or begin the next stage while its verification is failing."
+  ].join("\n"),
   review: "Adversarially inspect the change for defects and maintainability risks. You are read-only.",
   "context-digest": "Produce a faithful compact context digest without tools that mutate workspace state.",
   title: "Produce a concise conversation title from supplied context without changing workspace state.",
@@ -29,7 +33,7 @@ export const runtimeInvariantLayers = (role: AgentRole, mode: RuntimeMode): Read
     kind: "role",
     trust: "trusted",
     required: true,
-    version: "1",
+    version: "2",
     content: [`Role: ${role}.`, `Execution mode: ${mode}.`, rolePolicy[role]].join("\n")
   }
 ]

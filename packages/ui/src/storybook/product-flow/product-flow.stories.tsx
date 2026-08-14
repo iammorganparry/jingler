@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type {
   ManagedResource,
-  ManagedResourceId,
   ProviderConnectionId,
   ProviderModelId,
   Session
@@ -122,14 +121,20 @@ const useAgentSettings = (
     },
     onImportSelected: noop,
     onCancelDetection: noop,
-    onSetEnabled: (id: ManagedResourceId, enabled: boolean) => {
+    onSetEnabled: (selector, enabled) => {
       setResources((current) =>
-        current.map((resource) => resource.id === id ? { ...resource, enabled } : resource)
+        current.map((resource) =>
+          resource.id === selector.id && resource.kind === selector.kind
+            ? { ...resource, enabled }
+            : resource
+        )
       )
     },
     onReveal: noop,
-    onRemove: (id: ManagedResourceId) => {
-      setResources((current) => current.filter((resource) => resource.id !== id))
+    onRemove: (selector) => {
+      setResources((current) => current.filter((resource) =>
+        resource.id !== selector.id || resource.kind !== selector.kind
+      ))
     },
     onRetry: noop
   }

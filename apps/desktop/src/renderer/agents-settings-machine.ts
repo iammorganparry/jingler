@@ -1,7 +1,7 @@
 import type {
   DetectedResourceCandidate,
   ManagedResource,
-  ManagedResourceId,
+  ManagedResourceSelector,
   ResourceDetectionResult,
   ResourceImportResult
 } from "@jingler/core"
@@ -13,9 +13,9 @@ export interface AgentsSettingsApi {
   readonly importFiles: (
     candidates: ReadonlyArray<DetectedResourceCandidate>
   ) => Promise<ResourceImportResult>
-  readonly setEnabled: (id: ManagedResourceId, enabled: boolean) => Promise<void>
-  readonly remove: (id: ManagedResourceId) => Promise<void>
-  readonly reveal: (id: ManagedResourceId) => Promise<void>
+  readonly setEnabled: (selector: ManagedResourceSelector, enabled: boolean) => Promise<void>
+  readonly remove: (selector: ManagedResourceSelector) => Promise<void>
+  readonly reveal: (selector: ManagedResourceSelector) => Promise<void>
   readonly watch: (
     listener: (resources: ReadonlyArray<ManagedResource>) => void
   ) => () => void
@@ -23,7 +23,7 @@ export interface AgentsSettingsApi {
 
 export interface PendingResourceAction {
   readonly kind: "enable" | "remove" | "reveal"
-  readonly id: ManagedResourceId
+  readonly selector: ManagedResourceSelector
   readonly enabled?: boolean
 }
 
@@ -40,9 +40,9 @@ export type AgentsSettingsEvent =
   | { readonly type: "CANCEL_DETECTION" }
   | { readonly type: "TOGGLE_CANDIDATE"; readonly id: string }
   | { readonly type: "IMPORT_SELECTED" }
-  | { readonly type: "SET_ENABLED"; readonly id: ManagedResourceId; readonly enabled: boolean }
-  | { readonly type: "REMOVE"; readonly id: ManagedResourceId }
-  | { readonly type: "REVEAL"; readonly id: ManagedResourceId }
+  | { readonly type: "SET_ENABLED"; readonly selector: ManagedResourceSelector; readonly enabled: boolean }
+  | { readonly type: "REMOVE"; readonly selector: ManagedResourceSelector }
+  | { readonly type: "REVEAL"; readonly selector: ManagedResourceSelector }
   | { readonly type: "RETRY" }
   | { readonly type: "WATCHED"; readonly resources: ReadonlyArray<ManagedResource> }
 
@@ -68,11 +68,11 @@ export const createAgentsSettingsMachine = (api: AgentsSettingsApi) =>
       ),
       mutate: fromPromise(async ({ input }: { input: PendingResourceAction }) => {
         if (input.kind === "enable") {
-          await api.setEnabled(input.id, input.enabled === true)
+          await api.setEnabled(input.selector, input.enabled === true)
         } else if (input.kind === "remove") {
-          await api.remove(input.id)
+          await api.remove(input.selector)
         } else {
-          await api.reveal(input.id)
+          await api.reveal(input.selector)
         }
       }),
       watch: fromCallback(({ sendBack }) =>
@@ -118,17 +118,17 @@ export const createAgentsSettingsMachine = (api: AgentsSettingsApi) =>
           SET_ENABLED: {
             target: "mutating",
             actions: assign({
-              pending: ({ event }) => ({ kind: "enable", id: event.id, enabled: event.enabled }),
+              pending: ({ event }) => ({ kind: "enable", selector: event.selector, enabled: event.enabled }),
               error: null
             })
           },
           REMOVE: {
             target: "mutating",
-            actions: assign({ pending: ({ event }) => ({ kind: "remove", id: event.id }), error: null })
+            actions: assign({ pending: ({ event }) => ({ kind: "remove", selector: event.selector }), error: null })
           },
           REVEAL: {
             target: "mutating",
-            actions: assign({ pending: ({ event }) => ({ kind: "reveal", id: event.id }), error: null })
+            actions: assign({ pending: ({ event }) => ({ kind: "reveal", selector: event.selector }), error: null })
           }
         }
       },

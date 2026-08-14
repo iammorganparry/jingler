@@ -108,7 +108,7 @@ import {
   ManagedMcpImportInput,
   ManagedMcpServer,
   ManagedResource,
-  ManagedResourceId,
+  ManagedResourceSelector,
   ManagedResourceScope,
   ResourceDetectionResult,
   ResourceImportResult,
@@ -560,17 +560,20 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
   Rpc.make("AgentResources.remove", {
     error: AgentResourceRpcError,
-    payload: { id: ManagedResourceId }
+    payload: ManagedResourceSelector
   }),
 
   Rpc.make("AgentResources.setEnabled", {
     error: AgentResourceRpcError,
-    payload: { id: ManagedResourceId, enabled: Schema.Boolean }
+    payload: {
+      ...ManagedResourceSelector.fields,
+      enabled: Schema.Boolean
+    }
   }),
 
   Rpc.make("AgentResources.reveal", {
     error: AgentResourceRpcError,
-    payload: { id: ManagedResourceId }
+    payload: ManagedResourceSelector
   }),
 
   Rpc.make("AgentResources.enabledForTarget", {

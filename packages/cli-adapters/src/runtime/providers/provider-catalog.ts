@@ -1,4 +1,5 @@
 import {
+  authRouteIdentity,
   certificationKey,
   isCurrentCertification,
   type ModelCertification,
@@ -9,8 +10,10 @@ import {
   type ProviderModelCapabilities,
   type ProviderModelId
 } from "@jingler/core"
-import { Context, Data, Duration, Effect, Ref } from "effect"
+import { Context, Data, Deferred, Duration, Effect, type Exit, Ref } from "effect"
 import type { ModelCertificationStore } from "../certification/model-certification-store.js"
+
+const DEFAULT_DISCOVERY_CONCURRENCY = 4
 
 export class ProviderCatalogError extends Data.TaggedError("ProviderCatalogError")<{
   readonly message: string
@@ -36,6 +39,8 @@ export interface ProviderCatalogOptions {
     connection: ProviderConnection,
     model: DiscoveredProviderModel
   ) => boolean
+  /** Maximum provider connections discovered in parallel. */
+  readonly discoveryConcurrency?: number
   readonly timeoutMs?: number
   readonly now?: () => number
 }
@@ -45,11 +50,19 @@ const matchingCertification = (
   connection: ProviderConnection,
   model: DiscoveredProviderModel
 ): ModelCertification | null => {
+  const observedRoute = connection.subscription.observedRoute?.trim()
+  if (observedRoute === undefined || observedRoute.length === 0) return null
+  const connectionRouteIdentity = authRouteIdentity({
+    observedRoute,
+    subscription:
+      connection.subscription.confirmedBillingRoute === "subscription"
+  })
   const matching = certifications.filter(
     (item) =>
       item.providerId === model.providerId &&
       item.modelId === model.id &&
-      item.authRoute.kind === connection.authKind
+      item.authRoute.kind === connection.authKind &&
+      authRouteIdentity(item.authRoute) === connectionRouteIdentity
   )
   return matching.find((item) => isCurrentCertification(item)) ?? matching.reduce<ModelCertification | null>(
     (latest, item) =>
@@ -139,8 +152,13 @@ const refreshCachedDecorations = (
 
 const loadCatalog = (
   options: ProviderCatalogOptions
-): Effect.Effect<ProviderCatalog, ProviderCatalogError> =>
-  Effect.acquireUseRelease(
+): Effect.Effect<ProviderCatalog, ProviderCatalogError> => {
+  const requestedConcurrency = options.discoveryConcurrency ?? DEFAULT_DISCOVERY_CONCURRENCY
+  const discoveryConcurrency = Number.isFinite(requestedConcurrency)
+    ? Math.max(1, Math.floor(requestedConcurrency))
+    : DEFAULT_DISCOVERY_CONCURRENCY
+
+  return Effect.acquireUseRelease(
     Effect.sync(() => new AbortController()),
     (controller) =>
       Effect.gen(function* () {
@@ -164,7 +182,7 @@ const loadCatalog = (
                     )
                   }))
                 ),
-          { concurrency: "unbounded" }
+          { concurrency: discoveryConcurrency }
         )
         return {
           connections: catalogConnections,
@@ -182,13 +200,116 @@ const loadCatalog = (
         })
     })
   )
+}
+
+type RefreshDeferred = Deferred.Deferred<ProviderCatalog, ProviderCatalogError>
+
+type RefreshDecision =
+  | { readonly kind: "cached"; readonly catalog: ProviderCatalog }
+  | { readonly kind: "settled"; readonly deferred: RefreshDeferred }
+  | { readonly kind: "await"; readonly deferred: RefreshDeferred }
+  | { readonly kind: "lead"; readonly deferred: RefreshDeferred }
+
+interface RefreshState {
+  readonly lastGood: Ref.Ref<ProviderCatalog | null>
+  readonly generation: Ref.Ref<number>
+  readonly lastSettled: Ref.Ref<RefreshDeferred | null>
+  readonly inFlight: Ref.Ref<RefreshDeferred | null>
+  readonly lock: Effect.Semaphore
+}
+
+const makeRefreshState = (
+  lastGood: Ref.Ref<ProviderCatalog | null>
+): Effect.Effect<RefreshState> =>
+  Effect.gen(function* () {
+    return {
+      lastGood,
+      generation: yield* Ref.make(0),
+      lastSettled: yield* Ref.make<RefreshDeferred | null>(null),
+      inFlight: yield* Ref.make<RefreshDeferred | null>(null),
+      lock: yield* Effect.makeSemaphore(1)
+    }
+  })
+
+const selectRefresh = (
+  state: RefreshState,
+  reuseFreshCache: boolean,
+  observedGeneration: number
+): Effect.Effect<RefreshDecision> =>
+  Effect.all({
+    active: Ref.get(state.inFlight),
+    currentGeneration: Ref.get(state.generation),
+    cached: Ref.get(state.lastGood),
+    settled: Ref.get(state.lastSettled)
+  }).pipe(
+    Effect.flatMap(({ active, currentGeneration, cached, settled }) => {
+      if (active !== null) {
+        return Effect.succeed<RefreshDecision>({ kind: "await", deferred: active })
+      }
+      if (reuseFreshCache && cached !== null && !cached.stale) {
+        return Effect.succeed<RefreshDecision>({ kind: "cached", catalog: cached })
+      }
+      if (currentGeneration !== observedGeneration && settled !== null) {
+        return Effect.succeed<RefreshDecision>({ kind: "settled", deferred: settled })
+      }
+      return Deferred.make<ProviderCatalog, ProviderCatalogError>().pipe(
+        Effect.tap((deferred) => Ref.set(state.inFlight, deferred)),
+        Effect.map((deferred): RefreshDecision => ({ kind: "lead", deferred }))
+      )
+    })
+  )
+
+const settleRefresh = (
+  state: RefreshState,
+  deferred: RefreshDeferred,
+  exit: Exit.Exit<ProviderCatalog, ProviderCatalogError>
+): Effect.Effect<void> =>
+  state.lock.withPermits(1)(
+    Deferred.done(deferred, exit).pipe(
+      Effect.zipRight(Ref.set(state.lastSettled, deferred)),
+      Effect.zipRight(Ref.update(state.generation, (generation) => generation + 1)),
+      Effect.zipRight(Ref.set(state.inFlight, null))
+    )
+  )
+
+const runRefreshDecision = (
+  state: RefreshState,
+  decision: RefreshDecision,
+  performRefresh: Effect.Effect<ProviderCatalog, ProviderCatalogError>
+): Effect.Effect<ProviderCatalog, ProviderCatalogError> => {
+  switch (decision.kind) {
+    case "cached":
+      return Effect.succeed(decision.catalog)
+    case "settled":
+    case "await":
+      return Deferred.await(decision.deferred)
+    case "lead":
+      return performRefresh.pipe(
+        Effect.onExit((exit) => settleRefresh(state, decision.deferred, exit))
+      )
+  }
+}
+
+const coalescedRefresh = (
+  state: RefreshState,
+  performRefresh: Effect.Effect<ProviderCatalog, ProviderCatalogError>,
+  reuseFreshCache: boolean
+): Effect.Effect<ProviderCatalog, ProviderCatalogError> =>
+  Effect.gen(function* () {
+    const observedGeneration = yield* Ref.get(state.generation)
+    const decision = yield* state.lock.withPermits(1)(
+      selectRefresh(state, reuseFreshCache, observedGeneration)
+    )
+    return yield* runRefreshDecision(state, decision, performRefresh)
+  })
 
 export const makeProviderCatalogService = (
   options: ProviderCatalogOptions
 ): Effect.Effect<ProviderCatalogShape> =>
   Effect.gen(function* () {
     const lastGood = yield* Ref.make<ProviderCatalog | null>(null)
-    const refresh = loadCatalog(options).pipe(
+    const refreshState = yield* makeRefreshState(lastGood)
+    const performRefresh = loadCatalog(options).pipe(
       Effect.tap((catalog) => Ref.set(lastGood, catalog)),
       Effect.catchAll((error) =>
         Ref.get(lastGood).pipe(
@@ -202,9 +323,14 @@ export const makeProviderCatalogService = (
         )
       )
     )
+    const refreshFor = (reuseFreshCache: boolean) =>
+      coalescedRefresh(refreshState, performRefresh, reuseFreshCache)
+    const refresh = refreshFor(false)
     const list = Ref.get(lastGood).pipe(
       Effect.flatMap((catalog) =>
-        catalog === null || catalog.stale ? refresh : Effect.succeed(catalog)
+        catalog === null || catalog.stale
+          ? refreshFor(true)
+          : Effect.succeed(catalog)
       )
     )
 

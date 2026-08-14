@@ -60,6 +60,8 @@ const COMMAND_TOOL = "command_execute"
 const MEMORY_PROPOSE_TOOL = "mcp__jingler-memory__memory_propose"
 const MEMORY_WORKFLOW_TOOL = "mcp__jingler-memory__memory_workflow_status"
 const E2E_CONTEXT_WINDOW = 1_000_000
+const observedRouteFor = (authRoute: E2ePiFixture["authRoute"]): string =>
+  `e2e-${authRoute}`
 const COMPACTION_THINKING = "context ".repeat(17_500)
 const DIGEST_REPLY = `\`\`\`json
 {
@@ -118,7 +120,8 @@ export const e2eProviderConnection = (fixture: E2ePiFixture) =>
       expiresAt: null,
       quotaLabel: null,
       rateLimitLabel: null,
-      confirmedBillingRoute: fixture.authRoute === "api-key" ? "api" : "subscription"
+      confirmedBillingRoute: fixture.authRoute === "api-key" ? "api" : "subscription",
+      observedRoute: observedRouteFor(fixture.authRoute)
     },
     createdAt: "2026-08-10T00:00:00.000Z",
     updatedAt: "2026-08-10T00:00:00.000Z"
@@ -159,7 +162,7 @@ export const e2eCertification = (
   modelId,
   authRoute: {
     kind: fixture.authRoute,
-    observedRoute: fixture.authRoute,
+    observedRoute: observedRouteFor(fixture.authRoute),
     subscription: fixture.authRoute !== "api-key",
     entitlementConfirmed: true,
     apiBillingFallbackObserved: false

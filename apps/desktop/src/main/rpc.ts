@@ -4295,28 +4295,30 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     Effect.flatMap(ImportedMcpService, (service) =>
       service.importServer(input),
     ).pipe(Effect.mapError((cause) => agentResourceError("import", cause))),
-  "AgentResources.remove": ({ id }) =>
+  "AgentResources.remove": ({ kind, id }) =>
     Effect.gen(function* () {
       const files = yield* AgentResourceService;
       const mcp = yield* ImportedMcpService;
-      const isMcp = (yield* mcp.list).some((server) => server.id === id);
-      if (isMcp) return yield* mcp.remove(id);
+      if (kind === "mcp") return yield* mcp.remove(id);
       return yield* files.remove(id);
     }).pipe(Effect.mapError((cause) => agentResourceError("remove", cause))),
-  "AgentResources.setEnabled": ({ id, enabled }) =>
+  "AgentResources.setEnabled": ({ kind, id, enabled }) =>
     Effect.gen(function* () {
       const files = yield* AgentResourceService;
       const mcp = yield* ImportedMcpService;
-      const isMcp = (yield* mcp.list).some((server) => server.id === id);
-      if (isMcp) return yield* mcp.setEnabled(id, enabled);
+      if (kind === "mcp") return yield* mcp.setEnabled(id, enabled);
       return yield* files.setEnabled(id, enabled);
     }).pipe(Effect.mapError((cause) => agentResourceError("enable", cause))),
-  "AgentResources.reveal": ({ id }) =>
-    Effect.flatMap(AgentResourceService, (service) => service.reveal(id)).pipe(
-      Effect.tap((path) => Effect.sync(() => shell.showItemInFolder(path))),
-      Effect.asVoid,
-      Effect.mapError((cause) => agentResourceError("reveal", cause)),
-    ),
+  "AgentResources.reveal": ({ kind, id }) =>
+    kind === "mcp"
+      ? Effect.fail(
+        agentResourceError("reveal", new Error("MCP resources do not have a local file")),
+      )
+      : Effect.flatMap(AgentResourceService, (service) => service.reveal(id)).pipe(
+        Effect.tap((path) => Effect.sync(() => shell.showItemInFolder(path))),
+        Effect.asVoid,
+        Effect.mapError((cause) => agentResourceError("reveal", cause)),
+      ),
   "AgentResources.enabledForTarget": ({ targetId }) =>
     resourceEnabledForTarget(targetId),
   "AgentResources.watch": () =>

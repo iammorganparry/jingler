@@ -11,6 +11,7 @@
 import { join } from "node:path"
 import { app } from "electron"
 import { AppPaths } from "@jingler/cli-adapters"
+import { makeAppPaths } from "@jingler/cli-adapters/app-paths-factory"
 import { Layer } from "effect"
 
 /**
@@ -49,26 +50,7 @@ export const builtinPluginsRoot = (): string =>
     ? join(process.resourcesPath, "plugins")
     : join(import.meta.dirname, "../../../../plugins")
 
-export const AppPathsLive = Layer.succeed(AppPaths, {
-  root: jinglerRoot,
-  configFile: join(jinglerRoot, "config.json"),
-  sessionsFile: join(jinglerRoot, "sessions.json"),
-  projectsFile: join(jinglerRoot, "projects.json"),
-  worktreesDir: join(jinglerRoot, "worktrees"),
-  transcriptsDir: join(jinglerRoot, "transcripts"),
-  reviewsDir: join(jinglerRoot, "reviews"),
-  plansDir: join(jinglerRoot, ".jingler"),
-  themesDir: join(jinglerRoot, "themes"),
-  pluginsDir: join(jinglerRoot, "plugins"),
-  builtinPluginsDir: builtinPluginsRoot(),
-  pluginStorageDir: join(jinglerRoot, "plugin-storage"),
-  authFile: join(jinglerRoot, "auth.enc"),
-  openConnectorFile: join(jinglerRoot, "open-connector.enc"),
-  piSessionsDir: join(jinglerRoot, "pi-sessions"),
-  managedResourcesDir: join(jinglerRoot, "agent-resources"),
-  importedMcpFile: join(jinglerRoot, "agent-resources", "mcp.json"),
-  certificationsFile: join(jinglerRoot, "runtime", "certifications.json"),
-  providerConnectionsFile: join(jinglerRoot, "runtime", "provider-connections.json"),
-  runJournalsDir: join(jinglerRoot, "runtime", "journals"),
-  diagnosticsDir: join(jinglerRoot, "runtime", "diagnostics")
-})
+export const AppPathsLive = Layer.succeed(
+  AppPaths,
+  makeAppPaths(jinglerRoot, { builtinPluginsDir: builtinPluginsRoot() })
+)

@@ -11,6 +11,7 @@ import { AgentResourcesLive } from "@jingler/cli-adapters/runtime/resources/reso
 import { AssetService } from "@jingler/cli-adapters/asset"
 import { AgentRunner } from "@jingler/cli-adapters/agent-runner"
 import { AppPaths } from "@jingler/cli-adapters/app-paths"
+import { makeAppPaths } from "@jingler/cli-adapters/app-paths-factory"
 import { BackgroundTaskStore } from "@jingler/cli-adapters/background-tasks"
 import { BrowserControlMcpService } from "@jingler/cli-adapters/browser-control-mcp-service"
 import { ConfigService } from "@jingler/cli-adapters/config"
@@ -66,6 +67,7 @@ import { loadDeviceE2ePiRuntime } from "./e2e/pi-runtime.js"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
 import type { SessionCommandExecutor } from "./session-handler.js"
 import { makeDeviceProviderLayers } from "./provider-runtime.js"
+import { makeDeviceSecretStoreLive } from "./device-secret-store.js"
 
 type JsonRecord = Readonly<Record<string, unknown>>
 
@@ -331,28 +333,8 @@ export const makeDeviceSessionCommandExecutor = (
   }
 })
 
-const appPathsLayer = (root: string) => Layer.succeed(AppPaths, {
-  root,
-  configFile: join(root, "config.json"),
-  sessionsFile: join(root, "sessions.json"),
-  projectsFile: join(root, "projects.json"),
-  worktreesDir: join(root, "worktrees"),
-  transcriptsDir: join(root, "transcripts"),
-  reviewsDir: join(root, "reviews"),
-  plansDir: join(root, ".jingler"),
-  themesDir: join(root, "themes"),
-  pluginsDir: join(root, "plugins"),
-  pluginStorageDir: join(root, "plugin-storage"),
-  authFile: join(root, "auth.enc"),
-  openConnectorFile: join(root, "open-connector.enc"),
-  piSessionsDir: join(root, "pi-sessions"),
-  managedResourcesDir: join(root, "agent-resources"),
-  importedMcpFile: join(root, "agent-resources", "mcp.json"),
-  certificationsFile: join(root, "runtime", "certifications.json"),
-  providerConnectionsFile: join(root, "runtime", "provider-connections.json"),
-  runJournalsDir: join(root, "runtime", "journals"),
-  diagnosticsDir: join(root, "runtime", "diagnostics")
-})
+const appPathsLayer = (root: string) =>
+  Layer.succeed(AppPaths, makeAppPaths(root))
 
 /** Headless devices have no embedded browser; harness injection receives no browser MCP. */
 const HeadlessBrowserControlLive = Layer.succeed(
@@ -368,7 +350,15 @@ const deviceRuntime = (root: string, targetId: string) => {
   const providers = makeDeviceProviderLayers(
     targetId,
     process.env,
-    e2eRuntime?.providers
+    e2eRuntime?.providers,
+    (initialDeviceSecrets) => {
+      const paths = makeAppPaths(root)
+      return makeDeviceSecretStoreLive(
+        paths.deviceIdentityFile,
+        paths.deviceSecretsFile,
+        initialDeviceSecrets
+      )
+    }
   )
   const assets = AssetService.Default.pipe(Layer.provide(NodeContext.layer))
   const embeddedPi = makePiAgentRuntimeLive({

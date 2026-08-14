@@ -1557,10 +1557,10 @@ function AuthedApp({
             agentsSettings.send({ type: "IMPORT_SELECTED" }),
           onCancelDetection: () =>
             agentsSettings.send({ type: "CANCEL_DETECTION" }),
-          onSetEnabled: (id, enabled) =>
-            agentsSettings.send({ type: "SET_ENABLED", id, enabled }),
-          onReveal: (id) => agentsSettings.send({ type: "REVEAL", id }),
-          onRemove: (id) => agentsSettings.send({ type: "REMOVE", id }),
+          onSetEnabled: (selector, enabled) =>
+            agentsSettings.send({ type: "SET_ENABLED", selector, enabled }),
+          onReveal: (selector) => agentsSettings.send({ type: "REVEAL", selector }),
+          onRemove: (selector) => agentsSettings.send({ type: "REMOVE", selector }),
           onRetry: () => agentsSettings.send({ type: "RETRY" }),
         }}
         runtimeInspector={{

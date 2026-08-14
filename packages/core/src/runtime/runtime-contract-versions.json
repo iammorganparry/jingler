@@ -1,0 +1,10 @@
+{
+  "behavior": "5",
+  "authentication": "3",
+  "prompt": "2",
+  "tools": "4",
+  "diff": "1",
+  "policy": "1",
+  "capabilities": "3",
+  "piSdk": "0.84.1"
+}

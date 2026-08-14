@@ -48,6 +48,7 @@ describe("AuthBroker", () => {
     const broker = await Effect.runPromise(makeAuthBroker({ credentials, codexOAuth: oauth(Date.now() + 60_000), probe: activeProbe }))
     const connection = await Effect.runPromise(broker.connectClaudeToken({ id: "claude-1", token: "sk-ant-oat-fixture-value", targetId: "desktop" }))
     expect(connection.status).toBe("authenticated")
+    expect(connection.subscription.observedRoute).toBe("fixture-subscription")
     expect(connection.account?.fingerprint).not.toContain("fixture-value")
     expect(JSON.stringify(connection)).not.toContain("sk-ant-oat")
   })

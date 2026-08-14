@@ -9,7 +9,7 @@ import {
   type StartCodexLoginInput,
   type VerifyProviderModelInput
 } from "@jingler/core"
-import { Context, Data, Effect, PubSub, Schema, Stream } from "effect"
+import { Context, Data, Effect, Exit, PubSub, Schema, Stream } from "effect"
 import type {
   AuthBrokerShape,
   OAuthInteraction
@@ -121,6 +121,18 @@ export const makeProviderConnections = (
     yield* options.broker.restore(restored)
 
     const persist = persistConnection(document)
+    const setupLock = yield* Effect.makeSemaphore(1)
+    const persistSetup = <E extends { readonly message: string }>(
+      setup: Effect.Effect<ProviderConnection, E>
+    ) => setupLock.withPermits(1)(
+      Effect.acquireUseRelease(
+        brokerCall(setup),
+        persist,
+        (connection, exit) => Exit.isSuccess(exit)
+          ? Effect.void
+          : brokerCall(options.broker.delete(connection.id)).pipe(Effect.orDie)
+      )
+    )
     const refreshCatalog = <A, E>(effect: Effect.Effect<A, E>) =>
       effect.pipe(
         Effect.tap(() =>
@@ -137,8 +149,7 @@ export const makeProviderConnections = (
       status: options.broker.list,
       resolveCredential: (id) => brokerCall(options.broker.resolve(id)),
       connectClaudeToken: (input) =>
-        brokerCall(options.broker.connectClaudeToken(input)).pipe(
-          Effect.flatMap(persist),
+        persistSetup(options.broker.connectClaudeToken(input)).pipe(
           refreshCatalog
         ),
       startCodexLogin: (input) =>
@@ -147,7 +158,7 @@ export const makeProviderConnections = (
             Effect.mapError(serviceError("Invalid provider connection id"))
           )
           const interaction = options.codexInteraction(input.method)
-          return yield* brokerCall(
+          return yield* persistSetup(
             options.broker.startCodexLogin({
               id: input.id,
               targetId: input.targetId,
@@ -177,18 +188,18 @@ export const makeProviderConnections = (
                 Effect.runFork(PubSub.publish(loginEvents, normalized))
               }
             })
-          ).pipe(Effect.flatMap(persist), refreshCatalog)
+          ).pipe(refreshCatalog)
         }),
       cancelLogin: (id) => options.broker.cancelLogin(id),
       setApiKey: (input) =>
-        brokerCall(
+        persistSetup(
           options.broker.setApiKey({
             id: input.id,
             provider: input.providerId,
             apiKey: input.apiKey,
             targetId: input.targetId
           })
-        ).pipe(Effect.flatMap(persist), refreshCatalog),
+        ).pipe(refreshCatalog),
       refresh: (id) =>
         brokerCall(options.broker.refresh(id)).pipe(
           Effect.flatMap(persist),

@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { execFileSync } from "node:child_process"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
@@ -16,6 +17,7 @@ import {
 import { Effect, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
+import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
 
 const roots: string[] = []
@@ -155,6 +157,41 @@ describe("pi session creation", () => {
     }, {} as never))
 
     expect(captured[0]?.thinkingLevel).toBe("high")
+  })
+
+  it("disposes the terminal tracker when embedded session creation fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-pi-session-failure-"))
+    const shadowRoot = await mkdtemp(join(tmpdir(), "jingler-pi-shadow-"))
+    roots.push(root, shadowRoot)
+    execFileSync("git", ["init", "--quiet", root])
+    const credentials = new InMemoryProviderCredentialStore()
+    await Effect.runPromise(credentials.write({
+      connectionId: connection.id,
+      authKind: "api-key",
+      access: "secret",
+      refresh: null,
+      expiresAt: null
+    }))
+    const tracker = new FileChangeTracker({
+      artifactDir: join(root, "artifacts"),
+      sessionId: "session-1",
+      shadowIndexRoot: shadowRoot
+    })
+    const factory = makePiSessionFactory({
+      agentDir: join(root, "agent"),
+      sessionsDir: join(root, "sessions"),
+      credentials,
+      resolveConnection: () => Effect.succeed(connection),
+      terminalTracker: tracker,
+      createSession: async () => {
+        throw new Error("session unavailable")
+      }
+    })
+
+    const result = await Effect.runPromise(Effect.either(factory.create(makeSpec(root), {} as never)))
+
+    expect(result._tag).toBe("Left")
+    expect(await readdir(shadowRoot)).toEqual([])
   })
 })
 

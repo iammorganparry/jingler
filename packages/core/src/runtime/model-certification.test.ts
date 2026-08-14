@@ -65,4 +65,16 @@ describe("model certification", () => {
     }))
     expect(api).not.toBe(subscription)
   })
+
+  it("keys observed routes and billing classifications independently", () => {
+    const base = certification()
+    const proxy = certificationKey(certification({
+      authRoute: { ...base.authRoute, observedRoute: "managed-proxy" }
+    }))
+    const api = certificationKey(certification({
+      authRoute: { ...base.authRoute, subscription: false }
+    }))
+
+    expect(new Set([certificationKey(base), proxy, api])).toHaveLength(3)
+  })
 })

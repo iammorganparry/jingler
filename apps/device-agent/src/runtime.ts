@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { PendingDeviceRegistrationResponse } from "@jingler/core"
 import { PendingDeviceRegistrationResponse as PendingDeviceRegistrationResponseSchema } from "@jingler/core"
+import { makeAppPaths } from "@jingler/cli-adapters/app-paths-factory"
 import { Effect, Schema } from "effect"
 import packageJson from "../package.json" with { type: "json" }
 import { discoverLiveDeviceCapabilities } from "./capabilities.js"
@@ -38,11 +39,12 @@ export interface DeviceAgentPaths {
 
 export const deviceAgentPaths = (): DeviceAgentPaths => {
   const root = join(process.env.JINGLER_HOME ?? homedir(), "jingler")
+  const appPaths = makeAppPaths(root)
   const deviceDir = join(root, "device")
   return {
     jinglerRoot: root,
     deviceDir,
-    identityFile: join(deviceDir, "identity.json"),
+    identityFile: appPaths.deviceIdentityFile,
     enrollmentFile: join(deviceDir, "enrollment.json"),
     directSessionSocketFile: join(deviceDir, "direct-session.socket")
   }

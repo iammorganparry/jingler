@@ -2,7 +2,8 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { homedir, arch, platform } from "node:os"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
-import { AppPaths, type AppPathsShape } from "@jingler/cli-adapters/app-paths"
+import { AppPaths } from "@jingler/cli-adapters/app-paths"
+import { makeAppPaths } from "@jingler/cli-adapters/app-paths-factory"
 import { ConfigService } from "@jingler/cli-adapters/config"
 import { WorkspaceService } from "@jingler/cli-adapters/workspace"
 import type {
@@ -124,29 +125,6 @@ export const discoverDeviceCapabilities = (
     }
   })
 
-const appPaths = (root: string): AppPathsShape => ({
-  root,
-  configFile: join(root, "config.json"),
-  sessionsFile: join(root, "sessions.json"),
-  projectsFile: join(root, "projects.json"),
-  worktreesDir: join(root, "worktrees"),
-  transcriptsDir: join(root, "transcripts"),
-  reviewsDir: join(root, "reviews"),
-  plansDir: join(root, ".jingler"),
-  themesDir: join(root, "themes"),
-  pluginsDir: join(root, "plugins"),
-  pluginStorageDir: join(root, "plugin-storage"),
-  authFile: join(root, "auth.enc"),
-  openConnectorFile: join(root, "open-connector.enc"),
-  piSessionsDir: join(root, "pi-sessions"),
-  managedResourcesDir: join(root, "agent-resources"),
-  importedMcpFile: join(root, "agent-resources", "mcp.json"),
-  certificationsFile: join(root, "runtime", "certifications.json"),
-  providerConnectionsFile: join(root, "runtime", "provider-connections.json"),
-  runJournalsDir: join(root, "runtime", "journals"),
-  diagnosticsDir: join(root, "runtime", "diagnostics")
-})
-
 /** Live discovery deliberately reuses the same host services as Electron main. */
 export const discoverLiveDeviceCapabilities = (
   jinglerRoot: string,
@@ -163,7 +141,7 @@ export const discoverLiveDeviceCapabilities = (
     WorkspaceService.Default,
     ConfigService.Default,
     NodeContext.layer,
-    Layer.succeed(AppPaths, appPaths(jinglerRoot))
+    Layer.succeed(AppPaths, makeAppPaths(jinglerRoot))
   )
   return Effect.promise(() => ensureDeviceWorkspaceConfig(jinglerRoot)).pipe(
     Effect.flatMap(() =>

@@ -32,12 +32,49 @@ describe("PromptCompiler", () => {
     expect(result.text).not.toContain("workspace_edit")
   })
 
+  it("teaches progressive disclosure and first-class Jingler workflows only for active tools", () => {
+    const result = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("conversation", "ask"),
+      tools: [
+        { id: "jingler_list_resources", version: "2", description: "Search resources." },
+        { id: "jingler_load_resource", version: "2", description: "Load one resource." },
+        { id: "jingler_ask_question", version: "1", description: "Ask the operator." },
+        { id: "jingler_submit_plan", version: "1", description: "Submit a plan." },
+        { id: "mcp__jingler-memory__memory_search", version: "1", description: "Search memory." }
+      ],
+      tokenBudget: 2_000
+    })
+    expect(result.text).toContain("Use capability metadata progressively")
+    expect(result.text).toContain("jingler_list_resources with a narrow query")
+    expect(result.text).toContain("Jingler memory is private working context")
+    expect(result.text).toContain("Use jingler_ask_question")
+    expect(result.text).toContain("Use jingler_submit_plan")
+
+    const withoutMemory = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("conversation", "ask"),
+      tools: [tool],
+      tokenBudget: 2_000
+    })
+    expect(withoutMemory.text).not.toContain("Jingler memory is private working context")
+  })
+
+  it("requires a plan-execution stage to be tested and committed before advancing", () => {
+    const result = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("plan-execution", "accept-edits"),
+      tools: [tool],
+      tokenBudget: 2_000
+    })
+    expect(result.text).toContain("run its relevant tests and acceptance checks")
+    expect(result.text).toContain("commit the completed stage")
+    expect(result.text).toContain("Never mark a stage complete")
+  })
+
   it("trims lower-priority optional context without removing required layers", () => {
     const optional = promptLayer("turn", "turn.large", "x".repeat(4_000))
     const result = new PromptCompiler().compile({
       layers: [...runtimeInvariantLayers("conversation", "ask"), optional],
       tools: [tool],
-      tokenBudget: 220
+      tokenBudget: 500
     })
     expect(result.manifest.sections.find((section) => section.id === "turn.large")?.truncated).toBe(true)
     expect(result.manifest.sections.map((section) => section.kind)).toEqual(expect.arrayContaining(["safety", "role", "tools"]))

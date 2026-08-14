@@ -6,6 +6,35 @@ export interface UnifiedDiffStats {
   readonly noNewlineAtEnd: boolean
 }
 
+export interface GitDiffStat {
+  readonly added: number
+  readonly removed: number
+  readonly binary: boolean
+}
+
+/** Parse the count fields from `git diff --numstat -z` without touching path data. */
+export const gitDiffStat = (raw: string): GitDiffStat => {
+  const firstTab = raw.indexOf("\t")
+  const secondTab = raw.indexOf("\t", firstTab + 1)
+  if (firstTab <= 0 || secondTab <= firstTab + 1) {
+    throw new Error("invalid git numstat output")
+  }
+
+  const added = raw.slice(0, firstTab)
+  const removed = raw.slice(firstTab + 1, secondTab)
+  if (added === "-" || removed === "-") {
+    if (added !== "-" || removed !== "-") throw new Error("invalid binary git numstat output")
+    return { added: 0, removed: 0, binary: true }
+  }
+
+  const parsedAdded = Number(added)
+  const parsedRemoved = Number(removed)
+  if (!Number.isSafeInteger(parsedAdded) || parsedAdded < 0 || !Number.isSafeInteger(parsedRemoved) || parsedRemoved < 0) {
+    throw new Error("invalid git numstat counts")
+  }
+  return { added: parsedAdded, removed: parsedRemoved, binary: false }
+}
+
 interface ParseState {
   readonly preview: Array<string>
   readonly added: number

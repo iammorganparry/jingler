@@ -28,7 +28,8 @@ describe("mutation observer", () => {
     const { root: cwd, stateRoot } = await repository()
     const tracker = new FileChangeTracker({
       artifactDir: join(cwd, ".artifacts"),
-      sessionId: "session-1"
+      sessionId: "session-1",
+      shadowIndexRoot: stateRoot
     })
     const journal = new RunJournal({
       file: join(stateRoot, "journal", "run.json")

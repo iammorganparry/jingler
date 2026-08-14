@@ -8,6 +8,7 @@
     "./agent-runner": "./src/agent-runner.ts",
     "./asset": "./src/asset.ts",
     "./app-paths": "./src/app-paths.ts",
+    "./app-paths-factory": "./src/app-paths-factory.ts",
     "./background-tasks": "./src/background-tasks.ts",
     "./browser-control-mcp-service": "./src/browser-control-mcp-service.ts",
     "./config": "./src/config.ts",

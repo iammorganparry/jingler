@@ -1,6 +1,6 @@
 import {
+  expectedBillingRouteForAuthKind,
   CURRENT_RUNTIME_CONTRACTS,
-  type AuthKind,
   type EvalResult,
   type ModelCertification,
   type ProviderConnection,
@@ -45,20 +45,6 @@ export interface ModelVerificationResult {
   readonly traces: ReadonlyArray<EvalTrace>
 }
 
-const expectedBillingRoute = (
-  authKind: AuthKind
-): ProviderConnection["subscription"]["confirmedBillingRoute"] => {
-  switch (authKind) {
-    case "claude-setup-token":
-    case "openai-codex-oauth":
-      return "subscription"
-    case "api-key":
-      return "api"
-    case "device-environment":
-      return "device-environment"
-  }
-}
-
 const observeRoute = (
   input: VerifyProviderModelBehaviorInput
 ): Effect.Effect<EntitlementProbeResult, ModelVerificationError> =>
@@ -92,7 +78,7 @@ const requireObservedRoute = (
   connection: ProviderConnection,
   observation: EntitlementProbeResult
 ): Effect.Effect<void, ModelVerificationError> => {
-  const expected = expectedBillingRoute(connection.authKind)
+  const expected = expectedBillingRouteForAuthKind(connection.authKind)
   if (
     observation.entitlement !== "active" ||
     observation.billingRoute !== expected
@@ -223,10 +209,10 @@ export const evaluateProviderModelBehavior = (
         authRoute: {
           kind: input.connection.authKind,
           observedRoute: observation.observedRoute,
-          subscription: expectedBillingRoute(input.connection.authKind) === "subscription",
+          subscription: expectedBillingRouteForAuthKind(input.connection.authKind) === "subscription",
           entitlementConfirmed: observation.entitlement === "active",
           apiBillingFallbackObserved:
-            expectedBillingRoute(input.connection.authKind) === "subscription" &&
+            expectedBillingRouteForAuthKind(input.connection.authKind) === "subscription" &&
             observation.billingRoute === "api"
         },
         versions: CURRENT_RUNTIME_CONTRACTS,

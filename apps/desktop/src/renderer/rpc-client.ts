@@ -103,7 +103,7 @@ import type {
   ManagedMcpImportInput,
   ManagedMcpServer,
   ManagedResource,
-  ManagedResourceId,
+  ManagedResourceSelector,
   ManagedResourceScope,
   ResourceDetectionResult,
   ResourceImportResult
@@ -370,12 +370,14 @@ export const rpc = {
   agentResourcesImportMcp: (
     input: ManagedMcpImportInput
   ): Promise<ManagedMcpServer> => run((c) => c.AgentResources.importMcp(input)),
-  agentResourcesRemove: (id: ManagedResourceId): Promise<void> =>
-    run((c) => c.AgentResources.remove({ id })),
-  agentResourcesSetEnabled: (id: ManagedResourceId, enabled: boolean): Promise<void> =>
-    run((c) => c.AgentResources.setEnabled({ id, enabled })),
-  agentResourcesReveal: (id: ManagedResourceId): Promise<void> =>
-    run((c) => c.AgentResources.reveal({ id })),
+  agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>
+    run((c) => c.AgentResources.remove(selector)),
+  agentResourcesSetEnabled: (
+    selector: ManagedResourceSelector,
+    enabled: boolean
+  ): Promise<void> => run((c) => c.AgentResources.setEnabled({ ...selector, enabled })),
+  agentResourcesReveal: (selector: ManagedResourceSelector): Promise<void> =>
+    run((c) => c.AgentResources.reveal(selector)),
   agentResourcesEnabledForTarget: (targetId: string): Promise<ReadonlyArray<ManagedResource>> =>
     run((c) => c.AgentResources.enabledForTarget({ targetId })),
   agentResourcesWatch: (

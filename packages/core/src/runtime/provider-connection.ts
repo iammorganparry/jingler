@@ -62,9 +62,41 @@ export const SubscriptionStatus = Schema.Struct({
   expiresAt: Schema.NullOr(Schema.String),
   quotaLabel: Schema.NullOr(Schema.String),
   rateLimitLabel: Schema.NullOr(Schema.String),
-  confirmedBillingRoute: Schema.NullOr(Schema.Literal("subscription", "api", "device-environment"))
+  confirmedBillingRoute: Schema.NullOr(Schema.Literal("subscription", "api", "device-environment")),
+  /** Redacted provider route observed by the entitlement probe. */
+  observedRoute: Schema.optional(Schema.String)
 })
 export type SubscriptionStatus = Schema.Schema.Type<typeof SubscriptionStatus>
+
+export type ConfirmedBillingRoute = NonNullable<
+  SubscriptionStatus["confirmedBillingRoute"]
+>
+
+/** The only billing route that can authenticate a credential of this kind. */
+export const expectedBillingRouteForAuthKind = (
+  authKind: AuthKind
+): ConfirmedBillingRoute => {
+  switch (authKind) {
+    case "claude-setup-token":
+    case "openai-codex-oauth":
+      return "subscription"
+    case "api-key":
+      return "api"
+    case "device-environment":
+      return "device-environment"
+  }
+}
+
+/** Fail closed until an active entitlement and its expected route are observed. */
+export const authStatusForObservedBillingRoute = (
+  authKind: AuthKind,
+  entitlement: SubscriptionStatus["entitlement"],
+  confirmedBillingRoute: SubscriptionStatus["confirmedBillingRoute"]
+): AuthStatus =>
+  entitlement === "active" &&
+  confirmedBillingRoute === expectedBillingRouteForAuthKind(authKind)
+    ? "authenticated"
+    : "entitlement-unconfirmed"
 
 export const ProviderConnection = Schema.Struct({
   id: ProviderConnectionId,

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -99,6 +99,51 @@ describe("ProviderConnections", () => {
     const raw = await readFile(file, "utf8")
     expect(raw).toContain('"authKind": "api-key"')
     expect(raw).not.toContain("super-secret-api-key")
+  })
+
+  it("rolls back the credential and broker connection when metadata persistence fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-connections-"))
+    roots.push(root)
+    const file = join(root, "connections.json")
+    const credentials = new InMemoryProviderCredentialStore()
+    const broker = await Effect.runPromise(makeAuthBroker({
+      credentials,
+      codexOAuth: {
+        login: async () => ({ access: "oauth", refresh: "refresh", expires: 1 }),
+        refresh: async (credential) => credential
+      },
+      probe: async () => ({
+        entitlement: "active",
+        planLabel: "API",
+        quotaLabel: null,
+        rateLimitLabel: null,
+        billingRoute: "api",
+        observedRoute: "fixture-api"
+      })
+    }))
+    const service = await Effect.runPromise(makeProviderConnections({
+      file,
+      broker,
+      catalog: {
+        list: Effect.succeed({ connections: [], refreshedAt: "now", stale: false }),
+        refresh: Effect.succeed({ connections: [], refreshedAt: "now", stale: false }),
+        selectable: Effect.succeed([])
+      },
+      codexInteraction: () => ({ prompt: async () => "", notify: () => undefined }),
+      verifyModel: () => Effect.die("unused")
+    }))
+    await mkdir(file)
+
+    await expect(Effect.runPromise(service.setApiKey({
+      id: "api-rollback",
+      providerId: "anthropic",
+      apiKey: "temporary-secret",
+      targetId: "desktop"
+    }))).rejects.toMatchObject({ message: "Failed to persist provider connection" })
+
+    const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("api-rollback")
+    expect(await Effect.runPromise(credentials.read(connectionId))).toBeNull()
+    expect(await Effect.runPromise(broker.get(connectionId))).toBeNull()
   })
 
   it("exposes every typed connection operation through one Effect service", async () => {

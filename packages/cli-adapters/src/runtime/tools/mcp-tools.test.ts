@@ -263,6 +263,7 @@ it("connects to target-local stdio servers and supplies only resolved launch val
 
 it("reconciles actual file changes made by mutating MCP tools", async () => {
   const root = await temporary()
+  const shadowRoot = await temporary()
   execFileSync("git", ["init", "-q"], { cwd: root })
   const state: FakeClientState = { calls: [], closes: 0 }
   const output = join(root, "created-by-mcp.txt")
@@ -281,7 +282,11 @@ it("reconciles actual file changes made by mutating MCP tools", async () => {
       runId: "run-mcp",
       sessionId: "session-mcp",
       chatId: "chat-mcp",
-      tracker: new FileChangeTracker({ artifactDir: join(root, ".artifacts"), sessionId: "session-mcp" }),
+      tracker: new FileChangeTracker({
+        artifactDir: join(root, ".artifacts"),
+        sessionId: "session-mcp",
+        shadowIndexRoot: shadowRoot
+      }),
       journal: new RunJournal({ file: join(root, ".journal", "run-mcp.json") })
     })
   })

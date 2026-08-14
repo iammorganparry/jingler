@@ -4,7 +4,7 @@ import {
   type ManagedMcpServer as ManagedMcpServerType,
   type ManagedResourceId
 } from "@jingler/core"
-import { Context, Data, Effect, PubSub, Schema, Stream } from "effect"
+import { Context, Data, Effect, Exit, PubSub, Schema, Stream } from "effect"
 import type {
   AgentSecretStore,
   ManagedMcpSecretPayload
@@ -167,6 +167,28 @@ export const makeImportedMcpService = (
       try: () => catalog.read(),
       catch: () => error("list", "Could not read imported MCP metadata")
     })
+    const mutationLock = yield* Effect.makeSemaphore(1)
+    const mutateCatalog = <A>(
+      operation: ImportedMcpError["operation"],
+      message: string,
+      mutation: (
+        current: ReadonlyArray<ManagedMcpServerType>,
+        persist: (next: ReadonlyArray<ManagedMcpServerType>) => Effect.Effect<void, ImportedMcpError>
+      ) => Effect.Effect<A, ImportedMcpError>
+    ): Effect.Effect<A, ImportedMcpError> => mutationLock.withPermits(1)(
+      Effect.tryPromise({
+        try: () => catalog.read(),
+        catch: () => error(operation, message)
+      }).pipe(
+        Effect.flatMap((current) => mutation(
+          current,
+          (next) => Effect.tryPromise({
+            try: () => catalog.write(next),
+            catch: () => error(operation, message)
+          })
+        ))
+      )
+    )
     const changes = yield* PubSub.unbounded<ReadonlyArray<ManagedMcpServerType>>()
     const publishCatalog = list.pipe(
       Effect.flatMap((servers) => PubSub.publish(changes, servers)),
@@ -177,69 +199,72 @@ export const makeImportedMcpService = (
       input: ManagedMcpImportInput
     ): Effect.Effect<ManagedMcpServerType, ImportedMcpError> => {
       const metadata = metadataFor(input)
-      let secretWritten = false
       return validate(input).pipe(
         Effect.zipRight(
-          Effect.tryPromise({
-            try: () => catalog.update(async (current) => {
+          mutateCatalog(
+            "import",
+            "Could not persist MCP metadata",
+            (current, persist) => {
               if (current.some((server) => server.id === input.id)) {
-                throw new Error(`MCP id "${input.id}" already exists`)
+                return Effect.fail(error("import", `MCP id "${input.id}" already exists`))
               }
-              await Effect.runPromise(
-                options.secrets.writeMcp(input.id, input.targetId, secretsFor(input))
-              )
-              secretWritten = true
-              return [...current, metadata]
-            }),
-            catch: (cause) => error("import", cause instanceof Error ? cause.message : "Could not persist MCP metadata")
-          })
+              return Effect.acquireUseRelease(
+                options.secrets.writeMcp(input.id, input.targetId, secretsFor(input)).pipe(
+                  Effect.mapError(() => error("import", "Could not persist encrypted MCP values"))
+                ),
+                () => persist([...current, metadata]),
+                (_, exit) => Exit.isSuccess(exit)
+                  ? Effect.void
+                  : persist(current).pipe(
+                      Effect.ignore,
+                      Effect.zipRight(options.secrets.deleteMcp(input.id, input.targetId).pipe(Effect.ignore))
+                    )
+              ).pipe(Effect.as(metadata))
+            }
+          )
         ),
         Effect.tap(() => publishCatalog),
-        Effect.as(metadata),
-        Effect.tapError(() => secretWritten
-          ? options.secrets.deleteMcp(input.id, input.targetId).pipe(Effect.ignore)
-          : Effect.void)
+        Effect.as(metadata)
       )
     }
 
     const remove = (id: ManagedResourceId): Effect.Effect<void, ImportedMcpError> =>
-      list.pipe(
-        Effect.flatMap((servers) => {
-          const server = servers.find((item) => item.id === id)
+      mutateCatalog(
+        "remove",
+        `Could not remove MCP server "${id}"`,
+        (current, persist) => {
+          const server = current.find((item) => item.id === id)
           if (server === undefined) return Effect.fail(error("remove", `MCP server "${id}" does not exist`))
-          return Effect.tryPromise({
-            try: () => catalog.update((current) => current.filter((item) => item.id !== id)),
-            catch: () => error("remove", `Could not remove MCP server "${id}"`)
-          }).pipe(
-            Effect.zipRight(
-              options.secrets.deleteMcp(id, server.availability.targetId).pipe(
-                Effect.mapError(() => error("remove", `Could not remove encrypted values for "${id}"`)),
-                Effect.tapError(() =>
-                  Effect.tryPromise({
-                    try: () => catalog.update((current) =>
-                      current.some((item) => item.id === id) ? current : [...current, server]
-                    ),
-                    catch: () => error("remove", `Could not restore MCP metadata for "${id}"`)
-                  }).pipe(Effect.ignore)
-                )
-              )
+          const targetId = server.availability.targetId
+          return Effect.acquireUseRelease(
+            options.secrets.readMcp(id, targetId).pipe(
+              Effect.mapError(() => error("remove", `Could not read encrypted values for "${id}"`)),
+              Effect.tap(() => persist(current.filter((item) => item.id !== id)))
             ),
-            Effect.zipRight(publishCatalog)
+            () => options.secrets.deleteMcp(id, targetId).pipe(
+              Effect.mapError(() => error("remove", `Could not remove encrypted values for "${id}"`))
+            ),
+            (secret, exit) => Exit.isSuccess(exit)
+              ? Effect.void
+              : (secret === null
+                  ? Effect.void
+                  : options.secrets.writeMcp(id, targetId, secret).pipe(Effect.ignore)
+                ).pipe(Effect.zipRight(persist(current).pipe(Effect.ignore)))
           )
-        })
-      )
+        }
+      ).pipe(Effect.zipRight(publishCatalog))
 
     const setEnabled = (
       id: ManagedResourceId,
       enabled: boolean
     ): Effect.Effect<void, ImportedMcpError> =>
-      Effect.tryPromise({
-        try: () => catalog.update((current) => {
-          if (!current.some((server) => server.id === id)) throw new Error("MCP server does not exist")
-          return current.map((server) => server.id === id ? { ...server, enabled } : server)
-        }),
-        catch: () => error("enable", `Could not update MCP server "${id}"`)
-      }).pipe(Effect.zipRight(publishCatalog))
+      mutateCatalog(
+        "enable",
+        `Could not update MCP server "${id}"`,
+        (current, persist) => current.some((server) => server.id === id)
+          ? persist(current.map((server) => server.id === id ? { ...server, enabled } : server))
+          : Effect.fail(error("enable", `MCP server "${id}" does not exist`))
+      ).pipe(Effect.zipRight(publishCatalog))
 
     const resolveForTarget = (
       targetId: string

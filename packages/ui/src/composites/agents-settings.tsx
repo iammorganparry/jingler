@@ -1,7 +1,7 @@
 import type {
   DetectedResourceCandidate,
   ManagedResource,
-  ManagedResourceId,
+  ManagedResourceSelector,
   ResourceDetectionResult
 } from "@jingler/core"
 import { Boxes, Check, FolderOpen, RefreshCw, Trash2 } from "lucide-react"
@@ -20,9 +20,9 @@ export interface AgentsSettingsProps {
   readonly onToggleCandidate: (id: string) => void
   readonly onImportSelected: () => void
   readonly onCancelDetection: () => void
-  readonly onSetEnabled: (id: ManagedResourceId, enabled: boolean) => void
-  readonly onReveal: (id: ManagedResourceId) => void
-  readonly onRemove: (id: ManagedResourceId) => void
+  readonly onSetEnabled: (selector: ManagedResourceSelector, enabled: boolean) => void
+  readonly onReveal: (selector: ManagedResourceSelector) => void
+  readonly onRemove: (selector: ManagedResourceSelector) => void
   readonly onRetry: () => void
 }
 
@@ -131,7 +131,7 @@ export function AgentsSettings(props: AgentsSettingsProps) {
             <p className="px-4 py-10 text-center text-[12px] text-muted-foreground">No managed resources imported.</p>
           ) : props.resources.map((resource) => (
             <div
-              key={resource.id}
+              key={`${resource.kind}:${resource.id}`}
               className="grid grid-cols-[36px_minmax(0,1fr)_44px_88px_88px] items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0"
             >
               <span className="flex size-9 items-center justify-center rounded-md bg-sunken text-blue"><Boxes size={17} /></span>
@@ -142,20 +142,20 @@ export function AgentsSettings(props: AgentsSettingsProps) {
               <span className="flex justify-center">
                 <Toggle
                   checked={resource.enabled}
-                  onCheckedChange={(enabled) => props.onSetEnabled(resource.id, enabled)}
+                  onCheckedChange={(enabled) => props.onSetEnabled({ kind: resource.kind, id: resource.id }, enabled)}
                   aria-label={`${resource.enabled ? "Disable" : "Enable"} ${resource.name}`}
                   disabled={props.loading}
                 />
               </span>
               <span className="flex justify-end">
                 {resource.kind !== "mcp" && (
-                  <Button variant="ghost" size="sm" onClick={() => props.onReveal(resource.id)} disabled={props.loading}>
+                  <Button aria-label={`Reveal ${resource.name}`} variant="ghost" size="sm" onClick={() => props.onReveal({ kind: resource.kind, id: resource.id })} disabled={props.loading}>
                     <FolderOpen size={13} /> Reveal
                   </Button>
                 )}
               </span>
               <span className="flex justify-end">
-                <Button variant="ghost" size="sm" onClick={() => props.onRemove(resource.id)} disabled={props.loading}>
+                <Button aria-label={`Remove ${resource.name}`} variant="ghost" size="sm" onClick={() => props.onRemove({ kind: resource.kind, id: resource.id })} disabled={props.loading}>
                   <Trash2 size={13} /> Remove
                 </Button>
               </span>

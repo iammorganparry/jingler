@@ -6,6 +6,7 @@ export interface ManagedProviderEnvironment extends Readonly<
   readonly JINGLER_PROVIDER_CONNECTION_ID: string;
   readonly JINGLER_PROVIDER_ID: string;
   readonly JINGLER_PROVIDER_AUTH_KIND: string;
+  readonly JINGLER_PROVIDER_CONFIRMED_BILLING_ROUTE: string;
   readonly JINGLER_PROVIDER_ACCESS: string;
   readonly JINGLER_PROVIDER_EXPIRES_AT: string;
   readonly JINGLER_PROVIDER_BASE_URL: string;
@@ -48,6 +49,7 @@ export const managedProviderEnvironment = (input: {
     JINGLER_PROVIDER_CONNECTION_ID: input.capability.connectionId,
     JINGLER_PROVIDER_ID: input.capability.providerId,
     JINGLER_PROVIDER_AUTH_KIND: input.capability.authKind,
+    JINGLER_PROVIDER_CONFIRMED_BILLING_ROUTE: input.capability.billingRoute,
     JINGLER_PROVIDER_ACCESS: proxyAccess(input.capability, input.nonce),
     JINGLER_PROVIDER_EXPIRES_AT: String(input.capability.expiresAt * 1_000),
     JINGLER_PROVIDER_BASE_URL: baseUrl,

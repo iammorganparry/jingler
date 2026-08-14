@@ -60,7 +60,8 @@ const makeRegistry = (): ToolRegistry => {
       chatId: "chat-1",
       tracker: new FileChangeTracker({
         artifactDir: join(outside, "artifacts"),
-        sessionId: "session-1"
+        sessionId: "session-1",
+        shadowIndexRoot: outside
       }),
       journal: new RunJournal({ file: join(outside, "journal.json") })
     })

@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
 import { appShell, expect, test, type SeedSession } from "./fixtures.js"
 
 const CONNECTION_ID = "jingler-e2e-connection"
@@ -92,7 +93,9 @@ test("manages approved resources and inspects a redacted real-pi run", async ({ 
   const inspector = window.getByRole("region", { name: "Runtime inspector" })
   await expect(inspector.getByText("api-key")).toBeVisible()
   await expect(inspector.getByText("done", { exact: true })).toBeVisible()
-  await expect(inspector.getByText(/prompt 1 · tools 3 · diff 1 · pi 0\.84\.1/)).toBeVisible()
+  await expect(inspector.getByText(
+    `prompt ${CURRENT_RUNTIME_CONTRACTS.prompt} · tools ${CURRENT_RUNTIME_CONTRACTS.tools} · diff ${CURRENT_RUNTIME_CONTRACTS.diff} · pi ${CURRENT_RUNTIME_CONTRACTS.piSdk}`
+  )).toBeVisible()
   await inspector.getByRole("button", { name: "Export diagnostics" }).click()
   await expect(inspector.getByRole("status")).toHaveText("Redacted diagnostic bundle prepared.")
   await expect(inspector).not.toContainText("Record a runtime diagnostic")

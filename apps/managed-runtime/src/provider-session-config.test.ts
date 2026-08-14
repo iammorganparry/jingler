@@ -37,6 +37,7 @@ describe("managed provider session environment", () => {
       JINGLER_PROVIDER_CONNECTION_ID: "connection_one",
       JINGLER_PROVIDER_ID: "openai-codex",
       JINGLER_PROVIDER_AUTH_KIND: "openai-codex-oauth",
+      JINGLER_PROVIDER_CONFIRMED_BILLING_ROUTE: "subscription",
       JINGLER_PROVIDER_BASE_URL:
         "https://runtime.example/v1/provider/codex/session%2Fone/v1",
     });

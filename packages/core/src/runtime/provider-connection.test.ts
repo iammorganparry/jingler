@@ -1,6 +1,11 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import { ProviderConnection, SessionRuntimeIdentity } from "./provider-connection.js"
+import {
+  authStatusForObservedBillingRoute,
+  expectedBillingRouteForAuthKind,
+  ProviderConnection,
+  SessionRuntimeIdentity
+} from "./provider-connection.js"
 
 describe("provider connection identity", () => {
   it("keeps provider, authentication, target, and billing route explicit", () => {
@@ -39,5 +44,32 @@ describe("provider connection identity", () => {
       legacyResumeId: null
     })
     expect(identity.connectionSelectionRequired).toBe(true)
+  })
+
+  it("authenticates only an active entitlement on its credential's expected route", () => {
+    expect(expectedBillingRouteForAuthKind("claude-setup-token")).toBe(
+      "subscription"
+    )
+    expect(
+      authStatusForObservedBillingRoute(
+        "claude-setup-token",
+        "unknown",
+        "subscription"
+      )
+    ).toBe("entitlement-unconfirmed")
+    expect(
+      authStatusForObservedBillingRoute(
+        "claude-setup-token",
+        "active",
+        "api"
+      )
+    ).toBe("entitlement-unconfirmed")
+    expect(
+      authStatusForObservedBillingRoute(
+        "claude-setup-token",
+        "active",
+        "subscription"
+      )
+    ).toBe("authenticated")
   })
 })

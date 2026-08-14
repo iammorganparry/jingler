@@ -11,7 +11,7 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "typecheck": "pnpm version:check && turbo run typecheck",
+    "typecheck": "pnpm version:check && pnpm runtime-contracts:check && turbo run typecheck",
     "test": "vitest run && pnpm --filter @jingler/github-relay test && pnpm --filter @jingler/device-relay test && pnpm --filter @jingler/auth-state test && pnpm --filter @jingler/managed-runtime test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -21,6 +21,8 @@
     "clean": "turbo run clean && rimraf node_modules",
     "changeset": "changeset",
     "version:check": "node scripts/check-version-policy.mjs",
+    "runtime-contracts:check": "node scripts/sync-release-certification-manifest.mjs --check",
+    "runtime-contracts:sync": "node scripts/sync-release-certification-manifest.mjs",
     "version-packages": "changeset version && node scripts/sync-app-version.mjs && node scripts/check-version-policy.mjs",
     "lint:fix": "biome lint --write ."
   },
