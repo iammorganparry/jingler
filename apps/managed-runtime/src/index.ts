@@ -35,6 +35,7 @@ import {
 } from "./runtime-env.js";
 import { r2CheckpointStore } from "./r2-checkpoint-store.js";
 import { json } from "./worker-http.js";
+import { INTERNAL_ROUTES } from "./internal-routes.js";
 import {
   destroyRuntimeSession,
   unregisterRuntimeSession,
@@ -53,6 +54,7 @@ import {
   OffloadJobStore,
   makeOffloadJobStoreLayer
 } from "./offload-store.js";
+import { primeOffloadWorkspace } from "./offload-workspace.js";
 
 export { Sandbox } from "@cloudflare/sandbox";
 export { ManagedAccountObject } from "./account-runtime.js";
@@ -152,7 +154,7 @@ const runtimeRegistration = async (
 ): Promise<RuntimeRegistration> => {
   const accountResponse = await env.MANAGED_ACCOUNT.getByName(
     input.subject,
-  ).fetch("https://managed-account.internal/v1/sessions/register", {
+  ).fetch(INTERNAL_ROUTES.managedAccount.sessionRegister, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -254,7 +256,14 @@ const OffloadRuntimeGrantRequest = Schema.Struct({
   subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   ...OffloadAdmissionRequest.fields
 });
+const OffloadPrimeRequest = Schema.Struct({
+  subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  sessionId: OffloadAdmissionRequest.fields.sessionId,
+  repositorySlug: OffloadAdmissionRequest.fields.repositorySlug,
+  headSha: OffloadAdmissionRequest.fields.snapshot.fields.headSha
+});
 const OffloadSandboxDestroyRequest = Schema.Struct({
+  subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   sessionId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))
 });
 const OffloadAccountRegistration = Schema.Struct({
@@ -277,7 +286,7 @@ const registerOffloadJob = async (
   idempotencyKey: string
 ): Promise<Schema.Schema.Type<typeof OffloadAccountRegistration>> => {
   const response = await env.MANAGED_ACCOUNT.getByName(subject).fetch(
-    "https://managed-account.internal/v1/offload/register",
+    INTERNAL_ROUTES.managedAccount.offloadRegister,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -295,6 +304,125 @@ const registerOffloadJob = async (
   return Schema.decodeUnknownSync(OffloadAccountRegistration)(await response.json(), {
     onExcessProperty: "error"
   });
+};
+
+const authorizeOffloadPrimer = async (
+  env: ManagedRuntimeEnv,
+  subject: string
+): Promise<Schema.Schema.Type<typeof OffloadAccountRegistration>> => {
+  const response = await env.MANAGED_ACCOUNT.getByName(subject).fetch(
+    INTERNAL_ROUTES.managedAccount.offloadAuthorize,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject })
+    }
+  );
+  if (!response.ok) throw new Error("Offload primer is not authorized");
+  return Schema.decodeUnknownSync(OffloadAccountRegistration)(await response.json(), {
+    onExcessProperty: "error"
+  });
+};
+
+const primeOffloadSession = async (
+  env: ManagedRuntimeEnv,
+  body: Schema.Schema.Type<typeof OffloadPrimeRequest>
+): Promise<void> => {
+  const idempotencyKey = `prime_${(await sha256Hex(`${body.sessionId}:${body.headSha}`)).slice(0, 32)}`;
+  const jobId = await offloadJobId(body.subject, idempotencyKey);
+  const request: OffloadAdmissionRequestValue = {
+    version: 1,
+    sessionId: body.sessionId,
+    idempotencyKey,
+    repositorySlug: body.repositorySlug,
+    snapshot: {
+      version: 1,
+      headSha: body.headSha,
+      digest: "0".repeat(64),
+      bytes: 1
+    },
+    command: {
+      source: { kind: "preset", preset: "typecheck" },
+      executable: "pnpm",
+      args: ["typecheck"],
+      cwd: "."
+    },
+    limits: { timeoutSeconds: 1, snapshotBytes: 1, outputBytes: 1 }
+  };
+  const registration = await authorizeOffloadPrimer(env, body.subject);
+  const layer = makeOffloadJobStoreLayer(env.OFFLOAD_JOBS);
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const store = yield* OffloadJobStore;
+      yield* store.create({
+        jobId,
+        subject: body.subject,
+        request,
+        githubCapabilityHandle: registration.githubCapabilityHandle,
+        nowSeconds: Math.floor(Date.now() / 1_000)
+      });
+    }).pipe(Effect.provide(layer))
+  );
+  try {
+    const issued = await Effect.runPromise(issueOffloadGrant(
+      {
+        subject: body.subject,
+        sessionId: body.sessionId,
+        jobId,
+        idempotencyKey,
+        repositorySlug: body.repositorySlug,
+        snapshotDigest: request.snapshot.digest,
+        actions: ["git.read"]
+      },
+      env.MANAGED_RUNTIME_GRANT_SECRET
+    ));
+    await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(body.sessionId).fetch(
+      INTERNAL_ROUTES.offloadLifecycle.touch,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ subject: body.subject, sessionId: body.sessionId })
+      }
+    );
+    const sandbox = getSandbox(
+      env.Sandbox,
+      await sandboxIdForSession(`offload_${body.sessionId}`),
+      {
+        transport: "rpc",
+        normalizeId: true,
+        enableDefaultSession: false,
+        sleepAfter: "10m"
+      }
+    );
+    await Effect.runPromise(primeOffloadWorkspace(
+      sandbox,
+      {
+        version: 1,
+        jobId,
+        subject: body.subject,
+        request,
+        githubCapabilityHandle: registration.githubCapabilityHandle,
+        state: "preparing",
+        cancelRequested: false,
+        sequence: 0,
+        events: [],
+        execution: "available",
+        result: null,
+        createdAt: Math.floor(Date.now() / 1_000),
+        updatedAt: Math.floor(Date.now() / 1_000),
+        expiresAt: Math.floor(Date.now() / 1_000) + 24 * 60 * 60
+      },
+      env.MANAGED_RUNTIME_ORIGIN,
+      issued.grant
+    ));
+  } finally {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* OffloadJobStore;
+        yield* store.remove(jobId);
+      }).pipe(Effect.provide(layer), Effect.catchAll(() => Effect.void))
+    );
+  }
 };
 
 const authorizeOffloadRequest = (
@@ -323,7 +451,7 @@ const authorizeOffloadRequest = (
     if (consume) {
       const consumed = yield* Effect.tryPromise(() =>
         env.MANAGED_ACCOUNT.getByName(record.subject).fetch(
-          "https://managed-account.internal/v1/offload/grants/consume",
+          INTERNAL_ROUTES.managedAccount.offloadConsumeGrant,
           {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -359,7 +487,11 @@ const createOffloadWorkflowOnce = async (
 };
 
 export default {
-  async fetch(request: Request, env: ManagedRuntimeEnv): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: ManagedRuntimeEnv,
+    ctx: ExecutionContext
+  ): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       return json({
@@ -369,6 +501,19 @@ export default {
           typeof env.MANAGED_RUNTIME_SERVICE_SECRET === "string" &&
           env.MANAGED_RUNTIME_SERVICE_SECRET.length >= 32,
       });
+    }
+    if (url.pathname === "/v1/offload/prime" && request.method === "POST") {
+      if (!hasBearerServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const body = decodeOrNull(OffloadPrimeRequest, await request.json());
+      if (body === null) return json({ error: "Invalid offload prime request" }, 400);
+      ctx.waitUntil(
+        primeOffloadSession(env, body).catch((cause) =>
+          console.error("Offload primer failed", cause)
+        )
+      );
+      return json({ accepted: true }, 202);
     }
     if (
       url.pathname === "/v1/offload/sandboxes/destroy" &&
@@ -381,7 +526,7 @@ export default {
       if (body === null) return json({ error: "Invalid sandbox cleanup request" }, 400);
       const response = await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(
         body.sessionId
-      ).fetch("https://offload-lifecycle.internal/v1/destroy", {
+      ).fetch(INTERNAL_ROUTES.offloadLifecycle.destroy, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body)
@@ -595,7 +740,7 @@ export default {
         return json({ error: "Invalid environment cleanup request" }, 400);
       const account = env.MANAGED_ACCOUNT.getByName(body.subject);
       const listed = await account.fetch(
-        "https://managed-account.internal/v1/sessions/list",
+        INTERNAL_ROUTES.managedAccount.sessionList,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -1054,7 +1199,7 @@ export default {
       const subject = decodeURIComponent(authMatch[1] ?? "");
       const body: unknown = await request.json();
       return env.MANAGED_ACCOUNT.getByName(subject).fetch(
-        "https://managed-account.internal/v1/auth-state",
+        INTERNAL_ROUTES.managedAccount.authState,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -1074,7 +1219,7 @@ export default {
       }
       const subject = decodeURIComponent(capabilityMatch[1] ?? "");
       return env.MANAGED_ACCOUNT.getByName(subject).fetch(
-        "https://managed-account.internal/v1/capabilities",
+        INTERNAL_ROUTES.managedAccount.capabilities,
         {
           method: "POST",
           headers: { "content-type": "application/json" },

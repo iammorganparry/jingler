@@ -7,6 +7,7 @@ import {
 } from "cloudflare:workers"
 import { Effect } from "effect"
 import { issueOffloadGrant } from "./offload-grant.js"
+import { INTERNAL_ROUTES } from "./internal-routes.js"
 import {
   OffloadJobStore,
   makeOffloadJobStoreLayer
@@ -15,8 +16,7 @@ import {
   executeOffloadCommand,
   primeOffloadWorkspace,
   restoreOffloadSnapshot,
-  OffloadWorkspaceError,
-  type OffloadSandbox
+  OffloadWorkspaceError
 } from "./offload-workspace.js"
 import type { ManagedRuntimeEnv } from "./runtime-env.js"
 import { sandboxIdForSession } from "./runtime-identity.js"
@@ -114,7 +114,7 @@ const releaseOffloadSlot = async (
   )
   await Promise.all([
     env.MANAGED_ACCOUNT.getByName(record.subject).fetch(
-      "https://managed-account.internal/v1/offload/unregister",
+      INTERNAL_ROUTES.managedAccount.offloadUnregister,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -122,11 +122,14 @@ const releaseOffloadSlot = async (
       }
     ),
     env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(record.request.sessionId).fetch(
-      "https://offload-lifecycle.internal/v1/touch",
+      INTERNAL_ROUTES.offloadLifecycle.touch,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: record.request.sessionId })
+        body: JSON.stringify({
+          subject: record.subject,
+          sessionId: record.request.sessionId
+        })
       }
     )
   ]).catch(() => undefined)
@@ -170,11 +173,14 @@ export const runOffloadWorkflow = async (
           )
           const touched = yield* Effect.tryPromise(() =>
             env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(record.request.sessionId).fetch(
-              "https://offload-lifecycle.internal/v1/touch",
+              INTERNAL_ROUTES.offloadLifecycle.touch,
               {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ sessionId: record.request.sessionId })
+                body: JSON.stringify({
+          subject: record.subject,
+          sessionId: record.request.sessionId
+        })
               }
             )
           )
@@ -186,7 +192,7 @@ export const runOffloadWorkflow = async (
             sleepAfter: "10m"
           })
           const workspace = yield* primeOffloadWorkspace(
-            sandbox as unknown as OffloadSandbox,
+            sandbox,
             record,
             env.MANAGED_RUNTIME_ORIGIN,
             gitGrant.grant
@@ -220,7 +226,7 @@ export const runOffloadWorkflow = async (
             sleepAfter: "10m"
           })
           return yield* restoreOffloadSnapshot(
-            sandbox as unknown as OffloadSandbox,
+            sandbox,
             record.jobId,
             snapshot
           )
@@ -255,7 +261,7 @@ export const runOffloadWorkflow = async (
             sleepAfter: "10m"
           })
           return yield* executeOffloadCommand(
-            sandbox as unknown as OffloadSandbox,
+            sandbox,
             record.jobId,
             record.request,
             sourceDigest,

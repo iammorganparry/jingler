@@ -53,15 +53,27 @@ const harness = (overrides: Partial<ManagedOffloadPortShape> = {}) => {
   const authenticate = vi.fn(() => Effect.succeed<string | null>("user_one"))
   const authorizeRepository = vi.fn(() => Effect.void)
   const issueRuntimeGrant = vi.fn(() => Effect.succeed(response))
+  const primeRuntime = vi.fn(() => Effect.void)
+  const destroySandbox = vi.fn(() => Effect.void)
   const ports: ManagedOffloadPortShape = {
     enabled: true,
     authenticate,
     authorizeRepository,
     issueRuntimeGrant,
+    primeRuntime,
+    destroySandbox,
     ...overrides
   }
   const app = createManagedOffloadRoutes(Layer.succeed(ManagedOffloadPorts, ports))
-  return { app, ports, authenticate, authorizeRepository, issueRuntimeGrant }
+  return {
+    app,
+    ports,
+    authenticate,
+    authorizeRepository,
+    issueRuntimeGrant,
+    primeRuntime,
+    destroySandbox
+  }
 }
 
 describe("managed offload admission", () => {
@@ -111,6 +123,38 @@ describe("managed offload admission", () => {
     })
     expect(denied.status).toBe(status)
     expect(issueRuntimeGrant).not.toHaveBeenCalled()
+  })
+})
+
+describe("managed offload lifecycle", () => {
+  it("authenticates and authorizes asynchronous session priming", async () => {
+    const { app, authorizeRepository, primeRuntime } = harness()
+    const input = {
+      version: 1,
+      sessionId: "session_aaaaaaaaaaaaaaaa",
+      repositorySlug: "jingler/example",
+      headSha: "a".repeat(40)
+    }
+    const result = await app.request("http://localhost/prime", {
+      method: "POST",
+      headers: { authorization: "Bearer desktop-session" },
+      body: JSON.stringify(input)
+    })
+    expect(result.status).toBe(202)
+    expect(authorizeRepository).toHaveBeenCalledWith("user_one", "jingler/example")
+    expect(primeRuntime).toHaveBeenCalledWith("user_one", input)
+  })
+
+  it("destroys an archived or deleted session sandbox", async () => {
+    const { app, destroySandbox } = harness()
+    const input = { version: 1, sessionId: "session_aaaaaaaaaaaaaaaa" }
+    const result = await app.request("http://localhost/sandboxes/destroy", {
+      method: "POST",
+      headers: { authorization: "Bearer desktop-session" },
+      body: JSON.stringify(input)
+    })
+    expect(result.status).toBe(200)
+    expect(destroySandbox).toHaveBeenCalledWith("user_one", input)
   })
 })
 

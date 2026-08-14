@@ -12,10 +12,10 @@ export interface OffloadSandbox {
   readonly exec: (
     command: string,
     options?: {
-      readonly cwd?: string
-      readonly timeout?: number
-      readonly env?: Readonly<Record<string, string | undefined>>
-      readonly origin?: "user" | "internal"
+      cwd?: string
+      timeout?: number
+      env?: Record<string, string | undefined>
+      origin?: "user" | "internal"
     }
   ) => Promise<{ readonly success: boolean; readonly stdout: string; readonly stderr: string }>
   readonly writeFile: (
@@ -24,7 +24,7 @@ export interface OffloadSandbox {
   ) => Promise<unknown>
   readonly readFile: (
     path: string,
-    options?: { readonly encoding?: string }
+    options?: { encoding?: "utf8" }
   ) => Promise<{ readonly content: string }>
 }
 

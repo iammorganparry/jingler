@@ -43,6 +43,7 @@ import { ManagedRuntimeConfiguration } from "./runtime-configuration.js";
 import { unstreamedProcessOutput } from "./process-output.js";
 import { sandboxIdForSession, sha256Hex } from "./runtime-identity.js";
 import { managedCertificationDocument } from "./certification-config.js";
+import { INTERNAL_ROUTES } from "./internal-routes.js";
 
 interface RuntimeMetadata {
   readonly subject: string;
@@ -346,7 +347,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
 
   async #unregisterSession(metadata: RuntimeMetadata): Promise<void> {
     await this.env.MANAGED_ACCOUNT.getByName(metadata.subject)
-      .fetch("https://managed-account.internal/v1/sessions/unregister", {
+      .fetch(INTERNAL_ROUTES.managedAccount.sessionUnregister, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

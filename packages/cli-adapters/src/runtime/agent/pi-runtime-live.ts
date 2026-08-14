@@ -3,6 +3,7 @@ import type { PiRunSpec } from "@jingler/core"
 import { Effect, Layer } from "effect"
 import { AppPaths } from "../../app-paths.js"
 import { SecretStore } from "../../secret-store.js"
+import { makeOffloadCommandRouter } from "../../offload-command-router.js"
 import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
@@ -53,6 +54,7 @@ export const makePiAgentRuntimeLive = (
     const diagnostics = yield* RuntimeDiagnostics
     const workspace = yield* makeWorkspaceInspectionPort
     const mutations = yield* makeWorkspaceMutationPort
+    const offload = yield* makeOffloadCommandRouter
     const credentials = new AgentSecretStore(secretStore)
 
     const factory = makePiSessionFactory({
@@ -116,6 +118,9 @@ export const makePiAgentRuntimeLive = (
         sessionId: spec.piSessionId ?? spec.runId
       }),
       createToolRegistry: (spec, context, tracker) => {
+        Effect.runFork(
+          offload.primeSession(spec.cwd, spec.sessionId).pipe(Effect.ignore)
+        )
         if (!tracker) {
           return Effect.fail(
             new AgentRuntimeError({
@@ -164,7 +169,10 @@ export const makePiAgentRuntimeLive = (
               registerManagedFileTools(registry, managedResources, managedFiles)
             )),
             Effect.tap((registry) => Effect.sync(() =>
-              registerWorkspaceMutationTools(registry, spec.cwd, mutations)
+              registerWorkspaceMutationTools(registry, spec.cwd, mutations, {
+                sessionId: spec.sessionId,
+                offload
+              })
             )),
             Effect.tap((registry) =>
               options.configureToolRegistry?.({ registry, spec, context }) ?? Effect.void

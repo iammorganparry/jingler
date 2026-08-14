@@ -11,6 +11,7 @@ import {
 const METADATA_KEY = "offload-sandbox-lifecycle"
 
 interface OffloadSandboxLifecycleMetadata {
+  readonly subject: string
   readonly sessionId: string
   readonly sandboxId: string
   readonly generation: number
@@ -49,15 +50,22 @@ export class OffloadSandboxLifecycleObject extends DurableObject<ManagedRuntimeE
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const body = request.method === "POST" ? fields(await readJson(request)) : null
+    const subject = typeof body?.subject === "string" ? body.subject : null
     const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null
-    if (sessionId === null) return json({ error: "sessionId is required" }, 400)
+    if (subject === null || sessionId === null) {
+      return json({ error: "subject and sessionId are required" }, 400)
+    }
     const existing = await this.#metadata()
-    if (existing !== null && existing.sessionId !== sessionId) {
+    if (
+      existing !== null &&
+      (existing.subject !== subject || existing.sessionId !== sessionId)
+    ) {
       return json({ error: "sandbox lifecycle scope changed" }, 409)
     }
     if (url.pathname === "/v1/touch" && request.method === "POST") {
       const now = Math.floor(Date.now() / 1_000)
       const metadata: OffloadSandboxLifecycleMetadata = {
+        subject,
         sessionId,
         sandboxId: existing?.sandboxId ?? await sandboxIdForSession(`offload_${sessionId}`),
         generation: (existing?.generation ?? 0) + 1,

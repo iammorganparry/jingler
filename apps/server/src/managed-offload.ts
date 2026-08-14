@@ -2,8 +2,12 @@ import {
   OffloadAdmissionError,
   OffloadAdmissionRequest,
   OffloadAdmissionResponse,
+  OffloadPrimeRequest,
+  OffloadSandboxDestroyRequest,
   type OffloadAdmissionRequest as OffloadAdmissionRequestValue,
-  type OffloadAdmissionResponse as OffloadAdmissionResponseValue
+  type OffloadAdmissionResponse as OffloadAdmissionResponseValue,
+  type OffloadPrimeRequest as OffloadPrimeRequestValue,
+  type OffloadSandboxDestroyRequest as OffloadSandboxDestroyRequestValue
 } from "@jingler/core"
 import { Context, Effect, Either, Layer, Schema } from "effect"
 import { Hono } from "hono"
@@ -30,6 +34,14 @@ export interface ManagedOffloadPortShape {
   readonly issueRuntimeGrant: (
     input: RuntimeGrantInput
   ) => Effect.Effect<OffloadAdmissionResponseValue, OffloadAdmissionError>
+  readonly primeRuntime: (
+    subject: string,
+    request: OffloadPrimeRequestValue
+  ) => Effect.Effect<void, OffloadAdmissionError>
+  readonly destroySandbox: (
+    subject: string,
+    request: OffloadSandboxDestroyRequestValue
+  ) => Effect.Effect<void, OffloadAdmissionError>
 }
 
 export class ManagedOffloadPorts extends Context.Tag("@jingler/ManagedOffloadPorts")<
@@ -75,7 +87,47 @@ export class ManagedOffloadAdmission extends Effect.Service<ManagedOffloadAdmiss
           yield* ports.authorizeRepository(subject, request.repositorySlug)
           return yield* ports.issueRuntimeGrant({ subject, request })
         })
-      return { admit }
+      const authenticated = (
+        headers: Headers
+      ): Effect.Effect<string, OffloadAdmissionError> =>
+        ports.authenticate(headers).pipe(
+          Effect.flatMap((subject) =>
+            subject === null
+              ? Effect.fail(admissionFailure("authentication", "Authentication required"))
+              : Effect.succeed(subject)
+          )
+        )
+      const prime = (
+        headers: Headers,
+        body: unknown
+      ): Effect.Effect<void, OffloadAdmissionError> =>
+        Effect.gen(function* () {
+          if (!ports.enabled) {
+            return yield* Effect.fail(admissionFailure("disabled", "Offload Compute is disabled"))
+          }
+          const subject = yield* authenticated(headers)
+          const request = yield* Schema.decodeUnknown(OffloadPrimeRequest)(body, {
+            onExcessProperty: "error"
+          }).pipe(
+            Effect.mapError(() => admissionFailure("invalid-input", "Invalid offload prime request"))
+          )
+          yield* ports.authorizeRepository(subject, request.repositorySlug)
+          yield* ports.primeRuntime(subject, request)
+        })
+      const destroy = (
+        headers: Headers,
+        body: unknown
+      ): Effect.Effect<void, OffloadAdmissionError> =>
+        Effect.gen(function* () {
+          const subject = yield* authenticated(headers)
+          const request = yield* Schema.decodeUnknown(OffloadSandboxDestroyRequest)(body, {
+            onExcessProperty: "error"
+          }).pipe(
+            Effect.mapError(() => admissionFailure("invalid-input", "Invalid sandbox cleanup request"))
+          )
+          yield* ports.destroySandbox(subject, request)
+        })
+      return { admit, prime, destroy }
     })
   }
 ) {}
@@ -96,6 +148,28 @@ const runtimeError = async (response: Response): Promise<OffloadAdmissionError> 
     message
   )
 }
+
+const postRuntimeOperation = (
+  path: string,
+  body: unknown
+): Effect.Effect<void, OffloadAdmissionError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(new URL(path, env.managedRuntimeUrl), {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.managedRuntimeServiceSecret}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(body)
+      })
+      if (!response.ok) throw await runtimeError(response)
+    },
+    catch: (cause) =>
+      cause instanceof OffloadAdmissionError
+        ? cause
+        : admissionFailure("unavailable", "Managed runtime unavailable")
+  })
 
 export const ManagedOffloadPortsLive = Layer.succeed(ManagedOffloadPorts, {
   enabled: env.managedEnvironmentsEnabled && env.offloadComputeEnabled,
@@ -156,7 +230,11 @@ export const ManagedOffloadPortsLive = Layer.succeed(ManagedOffloadPorts, {
         cause instanceof OffloadAdmissionError
           ? cause
           : admissionFailure("unavailable", "Managed runtime unavailable")
-    })
+    }),
+  primeRuntime: (subject, request) =>
+    postRuntimeOperation("/v1/offload/prime", { subject, ...request }),
+  destroySandbox: (subject, request) =>
+    postRuntimeOperation("/v1/offload/sandboxes/destroy", { subject, ...request })
 })
 
 const errorStatus = (error: OffloadAdmissionError): number => {
@@ -193,6 +271,32 @@ export const createManagedOffloadRoutes = (
     return Either.isRight(admitted)
       ? json(admitted.right)
       : json({ error: admitted.left.message }, errorStatus(admitted.left))
+  })
+  routes.post("/prime", async (context) => {
+    const body = await decodeBoundedJson(context.req.raw, Schema.Unknown)
+    if (body === null) return json({ error: "Invalid offload prime request" }, 400)
+    const primed = await Effect.runPromise(
+      ManagedOffloadAdmission.prime(context.req.raw.headers, body).pipe(
+        Effect.provide(service),
+        Effect.either
+      )
+    )
+    return Either.isRight(primed)
+      ? json({ accepted: true }, 202)
+      : json({ error: primed.left.message }, errorStatus(primed.left))
+  })
+  routes.post("/sandboxes/destroy", async (context) => {
+    const body = await decodeBoundedJson(context.req.raw, Schema.Unknown)
+    if (body === null) return json({ error: "Invalid sandbox cleanup request" }, 400)
+    const destroyed = await Effect.runPromise(
+      ManagedOffloadAdmission.destroy(context.req.raw.headers, body).pipe(
+        Effect.provide(service),
+        Effect.either
+      )
+    )
+    return Either.isRight(destroyed)
+      ? json({ destroyed: true })
+      : json({ error: destroyed.left.message }, errorStatus(destroyed.left))
   })
   return routes
 }

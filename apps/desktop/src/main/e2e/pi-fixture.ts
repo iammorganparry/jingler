@@ -608,6 +608,20 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
         )
       : fauxAssistantMessage("Inspected the GitHub feedback through pi.")
   }
+  if (latestOperatorText(context).includes("[[offload-local-retry]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+          COMMAND_TOOL,
+          { command: "pnpm typecheck", runLocally: true },
+          "offload-local-retry-1"
+        )
+      : fauxAssistantMessage("Explicit local retry completed.")
+  }
+  if (latestOperatorText(context).includes("[[offload-typecheck]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(COMMAND_TOOL, { command: "pnpm typecheck" }, "offload-typecheck-1")
+      : fauxAssistantMessage("Typecheck completed on Offload Compute.")
+  }
   if (latestOperatorText(context).includes("Add rate limiting")) {
     return mutationResponse(context)
   }

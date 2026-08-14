@@ -114,6 +114,8 @@ const EmbeddedPiRuntimeLive = e2ePiFixture === null
     })
 
 const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
+  Layer.provide(ConfigService.Default),
+  Layer.provide(GitService.Default),
   Layer.provide(AssetLayer),
   Layer.provide(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),

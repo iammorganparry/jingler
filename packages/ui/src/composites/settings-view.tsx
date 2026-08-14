@@ -4,6 +4,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OffloadComputeSettings,
   PlanTemplateConfig,
   ContextConfig,
   ContextSnapshot,
@@ -216,6 +217,10 @@ export interface SettingsViewProps {
   /** Desktop-notification prefs; absent means the defaults, not "off". */
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
+  /** Automatic read-only cloud routing for eligible agent commands. */
+  offloadCompute?: OffloadComputeSettings | null
+  onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
+  offloadStatus?: "disabled" | "priming" | "ready" | "failed"
   /** Whether plan mode runs commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
@@ -263,6 +268,9 @@ export function SettingsView({
   onSaveGit,
   notifications,
   onSaveNotifications,
+  offloadCompute,
+  onSaveOffloadCompute,
+  offloadStatus,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -367,6 +375,9 @@ export function SettingsView({
         <GeneralSection
           notifications={notifications}
           onSaveNotifications={onSaveNotifications}
+          offloadCompute={offloadCompute}
+          onSaveOffloadCompute={onSaveOffloadCompute}
+          offloadStatus={offloadStatus}
           planAutoRun={planAutoRun}
           onSavePlanAutoRun={onSavePlanAutoRun}
           adhdMode={adhdMode}
@@ -896,6 +907,9 @@ function FontSizeRow({
 function GeneralSection({
   notifications,
   onSaveNotifications,
+  offloadCompute,
+  onSaveOffloadCompute,
+  offloadStatus,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -905,6 +919,9 @@ function GeneralSection({
 }: {
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
+  offloadCompute?: OffloadComputeSettings | null
+  onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
+  offloadStatus?: "disabled" | "priming" | "ready" | "failed"
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
   adhdMode?: boolean | null
@@ -912,6 +929,13 @@ function GeneralSection({
   fontScale?: number | null
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
 }) {
+  const [offloadDraft, setOffloadDraft] = React.useState<boolean>(
+    offloadCompute?.enabled ?? false
+  )
+  React.useEffect(
+    () => setOffloadDraft(offloadCompute?.enabled ?? false),
+    [offloadCompute?.enabled]
+  )
   // Absent means ON, matching `PLAN_AUTO_RUN_DEFAULT` in the domain.
   const [planDraft, setPlanDraft] = React.useState<boolean>(planAutoRun ?? true)
   React.useEffect(() => setPlanDraft(planAutoRun ?? true), [planAutoRun])
@@ -945,6 +969,39 @@ function GeneralSection({
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
       <div className="mx-auto w-full max-w-[560px]">
         <div className="mb-1 flex items-center gap-2 border-b border-hairline pb-2.5">
+          <span className="text-[13px] font-semibold text-text-bright">
+            Compute
+          </span>
+        </div>
+        <div className="divide-y divide-hairline">
+          <ToggleRow
+            label="Offload Compute"
+            description="Automatically run eligible lint, typecheck, test, build, and allowlisted argv in read-only cloud compute. Interactive, stateful, shell-composed, and unknown commands stay local."
+            checked={offloadDraft}
+            onChange={(enabled) => {
+              setOffloadDraft(enabled)
+              void onSaveOffloadCompute?.({
+                enabled,
+                explicitCommands: offloadCompute?.explicitCommands ?? []
+              })
+            }}
+          />
+          {offloadStatus === "priming" ? (
+            <p className="px-1 py-2 text-[11px] text-muted-foreground" role="status">
+              Priming cloud compute for active sessions…
+            </p>
+          ) : offloadStatus === "ready" ? (
+            <p className="px-1 py-2 text-[11px] text-success" role="status">
+              Cloud compute is ready and will route eligible commands automatically.
+            </p>
+          ) : offloadStatus === "failed" ? (
+            <p className="px-1 py-2 text-[11px] text-danger" role="alert">
+              Cloud compute could not be primed. Commands will not silently retry locally.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
           <span className="text-[13px] font-semibold text-text-bright">
             Planning
           </span>

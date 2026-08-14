@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   canTransitionOffloadJob,
   classifyOffloadCommand,
+  parseObservedAgentShellCommand,
   DEFAULT_OFFLOAD_COMPUTE_SETTINGS,
   OFFLOAD_OUTPUT_MAX_BYTES,
   OFFLOAD_SNAPSHOT_MAX_BYTES,
@@ -56,6 +57,37 @@ const result = {
   outputTruncated: false,
   timings
 } as const
+
+describe("Offload Compute shell observation", () => {
+  it("turns quoting and escaping into literal argv", () => {
+    expect(parseObservedAgentShellCommand(
+      "pnpm run test -- --name 'literal; value' escaped\\ value"
+    )).toMatchObject({
+      complete: true,
+      command: {
+        executable: "pnpm",
+        args: ["run", "test", "--", "--name", "literal; value", "escaped value"],
+        usesShellFeatures: false
+      }
+    })
+  })
+
+  it.each([
+    "pnpm test && echo done",
+    "pnpm test > output.txt",
+    "pnpm test $EXTRA",
+    "pnpm test\nrm -rf .",
+    "pnpm 'test"
+  ])("fails closed for shell-composed source: %s", (source) => {
+    expect(parseObservedAgentShellCommand(source).command.usesShellFeatures).toBe(true)
+  })
+
+  it("marks stateful commands local without blocking read-only presets", () => {
+    expect(parseObservedAgentShellCommand("git checkout main").command.mutatesSource).toBe(true)
+    expect(parseObservedAgentShellCommand("pnpm install").command.mutatesSource).toBe(true)
+    expect(parseObservedAgentShellCommand("pnpm build").command.mutatesSource).toBe(false)
+  })
+})
 
 describe("Offload Compute command classification", () => {
   it.each([

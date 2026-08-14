@@ -262,7 +262,7 @@ export const captureOffloadSnapshot = (
     }
   })
 
-const upload = (
+export const uploadOffloadSnapshot = (
   input: UploadOffloadSnapshotInput
 ): Effect.Effect<UploadedOffloadSnapshot, OffloadSnapshotError> =>
   Effect.tryPromise({
@@ -313,6 +313,6 @@ export class OffloadSnapshotService extends Effect.Service<OffloadSnapshotServic
   "@jingler/OffloadSnapshotService",
   {
     accessors: true,
-    sync: () => ({ capture: captureOffloadSnapshot, upload })
+    sync: () => ({ capture: captureOffloadSnapshot, upload: uploadOffloadSnapshot })
   }
 ) {}

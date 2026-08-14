@@ -17,6 +17,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OffloadComputeSettings,
   DiffStat,
   Environment,
   EnvironmentDiscovery,
@@ -200,6 +201,10 @@ export interface JinglerAppProps {
   onSaveNotificationsConfig?: (
     config: NotificationsConfig
   ) => Promise<void> | void
+  /** Automatic read-only cloud routing for eligible agent commands. */
+  offloadCompute?: OffloadComputeSettings | null
+  onSaveOffloadCompute?: (settings: OffloadComputeSettings) => Promise<void> | void
+  offloadStatus?: "disabled" | "priming" | "ready" | "failed"
   /** Whether plan mode runs its read-only commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => Promise<void> | void
@@ -450,6 +455,9 @@ export function JinglerApp({
   onSaveGitConfig,
   notificationsConfig,
   onSaveNotificationsConfig,
+  offloadCompute,
+  onSaveOffloadCompute,
+  offloadStatus,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -1270,6 +1278,9 @@ export function JinglerApp({
               onSaveGit={onSaveGitConfig}
               notifications={notificationsConfig}
               onSaveNotifications={onSaveNotificationsConfig}
+              offloadCompute={offloadCompute}
+              onSaveOffloadCompute={onSaveOffloadCompute}
+              offloadStatus={offloadStatus}
               planAutoRun={planAutoRun}
               onSavePlanAutoRun={onSavePlanAutoRun}
               adhdMode={adhdMode}

@@ -6,6 +6,7 @@ import {
 } from "@effect/platform"
 import { Effect, Schema, Stream } from "effect"
 import { AssetService } from "../../asset.js"
+import type { OffloadCommandRouterPort } from "../../offload-command-router.js"
 import {
   ToolError,
   type ToolDefinition,
@@ -280,10 +281,16 @@ const fileTool = <Input, Encoded>(
   idempotency: "keyed"
 })
 
+export interface WorkspaceCommandRouting {
+  readonly sessionId: string
+  readonly offload: OffloadCommandRouterPort
+}
+
 export const registerWorkspaceMutationTools = (
   registry: ToolRegistry,
   cwd: string,
-  workspace: WorkspaceMutationPort
+  workspace: WorkspaceMutationPort,
+  routing?: WorkspaceCommandRouting
 ): void => {
   registry.register(
     fileTool({
@@ -326,8 +333,11 @@ export const registerWorkspaceMutationTools = (
   registry.register({
     id: "command_execute",
     version: "1",
-    description: "Run a shell command in the workspace and stream its output.",
-    input: Schema.Struct({ command: Schema.String.pipe(Schema.minLength(1)) }),
+    description: "Run a shell command in the workspace and stream its output. Eligible commands offload automatically; set runLocally only after explicit operator approval following a remote failure.",
+    input: Schema.Struct({
+      command: Schema.String.pipe(Schema.minLength(1)),
+      runLocally: Schema.optionalWith(Schema.Boolean, { default: () => false })
+    }),
     risk: "execute",
     roles,
     modes,
@@ -335,9 +345,23 @@ export const registerWorkspaceMutationTools = (
     outputBudget: 32_000,
     cancellable: true,
     idempotency: "unsafe",
-    execute: ({ command }, context) =>
-      Effect.runPromise(workspace.execute(cwd, command, context), {
-        signal: context.signal
-      })
+    execute: ({ command, runLocally }, context) =>
+      Effect.runPromise(
+        (routing && !runLocally
+          ? routing.offload.executeIfEligible(
+              cwd,
+              routing.sessionId,
+              command,
+              context
+            ).pipe(
+              Effect.flatMap((remote) =>
+                remote === null
+                  ? workspace.execute(cwd, command, context)
+                  : Effect.succeed(remote)
+              )
+            )
+          : workspace.execute(cwd, command, context)),
+        { signal: context.signal }
+      )
   })
 }

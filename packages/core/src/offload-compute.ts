@@ -203,6 +203,16 @@ export const OffloadJobEvent = Schema.Union(
 )
 export type OffloadJobEvent = Schema.Schema.Type<typeof OffloadJobEvent>
 
+export const OffloadEventPage = Schema.Struct({
+  version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
+  jobId: OpaqueOffloadId,
+  state: OffloadJobState,
+  cursor: Schema.Int.pipe(Schema.nonNegative()),
+  events: Schema.Array(OffloadJobEvent),
+  result: Schema.NullOr(OffloadJobResult)
+})
+export type OffloadEventPage = Schema.Schema.Type<typeof OffloadEventPage>
+
 export const OffloadAdmissionRequest = Schema.Struct({
   version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
   sessionId: OpaqueOffloadId,
@@ -213,6 +223,20 @@ export const OffloadAdmissionRequest = Schema.Struct({
   limits: OffloadJobLimits
 })
 export type OffloadAdmissionRequest = Schema.Schema.Type<typeof OffloadAdmissionRequest>
+
+export const OffloadPrimeRequest = Schema.Struct({
+  version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
+  sessionId: OpaqueOffloadId,
+  repositorySlug: OffloadRepositorySlug,
+  headSha: OffloadSnapshotIdentity.fields.headSha
+})
+export type OffloadPrimeRequest = Schema.Schema.Type<typeof OffloadPrimeRequest>
+
+export const OffloadSandboxDestroyRequest = Schema.Struct({
+  version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
+  sessionId: OpaqueOffloadId
+})
+export type OffloadSandboxDestroyRequest = Schema.Schema.Type<typeof OffloadSandboxDestroyRequest>
 
 export const OFFLOAD_GRANT_MAX_TTL_SECONDS = 5 * 60
 export const OffloadGrantAction = Schema.Literal(
@@ -268,6 +292,108 @@ export interface ObservedAgentCommand {
   readonly usesShellFeatures: boolean
   readonly mutatesSource: boolean
   readonly environmentKeys: ReadonlyArray<string>
+}
+
+export interface ParsedAgentShellCommand {
+  readonly command: ObservedAgentCommand
+  readonly complete: boolean
+}
+
+const SHELL_OPERATOR = new Set(["|", "&", ";", "<", ">", "(", ")", "\n", "\r"])
+const SHELL_EXPANSION = new Set(["$", "`", "*", "?", "[", "]", "{", "}", "~"])
+const STATEFUL_EXECUTABLES = new Set(["cd", "export", "source", ".", "rm", "mv", "cp"])
+
+const mutatesSource = (executable: string, args: ReadonlyArray<string>): boolean => {
+  if (STATEFUL_EXECUTABLES.has(executable)) return true
+  if (executable === "git") {
+    return ["add", "apply", "checkout", "clean", "commit", "merge", "mv", "rebase", "reset", "restore", "rm", "switch"]
+      .includes(args[0] ?? "")
+  }
+  return (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") &&
+    ["add", "install", "remove", "uninstall", "update", "upgrade"].includes(args[0] ?? "")
+}
+
+/**
+ * Parse the command tool's POSIX-style source conservatively. Quoting and
+ * backslash escaping become literal argv; expansion, composition, redirects,
+ * control operators, and incomplete quoting are flagged for local execution.
+ */
+export const parseObservedAgentShellCommand = (
+  source: string,
+  cwd = "."
+): ParsedAgentShellCommand => {
+  const argv: string[] = []
+  let word = ""
+  let started = false
+  let quote: "single" | "double" | null = null
+  let escaped = false
+  let usesShellFeatures = false
+  const finish = (): void => {
+    if (!started) return
+    argv.push(word)
+    word = ""
+    started = false
+  }
+  for (const character of source) {
+    if (escaped) {
+      word += character
+      started = true
+      escaped = false
+      continue
+    }
+    if (quote === "single") {
+      if (character === "'") quote = null
+      else word += character
+      started = true
+      continue
+    }
+    if (character === "\\") {
+      escaped = true
+      started = true
+      continue
+    }
+    if (quote === "double") {
+      if (character === '"') quote = null
+      else {
+        word += character
+        if (character === "$" || character === "`") usesShellFeatures = true
+      }
+      started = true
+      continue
+    }
+    if (character === "'") {
+      quote = "single"
+      started = true
+    } else if (character === '"') {
+      quote = "double"
+      started = true
+    } else if (/\s/u.test(character)) {
+      finish()
+      if (character === "\n" || character === "\r") usesShellFeatures = true
+    } else {
+      word += character
+      started = true
+      if (SHELL_OPERATOR.has(character) || SHELL_EXPANSION.has(character)) {
+        usesShellFeatures = true
+      }
+    }
+  }
+  if (escaped) usesShellFeatures = true
+  finish()
+  const [executable = "", ...args] = argv
+  const complete = quote === null && !escaped && executable.length > 0
+  return {
+    complete,
+    command: {
+      executable,
+      args,
+      cwd,
+      interactive: false,
+      usesShellFeatures: usesShellFeatures || !complete,
+      mutatesSource: mutatesSource(executable, args),
+      environmentKeys: []
+    }
+  }
 }
 
 export type OffloadRoutingDecision =

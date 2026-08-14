@@ -103,6 +103,17 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
     await this.ctx.storage.put(USER_KEY, subject)
     const ledger = await this.#ledger(subject)
 
+    if (url.pathname === "/v1/offload/authorize" && request.method === "POST") {
+      const now = Math.floor(Date.now() / 1_000)
+      const connected = !ledger.needsSubscription(now) || (await this.#subscribe(subject))
+      const current = connected ? await this.#ledger(subject) : ledger
+      const auth = current.authorize("managed.session.execute", now)
+      const githubCapabilityHandle = current.credentialHandle("github", now)
+      return connected && auth.admitted && githubCapabilityHandle !== null
+        ? json({ authStateVersion: auth.authStateVersion, githubCapabilityHandle })
+        : json({ error: "Managed offload is not authorized" }, 403)
+    }
+
     if (url.pathname === "/v1/offload/register" && request.method === "POST") {
       const jobId = typeof body?.jobId === "string" ? body.jobId : null
       const idempotencyKey = typeof body?.idempotencyKey === "string"
