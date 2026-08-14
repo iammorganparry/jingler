@@ -70,6 +70,14 @@ const replacementSession = (repoPath: string) => ({
   worktreePath: repoPath,
   workspaceMode: "worktree",
   semanticBranchPending: false,
+  semanticBranchProposal: { type: "fix", slug: "original-review" },
+  publish: {
+    step: "failed",
+    completed: ["inspecting"],
+    error: "The worktree is not on a validated semantic task branch.",
+    resumeFrom: "verifying-branch",
+    updatedAt: "2026-08-11T06:00:00.000Z",
+  },
   chats: [
     {
       id: "c_s_replacement_1",
@@ -85,7 +93,13 @@ const replacementSession = (repoPath: string) => ({
 const persistedSessionIdentity = (home: string, id: string) => {
   const sessions = JSON.parse(
     readFileSync(join(home, "jingler", "sessions.json"), "utf8"),
-  ) as Array<{ id: string; branch: string; prNumber: number | null }>;
+  ) as Array<{
+    id: string;
+    branch: string;
+    prNumber: number | null;
+    semanticBranchProposal?: { type: string; slug: string };
+    publish?: { step: string };
+  }>;
   return sessions.find((session) => session.id === id);
 };
 
@@ -117,11 +131,11 @@ test("moves the live relay to a replacement PR created in the same session", asy
   const originalRoute = githubServer.sessionRoute("s_replacement");
   expect(originalRoute).toMatchObject({ pullRequestNumber: 42, state: "active" });
 
-  execFileSync("git", ["switch", "-c", "fix/replacement-review"], { cwd: repoPath });
+  execFileSync("git", ["switch", "-c", "backport/inngest-fixes-batch-2"], { cwd: repoPath });
   githubServer.addPr({
     number: 43,
     title: "Replacement review PR",
-    headRefName: "fix/replacement-review",
+    headRefName: "backport/inngest-fixes-batch-2",
     baseRefName: "main",
     author: { login: "octocat" },
   });
@@ -129,9 +143,13 @@ test("moves the live relay to a replacement PR created in the same session", asy
   await openSessionByTitle(window, "Replacement review");
   await window.getByRole("button", { name: "Pull Request", exact: true }).click();
   await expect.poll(() => persistedSessionIdentity(home, "s_replacement")).toMatchObject({
-    branch: "fix/replacement-review",
+    branch: "backport/inngest-fixes-batch-2",
     prNumber: 43,
   });
+  expect(persistedSessionIdentity(home, "s_replacement")?.semanticBranchProposal).toBeUndefined();
+  await window.getByRole("button", { name: "Retry from verifying-branch" }).click();
+  await expect.poll(() => persistedSessionIdentity(home, "s_replacement")?.publish?.step).toBe("no-changes");
+  await expect(window.getByText("Publishing stopped")).toHaveCount(0);
   await expect.poll(() => githubServer.sessionRoute("s_replacement")).toMatchObject({
     pullRequestNumber: 43,
     state: "active",

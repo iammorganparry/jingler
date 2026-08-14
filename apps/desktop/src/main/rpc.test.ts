@@ -1199,7 +1199,7 @@ describe("RPC handlers", () => {
             }),
         }),
         Layer.succeed(GitService, {
-          branchAt: () => Effect.succeed("fix/replacement-pr"),
+          branchAt: () => Effect.succeed("backport/inngest-fixes-batch-2"),
         } as never),
         Layer.succeed(GitHubAuth, { upsertSessionRoute } as never),
       );
@@ -1209,16 +1209,17 @@ describe("RPC handlers", () => {
           githubDetectPr("replacement-session").pipe(Effect.provide(github)),
         ),
       ).resolves.toBe(43);
-      await expect(
-        Effect.runPromise(
-          SessionStore.get("replacement-session").pipe(Effect.provide(github)),
-        ),
-      ).resolves.toMatchObject({
-        branch: "fix/replacement-pr",
+      const linked = await Effect.runPromise(
+        SessionStore.get("replacement-session").pipe(Effect.provide(github)),
+      );
+      expect(linked).toMatchObject({
+        branch: "backport/inngest-fixes-batch-2",
         prNumber: 43,
         githubInstallationId: "99",
         githubRepositoryId: "200",
+        semanticBranchPending: false,
       });
+      expect(linked.semanticBranchProposal).toBeUndefined();
       expect(upsertSessionRoute).toHaveBeenCalledWith({
         sessionId: "replacement-session",
         installationId: "99",

@@ -923,6 +923,41 @@ describe("SessionStore", () => {
     })
   })
 
+  it("replaces stale semantic metadata when GitHub links an established PR branch", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Replacement PR" }))
+        yield* SessionStore.setTitleAndBranch(
+          created.id,
+          created.title,
+          "fix/original-pr",
+          { type: "fix", slug: "original-pr" }
+        )
+        yield* SessionStore.setGitHubLink(created.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 1757,
+          branch: "backport/inngest-fixes-batch-2"
+        })
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value).toMatchObject({
+      branch: "backport/inngest-fixes-batch-2",
+      prNumber: 1757,
+      semanticBranchPending: false
+    })
+    expect(exit.value.semanticBranchProposal).toBeUndefined()
+    expect(isSessionPublishBranchReady(
+      exit.value,
+      "backport/inngest-fixes-batch-2"
+    )).toBe(true)
+  })
+
   it("claims GitHub feedback exactly once for the exact active linked session", async () => {
     const result = await runExit(
       Effect.gen(function* () {
