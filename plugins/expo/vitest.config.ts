@@ -5,6 +5,6 @@ export default defineConfig({
   test: {
     name: "plugin-expo",
     environment: "node",
-    include: ["src/**/*.test.ts"]
+    include: ["src/**/*.test.{ts,tsx}"]
   }
 })
