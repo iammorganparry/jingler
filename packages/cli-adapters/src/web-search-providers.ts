@@ -98,7 +98,9 @@ const providerResponse = async (
   request: WebSearchProviderRequest,
   dependencies: WebSearchProviderDependencies
 ): Promise<WebSearchResponse> => {
-  const endpoint = request.provider === "exa" ? EXA_URL : FIRECRAWL_URL
+  const endpoint = request.provider === "exa"
+    ? (process.env.JINGLER_EXA_URL ?? EXA_URL)
+    : (process.env.JINGLER_FIRECRAWL_URL ?? FIRECRAWL_URL)
   let response: Response
   try {
     response = await (dependencies.fetch ?? fetch)(endpoint, {

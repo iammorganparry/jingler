@@ -126,6 +126,16 @@ worktrees or changing transcript identity.
 The desktop connects to `http://localhost:9100` by default. Set `JINGLER_AUTH_URL` to point it at
 another auth service.
 
+### Web search
+
+Research agents use the **WebSearch** tool instead of driving the app browser. On first interactive
+use, choose EXA, Firecrawl, or Skip; keys can be added, replaced, or cleared later under
+**Settings → General → Web search**. Keys are encrypted locally and synchronized as revocable,
+encrypted capabilities for managed Cloud sessions. Cloud and paired-device daemons never advertise
+browser tools: without a custom provider or verified model-native search they return an explicit
+unavailable result rather than waiting for a desktop client. The in-app browser remains available
+separately for preview QA, screenshots, and application testing.
+
 Server configuration lives in `apps/server/.env`. The local defaults need no third-party
 credentials. Production deployments require `DATABASE_URL`, `BETTER_AUTH_SECRET`, and
 `BETTER_AUTH_URL`; GitHub, Google, and Resend credentials enable their corresponding sign-in
