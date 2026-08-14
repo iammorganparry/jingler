@@ -52,6 +52,25 @@ describe("managed auth lifecycle", () => {
   });
 });
 
+describe("managed WebSearch capability routing", () => {
+  it("exposes active search handles without exposing credentials", () => {
+    const ledger = new ManagedAuthSubscriptionLedger("user_123")
+    ledger.registerSession("session_1", 100)
+    ledger.apply({
+      ...snapshot(),
+      credentialCapabilities: [
+        { provider: "exa", handle: "search_exa", expiresAt: 500 },
+        { provider: "firecrawl", handle: "search_expired", expiresAt: 100 }
+      ]
+    }, { leaseExpiresAt: 400 })
+
+    expect(ledger.webSearchCapabilities(101)).toEqual([
+      { provider: "exa", handle: "search_exa", expiresAt: 500 }
+    ])
+    expect(JSON.stringify(ledger.snapshot())).not.toContain("apiKey")
+  })
+})
+
 describe("managed provider connection routing", () => {
   it("resolves only the exact active provider connection", () => {
     const ledger = new ManagedAuthSubscriptionLedger("user_123");

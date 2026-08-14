@@ -2,6 +2,7 @@ import { getSandbox } from "@cloudflare/sandbox";
 import type { ManagedProviderCapability as ManagedProviderCapabilityValue } from "@jingler/core";
 import {
   ManagedProviderCapability,
+  ManagedWebSearchCapability,
   ManagedRuntimeProviderSelection,
   WorkspaceProvisioningPlan,
 } from "@jingler/core";
@@ -93,6 +94,9 @@ interface RuntimeRegistration {
   readonly authStateVersion: number;
   readonly sessionGeneration: number;
   readonly providerConnection: ManagedProviderCapabilityValue;
+  readonly webSearchCapabilities: ReadonlyArray<
+    Schema.Schema.Type<typeof ManagedWebSearchCapability>
+  >;
   readonly githubCapabilityHandle: string | null;
 }
 
@@ -105,6 +109,10 @@ const AccountRegistration = Schema.Struct({
   providerConnections: Schema.Array(ManagedProviderCapability).pipe(
     Schema.minItems(1),
     Schema.maxItems(8),
+  ),
+  webSearchCapabilities: Schema.optionalWith(
+    Schema.Array(ManagedWebSearchCapability).pipe(Schema.maxItems(2)),
+    { default: () => [] },
   ),
   githubCapabilityHandle: Schema.NullOr(
     Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
@@ -201,6 +209,7 @@ const runtimeRegistration = async (
       runtimeConfigurationForRegistration(input, {
         authStateVersion: account.auth.authStateVersion,
         providerConnection,
+        webSearchCapabilities: account.webSearchCapabilities,
         githubCapabilityHandle: account.githubCapabilityHandle,
       }),
     ),
@@ -229,6 +238,7 @@ const runtimeRegistration = async (
     authStateVersion: account.auth.authStateVersion,
     sessionGeneration: session.right.sessionGeneration,
     providerConnection,
+    webSearchCapabilities: account.webSearchCapabilities,
     githubCapabilityHandle: account.githubCapabilityHandle,
   };
 };

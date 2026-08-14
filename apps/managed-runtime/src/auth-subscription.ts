@@ -1,5 +1,6 @@
 import {
   ManagedProviderCapability,
+  type ManagedWebSearchCapability,
   type ManagedProviderCapability as ManagedProviderCapabilityValue,
   type ProviderConnectionId as ProviderConnectionIdValue,
 } from "@jingler/core";
@@ -10,7 +11,7 @@ const MAX_ACTIVE_SESSIONS = 1;
 const ACTIVE_SESSION_LEASE_SECONDS = 2 * 60 * 60;
 
 const CredentialCapability = Schema.Struct({
-  provider: Schema.Literal("github", "codex", "claude"),
+  provider: Schema.Literal("github", "codex", "claude", "exa", "firecrawl"),
   handle: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   expiresAt: Schema.Int.pipe(Schema.positive()),
 });
@@ -194,7 +195,7 @@ export class ManagedAuthSubscriptionLedger {
   }
 
   credentialHandle(
-    provider: "github" | "codex" | "claude",
+    provider: "github" | "codex" | "claude" | "exa" | "firecrawl",
     now: number,
   ): string | null {
     if (this.needsSubscription(now)) return null;
@@ -203,6 +204,21 @@ export class ManagedAuthSubscriptionLedger {
         (capability) =>
           capability.provider === provider && capability.expiresAt > now,
       )?.handle ?? null
+    );
+  }
+
+  webSearchCapabilities(now: number): ReadonlyArray<ManagedWebSearchCapability> {
+    if (this.needsSubscription(now)) return [];
+    return (this.#state.snapshot?.credentialCapabilities ?? []).flatMap(
+      (capability) =>
+        (capability.provider === "exa" || capability.provider === "firecrawl") &&
+        capability.expiresAt > now
+          ? [{
+              provider: capability.provider,
+              handle: capability.handle,
+              expiresAt: capability.expiresAt
+            }]
+          : []
     );
   }
 

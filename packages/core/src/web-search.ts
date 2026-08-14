@@ -51,6 +51,15 @@ export const WebSearchResponse = Schema.Struct({
 export type WebSearchResponse = Schema.Schema.Type<typeof WebSearchResponse>
 
 /** Renderer-safe credential state. No saved key or authorization header is returned. */
+export const ManagedWebSearchCapability = Schema.Struct({
+  provider: WebSearchProvider,
+  handle: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  expiresAt: Schema.Int.pipe(Schema.positive())
+})
+export type ManagedWebSearchCapability = Schema.Schema.Type<
+  typeof ManagedWebSearchCapability
+>
+
 export const WebSearchCredentialStatus = Schema.Struct({
   provider: WebSearchProvider,
   configured: Schema.Boolean,
