@@ -21,6 +21,9 @@ export interface WebSearchFallbackPort {
 }
 
 export interface WebSearchServiceShape {
+  readonly chooseSetup?: (
+    provider: "exa" | "firecrawl" | null
+  ) => Effect.Effect<void, WebSearchError>
   readonly search: (
     input: WebSearchQuery,
     signal: AbortSignal
@@ -101,6 +104,7 @@ export const withWebSearchFallback = (
   primary: WebSearchServiceShape,
   fallback: WebSearchFallbackPort
 ): WebSearchServiceShape => ({
+  ...(primary.chooseSetup ? { chooseSetup: primary.chooseSetup } : {}),
   search: (input, signal) =>
     primary.search(input, signal).pipe(
       Effect.catchAll(() => fromPromise(() => fallback.search(input, signal)))
@@ -195,6 +199,17 @@ export const makeWebSearchService = (
     const getConfig = () => Runtime.runPromise(configRuntime)(configService.get())
 
     return {
+      chooseSetup: (provider) =>
+        fromPromise(async () => {
+          await Runtime.runPromise(configRuntime)(
+            configService.setWebSearch(
+              provider === null
+                ? { setup: "skipped", provider: null }
+                : { setup: "pending", provider }
+            )
+          )
+          return { route: "native", results: [] }
+        }).pipe(Effect.asVoid),
       search: (input, signal) =>
         fromPromise(async () => {
           const config = (await getConfig().catch(() => null))?.webSearch ??

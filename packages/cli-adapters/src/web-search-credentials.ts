@@ -7,6 +7,7 @@ import {
 import { Effect } from "effect"
 import { AgentSecretStore } from "./runtime/auth/agent-secret-store.js"
 import { SecretStore } from "./secret-store.js"
+import { searchWithProvider } from "./web-search-providers.js"
 
 const credentialError = (message: string, retryable = false) =>
   new WebSearchError({ reason: "unavailable", message, retryable })
@@ -77,17 +78,30 @@ export class WebSearchCredentialService extends Effect.Service<WebSearchCredenti
           resolve(provider).pipe(Effect.map((credential) => credential?.apiKey ?? null)),
         set: (input: SetWebSearchCredentialInput) => {
           const other = input.provider === "exa" ? "firecrawl" : "exa"
-          return credentials.writeWebSearch(input.provider, {
-            apiKey: input.apiKey,
-            validatedAt: null,
-            cloudSynced: false
+          const validatedAt = new Date().toISOString()
+          return Effect.tryPromise({
+            try: () => searchWithProvider({
+              provider: input.provider,
+              apiKey: input.apiKey,
+              input: { query: "Jingler", maxResults: 1 },
+              signal: AbortSignal.timeout(10_000)
+            }),
+            catch: (cause) =>
+              cause instanceof WebSearchError
+                ? cause
+                : credentialError("Could not validate WebSearch credentials", true)
           }).pipe(
+            Effect.zipRight(credentials.writeWebSearch(input.provider, {
+              apiKey: input.apiKey,
+              validatedAt,
+              cloudSynced: false
+            })),
             Effect.mapError(() => credentialError("Could not save WebSearch credentials")),
             Effect.zipRight(syncCloud(input.provider, input.apiKey)),
             Effect.flatMap((cloudSynced) =>
               credentials.writeWebSearch(input.provider, {
                 apiKey: input.apiKey,
-                validatedAt: null,
+                validatedAt,
                 cloudSynced
               }).pipe(
                 Effect.mapError(() =>

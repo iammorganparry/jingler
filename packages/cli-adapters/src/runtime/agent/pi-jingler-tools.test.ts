@@ -1,8 +1,13 @@
-import { defaultPlan } from "@jingler/core"
+import { defaultPlan, WebSearchError } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
-import { createJinglerControlTools, createJinglerTools } from "./pi-jingler-tools.js"
+import {
+  createJinglerControlTools,
+  createJinglerTools,
+  registerWebSearchTool
+} from "./pi-jingler-tools.js"
+import { ToolRegistry } from "../tools/tool-registry.js"
 
 const runtimeContext = (overrides: Partial<AgentRuntimeContext> = {}): AgentRuntimeContext => ({
   ...inactiveRuntimeActivity,
@@ -14,6 +19,59 @@ const runtimeContext = (overrides: Partial<AgentRuntimeContext> = {}): AgentRunt
 })
 
 describe("Jingler target-owned tools", () => {
+  it("offers setup only to an interactive run and persists Skip before retry", async () => {
+    const askQuestion = vi.fn(() =>
+      Effect.succeed([{ selected: ["Skip"], other: null }])
+    )
+    const chooseSetup = vi.fn(() => Effect.void)
+    let attempts = 0
+    const registry = new ToolRegistry()
+    registerWebSearchTool(registry, {
+      chooseSetup,
+      search: () => {
+        attempts += 1
+        return attempts === 1
+          ? Effect.fail(new WebSearchError({
+              reason: "setup-required",
+              message: "setup",
+              retryable: false
+            }))
+          : Effect.succeed({ route: "browser", results: [] })
+      }
+    }, runtimeContext({ askQuestion }), true)
+
+    const result = await Effect.runPromise(registry.execute({
+      id: "web_search",
+      arguments: { query: "research", maxResults: 5 },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(result.status).toBe("success")
+    expect(askQuestion).toHaveBeenCalledOnce()
+    expect(chooseSetup).toHaveBeenCalledWith(null)
+  })
+
+  it("never waits for setup when no interactive host is attached", async () => {
+    const askQuestion = vi.fn(() => Effect.succeed([]))
+    const registry = new ToolRegistry()
+    registerWebSearchTool(registry, {
+      chooseSetup: () => Effect.void,
+      search: () => Effect.fail(new WebSearchError({
+        reason: "setup-required",
+        message: "setup",
+        retryable: false
+      }))
+    }, runtimeContext({ askQuestion }), false)
+    const result = await Effect.runPromise(registry.execute({
+      id: "web_search",
+      arguments: { query: "research", maxResults: 5 },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(result.status).toBe("error")
+    expect(askQuestion).not.toHaveBeenCalled()
+  })
+
   it("registers WebSearch only when the runtime target supplies an executable route", async () => {
     const withoutSearch = await Effect.runPromise(createJinglerTools({
       context: runtimeContext(),

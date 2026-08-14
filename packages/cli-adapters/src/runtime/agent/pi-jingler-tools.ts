@@ -1,4 +1,9 @@
-import { PlanPrd, QuestionRequest, WebSearchQuery } from "@jingler/core"
+import {
+  PlanPrd,
+  QuestionRequest,
+  WebSearchError,
+  WebSearchQuery
+} from "@jingler/core"
 import { Effect, Schema } from "effect"
 import {
   type McpToolBridgeError,
@@ -72,7 +77,9 @@ export const createJinglerControlTools = (
 
 export const registerWebSearchTool = (
   registry: ToolRegistry,
-  service: WebSearchServiceShape
+  service: WebSearchServiceShape,
+  context: AgentRuntimeContext,
+  offerSetup: boolean
 ): void => {
   registry.register({
     id: "web_search",
@@ -87,8 +94,53 @@ export const registerWebSearchTool = (
     outputBudget: 32_000,
     cancellable: true,
     idempotency: "safe",
-    execute: (input, context) =>
-      Effect.runPromise(service.search(input, context.signal))
+    execute: (input, toolContext) =>
+      Effect.runPromise(
+        service.search(input, toolContext.signal).pipe(
+          Effect.catchTag("WebSearchError", (error) => {
+            if (
+              error.reason !== "setup-required" ||
+              !offerSetup ||
+              service.chooseSetup === undefined
+            ) return Effect.fail(error)
+            return context.askQuestion({
+              id: "web-search-setup",
+              questions: [{
+                header: "Web search",
+                question: "Set up a search provider, or skip and use available fallbacks?",
+                options: [
+                  { label: "Set up EXA", description: "Select EXA, then add its key in Settings → General." },
+                  { label: "Set up Firecrawl", description: "Select Firecrawl, then add its key in Settings → General." },
+                  { label: "Skip", description: "Use model-native or attached desktop browser fallback." }
+                ],
+                multiSelect: false
+              }]
+            }).pipe(
+              Effect.flatMap((answers) => {
+                const selected = answers[0]?.selected[0]
+                if (selected === "Skip") {
+                  return service.chooseSetup!(null).pipe(
+                    Effect.zipRight(service.search(input, toolContext.signal))
+                  )
+                }
+                const provider = selected === "Set up EXA"
+                  ? "exa"
+                  : selected === "Set up Firecrawl"
+                    ? "firecrawl"
+                    : null
+                if (provider === null) return Effect.fail(error)
+                return service.chooseSetup!(provider).pipe(
+                  Effect.zipRight(Effect.fail(new WebSearchError({
+                    reason: "setup-required",
+                    message: `Add the ${provider === "exa" ? "EXA" : "Firecrawl"} key in Settings → General, then retry search`,
+                    retryable: false
+                  })))
+                )
+              })
+            )
+          })
+        )
+      )
   })
 }
 
@@ -114,7 +166,14 @@ export const createJinglerTools = (
     if (input.workspace) {
       registerWorkspaceInspectionTools(registry, input.cwd, input.workspace)
     }
-    if (input.webSearch) registerWebSearchTool(registry, input.webSearch)
+    if (input.webSearch) {
+      registerWebSearchTool(
+        registry,
+        input.webSearch,
+        input.context,
+        input.mcp?.browser !== undefined
+      )
+    }
     const mcpSources = input.mcp ? jinglerMcpSources(input.mcp) : []
     if (mcpSources.length > 0) {
       const report = yield* (input.mcpClientFactory

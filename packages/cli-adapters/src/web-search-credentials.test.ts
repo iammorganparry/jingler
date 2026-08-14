@@ -57,7 +57,7 @@ describe("WebSearch credential storage", () => {
       provider: "exa",
       configured: true,
       cloudSynced: true,
-      validatedAt: null
+      validatedAt: expect.any(String)
     })
     expect(JSON.stringify(status)).not.toContain("exa-cloud-secret")
     expect(request).toHaveBeenCalledWith(

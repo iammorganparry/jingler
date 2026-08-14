@@ -457,6 +457,33 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
+  const webSearchQuery = useQuery({
+    queryKey: ["web-search-settings"],
+    queryFn: () => rpc.webSearchGet(),
+  });
+  const webSearchSet = useMutation({
+    mutationFn: ({ provider, apiKey }: { provider: "exa" | "firecrawl"; apiKey: string }) =>
+      rpc.webSearchSetCredential(provider, apiKey),
+    onSuccess: (status) => {
+      qc.setQueryData(["web-search-settings"], status);
+      void configQuery.refetch();
+    },
+  });
+  const webSearchClear = useMutation({
+    mutationFn: (provider: "exa" | "firecrawl") =>
+      rpc.webSearchClearCredential(provider),
+    onSuccess: (status) => {
+      qc.setQueryData(["web-search-settings"], status);
+      void configQuery.refetch();
+    },
+  });
+  const webSearchSkip = useMutation({
+    mutationFn: () => rpc.webSearchSkip(),
+    onSuccess: (status) => {
+      qc.setQueryData(["web-search-settings"], status);
+      void configQuery.refetch();
+    },
+  });
   const usageQuery = useQuery({
     queryKey: ["usage"],
     queryFn: () => rpc.usageGet(),
@@ -1477,6 +1504,29 @@ function AuthedApp({
         onSaveGitConfig={saveGitConfig}
         notificationsConfig={notificationsConfig}
         onSaveNotificationsConfig={saveNotificationsConfig}
+        webSearch={{
+          status: webSearchQuery.data ?? null,
+          loading: webSearchQuery.isLoading,
+          busy:
+            webSearchSet.isPending ||
+            webSearchClear.isPending ||
+            webSearchSkip.isPending,
+          error:
+            webSearchQuery.error?.message ??
+            webSearchSet.error?.message ??
+            webSearchClear.error?.message ??
+            webSearchSkip.error?.message ??
+            null,
+          onSave: async (provider, apiKey) => {
+            await webSearchSet.mutateAsync({ provider, apiKey });
+          },
+          onClear: async (provider) => {
+            await webSearchClear.mutateAsync(provider);
+          },
+          onSkip: async () => {
+            await webSearchSkip.mutateAsync();
+          },
+        }}
         planAutoRun={planAutoRun}
         onSavePlanAutoRun={savePlanAutoRun}
         adhdMode={adhdMode}

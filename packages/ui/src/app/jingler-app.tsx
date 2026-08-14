@@ -200,6 +200,8 @@ export interface JinglerAppProps {
   onSaveNotificationsConfig?: (
     config: NotificationsConfig
   ) => Promise<void> | void
+  /** Redacted WebSearch settings plus write-only credential actions. */
+  webSearch?: SettingsViewProps["webSearch"]
   /** Whether plan mode runs its read-only commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => Promise<void> | void
@@ -450,6 +452,7 @@ export function JinglerApp({
   onSaveGitConfig,
   notificationsConfig,
   onSaveNotificationsConfig,
+  webSearch,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -1270,6 +1273,7 @@ export function JinglerApp({
               onSaveGit={onSaveGitConfig}
               notifications={notificationsConfig}
               onSaveNotifications={onSaveNotificationsConfig}
+              webSearch={webSearch}
               planAutoRun={planAutoRun}
               onSavePlanAutoRun={onSavePlanAutoRun}
               adhdMode={adhdMode}

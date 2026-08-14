@@ -155,6 +155,7 @@ const RpcServicesLayer = RpcServerLive.pipe(
   ),
   // AuthService requires SecretStore, satisfied by SecretStoreLive (merged below).
   Layer.provide(AuthService.Default),
+  Layer.provideMerge(WebSearchCredentialService.Default),
   // Merged into one stage to stay inside `pipe`'s 20-argument limit. AssetService
   // captures the command executor used by its NUL-safe repository listing, so its
   // platform dependencies are provided at construction. Reusing NodeContext.layer

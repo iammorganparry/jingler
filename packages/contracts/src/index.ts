@@ -91,6 +91,10 @@ import {
   VsCodeTheme,
   WorkspaceConfig,
   WebSearchConfig,
+  WebSearchError,
+  WebSearchSettingsStatus,
+  SetWebSearchCredentialInput,
+  ClearWebSearchCredentialInput,
   RuntimeDiagnosticSnapshot,
   RuntimeRecoveryError,
   ModelCertification,
@@ -1573,6 +1577,29 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: WebSearchConfig
+  }),
+
+  Rpc.make("WebSearch.get", {
+    success: WebSearchSettingsStatus,
+    error: WebSearchError
+  }),
+
+  /** The key is inbound only; success returns redacted status. */
+  Rpc.make("WebSearch.setCredential", {
+    success: WebSearchSettingsStatus,
+    error: WebSearchError,
+    payload: SetWebSearchCredentialInput
+  }),
+
+  Rpc.make("WebSearch.clearCredential", {
+    success: WebSearchSettingsStatus,
+    error: WebSearchError,
+    payload: ClearWebSearchCredentialInput
+  }),
+
+  Rpc.make("WebSearch.skip", {
+    success: WebSearchSettingsStatus,
+    error: WebSearchError
   }),
 
   /**
