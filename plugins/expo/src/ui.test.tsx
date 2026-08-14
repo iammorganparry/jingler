@@ -4,18 +4,24 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ExpoFrame, ExpoStatus } from "./contracts.js"
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn() }))
+const mocks = vi.hoisted(() => {
+  const invoke = vi.fn()
+  return {
+    invoke,
+    host: {
+      invoke,
+      openExternal: vi.fn(),
+      storage: {},
+      sessions: {}
+    }
+  }
+})
 
 vi.mock("@jingler/plugin-sdk", async (load) => {
   const actual = await load<typeof import("@jingler/plugin-sdk")>()
   return {
     ...actual,
-    useHost: () => ({
-      invoke: mocks.invoke,
-      openExternal: vi.fn(),
-      storage: {},
-      sessions: {}
-    })
+    useHost: () => mocks.host
   }
 })
 
@@ -118,7 +124,7 @@ describe("ExpoTab live preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reload Expo app" }))
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("expo.reload", expect.any(Object)))
     fireEvent.click(screen.getByRole("button", { name: "Open Simulator" }))
-    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("expo.open-simulator"))
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("expo.open-simulator", expect.any(Object)))
     fireEvent.click(screen.getByRole("button", { name: "Stop Expo preview" }))
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("expo.stop", expect.any(Object)))
   })
