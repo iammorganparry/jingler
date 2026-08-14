@@ -205,6 +205,35 @@ describe("ConfigService", () => {
     expect(exit._tag).toBe("Failure")
   })
 
+  it("persists Offload Compute settings across unrelated saves", async () => {
+    const offloadCompute = {
+      enabled: true,
+      explicitCommands: [
+        {
+          id: "verify-generated",
+          command: {
+            executable: "node",
+            args: ["scripts/verify-generated.mjs"],
+            cwd: "."
+          }
+        }
+      ]
+    } as const
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setOffloadCompute(offloadCompute)
+        yield* ConfigService.setLastRepoPath("/repos/widget")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value?.offloadCompute).toStrictEqual(offloadCompute)
+      expect(JSON.stringify(exit.value)).not.toContain("token")
+      expect(JSON.stringify(exit.value)).not.toContain("secret")
+    }
+  })
+
   it("persists ADHD mode and reads it back", async () => {
     const exit = await provided(
       Effect.gen(function* () {

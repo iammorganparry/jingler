@@ -11,6 +11,7 @@ import {
 } from "./runtime/provider-connection.js";
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js";
 import { RuntimeRecoveryState } from "./runtime/runtime-recovery.js";
+import { OffloadComputeSettings } from "./offload-compute.js";
 
 /**
  * Domain schemas for Jingler. These are Effect `Schema`s so they can be reused
@@ -999,6 +1000,11 @@ export const WorkspaceConfig = Schema.Struct({
    * as `MEMORY_CONFIG_DEFAULT`: disabled and with no selected organization.
    */
   memory: Schema.optional(MemoryConfig),
+  /**
+   * Automatic Cloudflare compute routing. Absent on older configs and therefore
+   * disabled; explicit command allowlists contain argv only and never secrets.
+   */
+  offloadCompute: Schema.optional(OffloadComputeSettings),
   /**
    * Ids of plugins the operator has turned OFF. Absent (or a missing id) means
    * enabled — the safe default, since a freshly-dropped-in plugin should work

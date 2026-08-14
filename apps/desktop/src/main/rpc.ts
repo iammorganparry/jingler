@@ -5183,6 +5183,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Config.setContext": (context) => ConfigService.setContext(context),
   "Config.setMemory": (memory) => ConfigService.setMemory(memory),
+  "Config.setOffloadCompute": (offloadCompute) =>
+    ConfigService.setOffloadCompute(offloadCompute),
   "Memory.request": memoryRpcRequest,
   "Memory.suggestions": ({ organizationId, pageId, limit }) =>
     memorySuggestions(organizationId, pageId, limit ?? 5),

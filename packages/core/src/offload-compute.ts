@@ -112,6 +112,13 @@ const Sha256Digest = Schema.String.pipe(
   Schema.pattern(/^[a-f0-9]{64}$/u, { identifier: "ContentDigest" })
 )
 
+export const OffloadRepositorySlug = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u, {
+    identifier: "OffloadRepositorySlug"
+  })
+)
+export type OffloadRepositorySlug = Schema.Schema.Type<typeof OffloadRepositorySlug>
+
 export const OffloadSnapshotIdentity = Schema.Struct({
   version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
   headSha: Schema.String.pipe(
@@ -195,6 +202,53 @@ export const OffloadJobEvent = Schema.Union(
   })
 )
 export type OffloadJobEvent = Schema.Schema.Type<typeof OffloadJobEvent>
+
+export const OffloadAdmissionRequest = Schema.Struct({
+  version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
+  sessionId: OpaqueOffloadId,
+  idempotencyKey: OpaqueOffloadId,
+  repositorySlug: OffloadRepositorySlug,
+  snapshot: OffloadSnapshotIdentity,
+  command: OffloadResolvedCommand,
+  limits: OffloadJobLimits
+})
+export type OffloadAdmissionRequest = Schema.Schema.Type<typeof OffloadAdmissionRequest>
+
+export const OFFLOAD_GRANT_MAX_TTL_SECONDS = 5 * 60
+export const OffloadGrantAction = Schema.Literal(
+  "snapshot.upload",
+  "job.run",
+  "job.read",
+  "job.cancel"
+)
+export type OffloadGrantAction = Schema.Schema.Type<typeof OffloadGrantAction>
+
+export const OffloadGrantClaims = Schema.Struct({
+  version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
+  issuer: Schema.Literal("jingler"),
+  audience: Schema.Literal("offload-compute"),
+  grantId: OpaqueOffloadId,
+  subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  sessionId: OpaqueOffloadId,
+  jobId: OpaqueOffloadId,
+  idempotencyKey: OpaqueOffloadId,
+  repositorySlug: OffloadRepositorySlug,
+  snapshotDigest: Sha256Digest,
+  actions: Schema.Array(OffloadGrantAction).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  issuedAt: Schema.Int.pipe(Schema.nonNegative()),
+  expiresAt: Schema.Int.pipe(Schema.positive())
+})
+export type OffloadGrantClaims = Schema.Schema.Type<typeof OffloadGrantClaims>
+
+export const OffloadAdmissionResponse = Schema.Struct({
+  version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
+  jobId: OpaqueOffloadId,
+  runtimeUrl: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(2_048)),
+  uploadUrl: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(2_048)),
+  grant: Schema.String.pipe(Schema.minLength(16), Schema.maxLength(16_384)),
+  expiresAt: Schema.Int.pipe(Schema.positive())
+})
+export type OffloadAdmissionResponse = Schema.Schema.Type<typeof OffloadAdmissionResponse>
 
 export type OffloadLocalReason =
   | "disabled"
