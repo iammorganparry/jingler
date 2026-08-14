@@ -1147,7 +1147,7 @@ describe("SessionStore", () => {
   })
 
   describe("setProviderModel", () => {
-    it("switches identity atomically and clears incompatible continuation state", async () => {
+    it("switches identity atomically, keeps the pi session, and resets reasoning", async () => {
       const nextConnection = Schema.decodeUnknownSync(ProviderConnectionId)("codex-pro")
       const nextProvider = Schema.decodeUnknownSync(ProviderId)("openai-codex")
       const nextModel = Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5")
@@ -1185,13 +1185,15 @@ describe("SessionStore", () => {
         connectionSelectionRequired: false,
         modelSelectionRequired: false
       })
-      expect(exit.value.piSessionId).toBeUndefined()
+      // The pi session is provider-neutral: it survives the switch so the
+      // conversation continues seamlessly on the new model.
+      expect(exit.value.piSessionId).toBe("pi-session.jsonl")
       expect(activeChat(exit.value)).toMatchObject({
         connectionId: nextConnection,
         providerId: nextProvider,
         modelId: nextModel
       })
-      expect(activeChat(exit.value).piSessionId).toBeUndefined()
+      expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
       expect(activeChat(exit.value).reasoning).toBeUndefined()
     })
 

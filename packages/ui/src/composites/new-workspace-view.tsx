@@ -375,9 +375,15 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
   const submitting = state.matches("submitting");
   const loading = state.matches("loading");
   const sourceLoading = state.matches("sourceLoading");
+  const hasSelectableModel =
+    props.providerCatalog?.connections.some(({ models }) =>
+      models.some((model) => model.selectable),
+    ) === true;
   const modelUnavailableReason =
     connectionId === null || providerId === null || modelId === null
-      ? "Choose a certified provider connection and model."
+      ? hasSelectableModel
+        ? "Choose a provider connection and model."
+        : "Connect a provider in Settings › Provider connections to choose a model."
       : undefined;
   const unavailableReason = submitting
     ? "Creating session…"

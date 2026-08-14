@@ -46,6 +46,8 @@ export const ProviderUsage = Schema.Struct({
   plan: Schema.NullOr(Schema.String),
   /** False → the harness exposes no usage data yet (shown as "not available"). */
   available: Schema.Boolean,
+  /** Why usage is unavailable, when the provider told us (e.g. an HTTP 403). */
+  unavailableReason: Schema.optional(Schema.NullOr(Schema.String)),
   windows: Schema.Array(UsageWindow)
 })
 export type ProviderUsage = Schema.Schema.Type<typeof ProviderUsage>

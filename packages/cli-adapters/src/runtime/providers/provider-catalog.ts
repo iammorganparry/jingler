@@ -94,7 +94,9 @@ const decorate = (
   return {
     ...model,
     verification,
-    selectable: authenticated && available && current,
+    // Certification is advisory QA metadata; an authenticated connection's
+    // models are usable without a per-model certification pass.
+    selectable: authenticated && available,
     certificationKey: current ? certificationKey(certification) : null
   }
 }

@@ -57,16 +57,34 @@ export class AuthBrokerError extends Data.TaggedError("AuthBrokerError")<{
   readonly cause?: unknown
 }> {}
 
+/** Renderer-safe cause detail: no secrets, bounded length, single line. */
+export const describeCause = (cause: unknown): string | null => {
+  const raw = cause instanceof Error ? cause.message : String(cause)
+  const sanitized = raw
+    .replace(/\s+/gu, " ")
+    .replace(/(?:sk|rt|oat|pat)[-_][\w-]{8,}[\w.-]*/gu, "[redacted]")
+    .replace(/Bearer\s+\S+/gu, "Bearer [redacted]")
+    .replace(/\b[\w-]{20,}\.[\w-]{20,}\.[\w-]{10,}\b/gu, "[redacted]")
+    .trim()
+  if (sanitized.length === 0) return null
+  return sanitized.length > 300 ? `${sanitized.slice(0, 300)}…` : sanitized
+}
+
+const withCause = (message: string, cause: unknown): string => {
+  const detail = describeCause(cause)
+  return detail === null ? message : `${message}: ${detail}`
+}
+
 const brokerPromise = <A>(message: string, operation: () => Promise<A>) =>
   Effect.tryPromise({
     try: operation,
-    catch: (cause) => new AuthBrokerError({ message, cause })
+    catch: (cause) => new AuthBrokerError({ message: withCause(message, cause), cause })
   })
 
 const brokerSync = <A>(message: string, operation: () => A) =>
   Effect.try({
     try: operation,
-    catch: (cause) => new AuthBrokerError({ message, cause })
+    catch: (cause) => new AuthBrokerError({ message: withCause(message, cause), cause })
   })
 
 const fingerprint = (value: string): string =>

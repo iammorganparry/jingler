@@ -2,6 +2,7 @@ import { Match, Schema } from "effect"
 import { DiffStat } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
 import { FileChangeSet } from "./runtime/file-change.js"
+import { ProviderId } from "./runtime/provider-connection.js"
 
 /**
  * Conversation domain — the transcript model plus the normalized `StreamEvent`
@@ -477,7 +478,13 @@ export const Message = Schema.Struct({
   streaming: Schema.Boolean,
   createdAt: Schema.String,
   /** Optional for every transcript written before external instructions existed. */
-  externalInstruction: Schema.optional(ExternalInstructionIdentity)
+  externalInstruction: Schema.optional(ExternalInstructionIdentity),
+  /**
+   * Provider that produced this assistant turn, stamped at creation. Optional
+   * for transcripts from before mid-conversation model switching; the UI falls
+   * back to the chat's current provider.
+   */
+  providerId: Schema.optional(ProviderId)
 })
 export type Message = Schema.Schema.Type<typeof Message>
 
@@ -840,13 +847,15 @@ export const userMessage = (
 /** A fresh, empty assistant turn to be filled by streaming events. */
 export const assistantMessage = (
   id: string,
-  createdAt: string
+  createdAt: string,
+  providerId?: ProviderId
 ): Message => ({
   id,
   role: "assistant",
   parts: [],
   streaming: true,
-  createdAt
+  createdAt,
+  ...(providerId === undefined ? {} : { providerId })
 })
 
 /**
@@ -1888,10 +1897,13 @@ export const resumePlanPrompt = (plan: Plan): string => {
   return [
     "The plan below was approved. Implement it now — make the actual code changes and run what's needed.",
     "Do NOT re-plan or ask to enter plan mode again; proceed with the implementation.",
+    "The plan's end state is your target: after each stage, re-read the remaining stages and acceptance criteria, and keep working until every one is completed or explicitly blocked.",
     "Continue from the supplied execution checkpoints. Do not repeat tasks already marked completed.",
     "Whenever a listed task changes state, emit this exact checkpoint line immediately:",
     "PLAN_TASK stage=<stage-id> fingerprint=<fingerprint> task=<task-id> status=<in-progress|completed|blocked>",
+    "Mark a task in-progress the moment you begin its work and completed immediately after it verifies — never retroactively at the end of the turn.",
     "Use only the exact stage, fingerprint, and task ids supplied below. Do not repeat an unchanged status.",
+    "If the operator asks for something new while you execute, fold it into the plan — attach it to the stage it belongs to (or treat it as an addition), say where it landed, and keep driving the plan to completion.",
     ...PLAN_EVIDENCE_INSTRUCTIONS,
     "",
     `Plan: ${plan.summary}`,

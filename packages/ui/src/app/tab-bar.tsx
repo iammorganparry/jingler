@@ -414,6 +414,7 @@ export function TabBar({
         data-testid="session-tab-actions"
         className="flex min-w-0 max-w-[60%] flex-none items-center justify-end gap-1.5 pl-1"
       >
+        {tabs.length > 0 && (
         <div
           data-testid="view-tab-controls"
           className="sb-no-scrollbar flex min-w-0 items-center gap-0.5 overflow-x-auto"
@@ -465,6 +466,7 @@ export function TabBar({
             )
           })}
         </div>
+        )}
 
         {status && (
           // The status word is the first thing to go: it's a duplicate of the

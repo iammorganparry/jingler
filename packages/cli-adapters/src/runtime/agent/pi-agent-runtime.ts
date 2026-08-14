@@ -4,7 +4,7 @@ import { Effect, Option, Queue, Ref, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
-import { normalizePiEvent, piProviderFailure } from "./pi-events.js"
+import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
 
 export interface PiSessionHandle {
   readonly id: string
@@ -135,8 +135,9 @@ const subscribeToSession = (
   handle: PiSessionHandle,
   sink: EventSink,
   planDraft: PlanToolDraftStream
-): (() => void) =>
-  handle.subscribe((event) => {
+): (() => void) => {
+  const normalize = createPiEventNormalizer()
+  return handle.subscribe((event) => {
     const providerFailure = piProviderFailure(event)
     if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
     if (
@@ -149,7 +150,7 @@ const subscribeToSession = (
     }
     const draft = projectPlanDraft(event, planDraft)
     if (draft) sink.emit(draft)
-    const normalized = normalizePiEvent(event, handle.contextWindow ?? undefined)
+    const normalized = normalize(event, handle.contextWindow ?? undefined)
     if (normalized) sink.emit(normalized)
     if (event.type === "agent_settled" && sink.beginSettling()) {
       Effect.runFork(
@@ -164,6 +165,7 @@ const subscribeToSession = (
       )
     }
   })
+}
 
 const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): void => {
   Effect.runFork(

@@ -25,6 +25,7 @@ import {
   SESSION_AUXILIARY_SPLIT_BREAKPOINT,
   SESSION_AUXILIARY_SPLIT_HANDLE_WIDTH
 } from "../app/session-auxiliary-split.js"
+import { ViewRail } from "../app/view-rail.js"
 
 const SESSION_AUXILIARY_RATIO_KEY = "sb.split.session-auxiliary.ratio"
 const LEGACY_SESSION_BROWSER_RATIO_KEY = "sb.split.session-browser.ratio"
@@ -200,6 +201,10 @@ export interface SessionPaneProps {
   onMovePaneLeft?: () => void
   /** Swap this pane with its right-hand neighbour. Absent at the right-hand end. */
   onMovePaneRight?: () => void
+  /** Whether this session's terminal dock is open (tints the rail's toggle). */
+  terminalActive?: boolean
+  /** Toggle this session's terminal dock from the view rail. */
+  onToggleTerminal?: () => void
 }
 
 /**
@@ -480,18 +485,23 @@ function SessionPaneBody(props: SessionPaneProps) {
     onSelectTab: selectTab
   }
 
+  // The view tabs render in the right-edge rail rather than the tab bar: on a
+  // narrow pane they fought the chat titles for width, and a rail spends
+  // height instead. Same descriptors, same order, one code path for plugins.
+  const railTabs = tabs
+    // The desktop always supplies chat pills, and each pill is now the
+    // route back to the transcript. Standalone stories may omit them, so
+    // keep Conversation there rather than creating a one-way rail.
+    .filter(
+      (contribution) =>
+        props.renderChatTabs === undefined || contribution.id !== BUILTIN_TAB.conversation
+    )
+    .map((contribution) => describeTab(contribution, tabCtx))
+
   return (
     <>
       <TabBar
-        tabs={tabs
-          // The desktop always supplies chat pills, and each pill is now the
-          // route back to the transcript. Standalone stories may omit them, so
-          // keep Conversation there rather than creating a one-way tab bar.
-          .filter(
-            (contribution) =>
-              props.renderChatTabs === undefined || contribution.id !== BUILTIN_TAB.conversation
-          )
-          .map((contribution) => describeTab(contribution, tabCtx))}
+        tabs={[]}
         active={activeTab}
         onChange={selectTab}
         status={
@@ -534,7 +544,8 @@ function SessionPaneBody(props: SessionPaneProps) {
         onMovePaneRight={props.onMovePaneRight}
       />
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-row">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/*
           One dispatch, where there used to be a five-branch ternary chain.
 
@@ -602,6 +613,14 @@ function SessionPaneBody(props: SessionPaneProps) {
             activeContribution?.render(active, renderCtx)
           )}
         </div>
+        </div>
+        <ViewRail
+          tabs={railTabs}
+          active={activeTab}
+          onChange={selectTab}
+          terminalActive={props.terminalActive}
+          onToggleTerminal={props.onToggleTerminal}
+        />
       </div>
     </>
   )

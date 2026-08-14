@@ -111,7 +111,7 @@ export const ProviderConnection = Schema.Struct({
 })
 export type ProviderConnection = Schema.Schema.Type<typeof ProviderConnection>
 
-/** Renderer-safe provider setup failure; credentials and upstream bodies are excluded. */
+/** Renderer-safe provider setup failure; upstream detail is sanitized (secrets redacted, length-bounded) before it reaches this message. */
 export class ProviderConnectionError extends Schema.TaggedError<ProviderConnectionError>()(
   "ProviderConnectionError",
   { message: Schema.String }

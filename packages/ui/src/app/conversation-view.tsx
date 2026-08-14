@@ -501,7 +501,7 @@ export function ConversationView({
                   <div className="mx-auto w-full max-w-[760px] pb-6">
                     <MessageTurn
                       message={m}
-                      providerId={providerId}
+                      providerId={m.providerId ?? providerId}
                       onDecideGate={onDecideGate}
                       onApprovePlan={onApprovePlan}
                       onResumePlan={onResumePlan}

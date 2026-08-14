@@ -1159,7 +1159,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             modelId,
             connectionSelectionRequired: false,
             modelSelectionRequired: false,
-            ...(changed ? { piSessionId: undefined } : {}),
+            // The pi session is provider-neutral and survives a model switch:
+            // the model binds per run, so keeping piSessionId is what lets a
+            // conversation continue seamlessly on the new model. Only the
+            // reasoning setting resets — capabilities differ per model.
             chats: session.chats.map((chat) =>
               chat.id !== chatId
                 ? chat
@@ -1170,9 +1173,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                     modelId,
                     connectionSelectionRequired: false,
                     modelSelectionRequired: false,
-                    ...(changed
-                      ? { piSessionId: undefined, reasoning: undefined }
-                      : {})
+                    ...(changed ? { reasoning: undefined } : {})
                   }
             )
           }

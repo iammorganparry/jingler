@@ -15,6 +15,7 @@ import { PlanCard } from "./plan-card.js"
 import { QuestionSummary } from "./question-summary.js"
 import { ThoughtBlock } from "./thought-block.js"
 import { ToolCall } from "./tool-call.js"
+import { toolDisplayName } from "../lib/tool-names.js"
 
 // Parts fill the transcript's centered content column (width is owned by
 // ConversationView), so nothing here caps its own width.
@@ -25,6 +26,7 @@ const COLLAPSE_MIN = 3
 
 type ToolPart = Extract<ContentPart, { _tag: "Tool" }>
 type ImagePart = Extract<ContentPart, { _tag: "Image" }>
+type ThinkingPart = Extract<ContentPart, { _tag: "Thinking" }>
 type PlanTaskProgressPart = Extract<ContentPart, { _tag: "PlanTaskProgress" }>
 
 /** An attached image on a user turn — a read-only transcript thumbnail. */
@@ -32,12 +34,16 @@ const IMAGE_THUMB = "h-[80px] w-[132px]"
 
 const toolMeta = (tool: ToolCallModel): string | undefined => {
   if (tool.meta !== null) return tool.meta
-  if (tool.fileChanges !== undefined) {
+  // A run that touched nothing has no change story to tell — "0 files · +0 −0"
+  // on every Bash call is noise, not information.
+  if (tool.fileChanges !== undefined && tool.fileChanges.changes.length > 0) {
     const count = tool.fileChanges.changes.length
     const { added, removed } = tool.fileChanges.totals
     return `${count} ${count === 1 ? "file" : "files"} · +${added} −${removed}`
   }
-  return tool.diff ? `+${tool.diff.added} −${tool.diff.removed}` : undefined
+  return tool.diff && tool.diff.added + tool.diff.removed > 0
+    ? `+${tool.diff.added} −${tool.diff.removed}`
+    : undefined
 }
 
 /**
@@ -52,13 +58,15 @@ const PATH_TOOLS: ReadonlySet<string> = new Set([
   "Edit",
   "Update",
   "MultiEdit",
-  "NotebookEdit"
+  "NotebookEdit",
+  "Delete",
+  "Rename"
 ])
 
-const pathOf = (tool: ToolCallModel): string | null => {
+const pathOf = (tool: ToolCallModel, displayName: string): string | null => {
   const changes = tool.fileChanges?.changes
   if (changes?.length === 1) return changes[0]!.path
-  return tool.target && PATH_TOOLS.has(tool.name) ? tool.target : null
+  return tool.target && PATH_TOOLS.has(displayName) ? tool.target : null
 }
 
 /** Lines of a diff hunk shown before the "Show all" affordance kicks in. */
@@ -134,11 +142,12 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
   // else — a command and what it printed — only fits once opened.
   const openable = canonicalChanges.length === 0 && !legacyPreview &&
     (tool.output !== undefined || (tool.target?.length ?? 0) > 0)
-  const path = pathOf(tool)
+  const displayName = toolDisplayName(tool.name)
+  const path = pathOf(tool, displayName)
   return (
     <ToolCall
       status={tool.status}
-      name={tool.name}
+      name={displayName}
       target={tool.target ?? undefined}
       filePath={path}
       meta={toolMeta(tool)}
@@ -214,6 +223,33 @@ function ToolGroup({ tools }: { tools: ReadonlyArray<ToolCallModel> }) {
   )
 }
 
+/**
+ * One or more consecutive reasoning parts compiled into a single thought pill.
+ * Chained provider reasoning (summary bursts with nothing between them) reads
+ * as one thought, so it renders as one: durations sum, and the body joins the
+ * texts in order.
+ */
+function MergedThoughts({ parts }: { parts: ReadonlyArray<ThinkingPart> }) {
+  const known = parts
+    .map((part) => part.seconds)
+    .filter((seconds): seconds is number => seconds !== null)
+  const seconds = known.length > 0 ? known.reduce((a, b) => a + b, 0) : null
+  const streaming = parts.some((part) => part.streaming)
+  const text = parts
+    .map((part) => part.text.trim())
+    .filter((chunk) => chunk.length > 0)
+    .join("\n\n")
+  return (
+    <ThoughtBlock seconds={seconds} streaming={streaming} className={WIDTH}>
+      {text.length > 0 ? (
+        <Markdown className="text-[calc(11px*var(--sb-font-scale,1))] leading-[1.6] text-dim">
+          {text}
+        </Markdown>
+      ) : null}
+    </ThoughtBlock>
+  )
+}
+
 function PartView({
   part,
   markdown,
@@ -240,11 +276,8 @@ function PartView({
       // lone image part rendered directly.
       return <AttachmentThumb attachment={part.attachment} className={IMAGE_THUMB} />
     case "Thinking":
-      return (
-        <ThoughtBlock seconds={part.seconds} streaming={part.streaming} defaultOpen className={WIDTH}>
-          {part.text}
-        </ThoughtBlock>
-      )
+      return <MergedThoughts parts={[part]} />
+
     case "Tool":
       return <ToolCardView tool={part.tool} />
     case "Gate":
@@ -333,25 +366,44 @@ function renderParts(
     )
     imgs = []
   }
+  // Chained reasoning (consecutive Thinking parts) compiles into one thought.
+  let thoughts: ThinkingPart[] = []
+  let thoughtStart = 0
+  const flushThoughts = () => {
+    if (thoughts.length === 0) return
+    out.push(<MergedThoughts key={`t${thoughtStart}`} parts={thoughts} />)
+    thoughts = []
+  }
   parts.forEach((part, i) => {
     if (part._tag === "Tool") {
       flushImgs()
+      flushThoughts()
       if (run.length === 0) runStart = i
       run.push(part)
       return
     }
     if (part._tag === "Image") {
       flush()
+      flushThoughts()
       if (imgs.length === 0) imgStart = i
       imgs.push(part)
       return
     }
+    if (part._tag === "Thinking") {
+      flush()
+      flushImgs()
+      if (thoughts.length === 0) thoughtStart = i
+      thoughts.push(part)
+      return
+    }
     flush()
     flushImgs()
+    flushThoughts()
     out.push(<PartView key={i} part={part} markdown={markdown} {...handlers} />)
   })
   flush()
   flushImgs()
+  flushThoughts()
   return out
 }
 

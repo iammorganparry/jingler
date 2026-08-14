@@ -1619,6 +1619,7 @@ function AuthedApp({
           onVerify: providerCatalog.verify,
           onMakeDefault: providerCatalog.makeDefault,
           onLogout: providerCatalog.logout,
+          onRemove: providerCatalog.remove,
           onConnectClaude: providerCatalog.connectClaude,
           onStartCodex: providerCatalog.startCodex,
           onSetApiKey: providerCatalog.setApiKey,

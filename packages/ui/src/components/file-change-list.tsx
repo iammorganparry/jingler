@@ -72,6 +72,22 @@ function FileChangeRow({ change }: { readonly change: FileChange }) {
 
 /** Canonical post-execution create/modify/delete/rename evidence for a tool call. */
 export function FileChangeList({ changes }: { readonly changes: ReadonlyArray<FileChange> }) {
+  // A single change with a preview is already fully described by the tool
+  // card's own header (path, status, diff stat) — repeating it as a row would
+  // stack three title bars over one diff. Multi-file changes keep their rows:
+  // there the per-file identity is the information.
+  const only = changes.length === 1 ? changes[0]! : null
+  if (only !== null && only.preview !== null) {
+    return (
+      <div
+        className="border-t border-line/60 bg-editor"
+        data-file-change={only.status}
+        data-file-path={only.path}
+      >
+        <DiffPeek preview={only.preview} />
+      </div>
+    )
+  }
   return (
     <div className="divide-y divide-line/60 border-t border-line/60 bg-editor">
       {changes.map((change) => (

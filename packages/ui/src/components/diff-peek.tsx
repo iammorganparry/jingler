@@ -24,7 +24,11 @@ export function DiffPeek({ preview, className }: { preview: string; className?: 
         lineNumbers: false,
         wrap: true,
         stickyHeader: false,
-        hunkSeparators: "simple"
+        hunkSeparators: "simple",
+        // A lone preview's synthetic "preview.diff" header names nothing the
+        // surrounding card hasn't already said; headers earn their row only
+        // when they distinguish multiple files.
+        disableFileHeader: !multiFile
       }}
     />
   )

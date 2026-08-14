@@ -79,6 +79,10 @@ export interface SessionSplitProps {
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderTerminalDock?: (session: Session) => ReactNode
   terminalDockSide?: DockSide
+  /** Whether the per-session terminal dock is open (tints the view rail's toggle). */
+  terminalActive?: boolean
+  /** Toggle the per-session terminal dock (the view rail's terminal button). */
+  onToggleTerminal?: () => void
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
    *
@@ -152,6 +156,13 @@ export function SessionSplit(props: SessionSplitProps) {
         tabContributions={props.tabContributions}
         renderReview={props.renderReview}
         renderCode={props.renderCode}
+        // The terminal dock follows the FOCUSED pane's session (dockSession),
+        // so only that pane's rail gets the toggle — a button on an unfocused
+        // pane would open a terminal for a different session than it labels.
+        terminalActive={session.id === dockSessionId ? props.terminalActive : undefined}
+        onToggleTerminal={
+          session.id === dockSessionId ? props.onToggleTerminal : undefined
+        }
         // No close control in a group of one: there is nothing to close back to,
         // so it would only be a way to blank the app.
         onClosePane={single || !props.onClosePane ? undefined : () => props.onClosePane?.(index)}

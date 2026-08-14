@@ -67,6 +67,9 @@ import {
   isSessionPublishBranchReady,
   runPublishMachineExclusive,
   UsageService,
+  fetchPiProviderUsage,
+  adoptableChatIdentities,
+  sessionNeedsRuntimeIdentity,
   WorkspaceService,
   RuntimeDiagnostics,
   RuntimeRecoveryService,
@@ -1644,7 +1647,7 @@ export const continueOnEnvironment = (
               new EnvironmentHandoffError({
                 reason: "unavailable",
                 message:
-                  "Choose a certified provider connection before continuing this session.",
+                  "Choose a provider connection before continuing this session.",
                 sessionId: source.id,
                 ...(target === undefined ? {} : { environmentId: target }),
               }),
@@ -2417,7 +2420,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       return yield* Effect.fail(
         new ReviewError({
           message:
-            "Choose a certified provider connection before running a review.",
+            "Choose a provider connection before running a review.",
         }),
       );
     }
@@ -4215,6 +4218,39 @@ const agentResourceError = (
   cause: { readonly message: string },
 ) => new AgentResourceRpcError({ operation, message: cause.message });
 
+/**
+ * Resolve migrated sessions still gated on "choose a runtime connection" the
+ * moment an authenticated connection can satisfy them. Best-effort by design:
+ * a failure leaves the gate up (the manual path still works) rather than
+ * failing the listing that carries every other session.
+ */
+const healMigratedRuntimeIdentities = Effect.gen(function* () {
+  const sessions = yield* SessionStore.list();
+  const gated = sessions.filter(sessionNeedsRuntimeIdentity);
+  if (gated.length === 0) return;
+  const catalog = yield* ProviderConnections.pipe(
+    Effect.flatMap((service) => service.list),
+  );
+  const config = yield* ConfigService.get().pipe(
+    Effect.orElseSucceed(() => null),
+  );
+  const defaults = {
+    connectionId: config?.defaultConnectionId ?? null,
+    modelId: config?.defaultModelId ?? null,
+  };
+  for (const session of gated) {
+    for (const adopted of adoptableChatIdentities(session, catalog, defaults)) {
+      yield* SessionStore.setProviderModel(
+        session.id,
+        adopted.chatId,
+        adopted.connectionId,
+        adopted.providerId,
+        adopted.modelId,
+      );
+    }
+  }
+}).pipe(Effect.catchAll(() => Effect.void));
+
 const resourceWorktree = (sessionId: string | null) =>
   sessionId === null
     ? Effect.succeed(null)
@@ -4316,6 +4352,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     providerOperation((service) => service.refresh(connectionId)),
   "Provider.logout": ({ connectionId }) =>
     providerOperation((service) => service.logout(connectionId)),
+  "Provider.removeConnection": ({ connectionId }) =>
+    providerOperation((service) => service.remove(connectionId)),
   "Provider.verifyModel": (input) =>
     providerOperation((service) => service.verifyModel(input)),
   "AgentResources.list": () => resourceList,
@@ -4652,7 +4690,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       : WorkspaceService.files(repoPath),
   "Workspace.revertFile": (input) => workspaceRevertFile(input),
   "Workspace.revertLines": (input) => workspaceRevertLines(input),
-  "Sessions.list": () => SessionStore.list(),
+  // Migrated sessions whose runtime identity could not be resolved at
+  // migration time adopt one here, the moment an authenticated connection can
+  // satisfy them — so a pre-PI conversation continues without the operator
+  // re-choosing what they already had. No-op for healthy sessions.
+  "Sessions.list": () => healMigratedRuntimeIdentities.pipe(
+    Effect.andThen(SessionStore.list()),
+  ),
   "Sessions.get": ({ id }) => SessionStore.get(id),
   "Sessions.create": ({ requestedSessionId: _internalSessionId, ...input }) =>
     createSessionRouted(input),
@@ -5226,8 +5270,30 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   // the absolute path discovery found.
   "Usage.get": () =>
     ProviderConnections.pipe(
-      Effect.flatMap((service) => service.list),
-      Effect.flatMap(UsageService.fromProviderCatalog),
+      Effect.flatMap((service) =>
+        service.list.pipe(
+          Effect.flatMap((catalog) =>
+            UsageService.liveFromProviderCatalog(catalog, (entry) =>
+              entry.connection.status !== "authenticated"
+                ? Effect.succeed(null)
+                : service.resolveCredential(entry.connection.id).pipe(
+                    Effect.flatMap((credential) =>
+                      Effect.tryPromise((signal) =>
+                        fetchPiProviderUsage({
+                          authKind: entry.connection.authKind,
+                          access: credential.access,
+                          accountId: credential.accountId,
+                          signal,
+                        }),
+                      ),
+                    ),
+                    Effect.timeout("8 seconds"),
+                    Effect.catchAll(() => Effect.succeed(null)),
+                  ),
+            ),
+          ),
+        ),
+      ),
       Effect.catchAll(() => Effect.succeed({ providers: [], fetchedAt: null })),
     ),
   "Context.state": ({ sessionId, chatId }) =>

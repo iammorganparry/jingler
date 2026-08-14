@@ -351,6 +351,8 @@ export const rpc = {
     run((c) => c.Provider.refresh({ connectionId })),
   providerLogout: (connectionId: ProviderConnectionId): Promise<void> =>
     run((c) => c.Provider.logout({ connectionId })),
+  providerRemoveConnection: (connectionId: ProviderConnectionId): Promise<void> =>
+    run((c) => c.Provider.removeConnection({ connectionId })),
   providerVerifyModel: (
     connectionId: ProviderConnectionId,
     modelId: ProviderModelId

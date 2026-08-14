@@ -16,8 +16,9 @@ describe("PromptCompiler", () => {
       tools: [tool],
       tokenBudget: 2_000
     })
+    // Two role-kind sections: the role policy and the engineering principles.
     expect(result.manifest.sections.map((section) => section.kind)).toEqual([
-      "safety", "role", "tools", "workspace", "preferences", "turn"
+      "safety", "role", "role", "tools", "workspace", "preferences", "turn"
     ])
   })
 

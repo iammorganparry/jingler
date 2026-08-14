@@ -56,11 +56,12 @@ import {
 } from "./turn-prompt.js"
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
-import { planNote } from "./plan-prompt.js"
+import { planExecutionNote, planNote } from "./plan-prompt.js"
 import { capturePlanEmission, stripPlanJsonBlock } from "./plan-json.js"
 import {
   planTaskProgressFingerprint,
   planTaskProgressFromText,
+  planExecutionCheckpoints,
   planWithExecutionProgress,
   resumeCanonicalPlanPrompt
 } from "./plan-task-progress.js"
@@ -1006,7 +1007,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // would compete with the `ExitPlanMode` tool the harness is steered
           // toward. With Jingler tools disabled, the harness owns planning and
           // receives none of Jingler's structured plan protocol.
-          const planProtocol = mode === "plan" ? planNote() : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
@@ -1024,6 +1024,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ["approved", "executing", "needs-verification"].includes(activePlan.status)
               ? activePlan.id
               : null)
+          // An operator message mid-execution folds into the plan rather than
+          // derailing it; the note carries the live checkpoint state so the
+          // agent always has exact ids and fingerprints to mark against.
+          const planProtocol =
+            mode === "plan"
+              ? planNote()
+              : activePlanExecutionId !== null
+                ? planExecutionNote(
+                    activePlan !== null && activePlan.id === activePlanExecutionId
+                      ? planExecutionCheckpoints(activePlan)
+                      : []
+                  )
+                : null
           const operatorText = displayText ?? text
           const promptText = text
           // Resolve every remote MCP source once, here, where the full service
@@ -1156,7 +1169,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             images,
             externalInstruction
           )
-          const assistant = assistantMessage(`a_${chatId}_${an}`, now)
+          const assistant = assistantMessage(`a_${chatId}_${an}`, now, chat.providerId)
           const appended = yield* TranscriptStore.appendTurn(
             chatId,
             user,
@@ -1178,7 +1191,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const steeredReply = yield* Ref.make<RunReplyWaiter | null>(null)
           const replyGate = yield* Effect.makeSemaphore(1)
           const turnMutation = yield* Effect.makeSemaphore(1)
-          const executingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
+          // Seeded from the approval turn's explicit id OR the derived active
+          // plan: a follow-up operator message mid-execution is still a
+          // plan-execution turn, and its PLAN_TASK/PLAN_RESULT markers must
+          // persist exactly like the approval turn's. Leaving this null for
+          // follow-ups silently dropped every status the agent reported.
+          const executingPlanId = yield* Ref.make<string | null>(
+            planExecutionId ?? activePlanExecutionId
+          )
+          // Status settling stays EXPLICIT: only a turn that was started as an
+          // execution run (or promoted one mid-turn) may flip executing →
+          // needs-verification/done on settle. A chat message that merely rode
+          // along during execution reports progress but never ends the run.
+          const settlingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
 
           const out = yield* Mailbox.make<StreamEvent>()
           if (externalInstruction !== undefined) {
@@ -1390,10 +1415,29 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 const stage = canonical.plan.stages.find(
                   (candidate) => candidate.id === marker.stageId
                 )
+                if (stage === undefined) {
+                  yield* Effect.logWarning(
+                    `Plan task marker names unknown stage ${marker.stageId}; dropped.`
+                  )
+                  continue
+                }
+                if ((stage.tasks ?? []).every((task) => task.id !== marker.taskId)) {
+                  yield* Effect.logWarning(
+                    `Plan task marker names unknown task ${marker.taskId} in stage ${marker.stageId}; dropped.`
+                  )
+                  continue
+                }
+                // Stage + task ids are the identity; a stale or missing
+                // fingerprint downgrades to a warning instead of a silent drop
+                // — an invisible status was exactly the failure mode reported.
                 if (
-                  stage === undefined ||
+                  marker.stageFingerprint.length > 0 &&
                   planTaskProgressFingerprint(stage) !== marker.stageFingerprint
-                ) continue
+                ) {
+                  yield* Effect.logWarning(
+                    `Plan task marker fingerprint for stage ${marker.stageId} does not match the current revision; applying by id.`
+                  )
+                }
                 const persisted = yield* PlanStore.setTaskStatusLatest(
                   worktreePath,
                   {
@@ -1420,7 +1464,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const finalizePlanVerification = (): Effect.Effect<void> =>
             Effect.gen(function* () {
               if (worktreePath.length === 0) return
-              const activePlanId = yield* Ref.get(executingPlanId)
+              const activePlanId = yield* Ref.get(settlingPlanId)
               if (activePlanId === null) return
               const document = yield* PlanStore.readDocument(worktreePath)
               if (
@@ -1725,6 +1769,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }
                 canonicalPlan = promotion.right.plan
                 yield* Ref.set(executingPlanId, canonicalPlan.id)
+                yield* Ref.set(settlingPlanId, canonicalPlan.id)
                 if (submittedBlock !== undefined) {
                   yield* turnMutation.withPermits(1)(
                     Effect.gen(function* () {
@@ -1908,7 +1953,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               const at = yield* Effect.sync(() => new Date().toISOString())
               const settled = settleStreaming(yield* Ref.get(acc))
               const user = userMessage(`u_${chatId}_${yield* nextId}`, text, at, images)
-              const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at)
+              const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at, chat.providerId)
               yield* Ref.set(acc, assistant)
               yield* TranscriptStore.patchLast(chatId, () => settled).pipe(Effect.ignore)
               yield* TranscriptStore.append(chatId, user)
@@ -1925,7 +1970,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             new Map(m).set(chatId, {
               readPlan,
               applyPlan,
-              markPlanExecution: (planId) => Ref.set(executingPlanId, planId),
+              markPlanExecution: (planId) =>
+                Ref.set(executingPlanId, planId).pipe(
+                  Effect.zipRight(Ref.set(settlingPlanId, planId))
+                ),
               steer,
               clearReplyWaiter: (waiter) =>
                 Ref.update(steeredReply, (current) =>
