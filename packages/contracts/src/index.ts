@@ -90,6 +90,7 @@ import {
   Usage,
   VsCodeTheme,
   WorkspaceConfig,
+  WebSearchConfig,
   RuntimeDiagnosticSnapshot,
   RuntimeRecoveryError,
   ModelCertification,
@@ -1565,6 +1566,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Config.completeProviderSetup", {
     success: WorkspaceConfig,
     error: ConfigError
+  }),
+
+  /** Persist only the secret-free WebSearch provider/setup choice. */
+  Rpc.make("Config.setWebSearch", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: WebSearchConfig
   }),
 
   /**

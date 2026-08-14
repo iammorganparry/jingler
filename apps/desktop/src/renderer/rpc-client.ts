@@ -908,6 +908,8 @@ export const rpc = {
     run((c) => c.Config.setDefaultProviderModel({ connectionId, providerId, modelId })),
   configCompleteProviderSetup: (): Promise<WorkspaceConfig> =>
     run((c) => c.Config.completeProviderSetup()),
+  configSetWebSearch: (webSearch: import("@jingler/core").WebSearchConfig) =>
+    run((c) => c.Config.setWebSearch(webSearch)),
   /**
    * Ask main to raise an OS notification. Main decides whether it actually
    * surfaces — it owns window focus and the stored prefs.

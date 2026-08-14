@@ -9,6 +9,7 @@ import type {
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
+  WebSearchConfig,
 } from "@jingler/core"
 import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
@@ -130,6 +131,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.fontScale !== undefined ? { fontScale: existing.fontScale } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
             ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
+            ...(existing?.webSearch ? { webSearch: existing.webSearch } : {}),
             ...(existing?.memory ? { memory: existing.memory } : {}),
             ...(existing?.disabledPlugins ? { disabledPlugins: existing.disabledPlugins } : {}),
             // MANDATORY: omit a section here and every unrelated save silently
@@ -224,6 +226,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Persist the unified OpenConnector settings (endpoint, toggles). Token is NOT here. */
       const setOpenConnector = (openConnector: OpenConnectorConfig) => patch({ openConnector })
 
+      /** Persist only the secret-free WebSearch provider/setup choice. */
+      const setWebSearch = (webSearch: WebSearchConfig) => patch({ webSearch })
+
       /** Replace the set of disabled plugin ids wholesale (PluginRegistry owns the merge). */
       const setDisabledPlugins = (disabledPlugins: ReadonlyArray<string>) =>
         patch({ disabledPlugins })
@@ -279,6 +284,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setActiveTheme,
         setThemeCustomizations,
         setOpenConnector,
+        setWebSearch,
         setMemory,
         setDisabledPlugins
       }

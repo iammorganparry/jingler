@@ -56,6 +56,21 @@ describe("ConfigService", () => {
     }
   })
 
+  it("persists secret-free WebSearch setup across unrelated saves", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setWebSearch({ setup: "configured", provider: "exa" })
+        yield* ConfigService.setReposDir("/repos/search")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value?.webSearch).toStrictEqual({ setup: "configured", provider: "exa" })
+      expect(JSON.stringify(exit.value)).not.toContain("apiKey")
+    }
+  })
+
   it("persists memory enablement and organization selection across unrelated saves", async () => {
     const exit = await provided(
       Effect.gen(function* () {
