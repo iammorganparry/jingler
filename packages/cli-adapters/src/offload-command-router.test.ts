@@ -125,8 +125,9 @@ describe("automatic Offload Compute routing", () => {
       offloadCompute: { enabled: true, explicitCommands: [] }
     }))
     fetchMock.mockResolvedValue(Response.json({ accepted: true }, { status: 202 }))
-    await expect((await router()).primeSession(workspace, "session-one"))
-      .resolves.toBe("accepted")
+    await expect(Effect.runPromise(
+      (await router()).primeSession(workspace, "session-one")
+    )).resolves.toBe("accepted")
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
       repositorySlug: string
       headSha: string
@@ -143,9 +144,10 @@ describe("automatic Offload Compute routing", () => {
       offloadCompute: { enabled: true, explicitCommands: [] }
     }))
     fetchMock.mockImplementation(async (input, init) => {
-      const url = String(input)
+      const url = input instanceof Request ? input.url : String(input)
+      const method = input instanceof Request ? input.method : init?.method
       if (url.endsWith("/api/offload/jobs")) return Response.json(admission)
-      if (url.endsWith("/snapshot") && init?.method === "PUT") {
+      if (url.endsWith("/snapshot") && method === "PUT") {
         return Response.json({ accepted: true }, { status: 202 })
       }
       if (url.includes("/events?cursor=0")) {

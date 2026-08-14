@@ -64,7 +64,7 @@ export const primeOffloadWorkspace = (
   gitProxyOrigin: string,
   gitGrant: string
 ): Effect.Effect<
-  { readonly hydrationMs: number; readonly dependencyMs: number },
+  { readonly hydrationMs: number; readonly dependencyMs: number; readonly warmDependencies: boolean },
   OffloadWorkspaceError
 > =>
   Effect.gen(function* () {
@@ -93,14 +93,25 @@ export const primeOffloadWorkspace = (
     )
     const hydrationMs = Date.now() - hydrationStarted
     const dependencyStarted = Date.now()
-    yield* run(
+    const dependencyState = yield* run(
       sandbox,
-      "if test -f pnpm-lock.yaml; then corepack pnpm install --frozen-lockfile --prefer-offline; elif test -f package-lock.json; then npm ci; elif test -f yarn.lock; then corepack yarn install --immutable; fi",
+      [
+        "lockfile=''; install='';",
+        "if test -f pnpm-lock.yaml; then lockfile=pnpm-lock.yaml; install='corepack pnpm install --frozen-lockfile --prefer-offline';",
+        "elif test -f package-lock.json; then lockfile=package-lock.json; install='npm ci';",
+        "elif test -f yarn.lock; then lockfile=yarn.lock; install='corepack yarn install --immutable'; fi;",
+        "if test -z \"$lockfile\"; then printf none; else key=$(sha256sum \"$lockfile\" | cut -d' ' -f1); marker=/tmp/jingler-offload-deps-$key;",
+        "if test -f \"$marker\"; then printf warm; else sh -lc \"$install\" && touch \"$marker\" && printf cold; fi; fi"
+      ].join(" "),
       { cwd: WORKSPACE, timeout: 10 * 60_000, origin: "internal" },
       "dependency-failed",
       "Dependencies could not be prepared"
     )
-    return { hydrationMs, dependencyMs: Date.now() - dependencyStarted }
+    return {
+      hydrationMs,
+      dependencyMs: Date.now() - dependencyStarted,
+      warmDependencies: dependencyState === "warm"
+    }
   })
 
 export const restoreOffloadSnapshot = (

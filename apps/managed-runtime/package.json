@@ -16,6 +16,7 @@
     "image:prepare": "pnpm --filter @jingler/device-agent build && mkdir -p dist && cp ../device-agent/dist/jingler-device.mjs dist/jingler-device.mjs",
     "deploy": "pnpm image:prepare && wrangler deploy",
     "deploy:dry": "pnpm image:prepare && wrangler deploy --dry-run",
+    "benchmark:offload": "node ./scripts/benchmark-offload.mjs",
     "clean": "rimraf dist .wrangler .turbo *.tsbuildinfo"
   },
   "dependencies": {

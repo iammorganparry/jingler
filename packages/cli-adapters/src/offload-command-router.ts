@@ -287,6 +287,7 @@ export const makeOffloadCommandRouter = Effect.gen(function* () {
     if (routing.target === "local") return null
 
     context.progress({ message: "Offload Compute: capturing", completed: null, total: null })
+    const snapshotStarted = Date.now()
     const snapshot = yield* captureOffloadSnapshot(cwd).pipe(
       Effect.mapError((cause) => failure(cause.message))
     )
@@ -308,6 +309,7 @@ export const makeOffloadCommandRouter = Effect.gen(function* () {
       repositorySlug: `${repository.owner}/${repository.repo}`,
       snapshot: snapshot.identity,
       command: routing.command,
+      clientTimings: { snapshotMs: Date.now() - snapshotStarted },
       limits: {
         timeoutSeconds: OFFLOAD_TIMEOUT_MAX_SECONDS,
         snapshotBytes: snapshot.identity.bytes,

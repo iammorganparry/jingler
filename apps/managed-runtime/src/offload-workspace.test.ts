@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   executeOffloadCommand,
+  primeOffloadWorkspace,
   type OffloadSandbox
 } from "./offload-workspace.js"
 
@@ -79,6 +80,45 @@ describe("offload workspace result policy", () => {
     )
     expect(result.state).toBe("failed")
     expect(result.failureReason).toBe(reason)
+  })
+
+  it("reuses dependencies only for the same warm lockfile marker", async () => {
+    let dependencyRuns = 0
+    const value: OffloadSandbox = {
+      exec: async (command) => ({
+        success: true,
+        stdout: command.includes("jingler-offload-deps")
+          ? (++dependencyRuns === 1 ? "cold" : "warm")
+          : "",
+        stderr: ""
+      }),
+      writeFile: async () => ({}),
+      readFile: async () => ({ content: "" })
+    }
+    const record = {
+      version: 1 as const,
+      jobId: "job_aaaaaaaaaaaaaaaa",
+      subject: "user_one",
+      request,
+      githubCapabilityHandle: "github_aaaaaaaaaaaaaaaa",
+      state: "preparing" as const,
+      sequence: 0,
+      events: [],
+      result: null,
+      cancelRequested: false,
+      execution: "available" as const,
+      createdAt: 1,
+      updatedAt: 1,
+      expiresAt: 2
+    }
+    const first = await Effect.runPromise(
+      primeOffloadWorkspace(value, record, "https://runtime.test", "grant_one")
+    )
+    const second = await Effect.runPromise(
+      primeOffloadWorkspace(value, record, "https://runtime.test", "grant_two")
+    )
+    expect(first.warmDependencies).toBe(false)
+    expect(second.warmDependencies).toBe(true)
   })
 
   it("writes argv to a private file and invokes only the fixed executor", async () => {

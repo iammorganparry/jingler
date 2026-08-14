@@ -220,6 +220,9 @@ export const OffloadAdmissionRequest = Schema.Struct({
   repositorySlug: OffloadRepositorySlug,
   snapshot: OffloadSnapshotIdentity,
   command: OffloadResolvedCommand,
+  clientTimings: Schema.optional(
+    Schema.Struct({ snapshotMs: Schema.Int.pipe(Schema.nonNegative()) })
+  ),
   limits: OffloadJobLimits
 })
 export type OffloadAdmissionRequest = Schema.Schema.Type<typeof OffloadAdmissionRequest>

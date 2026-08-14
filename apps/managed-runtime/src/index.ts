@@ -347,6 +347,7 @@ const primeOffloadSession = async (
       args: ["typecheck"],
       cwd: "."
     },
+    clientTimings: { snapshotMs: 0 },
     limits: { timeoutSeconds: 1, snapshotBytes: 1, outputBytes: 1 }
   };
   const registration = await authorizeOffloadPrimer(env, body.subject);
@@ -634,6 +635,91 @@ export default {
         grant: issued.grant,
         expiresAt: issued.claims.expiresAt,
       });
+    }
+    if (url.pathname === "/v1/offload-benchmark" && request.method === "POST") {
+      if (!hasServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const suffix = crypto.randomUUID().replaceAll("-", "");
+      const sandbox = getSandbox(env.Sandbox, `offload-benchmark-${suffix}`, {
+        transport: "rpc",
+        normalizeId: true,
+        enableDefaultSession: false,
+        sleepAfter: "2m"
+      });
+      try {
+        const coldStarted = Date.now();
+        const cold = await sandbox.exec("printf cold-ready", {
+          cwd: "/workspace",
+          timeout: 30_000,
+          origin: "internal"
+        });
+        const coldMs = Date.now() - coldStarted;
+        const warmStarted = Date.now();
+        const warm = await sandbox.exec("printf warm-ready", {
+          cwd: "/workspace",
+          timeout: 30_000,
+          origin: "internal"
+        });
+        const warmMs = Date.now() - warmStarted;
+        return json({
+          success: cold.success && warm.success,
+          coldMs,
+          warmMs
+        }, cold.success && warm.success ? 200 : 500);
+      } finally {
+        await sandbox.destroy().catch(() => undefined);
+      }
+    }
+    if (url.pathname === "/v1/offload-probe" && request.method === "POST") {
+      if (!hasServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const suffix = crypto.randomUUID().replaceAll("-", "");
+      const sessionId = `offload_probe_${suffix}`;
+      const subject = "offload-probe";
+      const key = `offload/probes/${suffix}.txt`;
+      const lifecycle = env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(sessionId);
+      const sandbox = getSandbox(
+        env.Sandbox,
+        await sandboxIdForSession(`offload_${sessionId}`),
+        {
+          transport: "rpc",
+          normalizeId: true,
+          enableDefaultSession: false,
+          sleepAfter: "2m"
+        }
+      );
+      try {
+        await env.OFFLOAD_JOBS.put(key, "offload-r2-ready");
+        const stored = await env.OFFLOAD_JOBS.get(key);
+        const image = await sandbox.exec(
+          "test -x /opt/jingler/offload-exec.mjs && node --version",
+          { cwd: "/workspace", timeout: 30_000, origin: "internal" }
+        );
+        const touched = await lifecycle.fetch(INTERNAL_ROUTES.offloadLifecycle.touch, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ subject, sessionId })
+        });
+        const success = stored !== null && await stored.text() === "offload-r2-ready" &&
+          image.success && touched.ok;
+        return json({
+          success,
+          checks: {
+            r2: stored !== null,
+            sandboxImage: image.success,
+            lifecycle: touched.ok
+          }
+        }, success ? 200 : 500);
+      } finally {
+        await env.OFFLOAD_JOBS.delete(key).catch(() => undefined);
+        await lifecycle.fetch(INTERNAL_ROUTES.offloadLifecycle.destroy, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ subject, sessionId })
+        }).catch(() => undefined);
+      }
     }
     if (url.pathname === "/v1/sandbox-probe" && request.method === "POST") {
       if (!hasServiceAuthorization(request, env)) {

@@ -124,12 +124,17 @@ without recording repository paths or raw command text in telemetry.
 
 ## Observability and rollout
 
-Measure queue, snapshot, hydration, dependency, and command durations separately.
+The aggregate-only `offload_compute_settled` event measures queue, snapshot,
+hydration, dependency, and command durations separately and records only outcome,
+typed failure reason, warm-dependency state, and output truncation. It never
+contains account/session/job identity, repository, command, argv, output, or path.
 The initial targets are a warm p95 under five seconds from handoff to command
 start and a cold p95 under twenty seconds excluding dependency installation and
-external repository failure. Alert on admission denial, Workflow retry
-exhaustion, Sandbox capacity, cleanup backlog, digest mismatch, and unexpected
-source mutation.
+external repository failure. The scheduled production benchmark enforces both
+thresholds; the dashboard alerts on retry exhaustion, Sandbox capacity, cleanup
+backlog, digest mismatch, and unexpected source mutation. Provisioning, smoke,
+benchmark, alert thresholds, rollback, and incident steps live in
+[`runbooks/offload-compute.md`](runbooks/offload-compute.md).
 
 Roll out in order: managed-runtime Workflow support, API admission and grants,
 desktop setting/router, then account eligibility. Roll back by disabling new

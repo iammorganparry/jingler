@@ -8,6 +8,7 @@ import {
 import { Effect } from "effect"
 import { issueOffloadGrant } from "./offload-grant.js"
 import { INTERNAL_ROUTES } from "./internal-routes.js"
+import { redactedOffloadTelemetry } from "./offload-telemetry.js"
 import {
   OffloadJobStore,
   makeOffloadJobStoreLayer
@@ -141,6 +142,7 @@ export const runOffloadWorkflow = async (
   step: WorkflowStep
 ): Promise<OffloadJobResult> => {
   const storeLayer = makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)
+  let warmDependencies = false
   try {
     const prepared = await step.do("hydrate exact workspace", retry, () =>
       Effect.runPromise(
@@ -178,9 +180,9 @@ export const runOffloadWorkflow = async (
                 method: "POST",
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify({
-          subject: record.subject,
-          sessionId: record.request.sessionId
-        })
+                  subject: record.subject,
+                  sessionId: record.request.sessionId
+                })
               }
             )
           )
@@ -201,13 +203,19 @@ export const runOffloadWorkflow = async (
             cancelled: false as const,
             hydrationMs: workspace.hydrationMs,
             dependencyMs: workspace.dependencyMs,
+            warmDependencies: workspace.warmDependencies,
             sandboxId,
             queuedMs: Math.max(0, Date.now() - record.createdAt * 1_000)
           }
         }).pipe(Effect.provide(storeLayer))
       )
     )
-    if (prepared.cancelled) return prepared.result
+    if (prepared.cancelled) {
+      await releaseOffloadSlot(env, input.jobId)
+      console.log(JSON.stringify(redactedOffloadTelemetry(prepared.result, false)))
+      return prepared.result
+    }
+    warmDependencies = prepared.warmDependencies
 
     await step.waitForEvent("wait for exact snapshot", {
       type: "snapshot-ready",
@@ -267,7 +275,7 @@ export const runOffloadWorkflow = async (
             sourceDigest,
             {
               queuedMs: prepared.queuedMs,
-              snapshotMs: 0,
+              snapshotMs: record.request.clientTimings?.snapshotMs ?? 0,
               hydrationMs: prepared.hydrationMs,
               dependencyMs: prepared.dependencyMs
             }
@@ -287,6 +295,7 @@ export const runOffloadWorkflow = async (
       )
     )
     await releaseOffloadSlot(env, input.jobId)
+    console.log(JSON.stringify(redactedOffloadTelemetry(result, warmDependencies)))
     return result
   } catch (cause) {
     const result = failedResult(
@@ -310,6 +319,7 @@ export const runOffloadWorkflow = async (
       )
     )
     await releaseOffloadSlot(env, input.jobId)
+    console.log(JSON.stringify(redactedOffloadTelemetry(result, warmDependencies)))
     return result
   }
 }

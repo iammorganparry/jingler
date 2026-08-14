@@ -368,6 +368,8 @@ const deviceRuntime = (root: string, targetId: string) => {
     }
   })
   const piRuntime = embeddedPi.pipe(
+    Layer.provide(ConfigService.Default),
+    Layer.provide(GitService.Default),
     Layer.provide(RuntimeDiagnostics.Default),
     Layer.provide(assets),
     Layer.provide(AgentResourcesLive),
