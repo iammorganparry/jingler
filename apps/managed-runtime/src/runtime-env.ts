@@ -1,4 +1,9 @@
 export type ManagedRuntimeEnv = Env & {
+  OFFLOAD_JOBS: R2Bucket
+  OFFLOAD_WORKFLOW: Workflow<import("./offload-workflow.js").OffloadWorkflowInput>
+  OFFLOAD_SANDBOX_LIFECYCLE: DurableObjectNamespace<
+    import("./offload-sandbox-lifecycle.js").OffloadSandboxLifecycleObject
+  >
   MANAGED_RUNTIME_ORIGIN: string
   /** Worker origin reachable from inside the sandbox network. */
   MANAGED_RUNTIME_SANDBOX_ORIGIN?: string

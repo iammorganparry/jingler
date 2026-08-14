@@ -219,7 +219,8 @@ export const OffloadGrantAction = Schema.Literal(
   "snapshot.upload",
   "job.run",
   "job.read",
-  "job.cancel"
+  "job.cancel",
+  "git.read"
 )
 export type OffloadGrantAction = Schema.Schema.Type<typeof OffloadGrantAction>
 
@@ -234,7 +235,7 @@ export const OffloadGrantClaims = Schema.Struct({
   idempotencyKey: OpaqueOffloadId,
   repositorySlug: OffloadRepositorySlug,
   snapshotDigest: Sha256Digest,
-  actions: Schema.Array(OffloadGrantAction).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  actions: Schema.Array(OffloadGrantAction).pipe(Schema.minItems(1), Schema.maxItems(5)),
   issuedAt: Schema.Int.pipe(Schema.nonNegative()),
   expiresAt: Schema.Int.pipe(Schema.positive())
 })

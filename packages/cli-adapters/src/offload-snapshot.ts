@@ -291,7 +291,8 @@ const upload = (
         headers: {
           authorization: `Bearer ${input.grant}`,
           "content-type": "application/vnd.jingler.offload-snapshot+gzip",
-          "x-jingler-snapshot-digest": input.snapshot.identity.digest
+          "x-jingler-snapshot-digest": input.snapshot.identity.digest,
+          "x-jingler-snapshot-bytes": String(totalBytes)
         },
         body,
         signal,

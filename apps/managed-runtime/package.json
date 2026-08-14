@@ -21,7 +21,8 @@
   "dependencies": {
     "@cloudflare/sandbox": "0.10.3",
     "@jingler/core": "workspace:*",
-    "effect": "^3.21.4"
+    "effect": "^3.21.4",
+    "jose": "6.2.3"
   },
   "devDependencies": {
     "@jingler/tsconfig": "workspace:*",

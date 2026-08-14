@@ -49,9 +49,12 @@ bash text into a supposedly safe argument vector.
    worktree, unsafe path, symlink, excluded secret file, or size overflow.
 3. Stream a compressed and hashed snapshot to private R2 with a single-use grant
    scoped to the account, session, repository, job, and digest.
-4. Hydrate the exact commit through the existing scoped Git proxy, restore the
-   snapshot, and verify its digest before command admission.
-5. Execute the literal executable and arguments with no shell interpolation.
+4. Start the session-scoped Sandbox and Workflow as soon as admission succeeds.
+   While the desktop captures/uploads the dirty snapshot, the Workflow hydrates
+   the exact clean commit and primes the lockfile-keyed dependency installation;
+   a durable `snapshot-ready` event releases execution when upload completes.
+5. Restore and verify the snapshot, then execute the literal executable and
+   arguments with no shell interpolation.
    Compare source manifests afterwards and discard the Sandbox state if source
    changed.
 
@@ -95,9 +98,11 @@ storage.
 
 Each desktop request carries an idempotency key. The Workflow instance id is
 stable for that key, and command execution obtains a durable lease before the
-Sandbox starts. Workflow step retries can recover a recorded result but cannot
-execute the command twice. Event sequence numbers provide resumable, deduplicated
-logs after a desktop disconnect.
+Sandbox starts. Workflow step retries recover the executor's durable result
+marker instead of executing the argv twice. Event sequence numbers provide
+resumable, deduplicated logs after a desktop disconnect. Short-lived scoped
+capabilities are standard HS256 JWTs issued and verified by `jose`; Jingler does
+not implement JWT encoding, parsing, or signature verification itself.
 
 ## Limits and lifecycle
 
@@ -106,7 +111,11 @@ per command, one active job per account, and the managed runtime's global
 Sandbox cap. Production values remain server-controlled and may be lower by
 account tier. A warm Sandbox may reuse a dependency installation only when its
 runtime image and lockfile digests match; every job still revalidates `HEAD`, the
-snapshot, and the clean source baseline.
+snapshot, and the clean source baseline. Enabling offload primes the active
+session asynchronously, and resuming it refreshes that primer. Archiving or
+deleting the session destroys its Sandbox immediately. A Durable Object activity
+lease destroys any remaining Sandbox after three inactive hours; a later resume
+creates and primes a fresh one.
 
 Job states are `capturing`, `uploading`, `queued`, `preparing`, `running`,
 `cancelling`, and terminal `succeeded`, `failed`, or `cancelled`. Terminal

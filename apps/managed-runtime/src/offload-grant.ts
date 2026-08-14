@@ -6,10 +6,12 @@ import {
   type OffloadGrantClaims as OffloadGrantClaimsValue
 } from "@jingler/core"
 import { Effect, Either, Schema } from "effect"
+import { errors as joseErrors, jwtVerify, SignJWT } from "jose"
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
-const BASE64_PADDING = /[=]+$/u
+const JWT_ISSUER = "jingler"
+const JWT_AUDIENCE = "offload-compute"
+const JWT_TYPE = "JinglerOffloadGrant"
 
 export type OffloadGrantRejection =
   | "missing"
@@ -39,44 +41,18 @@ export interface IssueOffloadGrantInput {
 
 export interface VerifyOffloadGrantExpected {
   readonly action: OffloadGrantAction
-  readonly subject: string
-  readonly sessionId: string
-  readonly jobId: string
-  readonly repositorySlug: string
-  readonly snapshotDigest: string
+  readonly subject?: string
+  readonly sessionId?: string
+  readonly jobId?: string
+  readonly repositorySlug?: string
+  readonly snapshotDigest?: string
   readonly consumedGrantIds?: ReadonlySet<string>
 }
 
-const base64Url = (bytes: Uint8Array): string => {
-  let binary = ""
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(BASE64_PADDING, "")
+const signingKey = (secret: string): Uint8Array => {
+  if (secret.length < 32) throw new Error("Invalid signing configuration")
+  return encoder.encode(secret)
 }
-
-const decodeBase64Url = (value: string): Uint8Array<ArrayBuffer> => {
-  const normalized = value.replaceAll("-", "+").replaceAll("_", "/")
-  const decoded = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="))
-  const bytes = new Uint8Array(decoded.length)
-  for (let index = 0; index < decoded.length; index += 1) {
-    bytes[index] = decoded.charCodeAt(index)
-  }
-  return bytes
-}
-
-const encodeJson = (value: object): string =>
-  base64Url(encoder.encode(JSON.stringify(value)))
-
-const hmacKey = (
-  secret: string,
-  usage: ReadonlyArray<"sign" | "verify">
-): Promise<CryptoKey> =>
-  crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    [...usage]
-  )
 
 const admissionFailure = (): OffloadAdmissionError =>
   new OffloadAdmissionError({
@@ -95,29 +71,25 @@ export const issueOffloadGrant = (
 > =>
   Effect.tryPromise({
     try: async () => {
-      if (secret.length < 32) throw new Error("Invalid signing configuration")
       const claims = Schema.decodeUnknownSync(OffloadGrantClaims)({
         version: 1,
-        issuer: "jingler",
-        audience: "offload-compute",
+        issuer: JWT_ISSUER,
+        audience: JWT_AUDIENCE,
         grantId,
         ...input,
         actions: [...new Set(input.actions)],
         issuedAt: nowSeconds,
         expiresAt: nowSeconds + OFFLOAD_GRANT_MAX_TTL_SECONDS
       })
-      const header = encodeJson({ alg: "HS256", typ: "JinglerOffloadGrant", version: 1 })
-      const payload = encodeJson(claims)
-      const signed = `${header}.${payload}`
-      const signature = await crypto.subtle.sign(
-        "HMAC",
-        await hmacKey(secret, ["sign"]),
-        encoder.encode(signed)
-      )
-      return {
-        grant: `${signed}.${base64Url(new Uint8Array(signature))}`,
-        claims
-      }
+      const grant = await new SignJWT(claims)
+        .setProtectedHeader({ alg: "HS256", typ: JWT_TYPE })
+        .setIssuer(JWT_ISSUER)
+        .setAudience(JWT_AUDIENCE)
+        .setJti(grantId)
+        .setIssuedAt(nowSeconds)
+        .setExpirationTime(claims.expiresAt)
+        .sign(signingKey(secret))
+      return { grant, claims }
     },
     catch: admissionFailure
   })
@@ -126,22 +98,11 @@ const matchesScope = (
   claims: OffloadGrantClaimsValue,
   expected: VerifyOffloadGrantExpected
 ): boolean =>
-  claims.subject === expected.subject &&
-  claims.sessionId === expected.sessionId &&
-  claims.jobId === expected.jobId &&
-  claims.repositorySlug === expected.repositorySlug &&
-  claims.snapshotDigest === expected.snapshotDigest
-
-const tokenParts = (
-  grant: string,
-  secret: string
-): readonly [string, string, string] | null => {
-  const parts = grant.split(".")
-  const [header, payload, signature] = parts
-  return header && payload && signature && parts.length === 3 && secret.length >= 32
-    ? [header, payload, signature]
-    : null
-}
+  (expected.subject === undefined || claims.subject === expected.subject) &&
+  (expected.sessionId === undefined || claims.sessionId === expected.sessionId) &&
+  (expected.jobId === undefined || claims.jobId === expected.jobId) &&
+  (expected.repositorySlug === undefined || claims.repositorySlug === expected.repositorySlug) &&
+  (expected.snapshotDigest === undefined || claims.snapshotDigest === expected.snapshotDigest)
 
 const verifyUnsafe = async (
   grant: string | null,
@@ -150,33 +111,27 @@ const verifyUnsafe = async (
   nowSeconds: number
 ): Promise<OffloadGrantVerification> => {
   if (grant === null) return { ok: false, reason: "missing" }
-  const parts = tokenParts(grant, secret)
-  if (parts === null) return { ok: false, reason: "malformed" }
-  const [header, payload, signature] = parts
-  const signed = `${header}.${payload}`
-  const signatureValid = await crypto.subtle.verify(
-    "HMAC",
-    await hmacKey(secret, ["verify"]),
-    decodeBase64Url(signature),
-    encoder.encode(signed)
-  )
-  if (!signatureValid) return { ok: false, reason: "invalid-signature" }
-  const headerValue: unknown = JSON.parse(decoder.decode(decodeBase64Url(header)))
-  const headerFields =
-    typeof headerValue === "object" && headerValue !== null
-      ? Object.fromEntries(Object.entries(headerValue))
-      : null
-  if (
-    headerFields?.alg !== "HS256" ||
-    headerFields.typ !== "JinglerOffloadGrant" ||
-    headerFields.version !== 1
-  ) {
+  let payload: unknown
+  try {
+    const verified = await jwtVerify(grant, signingKey(secret), {
+      algorithms: ["HS256"],
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+      typ: JWT_TYPE,
+      currentDate: new Date(nowSeconds * 1_000),
+      clockTolerance: 60
+    })
+    payload = verified.payload
+  } catch (cause) {
+    if (cause instanceof joseErrors.JWTExpired) return { ok: false, reason: "expired" }
+    if (cause instanceof joseErrors.JWSSignatureVerificationFailed) {
+      return { ok: false, reason: "invalid-signature" }
+    }
     return { ok: false, reason: "malformed" }
   }
-  const decoded = Schema.decodeUnknownEither(OffloadGrantClaims)(
-    JSON.parse(decoder.decode(decodeBase64Url(payload))),
-    { onExcessProperty: "error" }
-  )
+  const decoded = Schema.decodeUnknownEither(OffloadGrantClaims)(payload, {
+    onExcessProperty: "ignore"
+  })
   if (Either.isLeft(decoded)) return { ok: false, reason: "invalid-claims" }
   const claims = decoded.right
   if (claims.expiresAt <= nowSeconds) return { ok: false, reason: "expired" }
@@ -184,15 +139,16 @@ const verifyUnsafe = async (
   if (claims.expiresAt - claims.issuedAt > OFFLOAD_GRANT_MAX_TTL_SECONDS) {
     return { ok: false, reason: "overlong" }
   }
-  if (expected.consumedGrantIds?.has(claims.grantId)) {
+  if (
+    expected.consumedGrantIds?.has(claims.grantId) ||
+    expected.consumedGrantIds?.has(`${claims.grantId}:${expected.action}`)
+  ) {
     return { ok: false, reason: "replayed" }
   }
   if (!claims.actions.includes(expected.action)) {
     return { ok: false, reason: "action-denied" }
   }
-  if (!matchesScope(claims, expected)) {
-    return { ok: false, reason: "wrong-scope" }
-  }
+  if (!matchesScope(claims, expected)) return { ok: false, reason: "wrong-scope" }
   return { ok: true, claims }
 }
 

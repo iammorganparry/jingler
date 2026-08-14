@@ -46,6 +46,10 @@
         "name": "AUTH_STATE",
         "class_name": "AuthStateObject",
         "script_name": "jingler-auth-state"
+      },
+      {
+        "name": "OFFLOAD_SANDBOX_LIFECYCLE",
+        "class_name": "OffloadSandboxLifecycleObject"
       }
     ]
   },
@@ -53,12 +57,27 @@
     {
       "binding": "WORKSPACE_CHECKPOINTS",
       "bucket_name": "jingler-managed-workspace-checkpoints"
+    },
+    {
+      "binding": "OFFLOAD_JOBS",
+      "bucket_name": "jingler-offload-jobs"
+    }
+  ],
+  "workflows": [
+    {
+      "binding": "OFFLOAD_WORKFLOW",
+      "name": "jingler-offload-compute",
+      "class_name": "OffloadComputeWorkflow"
     }
   ],
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["Sandbox", "ManagedAccountObject", "ManagedSessionObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["OffloadSandboxLifecycleObject"]
     }
   ],
   "observability": {
