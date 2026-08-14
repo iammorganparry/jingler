@@ -72,6 +72,31 @@ describe("Jingler target-owned tools", () => {
     expect(askQuestion).not.toHaveBeenCalled()
   })
 
+  it("treats a null browser lease as detached", async () => {
+    const askQuestion = vi.fn(() => Effect.succeed([]))
+    const registry = await Effect.runPromise(createJinglerTools({
+      context: runtimeContext({ askQuestion }),
+      cwd: "/workspace",
+      webSearch: {
+        chooseSetup: () => Effect.void,
+        search: () => Effect.fail(new WebSearchError({
+          reason: "setup-required",
+          message: "setup",
+          retryable: false
+        }))
+      },
+      mcp: { browser: null }
+    }))
+    const result = await Effect.runPromise(registry.execute({
+      id: "web_search",
+      arguments: { query: "research", maxResults: 5 },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(result.status).toBe("error")
+    expect(askQuestion).not.toHaveBeenCalled()
+  })
+
   it("registers WebSearch only when the runtime target supplies an executable route", async () => {
     const withoutSearch = await Effect.runPromise(createJinglerTools({
       context: runtimeContext(),

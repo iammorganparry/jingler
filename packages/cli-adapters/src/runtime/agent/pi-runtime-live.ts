@@ -125,7 +125,7 @@ export const makePiAgentRuntimeLive = (
       }),
       createToolRegistry: (spec, context, tracker) => {
         const runWebSearch = Option.isSome(webSearch)
-          ? Option.isSome(browserControl) && context.mcp?.browser !== undefined
+          ? Option.isSome(browserControl) && context.mcp?.browser != null
             ? withWebSearchFallback(
                 webSearch.value,
                 browserWebSearchPort(browserControl.value.forSession(spec.sessionId))

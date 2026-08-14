@@ -171,7 +171,7 @@ export const createJinglerTools = (
         registry,
         input.webSearch,
         input.context,
-        input.mcp?.browser !== undefined
+        input.mcp?.browser != null
       )
     }
     const mcpSources = input.mcp ? jinglerMcpSources(input.mcp) : []
