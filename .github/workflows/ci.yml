@@ -36,8 +36,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # Unit + integration tests (Vitest). Electron Playwright runs separately
-      # under xvfb so failures retain a focused job log and artifact build.
+      # Unit + integration tests (Vitest). The full Electron Playwright suite is
+      # a required local pre-PR gate; keeping it out of routine CI avoids a
+      # heavyweight desktop build and browser runtime on every push.
       - name: Test
         run: pnpm test
 
@@ -48,7 +49,7 @@ jobs:
         run: pnpm license:check
 
   electron:
-    name: Electron behavior and package gates
+    name: Electron package gates
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -60,10 +61,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install Electron runtime dependencies
-        run: pnpm --filter @jingler/desktop exec playwright install --with-deps chromium
-      - name: Electron end-to-end behavior contract
-        run: xvfb-run -a pnpm --filter @jingler/desktop e2e
       - name: Build unpacked desktop artifact
         run: pnpm --filter @jingler/desktop dist
       - name: Inspect desktop and device artifacts
