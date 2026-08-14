@@ -1,13 +1,14 @@
 import { type ReactNode, useState } from "react"
 import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
-import type { CliKind, ContentPart, ExecutionMode, GateDecision, Message, ToolCall as ToolCallModel } from "@jingler/core"
+import type { ContentPart, ExecutionMode, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { DiffPeek } from "../components/diff-peek.js"
+import { FileChangeList } from "../components/file-change-list.js"
 import { Markdown } from "../components/markdown.js"
-import { PROVIDER_COLOR, PROVIDER_LABEL, ProviderIcon } from "../components/provider-icon.js"
+import { providerColor, providerLabel, ProviderIcon } from "../components/provider-icon.js"
 import { ApprovalGate } from "./approval-gate.js"
 import { ContextDivider } from "./context-divider.js"
 import { PlanCard } from "./plan-card.js"
@@ -29,8 +30,15 @@ type PlanTaskProgressPart = Extract<ContentPart, { _tag: "PlanTaskProgress" }>
 /** An attached image on a user turn — a read-only transcript thumbnail. */
 const IMAGE_THUMB = "h-[80px] w-[132px]"
 
-const toolMeta = (tool: ToolCallModel): string | undefined =>
-  tool.meta ?? (tool.diff ? `+${tool.diff.added} −${tool.diff.removed}` : undefined)
+const toolMeta = (tool: ToolCallModel): string | undefined => {
+  if (tool.meta !== null) return tool.meta
+  if (tool.fileChanges !== undefined) {
+    const count = tool.fileChanges.changes.length
+    const { added, removed } = tool.fileChanges.totals
+    return `${count} ${count === 1 ? "file" : "files"} · +${added} −${removed}`
+  }
+  return tool.diff ? `+${tool.diff.added} −${tool.diff.removed}` : undefined
+}
 
 /**
  * Tools whose `target` is a file path, and so get a file glyph and the
@@ -47,8 +55,11 @@ const PATH_TOOLS: ReadonlySet<string> = new Set([
   "NotebookEdit"
 ])
 
-const pathOf = (tool: ToolCallModel): string | null =>
-  tool.target && PATH_TOOLS.has(tool.name) ? tool.target : null
+const pathOf = (tool: ToolCallModel): string | null => {
+  const changes = tool.fileChanges?.changes
+  if (changes?.length === 1) return changes[0]!.path
+  return tool.target && PATH_TOOLS.has(tool.name) ? tool.target : null
+}
 
 /** Lines of a diff hunk shown before the "Show all" affordance kicks in. */
 const HUNK_PREVIEW_LINES = 12
@@ -113,13 +124,16 @@ function ProtocolText({ text, markdown }: { text: string; markdown: boolean }) {
 
 function ToolCardView({ tool }: { tool: ToolCallModel }) {
   const [expanded, setExpanded] = useState(false)
-  const lines = tool.preview ? tool.preview.replace(/\n+$/, "").split("\n") : []
+  const canonicalChanges = tool.fileChanges?.changes ?? []
+  const legacyPreview = canonicalChanges.length === 0 ? tool.preview : null
+  const lines = legacyPreview ? legacyPreview.replace(/\n+$/, "").split("\n") : []
   const clipped = lines.length > HUNK_PREVIEW_LINES && !expanded
-  const shown = clipped ? lines.slice(0, HUNK_PREVIEW_LINES).join("\n") : tool.preview
+  const shown = clipped ? lines.slice(0, HUNK_PREVIEW_LINES).join("\n") : legacyPreview
   // An edit's change is already spelled out by its diff peek, so its header stays
   // inert and the existing "Show all N lines" control owns that body. Everything
   // else — a command and what it printed — only fits once opened.
-  const openable = !tool.preview && (tool.output !== undefined || (tool.target?.length ?? 0) > 0)
+  const openable = canonicalChanges.length === 0 && !legacyPreview &&
+    (tool.output !== undefined || (tool.target?.length ?? 0) > 0)
   const path = pathOf(tool)
   return (
     <ToolCall
@@ -132,6 +146,7 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
       onToggle={openable ? () => setExpanded((v) => !v) : undefined}
       className={WIDTH}
     >
+      {canonicalChanges.length > 0 && <FileChangeList changes={canonicalChanges} />}
       {openable && expanded && (
         <div className="border-t border-line bg-editor">
           {/* The header truncates a long command to one line; this is where you
@@ -152,7 +167,7 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
           )}
         </div>
       )}
-      {tool.preview && shown && (
+      {legacyPreview && shown && (
         <div>
           <DiffPeek preview={shown} />
           {lines.length > HUNK_PREVIEW_LINES && (
@@ -343,15 +358,15 @@ function renderParts(
 /** One transcript turn: a You / provider eyebrow followed by its ordered parts. */
 export function MessageTurn({
   message,
-  cli = "claude",
+  providerId,
   onDecideGate,
   onApprovePlan,
   onResumePlan,
   onOpenPlanReview
 }: {
   message: Message
-  /** The harness that produced assistant turns — sets the eyebrow logo + name. */
-  cli?: CliKind
+  /** Canonical provider identity for the assistant eyebrow. */
+  providerId?: ProviderId | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   /** Approve a proposed plan inline (from the transcript's plan card). */
   onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
@@ -365,8 +380,11 @@ export function MessageTurn({
     <div className="flex flex-col gap-3">
       {isAssistant ? (
         // Provider-branded eyebrow: logo + name in the provider's brand colour.
-        <Eyebrow icon={<ProviderIcon cli={cli} mono />} style={{ color: PROVIDER_COLOR[cli] }}>
-          {PROVIDER_LABEL[cli]}
+        <Eyebrow
+          icon={<ProviderIcon providerId={providerId ?? undefined} mono />}
+          style={{ color: providerColor(providerId) }}
+        >
+          {providerLabel(providerId)}
         </Eyebrow>
       ) : (
         <Eyebrow>You</Eyebrow>

@@ -1,0 +1,12 @@
+[
+  {
+    "providerId": "anthropic",
+    "modelId": "anthropic/claude-sonnet-5",
+    "authKind": "claude-setup-token"
+  },
+  {
+    "providerId": "openai-codex",
+    "modelId": "openai-codex/gpt-5.6-sol",
+    "authKind": "openai-codex-oauth"
+  }
+]

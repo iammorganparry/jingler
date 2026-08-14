@@ -21,28 +21,44 @@ describe("managed provider credential proxy", () => {
       serviceSecret: "service-secret",
       fetch: upstream
     })
-    await providerFetch(new Request(
-      "https://chatgpt.com/backend-api/codex/v1/responses",
-      { headers: { authorization: "Bearer oauth-secret" } }
-    ))
+    await providerFetch(
+      new Request("https://chatgpt.com/backend-api/codex/v1/responses", {
+        headers: { authorization: "Bearer oauth-secret" }
+      })
+    )
     expect(upstream).toHaveBeenCalledOnce()
   })
 
   it("accepts provider authorization without unrelated git metadata", () => {
-    expect(providerAuthorizationScope({
-      subject: "user-1",
-      capabilityHandle: "capability_codex_1"
-    })).toEqual({
+    expect(
+      providerAuthorizationScope({
+        subject: "user-1",
+        capabilityHandle: "capability_codex_1"
+      })
+    ).toEqual({
       subject: "user-1",
       capabilityHandle: "capability_codex_1"
     })
     expect(providerAuthorizationScope({ subject: "user-1" })).toBeNull()
+    expect(
+      providerAuthorizationScope({
+        subject: "user-1",
+        capabilityHandle: "capability_codex_1",
+        unexpected: true
+      })
+    ).toBeNull()
+    expect(
+      providerAuthorizationScope({
+        subject: "user-1",
+        capabilityHandle: "x".repeat(257)
+      })
+    ).toBeNull()
   })
 
   it("keeps real GitHub credentials inside the Worker-side upstream request", async () => {
     const providerToken = "ghp_provider_secret_value"
     const upstream = vi.fn(async function (
-      this: unknown,
+      this: typeof globalThis,
       input: Parameters<typeof fetch>[0]
     ) {
       expect(this).toBe(globalThis)
@@ -64,7 +80,9 @@ describe("managed provider credential proxy", () => {
         method: "GET"
       },
       {
-        resolve: async () => ({ authorizationHeader: `Bearer ${providerToken}` }),
+        resolve: async () => ({
+          authorizationHeader: `Bearer ${providerToken}`
+        }),
         fetch: upstream
       }
     )
@@ -73,7 +91,9 @@ describe("managed provider credential proxy", () => {
   })
 
   it("rejects arbitrary destinations before resolving credentials", async () => {
-    const resolve = vi.fn(async () => ({ authorizationHeader: "Bearer secret" }))
+    const resolve = vi.fn(async () => ({
+      authorizationHeader: "Bearer secret"
+    }))
     const response = await proxyProviderRequest(
       {
         subject: "user_1",
@@ -112,7 +132,9 @@ describe("managed provider credential proxy", () => {
         body: new Response(JSON.stringify({ model: "gpt-5" })).body
       },
       {
-        resolve: async () => ({ authorizationHeader: `Bearer ${providerToken}` }),
+        resolve: async () => ({
+          authorizationHeader: `Bearer ${providerToken}`
+        }),
         fetch: upstream
       }
     )
@@ -145,6 +167,40 @@ describe("managed provider credential proxy", () => {
       }
     )
     expect(response.status).toBe(200)
+  })
+
+  it("normalizes the pi-ai Codex response path without duplicating the service prefix", async () => {
+    const upstream = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const request = input instanceof Request ? input : new Request(input)
+      expect(request.url).toBe("https://chatgpt.com/backend-api/codex/responses")
+      expect(request.headers.get("content-encoding")).toBe("zstd")
+      expect(request.headers.get("session-id")).toBe("session_1")
+      expect(request.headers.get("x-client-request-id")).toBe("request_1")
+      return Response.json({ id: "response_1" })
+    })
+    const response = await proxyProviderRequest(
+      {
+        provider: "codex",
+        subject: "user_1",
+        capabilityHandle: "capability_codex_1",
+        upstreamUrl: "https://api.openai.com/v1/codex/responses",
+        method: "POST",
+        contentEncoding: "zstd",
+        sessionId: "session_1",
+        clientRequestId: "request_1"
+      },
+      {
+        resolve: async () => ({
+          authorizationHeader: "Bearer oauth-secret",
+          upstream: "chatgpt-codex",
+          accountId: "account_1"
+        }),
+        fetch: upstream
+      }
+    )
+
+    expect(response.ok).toBe(true)
+    expect(upstream).toHaveBeenCalledOnce()
   })
 
   it("proxies Claude subscription auth without exposing it to the sandbox", async () => {
@@ -185,7 +241,9 @@ describe("managed provider credential proxy", () => {
         method: "GET"
       },
       {
-        resolve: async () => ({ authorizationHeader: `Bearer ${providerToken}` }),
+        resolve: async () => ({
+          authorizationHeader: `Bearer ${providerToken}`
+        }),
         fetch: async (input) => {
           const request = input instanceof Request ? input : new Request(input)
           visible.push(request.url.replace("api.github.com", "provider"))

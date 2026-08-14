@@ -8,8 +8,6 @@ import {
 import type {
   ContextConfig,
   ContextSnapshot,
-  CliInfo,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
@@ -22,16 +20,12 @@ import type {
   DiffStat,
   Environment,
   EnvironmentDiscovery,
-  HarnessCapability,
   IssueProviderDescriptor,
   IssueSummary,
-  ModelOption,
   SessionPrStatus,
-  ProviderConfig,
   Project,
   ProjectDirectoryListing,
   PlanTemplateConfig,
-  ProvidersConfig,
   Repo,
   PrSummary,
   Session,
@@ -39,8 +33,8 @@ import type {
   Usage,
   User,
 } from "@jingler/core"
+import { UNTITLED_SESSION } from "@jingler/core"
 import type { SessionCreationPhase } from "@jingler/contracts"
-import { newSessionCli, UNTITLED_SESSION } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
@@ -52,7 +46,6 @@ import {
   type SettingsViewProps
 } from "../composites/settings-view.js"
 import type { ConnectorCenterProps } from "../composites/connector-center.js"
-import type { InjectionTargetsProps } from "../composites/injection-targets.js"
 import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
@@ -138,16 +131,6 @@ const cloudCreationTitle = (input: CloudCreationInput): string => {
 }
 
 export interface JinglerAppProps {
-  clis: ReadonlyArray<CliInfo>
-  /** Live harness, model, mode, and reasoning options for the shared composer. */
-  modelCapabilities?: ReadonlyArray<HarnessCapability>
-  /**
-   * The harness new sessions start on (Settings · Providers). The New Session
-   * dialog reads it instead of asking; absent falls back to the first installed.
-   */
-  defaultCli?: CliKind | null
-  /** Persist the default harness for new sessions. */
-  onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
@@ -206,7 +189,6 @@ export interface JinglerAppProps {
   contextSessions?: ReadonlyArray<{
     id: string
     title: string
-    cli: CliKind
     snapshot: ContextSnapshot
   }>
   /** Persisted git preferences (for the settings modal's Git section). */
@@ -236,23 +218,15 @@ export interface JinglerAppProps {
   /** Everything Settings › Plugins needs. Absent renders the stub. */
   plugins?: PluginsSettingsProps
   devices?: SettingsViewProps["devices"]
-  /** Persisted per-CLI provider defaults (Settings · Providers view). */
-  providersConfig?: ProvidersConfig | null
-  /** Persist one CLI's provider defaults; presence wires the Settings gear. */
-  onSaveProvider?: (
-    cli: CliKind,
-    config: ProviderConfig
-  ) => Promise<void> | void
+  providerConnections?: SettingsViewProps["providerConnections"]
+  agents?: SettingsViewProps["agents"]
+  runtimeInspector?: SettingsViewProps["runtimeInspector"]
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => void
-  /** Load the selectable models for a CLI (Settings · Providers). */
-  loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   /** Unified MCP (OpenConnector) connection settings (Settings → Connectors). */
   unifiedMcp?: OpenConnectorSectionProps
   /** MCP Connector Center data + actions (Settings → Connector Center). */
   connector?: ConnectorCenterProps
-  /** Per-harness injection readout (Settings → Connectors). */
-  injection?: InjectionTargetsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (
     session: Session,
@@ -434,14 +408,10 @@ const noBranches = async (): Promise<ReadonlyArray<string>> => []
 
 /**
  * The product shell — the whole Jingler window, data-driven. The desktop
- * renderer feeds it discovered `clis`/`repos`, live GitHub App state, and the session list
+ * renderer feeds it repositories, provider connections, live GitHub App state, and the session list
  * over Effect RPC, plus the callbacks that create real worktrees.
  */
 export function JinglerApp({
-  clis,
-  modelCapabilities = [],
-  defaultCli,
-  onSaveDefaultCli,
   sessions,
   user,
   onSignOut,
@@ -486,17 +456,16 @@ export function JinglerApp({
   themes,
   plugins,
   devices,
+  providerConnections,
+  agents,
+  runtimeInspector,
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
-  providersConfig,
-  onSaveProvider,
   planTemplate,
   onSavePlanTemplate,
-  loadModels,
   unifiedMcp,
   connector,
-  injection,
   renderPullRequest,
   tabContributions,
   paneContributions,
@@ -567,8 +536,19 @@ export function JinglerApp({
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<
-    "providers" | "github"
+    "providers" | "github" | "agents" | "runtime"
   >("providers")
+  const openSettings = useCallback(
+    (section: typeof settingsSection = settingsSection) => {
+      memory?.onClose()
+      setNewOpen(false)
+      setSettingsSection(section)
+      if (section === "providers") providerConnections?.onReload?.()
+      if (section === "runtime") runtimeInspector?.onRefresh()
+      setSettingsOpen(true)
+    },
+    [memory, providerConnections, runtimeInspector, settingsSection]
+  )
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [fileQuickOpenSessionId, setFileQuickOpenSessionId] = useState<
     string | null
@@ -972,9 +952,9 @@ export function JinglerApp({
       })
     }
 
-    // Gated on `onSaveProvider` for the same reason the sidebar's menu item is:
+    // Gated on provider connections for the same reason the sidebar's menu item is:
     // that prop is what makes the Settings view renderable at all.
-    if (onSaveProvider) {
+    if (providerConnections) {
       items.push({
         id: "action:open-settings",
         kind: "action",
@@ -982,8 +962,7 @@ export function JinglerApp({
         group: PALETTE_GROUP.actions,
         icon: SettingsIcon,
         run: () => {
-          setNewOpen(false)
-          setSettingsOpen(true)
+          openSettings()
         }
       })
     }
@@ -1064,7 +1043,7 @@ export function JinglerApp({
     isBrowserActive,
     onArchiveSession,
     onRestoreSession,
-    onSaveProvider,
+    providerConnections,
     onSignOut,
     planSessions,
     liveDiff,
@@ -1135,8 +1114,6 @@ export function JinglerApp({
     },
     [onCreateSessionFromIssue, runTrackedCreation]
   )
-  const initialNewSessionCli = newSessionCli(clis, defaultCli)
-
   return (
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
@@ -1147,7 +1124,6 @@ export function JinglerApp({
       <SessionConversation
         sessions={sessions}
         environments={environments}
-        clis={clis}
         activeSessionId={selected}
         onSelectSession={selectSession}
         pendingEnvironmentSession={pendingEnvironmentSession}
@@ -1206,24 +1182,15 @@ export function JinglerApp({
         onSignOut={onSignOut}
         onOpenUsage={onLoadUsage ? openUsage : undefined}
         onOpenSettings={
-          onSaveProvider
-            ? () => {
-              memory?.onClose()
-              setNewOpen(false)
-              setSettingsSection("providers")
-                setSettingsOpen(true)
-              }
+          providerConnections
+            ? () => openSettings("providers")
             : undefined
         }
+        onOpenProviderSettings={
+          providerConnections ? () => openSettings("providers") : undefined
+        }
         onOpenGithubSettings={
-          onSaveProvider
-            ? () => {
-              memory?.onClose()
-              setNewOpen(false)
-              setSettingsSection("github")
-                setSettingsOpen(true)
-              }
-            : undefined
+          providerConnections ? () => openSettings("github") : undefined
         }
         memoryEligible={memory?.eligible}
         memoryActive={memory?.active}
@@ -1254,16 +1221,10 @@ export function JinglerApp({
               projects={projects}
               environments={environments}
               environmentStartup={pendingEnvironmentSession}
-              capabilities={modelCapabilities}
               defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
-              clis={clis}
-              defaultCli={defaultCli}
-              defaultModel={
-                initialNewSessionCli === null
-                  ? null
-                  : providersConfig?.[initialNewSessionCli]?.defaultModel
-              }
-              providers={providersConfig}
+              providerCatalog={providerConnections?.catalog}
+              defaultConnectionId={providerConnections?.defaultConnectionId}
+              defaultModelId={providerConnections?.defaultModelId}
               issueProviders={issueProviders}
               loadPullRequests={loadPullRequests}
               loadGithubIssues={loadGithubIssues}
@@ -1283,21 +1244,17 @@ export function JinglerApp({
           ) : undefined
         }
         settingsView={
-          settingsOpen && onSaveProvider ? (
+          settingsOpen && providerConnections ? (
             <SettingsView
               key={settingsSection}
               initialSection={settingsSection}
-              clis={clis}
-              providers={providersConfig}
-              onSaveProvider={onSaveProvider}
-              defaultCli={defaultCli}
-              onSaveDefaultCli={onSaveDefaultCli}
+              providerConnections={providerConnections}
+              agents={agents}
+              runtimeInspector={runtimeInspector}
               planTemplate={planTemplate}
               onSavePlanTemplate={onSavePlanTemplate}
-              loadModels={loadModels ?? (async () => [])}
               unifiedMcp={unifiedMcp}
               connector={connector}
-              injection={injection}
               githubConnection={githubConnection}
               githubBusy={githubBusy}
               onGithubConnect={onGithubConnect}

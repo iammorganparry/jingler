@@ -12,6 +12,10 @@ const composerPlaceholder = /Message .+…/
 // The read-only bar shows the live phase as a status pill (lower-case) rather
 // than the removed sync indicator.
 const transientStatus = /composing|validating/
+const PI_FIXTURE = {
+  scenarioId: "plan-draft-stream",
+  authRoute: "api-key"
+} as const
 
 const session = (
   id: string
@@ -23,7 +27,6 @@ const session = (
       branch: `chore/${id}`,
       title: "Streamed plan",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -40,6 +43,7 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
   const launched = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: PI_FIXTURE,
     sessions: session("s_streamed_plan")
   })
   const { window } = launched
@@ -87,6 +91,7 @@ test("later plan drafts respect a split the operator closed", async ({
   const launched = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: PI_FIXTURE,
     sessions: session("s_plan_split_preference")
   })
   const { window } = launched
@@ -131,6 +136,7 @@ test("a closed plan split stays closed after an app restart", async ({
   const first = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: PI_FIXTURE,
     sessions: session("s_restarted_plan_split_preference")
   })
   await expect(appShell(first.window)).toBeVisible()

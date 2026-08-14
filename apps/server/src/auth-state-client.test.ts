@@ -1,41 +1,43 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest";
 import {
   deleteAuthStateSession,
   upsertAuthStateCapability,
-  upsertAuthStateSession
-} from "./auth-state-client.js"
+  upsertAuthStateSession,
+} from "./auth-state-client.js";
 
 const session = {
   id: "session_1",
   userId: "user/1",
-  expiresAt: new Date("2026-08-10T18:00:00Z")
-}
+  expiresAt: new Date("2026-08-10T18:00:00Z"),
+};
 
 describe("auth-state client", () => {
   it("routes session state directly to the user's Durable Object", async () => {
-    let sentUrl = ""
-    let sentInit: RequestInit | undefined
+    let sentUrl = "";
+    let sentInit: RequestInit | undefined;
     const request: typeof fetch = async (input, init) => {
-      sentUrl = String(input)
-      sentInit = init
-      return new Response(null, { status: 204 })
-    }
+      sentUrl = String(input);
+      sentInit = init;
+      return new Response(null, { status: 204 });
+    };
     await upsertAuthStateSession(
       {
         enabled: true,
         url: "https://auth-state.jingler.dev",
         serviceSecret: "secret",
-        fetch: request
+        fetch: request,
       },
-      session
-    )
-    expect(sentUrl).toBe("https://auth-state.jingler.dev/v1/internal/users/user%2F1/session")
-    expect(sentInit?.method).toBe("PUT")
+      session,
+    );
+    expect(sentUrl).toBe(
+      "https://auth-state.jingler.dev/v1/internal/users/user%2F1/session",
+    );
+    expect(sentInit?.method).toBe("PUT");
     expect(JSON.parse(String(sentInit?.body))).toEqual({
       sessionId: "session_1",
-      expiresAt: 1_786_384_800
-    })
-  })
+      expiresAt: 1_786_384_800,
+    });
+  });
 
   it("fails sign-out fencing when the authority cannot revoke", async () => {
     await expect(
@@ -44,56 +46,70 @@ describe("auth-state client", () => {
           enabled: true,
           url: "https://auth-state.jingler.dev",
           serviceSecret: "secret",
-          fetch: async () => new Response(null, { status: 503 })
+          fetch: async () => new Response(null, { status: 503 }),
         },
-        session
-      )
-    ).rejects.toThrow("Auth-state session sync failed (503)")
-  })
+        session,
+      ),
+    ).rejects.toThrow("Auth-state session sync failed (503)");
+  });
 
   it("publishes a bounded provider capability to the same user authority", async () => {
-    let sentUrl = ""
-    let sentBody: unknown
+    let sentUrl = "";
+    let sentBody: unknown;
     await upsertAuthStateCapability(
       {
         enabled: true,
         url: "https://auth-state.jingler.dev",
         serviceSecret: "secret",
         fetch: async (input, init) => {
-          sentUrl = String(input)
-          sentBody = JSON.parse(String(init?.body))
-          return new Response(null, { status: 204 })
-        }
+          sentUrl = String(input);
+          sentBody = JSON.parse(String(init?.body));
+          return new Response(null, { status: 204 });
+        },
       },
       {
         userId: "user/1",
         provider: "codex",
+        proxy: "codex",
         authorizationHeader: "Bearer cloud-provider-key",
-        expiresAt: new Date("2026-08-11T18:00:00Z")
-      }
-    )
+        expiresAt: new Date("2026-08-11T18:00:00Z"),
+        upstream: "chatgpt-codex",
+        accountId: "00000000-0000-0000-0000-000000000001",
+        connectionId: "connection_one",
+        providerId: "openai-codex",
+        authKind: "openai-codex-oauth",
+        billingRoute: "subscription",
+      },
+    );
 
     expect(sentUrl).toBe(
-      "https://auth-state.jingler.dev/v1/internal/users/user%2F1/capability"
-    )
+      "https://auth-state.jingler.dev/v1/internal/users/user%2F1/capability",
+    );
     expect(sentBody).toEqual({
       provider: "codex",
+      proxy: "codex",
       authorizationHeader: "Bearer cloud-provider-key",
-      expiresAt: 1_786_471_200
-    })
-  })
+      expiresAt: 1_786_471_200,
+      upstream: "chatgpt-codex",
+      accountId: "00000000-0000-0000-0000-000000000001",
+      connectionId: "connection_one",
+      providerId: "openai-codex",
+      authKind: "openai-codex-oauth",
+      billingRoute: "subscription",
+    });
+  });
 
   it("does not issue network traffic while managed environments are disabled", async () => {
-    const request = vi.fn()
+    const request = vi.fn();
     await upsertAuthStateSession(
       {
         enabled: false,
         url: "http://localhost:9450",
         serviceSecret: "secret",
-        fetch: request
+        fetch: request,
       },
-      session
-    )
-    expect(request).not.toHaveBeenCalled()
-  })
-})
+      session,
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+});

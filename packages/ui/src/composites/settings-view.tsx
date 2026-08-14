@@ -1,18 +1,10 @@
 import * as React from "react"
 import type {
-  CliInfo,
-  CliKind,
   GitHubConnection,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
-  ModelOption,
-  OutputStyle,
-  PermissionMode,
   PlanTemplateConfig,
-  ProviderConfig,
-  ProvidersConfig,
-  ReasoningEffort,
   ContextConfig,
   ContextSnapshot,
   Environment
@@ -20,19 +12,14 @@ import type {
 import {
   BUDGET_RANGE,
   DEFAULT_CONTEXT_CONFIG,
-  DEFAULT_REVIEW_MODEL,
   NOTIFICATIONS_DEFAULT,
-  clampFontScale,
-  contextWindowFor,
-  defaultModel,
-  digestModelFor,
-  newSessionCli,
-  providerReasoningCapabilitiesFor,
-  reviewModelFor,
-  startableClis,
-  triggerAt
+  clampFontScale
 } from "@jingler/core"
 import { ContextMeter } from "./context-meter.js"
+import {
+  ProviderConnectionsSettings,
+  type ProviderConnectionsSettingsProps
+} from "./provider-connections-settings.js"
 import {
   Boxes,
   ChevronRight,
@@ -42,7 +29,6 @@ import {
   Palette,
   Plug,
   RefreshCw,
-  RotateCcw,
   Server,
   ShieldCheck,
   Gauge,
@@ -51,7 +37,6 @@ import {
   X
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
-import { reasoningEffortsFor } from "../lib/reasoning-options.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
@@ -65,33 +50,25 @@ import {
 } from "../components/dialog.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { GithubMark } from "../components/github-mark.js"
-import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
 import { PlanSettings } from "./plan-settings.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
 import {
   PluginsSettings,
   type PluginsSettingsProps
 } from "./plugins-settings.js"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "../components/select.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
 import { ConnectorsSettings } from "./connectors-settings.js"
 import type { ConnectorCenterProps } from "./connector-center.js"
 import type { OpenConnectorSectionProps } from "./open-connector-section.js"
-import type { InjectionTargetsProps } from "./injection-targets.js"
-import { ProviderCard } from "./provider-card.js"
 import { Input } from "../components/input.js"
 import {
   EnvironmentDialog,
   type EnvironmentDialogProps
 } from "./environment-dialog.js"
+import { AgentsSettings, type AgentsSettingsProps } from "./agents-settings.js"
+import { RuntimeInspector, type RuntimeInspectorProps } from "./runtime-inspector.js"
 
 // ── Section registry ─────────────────────────────────────────────────────────
 
@@ -101,6 +78,7 @@ type SectionKey =
   | "context"
   | "plan"
   | "agents"
+  | "runtime"
   | "permissions"
   | "connectors"
   | "github"
@@ -137,7 +115,13 @@ const NAV: ReadonlyArray<NavItem> = [
     key: "agents",
     label: "Agents & skills",
     icon: <Sparkles size={14} />,
-    ready: false
+    ready: true
+  },
+  {
+    key: "runtime",
+    label: "Runtime",
+    icon: <Gauge size={14} />,
+    ready: true
   },
   {
     key: "permissions",
@@ -167,87 +151,13 @@ const NAV: ReadonlyArray<NavItem> = [
   }
 ]
 
-// ── Provider lever option sets (labels ← design E10) ─────────────────────────
-
-const MODE_ITEMS: ReadonlyArray<{ value: PermissionMode; label: string }> = [
-  { value: "ask", label: "Ask each time" },
-  { value: "accept-edits", label: "Accept edits" },
-  { value: "plan", label: "Plan first" },
-  { value: "auto", label: "Auto" }
-]
-const modeItemsFor = (
-  cli: CliKind
-): ReadonlyArray<{ value: PermissionMode; label: string }> =>
-  cli === "codex"
-    ? [
-        { value: "ask", label: "Ask for approval" },
-        { value: "accept-edits", label: "Approve for me" },
-        { value: "plan", label: "Plan first" },
-        { value: "auto", label: "Full access" }
-      ]
-    : MODE_ITEMS
-
-type ReasoningChoice = "off" | ReasoningEffort
-const reasoningItemsFor = (
-  cli: CliKind
-): ReadonlyArray<{ value: ReasoningChoice; label: string }> => [
-  ...(providerReasoningCapabilitiesFor(cli).explicitToggle
-    ? [{ value: "off" as const, label: "Off" }]
-    : []),
-  ...reasoningEffortsFor(cli).map((value) => ({
-    value,
-    label:
-      cli === "codex" && value === "low"
-        ? "Light"
-        : value === "xhigh"
-          ? "Extra High"
-          : value[0]!.toUpperCase() + value.slice(1)
-  }))
-]
-
-const OUTPUT_ITEMS: ReadonlyArray<{ value: OutputStyle; label: string }> = [
-  { value: "default", label: "Default" },
-  { value: "explanatory", label: "Explanatory" },
-  { value: "concise", label: "Concise" }
-]
-
-const HARNESS_DEFAULT = "__default__"
-
-const DEFAULT_PROVIDER: ProviderConfig = {
-  enabled: true,
-  defaultMode: "accept-edits"
-}
-
-const providerOf = (
-  providers: ProvidersConfig | undefined,
-  cli: CliKind
-): ProviderConfig => providers?.[cli] ?? DEFAULT_PROVIDER
-
-/** The card's one-line `model · mode · reasoning` summary. */
-function summarize(
-  cli: CliKind,
-  cfg: ProviderConfig,
-  installed: boolean
-): string {
-  if (!cfg.enabled) return "disabled"
-  if (!installed) return "not installed"
-  const modeLabel =
-    modeItemsFor(cli).find((m) => m.value === cfg.defaultMode)?.label ??
-    cfg.defaultMode
-  const parts = [cfg.defaultModel ?? "harness default", modeLabel]
-  const reasoning = reasoningItemsFor(cli).find(
-    (r) => r.value === cfg.reasoningEffort
-  )?.label
-  if (cfg.thinkingEnabled === false) parts.push("Thinking off")
-  else if (reasoning) parts.push(reasoning)
-  return parts.join(" · ")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
 export interface SettingsViewProps {
-  /** Discovered CLIs — every one becomes a provider card. */
-  clis: ReadonlyArray<CliInfo>
+  /** Canonical provider connections. When present, legacy CLI cards stay hidden. */
+  providerConnections?: ProviderConnectionsSettingsProps
+  /** Operator-controlled skills, prompts, and MCP resources. */
+  agents?: AgentsSettingsProps
+  /** Redacted metadata for the latest embedded pi run. */
+  runtimeInspector?: RuntimeInspectorProps
   /**
    * Everything the Themes pane needs. Optional so Storybook and the component
    * gallery can mount Settings without standing up a theme catalog; absent
@@ -270,22 +180,9 @@ export interface SettingsViewProps {
     onRename: (id: string, name: string) => void | Promise<void>
     onRevoke: (id: string) => void | Promise<void>
   }
-  /** Persisted per-CLI provider defaults. */
-  providers?: ProvidersConfig | null
-  /** Persist one CLI's provider config. */
-  onSaveProvider: (cli: CliKind, config: ProviderConfig) => Promise<void> | void
-  /**
-   * The harness NEW sessions start on. Absent means "the first installed one" —
-   * the New Session dialog no longer asks, so this is where the answer lives.
-   */
-  defaultCli?: CliKind | null
-  /** Persist the default harness for new sessions. */
-  onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
-  /** Custom PRD structure injected into every native planning harness. */
+  /** Custom PRD structure injected into planning runs. */
   planTemplate?: PlanTemplateConfig | null
   onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
-  /** Load the selectable models for a CLI (live discovery). */
-  loadModels: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   /** Unified MCP (OpenConnector) connection settings (from `useOpenConnector`). */
   unifiedMcp?: OpenConnectorSectionProps
   /**
@@ -293,8 +190,6 @@ export interface SettingsViewProps {
    * connection — see `ConnectorsSettings`.
    */
   connector?: ConnectorCenterProps
-  /** Per-harness injection readout, shown inside the Connectors section. */
-  injection?: InjectionTargetsProps
   /** Auto-compaction levers (master switch + working-set budget). */
   context?: ContextConfig | null
   onSaveContext?: (config: ContextConfig) => void
@@ -305,7 +200,6 @@ export interface SettingsViewProps {
   contextSessions?: ReadonlyArray<{
     id: string
     title: string
-    cli: CliKind
     snapshot: ContextSnapshot
   }>
   // Shared GitHub App connection (separate from BetterAuth social sign-in).
@@ -334,7 +228,7 @@ export interface SettingsViewProps {
   /** Close the view and return to the active session. */
   onClose?: () => void
   /** Recovery actions open directly on GitHub; ordinary Settings opens Providers. */
-  initialSection?: "providers" | "github" | "devices"
+  initialSection?: "providers" | "github" | "devices" | "agents" | "runtime"
 }
 
 /**
@@ -344,20 +238,16 @@ export interface SettingsViewProps {
  * fills the main pane (the sidebar stays), replacing the old modal.
  */
 export function SettingsView({
-  clis,
+  providerConnections,
+  agents,
+  runtimeInspector,
   themes,
   plugins,
   devices,
-  providers,
-  onSaveProvider,
-  defaultCli,
-  onSaveDefaultCli,
   planTemplate,
   onSavePlanTemplate,
-  loadModels,
   unifiedMcp,
   connector,
-  injection,
   context,
   onSaveContext,
   contextSessions,
@@ -383,6 +273,11 @@ export function SettingsView({
   initialSection = "providers"
 }: SettingsViewProps) {
   const [section, setSection] = React.useState<SectionKey>(initialSection)
+  const selectSection = (next: SectionKey) => {
+    setSection(next)
+    if (next === "providers") providerConnections?.onReload?.()
+    if (next === "runtime") runtimeInspector?.onRefresh()
+  }
 
   // Three `flex-none` columns (216 + 328 + detail) is ~544px of chrome before
   // the settings themselves get a pixel. Below `mid` the nav narrows to an icon
@@ -420,7 +315,7 @@ export function SettingsView({
           <button
             key={item.key}
             type="button"
-            onClick={() => setSection(item.key)}
+            onClick={() => selectSection(item.key)}
             aria-current={section === item.key}
             // The label is the accessible name in both modes — the compact rail
             // hides the TEXT, not the name, so a by-name lookup still finds it.
@@ -444,7 +339,7 @@ export function SettingsView({
             {!compact && <span className="flex-1 text-left">{item.label}</span>}
             {!compact && item.key === "providers" && (
               <span className="rounded bg-hover px-1.5 py-px font-mono text-[9px] text-muted-foreground">
-                {clis.length}
+                {providerConnections?.catalog?.connections.length ?? 0}
               </span>
             )}
           </button>
@@ -480,22 +375,16 @@ export function SettingsView({
           onSaveFontScale={onSaveFontScale}
         />
       ) : section === "providers" ? (
-        <ProvidersSection
-          clis={clis}
-          providers={providers ?? undefined}
-          onSaveProvider={onSaveProvider}
-          defaultCli={defaultCli}
-          onSaveDefaultCli={onSaveDefaultCli}
-          loadModels={loadModels}
-        />
+        providerConnections ? (
+          <ProviderConnectionsSettings {...providerConnections} />
+        ) : (
+          <StubSection label="Providers" />
+        )
       ) : section === "context" ? (
         <ContextSection
-          clis={clis}
           context={context}
-          providers={providers ?? undefined}
           sessions={contextSessions}
           onSaveContext={onSaveContext}
-          onSaveProvider={onSaveProvider}
         />
       ) : section === "plan" ? (
         <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
@@ -504,6 +393,10 @@ export function SettingsView({
             onSave={(source) => onSavePlanTemplate?.({ source })}
           />
         </div>
+      ) : section === "agents" ? (
+        agents ? <AgentsSettings {...agents} /> : <StubSection label="Agents & skills" />
+      ) : section === "runtime" ? (
+        runtimeInspector ? <RuntimeInspector {...runtimeInspector} /> : <StubSection label="Runtime" />
       ) : section === "connectors" ? (
         // Same wrapper every other section uses. Without `flex-1` this pane is a
         // shrink-to-fit child of the settings flex ROW, so the catalog sized to
@@ -514,7 +407,6 @@ export function SettingsView({
           <ConnectorsSettings
             unifiedMcp={unifiedMcp}
             connector={connector}
-            injection={injection}
           />
         </div>
       ) : section === "plugins" ? (
@@ -535,7 +427,6 @@ export function SettingsView({
           busy={githubBusy}
           github={github}
           git={git}
-          loadModels={loadModels}
           onConnect={onGithubConnect}
           onManage={onGithubManage}
           onRefresh={onGithubRefresh}
@@ -752,368 +643,6 @@ export function DevicesSection({
   )
 }
 
-// ── Providers section ────────────────────────────────────────────────────────
-
-function ProvidersSection({
-  clis,
-  providers,
-  onSaveProvider,
-  defaultCli,
-  onSaveDefaultCli,
-  loadModels
-}: {
-  clis: ReadonlyArray<CliInfo>
-  providers: ProvidersConfig | undefined
-  onSaveProvider: (cli: CliKind, config: ProviderConfig) => Promise<void> | void
-  defaultCli?: CliKind | null
-  onSaveDefaultCli?: (cli: CliKind) => Promise<void> | void
-  loadModels: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
-}) {
-  const [selected, setSelected] = React.useState<CliKind>(
-    clis[0]?.kind ?? "claude"
-  )
-  const stored = providerOf(providers, selected)
-  const [draft, setDraft] = React.useState<ProviderConfig>(stored)
-  const [models, setModels] = React.useState<ReadonlyArray<ModelOption>>([])
-
-  const selectedInfo = clis.find((c) => c.kind === selected)
-
-  // Re-seed the draft whenever the selected provider (or its stored config) changes.
-  React.useEffect(() => {
-    setDraft(providerOf(providers, selected))
-  }, [providers, selected])
-
-  // Load the model list for the selected provider.
-  React.useEffect(() => {
-    let live = true
-    void loadModels(selected)
-      .then((m) => live && setModels(m))
-      .catch(() => live && setModels([]))
-    return () => {
-      live = false
-    }
-  }, [selected, loadModels])
-
-  const dirty = JSON.stringify(draft) !== JSON.stringify(stored)
-  const patch = (next: Partial<ProviderConfig>) =>
-    setDraft((d) => ({ ...d, ...next }))
-
-  // Which harness new sessions actually get — resolved, not merely configured,
-  // so an unset default (or one naming an uninstalled CLI) still badges the
-  // harness that WOULD run rather than badging nothing.
-  const startable = startableClis(clis)
-  const isDefaultCli = newSessionCli(clis, defaultCli) === selected
-
-  return (
-    <>
-      {/* provider list */}
-      <div className="flex w-[328px] max-w-[45%] flex-none flex-col border-r border-hairline">
-        <div className="flex flex-none flex-col gap-1 p-4 pb-3">
-          <span className="text-[15px] font-bold text-text-bright">
-            Providers
-          </span>
-          <span className="text-[11.5px] leading-relaxed text-muted-foreground">
-            Set the defaults each agent CLI starts a new session with. Sessions
-            can override per-turn.
-          </span>
-        </div>
-        <div className="flex flex-1 flex-col gap-1.5 overflow-auto p-3 pt-1">
-          {clis.map((c) => (
-            <ProviderCard
-              key={c.kind}
-              cli={c.kind}
-              label={c.label}
-              summary={summarize(
-                c.kind,
-                providerOf(providers, c.kind),
-                c.available
-              )}
-              enabled={providerOf(providers, c.kind).enabled}
-              installed={c.available}
-              selected={c.kind === selected}
-              onSelect={() => setSelected(c.kind)}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* detail */}
-      <div className="flex min-w-0 flex-1 flex-col bg-editor">
-        <div className="flex flex-1 flex-col gap-5 overflow-auto p-6">
-          {/* header */}
-          <div className="flex items-center gap-3">
-            <span className="flex size-9 flex-none items-center justify-center rounded-lg bg-canvas">
-              <ProviderIcon cli={selected} size={19} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[15px] font-semibold text-text-bright">
-                {PROVIDER_LABEL[selected]}
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[10.5px] text-dim">
-                <StatusDot
-                  tone={selectedInfo?.available ? "bg-green" : "bg-line-strong"}
-                  size={6}
-                  glow={selectedInfo?.available}
-                />
-                {selectedInfo?.available
-                  ? `ready${selectedInfo.version ? ` · v${selectedInfo.version}` : ""}`
-                  : "not installed"}
-                {selectedInfo?.binPath && (
-                  <span className="truncate text-muted-foreground">
-                    · {selectedInfo.binPath}
-                  </span>
-                )}
-              </div>
-            </div>
-            {/* The New Session dialog has no harness picker; this is its default. */}
-            {onSaveDefaultCli &&
-              startable.some((c) => c.kind === selected) &&
-              (isDefaultCli ? (
-                <span className="rounded-md bg-blue/10 px-2 py-1 text-[10.5px] font-medium text-blue">
-                  Default for new sessions
-                </span>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void onSaveDefaultCli(selected)}
-                >
-                  Make default
-                </Button>
-              ))}
-            <label className="flex cursor-pointer items-center gap-2 text-[11.5px] text-muted-foreground">
-              Enabled
-              <Toggle
-                checked={draft.enabled}
-                onCheckedChange={(enabled) => patch({ enabled })}
-                aria-label="Enable provider"
-              />
-            </label>
-          </div>
-
-          {/* An installed-but-unusable harness explains itself. */}
-          {selectedInfo?.note && (
-            <Callout tone="yellow">{selectedInfo.note}</Callout>
-          )}
-
-          {/* default model */}
-          <Field label="Default model" flag="--model">
-            <div className="grid grid-cols-3 gap-2">
-              <ModelChoice
-                label="Harness default"
-                sub="the CLI's built-in pick"
-                selected={draft.defaultModel == null}
-                onSelect={() => patch({ defaultModel: undefined })}
-              />
-              {models.map((m) => (
-                <ModelChoice
-                  key={m.id}
-                  label={m.label}
-                  sub={m.id}
-                  selected={draft.defaultModel === m.id}
-                  onSelect={() => patch({ defaultModel: m.id })}
-                />
-              ))}
-            </div>
-          </Field>
-
-          {/* background model */}
-          <Row
-            label="Background model"
-            description="Small, fast model for summaries & side tasks"
-          >
-            <ModelSelect
-              value={draft.backgroundModel}
-              models={models}
-              onChange={(backgroundModel) => patch({ backgroundModel })}
-            />
-          </Row>
-
-          {/* default mode */}
-          <Field label="Default mode" flag="--permission-mode">
-            <SegmentedControl
-              items={modeItemsFor(selected)}
-              value={draft.defaultMode}
-              onChange={(defaultMode) => patch({ defaultMode })}
-            />
-            <span className="text-[11px] leading-relaxed text-dim">
-              {selected === "codex"
-                ? "Ask for approval gates external edits and internet access; Approve for me only interrupts for potentially unsafe actions. "
-                : ""}
-              Plan first drafts a plan and waits for approval before running.{" "}
-              <span className="text-yellow">
-                Auto bypasses all permission prompts — use with care.
-              </span>
-            </span>
-          </Field>
-
-          {/* reasoning effort */}
-          <Field label="Reasoning effort" flag="thinking budget">
-            <SegmentedControl
-              items={reasoningItemsFor(selected)}
-              value={
-                draft.thinkingEnabled === false
-                  ? "off"
-                  : (draft.reasoningEffort ??
-                    (selected === "claude" ? "high" : "medium"))
-              }
-              onChange={(value) =>
-                value === "off"
-                  ? patch({ thinkingEnabled: false })
-                  : patch({ thinkingEnabled: true, reasoningEffort: value })
-              }
-            />
-          </Field>
-
-          {/* output style */}
-          <Field label="Output style" flag="tone & verbosity">
-            <SegmentedControl
-              items={OUTPUT_ITEMS}
-              value={draft.outputStyle ?? "default"}
-              onChange={(outputStyle) => patch({ outputStyle })}
-            />
-          </Field>
-        </div>
-
-        {/* footer */}
-        <div className="flex flex-none items-center gap-2 border-t border-hairline px-6 py-3">
-          <span className="font-mono text-[10.5px] text-dim">
-            Saved to{" "}
-            <span className="text-muted-foreground">~/jingler/config.json</span>
-          </span>
-          <div className="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!dirty}
-            onClick={() => setDraft(stored)}
-          >
-            <RotateCcw size={12} />
-            Reset
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!dirty}
-            onClick={() => void onSaveProvider(selected, draft)}
-          >
-            Save
-          </Button>
-        </div>
-      </div>
-    </>
-  )
-}
-
-// ── Small building blocks ────────────────────────────────────────────────────
-
-/** A labelled lever block with an optional mono flag hint on the right. */
-function Field({
-  label,
-  flag,
-  children
-}: {
-  label: string
-  flag?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <Eyebrow className="flex-1">{label}</Eyebrow>
-        {flag && (
-          <span className="font-mono text-[9.5px] text-dim">{flag}</span>
-        )}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-/** A label+description row with a trailing control (dropdowns). */
-function Row({
-  label,
-  description,
-  children
-}: {
-  label: string
-  description: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex items-center gap-4">
-      <div className="flex-1">
-        <div className="text-[12.5px] font-medium text-text-body">{label}</div>
-        <div className="mt-0.5 text-[11px] text-muted-foreground">
-          {description}
-        </div>
-      </div>
-      {children}
-    </div>
-  )
-}
-
-/** A radio-style model card. */
-function ModelChoice({
-  label,
-  sub,
-  selected,
-  onSelect
-}: {
-  label: string
-  sub: string
-  selected: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className={cn(
-        "flex flex-col gap-0.5 rounded-md border px-3 py-2.5 text-left transition-colors",
-        selected
-          ? "border-blue/45 bg-surface shadow-[0_0_0_3px] shadow-blue/10"
-          : "border-line bg-sunken hover:bg-surface"
-      )}
-    >
-      <span className="text-[12.5px] font-medium text-text-bright">
-        {label}
-      </span>
-      <span className="truncate font-mono text-[9.5px] text-dim">{sub}</span>
-    </button>
-  )
-}
-
-function ModelSelect({
-  value,
-  models,
-  onChange
-}: {
-  value: string | undefined
-  models: ReadonlyArray<ModelOption>
-  onChange: (value: string | undefined) => void
-}) {
-  return (
-    <Select
-      value={value ?? HARNESS_DEFAULT}
-      onValueChange={(v) => onChange(v === HARNESS_DEFAULT ? undefined : v)}
-    >
-      <SelectTrigger className="w-[190px]">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={HARNESS_DEFAULT}>Harness default</SelectItem>
-        {models.map((m) => (
-          <SelectItem key={m.id} value={m.id}>
-            {m.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-}
-
 function StubSection({ label }: { label: string }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 bg-editor text-center">
@@ -1140,24 +669,17 @@ const fmtK = (n: number): string =>
  * subscription. Showing them apart would make each look arbitrary.
  */
 function ContextSection({
-  clis,
   context,
-  providers,
   sessions,
-  onSaveContext,
-  onSaveProvider
+  onSaveContext
 }: {
-  clis: ReadonlyArray<CliInfo>
   context?: ContextConfig | null
-  providers?: ProvidersConfig
   sessions?: ReadonlyArray<{
     id: string
     title: string
-    cli: CliKind
     snapshot: ContextSnapshot
   }>
   onSaveContext?: (config: ContextConfig) => void
-  onSaveProvider?: (cli: CliKind, config: ProviderConfig) => void
 }) {
   const [draft, setDraft] = React.useState<ContextConfig>(
     context ?? DEFAULT_CONTEXT_CONFIG
@@ -1168,9 +690,6 @@ function ContextSection({
     setDraft(next)
     onSaveContext?.(next)
   }
-
-  const measurable = clis.filter((c) => c.available && c.contextReporting)
-  const unmeasurable = clis.filter((c) => c.available && !c.contextReporting)
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor">
@@ -1192,7 +711,7 @@ function ContextSection({
         <div className="divide-y divide-hairline">
           <ToggleRow
             label="Compact sessions automatically"
-            description="Summarise and reseed in the background when a session outgrows its budget. Off returns Jingler to relying on each harness's own limit."
+            description="Summarise and reseed in the background when a session outgrows its budget. Off leaves the selected provider model to enforce its own limit."
             checked={draft.auto}
             onChange={(auto) => save({ ...draft, auto })}
           />
@@ -1232,46 +751,6 @@ function ContextSection({
           </div>
         </div>
 
-        {/* ── What that means per harness ── */}
-        <div className="rounded-lg border border-line bg-sunken p-3">
-          <Eyebrow>Compacts at</Eyebrow>
-          <p className="mb-2 mt-1 text-[11px] leading-[1.5] text-muted-foreground">
-            These figures apply to each harness&apos;s default model. A model
-            whose window is smaller than the budget compacts earlier, so it
-            never reaches its own hard limit.
-          </p>
-          <div className="space-y-1">
-            {measurable.map((cli) => (
-              <div key={cli.kind} className="flex items-center justify-between">
-                <span className="text-[12px] text-text-body">{cli.label}</span>
-                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                  {(() => {
-                    const model =
-                      providers?.[cli.kind]?.defaultModel ||
-                      defaultModel(cli.kind)
-                    const w = contextWindowFor(
-                      cli.kind,
-                      model,
-                      providers?.[cli.kind]?.contextWindow
-                    )
-                    return w === null
-                      ? "set a window below"
-                      : `${fmtK(triggerAt(w, draft.budgetTokens))} of ${fmtK(w)}`
-                  })()}
-                </span>
-              </div>
-            ))}
-            {unmeasurable.map((cli) => (
-              <div key={cli.kind} className="flex items-center justify-between">
-                <span className="text-[12px] text-text-body">{cli.label}</span>
-                <span className="font-mono text-[11px] text-dim">
-                  reports no usage
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
         {/* ── Live sessions ── */}
         {sessions !== undefined && sessions.length > 0 && (
           <div className="rounded-lg border border-line bg-sunken p-3">
@@ -1304,101 +783,6 @@ function ContextSection({
             </div>
           </div>
         )}
-
-        {/* ── The digest model ── */}
-        <div>
-          <div className="text-[12.5px] font-medium text-text-body">
-            Summarised by
-          </div>
-          <p className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-            Summaries run through the CLI you have already signed in to, on its
-            cheapest tier — no API key, and nothing billed outside your existing
-            plan. This is the same &quot;background model&quot; used for side
-            tasks.
-          </p>
-          <div className="mt-2 space-y-2">
-            {measurable.map((cli) => {
-              const provider = providers?.[cli.kind]
-              return (
-                <div
-                  key={cli.kind}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <span className="text-[12px] text-text-body">
-                    {cli.label}
-                  </span>
-                  <span className="font-mono text-[11px] text-muted-foreground">
-                    {digestModelFor(cli.kind, provider?.backgroundModel)}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          <p className="mt-2 text-[10.5px] text-dim">
-            Change these under Providers → Background model.
-          </p>
-        </div>
-
-        {/* ── Window override ── */}
-        {onSaveProvider && (
-          <div>
-            <div className="text-[12.5px] font-medium text-text-body">
-              Context window override
-            </div>
-            <p className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-              Jingler infers each model&apos;s window when the selected harness
-              reports it. Set an override here when a newly released model is
-              not yet known.
-            </p>
-            <div className="mt-2 space-y-2">
-              {clis
-                // Only harnesses that DO report usage but whose window we cannot
-                // infer. Offering this for Cursor would be a dead control: it
-                // reports no context at all, so a declared window still leaves
-                // nothing to measure against.
-                .filter(
-                  (c) =>
-                    c.available &&
-                    c.contextReporting &&
-                    contextWindowFor(c.kind, null) === null
-                )
-                .map((cli) => {
-                  const provider = providers?.[cli.kind]
-                  return (
-                    <div
-                      key={cli.kind}
-                      className="flex items-center justify-between gap-3"
-                    >
-                      <span className="text-[12px] text-text-body">
-                        {cli.label}
-                      </span>
-                      <input
-                        type="number"
-                        min={0}
-                        step={1000}
-                        placeholder="unknown"
-                        aria-label={`${cli.label} context window`}
-                        defaultValue={provider?.contextWindow ?? ""}
-                        onBlur={(e) => {
-                          const raw = Number(e.target.value)
-                          onSaveProvider(cli.kind, {
-                            enabled: provider?.enabled ?? true,
-                            defaultMode:
-                              provider?.defaultMode ?? "accept-edits",
-                            ...provider,
-                            ...(Number.isFinite(raw) && raw > 0
-                              ? { contextWindow: raw }
-                              : { contextWindow: undefined })
-                          })
-                        }}
-                        className="w-[128px] rounded-md border border-line bg-editor px-2 py-1 text-right font-mono text-[11px] tabular-nums text-text-body"
-                      />
-                    </div>
-                  )
-                })}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
@@ -1412,17 +796,6 @@ const DEFAULT_GITHUB: GithubConfig = {
   autoDetectPr: true
 }
 const DEFAULT_GIT: GitConfig = { shareCheckedOutBranches: true }
-
-/**
- * Harnesses that can run an adversarial review. Cursor has no headless path yet.
- *
- * NOT a `Record<CliKind, …>`, so adding a harness won't break the build here —
- * a new kind must be added by hand or it silently never appears as a reviewer.
- */
-const REVIEW_CLIS: ReadonlyArray<{ id: CliKind; label: string }> = [
-  { id: "claude", label: "Claude" },
-  { id: "codex", label: "Codex" }
-]
 
 function ToggleRow({
   label,
@@ -1674,7 +1047,6 @@ function GithubSection({
   busy,
   github,
   git,
-  loadModels,
   onConnect,
   onManage,
   onRefresh,
@@ -1686,7 +1058,6 @@ function GithubSection({
   busy?: boolean
   github?: GithubConfig | null
   git?: GitConfig | null
-  loadModels?: (cli: CliKind) => Promise<ReadonlyArray<ModelOption>>
   onConnect?: () => void
   onManage?: () => void
   onRefresh?: () => void
@@ -1698,42 +1069,11 @@ function GithubSection({
     github ?? DEFAULT_GITHUB
   )
   const [gitDraft, setGitDraft] = React.useState<GitConfig>(git ?? DEFAULT_GIT)
-  const [reviewModels, setReviewModels] = React.useState<
-    ReadonlyArray<ModelOption>
-  >([])
 
   React.useEffect(() => setDraft(github ?? DEFAULT_GITHUB), [github])
   React.useEffect(() => setGitDraft(git ?? DEFAULT_GIT), [git])
 
   const connected = connection.connected && connection.user !== null
-  const reviewCli: CliKind = draft.reviewCli ?? "claude"
-  const reviewModel = reviewModelFor(reviewCli, draft.reviewModel)
-
-  // Live model discovery for the chosen review harness; falls back to the
-  // curated list offline. Guarded so a late response for a harness the user has
-  // since switched away from can't overwrite the current list.
-  React.useEffect(() => {
-    if (!loadModels) return
-    let stale = false
-    void loadModels(reviewCli)
-      .then((models) => {
-        if (!stale) setReviewModels(models)
-      })
-      .catch(() => {
-        if (!stale) setReviewModels([])
-      })
-    return () => {
-      stale = true
-    }
-  }, [reviewCli, loadModels])
-
-  // The Select renders blank unless an option matches its value, and discovery
-  // may not surface the default (offline / no API key) — so always include it.
-  const modelOptions: ReadonlyArray<ModelOption> = reviewModels.some(
-    (m) => m.id === reviewModel
-  )
-    ? reviewModels
-    : [{ id: reviewModel, label: reviewModel }, ...reviewModels]
   // Persist each toggle immediately so this section needs no separate Save.
   const setGithub = (next: GithubConfig) => {
     setDraft(next)
@@ -1923,67 +1263,12 @@ function GithubSection({
             }
           />
         </div>
-        <div className="flex flex-col gap-2">
-          <div className="text-[12.5px] font-medium text-text-body">
-            Reviewer
-          </div>
-          <div className="text-[11px] leading-[1.5] text-muted-foreground">
-            The harness and model that argue against your pull requests. Reviews
-            run read-only in the session&apos;s worktree and never modify the
-            branch. Kept separate from Providers on purpose — reviewing a diff
-            with a stronger model than the one that wrote it is the point.
-          </div>
-          <div className="flex gap-2 pt-0.5">
-            <div className="w-[132px] flex-none">
-              <Select
-                value={reviewCli}
-                disabled={!draft.enabled}
-                onValueChange={(value) =>
-                  // Drop the model id: it is meaningless on a different harness,
-                  // so the new harness's default applies instead.
-                  setGithub({
-                    ...draft,
-                    reviewCli: value as CliKind,
-                    reviewModel: undefined
-                  })
-                }
-              >
-                <SelectTrigger aria-label="Review harness">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {REVIEW_CLIS.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="min-w-0 flex-1">
-              <Select
-                value={reviewModel}
-                disabled={!draft.enabled}
-                onValueChange={(value) =>
-                  setGithub({ ...draft, reviewModel: value })
-                }
-              >
-                <SelectTrigger aria-label="Review model">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelOptions.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.id === DEFAULT_REVIEW_MODEL[reviewCli]
-                        ? `${m.label} · default`
-                        : m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
+        <p className="text-[11px] leading-[1.6] text-muted-foreground">
+          Reviews run read-only through the session&apos;s pinned provider
+          connection and certified model. Changing the conversation model also
+          changes future reviews; Jingler never falls through to another account
+          or billing route.
+        </p>
 
         <div className="mt-1 flex items-center gap-2 border-b border-hairline pb-2.5">
           <span className="text-[13px] font-semibold text-text-bright">

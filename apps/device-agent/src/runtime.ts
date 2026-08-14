@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { PendingDeviceRegistrationResponse } from "@jingler/core"
 import { PendingDeviceRegistrationResponse as PendingDeviceRegistrationResponseSchema } from "@jingler/core"
+import { makeAppPaths } from "@jingler/cli-adapters/app-paths-factory"
 import { Effect, Schema } from "effect"
 import packageJson from "../package.json" with { type: "json" }
 import { discoverLiveDeviceCapabilities } from "./capabilities.js"
@@ -38,11 +39,12 @@ export interface DeviceAgentPaths {
 
 export const deviceAgentPaths = (): DeviceAgentPaths => {
   const root = join(process.env.JINGLER_HOME ?? homedir(), "jingler")
+  const appPaths = makeAppPaths(root)
   const deviceDir = join(root, "device")
   return {
     jinglerRoot: root,
     deviceDir,
-    identityFile: join(deviceDir, "identity.json"),
+    identityFile: appPaths.deviceIdentityFile,
     enrollmentFile: join(deviceDir, "enrollment.json"),
     directSessionSocketFile: join(deviceDir, "direct-session.socket")
   }
@@ -232,7 +234,7 @@ export const serveDevice = async (
   }
   const identity = await Effect.runPromise(loadOrCreateDeviceIdentity(paths.identityFile))
   const executor: SessionCommandExecutor =
-    input.sessionExecutor ?? makeLiveDeviceSessionCommandExecutor(paths.jinglerRoot)
+    input.sessionExecutor ?? makeLiveDeviceSessionCommandExecutor(paths.jinglerRoot, enrollment.deviceId)
   const sessionHandlers = new Map<string, SessionCommandHandler>()
   const sessionTasks = new DeviceSessionTasks()
   const handlerFor = (sessionId: string): SessionCommandHandler => {
@@ -261,7 +263,11 @@ export const serveDevice = async (
         connect: connectDeviceWebSocket,
         discover: () =>
           Effect.runPromise(
-            discoverLiveDeviceCapabilities(paths.jinglerRoot, DEVICE_AGENT_VERSION)
+            discoverLiveDeviceCapabilities(
+              paths.jinglerRoot,
+              DEVICE_AGENT_VERSION,
+              enrollment.deviceId
+            )
           ),
         sleep: abortableSleep,
         handleSessionRequest: (request) => {

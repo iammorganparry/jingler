@@ -1,4 +1,4 @@
-import type { Message } from "@jingler/core"
+import type { Message, Session } from "@jingler/core"
 import {
   GitError,
   buildTitlePrompt,
@@ -11,10 +11,11 @@ import {
   workspaceModeOf
 } from "@jingler/core"
 import { Effect } from "effect"
+import type { AgentRuntimeShape } from "./runtime/agent/agent-runtime.js"
+import { runReadOnlyRoleText } from "./runtime/agent/read-only-role.js"
 import { SessionStore, taskSlug } from "./sessions.js"
 import { GitService } from "./git.js"
 import { TranscriptStore } from "./transcripts.js"
-import { isScriptedEnv } from "./scripted.js"
 
 /**
  * Auto-titling: name a session from its transcript and refresh it each turn. The
@@ -23,14 +24,15 @@ import { isScriptedEnv } from "./scripted.js"
  * first-message heuristic, so titling never throws and never blocks.
  */
 
-/** A hung `claude` login can't wedge the retitle — bound the one-shot call. */
+/** A hung provider request can't wedge the retitle — bound the one-shot call. */
 const TITLE_TIMEOUT = "15 seconds"
-/** Cheap/fast model for titling regardless of the session's coding model. */
-const TITLE_MODEL = "haiku"
 
 /** Pluggable title source — the injection point for deterministic tests. */
 export interface TitleGenerator {
-  readonly generate: (messages: ReadonlyArray<Message>) => Effect.Effect<SessionMetadataProposal>
+  readonly generate: (
+    messages: ReadonlyArray<Message>,
+    session: Session
+  ) => Effect.Effect<SessionMetadataProposal>
 }
 
 const fallbackMetadata = (messages: ReadonlyArray<Message>): SessionMetadataProposal => {
@@ -62,45 +64,31 @@ export const parseSessionMetadata = (
   }
 }
 
-/** Concatenated text of an SDK assistant message's `text` content blocks. */
-const assistantText = (msg: unknown): string => {
-  const content = (msg as { message?: { content?: unknown } }).message?.content
-  if (!Array.isArray(content)) return ""
-  return content
-    .filter((b) => (b as { type?: unknown }).type === "text")
-    .map((b) => String((b as { text?: unknown }).text ?? ""))
-    .join(" ")
-}
-
 /**
- * Live generator: a one-shot Haiku completion via the Claude Agent SDK, which
- * runs on the user's `claude` subscription login (no API key required) and works
- * for both claude and codex sessions. Any error/timeout/empty output folds to the
- * deterministic `fallbackTitle` — so a user without a Claude login still gets a
- * sensible name from their first message.
+ * Live generator: a fresh, read-only title role through the same canonical pi
+ * runtime and explicit provider connection as the conversation. Missing runtime
+ * identity, provider failures, and timeouts fold to the deterministic fallback.
  */
-export const claudeTitleGenerator: TitleGenerator = {
-  generate: (messages) =>
-    messages.length === 0 || isScriptedEnv()
-      ? Effect.succeed(fallbackMetadata(messages))
-      : Effect.tryPromise(async () => {
-          const { query } = await import("@anthropic-ai/claude-agent-sdk")
-          const iterator = query({
-            prompt: buildTitlePrompt(messages),
-            options: { model: TITLE_MODEL, allowedTools: [], maxTurns: 1, includePartialMessages: false }
-          })
-          let text = ""
-          for await (const m of iterator) {
-            if ((m as { type?: string }).type === "assistant") text += assistantText(m)
-            if ((m as { type?: string }).type === "result") break
-          }
-          return text
-        }).pipe(
-          Effect.timeout(TITLE_TIMEOUT),
-          Effect.map((t) => parseSessionMetadata(t, messages)),
-          Effect.orElseSucceed(() => fallbackMetadata(messages))
-        )
-}
+export const makeAgentRuntimeTitleGenerator = (
+  runtime: AgentRuntimeShape
+): TitleGenerator => ({
+  generate: (messages, session) => {
+    if (messages.length === 0) {
+      return Effect.succeed(fallbackMetadata(messages))
+    }
+
+    return runReadOnlyRoleText(
+      runtime,
+      session,
+      "title",
+      buildTitlePrompt(messages),
+      TITLE_TIMEOUT
+    ).pipe(
+      Effect.map((text) => parseSessionMetadata(text, messages)),
+      Effect.orElseSucceed(() => fallbackMetadata(messages))
+    )
+  }
+})
 
 /**
  * Regenerate a session's title from its transcript and persist it, returning the
@@ -120,7 +108,7 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
     const messages = yield* TranscriptStore.list(session.activeChatId).pipe(
       Effect.orElseSucceed(() => [])
     )
-    const proposal = yield* gen.generate(messages)
+    const proposal = yield* gen.generate(messages, session)
     const title = session.autoTitle === true ? proposal.title : session.title
     // A direct session never owns a task branch. Retitling still updates its
     // display name, but branch creation belongs exclusively to linked worktrees.

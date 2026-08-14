@@ -21,6 +21,7 @@ import type { Command } from "@effect/platform"
 import { NodeContext } from "@effect/platform-node"
 import { Cause, Effect, Exit, Layer, Option, Sink, Stream } from "effect"
 import { AppPaths } from "./app-paths.js"
+import { makeAppPaths } from "./app-paths-factory.js"
 import type { AppPathsShape } from "./app-paths.js"
 
 // ── Temp filesystem ──────────────────────────────────────────────────────────
@@ -35,25 +36,10 @@ export interface TempRoot {
 }
 
 /**
- * The `~/jingler` layout for a test root. Exported so suites that need their own
- * root don't hand-roll the literal — adding a path to `AppPathsShape` should be
- * one edit here, not one per test file (adding `reviewsDir` was three).
+ * Compatibility name for suites that create a synthetic `~/jingler` root.
+ * Production and test runtimes both delegate to the same path factory.
  */
-export const appPathsFor = (root: string): AppPathsShape => ({
-  root,
-  configFile: join(root, "config.json"),
-  sessionsFile: join(root, "sessions.json"),
-  projectsFile: join(root, "projects.json"),
-  worktreesDir: join(root, "worktrees"),
-  transcriptsDir: join(root, "transcripts"),
-  reviewsDir: join(root, "reviews"),
-  plansDir: join(root, ".jingler"),
-  themesDir: join(root, "themes"),
-  pluginsDir: join(root, "plugins"),
-  pluginStorageDir: join(root, "plugin-storage"),
-  authFile: join(root, "auth.enc"),
-  openConnectorFile: join(root, "open-connector.enc")
-})
+export const appPathsFor = (root: string): AppPathsShape => makeAppPaths(root)
 
 /** Make a fresh OS temp dir; returns its path + a recursive cleanup. */
 export const mkTemp = (prefix = "jingler-test-"): { dir: string; cleanup: () => void } => {

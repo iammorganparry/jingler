@@ -6,8 +6,8 @@ import type { LaunchedApp, LaunchOptions, SeedSession } from "./fixtures.js"
  *
  * The regression this whole feature answers: an agent could background a shell
  * command or a sub-agent and it would run to completion with nothing in the UI
- * to say it existed — no way to see it, no way to stop it. The scripted harness
- * starts one on `[[background]]` and then ENDS the turn while it runs on, which
+ * to say it existed — no way to see it, no way to stop it. The deterministic
+ * runtime fixture starts one on `[[background]]` and ENDS the turn while it runs on, which
  * is precisely the situation that used to be invisible.
  */
 
@@ -16,7 +16,6 @@ const session = (over: Partial<SeedSession> & { id: string }): SeedSession => ({
   branch: `chore/${over.id}`,
   title: over.id,
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -27,16 +26,16 @@ const session = (over: Partial<SeedSession> & { id: string }): SeedSession => ({
 
 type LaunchApp = (options?: LaunchOptions) => Promise<LaunchedApp>
 
-const launch = (launchApp: LaunchApp, cli: SeedSession["cli"] = "claude") =>
+const launch = (launchApp: LaunchApp) =>
   launchApp({
     configured: true,
     withRepo: true,
-    sessions: ({ repoPath }) => [session({ id: "s_bg", title: "Background session", cli, worktreePath: repoPath })]
+    sessions: ({ repoPath }) => [session({ id: "s_bg", title: "Background session", worktreePath: repoPath })]
   })
 
-/** Send the marker prompt that makes the scripted harness background a task. */
+/** Send the marker prompt that makes the runtime fixture background a task. */
 const startBackgroundTask = async (window: LaunchedApp["window"]) => {
-  await window.getByPlaceholder(/message claude/i).fill("watch the tests [[background]]")
+  await window.getByPlaceholder("Message the agent…").fill("watch the tests [[background]]")
   await window.getByRole("button", { name: /send/i }).click()
 }
 
@@ -68,13 +67,13 @@ test("a background task appears in the dock and survives the turn ending", async
 })
 
 test("a backgrounded sub-agent gets a dock row, not an agent tab", async ({ launchApp }) => {
-  // The bug this answers: the tab opens at tool_use time, before the harness has
+  // The bug this answers: the tab opens at tool_use time, before the runtime has
   // said the task is backgrounded, so the same work showed up in BOTH the agent
   // tab bar and the dock. The dock owns it — it outlives the turn; the tab
   // would be wiped by the next prompt while the work carried on.
   const { window } = await launch(launchApp)
   await sessionRow(window, "Background session").click()
-  await window.getByPlaceholder(/message claude/i).fill("survey it [[background-agent]]")
+  await window.getByPlaceholder("Message the agent…").fill("survey it [[background-agent]]")
   await window.getByRole("button", { name: /send/i }).click()
 
   await expect(window.getByText("Delegated the survey to a background agent.")).toBeVisible()
@@ -107,7 +106,7 @@ test("stopping a task settles it, and the row says so", async ({ launchApp }) =>
   await expect(row).toHaveAttribute("data-status", "running")
   await window.getByRole("button", { name: /stop watching the test suite/i }).click()
 
-  // The scripted harness confirms the stop the way a real one does — through the
+  // The deterministic runtime confirms the stop through the
   // same settle + level signals — so the row ends in `stopped`, not `stopping`.
   await expect(row).toHaveAttribute("data-status", "stopped")
   await expect(row).toContainText("Stopped by the operator")
@@ -115,23 +114,12 @@ test("stopping a task settles it, and the row says so", async ({ launchApp }) =>
   await expect(window.getByRole("button", { name: /stop watching/i })).toHaveCount(0)
 })
 
-test("the dock is hidden for a harness with no background-task support", async ({ launchApp }) => {
-  // Codex can only abort a whole turn, so a dock with a Stop button would be a
-  // lie about what the operator can actually do.
-  const { window } = await launch(launchApp, "codex")
-  await sessionRow(window, "Background session").click()
-  await window.getByPlaceholder(/message codex/i).fill("watch the tests [[background]]")
-  await window.getByRole("button", { name: /send/i }).click()
-
-  await expect(window.getByText("Started a watcher in the background.")).toBeVisible()
-  await expect(window.getByTestId("background-task-dock")).toHaveCount(0)
-})
 
 test("there is no dock until something actually runs in the background", async ({ launchApp }) => {
   // An empty dock is chrome that costs attention and reports nothing.
   const { window } = await launch(launchApp)
   await sessionRow(window, "Background session").click()
-  await expect(window.getByPlaceholder(/message claude/i)).toBeVisible()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
   await expect(window.getByTestId("background-task-dock")).toHaveCount(0)
 })
 
@@ -150,8 +138,8 @@ test("the chat still accepts a prompt while a background task runs on", async ({
   const { window } = await launch(launchApp)
   await sessionRow(window, "Background session").click()
   await window
-    .getByPlaceholder(/message claude/i)
-    .fill("watch the tests [[background-live-harness]]")
+    .getByPlaceholder("Message the agent…")
+    .fill("watch the tests [[background-live-runtime]]")
   await window.getByRole("button", { name: /send/i }).click()
 
   // The task is running and the turn has settled.
@@ -159,7 +147,7 @@ test("the chat still accepts a prompt while a background task runs on", async ({
   await expect(window.getByText("1 running")).toBeVisible()
 
   // Now talk to the agent again.
-  await window.getByPlaceholder(/message claude/i).fill("summarise the repo")
+  await window.getByPlaceholder("Message the agent…").fill("summarise the repo")
   await window.getByRole("button", { name: /send/i }).click()
 
   // The refusal is a `Failed` stream event, so it renders in the transcript.
@@ -182,15 +170,15 @@ test("a reloaded window can still talk to a chat whose background task runs on",
   // reload, an HMR full reload in `pnpm dev`, a crash — never closes that scope,
   // so main keeps the reservation. The reclaim exists for this, but it decides
   // "stranded" by asking whether the run FIBER is still alive, and a background
-  // task keeps the harness session open long after the turn settled. So the fiber
+  // task keeps the agent session open long after the turn settled. So the fiber
   // is alive, the reclaim declines, and the chat is refused for as long as the
   // task runs — while the reloaded renderer shows an idle composer and a send
   // button, with nothing to stop.
   const { window } = await launch(launchApp)
   await sessionRow(window, "Background session").click()
   await window
-    .getByPlaceholder(/message claude/i)
-    .fill("watch the tests [[background-live-harness]]")
+    .getByPlaceholder("Message the agent…")
+    .fill("watch the tests [[background-live-runtime]]")
   await window.getByRole("button", { name: /send/i }).click()
 
   await expect(window.getByText("Started a watcher in the background.")).toBeVisible()
@@ -199,9 +187,9 @@ test("a reloaded window can still talk to a chat whose background task runs on",
   // The renderer goes away without interrupting the stream.
   await window.reload()
   await sessionRow(window, "Background session").click()
-  await expect(window.getByPlaceholder(/message claude/i)).toBeVisible()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 
-  await window.getByPlaceholder(/message claude/i).fill("summarise the repo")
+  await window.getByPlaceholder("Message the agent…").fill("summarise the repo")
   await window.getByRole("button", { name: /send/i }).click()
 
   await expect(window.getByText(/This chat is already running/)).toHaveCount(0)
@@ -214,14 +202,14 @@ test("a task that finishes after its turn reports its outcome, unprompted", asyn
   // "Aware of when it's done": the operator backgrounds something, carries on, and
   // the dock tells them how it went WITHOUT another prompt.
   //
-  // This is the case that could not work before. A real harness reports settlement
+  // This is the case that could not work before. A real provider reports settlement
   // through a later `task_notification`, which only arrives while the process is
   // still consuming — and the run used to be killed the moment the renderer left
   // `running` on `Done`. The row stayed "running" forever over a dead process.
   const { window } = await launch(launchApp)
   await sessionRow(window, "Background session").click()
   await window
-    .getByPlaceholder(/message claude/i)
+    .getByPlaceholder("Message the agent…")
     .fill("watch the tests [[background-completes]]")
   await window.getByRole("button", { name: /send/i }).click()
 
@@ -247,13 +235,13 @@ test("the chat is usable while a task runs, and reports the task's outcome after
   const { window } = await launch(launchApp)
   await sessionRow(window, "Background session").click()
   await window
-    .getByPlaceholder(/message claude/i)
+    .getByPlaceholder("Message the agent…")
     .fill("watch the tests [[background-completes]]")
   await window.getByRole("button", { name: /send/i }).click()
   await expect(window.getByText("1 running")).toBeVisible()
 
   // Talk to the main agent mid-task.
-  await window.getByPlaceholder(/message claude/i).fill("summarise the repo")
+  await window.getByPlaceholder("Message the agent…").fill("summarise the repo")
   await window.getByRole("button", { name: /send/i }).click()
   await expect(window.getByText(/This chat is already running/)).toHaveCount(0)
   await expect(window.getByText("src/routes/billing.ts").first()).toBeVisible({ timeout: 20_000 })

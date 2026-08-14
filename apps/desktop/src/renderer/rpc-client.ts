@@ -20,8 +20,6 @@ import type {
   PluginCatalog,
   PluginSettingValue,
   PluginSettingsSnapshot,
-  CliInfo,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
@@ -40,8 +38,6 @@ import type {
   GitConfig,
   NotificationKind,
   NotificationsConfig,
-  HarnessBilling,
-  HarnessCapability,
   GithubConfig,
   Issue,
   IssueAutomations,
@@ -50,7 +46,6 @@ import type {
   IssueReference,
   IssueProviderDescriptor,
   IssueSummary,
-  McpInjectionTarget,
   McpServerStatus,
   OpenConnectorConfig,
   OpenConnectorDefaults,
@@ -61,8 +56,6 @@ import type {
   ConnectorActionResult,
   Message,
   MemoryConfig,
-  ModelOption,
-  ProviderModels,
   Project,
   ProjectDirectoryListing,
   PermissionMode,
@@ -77,7 +70,6 @@ import type {
   PrState,
   SessionPrStatus,
   PrSummary,
-  ProviderConfig,
   PublishCheckpoint,
   PullRequest,
   QuestionAnswer,
@@ -97,7 +89,24 @@ import type {
   ContextConfig,
   ContextSnapshot,
   Usage,
-  WorkspaceConfig
+  WorkspaceConfig,
+  RuntimeDiagnosticSnapshot,
+  ModelCertification,
+  ProviderCatalog,
+  ProviderConnection,
+  ProviderConnectionId,
+  ProviderLoginEvent,
+  ProviderId,
+  ProviderModelId,
+  CodexLoginMethod,
+  DetectedResourceCandidate,
+  ManagedMcpImportInput,
+  ManagedMcpServer,
+  ManagedResource,
+  ManagedResourceSelector,
+  ManagedResourceScope,
+  ResourceDetectionResult,
+  ResourceImportResult
 } from "@jingler/core"
 import {
   AssetListRpcs,
@@ -289,11 +298,107 @@ const drainRun = (
 
 /** The typed calls the renderer consumes. */
 export const rpc = {
+  runtimeDiagnosticsGet: (runId: string): Promise<RuntimeDiagnosticSnapshot | null> =>
+    run((c) => c.RuntimeDiagnostics.get({ runId })),
+  runtimeDiagnosticsLatest: (): Promise<RuntimeDiagnosticSnapshot | null> =>
+    run((c) => c.RuntimeDiagnostics.latest()),
+  runtimeDiagnosticsExport: (runId: string): Promise<string> =>
+    run((c) => c.RuntimeDiagnostics.export({ runId })),
+  providerList: (): Promise<ProviderCatalog> => run((c) => c.Provider.list()),
+  providerStatus: (): Promise<ReadonlyArray<ProviderConnection>> =>
+    run((c) => c.Provider.status()),
+  providerLoginEvents: (
+    onEvent: (event: ProviderLoginEvent) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = coreRuntime.runFork(
+        client.Provider.loginEvents().pipe(
+          Stream.runForEach((event) => Effect.sync(() => onEvent(event)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
+  providerConnectClaudeToken: (input: {
+    id: string
+    token: string
+    targetId: string
+  }): Promise<ProviderConnection> =>
+    run((c) => c.Provider.connectClaudeToken(input)),
+  providerStartCodexLogin: (input: {
+    id: string
+    targetId: string
+    method: CodexLoginMethod
+  }): Promise<ProviderConnection> => run((c) => c.Provider.startCodexLogin(input)),
+  providerCancelLogin: (connectionId: ProviderConnectionId): Promise<void> =>
+    run((c) => c.Provider.cancelLogin({ connectionId })),
+  providerSetApiKey: (input: {
+    id: string
+    providerId: string
+    apiKey: string
+    targetId: string
+  }): Promise<ProviderConnection> => run((c) => c.Provider.setApiKey(input)),
+  providerRefresh: (connectionId: ProviderConnectionId): Promise<ProviderConnection> =>
+    run((c) => c.Provider.refresh({ connectionId })),
+  providerLogout: (connectionId: ProviderConnectionId): Promise<void> =>
+    run((c) => c.Provider.logout({ connectionId })),
+  providerVerifyModel: (
+    connectionId: ProviderConnectionId,
+    modelId: ProviderModelId
+  ): Promise<ModelCertification> =>
+    run((c) => c.Provider.verifyModel({ connectionId, modelId })),
+  agentResourcesList: (): Promise<ReadonlyArray<ManagedResource>> =>
+    run((c) => c.AgentResources.list()),
+  agentResourcesDetect: (sessionId: string | null): Promise<ResourceDetectionResult> =>
+    run((c) => c.AgentResources.detect({ sessionId })),
+  agentResourcesImportFiles: (
+    sessionId: string | null,
+    candidates: ReadonlyArray<DetectedResourceCandidate>,
+    scope: ManagedResourceScope
+  ): Promise<ResourceImportResult> =>
+    run((c) => c.AgentResources.importFiles({
+      sessionId,
+      sourcePaths: candidates.map((candidate) => candidate.provenance.sourcePath),
+      scope
+    })),
+  agentResourcesImportMcp: (
+    input: ManagedMcpImportInput
+  ): Promise<ManagedMcpServer> => run((c) => c.AgentResources.importMcp(input)),
+  agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>
+    run((c) => c.AgentResources.remove(selector)),
+  agentResourcesSetEnabled: (
+    selector: ManagedResourceSelector,
+    enabled: boolean
+  ): Promise<void> => run((c) => c.AgentResources.setEnabled({ ...selector, enabled })),
+  agentResourcesReveal: (selector: ManagedResourceSelector): Promise<void> =>
+    run((c) => c.AgentResources.reveal(selector)),
+  agentResourcesEnabledForTarget: (targetId: string): Promise<ReadonlyArray<ManagedResource>> =>
+    run((c) => c.AgentResources.enabledForTarget({ targetId })),
+  agentResourcesWatch: (
+    onResources: (resources: ReadonlyArray<ManagedResource>) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = coreRuntime.runFork(
+        client.AgentResources.watch().pipe(
+          Stream.runForEach((resources) => Effect.sync(() => onResources(resources)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   /** What each installed harness will actually be billed to. */
-  billingPaths: (): Promise<ReadonlyArray<HarnessBilling>> =>
-    run((c) => c.Billing.paths()),
-  discoveryList: (): Promise<ReadonlyArray<CliInfo>> =>
-    run((c) => c.Discovery.list()),
   configGet: (): Promise<WorkspaceConfig | null> => run((c) => c.Config.get()),
   memoryAccess: (): Promise<MemoryAccess> =>
     run((c) => c.Memory.request({ operation: "access" })).then((value) =>
@@ -492,6 +597,12 @@ export const rpc = {
   ): Promise<Session> => run((c) => c.Sessions.archive({ sessionId, reason })),
   sessionsRestore: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.restore({ sessionId })),
+  sessionsResolveRuntimeRecovery: (
+    sessionId: string,
+    runId: string,
+    callId: string
+  ): Promise<Session> =>
+    run((c) => c.Sessions.resolveRuntimeRecovery({ sessionId, runId, callId })),
   sessionsRetitle: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.retitle({ sessionId })),
   sessionsRename: (sessionId: string, title: string): Promise<Session> =>
@@ -623,9 +734,6 @@ export const rpc = {
   /** One-click onboarding: apply the environment default (dev = local, prod = hosted). */
   openConnectorAutoSetup: (): Promise<void> =>
     run((c) => c.OpenConnector.autoSetup()),
-  /** Which harnesses actually receive the unified server, and why not when they don't. */
-  openConnectorInjection: (): Promise<ReadonlyArray<McpInjectionTarget>> =>
-    run((c) => c.OpenConnector.injection()),
   /** The OpenConnector provider catalog (Connector Center). */
   connectorProviders: (): Promise<ReadonlyArray<ConnectorProvider>> =>
     run((c) => c.Connector.providers()),
@@ -670,12 +778,6 @@ export const rpc = {
     connectionName?: string
   ): Promise<ConnectorActionResult> =>
     run((c) => c.Connector.startOauth({ service, connectionName })),
-  modelsList: (cli: CliKind): Promise<ReadonlyArray<ModelOption>> =>
-    run((c) => c.Models.list({ cli })),
-  modelsCatalog: (): Promise<ReadonlyArray<ProviderModels>> =>
-    run((c) => c.Models.catalog()),
-  modelsCapabilities: (): Promise<ReadonlyArray<HarnessCapability>> =>
-    run((c) => c.Models.capabilities()),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),
   /** A session's context accounting — drives the meter and the Settings list. */
   contextState: (sessionId: string, chatId: string): Promise<ContextSnapshot> =>
@@ -717,45 +819,14 @@ export const rpc = {
   ): Promise<void> => run((c) => c.Agent.setMode({ sessionId, chatId, mode })),
   agentSetReasoning: (
     sessionId: string,
-    cli: "claude" | "codex",
+    chatId: string,
     reasoning: ReasoningSetting | undefined
   ): Promise<void> =>
-    run((c) => {
-      if (cli === "claude") {
-        const effort = reasoning?.effort
-        const compatible =
-          reasoning === undefined
-            ? undefined
-            : {
-                enabled: reasoning.enabled,
-                ...(effort === undefined
-                  ? {}
-                  : {
-                      effort: effort === "minimal" ? ("low" as const) : effort
-                    })
-              }
-        return c.Agent.setReasoning({
-          sessionId,
-          cli,
-          ...(compatible === undefined ? {} : { reasoning: compatible })
-        })
-      }
-      const effort = reasoning?.effort
-      const compatible =
-        reasoning === undefined
-          ? undefined
-          : {
-              enabled: reasoning.enabled,
-              ...(effort === undefined
-                ? {}
-                : { effort: effort === "max" ? ("xhigh" as const) : effort })
-            }
-      return c.Agent.setReasoning({
-        sessionId,
-        cli,
-        ...(compatible === undefined ? {} : { reasoning: compatible })
-      })
-    }),
+    run((c) => c.Agent.setReasoning({
+      sessionId,
+      chatId,
+      ...(reasoning === undefined ? {} : { reasoning })
+    })),
   agentCommentPlanStep: (
     sessionId: string,
     planId: string,
@@ -787,13 +858,14 @@ export const rpc = {
     run((c) =>
       c.Agent.approvePlan({ sessionId, planId, executionMode, revision })
     ),
-  agentSetHarness: (
+  agentSetModel: (
     sessionId: string,
     chatId: string,
-    cli: CliKind,
-    model: string
+    connectionId: ProviderConnectionId,
+    providerId: ProviderId,
+    modelId: ProviderModelId
   ): Promise<Session> =>
-    run((c) => c.Agent.setHarness({ sessionId, chatId, cli, model })),
+    run((c) => c.Agent.setModel({ sessionId, chatId, connectionId, providerId, modelId })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.Agent.stop({ sessionId, chatId })),
   agentStopSubagent: (
@@ -827,9 +899,15 @@ export const rpc = {
   /** Persist the conversation + code text-size multiplier. */
   configSetFontScale: (fontScale: number): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setFontScale({ fontScale })),
-  /** Which harness new sessions start on (Settings · Providers). */
-  configSetDefaultCli: (cli: CliKind): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setDefaultCli({ cli })),
+  /** Persist a certified connection/model identity atomically. */
+  configSetDefaultProviderModel: (
+    connectionId: ProviderConnectionId,
+    providerId: ProviderId,
+    modelId: ProviderModelId
+  ): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setDefaultProviderModel({ connectionId, providerId, modelId })),
+  configCompleteProviderSetup: (): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.completeProviderSetup()),
   /**
    * Ask main to raise an OS notification. Main decides whether it actually
    * surfaces — it owns window focus and the stored prefs.
@@ -855,11 +933,6 @@ export const rpc = {
     template: PlanTemplateConfig
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanTemplate({ template })),
-  configSetProvider: (
-    cli: CliKind,
-    provider: ProviderConfig
-  ): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setProvider({ cli, provider })),
   githubPr: (sessionId: string): Promise<PullRequest | null> =>
     run((c) => c.Github.pr({ sessionId })),
   githubPrState: (sessionId: string): Promise<SessionPrStatus | null> =>

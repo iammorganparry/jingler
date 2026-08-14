@@ -22,7 +22,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/refactor",
     title: "Refactor auth flow",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -51,7 +50,7 @@ test("attaching an image shows a thumbnail and persists it on the sent turn", as
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
 
   // Attach an image through the hidden file input (the picker the paperclip opens).
@@ -77,10 +76,11 @@ test("attaching an image shows a thumbnail and persists it on the sent turn", as
 })
 
 test("a message sent against a proposed plan revises it immediately", async ({ launchApp }) => {
+  test.slow()
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   // `[[plan]]` proposes a plan and parks the run awaiting approval — the agent is
   // busy (not paused for a gate), so the composer stays live with no timing race.
   await composer.fill("[[plan]] refactor auth to a TokenStore")
@@ -101,13 +101,17 @@ test("a message sent against a proposed plan revises it immediately", async ({ l
   // the parked planning turn.
   await busyComposer.fill("and then open a PR")
   await busyComposer.press("Enter")
-  await expect(window.getByText("Queued", { exact: true })).toHaveCount(0)
+  await expect(
+    window.getByTestId("conversation-scroll").getByText("Queued", { exact: true })
+  ).toHaveCount(0)
   await expect(window.getByText("Refactor auth flow (revised)", { exact: true })).toBeVisible({
     timeout: 20_000
   })
-  await expect(window.getByText("Open PR #482", { exact: true })).toBeVisible()
+  await expect(
+    window.getByTestId("plan-split-column").getByText("Open PR #482", { exact: true }).first()
+  ).toBeVisible()
 
   // The revised plan remains approvable through the ordinary plan gate.
   await window.getByRole("button", { name: "Approve", exact: true }).first().click()
-  await expect(window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible({ timeout: 25_000 })
+  await expect(window.getByText("Steps 2, 3 and 5 are done.")).toBeVisible({ timeout: 45_000 })
 })

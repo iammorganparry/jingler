@@ -1,10 +1,10 @@
-import type { CliKind, McpServerStatus } from "@jingler/core"
+import type { McpServerStatus } from "@jingler/core"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { Duration, Effect } from "effect"
-import type { McpLaunch, ParsedMcpServer } from "./mcp-config.js"
+import type { McpLaunch, ParsedMcpServer } from "./runtime/mcp/attachment.js"
 import { neutralCwd } from "./cwd.js"
 
 /**
@@ -14,13 +14,8 @@ import { neutralCwd } from "./cwd.js"
  * handshake (`initialize`, then `tools/list`) via the official SDK client, so the
  * UI can say "connected, 6 tools" rather than merely "present in a file".
  *
- * TRUST: this spawns the servers' own commands, so probing is user-initiated only
- * (opening the dialog, clicking refresh) and never automatic at startup. For most
- * servers it is not a new trust boundary — they are the exact commands the harness
- * runs anyway. The exception is a project-scope server from a harness that gates
- * project config behind its own consent prompt, where probing would execute what a
- * cloned repo committed *before* the harness ever asked. Those are not probed; see
- * `probeableScope`.
+ * TRUST: this spawns the server command, so probing is user-initiated only. Only
+ * operator-approved managed entries reach this service.
  */
 
 /**
@@ -104,34 +99,6 @@ const message = (cause: unknown): string => {
 }
 
 /**
- * Which harnesses gate project-scope servers behind their own approval, and so have
- * already asked the operator before Jingler probes anything.
- *
- * Claude records `.mcp.json` approvals in config we read, so an approved project
- * server is one the operator has consented to. Cursor and opencode prompt at
- * runtime and keep the answer somewhere we can't see, so from here a project entry
- * is indistinguishable from one a freshly-cloned repo just committed. Codex has no
- * project-scope MCP config at all, so the question never arises.
- */
-const GATES_PROJECT_SERVERS: Record<CliKind, boolean> = {
-  claude: true,
-  codex: true,
-  cursor: false,
-  opencode: false
-}
-
-/**
- * Whether we may spawn this server at all.
- *
- * Probing an un-gated project-scope server would run whatever a cloned repo put in
- * `.cursor/mcp.json` — ahead of, and without, the harness's own consent prompt.
- * That IS a new trust boundary, so those report `unknown` (configured, deliberately
- * not contacted) rather than being executed to find out.
- */
-export const probeableScope = (entry: ParsedMcpServer): boolean =>
-  entry.server.scope !== "project" || GATES_PROJECT_SERVERS[entry.server.cli]
-
-/**
  * Probe one server. Never fails — a probe that cannot connect is a `failed` status,
  * not an error, because "this server is broken" is exactly what we want to display.
  */
@@ -144,15 +111,9 @@ export const probeServer = (
 ): Effect.Effect<McpServerStatus> => {
   const base = { name: entry.server.name, scope: entry.server.scope }
 
-  // A server the harness won't load is reported as such rather than probed — starting
-  // it would report `connected` for something the agent never actually gets.
+  // A disabled managed server is reported as such rather than probed.
   if (!entry.server.enabled) {
     return Effect.succeed({ ...base, state: "disabled" as const, toolCount: null, error: null, checkedAt: now() })
-  }
-
-  // Un-gated project-scope server: listed, never executed. See `probeableScope`.
-  if (!probeableScope(entry)) {
-    return Effect.succeed({ ...base, state: "unknown" as const, toolCount: null, error: null, checkedAt: now() })
   }
 
   return Effect.tryPromise({

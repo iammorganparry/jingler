@@ -40,7 +40,6 @@ const session = (over: Partial<Session> = {}): Session =>
     branch: "chore/s1",
     title: "Fix auth",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: 42,
     costUsd: 0,

@@ -52,7 +52,7 @@ test("pairs and runs on a physical remote environment", async ({ launchApp }) =>
     timeout: 30_000
   })
 
-  const composer = app.window.getByPlaceholder("Message Claude…")
+  const composer = app.window.getByPlaceholder("Message the agent…")
   await composer.fill("Reply with exactly: physical remote session verified")
   await composer.press("Enter")
   await expect(

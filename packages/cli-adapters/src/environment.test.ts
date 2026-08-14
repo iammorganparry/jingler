@@ -17,6 +17,8 @@ import {
   type SshBootstrapError
 } from "./remote-bootstrap.js"
 import { makeInMemorySecretStore, SecretStore, type SecretStoreShape } from "./secret-store.js"
+import { ProviderConnections } from "./runtime/providers/provider-connections.js"
+import { Stream } from "effect"
 
 const device: RemoteDevice = {
   version: 1,
@@ -31,7 +33,6 @@ const device: RemoteDevice = {
   capabilities: {
     version: 1,
     capabilities: ["session.start"],
-    harnesses: ["codex"],
     maxConcurrentSessions: 2
   },
   agentVersion: "2.0.3",
@@ -96,6 +97,20 @@ const enrollmentCredential: DeviceEnrollmentCredentialResponse = {
   token: "signed-enrollment-token"
 }
 
+const ProviderConnectionsTest = Layer.succeed(ProviderConnections, {
+  loginEvents: Stream.empty,
+  list: Effect.dieMessage("Provider catalog is not used by environment tests"),
+  status: Effect.succeed([]),
+  resolveCredential: () => Effect.dieMessage("Credential export is not used by this test"),
+  connectClaudeToken: () => Effect.dieMessage("Provider login is not used by environment tests"),
+  startCodexLogin: () => Effect.dieMessage("Provider login is not used by environment tests"),
+  cancelLogin: () => Effect.void,
+  setApiKey: () => Effect.dieMessage("Provider login is not used by environment tests"),
+  refresh: () => Effect.dieMessage("Provider refresh is not used by environment tests"),
+  logout: () => Effect.dieMessage("Provider logout is not used by environment tests"),
+  verifyModel: () => Effect.dieMessage("Provider verification is not used by environment tests")
+})
+
 const environmentLayer = (bootstrap: {
   readonly bootstrap: (
     input: BootstrapSshInput
@@ -127,7 +142,8 @@ const environmentLayer = (bootstrap: {
       store
         ? Layer.succeed(SecretStore, store)
         : Layer.effect(SecretStore, makeInMemorySecretStore("desktop-bearer"))
-    )
+    ),
+    Layer.provide(ProviderConnectionsTest)
   )
 
 beforeEach(() => {

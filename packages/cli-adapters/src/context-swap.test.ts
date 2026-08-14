@@ -1,17 +1,17 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Session, StreamEvent } from "@jingler/core"
-import { Effect, Layer, Stream } from "effect"
+import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import { Effect, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { CliAdapter } from "./adapter.js"
-import type { CliAdapterShape, SessionSpec } from "./adapter.js"
+import { AgentTurnDriver } from "./agent-turn-driver.js"
+import type { AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
 import { AgentRunner } from "./agent-runner.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { ConfigService } from "./config.js"
 import { InMemorySecretStoreLive } from "./secret-store.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { ContextManager } from "./context-manager.js"
-import { DiscoveryService } from "./discovery.js"
 import { PlanStore } from "./plan-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -60,16 +60,16 @@ const DIGEST_REPLY = `\`\`\`json
 }
 \`\`\``
 
-const specs: Array<SessionSpec> = []
+const specs: Array<AgentTurnSpec> = []
 
 /**
  * One adapter serving both roles, told apart by the run id: the digest run is
  * keyed `digest_<session>`, the real turn by the session id itself. Recording
  * both is what lets a single test assert the handoff between them.
  */
-const adapter: Layer.Layer<CliAdapter> = Layer.succeed(
-  CliAdapter,
-  CliAdapter.of({
+const adapter: Layer.Layer<AgentTurnDriver> = Layer.succeed(
+  AgentTurnDriver,
+  AgentTurnDriver.of({
     run: (runId, spec, ctx) =>
       Effect.gen(function* () {
         specs.push(spec)
@@ -82,7 +82,7 @@ const adapter: Layer.Layer<CliAdapter> = Layer.succeed(
         yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 12_000 } as StreamEvent)
       }),
     stop: () => Effect.void
-  } satisfies CliAdapterShape)
+  } satisfies AgentTurnDriverShape)
 )
 
 const layers = () =>
@@ -97,7 +97,6 @@ const layers = () =>
     BackgroundTaskStore.Default,
     PlanStore.Default,
     ConfigService.Default,
-    DiscoveryService.Default,
     adapter,
     fakeCommandExecutor(installed),
     temp.layer
@@ -112,7 +111,9 @@ const seed = (over: Partial<Session> = {}) =>
       branch: "chore/swap",
       title: "Swap",
       status: "idle",
-      cli: "claude",
+      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+      providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+      modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -131,8 +132,10 @@ const seed = (over: Partial<Session> = {}) =>
         title: null,
         createdAt: now,
         updatedAt: now,
-        model: over.model ?? "sonnet",
-        resumeId: over.resumeId ?? "harness_thread_old",
+        connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+        providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+        modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
+        piSessionId: over.piSessionId ?? "harness_thread_old",
         ...("contextTokens" in over
           ? over.contextTokens === undefined
             ? {}
@@ -141,8 +144,7 @@ const seed = (over: Partial<Session> = {}) =>
       }],
       activeChatId: SESSION,
       worktreePath: temp.root,
-      model: "sonnet",
-      resumeId: "harness_thread_old",
+      piSessionId: "harness_thread_old",
       ...over
     }
     mkdirSync(temp.root, { recursive: true })
@@ -216,21 +218,18 @@ const compactThenPrompt = (over: Partial<Session> = {}) =>
   )
 
 /** The spec for the real turn (the digest run is recorded under its own id). */
-const turnSpec = (): SessionSpec => specs[specs.length - 1]!
+const turnSpec = (): AgentTurnSpec => specs[specs.length - 1]!
 
 beforeEach(() => {
   specs.length = 0
 })
 
 describe("compaction swap", () => {
-  it("starts a FRESH harness conversation instead of resuming the old thread", async () => {
+  it("starts a fresh pi session instead of resuming the old context", async () => {
     await compactThenPrompt()
     const spec = turnSpec()
-    // `resumeId: null` alone would lose to the adapter's in-memory resume map,
-    // which is keyed per session — the old conversation would quietly continue
-    // and the whole compaction would be a no-op that still cost a digest.
-    expect(spec.resumeId).toBeNull()
-    expect(spec.fresh).toBe(true)
+    expect(spec.piSessionId).toBeNull()
+    expect(spec.seed).toBeNull()
   })
 
   it("seeds the fresh conversation with what the summary kept", async () => {
@@ -309,8 +308,10 @@ describe("compaction swap", () => {
         title: null,
         createdAt: "2026-07-24T00:00:00.000Z",
         updatedAt: "2026-07-24T00:00:00.000Z",
-        model: "sonnet",
-        resumeId: "harness_thread_old"
+        connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+        providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+        modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
+        piSessionId: "harness_thread_old"
       }]
     })
     const marker = events.find((e) => e._tag === "ContextCompacted") as { tokensBefore: number }
@@ -323,11 +324,11 @@ describe("compaction swap", () => {
    * already decided to abandon would resume it on the next launch, silently
    * undoing the compaction.
    */
-  it("adopts the new harness thread and never the abandoned one", async () => {
+  it("adopts the new pi session and never the abandoned one", async () => {
     const { session } = await compactThenPrompt()
     const chat = session.chats.find((candidate) => candidate.id === session.activeChatId)
-    expect(chat?.resumeId).toBe("harness_thread_new")
-    expect(chat?.resumeId).not.toBe("harness_thread_old")
+    expect(chat?.piSessionId).toBe("harness_thread_new")
+    expect(chat?.piSessionId).not.toBe("harness_thread_old")
   })
 
   it("applies only once — the turn after a swap resumes normally", async () => {
@@ -342,11 +343,10 @@ describe("compaction swap", () => {
         specs.length = 0
         yield* runner.prompt(SESSION, SESSION, "second").pipe(Stream.runDrain)
         return specs[specs.length - 1]!
-      }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<SessionSpec>
+      }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<AgentTurnSpec>
     )
     // The second turn resumes the conversation the first one established.
-    expect(second.fresh).toBeUndefined()
-    expect(second.resumeId).toBe("harness_thread_new")
+    expect(second.piSessionId).toBe("harness_thread_new")
     expect(second.prompt).not.toContain("CONTEXT COMPACTED")
   })
 })
@@ -360,10 +360,9 @@ describe("no compaction pending", () => {
         const runner = yield* AgentRunner
         yield* runner.prompt(SESSION, SESSION, "just a normal turn").pipe(Stream.runDrain)
         return specs[specs.length - 1]!
-      }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<SessionSpec>
+      }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<AgentTurnSpec>
     )
-    expect(spec.resumeId).toBe("harness_thread_old")
-    expect(spec.fresh).toBeUndefined()
+    expect(spec.piSessionId).toBe("harness_thread_old")
     // "Byte-identical" now means "carries no compaction primer". The standing
     // question-channel note prefixes every turn regardless, so the meaningful
     // assertion is that no summary was spliced in and the user's text is last.

@@ -2,7 +2,8 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { useEffect, useState, type ReactNode } from "react"
-import type { Session } from "@jingler/core"
+import { ProviderId, type Session } from "@jingler/core"
+import { Schema } from "effect"
 import {
   useCommand,
   useHost,
@@ -49,7 +50,7 @@ const internalSession = (over: Partial<Session> = {}): Session =>
     branch: "chore/s1",
     title: "Fix auth",
     status: "idle",
-    cli: "claude",
+    providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
     diff: { added: 3, removed: 1 },
     prNumber: 42,
     costUsd: 0.42,
@@ -92,8 +93,9 @@ describe("a plugin view rendered the way the app renders it", () => {
     mountPlugin(View)
     const keys = screen.getByText(/repo/).textContent ?? ""
     expect(keys.split(",")).toEqual(
-      expect.arrayContaining(["branch", "cli", "id", "prNumber", "repo", "title"])
+      expect.arrayContaining(["branch", "id", "prNumber", "providerId", "repo", "title"])
     )
+    expect(keys).not.toContain("cli")
     // Internal bookkeeping a plugin must never couple to.
     expect(keys).not.toContain("chats")
     expect(keys).not.toContain("createdAt")

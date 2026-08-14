@@ -6,6 +6,10 @@ import {
 } from "./fixtures.js"
 
 const composerPlaceholder = /Message .+…/
+const PI_FIXTURE = {
+  scenarioId: "plan-draft-stream",
+  authRoute: "api-key"
+} as const
 const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
   {
     id: "s_plan_collaboration",
@@ -13,7 +17,6 @@ const session = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession>
     branch: "chore/plan-collaboration",
     title: "Collaborative plan",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -28,6 +31,7 @@ test("narrow streamed plans use full-width review chrome", async ({ launchApp })
   const launched = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: PI_FIXTURE,
     sessions: session
   })
   const { window } = launched

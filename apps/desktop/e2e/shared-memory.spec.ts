@@ -12,7 +12,6 @@ const seededSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSe
     branch: "chore/shared-memory",
     title: "Capture shared learning",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -35,7 +34,7 @@ test("accepted session learning reaches a teammate but never another organizatio
     })
     await expect(appShell(author.window)).toBeVisible()
 
-    const composer = author.window.getByPlaceholder("Message Claude…")
+    const composer = author.window.getByPlaceholder("Message the agent…")
     await composer.fill("[[memory-propose]] Capture the reusable refund limiter approach for the team.")
     await composer.press("Enter")
 
@@ -56,6 +55,7 @@ test("accepted session learning reaches a teammate but never another organizatio
     // Agent attachment discovered the server independently; UI reads are
     // separate POSTs that can land on either simulated Next.js instance.
     const mcpTraffic = fake.memoryRequests.filter((request) => request.path === "/api/mcp")
+    expect(mcpTraffic.some((request) => request.rpcMethod === "initialize")).toBe(true)
     expect(mcpTraffic.some((request) => request.rpcMethod === "server/discover")).toBe(true)
     expect(mcpTraffic.some((request) => request.rpcMethod === "tools/call")).toBe(true)
     expect(new Set(mcpTraffic.map((request) => request.assignedInstance))).toEqual(
@@ -71,7 +71,6 @@ test("accepted session learning reaches a teammate but never another organizatio
         expect(request.metadataProtocolVersion).toBe("2026-07-28")
       }
       expect(request.protocolVersion).toBe("2026-07-28")
-      expect(request.rpcMethod).not.toBe("initialize")
       expect(request.hasCookie).toBe(false)
       expect(request.hasSessionId).toBe(false)
     }
@@ -130,7 +129,7 @@ test("a stale agent proposal surfaces its conflict without overwriting accepted 
     })
     await expect(appShell(author.window)).toBeVisible()
 
-    const composer = author.window.getByPlaceholder("Message Claude…")
+    const composer = author.window.getByPlaceholder("Message the agent…")
     await composer.fill("[[memory-propose-conflict]] Try to replace alpha from its stale revision.")
     await composer.press("Enter")
 
@@ -194,10 +193,15 @@ test("historical proposals never surface a queue, and access failures remain saf
     })
     await expect(appShell(offline.window)).toBeVisible()
     await expect(offline.window.getByTestId("memory-sidebar-item")).toHaveCount(0)
-    const composer = offline.window.getByPlaceholder("Message Claude…")
+    const composer = offline.window.getByPlaceholder("Message the agent…")
     await composer.fill("Keep working even though team memory is unavailable.")
     await composer.press("Enter")
-    await expect(offline.window.getByText("1 passed", { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(
+      offline.window.getByText(
+        "Completed through deterministic pi. Repository summary: src/routes/billing.ts.",
+        { exact: true }
+      )
+    ).toBeVisible({ timeout: 30_000 })
     await expect(offline.window.getByTestId("session-row-s_memory_author").getByText("Idle", { exact: true })).toBeVisible({ timeout: 30_000 })
   } finally {
     await fake.close()

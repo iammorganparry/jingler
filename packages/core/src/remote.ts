@@ -1,5 +1,11 @@
 import { Schema } from "effect"
-import { CliKind } from "./domain.js"
+import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js"
+import {
+  AuthKind,
+  AuthStatus,
+  ProviderConnectionId,
+  ProviderId
+} from "./runtime/provider-connection.js"
 
 /** Wire revision shared by the server, relay Worker, desktop, and device daemon. */
 export const REMOTE_PROTOCOL_VERSION = 1 as const
@@ -201,8 +207,19 @@ export type RemoteDeviceCapability = Schema.Schema.Type<
 export const RemoteDeviceCapabilities = Schema.Struct({
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   capabilities: Schema.Array(RemoteDeviceCapability).pipe(Schema.maxItems(16)),
-  harnesses: Schema.Array(CliKind).pipe(Schema.maxItems(16)),
-  maxConcurrentSessions: Schema.Int.pipe(Schema.between(1, 64))
+  maxConcurrentSessions: Schema.Int.pipe(Schema.between(1, 64)),
+  /** Present on pi-capable agents; absent only on legacy device records. */
+  runtime: Schema.optional(RuntimeCapabilityManifest),
+  providerConnections: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: ProviderConnectionId,
+        providerId: ProviderId,
+        authKind: AuthKind,
+        status: AuthStatus
+      })
+    ).pipe(Schema.maxItems(64))
+  )
 })
 export type RemoteDeviceCapabilities = Schema.Schema.Type<
   typeof RemoteDeviceCapabilities

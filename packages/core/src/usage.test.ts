@@ -10,11 +10,11 @@ import { Usage, UsageWindow } from "./usage.js"
 
 describe("Usage", () => {
   it("round-trips a full snapshot through encode → decode", () => {
-    const usage: Usage = {
+    const usage = Schema.decodeUnknownSync(Usage)({
       fetchedAt: "2026-07-11T10:00:00.000Z",
       providers: [
         {
-          cli: "claude",
+          providerId: "anthropic",
           name: "Claude",
           plan: "Max",
           available: true,
@@ -23,9 +23,9 @@ describe("Usage", () => {
             { label: "Weekly · Opus", resetsAt: null, utilization: null, status: "unknown" }
           ]
         },
-        { cli: "codex", name: "Codex", plan: null, available: false, windows: [] }
+        { providerId: "openai-codex", name: "Codex", plan: null, available: false, windows: [] }
       ]
-    }
+    })
     expect(Schema.decodeUnknownSync(Usage)(Schema.encodeSync(Usage)(usage))).toStrictEqual(usage)
   })
 

@@ -1,12 +1,12 @@
 /**
- * When a Claude turn's `result` is the END of the run, and when it is a SEAM in it.
+ * Decide when a provider-neutral turn result ends the run or forms a seam in it.
  *
- * Pulled out of `claude-adapter` as a pure decision for the same reason
+ * Kept as a pure decision for the same reason
  * `run-lifetime.ts` was pulled out of `AgentRunner`: it is genuinely a policy —
  * three rules that interact — and it lived inline as one boolean expression at the
  * `result` plus a second, subtly different one at the foot of the message loop. The
  * only way to find out what the adapter would do was to run the whole SDK loop
- * against a mocked harness. Here it is a table you can read, and a table the tests
+ * against a mocked runtime. Here it is a table you can read, and a table the tests
  * can enumerate without an Effect runtime, a fake SDK or a timer.
  *
  * The rules, in the order they matter:

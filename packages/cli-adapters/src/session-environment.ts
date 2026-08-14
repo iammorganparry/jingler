@@ -1,5 +1,9 @@
 import type { Environment, Session } from "@jingler/core"
-import { EnvironmentHandoffError } from "@jingler/core"
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  EnvironmentHandoffError,
+  runtimeCapabilitiesMatch
+} from "@jingler/core"
 import { Effect } from "effect"
 
 /** Facts that make moving the existing checkout unsafe. Deliberately conservative. */
@@ -14,15 +18,42 @@ export const sessionContainsWork = (
   session.costUsd > 0 ||
   session.status !== "idle" ||
   session.semanticBranchPending === false ||
-  session.chats.some((chat) => chat.resumeId !== undefined)
+  session.chats.some((chat) => chat.piSessionId !== undefined)
+
+/** A remote target may execute this build only when its pi contracts match exactly. */
+export const environmentRuntimeIsCurrent = (environment: Environment): boolean => {
+  const runtime = environment.capabilities.runtime
+  return runtime !== undefined &&
+    runtimeCapabilitiesMatch(
+      {
+        versions: CURRENT_RUNTIME_CONTRACTS,
+        toolIds: [],
+        resourceIds: [],
+        targetId: environment.id
+      },
+      runtime
+    )
+}
 
 export const compatibleEnvironment = (
-  session: Pick<Session, "cli">,
+  session: Session,
   environment: Environment | undefined
-): boolean =>
-  environment !== undefined &&
-  environment.state === "online" &&
-  environment.capabilities.harnesses.includes(session.cli)
+): boolean => {
+  if (environment === undefined || environment.state !== "online") return false
+  const chat = session.chats.find((candidate) => candidate.id === session.activeChatId)
+  const connectionId = chat?.connectionId ?? session.connectionId
+  const modelId = chat?.modelId ?? session.modelId
+  if (connectionId === undefined || modelId === undefined) return false
+  // Managed Cloud receives the exact session connection through a short-lived,
+  // server-validated capability grant. It intentionally does not advertise the
+  // operator's provider account as a device-local saved connection.
+  if (environment.kind === "managed") return environmentRuntimeIsCurrent(environment)
+  const connection = environment.capabilities.providerConnections?.find(
+    (candidate) => candidate.id === connectionId
+  )
+  return environmentRuntimeIsCurrent(environment) &&
+    connection?.status === "authenticated"
+}
 
 export interface SessionEnvironmentDependencies<E1, R1, E2, R2, E3, R3> {
   readonly environments: () => Effect.Effect<ReadonlyArray<Environment>, E1, R1>
@@ -48,7 +79,7 @@ const validateTarget = (
       new EnvironmentHandoffError({
         reason: environment?.state === "incompatible" ? "incompatible" : "unavailable",
         message: environment
-          ? `${environment.name} is not available with the ${session.cli} harness.`
+          ? `${environment.name} does not have a compatible authenticated runtime connection.`
           : "The selected environment is no longer paired.",
         sessionId: session.id,
         environmentId

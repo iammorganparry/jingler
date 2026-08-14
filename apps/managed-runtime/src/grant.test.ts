@@ -20,6 +20,23 @@ const issue = () =>
   )
 
 describe("managed runtime grants", () => {
+  it("rejects a missing signing secret with a typed configuration error", async () => {
+    await expect(
+      issueManagedRuntimeGrant(
+        {
+          subject: "user_123",
+          environmentId: "managed_123",
+          sessionId: "session_123",
+          actions: ["session.start"],
+          authStateVersion: 7,
+          environmentGeneration: 3,
+          sessionGeneration: 2
+        },
+        undefined
+      )
+    ).rejects.toThrow("Managed runtime grant secret is invalid")
+  })
+
   it("admits a scoped short-lived grant", async () => {
     const issued = await issue()
     await expect(

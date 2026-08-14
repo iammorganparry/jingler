@@ -20,6 +20,14 @@ import { Message as MessageSchema } from "@jingler/core"
 import { harnessLogPath, rebuildTranscript } from "../src/main/transcript-backfill.js"
 
 const JINGLER_HOME = process.env.JINGLER_HOME ?? join(homedir(), "jingler")
+const BackfillSession = Schema.Struct({
+  id: Schema.String,
+  cli: Schema.optional(Schema.String),
+  legacyCli: Schema.optional(Schema.String),
+  resumeId: Schema.optional(Schema.String),
+  legacyResumeId: Schema.optional(Schema.String),
+  worktreePath: Schema.optional(Schema.String)
+})
 
 const main = async () => {
   const [sessionId, ...flags] = process.argv.slice(2)
@@ -27,21 +35,22 @@ const main = async () => {
   const write = flags.includes("--write")
   const force = flags.includes("--force")
 
-  const sessions = JSON.parse(readFileSync(join(JINGLER_HOME, "sessions.json"), "utf8")) as Array<{
-    id: string
-    cli?: string
-    resumeId?: string
-    worktreePath?: string
-  }>
+  const sessions = Schema.decodeUnknownSync(Schema.Array(BackfillSession))(
+    JSON.parse(readFileSync(join(JINGLER_HOME, "sessions.json"), "utf8"))
+  )
   const session = sessions.find((s) => s.id === sessionId)
   if (!session) throw new Error(`no session ${sessionId} in sessions.json`)
-  if (session.cli !== "claude") {
-    throw new Error(`session ${sessionId} ran on "${session.cli}"; only claude logs are mapped`)
+  const legacyCli = session.legacyCli ?? session.cli
+  const legacyResumeId = session.legacyResumeId ?? session.resumeId
+  if (legacyCli !== "claude") {
+    throw new Error(
+      `session ${sessionId} has legacy runtime "${legacyCli ?? "unknown"}"; only Claude logs are mapped`
+    )
   }
-  if (!session.resumeId) throw new Error(`session ${sessionId} has no resumeId — nothing to recover from`)
+  if (!legacyResumeId) throw new Error(`session ${sessionId} has no legacy resume id — nothing to recover from`)
   if (!session.worktreePath) throw new Error(`session ${sessionId} has no worktreePath`)
 
-  const jsonl = harnessLogPath(session.worktreePath, session.resumeId)
+  const jsonl = harnessLogPath(session.worktreePath, legacyResumeId)
   if (!existsSync(jsonl)) throw new Error(`no harness log at ${jsonl}`)
 
   const target = join(JINGLER_HOME, "transcripts", `${sessionId}.json`)

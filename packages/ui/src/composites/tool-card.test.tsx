@@ -110,6 +110,63 @@ describe("tool card — expanding a call", () => {
   })
 })
 
+describe("tool card — canonical file changes", () => {
+  it("renders create, modify, delete, and rename evidence from actual workspace state", async () => {
+    render(
+      <MessageTurn
+        message={tool({
+          name: "Workspace changes",
+          target: null,
+          diff: { added: 3, removed: 2 },
+          fileChanges: {
+            id: "changes-1",
+            callId: "t1",
+            changes: [
+              { status: "A", path: "src/new.ts", oldPath: null, added: 1, removed: 0, binary: false, noNewlineAtEnd: false, beforeBytes: 0, afterBytes: 12, preview: "+new", patchArtifactId: "patch-a" },
+              { status: "M", path: "src/edit.ts", oldPath: null, added: 1, removed: 1, binary: false, noNewlineAtEnd: true, beforeBytes: 10, afterBytes: 12, preview: "-old\n+new", patchArtifactId: "patch-m" },
+              { status: "D", path: "src/gone.ts", oldPath: null, added: 0, removed: 1, binary: false, noNewlineAtEnd: false, beforeBytes: 10, afterBytes: 0, preview: "-gone", patchArtifactId: "patch-d" },
+              { status: "R", path: "src/after.ts", oldPath: "src/before.ts", added: 1, removed: 0, binary: false, noNewlineAtEnd: false, beforeBytes: 10, afterBytes: 12, preview: "+changed", patchArtifactId: "patch-r" }
+            ],
+            totals: { added: 3, removed: 2 },
+            authoritative: true,
+            reconciledAt: "2026-08-10T12:00:00.000Z"
+          }
+        })}
+      />
+    )
+
+    expect(screen.getByText("Created")).toBeDefined()
+    expect(screen.getByText("Modified")).toBeDefined()
+    expect(screen.getByText("Deleted")).toBeDefined()
+    expect(screen.getByText("Renamed")).toBeDefined()
+    expect(screen.getByText("src/before.ts")).toBeDefined()
+    expect(screen.getByText("src/after.ts")).toBeDefined()
+    expect(screen.getByText("No newline")).toBeDefined()
+    await waitFor(() => {
+      expect(document.querySelectorAll("diffs-container")).toHaveLength(4)
+    })
+  })
+
+  it("labels binary changes without pretending they have a text diff", () => {
+    render(
+      <MessageTurn
+        message={tool({
+          fileChanges: {
+            id: "changes-binary",
+            callId: "t1",
+            changes: [{ status: "M", path: "logo.png", oldPath: null, added: 0, removed: 0, binary: true, noNewlineAtEnd: false, beforeBytes: 10, afterBytes: 20, preview: null, patchArtifactId: null }],
+            totals: { added: 0, removed: 0 },
+            authoritative: true,
+            reconciledAt: "2026-08-10T12:00:00.000Z"
+          }
+        })}
+      />
+    )
+    expect(screen.getByText("Binary")).toBeDefined()
+    expect(screen.getByText("1 file · +0 −0")).toBeDefined()
+  })
+})
+
 describe("plan task progress — protocol stays out of chat", () => {
   it("renders adjacent task markers as compact chips beside the remaining prose", () => {
     const message: Message = {

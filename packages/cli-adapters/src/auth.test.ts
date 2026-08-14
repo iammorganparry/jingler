@@ -92,6 +92,31 @@ describe("AuthService.getSession", () => {
     delete process.env.JINGLER_DEV_AUTH_LOOPBACK
   })
 
+  it("reports an unavailable social provider without hiding the server reason", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            message: "Provider not found",
+            code: "PROVIDER_NOT_FOUND"
+          }),
+          { status: 404, headers: { "content-type": "application/json" } }
+        )
+      )
+    )
+
+    const error = await Effect.runPromise(
+      AuthService.startSignIn("github").pipe(
+        Effect.provide(AuthService.Default),
+        Effect.provide(withStore(null)),
+        Effect.flip
+      )
+    )
+
+    expect(error.message).toBe("GitHub sign-in is unavailable. Use email instead.")
+  })
+
   it("clears a dead token (401) and returns null", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })))
     // Use a shared store so we can observe it was cleared.

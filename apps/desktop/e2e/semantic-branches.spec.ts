@@ -57,10 +57,12 @@ test("a fresh task starts detached and becomes a visible collision-safe semantic
   // proposal. Reserve it first to prove Jingler checks collisions before switch.
   execFileSync("git", ["branch", "chore/fix-token-refresh"], { cwd: repoPath })
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Fix token refresh")
   await composer.press("Enter")
-  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
+  await expect(
+    window.getByText("Completed through deterministic pi. Repository summary: src/routes/billing.ts.")
+  ).toBeVisible({ timeout: 25_000 })
 
   await expect(composerBranch).toHaveText("chore/fix-token-refresh-2", {
     timeout: 20_000

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { CSSProperties } from "react"
-import type { CliInfo, Repo, Session, SessionActivity, ThemeTokens } from "@jingler/core"
+import type { Repo, Session, SessionActivity, ThemeTokens } from "@jingler/core"
 import { CSS_VAR_BY_TOKEN } from "@jingler/core"
 import { jinglerDark, jinglerLight, toTokens } from "@jingler/themes"
 import { ThemeProvider } from "../theme-provider.js"
@@ -54,12 +54,6 @@ const inlineVars = (tokens: ThemeTokens): CSSProperties =>
 const DARK = toTokens(jinglerDark)
 const LIGHT = toTokens(jinglerLight)
 
-const clis: ReadonlyArray<CliInfo> = [
-  { kind: "claude", label: "Claude Code", binPath: "/usr/local/bin/claude", version: "2.1.0", available: true },
-  { kind: "codex", label: "Codex CLI", binPath: "/usr/local/bin/codex", version: "0.13.0", available: true },
-  { kind: "cursor", label: "Cursor Agent", binPath: null, version: null, available: false }
-]
-
 const repos: ReadonlyArray<Repo> = [
   { name: "trigify-app", path: "/Users/m/repos/trigify-app", defaultBranch: "main", currentBranch: "main", remoteUrl: "git@github.com:trigify/trigify-app.git", githubSlug: "trigify/trigify-app" },
   { name: "gtm-grid", path: "/Users/m/repos/gtm-grid", defaultBranch: "main", currentBranch: "feat/scoring", remoteUrl: "git@github.com:trigify/gtm-grid.git", githubSlug: "trigify/gtm-grid" }
@@ -78,10 +72,10 @@ const session = (value: Omit<Session, "chats" | "activeChatId">): Session => ({
  * with three idle sessions exercises one row style and hides the other four.
  */
 const sessions: ReadonlyArray<Session> = [
-  session({ id: "s1", repo: "trigify-app", branch: "feat/oauth", title: "Refactor auth flow", status: "thinking", cli: "claude", diff: { added: 313, removed: 23 }, prNumber: 482, costUsd: 1.24, tokens: 218_000, updatedAt: "2026-07-11T09:41:00Z" }),
-  session({ id: "s2", repo: "trigify-app", branch: "chore/deps", title: "Bump dependencies", status: "idle", cli: "claude", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0.12, tokens: 14_200, updatedAt: "2026-07-11T08:12:00Z" }),
-  session({ id: "s3", repo: "gtm-grid", branch: "fix/flaky", title: "Fix flaky tests", status: "needs-input", cli: "codex", diff: { added: 47, removed: 9 }, prNumber: null, costUsd: 0.44, tokens: 61_800, updatedAt: "2026-07-11T09:05:00Z" }),
-  session({ id: "s4", repo: "gtm-grid", branch: "feat/scoring", title: "Score model v2", status: "running", cli: "claude", diff: { added: 128, removed: 64 }, prNumber: 204, costUsd: 0.88, tokens: 96_400, updatedAt: "2026-07-11T09:52:00Z" })
+  session({ id: "s1", repo: "trigify-app", branch: "feat/oauth", title: "Refactor auth flow", status: "thinking", diff: { added: 313, removed: 23 }, prNumber: 482, costUsd: 1.24, tokens: 218_000, updatedAt: "2026-07-11T09:41:00Z" }),
+  session({ id: "s2", repo: "trigify-app", branch: "chore/deps", title: "Bump dependencies", status: "idle", diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0.12, tokens: 14_200, updatedAt: "2026-07-11T08:12:00Z" }),
+  session({ id: "s3", repo: "gtm-grid", branch: "fix/flaky", title: "Fix flaky tests", status: "needs-input", diff: { added: 47, removed: 9 }, prNumber: null, costUsd: 0.44, tokens: 61_800, updatedAt: "2026-07-11T09:05:00Z" }),
+  session({ id: "s4", repo: "gtm-grid", branch: "feat/scoring", title: "Score model v2", status: "running", diff: { added: 128, removed: 64 }, prNumber: 204, costUsd: 0.88, tokens: 96_400, updatedAt: "2026-07-11T09:52:00Z" })
 ]
 
 const liveActivity: Record<string, SessionActivity> = {
@@ -91,7 +85,6 @@ const liveActivity: Record<string, SessionActivity> = {
 
 const App = () => (
   <JinglerApp
-    clis={clis}
     sessions={sessions}
     repos={repos}
     liveActivity={liveActivity}

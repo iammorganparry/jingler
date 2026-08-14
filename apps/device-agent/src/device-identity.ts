@@ -1,8 +1,12 @@
 import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
   createPrivateKey,
   createPublicKey,
   diffieHellman,
   generateKeyPairSync,
+  randomBytes,
   sign as nodeSign,
   type KeyObject
 } from "node:crypto"
@@ -39,6 +43,50 @@ export interface DeviceIdentity {
   readonly deriveSessionSecret: (ephemeralPublicKey: DeviceEncryptionPublicKey) => Uint8Array
   readonly sign: (payload: Uint8Array) => string
   readonly signChallenge: (challenge: DeviceChallenge, newPublicKey?: DevicePublicKey) => string
+  readonly protectSecret: (plaintext: Uint8Array) => Uint8Array
+  readonly unprotectSecret: (ciphertext: Uint8Array) => Uint8Array
+}
+
+const DEVICE_SECRET_VERSION = 1
+const DEVICE_SECRET_NONCE_BYTES = 12
+const DEVICE_SECRET_TAG_BYTES = 16
+
+const deviceSecretKey = (privateKey: KeyObject): Buffer =>
+  createHash("sha256")
+    .update("jingler-device-secret-v1\0", "utf8")
+    .update(privateKey.export({ format: "der", type: "pkcs8" }))
+    .digest()
+
+const secretProtection = (privateKey: KeyObject) => {
+  const key = deviceSecretKey(privateKey)
+  return {
+    protectSecret: (plaintext: Uint8Array): Uint8Array => {
+      const nonce = randomBytes(DEVICE_SECRET_NONCE_BYTES)
+      const cipher = createCipheriv("aes-256-gcm", key, nonce)
+      const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()])
+      return new Uint8Array(Buffer.concat([
+        Buffer.from([DEVICE_SECRET_VERSION]),
+        nonce,
+        cipher.getAuthTag(),
+        encrypted
+      ]))
+    },
+    unprotectSecret: (ciphertext: Uint8Array): Uint8Array => {
+      const bytes = Buffer.from(ciphertext)
+      const headerBytes = 1 + DEVICE_SECRET_NONCE_BYTES + DEVICE_SECRET_TAG_BYTES
+      if (bytes.length < headerBytes || bytes[0] !== DEVICE_SECRET_VERSION) {
+        throw new Error("Unsupported device secret")
+      }
+      const nonce = bytes.subarray(1, 1 + DEVICE_SECRET_NONCE_BYTES)
+      const tag = bytes.subarray(1 + DEVICE_SECRET_NONCE_BYTES, headerBytes)
+      const decipher = createDecipheriv("aes-256-gcm", key, nonce)
+      decipher.setAuthTag(tag)
+      return new Uint8Array(Buffer.concat([
+        decipher.update(bytes.subarray(headerBytes)),
+        decipher.final()
+      ]))
+    }
+  }
 }
 
 const base64Url = (value: Uint8Array): string => Buffer.from(value).toString("base64url")
@@ -85,7 +133,8 @@ const identityFromStored = (stored: StoredDeviceIdentity): DeviceIdentity => {
     deriveSessionSecret: (ephemeralPublicKey) => new Uint8Array(diffieHellman({ privateKey: encryptionPrivateKey, publicKey: x25519PublicKey(ephemeralPublicKey) })),
     sign,
     signChallenge: (challenge, newPublicKey) =>
-      sign(deviceChallengePayload(challenge, newPublicKey))
+      sign(deviceChallengePayload(challenge, newPublicKey)),
+    ...secretProtection(encryptionPrivateKey)
   }
 }
 

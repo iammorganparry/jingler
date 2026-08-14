@@ -42,6 +42,20 @@ describe("ConfigService", () => {
     if (exit._tag === "Success") expect(exit.value?.reposDir).toBe("/Users/me/repos")
   })
 
+  it("persists completed provider onboarding across unrelated saves", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.completeProviderSetup()
+        yield* ConfigService.setReposDir("/repos/team")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value?.providerSetupCompleted).toBe(true)
+    }
+  })
+
   it("persists memory enablement and organization selection across unrelated saves", async () => {
     const exit = await provided(
       Effect.gen(function* () {
@@ -153,60 +167,14 @@ describe("ConfigService", () => {
     }
   })
 
-  it("setProvider upserts one CLI's defaults and preserves the other providers + sections", async () => {
-    const github = { enabled: true, autoCreatePr: false, autoDetectPr: true }
-    const claude = { enabled: true, defaultMode: "plan", defaultModel: "opus" } as const
-    const codex = { enabled: false, defaultMode: "accept-edits" } as const
-    const exit = await provided(
-      Effect.gen(function* () {
-        yield* ConfigService.setReposDir("/repos/a")
-        yield* ConfigService.setGithub(github)
-        yield* ConfigService.setProvider("claude", claude)
-        // Upserting codex must keep claude; a later setGithub must keep both.
-        yield* ConfigService.setProvider("codex", codex)
-        yield* ConfigService.setGithub({ ...github, autoCreatePr: true })
-        return yield* ConfigService.get()
-      })
-    )
-    expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") {
-      expect(exit.value?.providers?.claude).toStrictEqual(claude)
-      expect(exit.value?.providers?.codex).toStrictEqual(codex)
-      expect(exit.value?.github?.autoCreatePr).toBe(true)
-      expect(exit.value?.reposDir).toBe("/repos/a")
-    }
-  })
-
-  it("setProvider replaces an existing provider entry in place", async () => {
-    const exit = await provided(
-      Effect.gen(function* () {
-        yield* ConfigService.setProvider("claude", { enabled: true, defaultMode: "ask" })
-        yield* ConfigService.setProvider("claude", {
-          enabled: true,
-          defaultMode: "auto",
-          defaultModel: "sonnet"
-        })
-        return yield* ConfigService.get()
-      })
-    )
-    expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") {
-      expect(exit.value?.providers?.claude).toStrictEqual({
-        enabled: true,
-        defaultMode: "auto",
-        defaultModel: "sonnet"
-      })
-    }
-  })
-
-  it("decodes a config written without a providers field (backward compatible)", async () => {
+  it("decodes a config written before provider connections", async () => {
     mkdirSync(temp.root, { recursive: true })
     writeFileSync(`${temp.root}/config.json`, JSON.stringify({ reposDir: "/x", createdAt: "2026-01-01" }))
     const exit = await provided(ConfigService.get())
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") {
       expect(exit.value?.reposDir).toBe("/x")
-      expect(exit.value?.providers).toBeUndefined()
+      expect(exit.value).not.toHaveProperty("providers")
     }
   })
 
@@ -300,23 +268,6 @@ describe("ConfigService", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") expect(exit.value?.fontScale).toBe(2)
-  })
-
-  /**
-   * The default harness is the ONLY record of which CLI new sessions start on
-   * now that the New Session dialog stopped asking — losing it on an unrelated
-   * write would silently move every future session onto a different harness.
-   */
-  it("persists the default harness and keeps it across an unrelated save", async () => {
-    const exit = await provided(
-      Effect.gen(function* () {
-        yield* ConfigService.setDefaultCli("codex")
-        yield* ConfigService.setLastRepoPath("/repos/widget")
-        return yield* ConfigService.get()
-      })
-    )
-    expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") expect(exit.value?.defaultCli).toBe("codex")
   })
 
   it("persists the active theme and keeps it across an unrelated save", async () => {

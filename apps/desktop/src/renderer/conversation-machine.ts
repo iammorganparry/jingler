@@ -10,7 +10,6 @@
  */
 import type {
   Attachment,
-  CliKind,
   ExecutionMode,
   ExternalInstructionIdentity,
   GateDecision,
@@ -21,7 +20,9 @@ import type {
   PlanApprovalResult,
   PlanComment,
   PlanDraft,
-  ProviderModels,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   QuestionAnswer,
   ReasoningSetting,
   ReviewPhase,
@@ -42,8 +43,7 @@ import {
   applyStreamEvent,
   applySubagentEvent,
   assistantMessage,
-  defaultModeFor,
-  defaultModel,
+  isFileMutationTool,
   nextReviewPhase,
   planDocumentToPlan,
   isSubagentEvent,
@@ -54,8 +54,6 @@ import {
   settleLoaded,
   settleStreaming,
   STOPPED_NOTE,
-  supportsPlanMode,
-  supportsSteer,
   userMessage
 } from "@jingler/core"
 import {
@@ -73,53 +71,44 @@ import { publishSessionUpdate } from "./session-updates.js"
 const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
 
-/**
- * Mirror `SessionStore.setHarness` while its RPC is in flight.
- *
- * The conversation actor outlives the mounted chat. If its local session stays
- * on the old harness, revisiting the tab sends that stale record back through
- * `SESSION_UPDATED` and snaps the model chip to the old global default. Keeping
- * the complete session mirror current closes that window; the RPC response is
- * still published as the authoritative record once disk persistence completes.
- */
-const withHarness = (
+/** Optimistic mirror of SessionStore.setProviderModel while its RPC persists. */
+const withProviderModel = (
   session: Session,
   chatId: string,
-  cli: CliKind,
-  model: string,
-  switched: boolean
-): Session => ({
-  ...session,
-  cli,
-  model,
-  ...(switched ? { resumeId: undefined } : {}),
-  chats: (session.chats ?? []).map((chat) =>
-    switched
-      ? {
-          ...chat,
-          model: chat.id === chatId ? model : undefined,
-          resumeId: undefined,
-          mode: chat.mode === "plan" && !supportsPlanMode(cli) ? "ask" : chat.mode
-        }
-      : chat.id === chatId
-        ? { ...chat, model }
-        : chat
-  )
-})
-
-/**
- * Tools that can change which worktree paths exist even when their provider
- * cannot calculate a diff. Codex file-change events have historically emitted
- * a successful `Edit` with `diff: null`, so the diff alone is not a reliable
- * mutation signal.
- */
-const FILE_MUTATION_TOOLS: ReadonlySet<string> = new Set([
-  "Write",
-  "Edit",
-  "Update",
-  "MultiEdit",
-  "NotebookEdit"
-])
+  connectionId: ProviderConnectionId,
+  providerId: ProviderId,
+  modelId: ProviderModelId
+): Session => {
+  const current = session.chats.find((chat) => chat.id === chatId)
+  const changed =
+    current?.connectionId !== connectionId ||
+    current?.providerId !== providerId ||
+    current?.modelId !== modelId
+  return {
+    ...session,
+    connectionId,
+    providerId,
+    modelId,
+    connectionSelectionRequired: false,
+    modelSelectionRequired: false,
+    ...(changed ? { piSessionId: undefined, resumeId: undefined } : {}),
+    chats: session.chats.map((chat) =>
+      chat.id !== chatId
+        ? chat
+        : {
+            ...chat,
+            connectionId,
+            providerId,
+            modelId,
+            connectionSelectionRequired: false,
+            modelSelectionRequired: false,
+            ...(changed
+              ? { piSessionId: undefined, resumeId: undefined, reasoning: undefined }
+              : {})
+          }
+    )
+  }
+}
 
 const toolNameInMessage = (message: Message, id: string): string | null => {
   for (let i = message.parts.length - 1; i >= 0; i--) {
@@ -161,14 +150,9 @@ export interface ConversationContext {
   readonly executionMode: ExecutionMode
   readonly skills: ReadonlyArray<Skill>
   readonly files: ReadonlyArray<string>
-  /**
-   * The composer chip's state: the session's live harness + model, and the
-   * catalogue of every installed harness's models to choose from. `cli` is held
-   * here (not read off `session`) because it can change mid-session.
-   */
-  readonly cli: CliKind
-  readonly model: string
-  readonly catalog: ReadonlyArray<ProviderModels>
+  readonly connectionId: ProviderConnectionId | null
+  readonly providerId: ProviderId | null
+  readonly modelId: ProviderModelId | null
   /** The worktree's current unified diff, for the Changes rail. */
   readonly patch: string
   /** Operator-visible text for the running turn. */
@@ -338,12 +322,16 @@ type ConversationEvent =
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
   | { type: "SET_MODE"; mode: PermissionMode }
-  | { type: "SET_HARNESS"; cli: CliKind; model: string }
+  | {
+      type: "SET_MODEL"
+      connectionId: ProviderConnectionId
+      providerId: ProviderId
+      modelId: ProviderModelId
+    }
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
   | { type: "SESSION_UPDATED"; session: Session }
   | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
-  | { type: "CATALOG_LOADED"; catalog: ReadonlyArray<ProviderModels> }
   | { type: "REVIEW_EVENT"; event: StreamEvent }
   | {
       type: "COMMENT_PLAN_STEP"
@@ -483,6 +471,26 @@ interface LoadedData {
   readonly cursor: string | null
 }
 
+export const CONVERSATION_LOAD_TIMEOUT_MS = 30_000
+
+const withLoadDeadline = <Value>(operation: Promise<Value>): Promise<Value> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Timed out loading the conversation.")),
+      CONVERSATION_LOAD_TIMEOUT_MS
+    )
+    operation.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (cause) => {
+        clearTimeout(timer)
+        reject(cause)
+      }
+    )
+  })
+
 /**
  * Load the persisted transcript, worktree files + diff.
  *
@@ -498,7 +506,7 @@ const loadConversation = fromPromise<
   LoadedData,
   { session: Session; chatId: string }
 >(async ({ input }) => {
-  const [page, artifact, files, patch] = await Promise.all([
+  const [page, artifact, files, patch] = await withLoadDeadline(Promise.all([
     // Only the tail — older turns page in via LOAD_OLDER. A whole 46MB
     // transcript held as one parsed array was the renderer's high-water mark.
     rpc.sessionsTranscriptPage(input.session.id, input.chatId, undefined, HISTORY_PAGE_SIZE),
@@ -511,7 +519,7 @@ const loadConversation = fromPromise<
         )
       : Promise.resolve([] as ReadonlyArray<string>),
     rpc.sessionsDiff(input.session.id)
-  ])
+  ]))
   const rawTranscript = page.messages
   // A loaded transcript has no live run — settle any turn left mid-stream (the
   // app was closed mid-response) so it doesn't show the typing indicator forever,
@@ -873,15 +881,12 @@ export const conversationMachine = setup({
     /**
      * Whether this stream event is a tool boundary we may flush the queue into.
      *
-     * Deliberately narrow. Steering must be NATIVE (`supportsSteer`) — otherwise
-     * the fallback is stop-and-replay, and doing that at every tool call would
-     * shred the turn. A plan re-drive is excluded because its prompt is
+     * Deliberately narrow. A plan re-drive is excluded because its prompt is
      * machine-generated and a queued operator message would derail it.
      */
     canAutoFlush: ({ context, event }) => {
       if (event.type !== "STREAM_EVENT" || event.event._tag !== "ToolEnd") return false
       if (context.steeringId !== null || context.queued.length === 0) return false
-      if (!supportsSteer(context.cli)) return false
       return (
         context.resumePlanId === null &&
         !requiresFreshTurn(context.queued[0]!)
@@ -966,13 +971,14 @@ export const conversationMachine = setup({
         }
       }
       if (remote._tag === "DiffChanged") {
-        const diff = Object.values(remote.files).reduce(
-          (total, file) => ({
-            added: total.added + file.added,
-            removed: total.removed + file.removed
-          }),
-          { added: 0, removed: 0 }
-        )
+        const diff = remote.changes?.totals ??
+          Object.values(remote.files ?? {}).reduce(
+            (total, file) => ({
+              added: total.added + file.added,
+              removed: total.removed + file.removed
+            }),
+            { added: 0, removed: 0 }
+          )
         return {
           sessionEventCursor: admission.cursor,
           session: { ...context.session, diff }
@@ -1456,8 +1462,7 @@ export const conversationMachine = setup({
           pendingExternalAcceptances: []
         }
       }
-      // The harness reports its actual model on init — reflect it in the chip.
-      return e._tag === "Started" && e.model ? { messages, model: e.model } : { messages }
+      return { messages }
     }),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
     markHistoryLoading: assign(() => ({ loadingHistory: true })),
@@ -1566,7 +1571,12 @@ export const conversationMachine = setup({
       const e = event.event
       if (e._tag !== "ToolEnd" || e.status !== "success") return
       const toolName = toolNameFor(context, e.id, e.agentId)
-      if (e.diff === null && (toolName === null || !FILE_MUTATION_TOOLS.has(toolName))) return
+      const hasCanonicalChanges = (e.fileChanges?.changes.length ?? 0) > 0
+      if (
+        !hasCanonicalChanges &&
+        e.diff === null &&
+        (toolName === null || !isFileMutationTool(toolName))
+      ) return
       void rpc
         .sessionsDiff(context.session.id)
         .then((patch) => self.send({ type: "PATCH_UPDATED", patch }))
@@ -1627,36 +1637,25 @@ export const conversationMachine = setup({
     }),
     persistReasoning: assign(({ context, event }) => {
       if (event.type !== "SET_REASONING") return {}
-      if (context.cli === "claude" || context.cli === "codex") {
-        void rpc.agentSetReasoning(context.session.id, context.cli, event.reasoning)
-      }
-      const key =
-        context.cli === "claude" || context.cli === "codex"
-          ? context.cli
-          : null
+      void rpc.agentSetReasoning(context.session.id, context.chatId, event.reasoning)
       return {
         reasoning: event.reasoning,
-        session:
-          key === null
-            ? context.session
-            : {
-                ...context.session,
-                reasoning: {
-                  ...context.session.reasoning,
-                  [key]: event.reasoning
-                }
-              }
+        session: {
+          ...context.session,
+          chats: context.session.chats.map((chat) =>
+            chat.id === context.chatId
+              ? { ...chat, reasoning: event.reasoning }
+              : chat
+          )
+        }
       }
     }),
     reconcileSession: assign(({ context, event }) => {
       if (event.type !== "SESSION_UPDATED") return {}
       const chat = event.session.chats.find((candidate) => candidate.id === context.chatId)
       if (chat === undefined) return { session: event.session }
-      const reasoning =
-        event.session.cli === "claude" || event.session.cli === "codex"
-          ? event.session.reasoning?.[event.session.cli]
-          : undefined
-      const persistedMode = chat.mode ?? defaultModeFor(event.session.cli)
+      const providerId = chat.providerId ?? event.session.providerId ?? null
+      const persistedMode = chat.mode ?? event.session.mode ?? "accept-edits"
       // Plan/Gigaplan are TRANSIENT client overlays the backend never persists
       // (see `agent-runner.setMode`: plan is held in memory, only the exec mode
       // reaches `session.mode`). A `SESSION_UPDATED` therefore always carries a
@@ -1667,11 +1666,12 @@ export const conversationMachine = setup({
       const mode = isExecutionMode(context.mode) ? persistedMode : context.mode
       return {
         session: event.session,
-        cli: event.session.cli,
-        model: chat.model ?? defaultModel(event.session.cli),
+        connectionId: chat.connectionId ?? event.session.connectionId ?? null,
+        providerId,
+        modelId: chat.modelId ?? event.session.modelId ?? null,
         mode,
         executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
-        reasoning,
+        reasoning: chat.reasoning,
         tokens: chat.contextTokens ?? context.tokens,
         persistedStatus: event.session.status
       }
@@ -1794,73 +1794,31 @@ export const conversationMachine = setup({
         )
       }
     }),
-    /**
-     * Apply a harness/model pick. Picking a model under another provider's
-     * heading switches harness, which has consequences beyond the chip:
-     *  - `resumeId` is dropped (main does the authoritative write) — the new
-     *    harness starts a fresh thread, so the transcript stays on screen but the
-     *    agent won't recall earlier turns;
-     *  - `plan` mode degrades to `ask` on a harness that can't hold it
-     *    (`supportsPlanMode`) — cursor;
-     *  - skills are per-harness, so the `/` menu is refetched.
-     */
-    persistHarness: assign(({ context, event, self }) => {
-      if (event.type !== "SET_HARNESS") return {}
-      const switched = event.cli !== context.cli
-      const session = withHarness(
+    persistProviderModel: assign(({ context, event }) => {
+      if (event.type !== "SET_MODEL") return {}
+      const session = withProviderModel(
         context.session,
         context.chatId,
-        event.cli,
-        event.model,
-        switched
+        event.connectionId,
+        event.providerId,
+        event.modelId
       )
-      void rpc.agentSetHarness(
+      void rpc.agentSetModel(
         context.session.id,
         context.chatId,
-        event.cli,
-        event.model
+        event.connectionId,
+        event.providerId,
+        event.modelId
       ).then(publishSessionUpdate).catch(() => {})
-      if (!switched) return { model: event.model, session }
-
-      void rpc
-        .skillsList(context.session.id)
-        .then((skills) => self.send({ type: "SKILLS_LOADED", skills }))
-        .catch(() => {})
-
-      const mode = context.mode === "plan" && !supportsPlanMode(event.cli) ? "ask" : context.mode
-      const reasoning =
-        event.cli === "claude" || event.cli === "codex"
-          ? context.session.reasoning?.[event.cli]
-          : undefined
       return {
-        cli: event.cli,
-        model: event.model,
-        // Mirror main's write so the UI doesn't lie until the next load.
-        session,
-        mode,
-        reasoning,
-        executionMode: isExecutionMode(mode) ? mode : context.executionMode,
-        // Empty until the refetch lands — better a bare `/` menu than one
-        // offering the old harness's skills.
-        skills: []
+        connectionId: event.connectionId,
+        providerId: event.providerId,
+        modelId: event.modelId,
+        reasoning: session.chats.find((chat) => chat.id === context.chatId)?.reasoning,
+        session
       }
     }),
     applySkills: assign(({ event }) => (event.type === "SKILLS_LOADED" ? { skills: event.skills } : {})),
-    /**
-     * Fetch the model catalogue OUT OF BAND, not as part of `loadConversation`.
-     * It reaches `DiscoveryService` and probes the Codex CLI for its models —
-     * hundreds of ms to seconds. `loading` has no event handlers, so anything the
-     * operator does before it settles (typing a message, Shift+Tab) is silently
-     * dropped; gating the transcript on a CLI probe would widen that hole from
-     * imperceptible to seconds. The chip just fills itself in a beat later.
-     */
-    loadCatalog: ({ self }) => {
-      void rpc
-        .modelsCatalog()
-        .then((catalog) => self.send({ type: "CATALOG_LOADED", catalog }))
-        .catch(() => {})
-    },
-
     /**
      * The `/` menu's contents, fetched out of band for the same reason as the
      * catalogue above: `Skills.list` asks the HARNESS what commands it has,
@@ -1875,9 +1833,6 @@ export const conversationMachine = setup({
         .then((skills) => self.send({ type: "SKILLS_LOADED", skills }))
         .catch(() => {})
     },
-    applyCatalog: assign(({ event }) =>
-      event.type === "CATALOG_LOADED" ? { catalog: event.catalog } : {}
-    ),
     /** Fold one reviewer event into its tab + the PR button's phase/timer. */
     applyReview: assign(({ context, event }) => {
       if (event.type !== "REVIEW_EVENT") return {}
@@ -1960,7 +1915,7 @@ export const conversationMachine = setup({
   initial: "loading",
   // Kick the (slow, out-of-band) model catalogue + `/` menu fetches off once, at
   // start. Both probe a CLI, so neither may gate the transcript — see below.
-  entry: ["loadCatalog", "loadSkills"],
+  entry: ["loadSkills"],
   // Watch the reviewer for the machine's whole life — a review is not part of a
   // turn, so it can start, run and finish in any state.
   invoke: {
@@ -1976,10 +1931,10 @@ export const conversationMachine = setup({
       guard: "isAcceptedSessionEnvelope",
       actions: "applySessionEnvelope"
     },
-    CATALOG_LOADED: { actions: "applyCatalog" },
     SKILLS_LOADED: { actions: "applySkills" },
     REVIEW_EVENT: { actions: "applyReview" },
     SET_REASONING: { actions: "persistReasoning" },
+    SET_MODEL: { actions: "persistProviderModel" },
     SESSION_UPDATED: { actions: "reconcileSession" },
     SHARED_PLAN_UPDATED: { actions: "applySharedPlan" },
     // Root-level for the same reason: a sub-agent's tab outlives the turn that
@@ -2021,36 +1976,32 @@ export const conversationMachine = setup({
         createdAt: input.session.updatedAt,
         updatedAt: input.session.updatedAt,
         mode: input.session.mode,
-        model: input.session.model,
         contextTokens: input.session.contextTokens
       }
-    const reasoning =
-      input.session.cli === "claude" || input.session.cli === "codex"
-        ? input.session.reasoning?.[input.session.cli]
-        : undefined
+    const providerId = chat.providerId ?? input.session.providerId ?? null
     return {
       session: input.session,
       chatId: chat.id,
       messages: [],
       sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] },
       remotePublishProgress: null,
-      mode: chat.mode ?? defaultModeFor(input.session.cli),
+      mode: chat.mode ?? input.session.mode ?? "accept-edits",
       executionMode:
         chat.mode && isExecutionMode(chat.mode)
           ? chat.mode
           : "accept-edits",
       skills: [],
       files: [],
-      cli: input.session.cli,
-      model: chat.model ?? defaultModel(input.session.cli),
-      catalog: [],
+      connectionId: chat.connectionId ?? input.session.connectionId ?? null,
+      providerId,
+      modelId: chat.modelId ?? input.session.modelId ?? null,
       patch: "",
       pendingText: "",
       pendingAgentContext: "",
       pendingImages: [],
       pendingExternalInstruction: null,
       pendingExternalAcceptances: [],
-      reasoning,
+      reasoning: chat.reasoning,
       queued: [],
       steeringId: null,
       subagents: [],
@@ -2089,12 +2040,11 @@ export const conversationMachine = setup({
        * chip snaps back, nothing happens.
        *
        * Safe here because `onDone` below assigns only transcript state
-       * (messages/skills/files/patch) and never `cli`/`model`/`mode` — so a
+       * (messages/skills/files/patch) and never provider identity or `mode` — so a
        * choice made mid-load survives the transition rather than being clobbered.
        */
       on: {
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" },
         // The composer is enabled from the first paint, so a prompt can be sent
         // before the transcript lands — and a dropped one is invisible: the box
         // clears and the operator believes they sent it. Hold it and run it the
@@ -2207,7 +2157,6 @@ export const conversationMachine = setup({
         APPROVE_PLAN: { target: "running", actions: "startResumePlan" },
         RESUME_PLAN: { target: "running", actions: "startResumePlan" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" },
         // Re-read the worktree diff on demand (e.g. after a revert from the rail).
         REFRESH_DIFF: { target: "refreshingDiff" }
       }
@@ -2304,7 +2253,6 @@ export const conversationMachine = setup({
         REVISE_PLAN: { actions: "optimisticPlanRevise" },
         APPROVE_PLAN: { actions: "optimisticPlanApprove" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" },
         // Stopping abandons the queue too — the operator asked the agent to halt.
         // Live sub-agent tabs go with it (no completion events will arrive).
         STOP: {
@@ -2334,7 +2282,6 @@ export const conversationMachine = setup({
         PATCH_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" }
       }
     },
     /**
@@ -2378,7 +2325,6 @@ export const conversationMachine = setup({
         PATCH_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" }
       }
     },
     // After a turn ends, re-read the worktree diff so the Changes rail reflects
@@ -2421,7 +2367,6 @@ export const conversationMachine = setup({
         PATCH_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
-        SET_HARNESS: { actions: "persistHarness" }
       }
     }
   }

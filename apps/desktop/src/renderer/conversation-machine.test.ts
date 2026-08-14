@@ -10,12 +10,19 @@ import {
   applyStreamEvent,
   assistantMessage,
   latestPlan,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   STOPPED_NOTE,
   userMessage
 } from "@jingler/core"
+import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { conversationMachine } from "./conversation-machine.js"
+import {
+  CONVERSATION_LOAD_TIMEOUT_MS,
+  conversationMachine
+} from "./conversation-machine.js"
 
 /**
  * The renderer's conversation flow is a deterministic XState chart. Its only
@@ -53,24 +60,24 @@ const h = vi.hoisted(() => ({
   stopFails: false,
   /** Push reviewer events into the machine, as ReviewService's stream would. */
   reviewCb: null as null | ((event: unknown) => void),
-  // Lets a test hold the catalogue in flight to prove nothing waits on it.
-  catalogGate: Promise.resolve() as Promise<void>,
   // Same, for the skills probe — it spawns the harness, so nothing may wait on it.
   skillsGate: Promise.resolve() as Promise<void>,
   approvalRefused: false,
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
   transcriptGate: Promise.resolve() as Promise<void>,
+  filesGate: Promise.resolve() as Promise<void>,
   transcript: [] as ReadonlyArray<Message>,
   transcriptPageCalls: [] as Array<{ before: string | undefined; limit: number }>,
   currentPlan: null as PlanDocument | null,
-  setHarnessCalls: [] as Array<{ sessionId: string; cli: string; model: string }>,
+  setModelCalls: [] as Array<{
+    sessionId: string
+    connectionId: string
+    providerId: string
+    modelId: string
+  }>,
   planCommentCalls: [] as Array<{ planId: string; stepId: string; body: string }>,
   planReviseCalls: [] as Array<string>,
-  reasoningCalls: [] as Array<unknown>,
-  catalog: [
-    { cli: "claude", label: "Claude Code", models: [{ id: "opus", label: "opus" }] },
-    { cli: "codex", label: "Codex CLI", models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol" }] }
-  ]
+  reasoningCalls: [] as Array<unknown>
 }))
 
 vi.mock("./rpc-client.js", () => ({
@@ -105,11 +112,8 @@ vi.mock("./rpc-client.js", () => ({
     },
     workspaceFiles: async () => {
       h.filesCalls += 1
+      await h.filesGate
       return h.filesValue
-    },
-    modelsCatalog: async () => {
-      await h.catalogGate
-      return h.catalog
     },
     sessionsDiff: async () => {
       h.diffCalls += 1
@@ -151,16 +155,17 @@ vi.mock("./rpc-client.js", () => ({
     agentDecideGate: async () => {},
     agentAnswerQuestion: async () => {},
     agentSetMode: async () => {},
-    agentSetReasoning: async (_sessionId: string, _cli: string, reasoning: unknown) => {
-      h.reasoningCalls.push(reasoning)
+    agentSetReasoning: async (sessionId: string, chatId: string, reasoning: unknown) => {
+      h.reasoningCalls.push({ sessionId, chatId, reasoning })
     },
-    agentSetHarness: async (
+    agentSetModel: async (
       sessionId: string,
       _chatId: string,
-      cli: string,
-      model: string
+      connectionId: string,
+      providerId: string,
+      modelId: string
     ) => {
-      h.setHarnessCalls.push({ sessionId, cli, model })
+      h.setModelCalls.push({ sessionId, connectionId, providerId, modelId })
     },
     agentCommentPlanStep: async (
       _sessionId: string,
@@ -207,7 +212,6 @@ vi.mock("./rpc-client.js", () => ({
 
 const session = {
   id: "s1",
-  cli: "claude",
   worktreePath: "/tmp/wt",
   mode: "accept-edits",
   model: null,
@@ -225,6 +229,9 @@ const session = {
 
 const emit = (event: StreamEvent) => h.streamCb?.(event)
 const start = () => createActor(conversationMachine, { input: { session } }).start()
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
 const remoteEnvelope = (
   sequence: number,
   event: StreamEvent,
@@ -269,10 +276,10 @@ beforeEach(() => {
   h.steerStatus = "unsupported"
   h.steerGate = Promise.resolve()
   h.stopFails = false
-  h.setHarnessCalls.length = 0
-  h.catalogGate = Promise.resolve()
+  h.setModelCalls.length = 0
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
+  h.filesGate = Promise.resolve()
   h.transcript = []
   h.transcriptPageCalls.length = 0
   h.currentPlan = null
@@ -330,6 +337,36 @@ describe("conversationMachine — remote session envelopes", () => {
     expect(context.session.diff).toEqual({ added: 5, removed: 5 })
     expect(context.remotePublishProgress).toEqual({ phase: "publishing", message: "Pushing branch" })
     expect(context.lastOutcome).toBe("done")
+    actor.stop()
+  })
+
+  it("uses canonical remote file-change totals for diff presence", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: {
+        version: 1,
+        eventId: "event_canonical_diff",
+        sessionId: session.id,
+        sequence: 1,
+        revision: 1,
+        occurredAt: 1,
+        event: {
+          _tag: "DiffChanged",
+          changes: {
+          id: "changes-remote",
+          callId: "remote-tool",
+          changes: [{ status: "R", path: "src/new.ts", oldPath: "src/old.ts", added: 1, removed: 1, binary: false, noNewlineAtEnd: false, beforeBytes: 10, afterBytes: 10, preview: null, patchArtifactId: "patch-remote" }],
+          totals: { added: 1, removed: 1 },
+          authoritative: true,
+          reconciledAt: "2026-08-10T12:00:00.000Z"
+          }
+        }
+      }
+    })
+
+    expect(actor.getSnapshot().context.session.diff).toEqual({ added: 1, removed: 1 })
     actor.stop()
   })
 
@@ -1135,6 +1172,20 @@ describe("conversationMachine — nothing gates the transcript on a CLI probe", 
     actor.stop()
   })
 
+  it("runs a held prompt when an auxiliary remote read never settles", async () => {
+    vi.useFakeTimers()
+    h.filesGate = new Promise<void>(() => {})
+
+    const actor = start()
+    actor.send({ type: "SEND", text: "typed while Cloud wakes" })
+    await vi.advanceTimersByTimeAsync(CONVERSATION_LOAD_TIMEOUT_MS)
+
+    expect(actor.getSnapshot().matches("running")).toBe(true)
+    expect(h.agentRunCalls[0]?.text).toBe("typed while Cloud wakes")
+    actor.stop()
+    vi.useRealTimers()
+  })
+
   it("reaches idle and accepts a send while the skills probe is still in flight", async () => {
     let release = () => {}
     h.skillsGate = new Promise<void>((r) => (release = r))
@@ -1154,6 +1205,41 @@ describe("conversationMachine — nothing gates the transcript on a CLI probe", 
 })
 
 describe("conversationMachine — realtime Changes rail", () => {
+  it("re-reads diff and files for canonical changes from a generic mutating tool", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "run the generator" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    const beforeDiff = h.diffCalls
+    const beforeFiles = h.filesCalls
+    h.diffValue = "diff-after-generator"
+    h.filesValue = ["src/generated.ts"]
+    emit({ _tag: "ToolStart", id: "mcp-1", name: "mcp.generator", target: null })
+    emit({
+      _tag: "ToolEnd",
+      id: "mcp-1",
+      status: "success",
+      meta: null,
+      diff: { added: 1, removed: 0 },
+      preview: "+generated",
+      fileChanges: {
+        id: "changes-1",
+        callId: "mcp-1",
+        changes: [{ status: "A", path: "src/generated.ts", oldPath: null, added: 1, removed: 0, binary: false, noNewlineAtEnd: false, beforeBytes: 0, afterBytes: 10, preview: "+generated", patchArtifactId: "patch-1" }],
+        totals: { added: 1, removed: 0 },
+        authoritative: true,
+        reconciledAt: "2026-08-10T12:00:00.000Z"
+      }
+    })
+
+    await waitFor(actor, (s) => s.context.patch === "diff-after-generator", { timeout: 3000 })
+    await waitFor(actor, (s) => s.context.files.includes("src/generated.ts"), { timeout: 3000 })
+    expect(h.diffCalls).toBeGreaterThan(beforeDiff)
+    expect(h.filesCalls).toBeGreaterThan(beforeFiles)
+    actor.stop()
+  })
+
   it("re-reads the diff mid-run when an edit tool lands", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
@@ -1236,170 +1322,43 @@ describe("conversationMachine — image attachments", () => {
     actor.stop()
   })
 
-  it("loads the model catalogue into context", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.context.catalog.length > 0)
-    expect(actor.getSnapshot().context.catalog).toStrictEqual(h.catalog)
-    expect(actor.getSnapshot().context.cli).toBe("claude")
-    actor.stop()
-  })
-
-  /**
-   * REGRESSION: the catalogue must NOT be part of `loadConversation`.
-   *
-   * `loading` has no event handlers, so anything the operator does before the
-   * load settles is dropped on the floor. Fetching the catalogue inline reaches
-   * DiscoveryService + probes the Codex CLI for models — seconds — which widened
-   * that window enough that an immediate Shift+Tab or send was silently ignored
-   * (it broke four e2e tests). The transcript must not wait on the model chip.
-   */
-  it("reaches idle without waiting for the model catalogue", async () => {
-    let releaseCatalog = () => {}
-    h.catalogGate = new Promise<void>((resolve) => {
-      releaseCatalog = resolve
-    })
-
-    const actor = start()
-    // Idle while the catalogue is still in flight — so events aren't dropped.
-    await waitFor(actor, (s) => s.matches(idle))
-    expect(actor.getSnapshot().context.catalog).toStrictEqual([])
-
-    // The operator can act immediately, and it takes effect.
-    actor.send({ type: "SET_MODE", mode: "auto" })
-    expect(actor.getSnapshot().context.mode).toBe("auto")
-
-    releaseCatalog()
-    await waitFor(actor, (s) => s.context.catalog.length > 0)
-    actor.stop()
-  })
-
-  describe("SET_HARNESS", () => {
-    it("changes only the model when staying on the same harness", async () => {
+  describe("SET_MODEL", () => {
+    it("updates canonical identity and clears incompatible continuation state", async () => {
       const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-      // Skills land OUT OF BAND now (the fetch probes the harness, so gating the
-      // transcript on it would freeze the composer) — wait for the first one
-      // before asserting that a same-harness switch doesn't trigger a second.
-      await waitFor(actor, (s) => s.context.skills.length > 0)
-      const skillsBefore = h.skillsListCalls
+      await waitFor(actor, (snapshot) => snapshot.matches(idle))
+      actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "max" } })
 
-      actor.send({ type: "SET_HARNESS", cli: "claude", model: "haiku" })
+      actor.send({ type: "SET_MODEL", connectionId, providerId, modelId })
 
-      const { context } = actor.getSnapshot()
-      expect(context.model).toBe("haiku")
-      expect(context.cli).toBe("claude")
-      expect(context.session.chats[0]?.model).toBe("haiku")
-      expect(h.setHarnessCalls).toStrictEqual([{ sessionId: "s1", cli: "claude", model: "haiku" }])
-      // Same harness → same skills; refetching would be pointless work.
-      expect(h.skillsListCalls).toBe(skillsBefore)
-      expect(context.skills.length).toBeGreaterThan(0)
-      actor.stop()
-    })
-
-    /**
-     * The composer's chips are live while the conversation loads, and loading is
-     * NOT instant — it asks the harness for its command list, which means
-     * spawning it. A switch made in that window used to be swallowed: the menu
-     * closed, the chip snapped back, nothing happened.
-     *
-     * Every other test here waits for `idle` first, which is exactly why none of
-     * them caught it — this one deliberately does not.
-     */
-    it("honours a switch made while the conversation is still loading", async () => {
-      const actor = start()
-      expect(actor.getSnapshot().matches("loading")).toBe(true)
-
-      actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
-
-      expect(actor.getSnapshot().context.cli).toBe("codex")
-      expect(actor.getSnapshot().context.session).toMatchObject({
-        cli: "codex",
-        model: "gpt-5.6-sol",
-        chats: [{ id: "s1", model: "gpt-5.6-sol" }]
+      expect(actor.getSnapshot().context).toMatchObject({
+        connectionId,
+        providerId,
+        modelId,
+        reasoning: undefined
       })
-      expect(h.setHarnessCalls).toStrictEqual([
-        { sessionId: "s1", cli: "codex", model: "gpt-5.6-sol" }
+      expect(actor.getSnapshot().context.session).toMatchObject({
+        connectionId,
+        providerId,
+        modelId,
+        chats: [{ id: "s1", connectionId, providerId, modelId }]
+      })
+      expect(h.setModelCalls).toStrictEqual([
+        { sessionId: "s1", connectionId, providerId, modelId }
       ])
-
-      // …and the load completing must not clobber the choice: `onDone` assigns
-      // transcript state only.
-      await waitFor(actor, (s) => s.matches(idle))
-      expect(actor.getSnapshot().context.cli).toBe("codex")
-      expect(actor.getSnapshot().context.model).toBe("gpt-5.6-sol")
       actor.stop()
     })
+  })
 
-    it("honours a mode change made while the conversation is still loading", async () => {
-      const actor = start()
-      expect(actor.getSnapshot().matches("loading")).toBe(true)
+  it("honours a mode change made while the conversation is still loading", async () => {
+    const actor = start()
+    expect(actor.getSnapshot().matches("loading")).toBe(true)
 
-      actor.send({ type: "SET_MODE", mode: "auto" })
+    actor.send({ type: "SET_MODE", mode: "auto" })
 
-      expect(actor.getSnapshot().context.mode).toBe("auto")
-      await waitFor(actor, (s) => s.matches(idle))
-      expect(actor.getSnapshot().context.mode).toBe("auto")
-      actor.stop()
-    })
-
-    it("switches harness and refetches the harness-specific skills", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-      // As above — count from AFTER the out-of-band initial fetch, or the
-      // "+1 refetch" assertion below races it.
-      await waitFor(actor, (s) => s.context.skills.length > 0)
-      const skillsBefore = h.skillsListCalls
-
-      actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
-
-      expect(actor.getSnapshot().context.cli).toBe("codex")
-      expect(actor.getSnapshot().context.model).toBe("gpt-5.6-sol")
-      // The old harness's `/` menu must not linger.
-      expect(h.skillsListCalls).toBe(skillsBefore + 1)
-      await waitFor(actor, (s) => s.context.skills.length > 0)
-      actor.stop()
-    })
-
-    // The runner reads `session.cli`; if the mirror lagged, the chip would say
-    // "codex" while the next turn still ran on Claude.
-    it("mirrors the switch onto the session and drops the stale resume id", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-
-      actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
-
-      const { session: updated } = actor.getSnapshot().context
-      expect(updated.cli).toBe("codex")
-      expect(updated.resumeId).toBeUndefined()
-      actor.stop()
-    })
-
-    it("keeps plan mode when the new harness can plan too", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-      actor.send({ type: "SET_MODE", mode: "plan" })
-      expect(actor.getSnapshot().context.mode).toBe("plan")
-
-      actor.send({ type: "SET_HARNESS", cli: "codex", model: "gpt-5.6-sol" })
-
-      // Codex submits its plan as a fenced block instead of `ExitPlanMode`, so
-      // there is nothing to downgrade — dropping the mode would have discarded
-      // the operator's in-flight planning session for no reason.
-      expect(actor.getSnapshot().context.mode).toBe("plan")
-      actor.stop()
-    })
-
-    it("degrades plan mode to ask on a harness that cannot plan", async () => {
-      const actor = start()
-      await waitFor(actor, (s) => s.matches(idle))
-      actor.send({ type: "SET_MODE", mode: "plan" })
-
-      actor.send({ type: "SET_HARNESS", cli: "cursor", model: "composer-1" })
-
-      // Cursor falls through to the scripted stub, so its "plan" would be
-      // fabricated. Better to say `ask` than to invent one.
-      expect(actor.getSnapshot().context.mode).toBe("ask")
-      actor.stop()
-    })
+    expect(actor.getSnapshot().context.mode).toBe("auto")
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(actor.getSnapshot().context.mode).toBe("auto")
+    actor.stop()
   })
 })
 
@@ -2035,15 +1994,39 @@ describe("conversationMachine — PlanUpdated across turns", () => {
 })
 
 describe("conversationMachine — persisted session reconciliation", () => {
-  it("keeps transient plan mode when a Codex model update echoes the persisted exec mode", async () => {
+  it("persists reasoning against the active chat without a provider-specific route", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+
+    actor.send({
+      type: "SET_REASONING",
+      reasoning: { enabled: true, effort: "max" }
+    })
+
+    await vi.waitFor(() => {
+      expect(h.reasoningCalls).toEqual([{
+        sessionId: session.id,
+        chatId: session.id,
+        reasoning: { enabled: true, effort: "max" }
+      }])
+    })
+    expect(actor.getSnapshot().context.session.chats[0]?.reasoning).toEqual({
+      enabled: true,
+      effort: "max"
+    })
+    actor.stop()
+  })
+
+  it("keeps transient plan mode when a provider-model update echoes the persisted exec mode", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
     actor.send({ type: "SET_MODE", mode: "plan" })
 
     const updated = {
       ...session,
-      cli: "codex",
-      model: "gpt-5.6-sol",
+      connectionId,
+      providerId,
+      modelId,
       activeChatId: session.id,
       chats: [{
         id: session.id,
@@ -2052,13 +2035,14 @@ describe("conversationMachine — persisted session reconciliation", () => {
         updatedAt: "2026-07-25T00:00:00.000Z",
         // Plan mode is transient and deliberately absent from persistence.
         mode: "accept-edits",
-        model: "gpt-5.6-sol"
+        connectionId,
+        providerId,
+        modelId
       }]
     } as Session
 
     actor.send({ type: "SESSION_UPDATED", session: updated })
 
-    expect(actor.getSnapshot().context.cli).toBe("codex")
     expect(actor.getSnapshot().context.mode).toBe("plan")
     actor.stop()
   })
@@ -2068,26 +2052,30 @@ describe("conversationMachine — persisted session reconciliation", () => {
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
     const updated = {
       ...session,
-      cli: "codex",
-      model: "gpt-5.6-sol",
+      connectionId,
+      providerId,
+      modelId,
       mode: "auto",
       activeChatId: session.id,
       chats: [{
         id: session.id,
-        title: "Chat 1",
+        title: null,
         createdAt: "2026-07-25T00:00:00.000Z",
         updatedAt: "2026-07-25T00:00:00.000Z",
         mode: "auto",
-        model: "gpt-5.6-sol"
-      }],
-      reasoning: { codex: { enabled: false, effort: "high" } }
+        connectionId,
+        providerId,
+        modelId,
+        reasoning: { enabled: false, effort: "high" }
+      }]
     } as Session
 
     actor.send({ type: "SESSION_UPDATED", session: updated })
 
     expect(actor.getSnapshot().context).toMatchObject({
-      cli: "codex",
-      model: "gpt-5.6-sol",
+      connectionId,
+      providerId,
+      modelId,
       mode: "auto",
       reasoning: { enabled: false, effort: "high" }
     })
@@ -2115,7 +2103,9 @@ describe("conversationMachine — persisted session reconciliation", () => {
         createdAt: "2026-07-25T00:00:00.000Z",
         updatedAt: "2026-07-25T00:00:00.000Z",
         mode: "auto",
-        model: session.model
+        connectionId,
+        providerId,
+        modelId
       }]
     } as Session
 

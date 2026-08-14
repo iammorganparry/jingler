@@ -1,31 +1,27 @@
 import type {
   BackgroundTask,
-  CliInfo,
   ContextDigest,
   ContextSnapshot,
   Message,
   StreamEvent
 } from "@jingler/core"
 import {
+  CURRENT_RUNTIME_CONTRACTS,
   DEFAULT_CONTEXT_CONFIG,
   contextPhase,
   contextWindowFor,
-  defaultModel,
-  digestModelFor,
   reconcileWindow,
   shouldHoldSwap,
   triggerAt
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
-import type { CommandExecutor } from "@effect/platform"
 import { Effect, Fiber, Ref } from "effect"
 import { AppPaths } from "./app-paths.js"
-import type { AgentContext, SessionSpec } from "./adapter.js"
+import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
-import { CliAdapter, PlanDecision } from "./adapter.js"
+import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
 import { ConfigService } from "./config.js"
 import { digestPrompt, lastMessageId, parseDigest, renderTranscript } from "./context-digest.js"
-import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 
@@ -59,13 +55,6 @@ const DIGEST_TIMEOUT = "90 seconds"
  * that has never once produced a result they can see.
  */
 const MAX_FAILURES = 2
-
-/**
- * Legacy Codex sessions created before live occupancy telemetry can resume with
- * `contextTokens: 0`. A large local transcript is then the only evidence that
- * resuming the vendor thread is unsafe.
- */
-const UNKNOWN_CODEX_TRANSCRIPT_RECOVERY_CHARS = 500_000
 
 interface SessionContext {
   readonly status: "idle" | "preparing" | "ready"
@@ -130,14 +119,10 @@ const resolveWindow = (inferred: number | null, reported: number | null): number
 }
 
 export type DigestEnv =
-  | CliAdapter
+  | AgentTurnDriver
   | SessionStore
   | TranscriptStore
   | ConfigService
-  | DiscoveryService
-  // `DiscoveryService.list()` shells out to probe for harness binaries, which is
-  // how the digest learns which one the session is authenticated against.
-  | CommandExecutor.CommandExecutor
   | FileSystem.FileSystem
   | Path.Path
   | AppPaths
@@ -178,42 +163,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
       const ownerOf = (contextId: string): Effect.Effect<string> =>
         Effect.map(Ref.get(owners), (map) => map.get(contextId) ?? contextId)
 
-      /**
-       * Harness discovery, memoised for 30s.
-       *
-       * `DiscoveryService.list()` shells out `which` + `--version` for every
-       * harness — roughly eight processes per call — and does not cache. This
-       * service needs it on EVERY `snapshot`, which the meter polls once a second
-       * and a half while a turn runs, so calling straight through meant spawning
-       * eight processes a second per open session just to draw a progress bar.
-       *
-       * Hand-rolled rather than `Effect.cachedWithTTL` because that resolves the
-       * effect at CONSTRUCTION time, which would turn discovery into a layer
-       * dependency of this service and force every consumer to rewire. Keeping it
-       * per-call leaves the service's shape unchanged.
-       *
-       * A TTL rather than a permanent cache so installing or upgrading a harness
-       * takes effect within half a minute, without a restart.
-       */
-      const cliCache = yield* Ref.make<{ at: number; value: ReadonlyArray<CliInfo> } | null>(null)
-      const CLI_TTL_MS = 30_000
-
-      const listClis = (): Effect.Effect<
-        ReadonlyArray<CliInfo>,
-        never,
-        DiscoveryService | CommandExecutor.CommandExecutor
-      > =>
-        Effect.gen(function* () {
-          const now = yield* Effect.sync(() => Date.now())
-          const cached = yield* Ref.get(cliCache)
-          if (cached !== null && now - cached.at < CLI_TTL_MS) return cached.value
-          const fresh = yield* DiscoveryService.list().pipe(
-            Effect.orElseSucceed(() => [] as ReadonlyArray<CliInfo>)
-          )
-          yield* Ref.set(cliCache, { at: now, value: fresh })
-          return fresh
-        })
-
       const stateOf = (sessionId: string): Effect.Effect<SessionContext> =>
         Effect.map(Ref.get(states), (m) => m.get(sessionId) ?? EMPTY)
 
@@ -249,15 +198,16 @@ export class ContextManager extends Effect.Service<ContextManager>()(
 
           const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
           const ctx = config?.context ?? DEFAULT_CONTEXT_CONFIG
-          const provider = config?.providers?.[session.cli]
-
-          const cli = (yield* listClis()).find((c) => c.kind === session.cli)
-          const inferredWindow = contextWindowFor(session.cli, chat.model ?? null)
+          const selectedModel = chat.modelId ?? null
+          const inferredWindow = contextWindowFor(
+            chat.providerId ?? session.providerId ?? null,
+            selectedModel
+          )
           const measuredWindow = resolveWindow(inferredWindow, reported)
 
           // A harness that reports no usage gives us nothing to measure, so it is
           // left alone rather than compacted against a fabricated number.
-          const reporting = cli?.contextReporting ?? false
+          const reporting = true
           // The per-session switch overrides the global one in both directions,
           // so a user can pin one long-running session open (or force it on).
           const auto = (session.autoCompact ?? ctx.auto) && reporting
@@ -269,7 +219,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             auto,
             budget: ctx.budgetTokens,
             // The user's explicit Settings value stays on top because it is the
-            // escape hatch for a harness report we have reason to distrust.
+            // escape hatch for provider telemetry we have reason to distrust.
             // Otherwise, a known model window is a floor: stale Codex telemetry
             // must not lower GPT-5.6 from 1M to its former 258.4k session value.
             // A larger live report still raises an old or conservative table
@@ -279,28 +229,15 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             // occupancy this session has actually reported. A model-id table is a
             // guess, and an observation of 598k in a "200k" window disproves it —
             // left uncorrected, `triggerAt` sits at 170k and the session compacts
-            // every single turn while the harness is perfectly comfortable.
-            window: reconcileWindow(
-              provider?.contextWindow !== undefined && provider.contextWindow !== null
-                ? contextWindowFor(session.cli, chat.model ?? null, provider.contextWindow)
-                : measuredWindow,
-              peak
-            ),
-            binPath: cli?.binPath ?? null,
-            digestModel: digestModelFor(session.cli, provider?.backgroundModel)
+            // every single turn while the provider is perfectly comfortable.
+            window: reconcileWindow(measuredWindow, peak)
           }
         })
 
       /**
-       * Summarise the session's transcript through its OWN harness.
-       *
-       * The single most important property in this file: `CliAdapter.run` with
-       * the session's `binPath` means the summary is produced by the CLI the user
-       * has already authenticated — their Claude subscription, their Codex login.
-       * There is no API client constructed anywhere in this codepath and no key
-       * to configure, so enabling auto-compaction cannot present anyone with a
-       * bill they didn't expect. It runs on `backgroundModel` (haiku by default),
-       * so it is also the cheapest tier that harness offers.
+       * Summarise the transcript through the session's pinned provider connection.
+       * The same explicit billing route and certified model resolution used for
+       * foreground turns applies here; compaction cannot switch credentials.
        */
       const buildDigest = (sessionId: string): Effect.Effect<void, never, DigestEnv> =>
         Effect.gen(function* () {
@@ -323,33 +260,34 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             return
           }
 
-          const adapter = yield* CliAdapter
+          const adapter = yield* AgentTurnDriver
           const collected = yield* Ref.make<ReadonlyArray<string>>([])
+          if (
+            settings.chat.connectionId === undefined ||
+            settings.chat.modelId === undefined
+          ) {
+            return yield* fail(sessionId, "provider connection unavailable")
+          }
 
-          const spec: SessionSpec = {
-            cli: settings.session.cli,
-            repo: settings.session.repo,
-            branch: settings.session.branch,
+          const spec: AgentTurnSpec = {
+            sessionId: settings.session.id,
+            chatId: settings.chat.id,
+            connectionId: settings.chat.connectionId,
+            modelId: settings.chat.modelId,
+            role: "context-digest",
+            priorMessages: [],
+            piSessionId: null,
+            seed: null,
+            targetCapabilities: {
+              versions: CURRENT_RUNTIME_CONTRACTS,
+              toolIds: [],
+              resourceIds: [],
+              targetId: settings.session.environmentId ?? "desktop"
+            },
             cwd: settings.session.worktreePath ?? "",
             prompt: digestPrompt(renderTranscript(messages)),
             images: [],
-            binPath: settings.binPath,
-            // "ask" pairs with the deny-all gate below. Not "plan": plan mode
-            // steers the harness toward ExitPlanMode, and a summariser that
-            // proposes a plan instead of answering is useless.
-            mode: "ask",
-            // The cheap tier, on the user's existing subscription.
-            model: settings.digestModel || defaultModel(settings.session.cli),
-            resumeId: null,
-            // `resumeId: null` is NOT enough on its own — the adapter prefers its
-            // in-memory resume map, keyed per session, so without this the digest
-            // run would resume the very conversation it is trying to summarise
-            // and inherit the context we are attempting to shed.
-            fresh: true,
-            // A summariser has no business touching the worktree. Enforced in the
-            // harness because the deny-all gate below is not a control surface for
-            // every adapter — Codex never calls it at all.
-            readOnly: true
+            mode: "read-only"
           }
 
           const ctx: AgentContext = {
@@ -559,44 +497,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
         })
 
       /**
-       * Prepare a blocking digest for a legacy Codex resume whose occupancy is
-       * unknown but whose transcript is already large enough to be risky.
-       *
-       * This is deliberately narrower than ordinary auto-compaction: measured
-       * sessions use their Usage reading, small unknown sessions proceed, and an
-       * operator who disabled automatic compaction keeps that choice.
-       */
-      const prepareUnknownCodexResume = (
-        sessionId: string
-      ): Effect.Effect<void, never, DigestEnv> =>
-        Effect.gen(function* () {
-          const settings = yield* settingsFor(sessionId)
-          if (
-            settings === null ||
-            !settings.auto ||
-            settings.session.cli !== "codex" ||
-            settings.chat.resumeId === undefined
-          ) {
-            return
-          }
-          const state = yield* stateOf(sessionId)
-          const persisted = settings.chat.contextTokens ?? 0
-          if (state.tokens > 0 || persisted > 0 || state.status === "ready") return
-
-          const messages = yield* TranscriptStore.list(sessionId).pipe(
-            Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
-          )
-          let chars = 0
-          for (const message of messages) {
-            chars += JSON.stringify(message).length
-            if (chars >= UNKNOWN_CODEX_TRANSCRIPT_RECOVERY_CHARS) {
-              yield* compactNow(sessionId, { waitForReady: true })
-              return
-            }
-          }
-        })
-
-      /**
        * The structural half of the mid-flow question, which no summary can see.
        *
        * These are facts about the session's CURRENT state rather than its
@@ -692,7 +592,10 @@ export class ContextManager extends Effect.Service<ContextManager>()(
               tokens: tokensBefore,
               window:
                 state.window ??
-                  contextWindowFor(session?.cli ?? "claude", chat?.model ?? null),
+                  contextWindowFor(
+                    chat?.providerId ?? session?.providerId ?? null,
+                    chat?.modelId ?? session?.modelId ?? null
+                  ),
               deferrals: state.deferrals
             })
           if (hold) {
@@ -852,7 +755,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
         applyIfReady,
         applyWhenReady,
         compactNow,
-        prepareUnknownCodexResume,
         cancel,
         forget,
         snapshot

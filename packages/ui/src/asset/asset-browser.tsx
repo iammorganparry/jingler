@@ -1,7 +1,7 @@
-import { useLayoutEffect, type ReactNode } from "react"
+import { useLayoutEffect, useMemo, type ReactNode } from "react"
 import { useMachine } from "@xstate/react"
 import { Files, X } from "lucide-react"
-import type { AssetFileEntry } from "@jingler/core"
+import { extensionToLanguage, type AssetFileEntry } from "@jingler/core"
 import { jinglerDark, toTokens } from "@jingler/themes"
 import { ResizeHandle } from "../components/resizable.js"
 import { Spinner } from "../components/loading.js"
@@ -50,6 +50,16 @@ export function AssetBrowser({
   const [containerRef, width] = useContainerWidth()
   const theme = useThemeSyntax()
   const tokens = useOptionalThemeTokens()
+  const languages = useMemo(
+    () => [
+      ...new Set(
+        entries
+          .map((entry) => extensionToLanguage(entry.path))
+          .filter((language): language is string => language !== null)
+      )
+    ],
+    [entries]
+  )
   const [state, send] = useMachine(assetBrowserMachine, {
     input: { storageKey: "jingler.asset.tree-width" }
   })
@@ -100,7 +110,11 @@ export function AssetBrowser({
   )
 
   return (
-    <PierreProvider theme={theme} tokens={tokens ?? FALLBACK_TOKENS}>
+    <PierreProvider
+      theme={theme}
+      tokens={tokens ?? FALLBACK_TOKENS}
+      languages={languages}
+    >
       <section
         ref={containerRef}
         aria-label="Asset browser"

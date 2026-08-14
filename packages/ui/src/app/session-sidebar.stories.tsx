@@ -16,7 +16,6 @@ const session = (over: Partial<Session> & Pick<Session, "id" | "title">): Sessio
   repo: "jingler",
   branch: "chore/witty-berners",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -78,8 +77,8 @@ export const AllStates: Story = {
 export const PersistentTray: Story = {
   args: {
     sessions: [
-      session({ id: "kept-auth", title: "Auth", persistent: true, cli: "claude" }),
-      session({ id: "kept-tests", title: "Tests", persistent: true, cli: "codex" }),
+      session({ id: "kept-auth", title: "Auth", persistent: true }),
+      session({ id: "kept-tests", title: "Tests", persistent: true }),
       ...SESSIONS.slice(2)
     ],
     activeSessionId: "kept-tests",

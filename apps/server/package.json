@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Jingler auth and stateless MCP backend, hosted on Next.js with BetterAuth and Effect.",
   "exports": {
-    ".": "./src/app.ts"
+    ".": "./src/app.ts",
+    "./test-support/better-auth-account": "./src/test-support/better-auth-account.ts"
   },
   "scripts": {
     "dev": "next dev --port 9100",
@@ -45,7 +46,7 @@
   },
   "devDependencies": {
     "@jingler/tsconfig": "workspace:*",
-    "@types/node": "^22.10.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "drizzle-kit": "^0.31.10",

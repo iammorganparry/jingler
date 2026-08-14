@@ -28,7 +28,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/lazy-images",
     title: "Look at this screenshot",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,

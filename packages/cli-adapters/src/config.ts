@@ -1,5 +1,4 @@
 import type {
-  CliKind,
   ContextConfig,
   GitConfig,
   GithubConfig,
@@ -7,7 +6,9 @@ import type {
   NotificationsConfig,
   OpenConnectorConfig,
   PlanTemplateConfig,
-  ProviderConfig,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
 } from "@jingler/core"
 import { clampFontScale, DEFAULT_THEME_ID, WorkspaceConfig } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
@@ -15,6 +16,7 @@ import { FileSystem } from "@effect/platform"
 import { Effect, Either, Schema } from "effect"
 import { PlanPrd } from "@jingler/core"
 import { AppPaths } from "./app-paths.js"
+import { migrateLegacyConfigIdentity } from "./runtime/migration/legacy-runtime-identity.js"
 
 const decodePlanTemplate = Schema.decodeUnknownEither(Schema.parseJson(PlanPrd))
 
@@ -40,7 +42,7 @@ const migrateProviderReasoning = (value: unknown): unknown => {
 }
 
 export const migrateConfigReasoning = (value: unknown): unknown => {
-  if (!isRecord(value) || !isRecord(value.providers)) return value
+  if (!(isRecord(value) && isRecord(value.providers))) return value
   return {
     ...value,
     providers: Object.fromEntries(
@@ -77,7 +79,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             Effect.mapError((cause) => new ConfigError({ message: "Config file is malformed", cause }))
           )
           return yield* Schema.decodeUnknown(WorkspaceConfig)(
-            migrateConfigReasoning(parsed)
+            migrateLegacyConfigIdentity(migrateConfigReasoning(parsed))
           ).pipe(
             Effect.mapError(
               (cause) => new ConfigError({ message: "Config file is malformed", cause })
@@ -106,8 +108,19 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.starredRepos ? { starredRepos: existing.starredRepos } : {}),
             ...(existing?.collapsedRepos ? { collapsedRepos: existing.collapsedRepos } : {}),
             ...(existing?.lastRepoPath ? { lastRepoPath: existing.lastRepoPath } : {}),
-            ...(existing?.providers ? { providers: existing.providers } : {}),
-            ...(existing?.defaultCli ? { defaultCli: existing.defaultCli } : {}),
+            ...(existing?.defaultConnectionId
+              ? { defaultConnectionId: existing.defaultConnectionId }
+              : {}),
+            ...(existing?.defaultProviderId
+              ? { defaultProviderId: existing.defaultProviderId }
+              : {}),
+            ...(existing?.defaultModelId ? { defaultModelId: existing.defaultModelId } : {}),
+            ...(existing?.connectionSelectionRequired !== undefined
+              ? { connectionSelectionRequired: existing.connectionSelectionRequired }
+              : {}),
+            ...(existing?.providerSetupCompleted !== undefined
+              ? { providerSetupCompleted: existing.providerSetupCompleted }
+              : {}),
             ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
             ...(existing?.notifications ? { notifications: existing.notifications } : {}),
             // Booleans are checked against `undefined`, not truthiness — a saved
@@ -127,6 +140,8 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         })
 
       const setReposDir = (dir: string) => patch({ reposDir: dir })
+
+      const completeProviderSetup = () => patch({ providerSetupCompleted: true })
 
       const setGithub = (github: GithubConfig) => patch({ github })
 
@@ -171,11 +186,18 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             )
       }
 
-      /**
-       * Which harness new sessions start on. Replaces the New Session dialog's
-       * harness select — one standing answer instead of the same click per session.
-       */
-      const setDefaultCli = (defaultCli: CliKind) => patch({ defaultCli })
+      /** Persist the canonical runtime selection as one indivisible config update. */
+      const setDefaultProviderModel = (
+        defaultConnectionId: ProviderConnectionId,
+        defaultProviderId: ProviderId,
+        defaultModelId: ProviderModelId
+      ) =>
+        patch({
+          defaultConnectionId,
+          defaultProviderId,
+          defaultModelId,
+          connectionSelectionRequired: false
+        })
 
       /**
        * Switch the active colour theme, preserving any `colorCustomizations`
@@ -221,14 +243,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
           })
         })
 
-      const setProvider = (cli: CliKind, provider: ProviderConfig) =>
-        Effect.gen(function* () {
-          const existing = yield* get()
-          return yield* patch({
-            providers: { ...(existing?.providers ?? {}), [cli]: provider }
-          })
-        })
-
       /** Encode + write the config to disk, mapping every failure to `ConfigError`. */
       const persist = (config: WorkspaceConfig): Effect.Effect<WorkspaceConfig, ConfigError, ConfigEnv> =>
         Effect.gen(function* () {
@@ -249,6 +263,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       return {
         get,
         setReposDir,
+        completeProviderSetup,
         setGithub,
         setGit,
         setNotifications,
@@ -259,8 +274,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setCollapsedRepos,
         setLastRepoPath,
         setContext,
-        setDefaultCli,
-        setProvider,
+        setDefaultProviderModel,
         setPlanTemplate,
         setActiveTheme,
         setThemeCustomizations,

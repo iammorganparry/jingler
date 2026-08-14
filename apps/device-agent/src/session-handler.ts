@@ -98,6 +98,7 @@ export class SessionCommandHandler {
   readonly #policy: SessionCommandHandlerPolicy
   #serial: Promise<unknown> = Promise.resolve()
   #initialized: Promise<void> | null = null
+  readonly #persistedListeners = new Set<PersistedEventCallback>()
   readonly #inFlight = new Map<string, {
     readonly command: RemoteSessionCommand
     readonly receivedSequence?: number
@@ -246,6 +247,26 @@ export class SessionCommandHandler {
     return this.#initialize().then(() => this.#withLedger((ledger) => ledger.transport))
   }
 
+  watchPersisted(listener: PersistedEventCallback): () => void {
+    this.#persistedListeners.add(listener)
+    return () => this.#persistedListeners.delete(listener)
+  }
+
+  async #notifyPersisted(
+    callback: PersistedEventCallback | undefined,
+    commandId: string
+  ): Promise<void> {
+    const listeners = new Set(this.#persistedListeners)
+    if (callback) listeners.add(callback)
+    await Promise.all([...listeners].map(async (listener) => {
+      try {
+        await listener(commandId)
+      } catch {
+        // Persistence is authoritative. A replacement tunnel replays the durable event.
+      }
+    }))
+  }
+
   async #appendEvent(
     command: RemoteSessionCommand,
     event: Omit<RemoteSessionEvent, "version" | "commandId" | "sessionId" | "eventSequence">,
@@ -357,7 +378,7 @@ export class SessionCommandHandler {
         event: Omit<RemoteSessionEvent, "version" | "commandId" | "sessionId" | "eventSequence">
       ) => {
         events.push(await this.#appendEvent(command, event, false))
-        await onEventPersisted?.(command.commandId)
+        await this.#notifyPersisted(onEventPersisted, command.commandId)
       }
       let status: "complete" | "failed"
       let terminal: RemoteSessionEvent
@@ -377,7 +398,7 @@ export class SessionCommandHandler {
       }
       events.push(terminal)
       await this.#settle(command.commandId, status)
-      await onEventPersisted?.(command.commandId)
+      await this.#notifyPersisted(onEventPersisted, command.commandId)
       return events
     })
 
@@ -401,12 +422,49 @@ export class SessionCommandHandler {
     encrypt: (event: RemoteSessionEvent, sequence: number) => EncryptedTunnelEnvelope
   ): Promise<ReadonlyArray<EncryptedTunnelEnvelope>> {
     return this.#initialize().then(() => this.#withLedger(async (ledger) => {
+      if (!ledger.commands[commandId]) throw new Error(`Unknown command ${commandId}.`)
+      return this.#prepareOutgoing(ledger, [commandId], encrypt)
+    }))
+  }
+
+  /** Encrypts every retained response so a replacement tunnel can flush late events. */
+  prepareAllOutgoingEnvelopes(
+    encrypt: (event: RemoteSessionEvent, sequence: number) => EncryptedTunnelEnvelope
+  ): Promise<ReadonlyArray<EncryptedTunnelEnvelope>> {
+    return this.#initialize().then(() => this.#withLedger(async (ledger) => {
+      const commandIds = Object.entries(ledger.commands)
+        .filter(
+          ([, command]) =>
+            command.events.length > 0 || (command.outgoingEnvelopes?.length ?? 0) > 0
+        )
+        .sort(([, left], [, right]) => {
+          const leftSequence = left.outgoingEnvelopes?.[0]?.sequence ?? Number.POSITIVE_INFINITY
+          const rightSequence = right.outgoingEnvelopes?.[0]?.sequence ?? Number.POSITIVE_INFINITY
+          return leftSequence - rightSequence ||
+            (left.receivedSequence ?? Number.POSITIVE_INFINITY) -
+              (right.receivedSequence ?? Number.POSITIVE_INFINITY)
+        })
+        .map(([commandId]) => commandId)
+      return this.#prepareOutgoing(ledger, commandIds, encrypt)
+    }))
+  }
+
+  async #prepareOutgoing(
+    ledger: Ledger,
+    commandIds: ReadonlyArray<string>,
+    encrypt: (event: RemoteSessionEvent, sequence: number) => EncryptedTunnelEnvelope
+  ): Promise<ReadonlyArray<EncryptedTunnelEnvelope>> {
+    let next = ledger.transport.nextOutgoingSequence
+    let changed = false
+    const outgoing: EncryptedTunnelEnvelope[] = []
+    for (const commandId of commandIds) {
       const command = ledger.commands[commandId]
-      if (!command) throw new Error(`Unknown command ${commandId}.`)
-      let next = ledger.transport.nextOutgoingSequence
+      if (!command) continue
       const appended = command.events.map((event) => encrypt(event, next++))
       const outgoingEnvelopes = [...(command.outgoingEnvelopes ?? []), ...appended]
-      if (appended.length === 0) return outgoingEnvelopes
+      outgoing.push(...outgoingEnvelopes)
+      if (appended.length === 0) continue
+      changed = true
       ledger.commands[commandId] = {
         ...command,
         // Ciphertext is now the replay source of truth. Do not retain the full
@@ -414,11 +472,13 @@ export class SessionCommandHandler {
         events: [],
         outgoingEnvelopes
       }
+    }
+    if (changed) {
       ledger.transport = { ...ledger.transport, nextOutgoingSequence: next }
       await this.#advanceIncomingAcknowledgement(ledger)
       await this.#write(ledger)
-      return outgoingEnvelopes
-    }))
+    }
+    return outgoing.sort((left, right) => left.sequence - right.sequence)
   }
 
   /** Returns durable ciphertext for reconnect replay without re-encrypting plaintext events. */

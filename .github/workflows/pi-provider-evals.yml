@@ -1,0 +1,73 @@
+name: Pi provider certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_cost_usd:
+        description: Maximum total provider cost for this certification run
+        required: true
+        default: "25"
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    name: Certify provider routes and models
+    runs-on: ubuntu-latest
+    environment: pi-provider-certification
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Stage non-secret route matrix
+        env:
+          PROVIDER_EVAL_MATRIX: ${{ secrets.PI_PROVIDER_EVAL_MATRIX }}
+        run: |
+          mkdir -p .artifacts/pi-certification
+          printf '%s' "$PROVIDER_EVAL_MATRIX" > .artifacts/pi-certification/matrix.json
+          cp config/pi-release-candidates.json .artifacts/pi-certification/candidates.json
+
+      - name: Run reviewed live behavior matrix
+        env:
+          JINGLER_EVAL: "1"
+          JINGLER_EVAL_REVIEWED: "1"
+          JINGLER_EVAL_MAX_COST_USD: ${{ inputs.max_cost_usd }}
+          JINGLER_LIVE_EVAL_MATRIX: ${{ github.workspace }}/.artifacts/pi-certification/matrix.json
+          JINGLER_RELEASE_CANDIDATES: ${{ github.workspace }}/config/pi-release-candidates.json
+          JINGLER_LIVE_CERTIFICATIONS: ${{ github.workspace }}/.artifacts/pi-certification/certifications.json
+          JINGLER_EVAL_REPORT: ${{ github.workspace }}/.artifacts/pi-certification/report.json
+          JINGLER_EVAL_SECRET_NAMES: JINGLER_EVAL_CLAUDE_SETUP_TOKEN,JINGLER_EVAL_CODEX_ACCESS,JINGLER_EVAL_CODEX_REFRESH,JINGLER_EVAL_ANTHROPIC_API_KEY,JINGLER_EVAL_OPENAI_API_KEY
+          JINGLER_EVAL_CLAUDE_SETUP_TOKEN: ${{ secrets.CLAUDE_SETUP_TOKEN }}
+          JINGLER_EVAL_CODEX_ACCESS: ${{ secrets.CODEX_OAUTH_ACCESS }}
+          JINGLER_EVAL_CODEX_REFRESH: ${{ secrets.CODEX_OAUTH_REFRESH }}
+          JINGLER_EVAL_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          JINGLER_EVAL_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: pnpm --filter @jingler/cli-adapters eval:pi:live
+
+      - name: Generate reviewed release manifest
+        env:
+          JINGLER_RELEASE_CANDIDATES: ${{ github.workspace }}/config/pi-release-candidates.json
+          JINGLER_RELEASE_CERTIFICATIONS: ${{ github.workspace }}/.artifacts/pi-certification/certifications.json
+          JINGLER_RELEASE_MANIFEST: ${{ github.workspace }}/.artifacts/pi-certification/release-manifest.json
+        run: pnpm --filter @jingler/cli-adapters eval:pi:release-manifest
+
+      - name: Upload redacted certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-provider-certification
+          path: |
+            .artifacts/pi-certification/candidates.json
+            .artifacts/pi-certification/certifications.json
+            .artifacts/pi-certification/release-manifest.json
+            .artifacts/pi-certification/report.json
+          if-no-files-found: warn
+          retention-days: 30

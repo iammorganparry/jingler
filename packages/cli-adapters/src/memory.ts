@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 import type {
-  CliKind,
   MemoryGrantResponse,
   MemoryOrganizationRole,
   MemoryPrivilege,
@@ -19,7 +18,7 @@ import {
 } from "@jingler/core"
 import { FileSystem } from "@effect/platform"
 import { Data, Effect, Either, Layer, Schema } from "effect"
-import type { RemoteMcpServer } from "./adapter.js"
+import type { RemoteMcpServer } from "./agent-turn-driver.js"
 import { AppPaths, type AppPathsShape } from "./app-paths.js"
 import { ConfigService } from "./config.js"
 import {
@@ -154,7 +153,6 @@ export const renderRecalledMemories = (
 
 export interface MemoryServiceShape {
   readonly attachment: (
-    cli: CliKind,
     /** Raw operator text. When present, Jingler performs bounded recall first. */
     query?: string,
     /** Stable conversation boundary used to avoid reinjecting unchanged pages. */
@@ -449,8 +447,10 @@ const forwardMemoryMcp = (
           method: "POST",
           headers: {
             ...scopedHeaders(issued.grant, selection.organizationId),
-            "mcp-protocol-version":
-              input.protocolVersion ?? MEMORY_MCP_PROTOCOL_VERSION
+            // The loopback client and hosted stateless service are independent
+            // protocol boundaries. Never let a provider-side MCP version change
+            // the exact private-memory route Jingler certified upstream.
+            "mcp-protocol-version": MEMORY_MCP_PROTOCOL_VERSION
           },
           body: input.body,
           signal: AbortSignal.timeout(runtime.uiTimeoutMs)
@@ -941,46 +941,44 @@ export const makeMemoryService = (
     recallCache: new Map<string, RecallCacheEntry>(),
     drainLock: Effect.unsafeMakeSemaphore(1)
   }
-  const attachment = (cli: CliKind, query?: string, recallScope?: string) =>
-    cli === "cursor"
-      ? Effect.succeed(null)
-      : selectedMemory.pipe(
-          Effect.flatMap((selection) => {
-            if (selection === null) return Effect.succeed(null)
-            return cachedAttachment(runtime, selection).pipe(
-              Effect.flatMap((cached) => {
-                if (cached === null) return Effect.succeed(null)
-                const trimmedQuery = redactMemoryText(query ?? "")
-                  .trim()
-                  .slice(0, MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS)
-                if (trimmedQuery.length === 0) return Effect.succeed(cached.attachment)
-                const cacheScope = recallScope === undefined
-                  ? undefined
-                  : `${selection.organizationId}:${recallScope}`
-                return automaticRecall(
-                  runtime,
-                  cached.issued,
-                  selection.organizationId,
-                  trimmedQuery,
-                  cacheScope === undefined
-                    ? undefined
-                    : runtime.recallCache.get(cacheScope)
-                ).pipe(
-                  Effect.map((recalled) => {
-                    if (cacheScope !== undefined) rememberRecall(runtime, cacheScope, recalled)
-                    return {
-                      ...cached.attachment,
-                      instructions: recalled.instructions.length === 0
-                        ? cached.attachment.instructions
-                        : `${cached.attachment.instructions}\n${recalled.instructions}`
-                    }
-                  }),
-                  Effect.orElseSucceed(() => cached.attachment)
-                )
-              })
+  const attachment = (query?: string, recallScope?: string) =>
+    selectedMemory.pipe(
+      Effect.flatMap((selection) => {
+        if (selection === null) return Effect.succeed(null)
+        return cachedAttachment(runtime, selection).pipe(
+          Effect.flatMap((cached) => {
+            if (cached === null) return Effect.succeed(null)
+            const trimmedQuery = redactMemoryText(query ?? "")
+              .trim()
+              .slice(0, MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS)
+            if (trimmedQuery.length === 0) return Effect.succeed(cached.attachment)
+            const cacheScope = recallScope === undefined
+              ? undefined
+              : `${selection.organizationId}:${recallScope}`
+            return automaticRecall(
+              runtime,
+              cached.issued,
+              selection.organizationId,
+              trimmedQuery,
+              cacheScope === undefined
+                ? undefined
+                : runtime.recallCache.get(cacheScope)
+            ).pipe(
+              Effect.map((recalled) => {
+                if (cacheScope !== undefined) rememberRecall(runtime, cacheScope, recalled)
+                return {
+                  ...cached.attachment,
+                  instructions: recalled.instructions.length === 0
+                    ? cached.attachment.instructions
+                    : `${cached.attachment.instructions}\n${recalled.instructions}`
+                }
+              }),
+              Effect.orElseSucceed(() => cached.attachment)
             )
           })
-      )
+        )
+      })
+    )
   const access = () =>
     Effect.all([memoryToken, ConfigService.get().pipe(Effect.orElseSucceed(() => null))]).pipe(
       Effect.flatMap(([token, config]) => {

@@ -42,7 +42,7 @@ const openConnectors = async (window: Page) => {
   await window.getByRole("button", { name: /Connectors/ }).click()
 }
 
-test("connects to the local OpenConnector and serves its real catalog to every agent", async ({
+test("connects to the local OpenConnector and serves its real managed catalog", async ({
   launchApp
 }) => {
   test.skip(!(await instanceReachable()), `No OpenConnector at ${ENDPOINT} — run docker compose up -d open-connector`)
@@ -67,12 +67,10 @@ test("connects to the local OpenConnector and serves its real catalog to every a
   const catalog = app.window.getByRole("group", { name: "Provider catalog" })
   await expect(catalog.getByRole("button", { name: /GitHub/ }).first()).toBeVisible()
 
-  // And the instance the agents get is the same one just proven reachable.
-  for (const harness of ["Claude Code", "Codex", "opencode"]) {
-    const row = app.window.getByLabel(harness, { exact: true })
-    await expect(row.getByText("injected", { exact: true })).toBeVisible()
-    await expect(row.getByText(`open-connector · ${ENDPOINT}/mcp`)).toBeVisible()
-  }
+  // The unified MCP status is authoritative; there are no provider-specific copies.
+  await expect(
+    app.window.getByText("Connect providers once — every agent draws them from the shared OpenConnector.")
+  ).toBeVisible()
 })
 
 /**

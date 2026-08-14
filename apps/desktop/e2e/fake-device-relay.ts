@@ -33,6 +33,12 @@ export interface FakeDeviceRelayOptions {
   readonly deviceAgentBundle: string
   readonly deviceHome: string
   readonly deviceBinDir: string
+  readonly piFixture?: {
+    readonly file: string
+    readonly connectionId: string
+    readonly providerId: string
+    readonly modelId: string
+  }
   /** Real-host QA activates the uploaded daemon over SSH instead of spawning one locally. */
   readonly spawnAgentOnClaim?: boolean
   readonly listenHost?: string
@@ -132,8 +138,15 @@ export const startFakeDeviceRelay = async (
           HOME: options.deviceHome,
           JINGLER_HOME: options.deviceHome,
           JINGLER_DEVICE_RELAY_URL: baseUrl,
-          JINGLER_SCRIPTED_AGENT: "1",
           JINGLER_E2E: "1",
+          ...(options.piFixture === undefined
+            ? {}
+            : {
+                JINGLER_E2E_PI_FIXTURE: options.piFixture.file,
+                JINGLER_E2E_PI_CONNECTION_ID: options.piFixture.connectionId,
+                JINGLER_E2E_PI_PROVIDER_ID: options.piFixture.providerId,
+                JINGLER_E2E_PI_MODEL_ID: options.piFixture.modelId
+              }),
           JINGLER_DISCOVERY_BIN_DIR: options.deviceBinDir,
           PATH: `${options.deviceBinDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
         },
@@ -149,6 +162,11 @@ export const startFakeDeviceRelay = async (
 
   const device = () => {
     const effectiveState = forcedState ?? state
+    const announcedCapabilities =
+      discovery?.capabilities !== null &&
+      typeof discovery?.capabilities === "object"
+        ? discovery.capabilities
+        : undefined
     return {
       version: 1,
       deviceId: DEVICE_ID,
@@ -165,10 +183,9 @@ export const startFakeDeviceRelay = async (
           ? {
               version: 1,
               capabilities: ["session.observe"],
-              harnesses: [],
               maxConcurrentSessions: 1
             }
-          : registration?.capabilities,
+          : announcedCapabilities ?? registration?.capabilities,
       agentVersion:
         discovery && typeof discovery.agentVersion === "string"
           ? discovery.agentVersion
@@ -395,6 +412,10 @@ export const startFakeDeviceRelay = async (
       const acknowledged = Number(url.searchParams.get("acknowledgedSequence") ?? "0")
       const tunnel = tunnels.get(sessionId) ?? { envelopes: [] }
       tunnels.set(sessionId, tunnel)
+      const replaced = tunnel[endpoint]
+      if (replaced?.readyState === WebSocket.OPEN) {
+        replaced.close(4002, "Connection replaced")
+      }
       tunnel[endpoint] = websocket
       const newestOutgoingSequence = tunnel.envelopes
         .filter((envelope) => envelope.sender === endpoint)

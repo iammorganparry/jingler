@@ -11,7 +11,7 @@ const sessions: ReadonlyArray<SeedSession> = [
     branch: "feat/sidebar-glass",
     title: "Liquid glass sidebar",
     status: "running",
-    cli: "claude",
+    providerId: "anthropic",
     executionLocation: "local",
     diff: { added: 18, removed: 4 },
     prNumber: 5462,
@@ -26,7 +26,7 @@ const sessions: ReadonlyArray<SeedSession> = [
     branch: "chore/quiet",
     title: "Quiet maintenance",
     status: "idle",
-    cli: "opencode",
+    providerId: "openrouter",
     executionLocation: "local",
     diff: { added: 0, removed: 0 },
     prNumber: null,
@@ -41,7 +41,7 @@ const sessions: ReadonlyArray<SeedSession> = [
     branch: "feat/cloud-session",
     title: "Cloud session approval",
     status: "needs-input",
-    cli: "codex",
+    providerId: "openai-codex",
     executionLocation: "cloud",
     diff: { added: 3, removed: 1 },
     prNumber: 5501,
@@ -89,7 +89,7 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
     "title",
     "Cloud session"
   )
-  await expect(attention.getByTitle("Codex harness")).toBeVisible()
+  await expect(attention.getByTitle("OpenAI")).toBeVisible()
 
   await expect(window.getByTestId("session-location-s_running")).toHaveAttribute(
     "title",

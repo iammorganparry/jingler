@@ -49,7 +49,6 @@ export function OpenConnectorSection({
   const [endpoint, setEndpoint] = React.useState("")
   const [token, setToken] = React.useState("")
   const [enabled, setEnabled] = React.useState(false)
-  const [preferJinglerTools, setPreferJinglerTools] = React.useState(true)
 
   // Seed the local fields once the persisted config arrives. When nothing is saved
   // yet, prefill the endpoint from the environment default so onboarding is one edit.
@@ -57,7 +56,6 @@ export function OpenConnectorSection({
     if (config) {
       setEndpoint(config.endpoint.length > 0 ? config.endpoint : (defaults?.endpoint ?? ""))
       setEnabled(config.enabled)
-      setPreferJinglerTools(config.preferJinglerTools ?? true)
     } else if (defaults) {
       setEndpoint(defaults.endpoint)
     }
@@ -70,9 +68,7 @@ export function OpenConnectorSection({
       {
         endpoint: endpoint.trim(),
         enabled,
-        serverName: config?.serverName ?? "open-connector",
-        preferJinglerTools,
-        ...(config?.perCli ? { perCli: config.perCli } : {})
+        serverName: config?.serverName ?? "open-connector"
       },
       token.length > 0 ? token : undefined
     )
@@ -136,25 +132,7 @@ export function OpenConnectorSection({
         <Toggle
           checked={enabled}
           onCheckedChange={setEnabled}
-          // Named because it is no longer the only switch on this screen — the
-          // per-harness injection rows each carry one too.
           aria-label="Enable the shared MCP server"
-          className="mt-0.5"
-        />
-      </div>
-
-      <div className="flex items-start gap-3">
-        <div className="flex-1">
-          <div className="text-[12.5px] font-medium text-text-body">Use Jingler tools</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
-            Use Jingler's enhanced Plan mode, OpenConnector, and visible in-app browser.
-            Turn this off to use the selected harness's native plan and tool behaviour.
-          </div>
-        </div>
-        <Toggle
-          checked={preferJinglerTools}
-          onCheckedChange={setPreferJinglerTools}
-          aria-label="Use Jingler tools"
           className="mt-0.5"
         />
       </div>

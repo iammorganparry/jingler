@@ -1,13 +1,15 @@
-import type { CliKind } from "@jingler/core"
+import type { ProviderId } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 
 /**
  * Brand marks for the coding-agent providers (`currentColor`). Claude is the
- * official sunburst symbol; OpenAI's blossom for Codex; Cursor's cube for Cursor
- * Agent; opencode's block from their favicon. Each carries its own viewBox (the
+ * official sunburst symbol; OpenAI's blossom for Codex; opencode's block from
+ * their favicon. Each carries its own viewBox (the
  * marks aren't all 24×24), and `fillRule` where the mark has holes.
  */
-const ICONS: Record<CliKind, { viewBox: string; d: string; fillRule?: "evenodd" }> = {
+type ProviderIconKind = "claude" | "codex" | "opencode"
+
+const ICONS: Record<ProviderIconKind, { viewBox: string; d: string; fillRule?: "evenodd" }> = {
   claude: {
     viewBox: "0 0 100 100",
     d: "m19.6 66.5 19.7-11 .3-1-.3-.5h-1l-3.3-.2-11.2-.3L14 53l-9.5-.5-2.4-.5L0 49l.2-1.5 2-1.3 2.9.2 6.3.5 9.5.6 6.9.4L38 49.1h1.6l.2-.7-.5-.4-.4-.4L29 41l-10.6-7-5.6-4.1-3-2-1.5-2-.6-4.2 2.7-3 3.7.3.9.2 3.7 2.9 8 6.1L37 36l1.5 1.2.6-.4.1-.3-.7-1.1L33 25l-6-10.4-2.7-4.3-.7-2.6c-.3-1-.4-2-.4-3l3-4.2L28 0l4.2.6L33.8 2l2.6 6 4.1 9.3L47 29.9l2 3.8 1 3.4.3 1h.7v-.5l.5-7.2 1-8.7 1-11.2.3-3.2 1.6-3.8 3-2L61 2.6l2 2.9-.3 1.8-1.1 7.7L59 27.1l-1.5 8.2h.9l1-1.1 4.1-5.4 6.9-8.6 3-3.5L77 13l2.3-1.8h4.3l3.1 4.7-1.4 4.9-4.4 5.6-3.7 4.7-5.3 7.1-3.2 5.7.3.4h.7l12-2.6 6.4-1.1 7.6-1.3 3.5 1.6.4 1.6-1.4 3.4-8.2 2-9.6 2-14.3 3.3-.2.1.2.3 6.4.6 2.8.2h6.8l12.6 1 3.3 2 1.9 2.7-.3 2-5.1 2.6-6.8-1.6-16-3.8-5.4-1.3h-.8v.4l4.6 4.5 8.3 7.5L89 80.1l.5 2.4-1.3 2-1.4-.2-9.2-7-3.6-3-8-6.8h-.5v.7l1.8 2.7 9.8 14.7.5 4.5-.7 1.4-2.6 1-2.7-.6-5.8-8-6-9-4.7-8.2-.5.4-2.9 30.2-1.3 1.5-3 1.2-2.5-2-1.4-3 1.4-6.2 1.6-8 1.3-6.4 1.2-7.9.7-2.6v-.2H49L43 72l-9 12.3-7.2 7.6-1.7.7-3-1.5.3-2.8L24 86l10-12.8 6-7.9 4-4.6-.1-.5h-.3L17.2 77.4l-4.7.6-2-2 .2-3 1-1 8-5.5Z"
@@ -15,10 +17,6 @@ const ICONS: Record<CliKind, { viewBox: string; d: string; fillRule?: "evenodd" 
   codex: {
     viewBox: "0 0 721 721",
     d: "M304.246 295.411V249.828C304.246 245.989 305.687 243.109 309.044 241.191L400.692 188.412C413.167 181.215 428.042 177.858 443.394 177.858C500.971 177.858 537.44 222.482 537.44 269.982C537.44 273.34 537.44 277.179 536.959 281.018L441.954 225.358C436.197 222 430.437 222 424.68 225.358L304.246 295.411ZM518.245 472.945V364.024C518.245 357.304 515.364 352.507 509.608 349.149L389.174 279.096L428.519 256.543C431.877 254.626 434.757 254.626 438.115 256.543L529.762 309.323C556.154 324.679 573.905 357.304 573.905 388.971C573.905 425.436 552.315 459.024 518.245 472.941V472.945ZM275.937 376.982L236.592 353.952C233.235 352.034 231.794 349.154 231.794 345.315V239.756C231.794 188.416 271.139 149.548 324.4 149.548C344.555 149.548 363.264 156.268 379.102 168.262L284.578 222.964C278.822 226.321 275.942 231.119 275.942 237.838V376.986L275.937 376.982ZM360.626 425.922L304.246 394.255V327.083L360.626 295.416L417.002 327.083V394.255L360.626 425.922ZM396.852 571.789C376.698 571.789 357.989 565.07 342.151 553.075L436.674 498.374C442.431 495.017 445.311 490.219 445.311 483.499V344.352L485.138 367.382C488.495 369.299 489.936 372.179 489.936 376.018V481.577C489.936 532.917 450.109 571.785 396.852 571.785V571.789ZM283.134 464.79L191.486 412.01C165.094 396.654 147.343 364.029 147.343 332.362C147.343 295.416 169.415 262.309 203.48 248.393V357.791C203.48 364.51 206.361 369.308 212.117 372.665L332.074 442.237L292.729 464.79C289.372 466.707 286.491 466.707 283.134 464.79ZM277.859 543.48C223.639 543.48 183.813 502.695 183.813 452.314C183.813 448.475 184.294 444.636 184.771 440.797L279.295 495.498C285.051 498.856 290.812 498.856 296.568 495.498L417.002 425.927V471.509C417.002 475.349 415.562 478.229 412.204 480.146L320.557 532.926C308.081 540.122 293.206 543.48 277.854 543.48H277.859ZM396.852 600.576C454.911 600.576 503.37 559.313 514.41 504.612C568.149 490.696 602.696 440.315 602.696 388.976C602.696 355.387 588.303 322.762 562.392 299.25C564.791 289.173 566.231 279.096 566.231 269.024C566.231 200.411 510.571 149.067 446.274 149.067C433.322 149.067 420.846 150.984 408.37 155.305C386.775 134.192 357.026 120.758 324.4 120.758C266.342 120.758 217.883 162.02 206.843 216.721C153.104 230.637 118.557 281.018 118.557 332.357C118.557 365.946 132.95 398.571 158.861 422.083C156.462 432.16 155.022 442.237 155.022 452.309C155.022 520.922 210.682 572.266 274.978 572.266C287.931 572.266 300.407 570.349 312.883 566.028C334.473 587.141 364.222 600.576 396.852 600.576Z"
-  },
-  cursor: {
-    viewBox: "0 0 747 851",
-    d: "M731.545 201.413L390.888 4.73778C379.949 -1.57926 366.451 -1.57926 355.512 4.73778L14.873 201.413C5.67736 206.723 0 216.542 0 227.177V623.776C0 634.394 5.67736 644.23 14.873 649.539L355.529 846.214C366.468 852.532 379.966 852.532 390.905 846.214L731.56 649.539C740.756 644.23 746.434 634.409 746.434 623.776V227.177C746.434 216.558 740.756 206.723 731.56 201.413H731.545ZM710.147 243.074L381.292 812.663C379.07 816.501 373.201 814.933 373.201 810.487V437.526C373.201 430.074 369.218 423.18 362.757 419.438L39.7734 232.966C35.9352 230.744 37.5024 224.874 41.9483 224.874H699.655C708.995 224.874 714.833 234.997 710.162 243.09H710.147V243.074Z"
   },
   // opencode's mark, flattened from their favicon (opencode.ai/favicon.svg) into
   // one `currentColor` path: an outer frame, a rectangular hole, and the block
@@ -33,49 +31,78 @@ const ICONS: Record<CliKind, { viewBox: string; d: string; fillRule?: "evenodd" 
 }
 
 /** Human label for each provider. */
-export const PROVIDER_LABEL: Record<CliKind, string> = {
+const PROVIDER_LABEL: Record<ProviderIconKind, string> = {
   claude: "Claude",
   codex: "Codex",
-  cursor: "Cursor",
   // Lowercase is opencode's own styling, not a typo.
   opencode: "opencode"
 }
 
 /**
- * Brand colours: Anthropic's clay orange for Claude; OpenAI, Cursor and opencode
+ * Brand colours: Anthropic's clay orange for Claude; OpenAI and opencode
  * render monochrome (their marks are black/white) so they read cleanly on dark.
  *
  * Claude's hex is deliberately a literal — it is Anthropic's mark, so it must
  * NOT shift when the theme does. The monochrome three take `--sb-text-bright`
  * instead of a baked light grey, or they would be invisible on a light theme.
  */
-export const PROVIDER_COLOR: Record<CliKind, string> = {
+const PROVIDER_COLOR: Record<ProviderIconKind, string> = {
   claude: "#d97757",
   codex: "var(--sb-text-bright)",
-  cursor: "var(--sb-text-bright)",
   opencode: "var(--sb-text-bright)"
 }
 
+const iconKindForProvider = (providerId: ProviderId): ProviderIconKind =>
+  providerId === "anthropic"
+    ? "claude"
+    : providerId === "openai" || providerId === "openai-codex"
+      ? "codex"
+      : "opencode"
+
+export const providerLabel = (
+  providerId: ProviderId | null | undefined
+): string => {
+  if (providerId == null) return "Agent"
+  switch (providerId) {
+    case "anthropic":
+      return "Anthropic"
+    case "openai":
+    case "openai-codex":
+      return "OpenAI"
+    case "google":
+      return "Google"
+    case "openrouter":
+      return "OpenRouter"
+    default:
+      return providerId
+  }
+}
+
+export const providerColor = (
+  providerId: ProviderId | null | undefined
+): string => PROVIDER_COLOR[providerId == null ? "opencode" : iconKindForProvider(providerId)]
+
 export function ProviderIcon({
-  cli,
+  providerId,
   size = 14,
   mono = false,
   className
 }: {
-  cli: CliKind
+  providerId?: ProviderId
   size?: number
   /** Inherit the surrounding `currentColor` instead of the brand colour. */
   mono?: boolean
   className?: string
 }) {
-  const icon = ICONS[cli]
+  const kind = providerId === undefined ? "opencode" : iconKindForProvider(providerId)
+  const icon = ICONS[kind]
   return (
     <svg
       width={size}
       height={size}
       viewBox={icon.viewBox}
       fill="currentColor"
-      style={mono ? undefined : { color: PROVIDER_COLOR[cli] }}
+      style={mono ? undefined : { color: PROVIDER_COLOR[kind] }}
       className={cn("shrink-0", className)}
       aria-hidden
     >

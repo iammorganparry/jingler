@@ -21,7 +21,6 @@ const seeded = (index: number): SeedSession => ({
   branch: `chore/res-${index}`,
   title: `Residency ${index}`,
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

@@ -55,7 +55,7 @@ describe("SessionSidebar session identity", () => {
         environments={[{
           kind: "owned",
           id: "device-buildbox", name: "buildbox", platform: { os: "darwin", arch: "arm64" },
-          capabilities: { version: 1, capabilities: ["session.start"], harnesses: ["claude"], maxConcurrentSessions: 4 },
+          capabilities: { version: 1, capabilities: ["session.start"], maxConcurrentSessions: 4 },
           state: "offline", agentVersion: "2.0.3", lastSeenAt: 1
         }]}
       />
@@ -63,7 +63,7 @@ describe("SessionSidebar session identity", () => {
     expect(screen.getByTestId("session-environment-remote").textContent).toBe("buildbox · offline")
     expect(screen.getByTestId("session-location-remote").getAttribute("title")).toBe("Environment: buildbox · offline")
   })
-  it("shows repository, attention age, PR, execution location, and harness", () => {
+  it("shows repository, attention age, PR, execution location, and status", () => {
     render(
       <SessionSidebar
         activeSessionId="cloud-run"
@@ -74,7 +74,6 @@ describe("SessionSidebar session identity", () => {
             repo: "jingler",
             title: "Liquid glass sidebar",
             status: "running",
-            cli: "codex",
             executionLocation: "cloud",
             prNumber: 5462
           })
@@ -97,7 +96,6 @@ describe("SessionSidebar session identity", () => {
     expect(screen.getByTestId("session-location-cloud-run").getAttribute("title")).toBe(
       "Cloud session"
     )
-    expect(screen.getByTitle("Codex harness")).toBeTruthy()
     expect(screen.getByRole("status", { name: "Running" })).toBeTruthy()
     expect(screen.getByAltText("j").getAttribute("src")).toContain("github.com/jinglerhq.png")
   })

@@ -8,6 +8,7 @@ import type {
 } from "@jingler/core"
 import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
+import { testProviderCatalog } from "../test-support.js"
 import { CodeChip } from "../components/code-chip.js"
 import { DiffPeek } from "../components/diff-peek.js"
 import { FileIcon } from "../components/file-icon.js"
@@ -20,6 +21,10 @@ import { ToolCall } from "./tool-call.js"
 const meta: Meta = { title: "Conversation/Overview" }
 export default meta
 type Story = StoryObj
+
+const providerCatalog = testProviderCatalog(["low", "medium", "high"])
+const { id: connectionId, providerId } = providerCatalog.connections[0]!.connection
+const { id: modelId } = providerCatalog.connections[0]!.models[0]!
 
 /** A tiny inline PNG so the attachment stories render without external assets. */
 const PNG =
@@ -193,7 +198,6 @@ export const ComposerWithMenus: Story = {
             capabilities: {
               version: 1,
               capabilities: ["session.start"],
-              harnesses: ["claude", "codex"],
               maxConcurrentSessions: 4
             },
             state: "online",
@@ -208,26 +212,9 @@ export const ComposerWithMenus: Story = {
         ]}
         files={["src/routes/billing.ts", "README.md"]}
         mode="accept-edits"
-        cli="claude"
-        model="opus"
-        catalog={[
-          {
-            cli: "claude",
-            label: "Claude Code",
-            models: [
-              { id: "opus", label: "opus" },
-              { id: "sonnet", label: "sonnet" }
-            ]
-          },
-          {
-            cli: "codex",
-            label: "Codex CLI",
-            models: [
-              { id: "gpt-5.6-sol", label: "GPT-5.6-Sol" },
-              { id: "gpt-5.6-terra", label: "GPT-5.6-Terra" }
-            ]
-          }
-        ]}
+        providerCatalog={providerCatalog}
+        connectionId={connectionId}
+        modelId={modelId}
       />
     </div>
   )
@@ -255,9 +242,9 @@ export const ComposerBusy: Story = {
       <Composer
         busy
         mode="accept-edits"
-        cli="claude"
-        model="sonnet"
-        catalog={[{ cli: "claude", label: "Claude Code", models: [{ id: "sonnet", label: "sonnet" }] }]}
+        providerCatalog={providerCatalog}
+        connectionId={connectionId}
+        modelId={modelId}
       />
     </div>
   )
@@ -270,8 +257,10 @@ export const WithPlanProgress: Story = {
       <ConversationView
         messages={SEED_CONVERSATION}
         mode="accept-edits"
-        cli="codex"
-        model="gpt-5.6-sol"
+        providerCatalog={providerCatalog}
+        connectionId={connectionId}
+        providerId={providerId}
+        modelId={modelId}
         busy
         branch="feature/provider-neutral-orchestration"
         repo="jingler"

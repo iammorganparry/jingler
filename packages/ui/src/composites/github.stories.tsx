@@ -2,7 +2,6 @@ import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type {
   AdversarialReview,
-  CliInfo,
   PrFileChange,
   PullRequest as PullRequestData,
   PrReviewThread,
@@ -152,8 +151,10 @@ const adversarialReview: AdversarialReview = {
   sessionId: "s1",
   prNumber: 482,
   headSha: "9f3c1ab7d2e4f5061728394a5b6c7d8e9f0a1b2c",
-  cli: "claude",
-  model: "claude-fable-5",
+  connectionId: null,
+  providerId: null,
+  modelId: null,
+  legacyModel: "claude-fable-5",
   createdAt: "2026-07-16T10:00:00.000Z",
   note: null,
   routedAt: "2026-07-16T10:00:04.000Z",
@@ -558,7 +559,6 @@ export const Settings: Story = {
     <div className="flex h-screen bg-editor">
       <SettingsView
         initialSection="github"
-        clis={[] as ReadonlyArray<CliInfo>}
         githubConnection={{
           mode: "partial-access",
           enabled: true,
@@ -575,8 +575,6 @@ export const Settings: Story = {
           lastRefreshedAt: "2026-08-04T09:00:00.000Z",
           error: null
         }}
-        onSaveProvider={() => {}}
-        loadModels={async () => []}
         onGithubManage={() => {}}
         onGithubRefresh={() => {}}
         onGithubDisconnect={() => {}}

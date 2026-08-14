@@ -14,38 +14,31 @@
  */
 import {
   AgentRunner,
+  AgentRuntime,
   AppPaths,
   AssetService,
   AuthService,
   BrowserControlMcpService,
-  type CliAdapter,
+  type AgentTurnDriver,
   ConfigService,
-  claudeTitleGenerator,
-  DiscoveryService,
+  makeAgentRuntimeTitleGenerator,
   EnvironmentService,
   RemoteSessionService,
   routeSessionOperation,
-  filterVisible,
   GitHubApi,
   parseGitHubRemote,
   GitHubAuth,
   githubPushPermissions,
   GitHubEventStore,
   GitService,
-  ModelsService,
   MemoryService,
   type MemoryServiceEnvironment,
   attachMemoryToSessionSpec,
   OpenConnectorService,
   OpenConnectorApi,
-  SecretStore,
+  type SecretStore,
   SecretStoreUnavailable,
   planDraftPost,
-  billingPath,
-  subscriptionProbeFailed,
-  hasSubscriptionAuth,
-  resetSubscriptionCache,
-  METERED_ENV_KEYS,
   PlanStore,
   PluginRegistry,
   PluginSecretStore,
@@ -61,18 +54,25 @@ import {
   SessionStore,
   setSessionEnvironment,
   continueSessionOnEnvironment,
+  environmentRuntimeIsCurrent,
   ContextManager,
-  SkillsService,
   TerminalService,
   ThemeService,
   BackgroundTaskStore,
   TranscriptStore,
-  claudePublishMetadataGenerator,
+  makeAgentRuntimePublishMetadataGenerator,
   isCommitSubjectSafe,
   isSessionPublishBranchReady,
   runPublishMachineExclusive,
   UsageService,
   WorkspaceService,
+  RuntimeDiagnostics,
+  RuntimeRecoveryService,
+  ProviderConnections,
+  type ProviderConnectionsShape,
+  AgentResourceService,
+  ImportedMcpService,
+  detectAgentResources,
   exportWorkspaceHandoff,
   checkoutWorkspaceHandoffBase,
   importWorkspaceHandoff,
@@ -85,12 +85,11 @@ import {
   AuthError,
   ConfigError,
   ConnectorError,
-  defaultModeFor,
   GitHubApiError,
   GitError,
   IssueComment,
   IssueDetail,
-  IssueReference,
+  type IssueReference,
   IssueSummary,
   issueReferenceOf,
   PlanConflictError,
@@ -98,7 +97,6 @@ import {
   type PlanValidationError,
   resolveFindings,
   ReviewError,
-  reviewModelFor,
   PluginError,
   SessionNotFoundError,
   workspaceModeOf,
@@ -113,11 +111,12 @@ import {
   PublishCheckpoint as PublishCheckpointSchema,
   Project as ProjectSchema,
   RemotePublishPrepared as RemotePublishPreparedSchema,
+  ProviderConnectionError,
+  AgentResourceRpcError,
 } from "@jingler/core";
 import type {
   BrowserBounds,
   AdversarialReview,
-  CliKind,
   OpenConnectorConfig,
   OpenConnectorDefaults,
   StreamEvent,
@@ -138,7 +137,6 @@ import type {
   SettingContribution,
   PrMergeMethod,
   PublishCheckpoint,
-  ProviderConfig,
   Project,
   ReviewComment,
   ReviewSubmitKind,
@@ -155,10 +153,7 @@ import type {
   WorkspaceConfig,
   WorkspaceTransferCheckpoint,
 } from "@jingler/core";
-import type {
-  GitHubRepository,
-  SessionSpec,
-} from "@jingler/cli-adapters";
+import type { GitHubRepository, AgentTurnSpec } from "@jingler/cli-adapters";
 import {
   AssetListRpcs,
   JinglerCoreRpcs,
@@ -662,31 +657,30 @@ export const chooseReposDir = () =>
     return yield* ConfigService.setReposDir(dir);
   }).pipe(Effect.orElseSucceed(() => null));
 
-/**
- * `Skills.list` handler. Resolves the session's harness + worktree (best-effort;
- * an unknown session falls back to Claude with no worktree) so `SkillsService`
- * can report the harness-appropriate skills for the `/` menu. Exported for tests.
- */
+/** Managed skills and prompts are the only file-backed composer command source. */
 export const skillsList = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId).pipe(
       Effect.orElseSucceed(() => null),
     );
-    const cli = session?.cli ?? "claude";
-    // The harness announces its own command list, so we need the binary discovery
-    // resolved — a GUI-launched Electron app has a threadbare PATH, so the bare
-    // name often isn't runnable (same reason `Models.list` takes it).
-    const clis = yield* DiscoveryService.list().pipe(
-      Effect.orElseSucceed(() => []),
+    const service = yield* AgentResourceService;
+    const resources = yield* service
+      .enabledForTarget(session?.environmentId ?? "desktop")
+      .pipe(Effect.orElseSucceed(() => []));
+    return resources.flatMap((resource) =>
+      resource.kind === "mcp"
+        ? []
+        : [
+            {
+              name: `/${resource.id}`,
+              description: resource.description,
+              source:
+                resource.kind === "skill"
+                  ? ("skill" as const)
+                  : ("command" as const),
+            },
+          ],
     );
-    return yield* SkillsService.list({
-      cli,
-      // The operator's global skills live under the real home (~/.claude/skills),
-      // never JINGLER_HOME.
-      homeDir: homedir(),
-      worktreePath: session?.worktreePath ?? null,
-      binPath: clis.find((c) => c.kind === cli)?.binPath ?? null,
-    });
   });
 
 /**
@@ -734,7 +728,6 @@ export const openConnectorAutoSetup = () => {
     endpoint: d.endpoint,
     enabled: d.kind === "local",
     serverName: "open-connector",
-    preferJinglerTools: true,
   };
   return openConnectorSet(
     config,
@@ -760,13 +753,6 @@ export const openConnectorSet = (
 
 /** `OpenConnector.test` handler — live probe of the configured endpoint. */
 export const openConnectorTest = () => OpenConnectorService.test;
-
-/**
- * `OpenConnector.injection` handler — what each harness would actually launch with,
- * resolved by the same service method the agent runner calls.
- */
-export const openConnectorInjection = () =>
-  OpenConnectorService.injectionTargets;
 
 // ── MCP Connector Center handlers ────────────────────────────────────────────
 
@@ -826,46 +812,14 @@ type SessionWithPr = Session & { readonly prNumber: number };
 const hasActivePr = (session: Session | null): session is SessionWithPr =>
   session !== null && session.prNumber !== null;
 
-const providerReasoning = (
-  provider: ProviderConfig | undefined,
-): ReasoningSetting | undefined => {
-  if (
-    provider === undefined ||
-    (provider.thinkingEnabled === undefined &&
-      provider.reasoningEffort === undefined)
-  ) {
-    return;
-  }
-  return {
-    enabled: provider.thinkingEnabled ?? true,
-    ...(provider.reasoningEffort === undefined
-      ? {}
-      : { effort: provider.reasoningEffort }),
-  };
-};
-
-/** Shared route/default policy for blank, PR, and issue session creation. */
-export const sessionCreationDefaults = (
-  requestedCli: CliKind,
-  config: WorkspaceConfig | null,
-  requestedModel?: string,
-  requestedMode?: PermissionMode,
-  requestedReasoning?: ReasoningSetting | null,
-) => {
-  const cli = requestedCli;
-  const provider = config?.providers?.[cli];
-  return {
-    cli,
-    options: {
-      defaultMode: requestedMode ?? defaultModeFor(cli, provider?.defaultMode),
-      defaultModel: requestedModel ?? provider?.defaultModel,
-      defaultReasoning:
-        requestedReasoning === undefined
-          ? providerReasoning(provider)
-          : (requestedReasoning ?? undefined),
-    },
-  };
-};
+const sessionCreationOptions = (input: {
+  readonly modelId: CreateSessionInput["modelId"];
+  readonly mode?: PermissionMode;
+  readonly reasoning?: ReasoningSetting | null;
+}) => ({
+  defaultMode: input.mode ?? ("accept-edits" as const),
+  defaultReasoning: input.reasoning ?? undefined,
+});
 
 const planMutationConflict = (message: string): PlanConflictError =>
   new PlanConflictError({
@@ -1017,7 +971,9 @@ export const planDispatchMessage = (input: PlanDispatchMessageInput) =>
         ?.messages.at(-1)?.id;
       if (messageId === undefined) {
         return Effect.fail(
-          planMutationConflict("The recorded plan comment is no longer available."),
+          planMutationConflict(
+            "The recorded plan comment is no longer available.",
+          ),
         );
       }
       return Effect.succeed({
@@ -1043,7 +999,9 @@ export const planDispatchExistingMessage = (
   SessionStore.get(input.sessionId).pipe(
     Effect.flatMap((session) =>
       session.worktreePath == null
-        ? Effect.fail(planMutationConflict("This session has no plan worktree."))
+        ? Effect.fail(
+            planMutationConflict("This session has no plan worktree."),
+          )
         : PlanStore.readDocument(session.worktreePath),
     ),
     Effect.flatMap((document) =>
@@ -1060,7 +1018,8 @@ export const planDispatchExistingMessage = (
               .find((annotation) => annotation.id === input.annotationId)
               ?.messages.find((candidate) => candidate.id === input.messageId);
             return message === undefined ||
-              (message.deliveryState !== "pending" && message.deliveryState !== "failed")
+              (message.deliveryState !== "pending" &&
+                message.deliveryState !== "failed")
               ? Effect.fail(
                   planMutationConflict(
                     `Retryable comment message "${input.messageId}" is no longer available.`,
@@ -1077,7 +1036,6 @@ export const planDispatchExistingMessage = (
       Effect.fail(planMutationConflict("The plan session no longer exists.")),
     ),
   );
-
 
 /** Resolve a session only when it has an active pull request. */
 const sessionWithPr = (sessionId: string) =>
@@ -1098,20 +1056,10 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
       Effect.orElseSucceed(() => null),
     );
     const allowSharedCheckout = config?.git?.shareCheckedOutBranches ?? true;
-    const route = sessionCreationDefaults(
-      input.cli,
-      config,
-      input.model,
-      input.mode,
-      input.reasoning,
-    );
-    return yield* SessionStore.createFromPr(
-      { ...input, cli: route.cli },
-      {
-        allowSharedCheckout,
-        ...route.options,
-      },
-    );
+    return yield* SessionStore.createFromPr(input, {
+      allowSharedCheckout,
+      ...sessionCreationOptions(input),
+    });
   });
 
 /**
@@ -1122,58 +1070,51 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
  */
 export const createSession = (input: CreateSessionInput) =>
   Effect.gen(function* () {
-    const resolvedInput = input.projectId === undefined
-      ? input
-      : yield* ProjectService.get(input.projectId).pipe(
-          Effect.map((project) => ({
-            ...input,
-            repoPath: project.path,
-            repoName: project.name,
-            ...(project.environmentId === undefined
-              ? {}
-              : { environmentId: project.environmentId })
-          }))
-        );
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const route = sessionCreationDefaults(
-      resolvedInput.cli,
-      config,
-      resolvedInput.model,
-      resolvedInput.mode,
-      resolvedInput.reasoning,
-    );
+    const resolvedInput =
+      input.projectId === undefined
+        ? input
+        : yield* ProjectService.get(input.projectId).pipe(
+            Effect.map((project) => ({
+              ...input,
+              repoPath: project.path,
+              repoName: project.name,
+              ...(project.environmentId === undefined
+                ? {}
+                : { environmentId: project.environmentId }),
+            })),
+          );
     return yield* SessionStore.create(
-      { ...resolvedInput, cli: route.cli },
-      route.options,
+      resolvedInput,
+      sessionCreationOptions(resolvedInput),
     );
   });
 
 /** Provision on the selected device and mirror only the returned metadata locally. */
-type SessionCreationProgress = (phase: SessionCreationPhase) => Effect.Effect<void>
+type SessionCreationProgress = (
+  phase: SessionCreationPhase,
+) => Effect.Effect<void>;
 
 const reportSessionCreation = (
   progress: SessionCreationProgress | undefined,
   phase: SessionCreationPhase,
-) => progress?.(phase) ?? Effect.void
+) => progress?.(phase) ?? Effect.void;
 
 const sessionCreationStream = <E, R>(
   create: (progress: SessionCreationProgress) => Effect.Effect<Session, E, R>,
 ) =>
   Stream.unwrapScoped(
     Effect.gen(function* () {
-      const mailbox = yield* Mailbox.make<SessionCreationUpdate, E>(16)
+      const mailbox = yield* Mailbox.make<SessionCreationUpdate, E>(16);
       yield* Effect.forkScoped(
         create((phase) =>
           Effect.sync(() => {
-            mailbox.unsafeOffer({ kind: "progress", phase })
-          })
+            mailbox.unsafeOffer({ kind: "progress", phase });
+          }),
         ).pipe(
           Effect.tap((session) =>
             Effect.sync(() => {
-              mailbox.unsafeOffer({ kind: "complete", session })
-            })
+              mailbox.unsafeOffer({ kind: "complete", session });
+            }),
           ),
           Effect.matchEffect({
             onFailure: (error) =>
@@ -1184,107 +1125,45 @@ const sessionCreationStream = <E, R>(
                   "message" in error &&
                   typeof error.message === "string"
                     ? error.message
-                    : "Session creation failed."
-                mailbox.unsafeOffer({ kind: "failed", message })
+                    : "Session creation failed.";
+                mailbox.unsafeOffer({ kind: "failed", message });
               }).pipe(Effect.zipRight(mailbox.end), Effect.asVoid),
             onSuccess: () => mailbox.end.pipe(Effect.asVoid),
           }),
         ),
-      )
-      return Mailbox.toStream(mailbox)
+      );
+      return Mailbox.toStream(mailbox);
     }),
-  )
+  );
 
 export const createSessionRouted = (
   input: CreateSessionInput,
   progress?: SessionCreationProgress,
 ) =>
   Effect.gen(function* () {
-      if (input.environmentId === undefined) {
-        yield* reportSessionCreation(progress, "creating-session")
-        const session = yield* createSession(input)
-        yield* reportSessionCreation(progress, "ready")
-        return session
-      }
+    if (input.environmentId === undefined) {
+      yield* reportSessionCreation(progress, "creating-session");
+      const session = yield* createSession(input);
+      yield* reportSessionCreation(progress, "ready");
+      return session;
+    }
 
-      yield* reportSessionCreation(progress, "checking-access")
-      const environmentService = yield* EnvironmentService
-      const environment = yield* environmentService.environment(input.environmentId).pipe(
-        Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
-      )
-      return yield* provisionRemoteSession(
-        input.environmentId,
-        "Sessions.create",
-        input,
-        progress,
-        environment,
-      )
-    });
-
-/**
- * Every model a harness offers — the WHOLE catalogue, deliberately uncurated.
- *
- * This feeds Settings' default-model picker, which is where a provider is
- * CONFIGURED. Curation (`visibleModels`) is defined as what shows in the
- * composer's model menu, so applying it here too would let it hide models from
- * the one surface you'd use to change it: curate down to three, and the fourth
- * can never be chosen as your default again — from inside the app there'd be no
- * way back. Configuration surfaces show what exists; `Models.catalog` is where
- * the operator's own choice is honoured.
- *
- * Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
- * app has a threadbare PATH, so Codex's and opencode's own model lists are only
- * reachable via the absolute path discovery found. Exported for tests.
- */
-export const modelsList = (cli: CliKind) =>
-  Effect.gen(function* () {
-    const clis = yield* DiscoveryService.list();
-    return yield* ModelsService.list(
-      cli,
-      clis.find((c) => c.kind === cli)?.binPath,
+    yield* reportSessionCreation(progress, "checking-access");
+    const environmentService = yield* EnvironmentService;
+    const environment = yield* environmentService
+      .environment(input.environmentId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new GitError({ message: cause.message, cause }),
+        ),
+      );
+    return yield* provisionRemoteSession(
+      input.environmentId,
+      "Sessions.create",
+      input,
+      progress,
+      environment,
     );
-  });
-
-/**
- * Every installed harness's models, each narrowed by its own curation — the
- * composer's model menu.
- *
- * This is the surface curation exists for: opencode's catalogue is resolved from
- * the user's own credentials, and a single OpenRouter key resolves ~342 models,
- * which is not a menu anyone can use. Applied HERE rather than inside
- * `ModelsService` so that service stays free of a config dependency (and
- * hermetically testable). Exported for tests.
- */
-export const modelsCatalog = () =>
-  Effect.gen(function* () {
-    const clis = yield* DiscoveryService.list();
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const catalog = yield* ModelsService.catalog(clis);
-    return catalog.map((section) => ({
-      ...section,
-      models: filterVisible(
-        section.models,
-        config?.providers?.[section.cli]?.visibleModels,
-      ),
-    }));
-  });
-
-export const modelsCapabilities = () =>
-  Effect.gen(function* () {
-    const clis = yield* DiscoveryService.list();
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const capabilities = yield* ModelsService.capabilities(clis);
-    return capabilities.map((capability) => ({
-      ...capability,
-      models: filterVisible(
-        capability.models,
-        config?.providers?.[capability.cli]?.visibleModels,
-      ),
-    }));
   });
 
 /**
@@ -1294,19 +1173,9 @@ export const modelsCapabilities = () =>
  */
 export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
   Effect.gen(function* () {
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const route = sessionCreationDefaults(
-      input.cli,
-      config,
-      input.model,
-      input.mode,
-      input.reasoning,
-    );
     return yield* SessionStore.createFromIssue(
-      { ...input, cli: route.cli },
-      route.options,
+      input,
+      sessionCreationOptions(input),
     );
   });
 
@@ -1345,8 +1214,10 @@ const ensureProjectOnOwnedEnvironment = (
 
 const provisionRemoteSession = (
   environmentId: string,
-  operation: "Sessions.create" | "Sessions.createFromPr" | "Sessions.createFromIssue",
-  input: CreateSessionInput | CreateSessionFromPrInput | CreateSessionFromIssueInput,
+  operation:
+    "Sessions.create" | "Sessions.createFromPr" | "Sessions.createFromIssue",
+  input:
+    CreateSessionInput | CreateSessionFromPrInput | CreateSessionFromIssueInput,
   progress?: SessionCreationProgress,
   knownEnvironment?: Environment,
 ) => {
@@ -1355,106 +1226,155 @@ const provisionRemoteSession = (
     const remote = yield* RemoteSessionService;
     const sessions = yield* SessionStore;
     const environmentService = yield* EnvironmentService;
-    const environment = knownEnvironment ?? (yield* environmentService.environment(environmentId).pipe(
-      Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
-    ));
-    let requestSession = { id: "", environmentId };
+    const environment =
+      knownEnvironment ??
+      (yield* environmentService
+        .environment(environmentId)
+        .pipe(
+          Effect.mapError(
+            (cause) => new GitError({ message: cause.message, cause }),
+          ),
+        ));
+    let requestSession = {
+      id: "",
+      environmentId,
+      connectionId: input.connectionId,
+      providerId: input.providerId,
+      modelId: input.modelId,
+    };
     let requestInput = input;
     if (environment.kind === "owned" && input.projectId !== undefined) {
-      yield* reportSessionCreation(progress, "resolving-repository")
-      const localProject = yield* ProjectService.get(input.projectId)
+      yield* reportSessionCreation(progress, "resolving-repository");
+      const localProject = yield* ProjectService.get(input.projectId);
       const remoteProject = yield* ensureProjectOnOwnedEnvironment(
         localProject,
         environmentId,
-      )
+      );
       requestInput = {
         ...input,
         projectId: remoteProject.id,
         repoPath: remoteProject.path,
         repoName: remoteProject.name,
-      }
+      };
     } else if (environment.kind === "managed") {
-      yield* reportSessionCreation(progress, "resolving-repository")
+      if (!environmentRuntimeIsCurrent(environment)) {
+        return yield* Effect.fail(
+          new GitError({
+            message:
+              "Cloud is running an incompatible agent runtime. Update Cloud before starting this pi session.",
+          }),
+        );
+      }
+      yield* reportSessionCreation(progress, "resolving-repository");
       const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
       managedSessionId = sessionId;
       const remoteUrl = yield* GitService.remoteUrl(input.repoPath);
       const repository = remoteUrl ? parseGitHubRemote(remoteUrl) : null;
       if (!repository) {
-        return yield* Effect.fail(new GitError({
-          message: "Managed environments currently require a GitHub repository remote.",
-        }));
+        return yield* Effect.fail(
+          new GitError({
+            message:
+              "Managed environments currently require a GitHub repository remote.",
+          }),
+        );
       }
-      const branch = operation === "Sessions.createFromPr"
-        ? (input as CreateSessionFromPrInput).pr.headRefName
-        : (input as CreateSessionInput | CreateSessionFromIssueInput).baseBranch;
+      const branch =
+        operation === "Sessions.createFromPr"
+          ? (input as CreateSessionFromPrInput).pr.headRefName
+          : (input as CreateSessionInput | CreateSessionFromIssueInput)
+              .baseBranch;
       const headSha = yield* GitService.revision(input.repoPath, branch).pipe(
-        Effect.orElse(() => GitService.revision(input.repoPath, `origin/${branch}`)),
+        Effect.orElse(() =>
+          GitService.revision(input.repoPath, `origin/${branch}`),
+        ),
       );
-      const baseBranch = operation === "Sessions.createFromPr"
-        ? (input as CreateSessionFromPrInput).pr.baseRefName
-        : (input as CreateSessionInput | CreateSessionFromIssueInput).baseBranch;
+      const baseBranch =
+        operation === "Sessions.createFromPr"
+          ? (input as CreateSessionFromPrInput).pr.baseRefName
+          : (input as CreateSessionInput | CreateSessionFromIssueInput)
+              .baseBranch;
       const plan = createWorkspaceProvisioningPlan({
         githubSlug: `${repository.owner}/${repository.repo}`,
         headSha,
         branch,
         baseBranch,
         createBranch: false,
-        source: operation === "Sessions.createFromPr"
-          ? {
-              kind: "pull-request",
-              pullRequestNumber: (input as CreateSessionFromPrInput).pr.number,
-            }
-          : { kind: "new" },
+        source:
+          operation === "Sessions.createFromPr"
+            ? {
+                kind: "pull-request",
+                pullRequestNumber: (input as CreateSessionFromPrInput).pr
+                  .number,
+              }
+            : { kind: "new" },
       });
-      yield* reportSessionCreation(progress, "starting-sandbox")
-      yield* environmentService.hydrateManagedWorkspace(
-        environment,
-        sessionId,
-        plan,
-      ).pipe(
-        Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
-      );
-      requestSession = { id: sessionId, environmentId };
+      yield* reportSessionCreation(progress, "starting-sandbox");
+      yield* environmentService
+        .hydrateManagedWorkspace(environment, sessionId, plan, {
+          connectionId: input.connectionId,
+          providerId: input.providerId,
+          modelId: input.modelId,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) => new GitError({ message: cause.message, cause }),
+          ),
+        );
+      requestSession = {
+        id: sessionId,
+        environmentId,
+        connectionId: input.connectionId,
+        providerId: input.providerId,
+        modelId: input.modelId,
+      };
       requestInput = {
         ...input,
         requestedSessionId: sessionId,
         repoPath: "/workspace",
       };
     }
-    yield* reportSessionCreation(progress, "creating-session")
+    yield* reportSessionCreation(progress, "creating-session");
     const value = yield* (
       environment.kind === "managed"
         ? remote.request(requestSession, operation, requestInput)
         : remote.requestOnEnvironment(environmentId, operation, requestInput)
     ).pipe(
-      Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+      Effect.mapError(
+        (cause) => new GitError({ message: cause.message, cause }),
+      ),
     );
     const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
-      Effect.mapError((cause) => new GitError({
-        message: "The remote device returned invalid session metadata",
-        cause,
-      })),
+      Effect.mapError(
+        (cause) =>
+          new GitError({
+            message: "The remote device returned invalid session metadata",
+            cause,
+          }),
+      ),
     );
     if (created.environmentId !== environmentId) {
-      return yield* Effect.fail(new GitError({
-        message: "The remote device returned a session for a different environment",
-      }));
+      return yield* Effect.fail(
+        new GitError({
+          message:
+            "The remote device returned a session for a different environment",
+        }),
+      );
     }
     const persisted = yield* sessions.upsertRemote(created);
-    yield* reportSessionCreation(progress, "ready")
+    yield* reportSessionCreation(progress, "ready");
     return persisted;
   }).pipe(
     Effect.onError(() =>
       Effect.gen(function* () {
         if (managedSessionId === undefined) return;
         const environments = yield* EnvironmentService;
-        const environment = yield* environments.environment(environmentId).pipe(
-          Effect.orElseSucceed(() => null),
-        );
+        const environment = yield* environments
+          .environment(environmentId)
+          .pipe(Effect.orElseSucceed(() => null));
         if (environment?.kind !== "managed") return;
-        yield* environments.cleanupManagedSession(environment, managedSessionId).pipe(
-          Effect.ignore,
-        );
+        yield* environments
+          .cleanupManagedSession(environment, managedSessionId)
+          .pipe(Effect.ignore);
       }),
     ),
   );
@@ -1463,30 +1383,42 @@ const provisionRemoteSession = (
 export const createSessionFromPrRouted = (
   input: CreateSessionFromPrInput,
   progress?: SessionCreationProgress,
-) => Effect.gen(function* () {
-  if (input.environmentId === undefined) {
-    yield* reportSessionCreation(progress, "creating-session")
-    const session = yield* createSessionFromPr(input)
-    yield* reportSessionCreation(progress, "ready")
-    return session
-  }
-  yield* reportSessionCreation(progress, "checking-access")
-  return yield* provisionRemoteSession(input.environmentId, "Sessions.createFromPr", input, progress)
-});
+) =>
+  Effect.gen(function* () {
+    if (input.environmentId === undefined) {
+      yield* reportSessionCreation(progress, "creating-session");
+      const session = yield* createSessionFromPr(input);
+      yield* reportSessionCreation(progress, "ready");
+      return session;
+    }
+    yield* reportSessionCreation(progress, "checking-access");
+    return yield* provisionRemoteSession(
+      input.environmentId,
+      "Sessions.createFromPr",
+      input,
+      progress,
+    );
+  });
 
 export const createSessionFromIssueRouted = (
   input: CreateSessionFromIssueInput,
   progress?: SessionCreationProgress,
-) => Effect.gen(function* () {
-  if (input.environmentId === undefined) {
-    yield* reportSessionCreation(progress, "creating-session")
-    const session = yield* createSessionFromIssue(input)
-    yield* reportSessionCreation(progress, "ready")
-    return session
-  }
-  yield* reportSessionCreation(progress, "checking-access")
-  return yield* provisionRemoteSession(input.environmentId, "Sessions.createFromIssue", input, progress)
-});
+) =>
+  Effect.gen(function* () {
+    if (input.environmentId === undefined) {
+      yield* reportSessionCreation(progress, "creating-session");
+      const session = yield* createSessionFromIssue(input);
+      yield* reportSessionCreation(progress, "ready");
+      return session;
+    }
+    yield* reportSessionCreation(progress, "checking-access");
+    return yield* provisionRemoteSession(
+      input.environmentId,
+      "Sessions.createFromIssue",
+      input,
+      progress,
+    );
+  });
 
 export const setEnvironment = (
   sessionId: string,
@@ -1499,7 +1431,9 @@ export const setEnvironment = (
     // The persisted Session counters lag a running turn. The transcript is the
     // durable proof that this checkout has started work, so never move it in
     // place merely because the first streamed usage/diff update has not landed.
-    const hasTranscript = yield* TranscriptStore.list(session.activeChatId).pipe(
+    const hasTranscript = yield* TranscriptStore.list(
+      session.activeChatId,
+    ).pipe(
       Effect.map((messages) => messages.length > 0),
       Effect.orElseSucceed(() => true),
     );
@@ -1510,12 +1444,15 @@ export const setEnvironment = (
         environments: () => environments.list,
         persist: (id, target) => sessions.setEnvironment(id, target),
         continueSession: (source, target) =>
-          Effect.fail(new EnvironmentHandoffError({
-            reason: "unavailable",
-            message: "The target device did not admit a continuation workspace.",
-            sessionId: source.id,
-            ...(target === undefined ? {} : { environmentId: target }),
-          })),
+          Effect.fail(
+            new EnvironmentHandoffError({
+              reason: "unavailable",
+              message:
+                "The target device did not admit a continuation workspace.",
+              sessionId: source.id,
+              ...(target === undefined ? {} : { environmentId: target }),
+            }),
+          ),
       },
       hasTranscript,
     );
@@ -1541,22 +1478,26 @@ export const selectContinuationRepository = (
     if (bySlug) return bySlug;
   }
   const name = source.name.toLocaleLowerCase();
-  return candidates.find(
-    (candidate) => candidate.name.toLocaleLowerCase() === name,
-  ) ?? null;
+  return (
+    candidates.find(
+      (candidate) => candidate.name.toLocaleLowerCase() === name,
+    ) ?? null
+  );
 };
 
 const continuationRepositories = (
   environments: EnvironmentService,
   environmentId: string | undefined,
-) => Effect.gen(function* () {
-  if (environmentId === undefined) {
-    const repositories = yield* WorkspaceService.listRepos();
-    return repositories satisfies ReadonlyArray<ContinuationRepository>;
-  }
-  const result = yield* environments.discovery(environmentId);
-  return (result.discovery?.repositories ?? []) satisfies ReadonlyArray<ContinuationRepository>;
-});
+) =>
+  Effect.gen(function* () {
+    if (environmentId === undefined) {
+      const repositories = yield* WorkspaceService.listRepos();
+      return repositories satisfies ReadonlyArray<ContinuationRepository>;
+    }
+    const result = yield* environments.discovery(environmentId);
+    return (result.discovery?.repositories ??
+      []) satisfies ReadonlyArray<ContinuationRepository>;
+  });
 
 export const continueOnEnvironment = (
   sessionId: string,
@@ -1567,73 +1508,88 @@ export const continueOnEnvironment = (
     const environments = yield* EnvironmentService;
     const remote = yield* RemoteSessionService;
     const session = yield* sessions.get(sessionId);
-    return yield* continueSessionOnEnvironment(
-      session,
-      environmentId,
-      {
-        environments: () => environments.list,
-        persist: (id, target) => sessions.setEnvironment(id, target),
-        continueSession: (source, target) => Effect.gen(function* () {
-          const sourceMessages = yield* TranscriptStore.list(source.activeChatId).pipe(
-            Effect.orElseSucceed(() => []),
-          );
-          const checkpoint = yield* (
-            source.environmentId === undefined
-              ? source.worktreePath
-                ? Effect.tryPromise({
-                    try: () => exportWorkspaceHandoff({
+    return yield* continueSessionOnEnvironment(session, environmentId, {
+      environments: () => environments.list,
+      persist: (id, target) => sessions.setEnvironment(id, target),
+      continueSession: (source, target) =>
+        Effect.gen(function* () {
+          const sourceMessages = yield* TranscriptStore.list(
+            source.activeChatId,
+          ).pipe(Effect.orElseSucceed(() => []));
+          const checkpoint = yield* source.environmentId === undefined
+            ? source.worktreePath
+              ? Effect.tryPromise({
+                  try: () =>
+                    exportWorkspaceHandoff({
                       workspacePath: source.worktreePath!,
                       sourceSessionId: source.id,
                       eventCursor: sourceMessages.length,
                     }),
-                    catch: (cause) => new EnvironmentHandoffError({
+                  catch: (cause) =>
+                    new EnvironmentHandoffError({
                       reason: "unavailable",
-                      message: "The source workspace could not be checkpointed.",
+                      message:
+                        "The source workspace could not be checkpointed.",
                       sessionId: source.id,
                     }),
-                  })
-                : Effect.fail(new EnvironmentHandoffError({
+                })
+              : Effect.fail(
+                  new EnvironmentHandoffError({
                     reason: "unavailable",
                     message: "The source session has no workspace to hand off.",
                     sessionId: source.id,
-                  }))
-              : remote.request(
-                  source,
-                  "Workspace.exportHandoff",
-                  { eventCursor: sourceMessages.length },
-                ).pipe(
-                  Effect.flatMap(Schema.decodeUnknown(WorkspaceTransferCheckpointSchema)),
-                  Effect.mapError((cause) => new EnvironmentHandoffError({
-                    reason: "unavailable",
-                    message: "The source environment could not checkpoint the workspace.",
-                    sessionId: source.id,
-                    environmentId: source.environmentId,
-                  })),
+                  }),
                 )
-          );
+            : remote
+                .request(source, "Workspace.exportHandoff", {
+                  eventCursor: sourceMessages.length,
+                })
+                .pipe(
+                  Effect.flatMap(
+                    Schema.decodeUnknown(WorkspaceTransferCheckpointSchema),
+                  ),
+                  Effect.mapError(
+                    (cause) =>
+                      new EnvironmentHandoffError({
+                        reason: "unavailable",
+                        message:
+                          "The source environment could not checkpoint the workspace.",
+                        sessionId: source.id,
+                        environmentId: source.environmentId,
+                      }),
+                  ),
+                );
           const sourceRepositories = yield* continuationRepositories(
             environments,
             source.environmentId,
           ).pipe(Effect.orElseSucceed(() => []));
-          const sourceRepository = sourceRepositories.find(
-            (candidate) => candidate.path === source.repoPath,
-          ) ?? sourceRepositories.find(
-            (candidate) => candidate.name === source.repo,
-          );
+          const sourceRepository =
+            sourceRepositories.find(
+              (candidate) => candidate.path === source.repoPath,
+            ) ??
+            sourceRepositories.find(
+              (candidate) => candidate.name === source.repo,
+            );
           const sourceIdentity = {
             name: sourceRepository?.name ?? source.repo,
-            githubSlug: checkpoint.repositorySlug ?? sourceRepository?.githubSlug ?? null,
+            githubSlug:
+              checkpoint.repositorySlug ?? sourceRepository?.githubSlug ?? null,
           };
-          const targetEnvironment = target === undefined
-            ? undefined
-            : yield* environments.environment(target).pipe(
-                Effect.mapError((cause) => new EnvironmentHandoffError({
-                  reason: "unavailable",
-                  message: "The target environment is no longer available.",
-                  sessionId: source.id,
-                  environmentId: target,
-                })),
-              );
+          const targetEnvironment =
+            target === undefined
+              ? undefined
+              : yield* environments.environment(target).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new EnvironmentHandoffError({
+                        reason: "unavailable",
+                        message:
+                          "The target environment is no longer available.",
+                        sessionId: source.id,
+                        environmentId: target,
+                      }),
+                  ),
+                );
           const targetRepositories = yield* continuationRepositories(
             environments,
             target,
@@ -1641,59 +1597,97 @@ export const continueOnEnvironment = (
             targetEnvironment?.kind === "managed"
               ? Effect.orElseSucceed(() => [])
               : (effect) => effect,
-            Effect.mapError(() => new EnvironmentHandoffError({
-              reason: "unavailable",
-              message: "The target environment could not list its repositories.",
-              sessionId: source.id,
-              ...(target === undefined ? {} : { environmentId: target }),
-            })),
+            Effect.mapError(
+              () =>
+                new EnvironmentHandoffError({
+                  reason: "unavailable",
+                  message:
+                    "The target environment could not list its repositories.",
+                  sessionId: source.id,
+                  ...(target === undefined ? {} : { environmentId: target }),
+                }),
+            ),
           );
           const targetRepository = selectContinuationRepository(
             sourceIdentity,
             targetRepositories,
           );
-          if (targetRepository === null && targetEnvironment?.kind !== "managed") {
-            return yield* Effect.fail(new EnvironmentHandoffError({
-              reason: "unavailable",
-              message: `${sourceIdentity.githubSlug ?? sourceIdentity.name} is not available on the target environment.`,
-              sessionId: source.id,
-              ...(target === undefined ? {} : { environmentId: target }),
-            }));
+          if (
+            targetRepository === null &&
+            targetEnvironment?.kind !== "managed"
+          ) {
+            return yield* Effect.fail(
+              new EnvironmentHandoffError({
+                reason: "unavailable",
+                message: `${sourceIdentity.githubSlug ?? sourceIdentity.name} is not available on the target environment.`,
+                sessionId: source.id,
+                ...(target === undefined ? {} : { environmentId: target }),
+              }),
+            );
           }
-          const targetBaseBranch = source.baseBranch
-            ?? targetRepository?.defaultBranch
-            ?? source.branch;
+          const targetBaseBranch =
+            source.baseBranch ??
+            targetRepository?.defaultBranch ??
+            source.branch;
+          if (
+            source.connectionId === undefined ||
+            source.providerId === undefined ||
+            source.modelId === undefined
+          ) {
+            return yield* Effect.fail(
+              new EnvironmentHandoffError({
+                reason: "unavailable",
+                message:
+                  "Choose a certified provider connection before continuing this session.",
+                sessionId: source.id,
+                ...(target === undefined ? {} : { environmentId: target }),
+              }),
+            );
+          }
           if (target === undefined) {
             const created = yield* createSession({
               repoPath: targetRepository!.path,
               repoName: targetRepository!.name,
-              cli: source.cli,
+              connectionId: source.connectionId,
+              providerId: source.providerId,
+              modelId: source.modelId,
               baseBranch: targetBaseBranch,
               title: `${source.title} continuation`,
             }).pipe(
-              Effect.mapError(() => new EnvironmentHandoffError({
-                reason: "unavailable",
-                message: "The desktop could not provision the continuation workspace.",
-                sessionId: source.id,
-              })),
+              Effect.mapError(
+                () =>
+                  new EnvironmentHandoffError({
+                    reason: "unavailable",
+                    message:
+                      "The desktop could not provision the continuation workspace.",
+                    sessionId: source.id,
+                  }),
+              ),
             );
             if (!created.worktreePath) {
-              return yield* Effect.fail(new EnvironmentHandoffError({
-                reason: "unavailable",
-                message: "The local continuation has no verified workspace.",
-                sessionId: source.id,
-              }));
+              return yield* Effect.fail(
+                new EnvironmentHandoffError({
+                  reason: "unavailable",
+                  message: "The local continuation has no verified workspace.",
+                  sessionId: source.id,
+                }),
+              );
             }
             yield* Effect.tryPromise({
               try: async () => {
-                await checkoutWorkspaceHandoffBase(created.worktreePath!, checkpoint)
-                await importWorkspaceHandoff(created.worktreePath!, checkpoint)
+                await checkoutWorkspaceHandoffBase(
+                  created.worktreePath!,
+                  checkpoint,
+                );
+                await importWorkspaceHandoff(created.worktreePath!, checkpoint);
               },
-              catch: (cause) => new EnvironmentHandoffError({
-                reason: "unavailable",
-                message: "The local continuation did not match the source checkpoint.",
-                sessionId: source.id,
-              }),
+              catch: (cause) =>
+                new EnvironmentHandoffError({
+                  reason: "unavailable",
+                  message:
+                    "The local continuation did not match the source checkpoint.",
+                  sessionId: source.id,
+                }),
             });
             for (const message of sourceMessages) {
               yield* TranscriptStore.append(created.activeChatId, message);
@@ -1702,127 +1696,188 @@ export const continueOnEnvironment = (
           }
           let requestedSessionId: string | undefined;
           if (targetEnvironment?.kind === "managed") {
+            if (!environmentRuntimeIsCurrent(targetEnvironment)) {
+              return yield* Effect.fail(
+                new EnvironmentHandoffError({
+                  reason: "incompatible",
+                  message:
+                    "Cloud is running an incompatible agent runtime. Update Cloud before continuing this pi session.",
+                  sessionId: source.id,
+                  environmentId: target,
+                }),
+              );
+            }
             if (checkpoint.repositorySlug === null) {
-              return yield* Effect.fail(new EnvironmentHandoffError({
-                reason: "unavailable",
-                message: "Managed handoff requires a GitHub repository identity.",
-                sessionId: source.id,
-                environmentId: target,
-              }));
+              return yield* Effect.fail(
+                new EnvironmentHandoffError({
+                  reason: "unavailable",
+                  message:
+                    "Managed handoff requires a GitHub repository identity.",
+                  sessionId: source.id,
+                  environmentId: target,
+                }),
+              );
             }
             requestedSessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
-            yield* environments.hydrateManagedWorkspace(
-              targetEnvironment,
-              requestedSessionId,
-              createWorkspaceProvisioningPlan({
-                githubSlug: checkpoint.repositorySlug,
-                headSha: checkpoint.headSha,
-                branch: checkpoint.branch ?? source.baseBranch ?? "main",
-                baseBranch: source.baseBranch ?? checkpoint.branch ?? "main",
-                createBranch: false,
-                source: {
-                  kind: "handoff",
-                  sourceSessionId: source.id,
-                  checkpointId: checkpoint.checkpointId,
-                  eventCursor: checkpoint.eventCursor,
-                },
-              }),
-            ).pipe(
-              Effect.mapError((cause) => new EnvironmentHandoffError({
-                reason: "unavailable",
-                message: "The managed target could not verify the source Git base.",
-                sessionId: source.id,
-                environmentId: target,
-              })),
-            );
-          }
-          const targetSession = requestedSessionId
-            ? { id: requestedSessionId, environmentId: target }
-            : null;
-          const value = yield* (targetSession
-            ? remote.request(
-                targetSession,
-                "Sessions.continueOnEnvironment",
-                {
-                  sourceSession: {
-                    ...source,
-                    title: `${source.title} continuation`,
-                    environmentId: target,
-                    repo: targetRepository?.name ?? source.repo,
-                    repoPath: "/workspace",
-                    worktreePath: undefined,
-                    baseBranch: targetBaseBranch,
+            yield* environments
+              .hydrateManagedWorkspace(
+                targetEnvironment,
+                requestedSessionId,
+                createWorkspaceProvisioningPlan({
+                  githubSlug: checkpoint.repositorySlug,
+                  headSha: checkpoint.headSha,
+                  branch: checkpoint.branch ?? source.baseBranch ?? "main",
+                  baseBranch: source.baseBranch ?? checkpoint.branch ?? "main",
+                  createBranch: false,
+                  source: {
+                    kind: "handoff",
+                    sourceSessionId: source.id,
+                    checkpointId: checkpoint.checkpointId,
+                    eventCursor: checkpoint.eventCursor,
                   },
-                  requestedSessionId,
+                }),
+                {
+                  connectionId: source.connectionId,
+                  providerId: source.providerId,
+                  modelId: source.modelId,
                 },
               )
-            : remote.requestOnEnvironment(
-                target,
-            "Sessions.continueOnEnvironment",
-            {
-              sourceSession: {
-                ...source,
-                title: `${source.title} continuation`,
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new EnvironmentHandoffError({
+                      reason: "unavailable",
+                      message:
+                        "The managed target could not verify the source Git base.",
+                      sessionId: source.id,
+                      environmentId: target,
+                    }),
+                ),
+              );
+          }
+          const targetSession = requestedSessionId
+            ? {
+                id: requestedSessionId,
                 environmentId: target,
-                repo: targetRepository!.name,
-                repoPath: targetRepository!.path,
-                worktreePath: undefined,
-                baseBranch: targetBaseBranch,
-              },
-            },
-              )).pipe(
-            Effect.mapError(() => new EnvironmentHandoffError({
-              reason: "unavailable",
-              message: "The target device did not admit a continuation workspace.",
-              sessionId: source.id,
-              environmentId: target,
-            })),
+                connectionId: source.connectionId,
+                providerId: source.providerId,
+                modelId: source.modelId,
+              }
+            : null;
+          const value = yield* (
+            targetSession
+              ? remote.request(
+                  targetSession,
+                  "Sessions.continueOnEnvironment",
+                  {
+                    sourceSession: {
+                      ...source,
+                      title: `${source.title} continuation`,
+                      environmentId: target,
+                      repo: targetRepository?.name ?? source.repo,
+                      repoPath: "/workspace",
+                      worktreePath: undefined,
+                      baseBranch: targetBaseBranch,
+                    },
+                    requestedSessionId,
+                  },
+                )
+              : remote.requestOnEnvironment(
+                  target,
+                  "Sessions.continueOnEnvironment",
+                  {
+                    sourceSession: {
+                      ...source,
+                      title: `${source.title} continuation`,
+                      environmentId: target,
+                      repo: targetRepository!.name,
+                      repoPath: targetRepository!.path,
+                      worktreePath: undefined,
+                      baseBranch: targetBaseBranch,
+                    },
+                  },
+                )
+          ).pipe(
+            Effect.mapError(
+              () =>
+                new EnvironmentHandoffError({
+                  reason: "unavailable",
+                  message:
+                    "The target device did not admit a continuation workspace.",
+                  sessionId: source.id,
+                  environmentId: target,
+                }),
+            ),
           );
-          const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
-            Effect.mapError(() => new EnvironmentHandoffError({
-              reason: "unavailable",
-              message: "The target device returned invalid continuation metadata.",
-              sessionId: source.id,
-              environmentId: target,
-            })),
+          const created = yield* Schema.decodeUnknown(SessionSchema)(
+            value,
+          ).pipe(
+            Effect.mapError(
+              () =>
+                new EnvironmentHandoffError({
+                  reason: "unavailable",
+                  message:
+                    "The target device returned invalid continuation metadata.",
+                  sessionId: source.id,
+                  environmentId: target,
+                }),
+            ),
           );
           if (created.environmentId !== target) {
-            return yield* Effect.fail(new EnvironmentHandoffError({
-              reason: "unavailable",
-              message: "The remote device returned a continuation for a different environment.",
-              sessionId: source.id,
-              environmentId: target,
-            }));
+            return yield* Effect.fail(
+              new EnvironmentHandoffError({
+                reason: "unavailable",
+                message:
+                  "The remote device returned a continuation for a different environment.",
+                sessionId: source.id,
+                environmentId: target,
+              }),
+            );
           }
-          yield* remote.request(created, "Workspace.importHandoff", { checkpoint }).pipe(
-            Effect.mapError((cause) => new EnvironmentHandoffError({
-              reason: "unavailable",
-              message: "The target workspace did not verify the source checkpoint.",
-              sessionId: source.id,
-              environmentId: target,
-            })),
-          );
-          yield* remote.request(created, "Sessions.importConversation", {
-            messages: sourceMessages,
-          }).pipe(
-            Effect.mapError(() => new EnvironmentHandoffError({
-              reason: "unavailable",
-              message: "The target session could not restore the source conversation.",
-              sessionId: source.id,
-              environmentId: target,
-            })),
-          );
+          yield* remote
+            .request(created, "Workspace.importHandoff", { checkpoint })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new EnvironmentHandoffError({
+                    reason: "unavailable",
+                    message:
+                      "The target workspace did not verify the source checkpoint.",
+                    sessionId: source.id,
+                    environmentId: target,
+                  }),
+              ),
+            );
+          yield* remote
+            .request(created, "Sessions.importConversation", {
+              messages: sourceMessages,
+            })
+            .pipe(
+              Effect.mapError(
+                () =>
+                  new EnvironmentHandoffError({
+                    reason: "unavailable",
+                    message:
+                      "The target session could not restore the source conversation.",
+                    sessionId: source.id,
+                    environmentId: target,
+                  }),
+              ),
+            );
           return yield* sessions.upsertRemote(created).pipe(
-            Effect.mapError(() => new EnvironmentHandoffError({
-              reason: "unavailable",
-              message: "The desktop could not persist the remote continuation.",
-              sessionId: source.id,
-              environmentId: target,
-            })),
+            Effect.mapError(
+              () =>
+                new EnvironmentHandoffError({
+                  reason: "unavailable",
+                  message:
+                    "The desktop could not persist the remote continuation.",
+                  sessionId: source.id,
+                  environmentId: target,
+                }),
+            ),
           );
         }),
-      },
-    );
+    });
   });
 
 /** A remote cleanup failure must not strand the desktop's local mirror forever. */
@@ -1867,8 +1922,12 @@ export const githubCloseIssue = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
     const issue = session ? issueReferenceOf(session) : undefined;
-    const issueNumber = issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
-    if (!session?.worktreePath || !Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+    const issueNumber =
+      issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
+    if (
+      !(session?.worktreePath && Number.isSafeInteger(issueNumber)) ||
+      issueNumber <= 0
+    ) {
       return yield* Effect.fail(
         new GitHubApiError({
           reason: "validation",
@@ -1884,12 +1943,14 @@ export const githubIssue = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
     const issue = session ? issueReferenceOf(session) : undefined;
-    const issueNumber = issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
-    if (!session?.worktreePath || !Number.isSafeInteger(issueNumber) || issueNumber <= 0) return null;
-    return yield* GitHubApi.issueView(
-      session.worktreePath,
-      issueNumber,
-    );
+    const issueNumber =
+      issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
+    if (
+      !(session?.worktreePath && Number.isSafeInteger(issueNumber)) ||
+      issueNumber <= 0
+    )
+      return null;
+    return yield* GitHubApi.issueView(session.worktreePath, issueNumber);
   });
 
 /**
@@ -2103,12 +2164,18 @@ export const archiveSessionRouted = (
       { reason },
       { execute: () => archiveSession(sessionId, reason) },
       {
-        execute: () => remote.request(session, "Sessions.archive", { reason }).pipe(
-          Effect.flatMap(Schema.decodeUnknown(SessionSchema)),
-          Effect.flatMap(SessionStore.upsertRemote),
-          Effect.mapError((cause) =>
-            new GitError({ message: "Could not archive the remote session", cause })),
-        )
+        execute: () =>
+          remote.request(session, "Sessions.archive", { reason }).pipe(
+            Effect.flatMap(Schema.decodeUnknown(SessionSchema)),
+            Effect.flatMap(SessionStore.upsertRemote),
+            Effect.mapError(
+              (cause) =>
+                new GitError({
+                  message: "Could not archive the remote session",
+                  cause,
+                }),
+            ),
+          ),
       },
     );
   }).pipe(
@@ -2199,40 +2266,6 @@ export const reviewGet = (sessionId: string) =>
     const review = yield* ReviewStore.get(sessionId);
     return review?.prNumber === session.prNumber ? review : null;
   });
-
-/**
- * `Billing.paths` handler — what each installed harness is charged to.
- *
- * Reports every available harness, including ones with no metered key of their
- * own (opencode), so the pane can be read as a complete picture rather than a
- * list of exceptions.
- */
-export const billingPaths = Effect.gen(function* () {
-  // Re-probe rather than trust the memo. Signing in happens in a terminal and
-  // does not restart the app, so a cached "not signed in" would outlive the fact
-  // — on the one screen whose whole job is to report it accurately.
-  resetSubscriptionCache();
-  const clis = yield* DiscoveryService.list();
-  return clis
-    .filter((c) => c.available)
-    .map((c) => {
-      const subscription = hasSubscriptionAuth(c.kind);
-      const keys = METERED_ENV_KEYS[c.kind] ?? [];
-      return {
-        cli: c.kind,
-        path: billingPath(
-          c.kind,
-          process.env,
-          subscription,
-          subscriptionProbeFailed(c.kind),
-        ),
-        // A key WAS present and we withheld it — the case worth naming, because
-        // it is the one that silently cost money before.
-        keyWithheld:
-          subscription && keys.some((k) => (process.env[k] ?? "").length > 0),
-      };
-    });
-});
 
 /**
  * Strip image payload bytes from transcripts before they cross into the
@@ -2362,12 +2395,18 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       return prior;
     }
 
-    const config = yield* ConfigService.get().pipe(
-      Effect.orElseSucceed(() => null),
-    );
-    const cli = config?.github?.reviewCli ?? "claude";
-    const model = reviewModelFor(cli, config?.github?.reviewModel);
-
+    if (
+      session.connectionId === undefined ||
+      session.providerId === undefined ||
+      session.modelId === undefined
+    ) {
+      return yield* Effect.fail(
+        new ReviewError({
+          message:
+            "Choose a certified provider connection before running a review.",
+        }),
+      );
+    }
     const diff = yield* GitHubApi.prDiff(
       session.worktreePath,
       session.prNumber,
@@ -2381,8 +2420,10 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       repo: session.repo,
       branch: session.branch,
       baseBranch: session.baseBranch ?? null,
-      cli,
-      model,
+      connectionId: session.connectionId,
+      providerId: session.providerId,
+      modelId: session.modelId,
+      targetId: session.environmentId ?? "desktop",
       diff,
     });
 
@@ -2821,9 +2862,7 @@ export const resolvePublishSessionBranch = async (
     if (workspaceModeOf(session) === "direct") {
       throw new Error("Publishing requires an isolated session worktree.");
     }
-    throw new Error(
-      "The worktree is not on a validated semantic task branch.",
-    );
+    throw new Error("The worktree is not on a validated semantic task branch.");
   }
   return { session, branch: liveBranch };
 };
@@ -2837,6 +2876,7 @@ export const githubPublish = (sessionId: string) =>
   Stream.unwrapScoped(
     Effect.gen(function* () {
       const mailbox = yield* Mailbox.make<PublishCheckpoint>();
+      const agentRuntime = yield* AgentRuntime;
       const runtime = yield* Effect.runtime<
         | GitService
         | GitHubApi
@@ -2907,7 +2947,9 @@ export const githubPublish = (sessionId: string) =>
                   },
                   generateMetadata: (inspection) =>
                     run(
-                      claudePublishMetadataGenerator.generate({
+                      makeAgentRuntimePublishMetadataGenerator(
+                        agentRuntime,
+                      ).generate({
                         session,
                         messages,
                         changedPaths: inspection.changedPaths,
@@ -3048,163 +3090,218 @@ export const githubPublishRouted = (sessionId: string) =>
         "Github.createPr",
         {},
         { execute: () => Effect.succeed(githubPublish(sessionId)) },
-        { execute: () => Effect.succeed(Stream.unwrapScoped(
-            Effect.gen(function* () {
-              const mailbox = yield* Mailbox.make<PublishCheckpoint>();
-              let latest: PublishCheckpoint | undefined = session.publish;
-              const emit = (checkpoint: PublishCheckpoint) =>
-                SessionStore.setPublishCheckpoint(session.id, checkpoint).pipe(
-                  Effect.tap(() => Effect.sync(() => {
-                    latest = checkpoint;
-                    mailbox.unsafeOffer(checkpoint);
-                  })),
-                );
-
-              const remoteResult = <A, I>(
-                operation: string,
-                payload: unknown,
-                schema: Schema.Schema<A, I>,
-              ) => remote.execute(session, operation, payload).pipe(
-                Stream.runCollect,
-                Effect.flatMap((events) => {
-                  const terminal = Array.from(events).at(-1);
-                  if (!terminal || terminal.kind === "failed") {
-                    const message = terminal?.payload && typeof terminal.payload === "object" &&
-                      "message" in terminal.payload && typeof terminal.payload.message === "string"
-                      ? terminal.payload.message
-                      : `Remote ${operation} failed.`;
-                    return Effect.fail(new Error(message));
-                  }
-                  if (terminal.kind !== "complete") {
-                    return Effect.fail(new Error(`Remote ${operation} did not complete.`));
-                  }
-                  return Schema.decodeUnknown(schema)(terminal.payload).pipe(
-                    Effect.mapError(() => new Error(`Remote ${operation} returned an invalid result.`)),
-                  );
-                }),
-              );
-
-              yield* Effect.forkScoped(
+        {
+          execute: () =>
+            Effect.succeed(
+              Stream.unwrapScoped(
                 Effect.gen(function* () {
-                  yield* emit({
-                    step: "inspecting",
-                    completed: [],
-                    updatedAt: new Date().toISOString(),
-                  });
-                  const prepared = yield* remoteResult(
-                    "Github.preparePublish",
-                    {},
-                    RemotePublishPreparedSchema,
-                  );
-                  const preparedFields = {
-                    metadata: {
-                      commitMessage: prepared.commitMessage,
-                      prTitle: prepared.prTitle,
-                      prBody: prepared.prBody,
-                    },
-                    branch: prepared.branch,
-                    commitSha: prepared.commitSha,
-                  };
-                  const throughCommit = [
-                    "inspecting",
-                    "verifying-branch",
-                    "generating-metadata",
-                    "staging",
-                    "committing",
-                  ] as const;
-                  yield* emit({
-                    step: "pushing",
-                    completed: throughCommit,
-                    ...preparedFields,
-                    updatedAt: new Date().toISOString(),
-                  });
-                  yield* emit({
-                    step: "resolving-pr",
-                    completed: [...throughCommit, "pushing"],
-                    ...preparedFields,
-                    updatedAt: new Date().toISOString(),
-                  });
-                  const existing = prepared.existingPrNumber ?? (
-                    yield* GitHubApi.prForBranchBySlug(prepared.githubSlug, prepared.branch)
-                  );
-                  const prStep = existing === null ? "creating-pr" : "updating-pr";
-                  yield* emit({
-                    step: prStep,
-                    completed: [...throughCommit, "pushing", "resolving-pr"],
-                    ...preparedFields,
-                    updatedAt: new Date().toISOString(),
-                  });
-                  const prNumber = existing ?? (
-                    yield* GitHubApi.prCreateBySlug(prepared.githubSlug, prepared.branch, {
-                      title: prepared.prTitle,
-                      body: prepared.prBody,
-                      base: prepared.baseBranch,
-                      draft: false,
-                    })
-                  );
-                  if (existing !== null) {
-                    yield* GitHubApi.prUpdateBySlug(prepared.githubSlug, existing, {
-                      title: prepared.prTitle,
-                      body: prepared.prBody,
-                    });
-                  }
-                  yield* emit({
-                    step: "linking",
-                    completed: [...throughCommit, "pushing", "resolving-pr", prStep],
-                    ...preparedFields,
-                    prNumber,
-                    updatedAt: new Date().toISOString(),
-                  });
-                  yield* remoteResult(
-                    "Github.completePublish",
-                    { prNumber },
-                    SessionSchema,
-                  );
-                  yield* SessionStore.setPrNumber(session.id, prNumber);
-                  yield* emit({
-                    step: "complete",
-                    completed: [
-                      ...throughCommit,
-                      "pushing",
-                      "resolving-pr",
-                      prStep,
-                      "linking",
-                      "complete",
-                    ],
-                    ...preparedFields,
-                    prNumber,
-                    updatedAt: new Date().toISOString(),
-                  });
-                }).pipe(
-                  Effect.catchAll((error) => {
-                    const failure = publishFailure(
-                      "message" in error && typeof error.message === "string"
-                        ? error.message
-                        : "Remote publishing failed.",
-                      latest,
+                  const mailbox = yield* Mailbox.make<PublishCheckpoint>();
+                  let latest: PublishCheckpoint | undefined = session.publish;
+                  const emit = (checkpoint: PublishCheckpoint) =>
+                    SessionStore.setPublishCheckpoint(
+                      session.id,
+                      checkpoint,
+                    ).pipe(
+                      Effect.tap(() =>
+                        Effect.sync(() => {
+                          latest = checkpoint;
+                          mailbox.unsafeOffer(checkpoint);
+                        }),
+                      ),
                     );
-                    return SessionStore.setPublishCheckpoint(session.id, failure).pipe(
-                      Effect.catchAll(() => Effect.void),
-                      Effect.andThen(Effect.sync(() => mailbox.unsafeOffer(failure))),
+
+                  const remoteResult = <A, I>(
+                    operation: string,
+                    payload: unknown,
+                    schema: Schema.Schema<A, I>,
+                  ) =>
+                    remote.execute(session, operation, payload).pipe(
+                      Stream.runCollect,
+                      Effect.flatMap((events) => {
+                        const terminal = Array.from(events).at(-1);
+                        if (!terminal || terminal.kind === "failed") {
+                          const message =
+                            terminal?.payload &&
+                            typeof terminal.payload === "object" &&
+                            "message" in terminal.payload &&
+                            typeof terminal.payload.message === "string"
+                              ? terminal.payload.message
+                              : `Remote ${operation} failed.`;
+                          return Effect.fail(new Error(message));
+                        }
+                        if (terminal.kind !== "complete") {
+                          return Effect.fail(
+                            new Error(`Remote ${operation} did not complete.`),
+                          );
+                        }
+                        return Schema.decodeUnknown(schema)(
+                          terminal.payload,
+                        ).pipe(
+                          Effect.mapError(
+                            () =>
+                              new Error(
+                                `Remote ${operation} returned an invalid result.`,
+                              ),
+                          ),
+                        );
+                      }),
                     );
-                  }),
-                  Effect.ensuring(mailbox.end),
-                ),
-              );
-              return Mailbox.toStream(mailbox);
-            }),
-          )) },
+
+                  yield* Effect.forkScoped(
+                    Effect.gen(function* () {
+                      yield* emit({
+                        step: "inspecting",
+                        completed: [],
+                        updatedAt: new Date().toISOString(),
+                      });
+                      const prepared = yield* remoteResult(
+                        "Github.preparePublish",
+                        {},
+                        RemotePublishPreparedSchema,
+                      );
+                      const preparedFields = {
+                        metadata: {
+                          commitMessage: prepared.commitMessage,
+                          prTitle: prepared.prTitle,
+                          prBody: prepared.prBody,
+                        },
+                        branch: prepared.branch,
+                        commitSha: prepared.commitSha,
+                      };
+                      const throughCommit = [
+                        "inspecting",
+                        "verifying-branch",
+                        "generating-metadata",
+                        "staging",
+                        "committing",
+                      ] as const;
+                      yield* emit({
+                        step: "pushing",
+                        completed: throughCommit,
+                        ...preparedFields,
+                        updatedAt: new Date().toISOString(),
+                      });
+                      yield* emit({
+                        step: "resolving-pr",
+                        completed: [...throughCommit, "pushing"],
+                        ...preparedFields,
+                        updatedAt: new Date().toISOString(),
+                      });
+                      const existing =
+                        prepared.existingPrNumber ??
+                        (yield* GitHubApi.prForBranchBySlug(
+                          prepared.githubSlug,
+                          prepared.branch,
+                        ));
+                      const prStep =
+                        existing === null ? "creating-pr" : "updating-pr";
+                      yield* emit({
+                        step: prStep,
+                        completed: [
+                          ...throughCommit,
+                          "pushing",
+                          "resolving-pr",
+                        ],
+                        ...preparedFields,
+                        updatedAt: new Date().toISOString(),
+                      });
+                      const prNumber =
+                        existing ??
+                        (yield* GitHubApi.prCreateBySlug(
+                          prepared.githubSlug,
+                          prepared.branch,
+                          {
+                            title: prepared.prTitle,
+                            body: prepared.prBody,
+                            base: prepared.baseBranch,
+                            draft: false,
+                          },
+                        ));
+                      if (existing !== null) {
+                        yield* GitHubApi.prUpdateBySlug(
+                          prepared.githubSlug,
+                          existing,
+                          {
+                            title: prepared.prTitle,
+                            body: prepared.prBody,
+                          },
+                        );
+                      }
+                      yield* emit({
+                        step: "linking",
+                        completed: [
+                          ...throughCommit,
+                          "pushing",
+                          "resolving-pr",
+                          prStep,
+                        ],
+                        ...preparedFields,
+                        prNumber,
+                        updatedAt: new Date().toISOString(),
+                      });
+                      yield* remoteResult(
+                        "Github.completePublish",
+                        { prNumber },
+                        SessionSchema,
+                      );
+                      yield* SessionStore.setPrNumber(session.id, prNumber);
+                      yield* emit({
+                        step: "complete",
+                        completed: [
+                          ...throughCommit,
+                          "pushing",
+                          "resolving-pr",
+                          prStep,
+                          "linking",
+                          "complete",
+                        ],
+                        ...preparedFields,
+                        prNumber,
+                        updatedAt: new Date().toISOString(),
+                      });
+                    }).pipe(
+                      Effect.catchAll((error) => {
+                        const failure = publishFailure(
+                          "message" in error &&
+                            typeof error.message === "string"
+                            ? error.message
+                            : "Remote publishing failed.",
+                          latest,
+                        );
+                        return SessionStore.setPublishCheckpoint(
+                          session.id,
+                          failure,
+                        ).pipe(
+                          Effect.catchAll(() => Effect.void),
+                          Effect.andThen(
+                            Effect.sync(() => mailbox.unsafeOffer(failure)),
+                          ),
+                        );
+                      }),
+                      Effect.ensuring(mailbox.end),
+                    ),
+                  );
+                  return Mailbox.toStream(mailbox);
+                }),
+              ),
+            ),
+        },
       );
     }).pipe(
-      Effect.catchAll((error) => Effect.succeed(Stream.make({
-        step: "failed" as const,
-        completed: [],
-        error: "message" in error && typeof error.message === "string"
-          ? error.message
-          : "Publishing failed.",
-        updatedAt: new Date().toISOString(),
-      })))
-    )
+      Effect.catchAll((error) =>
+        Effect.succeed(
+          Stream.make({
+            step: "failed" as const,
+            completed: [],
+            error:
+              "message" in error && typeof error.message === "string"
+                ? error.message
+                : "Publishing failed.",
+            updatedAt: new Date().toISOString(),
+          }),
+        ),
+      ),
+    ),
   );
 
 /**
@@ -3445,10 +3542,10 @@ export const createTerminal = (input: {
  */
 export const setReasoning = (
   sessionId: string,
-  cli: "claude" | "codex",
+  chatId: string,
   reasoning: Parameters<typeof SessionStore.setReasoning>[2],
 ) =>
-  SessionStore.setReasoning(sessionId, cli, reasoning).pipe(
+  SessionStore.setReasoning(sessionId, chatId, reasoning).pipe(
     Effect.tapError((error) =>
       Effect.logWarning(
         `Failed to persist reasoning strength for session ${sessionId}: ${error.message}`,
@@ -3609,7 +3706,8 @@ const validPersistedSettingValue = (
   setting: SettingContribution,
   value: unknown,
 ): value is PluginSettingValue =>
-  setting.type !== "secret" && settingValidationFailure(setting, value) === null;
+  setting.type !== "secret" &&
+  settingValidationFailure(setting, value) === null;
 
 /** Where one plugin's private key/value blob lives. Confined by construction. */
 const pluginStorageFile = (pluginId: string) =>
@@ -3817,19 +3915,19 @@ const pluginSettingSet = (
     if (failure) {
       return yield* Effect.fail(new PluginError({ pluginId, reason: failure }));
     }
-    yield* pluginStorageSet(pluginId, pluginSettingStorageKey(settingId), value);
+    yield* pluginStorageSet(
+      pluginId,
+      pluginSettingStorageKey(settingId),
+      value,
+    );
   });
 
 const mapPluginSecretStoreError =
-  (
-    pluginId: string,
-    reason: (cause: PluginSecretStoreUnavailable) => string,
-  ) =>
+  (pluginId: string, reason: (cause: PluginSecretStoreUnavailable) => string) =>
   <A, R>(effect: Effect.Effect<A, PluginSecretStoreUnavailable, R>) =>
     effect.pipe(
       Effect.mapError(
-        (cause) =>
-          new PluginError({ pluginId, reason: reason(cause), cause }),
+        (cause) => new PluginError({ pluginId, reason: reason(cause), cause }),
       ),
     );
 
@@ -3849,25 +3947,29 @@ const pluginSecretSet = (pluginId: string, settingId: string, value: string) =>
       return yield* Effect.fail(new PluginError({ pluginId, reason: failure }));
     }
     const pluginSecrets = yield* PluginSecretStore;
-    yield* pluginSecrets.set(pluginId, settingId, value).pipe(
-      mapPluginSecretStoreError(
-        pluginId,
-        (cause) =>
-          `Could not save "${setting.label}" securely: ${cause.message}`,
-      ),
-    );
+    yield* pluginSecrets
+      .set(pluginId, settingId, value)
+      .pipe(
+        mapPluginSecretStoreError(
+          pluginId,
+          (cause) =>
+            `Could not save "${setting.label}" securely: ${cause.message}`,
+        ),
+      );
   });
 
 const pluginSecretClear = (pluginId: string, settingId: string) =>
   Effect.gen(function* () {
     const setting = yield* declaredSecretSetting(pluginId, settingId);
     const pluginSecrets = yield* PluginSecretStore;
-    yield* pluginSecrets.clear(pluginId, settingId).pipe(
-      mapPluginSecretStoreError(
-        pluginId,
-        (cause) => `Could not remove "${setting.label}": ${cause.message}`,
-      ),
-    );
+    yield* pluginSecrets
+      .clear(pluginId, settingId)
+      .pipe(
+        mapPluginSecretStoreError(
+          pluginId,
+          (cause) => `Could not remove "${setting.label}": ${cause.message}`,
+        ),
+      );
   });
 
 /**
@@ -3896,13 +3998,15 @@ const clearPluginConfiguration = (pluginId: string) =>
       ),
     );
     const pluginSecrets = yield* PluginSecretStore;
-    yield* pluginSecrets.clearPlugin(pluginId).pipe(
-      mapPluginSecretStoreError(
-        pluginId,
-        (cause) =>
-          `The plugin remains installed because its encrypted settings could not be cleared: ${cause.message}`,
-      ),
-    );
+    yield* pluginSecrets
+      .clearPlugin(pluginId)
+      .pipe(
+        mapPluginSecretStoreError(
+          pluginId,
+          (cause) =>
+            `The plugin remains installed because its encrypted settings could not be cleared: ${cause.message}`,
+        ),
+      );
   });
 
 export const uninstallPlugin = (pluginId: string) =>
@@ -4032,12 +4136,7 @@ const issueProviderOperation = <A, I>(
     return decoded;
   });
 
-/**
- * Handlers for every procedure in the group. Each one delegates straight to an
- * Effect service, so the group remains the sole contract. `Discovery.list`
- * pulls in a `CommandExecutor` requirement (via `DiscoveryService.list()`) that
- * `AppLayer` satisfies with the Node platform layer.
- */
+/** Handlers for every procedure in the group, delegated to Effect services. */
 let failGitHubFeedbackMarkOnce =
   process.env.JINGLER_E2E_GITHUB_FAIL_MARK_ONCE === "1";
 
@@ -4059,7 +4158,10 @@ export const listProjectDirectories = (requestedPath?: string) =>
         Effect.gen(function* () {
           const child = path.join(directory, name);
           const childInfo = yield* fs.stat(child).pipe(Effect.option);
-          if (Option.isNone(childInfo) || childInfo.value.type !== "Directory") {
+          if (
+            Option.isNone(childInfo) ||
+            childInfo.value.type !== "Directory"
+          ) {
             return null;
           }
           const isGitRepository = yield* fs
@@ -4085,12 +4187,156 @@ export const listProjectDirectories = (requestedPath?: string) =>
     ),
   );
 
+const providerOperation = <A, E extends { readonly message: string }>(
+  operation: (service: ProviderConnectionsShape) => Effect.Effect<A, E>,
+): Effect.Effect<A, ProviderConnectionError, ProviderConnections> =>
+  Effect.flatMap(ProviderConnections, operation).pipe(
+    Effect.mapError(
+      (error) => new ProviderConnectionError({ message: error.message }),
+    ),
+  );
+
+const agentResourceError = (
+  operation: AgentResourceRpcError["operation"],
+  cause: { readonly message: string },
+) => new AgentResourceRpcError({ operation, message: cause.message });
+
+const resourceWorktree = (sessionId: string | null) =>
+  sessionId === null
+    ? Effect.succeed(null)
+    : SessionStore.get(sessionId).pipe(
+        Effect.map((session) => session.worktreePath ?? null),
+        Effect.orElseSucceed(() => null),
+      );
+
+const resourceDetection = (sessionId: string | null) =>
+  resourceWorktree(sessionId).pipe(
+    Effect.flatMap((worktreePath) =>
+      detectAgentResources({ homeDir: homedir(), worktreePath }),
+    ),
+  );
+
+const resourceList = Effect.gen(function* () {
+  const files = yield* AgentResourceService;
+  const mcp = yield* ImportedMcpService;
+  return [...(yield* files.list), ...(yield* mcp.list)];
+}).pipe(Effect.mapError((cause) => agentResourceError("list", cause)));
+
+const resourceEnabledForTarget = (targetId: string) =>
+  Effect.gen(function* () {
+    const files = yield* AgentResourceService;
+    const mcp = yield* ImportedMcpService;
+    const managedFiles = yield* files.enabledForTarget(targetId);
+    const managedMcp = (yield* mcp.list).filter(
+      (server) =>
+        server.enabled &&
+        server.availability.state === "available" &&
+        server.availability.targetId === targetId,
+    );
+    return [...managedFiles, ...managedMcp];
+  }).pipe(Effect.mapError((cause) => agentResourceError("resolve", cause)));
+
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
-  "Billing.paths": () => billingPaths,
-  "Discovery.list": () => DiscoveryService.list(),
+  "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
+  "RuntimeDiagnostics.latest": () => RuntimeDiagnostics.latest(),
+  "RuntimeDiagnostics.export": ({ runId }) => RuntimeDiagnostics.export(runId),
+  "Provider.list": () => providerOperation((service) => service.list),
+  "Provider.status": () => providerOperation((service) => service.status),
+  "Provider.loginEvents": () =>
+    Stream.unwrap(
+      ProviderConnections.pipe(Effect.map((service) => service.loginEvents)),
+    ),
+  "Provider.connectClaudeToken": (input) =>
+    providerOperation((service) => service.connectClaudeToken(input)),
+  "Provider.startCodexLogin": (input) =>
+    providerOperation((service) => service.startCodexLogin(input)),
+  "Provider.cancelLogin": ({ connectionId }) =>
+    providerOperation((service) => service.cancelLogin(connectionId)),
+  "Provider.setApiKey": (input) =>
+    providerOperation((service) => service.setApiKey(input)),
+  "Provider.refresh": ({ connectionId }) =>
+    providerOperation((service) => service.refresh(connectionId)),
+  "Provider.logout": ({ connectionId }) =>
+    providerOperation((service) => service.logout(connectionId)),
+  "Provider.verifyModel": (input) =>
+    providerOperation((service) => service.verifyModel(input)),
+  "AgentResources.list": () => resourceList,
+  "AgentResources.detect": ({ sessionId }) => resourceDetection(sessionId),
+  "AgentResources.importFiles": ({ sessionId, sourcePaths, scope }) =>
+    Effect.gen(function* () {
+      const service = yield* AgentResourceService;
+      const detected = yield* resourceDetection(sessionId);
+      const requested = new Set(sourcePaths);
+      const candidates = detected.candidates.filter(
+        (candidate) =>
+          candidate.kind !== "mcp" &&
+          requested.has(candidate.provenance.sourcePath),
+      );
+      const imported = yield* service.importResources(candidates, scope);
+      const found = new Set(
+        candidates.map((candidate) => candidate.provenance.sourcePath),
+      );
+      return {
+        imported: imported.imported,
+        skipped: [
+          ...imported.skipped,
+          ...sourcePaths
+            .filter((sourcePath) => !found.has(sourcePath))
+            .map((sourcePath) => ({
+              sourcePath,
+              kind: null,
+              code: "malformed" as const,
+              message: "Resource is no longer present in the detected catalog",
+            })),
+        ],
+      };
+    }).pipe(Effect.mapError((cause) => agentResourceError("import", cause))),
+  "AgentResources.importMcp": (input) =>
+    Effect.flatMap(ImportedMcpService, (service) =>
+      service.importServer(input),
+    ).pipe(Effect.mapError((cause) => agentResourceError("import", cause))),
+  "AgentResources.remove": ({ kind, id }) =>
+    Effect.gen(function* () {
+      const files = yield* AgentResourceService;
+      const mcp = yield* ImportedMcpService;
+      if (kind === "mcp") return yield* mcp.remove(id);
+      return yield* files.remove(id);
+    }).pipe(Effect.mapError((cause) => agentResourceError("remove", cause))),
+  "AgentResources.setEnabled": ({ kind, id, enabled }) =>
+    Effect.gen(function* () {
+      const files = yield* AgentResourceService;
+      const mcp = yield* ImportedMcpService;
+      if (kind === "mcp") return yield* mcp.setEnabled(id, enabled);
+      return yield* files.setEnabled(id, enabled);
+    }).pipe(Effect.mapError((cause) => agentResourceError("enable", cause))),
+  "AgentResources.reveal": ({ kind, id }) =>
+    kind === "mcp"
+      ? Effect.fail(
+        agentResourceError("reveal", new Error("MCP resources do not have a local file")),
+      )
+      : Effect.flatMap(AgentResourceService, (service) => service.reveal(id)).pipe(
+        Effect.tap((path) => Effect.sync(() => shell.showItemInFolder(path))),
+        Effect.asVoid,
+        Effect.mapError((cause) => agentResourceError("reveal", cause)),
+      ),
+  "AgentResources.enabledForTarget": ({ targetId }) =>
+    resourceEnabledForTarget(targetId),
+  "AgentResources.watch": () =>
+    Stream.merge(
+      Stream.unwrap(
+        Effect.map(AgentResourceService, (service) => service.watch()),
+      ),
+      Stream.unwrap(
+        Effect.map(ImportedMcpService, (service) => service.watch()),
+      ),
+    ).pipe(
+      Stream.mapEffect(() => resourceList),
+      Stream.catchAll(() => Stream.empty),
+    ),
   "Environment.list": () => EnvironmentService.list,
   "Environment.refresh": () => EnvironmentService.refresh,
-  "Environment.discovery": ({ deviceId }) => EnvironmentService.discovery(deviceId),
+  "Environment.discovery": ({ deviceId }) =>
+    EnvironmentService.discovery(deviceId),
   "Environment.watch": () =>
     Stream.repeatEffectWithSchedule(
       EnvironmentService.list.pipe(
@@ -4113,47 +4359,60 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Projects.list": ({ environmentId }) =>
     environmentId === undefined
       ? Effect.gen(function* () {
-          const sessions = yield* SessionStore.list()
+          const sessions = yield* SessionStore.list();
           const discovered = yield* WorkspaceService.listRepos().pipe(
-            Effect.orElseSucceed(() => [])
-          )
+            Effect.orElseSucceed(() => []),
+          );
           const projects = yield* ProjectService.backfill([
             ...sessions.flatMap((session) =>
-              session.environmentId !== undefined || session.repoPath === undefined
+              session.environmentId !== undefined ||
+              session.repoPath === undefined
                 ? []
-                : [{ path: session.repoPath, name: session.repo }]
+                : [{ path: session.repoPath, name: session.repo }],
             ),
             ...discovered.map((repository) => ({
               path: repository.path,
-              name: repository.name
-            }))
-          ])
-          const byPath = new Map(projects.map((project) => [project.path, project.id]))
+              name: repository.name,
+            })),
+          ]);
+          const byPath = new Map(
+            projects.map((project) => [project.path, project.id]),
+          );
           yield* Effect.forEach(
             sessions.filter(
               (session) =>
                 session.environmentId === undefined &&
                 session.projectId === undefined &&
-                session.repoPath !== undefined
+                session.repoPath !== undefined,
             ),
             (session) => {
-              const projectId = byPath.get(resolve(session.repoPath!))
+              const projectId = byPath.get(resolve(session.repoPath!));
               return projectId === undefined
                 ? Effect.void
-                : SessionStore.setProject(session.id, projectId).pipe(Effect.asVoid)
+                : SessionStore.setProject(session.id, projectId).pipe(
+                    Effect.asVoid,
+                  );
             },
-            { concurrency: 1, discard: true }
-          )
-          return projects
+            { concurrency: 1, discard: true },
+          );
+          return projects;
         })
-      : RemoteSessionService.requestOnEnvironment(environmentId, "Projects.list", {}).pipe(
+      : RemoteSessionService.requestOnEnvironment(
+          environmentId,
+          "Projects.list",
+          {},
+        ).pipe(
           Effect.flatMap(Schema.decodeUnknown(Schema.Array(ProjectSchema))),
           Effect.map((projects) =>
-            projects.map((project) => ({ ...project, environmentId }))
+            projects.map((project) => ({ ...project, environmentId })),
           ),
           Effect.mapError(
-            (cause) => new GitError({ message: "Could not list projects on the selected device", cause })
-          )
+            (cause) =>
+              new GitError({
+                message: "Could not list projects on the selected device",
+                cause,
+              }),
+          ),
         ),
   "Projects.register": (input) =>
     input.environmentId === undefined
@@ -4161,13 +4420,23 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       : RemoteSessionService.requestOnEnvironment(
           input.environmentId,
           "Projects.register",
-          { path: input.path, ...(input.name === undefined ? {} : { name: input.name }) }
+          {
+            path: input.path,
+            ...(input.name === undefined ? {} : { name: input.name }),
+          },
         ).pipe(
           Effect.flatMap(Schema.decodeUnknown(ProjectSchema)),
-          Effect.map((project) => ({ ...project, environmentId: input.environmentId })),
+          Effect.map((project) => ({
+            ...project,
+            environmentId: input.environmentId,
+          })),
           Effect.mapError(
-            (cause) => new GitError({ message: "Could not register the remote project", cause })
-          )
+            (cause) =>
+              new GitError({
+                message: "Could not register the remote project",
+                cause,
+              }),
+          ),
         ),
   "Projects.browse": () =>
     Effect.flatMap(DialogService, (dialog) =>
@@ -4187,7 +4456,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         allowCreate: true,
       });
       if (parent === null) return null;
-      const directoryName = path.basename(repositoryName.trim().replace(/\.git$/i, ""));
+      const directoryName = path.basename(
+        repositoryName.trim().replace(/\.git$/i, ""),
+      );
       if (directoryName.length === 0 || directoryName === ".") {
         return null;
       }
@@ -4200,13 +4471,23 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       : RemoteSessionService.requestOnEnvironment(
           input.environmentId,
           "Projects.createDirectory",
-          { path: input.path, ...(input.name === undefined ? {} : { name: input.name }) }
+          {
+            path: input.path,
+            ...(input.name === undefined ? {} : { name: input.name }),
+          },
         ).pipe(
           Effect.flatMap(Schema.decodeUnknown(ProjectSchema)),
-          Effect.map((project) => ({ ...project, environmentId: input.environmentId })),
+          Effect.map((project) => ({
+            ...project,
+            environmentId: input.environmentId,
+          })),
           Effect.mapError(
-            (cause) => new GitError({ message: "Could not create the remote project", cause })
-          )
+            (cause) =>
+              new GitError({
+                message: "Could not create the remote project",
+                cause,
+              }),
+          ),
         ),
   "Projects.clone": (input) =>
     input.environmentId === undefined
@@ -4217,14 +4498,21 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           {
             url: input.url,
             destination: input.destination,
-            ...(input.name === undefined ? {} : { name: input.name })
-          }
+            ...(input.name === undefined ? {} : { name: input.name }),
+          },
         ).pipe(
           Effect.flatMap(Schema.decodeUnknown(ProjectSchema)),
-          Effect.map((project) => ({ ...project, environmentId: input.environmentId })),
+          Effect.map((project) => ({
+            ...project,
+            environmentId: input.environmentId,
+          })),
           Effect.mapError(
-            (cause) => new GitError({ message: "Could not clone the remote project", cause })
-          )
+            (cause) =>
+              new GitError({
+                message: "Could not clone the remote project",
+                cause,
+              }),
+          ),
         ),
   "Projects.cloneFromGitHub": (input) =>
     Effect.gen(function* () {
@@ -4245,24 +4533,42 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     }),
   "Projects.ensureOnEnvironment": ({ projectId, environmentId }) =>
     Effect.gen(function* () {
-      const project = yield* ProjectService.get(projectId)
-      return yield* ensureProjectOnOwnedEnvironment(project, environmentId)
+      const project = yield* ProjectService.get(projectId);
+      return yield* ensureProjectOnOwnedEnvironment(project, environmentId);
     }),
   "Projects.remove": ({ id, environmentId }) =>
     environmentId === undefined
       ? ProjectService.remove(id)
-      : RemoteSessionService.requestOnEnvironment(environmentId, "Projects.remove", { id }).pipe(
+      : RemoteSessionService.requestOnEnvironment(
+          environmentId,
+          "Projects.remove",
+          { id },
+        ).pipe(
           Effect.asVoid,
           Effect.mapError(
-            (cause) => new GitError({ message: "Could not remove the remote project registration", cause })
-          )
+            (cause) =>
+              new GitError({
+                message: "Could not remove the remote project registration",
+                cause,
+              }),
+          ),
         ),
   "Workspace.repos": () => WorkspaceService.listRepos(),
   "Workspace.branches": ({ repoPath, environmentId }) =>
     environmentId
-      ? RemoteSessionService.requestOnEnvironment(environmentId, "Workspace.branches", { repoPath }).pipe(
+      ? RemoteSessionService.requestOnEnvironment(
+          environmentId,
+          "Workspace.branches",
+          { repoPath },
+        ).pipe(
           Effect.flatMap(Schema.decodeUnknown(Schema.Array(Schema.String))),
-          Effect.mapError((cause) => new GitError({ message: "Could not list remote branches", cause })),
+          Effect.mapError(
+            (cause) =>
+              new GitError({
+                message: "Could not list remote branches",
+                cause,
+              }),
+          ),
         )
       : WorkspaceService.branches(repoPath),
   "Workspace.files": ({ repoPath, environmentId, sessionId }) =>
@@ -4277,9 +4583,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
               environmentId,
               "Workspace.files",
               { repoPath },
-            )).pipe(
+            )
+        ).pipe(
           Effect.flatMap(Schema.decodeUnknown(Schema.Array(Schema.String))),
-          Effect.mapError((cause) => new GitError({ message: "Could not list remote files", cause })),
+          Effect.mapError(
+            (cause) =>
+              new GitError({ message: "Could not list remote files", cause }),
+          ),
         )
       : WorkspaceService.files(repoPath),
   "Workspace.revertFile": (input) => workspaceRevertFile(input),
@@ -4288,16 +4598,33 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Sessions.get": ({ id }) => SessionStore.get(id),
   "Sessions.create": ({ requestedSessionId: _internalSessionId, ...input }) =>
     createSessionRouted(input),
-  "Sessions.createWithProgress": ({ requestedSessionId: _internalSessionId, ...input }) =>
+  "Sessions.createWithProgress": ({
+    requestedSessionId: _internalSessionId,
+    ...input
+  }) =>
     sessionCreationStream((progress) => createSessionRouted(input, progress)),
-  "Sessions.createFromPr": ({ requestedSessionId: _internalSessionId, ...input }) =>
-    createSessionFromPrRouted(input),
-  "Sessions.createFromPrWithProgress": ({ requestedSessionId: _internalSessionId, ...input }) =>
-    sessionCreationStream((progress) => createSessionFromPrRouted(input, progress)),
-  "Sessions.createFromIssue": ({ requestedSessionId: _internalSessionId, ...input }) =>
-    createSessionFromIssueRouted(input),
-  "Sessions.createFromIssueWithProgress": ({ requestedSessionId: _internalSessionId, ...input }) =>
-    sessionCreationStream((progress) => createSessionFromIssueRouted(input, progress)),
+  "Sessions.createFromPr": ({
+    requestedSessionId: _internalSessionId,
+    ...input
+  }) => createSessionFromPrRouted(input),
+  "Sessions.createFromPrWithProgress": ({
+    requestedSessionId: _internalSessionId,
+    ...input
+  }) =>
+    sessionCreationStream((progress) =>
+      createSessionFromPrRouted(input, progress),
+    ),
+  "Sessions.createFromIssue": ({
+    requestedSessionId: _internalSessionId,
+    ...input
+  }) => createSessionFromIssueRouted(input),
+  "Sessions.createFromIssueWithProgress": ({
+    requestedSessionId: _internalSessionId,
+    ...input
+  }) =>
+    sessionCreationStream((progress) =>
+      createSessionFromIssueRouted(input, progress),
+    ),
   "Sessions.linkIssue": (input) => linkIssue(input),
   "Sessions.unlinkIssue": ({ sessionId }) => unlinkIssue(sessionId),
   "Sessions.clearInitialPrompt": ({ sessionId }) =>
@@ -4308,8 +4635,16 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Sessions.archive": ({ sessionId, reason }) =>
     archiveSessionRouted(sessionId, reason),
   "Sessions.restore": ({ sessionId }) => restoreSession(sessionId),
+  "Sessions.resolveRuntimeRecovery": ({ sessionId, runId, callId }) =>
+    RuntimeRecoveryService.resolve(sessionId, runId, callId),
   "Sessions.retitle": ({ sessionId }) =>
-    retitleSession(sessionId, claudeTitleGenerator),
+    Effect.gen(function* () {
+      const runtime = yield* AgentRuntime;
+      return yield* retitleSession(
+        sessionId,
+        makeAgentRuntimeTitleGenerator(runtime),
+      );
+    }),
   "Sessions.rename": ({ sessionId, title }) => renameSession(sessionId, title),
   "Sessions.setStatus": ({ sessionId, status }) =>
     setSessionStatus(sessionId, status),
@@ -4328,10 +4663,12 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         const remote = yield* RemoteSessionService;
         yield* removeRemoteSessionMirror(
           remote.request(session, "Sessions.delete", {}),
-          remote.forget(sessionId).pipe(
-            Effect.ignore,
-            Effect.zipRight(SessionStore.forgetRemote(sessionId)),
-          ),
+          remote
+            .forget(sessionId)
+            .pipe(
+              Effect.ignore,
+              Effect.zipRight(SessionStore.forgetRemote(sessionId)),
+            ),
         );
         return;
       }
@@ -4435,33 +4772,44 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         "Sessions.transcriptPage",
         { chatId, before, limit },
         {
-          execute: () => Effect.gen(function* () {
-            if (!session.chats.some((chat) => chat.id === chatId)) {
-              return { messages: [], hasMore: false };
-            }
-            if (chatId === `c_${session.id}_1`) {
-              yield* TranscriptStore.adoptLegacy(sessionId, chatId);
-            }
-            const page = yield* TranscriptStore.listPage(chatId, { before, limit });
-            return {
-              messages: withoutAttachmentData(page.messages),
-              hasMore: page.hasMore,
-              ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
-            };
-          }),
+          execute: () =>
+            Effect.gen(function* () {
+              if (!session.chats.some((chat) => chat.id === chatId)) {
+                return { messages: [], hasMore: false };
+              }
+              if (chatId === `c_${session.id}_1`) {
+                yield* TranscriptStore.adoptLegacy(sessionId, chatId);
+              }
+              const page = yield* TranscriptStore.listPage(chatId, {
+                before,
+                limit,
+              });
+              return {
+                messages: withoutAttachmentData(page.messages),
+                hasMore: page.hasMore,
+                ...(page.cursor === undefined ? {} : { cursor: page.cursor }),
+              };
+            }),
         },
         {
-          execute: () => remote.request(session, "Sessions.transcriptPage", {
-              chatId,
-              before,
-              limit,
-            }).pipe(
-            Effect.flatMap(Schema.decodeUnknown(Schema.Struct({
-              messages: Schema.Array(MessageSchema),
-              hasMore: Schema.Boolean,
-              cursor: Schema.optional(Schema.String),
-            }))),
-          ),
+          execute: () =>
+            remote
+              .request(session, "Sessions.transcriptPage", {
+                chatId,
+                before,
+                limit,
+              })
+              .pipe(
+                Effect.flatMap(
+                  Schema.decodeUnknown(
+                    Schema.Struct({
+                      messages: Schema.Array(MessageSchema),
+                      hasMore: Schema.Boolean,
+                      cursor: Schema.optional(Schema.String),
+                    }),
+                  ),
+                ),
+              ),
         },
       );
     }).pipe(
@@ -4501,9 +4849,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         {},
         { execute: () => sessionDiff(id) },
         {
-          execute: () => remote.request(session, "Sessions.diff", {}).pipe(
-            Effect.flatMap(Schema.decodeUnknown(Schema.String)),
-          ),
+          execute: () =>
+            remote
+              .request(session, "Sessions.diff", {})
+              .pipe(Effect.flatMap(Schema.decodeUnknown(Schema.String))),
         },
       );
     }).pipe(
@@ -4534,68 +4883,90 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           "Agent.run",
           { chatId, text, displayText, images, reasoning, externalInstruction },
           {
-            execute: () => Effect.succeed(runner.prompt(
-              sessionId,
-              chatId,
-              text,
-              images ?? [],
-              reasoning,
-              undefined,
-              externalInstruction,
-              displayText,
-            )),
+            execute: () =>
+              Effect.succeed(
+                runner.prompt(
+                  sessionId,
+                  chatId,
+                  text,
+                  images ?? [],
+                  reasoning,
+                  undefined,
+                  externalInstruction,
+                  displayText,
+                ),
+              ),
           },
           {
-            execute: () => Effect.succeed(
-              remote.execute(session, "Agent.run", {
-                chatId,
-                text,
-                displayText,
-                images,
-                reasoning,
-                externalInstruction
-              }).pipe(
-                Stream.tap((event) => {
-                  if (event.kind !== "complete") return Effect.void;
-                  const payload = event.payload as Record<string, unknown>;
-                  return Schema.decodeUnknown(SessionSchema)(payload?.session).pipe(
-                    Effect.flatMap(SessionStore.upsertRemote),
-                    Effect.ignore,
-                  );
-                }),
-                Stream.filter((event) => event.kind !== "complete"),
-                Stream.mapEffect((event) =>
-                  event.kind === "failed"
-                    ? Effect.succeed<StreamEvent>({
-                        _tag: "Failed",
-                        message:
-                          event.payload && typeof event.payload === "object" &&
-                          "message" in event.payload && typeof event.payload.message === "string"
-                            ? event.payload.message
-                            : "The remote operation failed."
-                      })
-                    : Schema.decodeUnknown(StreamEventSchema)(event.payload).pipe(
-                        Effect.orElseSucceed((): StreamEvent => ({
-                          _tag: "Failed",
-                          message: "The remote device returned an invalid agent event."
-                        }))
-                      )
-                ),
-                Stream.catchAll((error) => Stream.make({
-                  _tag: "Failed" as const,
-                  message: error.message
-                }))
-              )
-            ),
-          }
+            execute: () =>
+              Effect.succeed(
+                remote
+                  .execute(session, "Agent.run", {
+                    chatId,
+                    text,
+                    displayText,
+                    images,
+                    reasoning,
+                    externalInstruction,
+                  })
+                  .pipe(
+                    Stream.tap((event) =>
+                      event.kind !== "complete"
+                        ? Effect.void
+                        : Schema.decodeUnknown(
+                            Schema.Struct({ session: SessionSchema }),
+                          )(event.payload).pipe(
+                            Effect.flatMap(({ session: remoteSession }) =>
+                              SessionStore.upsertRemote(remoteSession),
+                            ),
+                            Effect.ignore,
+                          ),
+                    ),
+                    Stream.filter((event) => event.kind !== "complete"),
+                    Stream.mapEffect((event) =>
+                      event.kind === "failed"
+                        ? Effect.succeed<StreamEvent>({
+                            _tag: "Failed",
+                            message:
+                              event.payload &&
+                              typeof event.payload === "object" &&
+                              "message" in event.payload &&
+                              typeof event.payload.message === "string"
+                                ? event.payload.message
+                                : "The remote operation failed.",
+                          })
+                        : Schema.decodeUnknown(StreamEventSchema)(
+                            event.payload,
+                          ).pipe(
+                            Effect.orElseSucceed((): StreamEvent => ({
+                              _tag: "Failed",
+                              message:
+                                "The remote device returned an invalid agent event.",
+                            })),
+                          ),
+                    ),
+                    Stream.catchAll((error) =>
+                      Stream.make({
+                        _tag: "Failed" as const,
+                        message: error.message,
+                      }),
+                    ),
+                  ),
+              ),
+          },
         );
       }).pipe(
-        Effect.catchAll((error) => Effect.succeed(Stream.make({
-          _tag: "Failed" as const,
-          message: "message" in error && typeof error.message === "string"
-            ? error.message
-            : "The session could not be started."
-        })))
+        Effect.catchAll((error) =>
+          Effect.succeed(
+            Stream.make({
+              _tag: "Failed" as const,
+              message:
+                "message" in error && typeof error.message === "string"
+                  ? error.message
+                  : "The session could not be started.",
+            }),
+          ),
+        ),
       ),
     ),
   "Agent.decideGate": ({ sessionId, chatId, gateId, decision }) =>
@@ -4607,10 +4978,29 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Agent.decideGate",
         { chatId, gateId, decision },
-        { execute: () => runner.decideGate(sessionId, chatId, gateId, decision) },
-        { execute: () => remote.request(session, "Agent.decideGate", { chatId, gateId, decision }).pipe(Effect.asVoid) },
+        {
+          execute: () => runner.decideGate(sessionId, chatId, gateId, decision),
+        },
+        {
+          execute: () =>
+            remote
+              .request(session, "Agent.decideGate", {
+                chatId,
+                gateId,
+                decision,
+              })
+              .pipe(Effect.asVoid),
+        },
       );
-    }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not submit the approval decision", cause }))),
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitError({
+            message: "Could not submit the approval decision",
+            cause,
+          }),
+      ),
+    ),
   "Agent.answerQuestion": ({ sessionId, chatId, requestId, answers }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
@@ -4620,16 +5010,33 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Agent.answerQuestion",
         { chatId, requestId, answers },
-        { execute: () => runner.answerQuestion(sessionId, chatId, requestId, answers) },
-        { execute: () => remote.request(session, "Agent.answerQuestion", { chatId, requestId, answers }).pipe(Effect.asVoid) },
+        {
+          execute: () =>
+            runner.answerQuestion(sessionId, chatId, requestId, answers),
+        },
+        {
+          execute: () =>
+            remote
+              .request(session, "Agent.answerQuestion", {
+                chatId,
+                requestId,
+                answers,
+              })
+              .pipe(Effect.asVoid),
+        },
       );
-    }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not submit the answer", cause }))),
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitError({ message: "Could not submit the answer", cause }),
+      ),
+    ),
   "Agent.setMode": ({ sessionId, chatId, mode }) =>
     Effect.flatMap(AgentRunner, (runner) =>
       runner.setMode(sessionId, chatId, mode),
     ),
-  "Agent.setReasoning": ({ sessionId, cli, reasoning }) =>
-    setReasoning(sessionId, cli, reasoning),
+  "Agent.setReasoning": ({ sessionId, chatId, reasoning }) =>
+    setReasoning(sessionId, chatId, reasoning),
   "Agent.commentPlanStep": ({ sessionId, planId, stepId, body, anchor }) =>
     Effect.flatMap(AgentRunner, (runner) =>
       runner.commentPlanStep(sessionId, planId, stepId, body, anchor),
@@ -4648,10 +5055,20 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         runner.resumePlan(sessionId, chatId, planId, revision),
       ),
     ),
-  "Agent.setHarness": ({ sessionId, chatId, cli, model }) =>
-    SessionStore.setHarness(sessionId, chatId, cli, model).pipe(
-      Effect.andThen(SessionStore.get(sessionId)),
-    ),
+  "Agent.setModel": ({
+    sessionId,
+    chatId,
+    connectionId,
+    providerId,
+    modelId,
+  }) =>
+    SessionStore.setProviderModel(
+      sessionId,
+      chatId,
+      connectionId,
+      providerId,
+      modelId,
+    ).pipe(Effect.andThen(SessionStore.get(sessionId))),
   "Agent.stop": ({ sessionId, chatId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
@@ -4662,9 +5079,18 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         "Agent.stop",
         { chatId },
         { execute: () => runner.stop(sessionId, chatId) },
-        { execute: () => remote.request(session, "Agent.stop", { chatId }).pipe(Effect.asVoid) },
+        {
+          execute: () =>
+            remote
+              .request(session, "Agent.stop", { chatId })
+              .pipe(Effect.asVoid),
+        },
       );
-    }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not stop the agent", cause }))),
+    }).pipe(
+      Effect.mapError(
+        (cause) => new GitError({ message: "Could not stop the agent", cause }),
+      ),
+    ),
   // Not `AgentRunner.stop` scoped smaller: that halts the whole turn. A
   // sub-agent is killed through the run's own per-task handle, which is what
   // `BackgroundTaskStore` holds.
@@ -4681,23 +5107,38 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         { chatId, text, images },
         { execute: () => runner.steer(sessionId, chatId, text, images) },
         {
-          execute: () => remote.request(session, "Agent.steer", { chatId, text, images }).pipe(
-            Effect.flatMap((value) => Schema.decodeUnknown(
-              Schema.Union(
-                Schema.Struct({ status: Schema.Literal("accepted"), user: MessageSchema, assistant: MessageSchema }),
-                Schema.Struct({ status: Schema.Literal("deferred", "unsupported") })
-              )
-            )(value))
-          ),
+          execute: () =>
+            remote
+              .request(session, "Agent.steer", { chatId, text, images })
+              .pipe(
+                Effect.flatMap((value) =>
+                  Schema.decodeUnknown(
+                    Schema.Union(
+                      Schema.Struct({
+                        status: Schema.Literal("accepted"),
+                        user: MessageSchema,
+                        assistant: MessageSchema,
+                      }),
+                      Schema.Struct({
+                        status: Schema.Literal("deferred", "unsupported"),
+                      }),
+                    ),
+                  )(value),
+                ),
+              ),
         },
       );
-    }).pipe(Effect.mapError((cause) => new GitError({ message: "Could not steer the agent", cause }))),
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitError({ message: "Could not steer the agent", cause }),
+      ),
+    ),
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
   "OpenConnector.get": () => openConnectorGet(),
   "OpenConnector.set": ({ config, token }) => openConnectorSet(config, token),
   "OpenConnector.test": () => openConnectorTest(),
   "OpenConnector.autoSetup": () => openConnectorAutoSetup(),
-  "OpenConnector.injection": () => openConnectorInjection(),
   "Connector.providers": () => OpenConnectorApi.listProviders(),
   "Connector.provider": ({ service }) => OpenConnectorApi.getProvider(service),
   "Connector.connections": () => OpenConnectorApi.listConnections(),
@@ -4723,11 +5164,12 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via
   // the absolute path discovery found.
-  "Models.list": ({ cli }) => modelsList(cli),
-  "Models.catalog": () => modelsCatalog(),
-  "Models.capabilities": () => modelsCapabilities(),
   "Usage.get": () =>
-    Effect.flatMap(DiscoveryService.list(), (clis) => UsageService.get(clis)),
+    ProviderConnections.pipe(
+      Effect.flatMap((service) => service.list),
+      Effect.flatMap(UsageService.fromProviderCatalog),
+      Effect.catchAll(() => Effect.succeed({ providers: [], fetchedAt: null })),
+    ),
   "Context.state": ({ sessionId, chatId }) =>
     ContextManager.bindContext(chatId, sessionId).pipe(
       Effect.zipRight(ContextManager.snapshot(chatId)),
@@ -4767,7 +5209,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),
   "Config.setFontScale": ({ fontScale }) =>
     ConfigService.setFontScale(fontScale),
-  "Config.setDefaultCli": ({ cli }) => ConfigService.setDefaultCli(cli),
+  "Config.setDefaultProviderModel": ({ connectionId, providerId, modelId }) =>
+    ConfigService.setDefaultProviderModel(connectionId, providerId, modelId),
+  "Config.completeProviderSetup": () => ConfigService.completeProviderSetup(),
   /**
    * Deliver an OS notification. Main decides whether to actually show it: it
    * owns the window's focus state, which the renderer cannot observe reliably,
@@ -4801,8 +5245,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setLastRepoPath": ({ path }) => ConfigService.setLastRepoPath(path),
   "Config.setPlanTemplate": ({ template }) =>
     ConfigService.setPlanTemplate(template),
-  "Config.setProvider": ({ cli, provider }) =>
-    ConfigService.setProvider(cli, provider),
   "Github.events": () => githubEvents(),
   "Github.claimFeedback": (input) => {
     if (input.operation === "claim") {
@@ -5105,8 +5547,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
    * access the operator revoked by deleting it — the strongest revocation
    * gesture there is, and the one they would most expect to stick.
    */
-  "Plugins.uninstall": ({ pluginId }) =>
-    uninstallPlugin(pluginId),
+  "Plugins.uninstall": ({ pluginId }) => uninstallPlugin(pluginId),
 
   "Plugins.installFromFolder": ({ sourcePath }) =>
     PluginRegistry.installFromFolder(sourcePath),
@@ -5180,12 +5621,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       (issue) => (issue ? [issue.providerId] : []),
     ),
 
-  "Plugins.issueProviderCreate": ({
-    providerId,
-    repository,
-    title,
-    body,
-  }) =>
+  "Plugins.issueProviderCreate": ({ providerId, repository, title, body }) =>
     issueProviderOperation(
       providerId,
       "createIssue",
@@ -5402,8 +5838,7 @@ const ServerProtocolLive = Layer.effect(
 /**
  * The running RPC server: the group's handlers served over the IPC protocol.
  * Building this layer forks the server daemon and registers the `ipcMain`
- * listener; it still requires `CommandExecutor | DiscoveryService | SessionStore
- * | ContextManager`, which `AppLayer` provides.
+ * listener; `AppLayer` provides its Effect service requirements.
  *
  * `ContextManager` must be imported as a VALUE here even though this file never
  * calls it: it appears in the inferred requirement set via the handlers, and
@@ -5422,17 +5857,17 @@ const RpcServerLayer = RpcServer.layer(JinglerRpcs).pipe(
 // superset of every handler requirement.
 export type RpcServerRequirements =
   | AgentRunner
+  | AgentRuntime
   | AppPaths
   | AssetService
   | AuthService
   | BackgroundTaskStore
   | BrowserControlMcpService
-  | CliAdapter
+  | AgentTurnDriver
   | CommandExecutor.CommandExecutor
   | ConfigService
   | ContextManager
   | DialogService
-  | DiscoveryService
   | EnvironmentService
   | FileSystem.FileSystem
   | GitHubApi
@@ -5440,7 +5875,6 @@ export type RpcServerRequirements =
   | GitHubEventStore
   | GitService
   | MemoryService
-  | ModelsService
   | OpenConnectorApi
   | OpenConnectorService
   | Path.Path
@@ -5456,11 +5890,15 @@ export type RpcServerRequirements =
   | RemoteSessionService
   | SecretStore
   | SessionStore
-  | SkillsService
+  | AgentResourceService
+  | ImportedMcpService
   | TerminalService
   | ThemeService
   | TranscriptStore
   | UsageService
-  | WorkspaceService;
+  | WorkspaceService
+  | RuntimeDiagnostics
+  | RuntimeRecoveryService
+  | ProviderConnections;
 export const RpcServerLive: Layer.Layer<never, never, RpcServerRequirements> =
   RpcServerLayer;

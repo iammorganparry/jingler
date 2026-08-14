@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AppPaths } from "./app-paths.js"
+import { makeAppPaths } from "./app-paths-factory.js"
 import { PluginAuth, type AuthProvider, type ConsentPrompt } from "./plugin-auth.js"
 
 /**
@@ -22,21 +23,7 @@ const tempPaths = async () => {
   const root = join(home, "jingler")
   return {
     home,
-    layer: Layer.succeed(AppPaths, {
-      root,
-      configFile: join(root, "config.json"),
-      sessionsFile: join(root, "sessions.json"),
-      projectsFile: join(root, "projects.json"),
-      worktreesDir: join(root, "worktrees"),
-      transcriptsDir: join(root, "transcripts"),
-      reviewsDir: join(root, "reviews"),
-      plansDir: join(root, ".jingler"),
-      themesDir: join(root, "themes"),
-      pluginsDir: join(root, "plugins"),
-      pluginStorageDir: join(root, "plugin-storage"),
-      authFile: join(root, "auth.enc"),
-      openConnectorFile: join(root, "open-connector.enc")
-    } as never)
+    layer: Layer.succeed(AppPaths, makeAppPaths(root))
   }
 }
 

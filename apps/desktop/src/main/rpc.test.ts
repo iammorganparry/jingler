@@ -11,16 +11,16 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AppPaths,
+  AgentResourceService,
   AssetService,
-  CliAdapter,
+  AgentTurnDriver,
   ConfigService,
-  DiscoveryService,
   GitHubAuth,
   GitHubApi,
   GitService,
   InMemorySecretStoreLive,
   MemoryService,
-  ModelsService,
+  makeAgentResourceService,
   PlanStore,
   PluginAuth,
   PluginHost,
@@ -31,14 +31,13 @@ import {
   ReviewStore,
   SessionStore,
   TranscriptStore,
-  SkillsService,
   TerminalService,
   WorkspaceService,
 } from "@jingler/cli-adapters";
 import type {
   AgentContext,
-  CliAdapterShape,
-  SessionSpec,
+  AgentTurnDriverShape,
+  AgentTurnSpec,
 } from "@jingler/cli-adapters";
 import type {
   Attachment,
@@ -52,6 +51,7 @@ import type {
 import {
   GitError,
   GitHubApiError,
+  DetectedResourceCandidate,
   planStageSemanticFingerprint,
 } from "@jingler/core";
 import {
@@ -68,6 +68,7 @@ import {
   Fiber,
   Layer,
   Logger,
+  Schema,
   Stream,
 } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,8 +86,6 @@ import {
   githubDetectPr,
   githubSubmitReview,
   githubPr,
-  modelsCatalog,
-  modelsList,
   mismatchedIssueProviderId,
   planAppendMessage,
   planDispatchExistingMessage,
@@ -103,7 +102,6 @@ import {
   selectContinuationRepository,
   setReasoning,
   setSessionPersistent,
-  sessionCreationDefaults,
   sessionDiff,
   skillsList,
   transcriptHasGitHubFeedback,
@@ -122,7 +120,6 @@ describe("publish branch verification", () => {
     baseBranch: "main",
     title: "Publish session",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -443,70 +440,6 @@ describe("RPC handlers", () => {
     expect(existsSync(pluginDir)).toBe(true);
   });
 
-  it("keeps a new session direct, defaulting to auto where the harness supports it", () => {
-    expect(sessionCreationDefaults("codex", null)).toMatchObject({
-      cli: "codex",
-      options: {
-        // No configured default → `auto` (codex supports it): unsandboxed and
-        // able to use git as it does in a direct CLI.
-        defaultMode: "auto",
-        defaultModel: undefined,
-      },
-    });
-  });
-
-  it("prefers the model selected in New Session over the provider default", () => {
-    expect(
-      sessionCreationDefaults(
-        "codex",
-        {
-          reposDir: null,
-          createdAt: "2026-08-09T00:00:00.000Z",
-          providers: {
-            codex: { enabled: true, defaultMode: "auto", defaultModel: "gpt-5.5" },
-          },
-        },
-        "gpt-5.6-sol",
-      ),
-    ).toMatchObject({
-      cli: "codex",
-      options: { defaultModel: "gpt-5.6-sol" },
-    });
-  });
-
-  it("prefers mode and reasoning selected in New Session over provider defaults", () => {
-    expect(
-      sessionCreationDefaults(
-        "codex",
-        {
-          reposDir: null,
-          createdAt: "2026-08-09T00:00:00.000Z",
-          providers: {
-            codex: {
-              enabled: true,
-              defaultMode: "auto",
-              thinkingEnabled: false,
-              reasoningEffort: "minimal",
-            },
-          },
-        },
-        "gpt-5.6-sol",
-        "ask",
-        { enabled: true, effort: "high" },
-      ),
-    ).toMatchObject({
-      options: {
-        defaultMode: "ask",
-        defaultReasoning: { enabled: true, effort: "high" },
-      },
-    });
-
-    expect(
-      sessionCreationDefaults("codex", null, undefined, undefined, null).options
-        .defaultReasoning,
-    ).toBeUndefined();
-  });
-
   it("Sessions.setPersistent returns and persists the updated session", async () => {
     const now = "2026-07-30T10:00:00.000Z";
     mkdirSync(root, { recursive: true });
@@ -519,7 +452,6 @@ describe("RPC handlers", () => {
           branch: "chore/widget",
           title: "Widget",
           status: "idle",
-          cli: "claude",
           diff: { added: 0, removed: 0 },
           prNumber: null,
           costUsd: 0,
@@ -564,7 +496,6 @@ describe("RPC handlers", () => {
           branch: "chore/widget",
           title: "Widget",
           status: "idle",
-          cli: "codex",
           diff: { added: 0, removed: 0 },
           prNumber: null,
           costUsd: 0,
@@ -734,7 +665,7 @@ describe("RPC handlers", () => {
       });
 
       await Effect.runPromise(
-        setReasoning("session-1", "claude", {
+        setReasoning("session-1", "chat-1", {
           enabled: true,
           effort: "high",
         }).pipe(
@@ -751,77 +682,6 @@ describe("RPC handlers", () => {
     });
   });
 
-  /**
-   * No harness discovered — which keeps this hermetic. The real DiscoveryService
-   * would find the operator's actual `claude` binary, and listing skills asks the
-   * harness what it offers, so the test would spawn a CLI.
-   */
-  const noHarnesses = Layer.succeed(
-    DiscoveryService,
-    new DiscoveryService({ list: () => Effect.succeed([]) }),
-  );
-
-  /**
-   * `visibleModels` narrows the COMPOSER's menu. Letting it narrow Settings'
-   * default-model picker too would make it a one-way door: curate down to a few
-   * models and the rest can never be chosen as your default again, from the very
-   * screen you'd use to un-curate. Configuration surfaces show what exists.
-   *
-   * It matters more than it looks: no UI writes `visibleModels` yet, so today the
-   * only writer is a hand-edited `config.json` — which is exactly the user who
-   * would get stuck.
-   */
-  describe("Models.list / Models.catalog — curation", () => {
-    const CLAUDE_MODELS = [
-      { id: "opus", label: "opus" },
-      { id: "sonnet", label: "sonnet" },
-      { id: "haiku", label: "haiku" },
-    ];
-    const models = Layer.succeed(
-      ModelsService,
-      new ModelsService({
-        list: () => Effect.succeed(CLAUDE_MODELS),
-        catalog: () =>
-          Effect.succeed([
-            {
-              cli: "claude" as const,
-              label: "Claude Code",
-              models: CLAUDE_MODELS,
-            },
-          ]),
-        capabilities: () => Effect.succeed([]),
-      }),
-    );
-    const env = () => Layer.mergeAll(base, noHarnesses, models);
-
-    /** Curate this session's harness down to a single model. */
-    const curate = ConfigService.setProvider("claude", {
-      enabled: true,
-      defaultMode: "accept-edits",
-      visibleModels: ["opus"],
-    });
-
-    it("honours curation in the composer's menu — the surface it's for", async () => {
-      const catalog = await Effect.runPromise(
-        Effect.gen(function* () {
-          yield* curate;
-          return yield* modelsCatalog();
-        }).pipe(Effect.provide(env())),
-      );
-      expect(catalog[0]?.models.map((m) => m.id)).toStrictEqual(["opus"]);
-    });
-
-    it("NEVER narrows the Settings picker, so curation stays reversible", async () => {
-      const list = await Effect.runPromise(
-        Effect.gen(function* () {
-          yield* curate;
-          return yield* modelsList("claude");
-        }).pipe(Effect.provide(env())),
-      );
-      expect(list.map((m) => m.id)).toStrictEqual(["opus", "sonnet", "haiku"]);
-    });
-  });
-
   describe("Skills.list", () => {
     // An unknown session must not error — the `/` menu just has nothing to add.
     it("resolves for an unknown session, rather than failing", async () => {
@@ -831,8 +691,10 @@ describe("RPC handlers", () => {
             Layer.mergeAll(
               base,
               SessionStore.Default,
-              SkillsService.Default,
-              noHarnesses,
+              Layer.effect(
+                AgentResourceService,
+                makeAgentResourceService({ managedRoot: join(root, "agent-resources") }),
+              ),
             ),
           ),
         ),
@@ -846,6 +708,49 @@ describe("RPC handlers", () => {
       expect(skills.map((s) => s.name)).not.toContain("/plan");
       expect(skills.map((s) => s.name)).not.toContain("/test");
       expect(skills.map((s) => s.name)).not.toContain("/commit");
+    });
+
+    it("uses enabled Jingler-managed resources as the composer command surface", async () => {
+      const sourceRoot = join(dir, "detected", "prompts");
+      const sourcePath = join(sourceRoot, "review.md");
+      mkdirSync(sourceRoot, { recursive: true });
+      writeFileSync(sourcePath, "Review the current changes");
+      const service = await Effect.runPromise(
+        makeAgentResourceService({ managedRoot: join(root, "agent-resources") }),
+      );
+      const candidate = Schema.decodeUnknownSync(DetectedResourceCandidate)({
+        id: "review",
+        kind: "prompt",
+        name: "Review",
+        description: "Review current changes",
+        byteLength: 26,
+        provenance: {
+          origin: "jingler",
+          sourceRoot,
+          sourcePath,
+          importedAt: null,
+        },
+      });
+      await Effect.runPromise(service.importResources(
+        [candidate],
+        { kind: "portable", allowedTargets: [] },
+      ));
+
+      const skills = await Effect.runPromise(
+        skillsList("nope").pipe(
+          Effect.provide(Layer.mergeAll(
+            base,
+            SessionStore.Default,
+            Layer.succeed(AgentResourceService, service),
+          )),
+        ),
+      );
+
+      expect(skills).toEqual([{
+        name: "/review",
+        description: "Review current changes",
+        source: "command",
+      }]);
     });
   });
 
@@ -934,7 +839,6 @@ describe("RPC handlers", () => {
             branch: "feature",
             title: "Broken worktree",
             status: "idle",
-            cli: "codex",
             diff: { added: 0, removed: 0 },
             prNumber: null,
             costUsd: 0,
@@ -987,7 +891,9 @@ describe("RPC handlers", () => {
             branch: "jingler/assets",
             title: "Assets",
             status: "idle",
-            cli: "claude",
+            connectionId: "anthropic-max",
+            providerId: "anthropic",
+            modelId: "anthropic/claude-sonnet-4-5",
             diff: { added: 0, removed: 0 },
             prNumber: null,
             costUsd: 0,
@@ -1034,7 +940,6 @@ describe("RPC handlers", () => {
             branch: "jingler/editable-assets",
             title: "Editable assets",
             status: "idle",
-            cli: "claude",
             diff: { added: 0, removed: 0 },
             prNumber: null,
             costUsd: 0,
@@ -1120,7 +1025,6 @@ describe("RPC handlers", () => {
             baseBranch: "main",
             title: "Production checkout",
             status: "idle",
-            cli: "claude",
             diff: { added: 0, removed: 0 },
             prNumber: null,
             costUsd: 0,
@@ -1360,7 +1264,6 @@ describe("RPC handlers", () => {
             branch: "feature",
             title: "Feature",
             status: "idle",
-            cli: "claude",
             diff: { added: 0, removed: 0 },
             prNumber: 42,
             costUsd: 0,
@@ -1435,7 +1338,7 @@ describe("RPC handlers", () => {
    */
   describe("Review.run", () => {
     /** Persist a session with a linked PR by writing the store's own file. */
-    const withSession = (over: Record<string, unknown> = {}) => {
+    const withSession = (over: Partial<Session> = {}) => {
       mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "sessions.json"),
@@ -1446,7 +1349,9 @@ describe("RPC handlers", () => {
             branch: "feature",
             title: "Feature",
             status: "idle",
-            cli: "claude",
+            connectionId: "anthropic-max",
+            providerId: "anthropic",
+            modelId: "anthropic/claude-sonnet-4-5",
             diff: { added: 0, removed: 0 },
             prNumber: 42,
             costUsd: 0,
@@ -1484,25 +1389,25 @@ describe("RPC handlers", () => {
 
     /** A reviewer stub that counts its runs and always reports one finding. */
     const countingAdapter = () => {
-      const spawns: SessionSpec[] = [];
+      const spawns: AgentTurnSpec[] = [];
       const layer = Layer.succeed(
-        CliAdapter,
-        CliAdapter.of({
-          run: ((_id: string, spec: SessionSpec, ctx: AgentContext) =>
+        AgentTurnDriver,
+        AgentTurnDriver.of({
+          run: ((_id: string, spec: AgentTurnSpec, ctx: AgentContext) =>
             Effect.gen(function* () {
               spawns.push(spec);
               yield* ctx.emit({
                 _tag: "Assistant",
                 text: '```json\n{"findings":[{"title":"A bug","severity":"major"}]}\n```',
               });
-            })) as CliAdapterShape["run"],
+            })) as AgentTurnDriverShape["run"],
           stop: () => Effect.void,
         }),
       );
       return { spawns, layer };
     };
 
-    const envFor = (headSha: string, adapter: Layer.Layer<CliAdapter>) =>
+    const envFor = (headSha: string, adapter: Layer.Layer<AgentTurnDriver>) =>
       Layer.mergeAll(
         Layer.succeed(AppPaths, appPathsFor(root)),
         NodeContext.layer,
@@ -1513,7 +1418,6 @@ describe("RPC handlers", () => {
           SessionStore.Default,
           ReviewStore.Default,
           ReviewService.Default,
-          DiscoveryService.Default,
           adapter,
         ).pipe(Layer.provideMerge(leaf)),
       );
@@ -1545,8 +1449,7 @@ describe("RPC handlers", () => {
       expect(spawns).toHaveLength(1);
       expect(review.headSha).toBe("sha-one");
       expect(review.findings).toHaveLength(1);
-      // Fable is the default reviewer when nothing is configured.
-      expect(review.model).toBe("claude-fable-5");
+      expect(review.modelId).toBe("anthropic/claude-sonnet-4-5");
     });
 
     it("does not expose or stamp a stored review after the active PR changes", async () => {
@@ -1577,7 +1480,7 @@ describe("RPC handlers", () => {
       const gitEnv = (
         headSha: string,
         log: string,
-        adapter: Layer.Layer<CliAdapter>,
+        adapter: Layer.Layer<AgentTurnDriver>,
       ) =>
         Layer.mergeAll(
           Layer.succeed(AppPaths, appPathsFor(root)),
@@ -1603,7 +1506,6 @@ describe("RPC handlers", () => {
             GitService.Default,
             ReviewStore.Default,
             ReviewService.Default,
-            DiscoveryService.Default,
             adapter,
           ).pipe(Layer.provideMerge(leaf)),
         );
@@ -1755,29 +1657,14 @@ describe("RPC handlers", () => {
       expect(second.headSha).toBe("sha-two");
     });
 
-    it("honours a configured review model", async () => {
+    it("uses the session's certified provider model", async () => {
       withSession();
-      mkdirSync(root, { recursive: true });
-      writeFileSync(
-        join(root, "config.json"),
-        JSON.stringify({
-          reposDir: "/repos",
-          createdAt: "2026-01-01T00:00:00.000Z",
-          github: {
-            enabled: true,
-            autoCreatePr: false,
-            autoDetectPr: true,
-            reviewCli: "claude",
-            reviewModel: "claude-opus-4-8",
-          },
-        }),
-      );
       const { layer, spawns } = countingAdapter();
       const review = await Effect.runPromise(
         reviewRun("s1", false).pipe(Effect.provide(envFor("sha-one", layer))),
       );
-      expect(review.model).toBe("claude-opus-4-8");
-      expect(spawns[0]!.model).toBe("claude-opus-4-8");
+      expect(review.modelId).toBe("anthropic/claude-sonnet-4-5");
+      expect(spawns[0]!.modelId).toBe("anthropic/claude-sonnet-4-5");
     });
 
     /**
@@ -1839,20 +1726,20 @@ describe("RPC handlers", () => {
         findings: ReadonlyArray<Record<string, unknown>>,
       ) =>
         Layer.succeed(
-          CliAdapter,
-          CliAdapter.of({
-            run: ((_id: string, _spec: SessionSpec, ctx: AgentContext) =>
+          AgentTurnDriver,
+          AgentTurnDriver.of({
+            run: ((_id: string, _spec: AgentTurnSpec, ctx: AgentContext) =>
               ctx.emit({
                 _tag: "Assistant",
                 text: `\`\`\`json\n${JSON.stringify({ findings })}\n\`\`\``,
-              })) as CliAdapterShape["run"],
+              })) as AgentTurnDriverShape["run"],
             stop: () => Effect.void,
           }),
         );
 
       const envWith = (
         github: Layer.Layer<GitHubApi | CommandExecutor.CommandExecutor>,
-        adapter: Layer.Layer<CliAdapter>,
+        adapter: Layer.Layer<AgentTurnDriver>,
       ) =>
         Layer.mergeAll(
           Layer.succeed(AppPaths, appPathsFor(root)),
@@ -1864,7 +1751,6 @@ describe("RPC handlers", () => {
             SessionStore.Default,
             ReviewStore.Default,
             ReviewService.Default,
-            DiscoveryService.Default,
             adapter,
           ).pipe(Layer.provideMerge(leaf)),
         );
@@ -2017,7 +1903,6 @@ describe("RPC handlers", () => {
             SessionStore.Default,
             ReviewStore.Default,
             ReviewService.Default,
-            DiscoveryService.Default,
             countingAdapter().layer,
           ).pipe(Layer.provideMerge(leaf)),
         );

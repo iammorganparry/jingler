@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   createPlanDraftStream,
+  createPlanToolDraftStream,
   extractPlanDraft
 } from "./plan-draft-stream.js"
 
@@ -138,6 +139,37 @@ describe("createPlanDraftStream", () => {
       draft: {
         source: expect.stringContaining("PRD: Replacement"),
         phase: "composing"
+      }
+    })
+  })
+})
+
+describe("createPlanToolDraftStream", () => {
+  it("projects partial plan tool arguments and completes from the validated plan", () => {
+    const stream = createPlanToolDraftStream(() => "plan-tool", {
+      minIntervalMs: 0
+    })
+    expect(stream.append('{"plan":{"title":"PRD: Tool"')).toEqual({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan-tool",
+        source: '{"mode":"submit","plan":{"title":"PRD: Tool"',
+        phase: "composing"
+      }
+    })
+    expect(
+      stream.complete({
+        title: "PRD: Tool",
+        sections: [],
+        stages: [],
+        annotations: []
+      })
+    ).toMatchObject({
+      _tag: "PlanDraft",
+      draft: {
+        id: "plan-tool",
+        source: expect.stringContaining('"title":"PRD: Tool"'),
+        phase: "complete"
       }
     })
   })

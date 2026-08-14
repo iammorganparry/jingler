@@ -9,7 +9,6 @@ const discovery: RemoteDeviceDiscovery = {
   capabilities: {
     version: 1,
     capabilities: ["session.start", "session.input", "session.cancel", "session.observe"],
-    harnesses: ["codex"],
     maxConcurrentSessions: 4
   },
   repositories: []

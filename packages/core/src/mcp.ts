@@ -1,10 +1,7 @@
 import { Schema } from "effect"
-import { CliKind } from "./domain.js"
 
 /**
- * MCP (Model Context Protocol) servers, as configured in the *harness's own*
- * config files. Jingler never defines an MCP format of its own — it reads what
- * `claude` / `codex` / `cursor` / `opencode` already load, and reports it back.
+ * Renderer-safe metadata for an MCP server managed by Jingler.
  */
 
 /** How a server is reached. `stdio` spawns a command; the rest are remote URLs. */
@@ -24,10 +21,8 @@ export type McpScope = Schema.Schema.Type<typeof McpScope>
 /**
  * The result of probing a server.
  *
- * `unknown` means "configured, deliberately not contacted" — a project-scope server
- * from a harness that gates project config behind its own consent prompt, which we
- * must not spawn on the operator's behalf. Distinct from an absent status, which
- * just means nothing has been probed yet.
+ * `unknown` means configured but not yet contacted. Distinct from an absent
+ * status, which means no probe result exists.
  */
 export const McpServerState = Schema.Literal("unknown", "connected", "failed", "disabled")
 export type McpServerState = Schema.Schema.Type<typeof McpServerState>
@@ -41,10 +36,8 @@ export type McpServerState = Schema.Schema.Type<typeof McpServerState>
  * the renderer would require changing this schema, which is the point.
  */
 export const McpServer = Schema.Struct({
-  /** The key the harness knows this server by, e.g. "linear". */
+  /** Stable runtime name, e.g. "linear". */
   name: Schema.String,
-  /** Which harness's config this came from. */
-  cli: CliKind,
   transport: McpTransport,
   scope: McpScope,
   /**
@@ -56,7 +49,7 @@ export const McpServer = Schema.Struct({
   envKeys: Schema.Array(Schema.String),
   /** Names of HTTP headers sent to a remote server. Values are deliberately absent. */
   headerKeys: Schema.Array(Schema.String),
-  /** False when the harness's config explicitly disables/does not approve it. */
+  /** False when the operator disabled the managed server. */
   enabled: Schema.Boolean
 })
 export type McpServer = Schema.Schema.Type<typeof McpServer>
@@ -75,47 +68,6 @@ export const McpServerStatus = Schema.Struct({
   checkedAt: Schema.String
 })
 export type McpServerStatus = Schema.Schema.Type<typeof McpServerStatus>
-
-/**
- * Why a harness is not receiving the unified server. `null` on an injected target.
- *
- * These are the four ways "connected in Settings" fails to mean "the agent has the
- * tools", and they are indistinguishable from the config alone — which is exactly
- * why the UI asks the resolver rather than re-deriving them.
- */
-export const McpInjectionSkip = Schema.Literal(
-  /** The master switch is off, or no endpoint is set. */
-  "disabled",
-  /** `perCli[<harness>] === false` — this harness was opted out. */
-  "opted-out",
-  /** No bearer token is stored, so no request could authenticate. */
-  "no-token",
-  /** Jingler has no run path for this harness, so there is nothing to inject into. */
-  "no-run-path"
-)
-export type McpInjectionSkip = Schema.Schema.Type<typeof McpInjectionSkip>
-
-/**
- * What ONE harness would actually be launched with, resolved through the same
- * `OpenConnectorService.injection(cli)` the agent runner calls.
- *
- * SECURITY: `url` is the bare `${endpoint}/mcp` and `headerKeys` carries header
- * NAMES only — the bearer never crosses the RPC boundary, matching `McpServer`.
- */
-export const McpInjectionTarget = Schema.Struct({
-  cli: CliKind,
-  /** The name the server is registered under in that harness's config. */
-  serverName: Schema.String,
-  /** True when a session on this harness starts with the unified server attached. */
-  injected: Schema.Boolean,
-  /** `${endpoint}/mcp`, or null when nothing would be injected. */
-  url: Schema.NullOr(Schema.String),
-  /** Header names sent to the instance (values deliberately absent). */
-  headerKeys: Schema.Array(Schema.String),
-  /** Why not, when `injected` is false. Null when it is. */
-  skipped: Schema.NullOr(McpInjectionSkip)
-})
-export type McpInjectionTarget = Schema.Schema.Type<typeof McpInjectionTarget>
 
 /** Stable identity for a server across list/status/cache — name alone can collide across scopes. */
 export const mcpServerKey = (scope: McpScope, name: string): string => `${scope}:${name}`

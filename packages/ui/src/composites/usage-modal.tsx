@@ -1,8 +1,9 @@
-import type { CliKind, ProviderUsage, Usage, UsageStatus, UsageWindow } from "@jingler/core"
+import type { ProviderUsage, Usage, UsageStatus, UsageWindow } from "@jingler/core"
 import { Gauge, RefreshCw } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/dialog.js"
-import { PROVIDER_COLOR, ProviderIcon } from "../components/provider-icon.js"
+import { ProviderIcon } from "../components/provider-icon.js"
+import { providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
 
 const fmtReset = (iso: string | null): string => {
   if (!iso) return "—"
@@ -23,14 +24,14 @@ const fmtUpdated = (iso: string | null): string => {
   return `${Math.floor(s / 86_400)} days ago`
 }
 
-const barColor = (status: UsageStatus, cli: CliKind): string =>
+const barColor = (status: UsageStatus): string =>
   status === "limited"
     ? "var(--sb-red)"
     : status === "nearing"
       ? "var(--sb-yellow)"
-      : PROVIDER_COLOR[cli]
+      : "var(--sb-blue)"
 
-function WindowRow({ window: w, cli }: { window: UsageWindow; cli: CliKind }) {
+function WindowRow({ window: w }: { window: UsageWindow }) {
   const pct = w.utilization == null ? 0 : Math.min(100, Math.max(0, w.utilization))
   return (
     <div className="flex items-center gap-4 py-2">
@@ -41,7 +42,7 @@ function WindowRow({ window: w, cli }: { window: UsageWindow; cli: CliKind }) {
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface">
         <div
           className="h-full rounded-full transition-[width]"
-          style={{ width: `${pct}%`, background: barColor(w.status, cli) }}
+          style={{ width: `${pct}%`, background: barColor(w.status) }}
         />
       </div>
       <span className="w-[66px] flex-none text-right font-mono text-[11px] text-text-body">
@@ -52,10 +53,11 @@ function WindowRow({ window: w, cli }: { window: UsageWindow; cli: CliKind }) {
 }
 
 function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
+  const route = p.authKind ? providerAuthRouteLabel(p.authKind) : null
   return (
     <div className="border-b border-hairline py-[18px] last:border-0">
       <div className="mb-3 flex items-center gap-[9px]">
-        <ProviderIcon cli={p.cli} size={14} />
+        <ProviderIcon providerId={p.providerId} size={14} />
         <span className="text-[14px] font-semibold text-text-bright">{p.name}</span>
         {p.plan && (
           <Badge tone="neutral" size="sm">
@@ -63,11 +65,24 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
           </Badge>
         )}
       </div>
+      {route && (
+        <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
+          <span>{route}</span>
+          <span>Billing: {p.billingRoute ?? "unconfirmed"}</span>
+          <span>Target: {p.targetId}</span>
+          <span>Status: {p.authStatus}</span>
+        </div>
+      )}
+      {(p.quotaLabel || p.rateLimitLabel) && (
+        <div className="mb-2 text-[11px] text-text-body">
+          {[p.quotaLabel, p.rateLimitLabel].filter(Boolean).join(" · ")}
+        </div>
+      )}
       {p.available ? (
-        p.windows.map((w) => <WindowRow key={w.label} window={w} cli={p.cli} />)
+        p.windows.map((w) => <WindowRow key={w.label} window={w} />)
       ) : (
         <div className="text-[12px] text-muted-foreground">
-          Usage data isn&apos;t available for this harness yet.
+          Usage data isn&apos;t available for this connection yet.
         </div>
       )}
     </div>
@@ -76,8 +91,8 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
 
 /**
  * The Usage & limits modal: per-provider session/weekly windows as status-tinted
- * bars. Claude and Codex are read live from their local harness APIs; providers
- * without a usage endpoint show as unavailable.
+ * bars. Provider connections report usage through their pinned authentication
+ * route; connections without a usage endpoint show as unavailable.
  */
 export function UsageModal({
   open,
@@ -101,7 +116,9 @@ export function UsageModal({
         </DialogHeader>
         <DialogBody className="py-0">
           {providers.length > 0 ? (
-            providers.map((p) => <ProviderSection key={p.cli} provider={p} />)
+            providers.map((p) => (
+              <ProviderSection key={p.connectionId ?? p.name} provider={p} />
+            ))
           ) : loading ? (
             <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-muted-foreground">
               <RefreshCw size={13} className="animate-spin" />
@@ -109,7 +126,7 @@ export function UsageModal({
             </div>
           ) : (
             <div className="py-8 text-center text-[13px] text-muted-foreground">
-              No harnesses detected on this machine.
+              No provider connections are configured on this machine.
             </div>
           )}
         </DialogBody>

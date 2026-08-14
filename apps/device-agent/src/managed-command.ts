@@ -12,19 +12,23 @@ export type ManagedCommandFrame =
   | { readonly type: "managed-complete"; readonly payload: unknown }
   | { readonly type: "managed-failed"; readonly payload: unknown }
 
+export type ManagedCommandFrameEmitter = (
+  frame: ManagedCommandFrame
+) => void | Promise<void>
+
 /** Thin stdio protocol around the same executor used by owned-device tunnels. */
 export const runManagedCommand = async (
   command: RemoteSessionCommand,
   executor: SessionCommandExecutor,
-  emit: (frame: ManagedCommandFrame) => void
+  emit: ManagedCommandFrameEmitter
 ): Promise<void> => {
   try {
     const payload = await executor.execute(command, async (event) => {
-      emit({ type: "managed-event", event })
+      await emit({ type: "managed-event", event })
     })
-    emit({ type: "managed-complete", payload })
+    await emit({ type: "managed-complete", payload })
   } catch (error) {
-    emit({
+    await emit({
       type: "managed-failed",
       payload: {
         code: "operation-failed",

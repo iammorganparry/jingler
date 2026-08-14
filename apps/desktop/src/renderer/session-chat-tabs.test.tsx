@@ -42,7 +42,6 @@ const session = {
   branch: "feature/files",
   title: "Files",
   status: "idle",
-  cli: "codex",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,

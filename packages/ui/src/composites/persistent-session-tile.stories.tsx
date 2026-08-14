@@ -23,7 +23,6 @@ export const Idle: Story = {
       id: "kept",
       title: "Auth",
       persistent: true,
-      cli: "claude"
     }),
     onSelect: () => {},
     onUnpersist: () => {},
@@ -39,7 +38,6 @@ export const ActiveAndRunning: Story = {
       id: "running",
       title: "Tests",
       persistent: true,
-      cli: "codex"
     }),
     activity: {
       kind: "running",
@@ -57,7 +55,6 @@ export const NeedsInput: Story = {
       id: "input",
       title: "Review",
       persistent: true,
-      cli: "opencode"
     }),
     activity: {
       kind: "needs-approval",

@@ -1,16 +1,17 @@
 import { type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react"
 import type {
   Attachment,
-  CliKind,
   ExecutionMode,
   GateDecision,
-  HarnessCapability,
   Message,
-  ProviderModels,
   PermissionMode,
   Plan,
   PlanDocument,
   PlanStatus,
+  ProviderCatalog,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   QuestionAnswer,
   QuestionRequest,
   ReasoningEffort,
@@ -21,7 +22,6 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
 import { ArrowUp, Lock, RotateCcw } from "lucide-react"
 import type { ArchiveReason, ContextPhase } from "@jingler/core"
-import { supportsPlanMode } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
@@ -36,11 +36,6 @@ import { RunStats } from "../composites/run-stats.js"
 import { PlanProgressDock } from "../composites/plan-progress-dock.js"
 
 /**
- * Shift+Tab cycles through the HITL modes, Claude-Code style. Plan mode is
- * Claude-only (the other harnesses are autonomous), so it's appended to the
- * cycle only for Claude sessions — see `cycleFor`.
- */
-/**
  * How many queued messages show before the list collapses behind a "+N more".
  *
  * The queue sits between the transcript and the composer, so its height comes
@@ -50,14 +45,9 @@ import { PlanProgressDock } from "../composites/plan-progress-dock.js"
  */
 const QUEUE_PREVIEW = 5
 
-/**
- * Shift+Tab cycles these three only.
- *
- * Plan is appended only for harnesses that support it.
- */
+/** Shift+Tab cycles Jingler's provider-neutral permission modes. */
 const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
-const cycleFor = (cli: CliKind): ReadonlyArray<PermissionMode> =>
-  supportsPlanMode(cli) ? [...MODE_CYCLE, "plan"] : MODE_CYCLE
+const MODE_CYCLE_WITH_PLAN: ReadonlyArray<PermissionMode> = [...MODE_CYCLE, "plan"]
 
 const useStickyBottomOnResize = (
   scrollRef: RefObject<HTMLDivElement | null>,
@@ -90,8 +80,6 @@ export interface ConversationViewProps {
   /** Page the next window of older turns onto the front of `messages`. */
   onLoadEarlier?: () => void
   mode: PermissionMode
-  /** The harness driving this session — sets the assistant eyebrow logo/name. */
-  cli?: CliKind
   skills?: ReadonlyArray<Skill>
   files?: ReadonlyArray<string>
   paused?: boolean
@@ -105,11 +93,15 @@ export interface ConversationViewProps {
   environmentId?: string
   environmentPending?: boolean
   onSetEnvironment?: (environmentId?: string) => void
-  /** Current harness model id + every installed harness's models (model chip). */
-  model?: string
-  catalog?: ReadonlyArray<ProviderModels>
-  capabilities?: ReadonlyArray<HarnessCapability>
-  onSetHarness?: (cli: CliKind, model: string) => void
+  providerCatalog?: ProviderCatalog | null
+  connectionId?: ProviderConnectionId | null
+  providerId?: ProviderId | null
+  modelId?: ProviderModelId | null
+  onSetModel?: (selection: {
+    connectionId: ProviderConnectionId
+    providerId: ProviderId
+    modelId: ProviderModelId
+  }) => void
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void
   /** Halt the running agent — the Stop button, and Escape outside the composer. */
   onStop?: () => void
@@ -223,8 +215,6 @@ export interface ConversationViewProps {
   autoFocusComposer?: boolean
   /** Identity of "the one on screen" — the session id. */
   focusKey?: string
-  /** Whether Jingler's enhanced Plan/tools layer is enabled. */
-  useJinglerTools?: boolean
   /** Disable sending while preserving the model picker as the recovery path. */
   composerDisabledReason?: string
   /** Whether the session Files workspace follows this chat's agent mutations. */
@@ -233,7 +223,6 @@ export interface ConversationViewProps {
   onToggleFollowAgent?: (enabled: boolean) => void
 }
 
-/** Count added/removed lines in a unified diff, ignoring the file headers. */
 /**
  * The session workspace pane: the mode bar + interleaved transcript + composer,
  * with the live Changes rail (the worktree's real diff). Purely presentational —
@@ -247,7 +236,6 @@ export function ConversationView({
   loadingHistory = false,
   onLoadEarlier,
   mode,
-  cli = "claude",
   skills = [],
   files = [],
   paused = false,
@@ -258,10 +246,11 @@ export function ConversationView({
   environmentId,
   environmentPending,
   onSetEnvironment,
-  model,
-  catalog = [],
-  capabilities,
-  onSetHarness,
+  providerCatalog,
+  connectionId = null,
+  providerId = null,
+  modelId = null,
+  onSetModel,
   onSend,
   onStop,
   busy = false,
@@ -303,7 +292,6 @@ export function ConversationView({
   onDraftCodeReferencesClear,
   autoFocusComposer,
   focusKey,
-  useJinglerTools = true,
   composerDisabledReason,
   followAgent = false,
   onToggleFollowAgent,
@@ -324,14 +312,14 @@ export function ConversationView({
   const queueLimit = queueExpanded ? queued.length : QUEUE_PREVIEW
 
   // Shift+Tab cycles the HITL mode (works while typing in the composer). Plan
-  // mode joins the cycle on Claude sessions only (matches the composer's gate).
+  // is part of the same Jingler-owned contract for every certified model.
   //
   // Scoped to THIS pane via the ref `useHotkeys` returns (attached to the root
   // below), so it only fires while focus is inside this view. A split view
   // mounts one ConversationView per pane, and an unscoped document-level binding
   // fires in EVERY mounted pane at once — so a single Shift+Tab cycled every
   // composer's mode, not just the focused one's.
-  const cycle = cycleFor(cli)
+  const cycle = MODE_CYCLE_WITH_PLAN
   const modeHotkeyRef = useHotkeys<HTMLDivElement>(
     "shift+tab",
     () => {
@@ -513,7 +501,7 @@ export function ConversationView({
                   <div className="mx-auto w-full max-w-[760px] pb-6">
                     <MessageTurn
                       message={m}
-                      cli={cli}
+                      providerId={providerId}
                       onDecideGate={onDecideGate}
                       onApprovePlan={onApprovePlan}
                       onResumePlan={onResumePlan}
@@ -661,21 +649,19 @@ export function ConversationView({
                 environmentPending={environmentPending}
                 onSetEnvironment={onSetEnvironment}
                 busy={busy}
-                cli={cli}
-                model={model}
-                catalog={catalog}
-                capabilities={capabilities}
                 disabledReason={composerDisabledReason}
-                onSetHarness={onSetHarness}
+                providerCatalog={providerCatalog}
+                connectionId={connectionId}
+                modelId={modelId}
+                onSetModel={onSetModel}
                 mode={mode}
                 onSetMode={onSetMode}
-                useJinglerTools={useJinglerTools}
                 followAgent={followAgent}
                 onToggleFollowAgent={onToggleFollowAgent}
                 reasoningEffort={reasoningEffort}
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}
-                allowPlan={supportsPlanMode(cli)}
+                allowPlan
                 onSend={onSend}
                 onStop={onStop}
                 initialValue={initialDraft}

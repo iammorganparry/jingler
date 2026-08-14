@@ -1,5 +1,3 @@
-import type { CliKind } from "@jingler/core"
-
 /**
  * How a turn's prompt is assembled from the operator's message and the notes that
  * ride along with it.
@@ -7,7 +5,7 @@ import type { CliKind } from "@jingler/core"
  * Every turn can carry prefixes for compaction, saved plans, output shaping,
  * private memory, structured questions, and the plan-mode protocol — and they
  * go in front of the message, in a fixed order, except when they must not. That
- * exception is a real bug that shipped: a harness only expands a slash command
+ * exception is a real bug that shipped: the runtime only expands a command
  * when it is the FIRST thing in the message, so prefixing a primer turned
  * `/babysit-pr …` into prose and the turn came back instantly with nothing to say.
  *
@@ -17,25 +15,22 @@ import type { CliKind } from "@jingler/core"
  */
 
 /** A slash command, e.g. `/plan` or `/babysit-pr foo` — expanded only when first. */
+const SLASH_COMMAND = /^\/[A-Za-z][\w:-]*(\s|$)/
+const SKILL_INVOCATION = /^\$[A-Za-z][\w:-]*(\s|$)/
+
 export const isSlashCommand = (text: string): boolean =>
-  /^\/[A-Za-z][\w:-]*(\s|$)/.test(text.trimStart())
+  SLASH_COMMAND.test(text.trimStart())
 
 /**
- * Codex's own skill invocation, which has the same first-position requirement as a
- * slash command but none of the syntax.
+ * A skill invocation, which has the same first-position requirement as a slash
+ * command but its own syntax.
  */
-export const isCodexSkillInvocation = (text: string): boolean =>
-  /^\$[A-Za-z][\w:-]*(\s|$)/.test(text.trimStart())
+export const isSkillInvocation = (text: string): boolean =>
+  SKILL_INVOCATION.test(text.trimStart())
 
-/**
- * Whether this harness will treat `text` as a command that has to lead.
- *
- * Asked of the harness as well as the text because the syntaxes differ: only Codex
- * treats a `$skill` prefix specially, and mistaking one for a command elsewhere
- * would push the notes after a message that never needed to lead.
- */
-export const leadsWithCommand = (cli: CliKind, text: string): boolean =>
-  isSlashCommand(text) || (cli === "codex" && isCodexSkillInvocation(text))
+/** Whether pi will treat `text` as a command that has to lead. */
+export const leadsWithCommand = (text: string): boolean =>
+  isSlashCommand(text) || isSkillInvocation(text)
 
 /**
  * The notes that ride in front of a turn, in the order they are emitted.
@@ -56,7 +51,7 @@ export interface TurnNotes {
   readonly tools?: string | null
   /** How to ask the operator a question so it actually reaches them. */
   readonly ask?: string | null
-  /** How this harness is expected to submit a plan. */
+  /** How the agent submits a plan through Jingler's control tool. */
   readonly planProtocol?: string | null
 }
 

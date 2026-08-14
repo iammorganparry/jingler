@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto"
 import type {
   ApprovalGate,
   Attachment,
-  CliKind,
   ContentPart,
   ExecutionMode,
   ExternalInstructionIdentity,
@@ -23,9 +22,9 @@ import {
   ADHD_MODE_DEFAULT,
   applyStreamEvent,
   assistantMessage,
-  CliExecError,
+  AgentRunError,
+  CURRENT_RUNTIME_CONTRACTS,
   defaultModeFor,
-  defaultModel,
   findApprovedPlan,
   isBackgroundTaskEvent,
   isFileMutationTool,
@@ -43,7 +42,7 @@ import {
   workspaceModeOf,
   type PlanPrd
 } from "@jingler/core"
-import { FileSystem, Path } from "@effect/platform"
+import { FileSystem, type Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
@@ -68,23 +67,21 @@ import {
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
-import { CliAdapter, PlanDecision } from "./adapter.js"
+import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
 import type {
   PermissionDecision,
   PermissionRequest,
-  SessionSpec,
+  AgentTurnSpec,
   SteerTurn,
   StopBackgroundTask
-} from "./adapter.js"
+} from "./agent-turn-driver.js"
 import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
-import { readDefaultMode } from "./default-mode.js"
-import { DiscoveryService } from "./discovery.js"
-import { healedWorktreePath } from "./cli-project-dir.js"
+import { healedWorktreePath } from "./runtime/persistence/worktree-path.js"
 import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
-import { composeRemoteMcpServers, remoteMcpServer } from "./mcp-config.js"
+import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
@@ -273,13 +270,12 @@ const revisionText = (plan: Plan, comments: ReadonlyArray<PlanComment>): string 
 }
 
 type PromptEnv =
-  | CliAdapter
+  | AgentTurnDriver
   | ConfigService
   | SessionStore
   | TranscriptStore
   | BackgroundTaskStore
   | PlanStore
-  | DiscoveryService
   | ContextManager
   | OpenConnectorService
   | BrowserControlMcpService
@@ -319,9 +315,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     // chatId → live handles onto the current run, for the out-of-band plan RPCs.
     const active = yield* Ref.make(new Map<string, ActiveRun>())
     // chatId → the fiber running the agent, so `stop` can interrupt it.
-    // Interruption is the ONLY thing that reaches the underlying process: the
-    // real adapter aborts its CLI in an `onInterrupt` finalizer. Nothing else
-    // gets there — `CliAdapter.stop` is a no-op in every implementation, and a
+    // Interruption is the ONLY thing that reaches the underlying provider turn:
+    // the production driver interrupts pi in an `onInterrupt` finalizer. Nothing
+    // else gets there — scripted runs have no separate process-level stop, and a
     // client hanging up its stream does NOT tear the run down (verified: the run
     // survives its consumer). Without this handle a "stopped" agent keeps running.
     const fibers = yield* Ref.make(new Map<string, RunFiber>())
@@ -633,18 +629,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         return approvalAccepted
       })
 
-    /**
-     * The user's configured default execution mode for a session (`auto` /
-     * `accept-edits` / `ask`), read from their CLI config. `AppPaths.root` is
-     * `~/jingler`, so its parent is $HOME. Never fails.
-     */
-    const resolveExecMode = (sessionId: string): Effect.Effect<PermissionMode, never, PromptEnv> =>
-      Effect.gen(function* () {
-        const session = yield* getSessionOrNull(sessionId)
-        const pathSvc = yield* Path.Path
-        const appPaths = yield* AppPaths
-        return yield* readDefaultMode(session?.cli ?? "claude", pathSvc.dirname(appPaths.root))
-      })
+    /** Jingler's provider-independent execution fallback. */
+    const resolveExecMode = (): Effect.Effect<PermissionMode> =>
+      Effect.succeed(defaultModeFor())
 
     /** The plan with `planId` from a session's persisted transcript, or null. */
     const sessionPlan = (chatId: string, planId: string): Effect.Effect<Plan | null, never, PromptEnv> =>
@@ -717,7 +704,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             (chat) => chat.id === chatId
           )?.mode
           const restore =
-            persisted && persisted !== "plan" ? persisted : yield* resolveExecMode(sessionId)
+            persisted && persisted !== "plan" ? persisted : yield* resolveExecMode()
           yield* setMode(sessionId, chatId, restore)
           return prompt(
             sessionId,
@@ -842,7 +829,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     ) =>
       Effect.suspend(() =>
         Effect.gen(function* () {
-          const adapter = yield* CliAdapter
+          const adapter = yield* AgentTurnDriver
           const session: Session | null = yield* getSessionOrNull(sessionId)
           const chat =
             session?.chats.find((candidate) => candidate.id === chatId) ??
@@ -853,39 +840,39 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               : null)
           if (session === null || chat === null) {
             return yield* Effect.fail(
-              new CliExecError({
+              new AgentRunError({
                 kind: "chat",
                 message: "The selected chat no longer exists."
+              })
+            )
+          }
+          if (chat.connectionId === undefined || chat.modelId === undefined) {
+            return yield* Effect.fail(
+              new AgentRunError({
+                kind: session.providerId ?? "provider",
+                message: "Choose a certified provider connection before continuing."
               })
             )
           }
           yield* TranscriptStore.adoptLegacy(sessionId, chatId)
 
           const sessionMode =
-            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor(session.cli)
+            (yield* Ref.get(modes)).get(chatId) ?? chat.mode ?? defaultModeFor()
           const allow = new Set<string>([
             ...(yield* approvals.allowlistFor(chatId)),
             ...(chat.allowlist ?? [])
           ])
-          const sessionCli = session.cli
           const workspaceConfig = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-          const discoveredClis = yield* DiscoveryService.list().pipe(
-            Effect.orElseSucceed(() => [])
-          )
           // Read once per turn: plan mode's commands run unattended unless the
           // operator switched that off in Settings.
           const planAutoRun = workspaceConfig?.planAutoRun ?? PLAN_AUTO_RUN_DEFAULT
           // Read per turn, not per session: flipping ADHD mode in Settings takes
           // effect on the very next message of an already-running session.
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
-          const cli = sessionCli
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
-          const execDefault = yield* resolveExecMode(sessionId)
+          const execDefault = yield* resolveExecMode()
           yield* Ref.update(execDefaults, (m) => new Map(m).set(chatId, execDefault))
-          // Resolve the harness binary; null → the dispatcher uses the scripted
-          // fallback (also the path when the CLI isn't installed).
-          const binPath = discoveredClis.find((c) => c.kind === cli)?.binPath ?? null
           // The agent always runs in the session's recorded working checkout.
           //
           // This comment used to claim an empty value "would fail loudly on a
@@ -901,9 +888,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // `worktreePath` is stored ABSOLUTE and nothing rewrites it — this
           // app's own rename moved the home directory and shipped no migration
           // — so the stored value can name a directory that is not there while
-          // the worktree sits perfectly intact one name over. Healing it also
-          // moves the agent CLI's transcripts, which are filed under a slug of
-          // the working directory and are otherwise lost to `--resume`.
+          // the worktree sits perfectly intact one name over.
           //
           // Costs one `stat` on the overwhelmingly common healthy path.
           const storedWorktree = session?.worktreePath ?? ""
@@ -946,8 +931,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               const actual =
                 liveBranch === null ? "detached HEAD" : `branch "${liveBranch}"`
               return yield* Effect.fail(
-                new CliExecError({
-                  kind: session.cli,
+                new AgentRunError({
+                  kind: session.providerId ?? "provider",
                   message:
                     `This direct session is pinned to branch "${session.branch}", but ` +
                     `the repository checkout is now on ${actual}. Switch the repository ` +
@@ -973,7 +958,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * digest; an immediate retry waits here rather than resuming the same
            * full thread. Sub-agents never reach this top-level path.
            */
-          yield* ContextManager.prepareUnknownCodexResume(chatId)
           const applied = yield* ContextManager.applyWhenReady(chatId)
           const digest = applied?.digest ?? null
           // The WORKING SET at the moment of the swap, straight from the manager.
@@ -1007,7 +991,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // ADHD mode rides in the same per-turn prefix as the primer and plan
           // pointer so a Settings change applies immediately. Its own scope makes
           // the format dormant during work and active only for the final summary.
-          const adhd = adhdMode ? adhdNote(cli) : null
+          const adhd = adhdMode ? adhdNote() : null
           // Not optional, and not a setting: an agent that asks in prose is an
           // agent whose question never reaches the operator. Claude has the
           // `AskUserQuestion` tool the adapter intercepts, Codex has the fenced
@@ -1016,29 +1000,32 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // an unanswerable paragraph. Rides the same per-turn prefix as ADHD
           // mode, for the same reason: no system-prompt hook is shared by every
           // harness, and this has to survive a mid-session harness switch.
-          const ask = questionNote(cli)
-          const preferJinglerTools =
-            workspaceConfig?.openConnector?.preferJinglerTools ?? true
+          const ask = questionNote()
           // How this harness submits an enhanced plan. Null for Claude — the adapter passes
           // `planModeInstructions` as a real SDK option there, and saying it twice
           // would compete with the `ExitPlanMode` tool the harness is steered
           // toward. With Jingler tools disabled, the harness owns planning and
           // receives none of Jingler's structured plan protocol.
-          const planProtocol =
-            mode === "plan" && preferJinglerTools
-              ? planNote(cli)
-              : null
+          const planProtocol = mode === "plan" ? planNote() : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
+          const activePlan = worktreePath.length === 0
+            ? null
+            : yield* PlanStore.readDocument(
+                worktreePath,
+                sessionId,
+                chatId
+              ).pipe(Effect.orElseSucceed(() => null))
+          const activePlanExecutionId =
+            planExecutionId ??
+            (activePlan !== null &&
+            activePlan.producingChatId === chatId &&
+            ["approved", "executing", "needs-verification"].includes(activePlan.status)
+              ? activePlan.id
+              : null)
           const operatorText = displayText ?? text
           const promptText = text
-          const providerReasoning =
-            cli === "claude" || cli === "codex" || cli === "opencode"
-              ? session.reasoning?.[cli]
-              : undefined
-          const resolvedReasoning =
-            reasoning === undefined ? providerReasoning : reasoning
           // Resolve every remote MCP source once, here, where the full service
           // context is available — adapters run in `R = never` async code and
           // cannot reach services. Best-effort: a configured connector read
@@ -1047,7 +1034,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // requirement channel (`PromptEnv`) rather than becoming a build-time
           // dependency of `AgentRunner.Default` — the latter is a singleton whose
           // construction must stay `R = never` for the layer graph and tests.
-          const openConnectorServer = yield* OpenConnectorService.injection(cli).pipe(
+          const openConnectorServer = yield* OpenConnectorService.injection().pipe(
             Effect.orElseSucceed(() => null)
           )
 
@@ -1062,20 +1049,40 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // Pass only the raw operator text: injected policy/persona notes are not
           // useful search terms and would dilute a narrow memory query.
           const memoryAttachment = yield* memoryService.attachment(
-            cli,
             operatorText,
             `${sessionId}:${chatId}`
           )
-          const remoteMcpServers = composeRemoteMcpServers(
-            memoryAttachment?.server ?? null,
-            remoteMcpServer(openConnectorServer),
-            browserAttachment
-          )
+          const mcp = {
+            memory: memoryAttachment?.server ?? null,
+            openConnector: remoteMcpServer(openConnectorServer),
+            browser: browserAttachment
+          }
 
-          const spec: SessionSpec = {
-            cli,
-            repo: session?.repo ?? "",
-            branch: session?.branch ?? "",
+          const spec: AgentTurnSpec = {
+            sessionId,
+            chatId,
+            connectionId: chat.connectionId,
+            modelId: chat.modelId,
+            role:
+              mode === "plan"
+                ? "plan"
+                : activePlanExecutionId
+                  ? "plan-execution"
+                  : "conversation",
+            priorMessages,
+            piSessionId: digest === null ? chat.piSessionId ?? null : null,
+            seed:
+              digest === null &&
+              chat.piSessionId === undefined &&
+              priorMessages.length > 0
+                ? { reason: "migration", messages: priorMessages }
+                : null,
+            targetCapabilities: {
+              versions: CURRENT_RUNTIME_CONTRACTS,
+              toolIds: [],
+              resourceIds: [],
+              targetId: session.environmentId ?? "desktop"
+            },
             cwd: worktreePath,
             // A slash command is only expanded by the harness when it is the FIRST
             // thing in the message. Prefixing a compaction primer or a plan pointer
@@ -1089,53 +1096,23 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 planPointer,
                 adhd,
                 memory: memoryAttachment?.instructions ?? null,
-                tools: preferJinglerTools ? managedToolsNote() : null,
+                tools: managedToolsNote(),
                 ask,
                 planProtocol
               },
-              { leadWithText: leadsWithCommand(cli, promptText) }
+              { leadWithText: leadsWithCommand(promptText) }
             ),
             images,
-            binPath,
             mode,
-            model: chat.model ?? defaultModel(cli),
-            ...(mode === "plan"
-              ? { planTemplate: workspaceConfig?.planTemplate?.source ?? "" }
-              : {}),
-            ...(resolvedReasoning === null
-              ? {}
-              : {
-                  ...(resolvedReasoning?.enabled === undefined
-                    ? {}
-                    : { thinkingEnabled: resolvedReasoning.enabled }),
-                  ...(resolvedReasoning?.effort === undefined
-                    ? {}
-                    : { reasoningEffort: resolvedReasoning.effort })
-                }),
-            // The persisted harness session id, so the adapter resumes the full
-            // conversation even after a restart cleared its in-memory resume map.
-            //
-            // On a compaction this is dropped: the whole point is to begin a NEW
-            // harness conversation seeded with the summary. `fresh` is required
-            // alongside it because the adapter prefers its in-memory resume map
-            // over the spec, so a null id alone would silently resume anyway.
-            resumeId: digest === null ? chat.resumeId ?? null : null,
-            ...(digest === null ? {} : { fresh: true }),
-            // `mode: plan` is the transient read-only boundary. Do not also set
-            // the permanent `readOnly` role flag: Codex resumes this SAME spec
-            // after approval, and a permanent flag would keep its sandbox
-            // read-only instead of restoring the operator's Auto policy.
-            // Each adapter enforces plan mode in its own native vocabulary.
-            remoteMcpServers,
-            mcpPolicy: preferJinglerTools ? "managed-only" : "merge",
-            enhancedPlan: preferJinglerTools
+            reasoning: reasoning ?? chat.reasoning ?? null,
+            mcp
           }
 
           // Clear the PERSISTED id too, so a crash between here and the harness
           // reporting its new id can't leave the session pointing at a thread
           // whose context we have already decided to abandon.
           if (digest !== null) {
-            yield* SessionStore.clearResumeId(sessionId, chatId).pipe(Effect.ignore)
+            yield* SessionStore.clearPiSessionId(sessionId, chatId).pipe(Effect.ignore)
           }
 
           // Capture the persistence services so `emit`/`run` handed to the
@@ -1146,14 +1123,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             | PlanStore
             | BackgroundTaskStore
             // `emit` hands every context reading to the manager, which may fork a
-            // digest run — so the manager's own dependencies (the adapter it
-            // summarises through, the config holding the budget, the discovery
-            // that finds the binary) have to be captured here too, or `emit`
+            // digest run — so the manager's own dependencies have to be captured
+            // here too, or `emit`
             // stops being `R = never` and the whole fold fails to type.
             | ContextManager
             | ConfigService
-            | CliAdapter
-            | DiscoveryService
+            | AgentTurnDriver
             | CommandExecutor.CommandExecutor
             | FileSystem.FileSystem
             | Path.Path
@@ -1582,19 +1557,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }
               yield* Ref.set(acc, next)
               yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
-              // Persist the harness's actual model (reported on init) so the chip
-              // reflects reality even when the session hadn't pinned one.
-              if (event._tag === "Started" && event.model) {
-                yield* SessionStore.setModel(sessionId, chatId, event.model).pipe(Effect.ignore)
-              }
-              // Persist the harness session id (carried on Started) so the NEXT
+              // Persist the pi session id (carried on Started) so the NEXT
               // prompt resumes this conversation — even after an app restart wiped
-              // the adapter's in-memory resume map. `event.sessionId` is the
-              // harness's own id, not our `sessionId` (the Jingler session key).
+              // the runtime's in-memory resume map. `event.sessionId` is the
+              // pi session id, not our `sessionId` (the Jingler session key).
               if (event._tag === "Started" && event.sessionId.length > 0) {
-                yield* SessionStore.setResumeId(sessionId, chatId, event.sessionId).pipe(
-                  Effect.ignore
-                )
+                yield* SessionStore.setPiSessionId(
+                  sessionId,
+                  chatId,
+                  event.sessionId
+                ).pipe(Effect.ignore)
               }
               // Remember an edit's target path so its ToolEnd can tie back to a step.
               if (event._tag === "ToolStart" && isFileMutationTool(event.name) && event.target) {
@@ -1752,6 +1724,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   return PlanDecision.Reject()
                 }
                 canonicalPlan = promotion.right.plan
+                yield* Ref.set(executingPlanId, canonicalPlan.id)
                 if (submittedBlock !== undefined) {
                   yield* turnMutation.withPermits(1)(
                     Effect.gen(function* () {
@@ -1917,7 +1890,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 // caller that can lose that race is the operator's own "Send now",
                 // whose fallback is exactly right. The queue's automatic flush is
                 // unaffected — it marks its steers `auto`, which forbids the stop.
-                return { status: cli === "codex" ? "deferred" : "unsupported" } as const
+                return { status: "deferred" } as const
               }
               const replyWaiter: RunReplyWaiter | null = captureReply
                 ? yield* makeSteeredReplyWaiter
@@ -2007,8 +1980,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                               ? "detached HEAD"
                               : `branch "${liveBranch}"`
                           return yield* Effect.fail(
-                            new CliExecError({
-                              kind: session.cli,
+                            new AgentRunError({
+                              kind: session.providerId ?? "provider",
                               message:
                                 `This direct session was stopped because its repository ` +
                                 `moved from branch "${session.branch}" to ${actual}. Switch ` +
@@ -2052,7 +2025,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               const failure = Option.getOrUndefined(Cause.failureOption(cause))
               return emit({
                 _tag: "Failed",
-                message: failure instanceof CliExecError ? failure.message : "The agent run failed."
+                message: failure instanceof AgentRunError ? failure.message : "The agent run failed."
               })
             }),
             Effect.ensuring(
@@ -2106,7 +2079,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 const record = {
                   at: new Date().toISOString(),
                   sessionId,
-                  cli: session?.cli ?? null,
+                  providerId: session?.providerId ?? null,
                   images: images.length,
                   events: yield* Ref.get(eventCount),
                   lastEvent: yield* Ref.get(lastEvent),
@@ -2221,7 +2194,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   if ((yield* Ref.get(eventCount)) > 0) return
                   yield* emit({
                     _tag: "Failed",
-                    message: `${session.cli} produced no output for ${FIRST_EVENT_DEADLINE}. The turn was cancelled — send your message again.`
+                    message: `The provider produced no output for ${FIRST_EVENT_DEADLINE}. The turn was cancelled — send your message again.`
                   })
                   yield* Fiber.interrupt(fiber)
                 })
@@ -2323,7 +2296,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     Stream.fromIterable<StreamEvent>([{
                       _tag: "Failed",
                       message:
-                        error instanceof CliExecError
+                        error instanceof AgentRunError
                           ? error.message
                           : "The agent run could not start."
                     }])

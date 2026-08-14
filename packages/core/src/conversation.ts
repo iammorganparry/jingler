@@ -1,6 +1,7 @@
 import { Match, Schema } from "effect"
-import { CliKind, DiffStat } from "./domain.js"
+import { DiffStat } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
+import { FileChangeSet } from "./runtime/file-change.js"
 
 /**
  * Conversation domain — the transcript model plus the normalized `StreamEvent`
@@ -37,6 +38,8 @@ export const ToolCall = Schema.Struct({
   diff: Schema.NullOr(DiffStat),
   /** A compact unified-diff snippet shown inline under the card (Edit). */
   preview: Schema.NullOr(Schema.String),
+  /** Canonical actual-workspace evidence; absent on transcripts written before pi. */
+  fileChanges: Schema.optional(FileChangeSet),
   /**
    * What the tool printed — the expanded body of a non-edit card (a Bash
    * command's output, a Grep's hits). Capped upstream; edit tools use `preview`.
@@ -527,8 +530,6 @@ export const Subagent = Schema.Struct({
   description: Schema.String,
   /** The spawning sub-agent's id, or null when spawned by the main agent. */
   parentId: Schema.NullOr(Schema.String),
-  /** The harness running this sub-agent, when it differs from the session CLI. */
-  cli: Schema.optional(CliKind),
   status: SubagentStatus,
   message: Message
 })
@@ -567,10 +568,7 @@ export type BackgroundTaskStatus = Schema.Schema.Type<typeof BackgroundTaskStatu
  * main process, not in the renderer's per-run conversation state.
  *
  * Provider support is uneven and this model is the common denominator: only
- * Claude exposes real background tasks (start/progress/settle events, a live
- * set, and per-task stop). Codex and OpenCode can cancel a whole turn but have
- * no per-task handle, so they report the capability as unsupported and no dock
- * is shown. `CliInfo.backgroundTasks` carries that flag.
+ * pi tools report start/progress/settle events and expose per-task stop handles.
  */
 export const BackgroundTask = Schema.Struct({
   /** The harness's task id — the handle `stop` needs. */
@@ -677,6 +675,8 @@ export const StreamEvent = Schema.Union(
     meta: Schema.NullOr(Schema.String),
     diff: Schema.NullOr(DiffStat),
     preview: Schema.NullOr(Schema.String),
+    /** Actual post-execution workspace evidence when the tool could mutate files. */
+    fileChanges: Schema.optional(FileChangeSet),
     /** What the tool printed (capped upstream). Optional — see `ToolCall.output`. */
     output: Schema.optional(Schema.String),
     agentId: AgentId
@@ -702,8 +702,6 @@ export const StreamEvent = Schema.Union(
      * the `parent_tool_use_id` of the message carrying the `Task` call.
      */
     parentId: Schema.NullOr(Schema.String),
-    /** The harness running it, when it differs from the session's own CLI. */
-    cli: Schema.optional(CliKind)
   }),
   /** A spawned sub-agent finished — its tab is removed (transcripts are live-only). */
   Schema.TaggedStruct("SubagentEnded", {
@@ -765,6 +763,29 @@ export const StreamEvent = Schema.Union(
   Schema.TaggedStruct("Usage", {
     tokens: Schema.Number,
     window: Schema.optional(Schema.Number)
+  }),
+  Schema.TaggedStruct("RetryScheduled", {
+    operation: Schema.Literal("provider", "summarization"),
+    attempt: Schema.Number,
+    maxAttempts: Schema.Number,
+    delayMs: Schema.Number,
+    message: Schema.String
+  }),
+  Schema.TaggedStruct("RetryFinished", {
+    operation: Schema.Literal("provider", "summarization"),
+    attempt: Schema.Number,
+    success: Schema.Boolean,
+    message: Schema.NullOr(Schema.String)
+  }),
+  Schema.TaggedStruct("CompactionStarted", {
+    reason: Schema.Literal("manual", "threshold", "overflow")
+  }),
+  Schema.TaggedStruct("CompactionFinished", {
+    reason: Schema.Literal("manual", "threshold", "overflow"),
+    status: Schema.Literal("success", "failed", "aborted"),
+    tokensBefore: Schema.NullOr(Schema.Number),
+    tokensAfter: Schema.NullOr(Schema.Number),
+    message: Schema.NullOr(Schema.String)
   }),
   /**
    * The harness conversation was reseeded from a summary to keep the working set
@@ -837,7 +858,7 @@ export const assistantMessage = (
  */
 export const settleStreaming = (msg: Message): Message => {
   const partStreaming = msg.parts.some((p) => p._tag === "Thinking" && p.streaming)
-  if (!msg.streaming && !partStreaming) return msg
+  if (!(msg.streaming || partStreaming)) return msg
   return {
     ...msg,
     streaming: false,
@@ -1004,6 +1025,9 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
                 meta: e.meta,
                 diff: e.diff,
                 preview: e.preview,
+                ...(e.fileChanges !== undefined
+                  ? { fileChanges: e.fileChanges }
+                  : {}),
                 // Spread so an event without output leaves the key ABSENT rather
                 // than present-and-undefined — the field is optional, and an
                 // explicit `undefined` re-encodes differently from "not there".
@@ -1082,7 +1106,14 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
 
     // Live usage is run-level analytics (tracked in the machine/session), not part
     // of the transcript — no-op in the per-message fold.
-    Match.tag("Usage", () => msg),
+    Match.tag(
+      "Usage",
+      "RetryScheduled",
+      "RetryFinished",
+      "CompactionStarted",
+      "CompactionFinished",
+      () => msg
+    ),
 
     // A compaction IS part of the transcript: it is the only visible trace that
     // the model's memory was rebuilt, and the only place the user can check what
@@ -1261,7 +1292,6 @@ export const applySubagentEvent = (
         name: event.name,
         description: event.description,
         parentId: event.parentId,
-        ...(event.cli === undefined ? {} : { cli: event.cli }),
         status: "working",
         message: assistantMessage(event.id, "")
       }
@@ -1529,7 +1559,18 @@ export interface AgentFileActivity {
 export type ActivityPhase = "running" | "settling" | "idle"
 
 const READ_TOOLS = new Set(["Read", "Grep", "Glob", "NotebookRead", "LS"])
-const EDIT_TOOLS = new Set(["Edit", "Write", "Update", "NotebookEdit", "MultiEdit"])
+const EDIT_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "Update",
+  "NotebookEdit",
+  "MultiEdit",
+  "workspace_write",
+  "workspace_edit",
+  "workspace_delete",
+  "workspace_rename"
+])
+const WORKSPACE_RECONCILIATION_TOOL = "Workspace changes"
 const WEB_TOOLS = new Set(["WebFetch", "WebSearch"])
 const SUBAGENT_TOOLS = new Set(["Task", "Agent"])
 
@@ -1602,20 +1643,32 @@ export const agentFileActivityOf = (
     lastTool(
       [currentTurn],
       (candidate) => candidate.status === "running" && isFileMutationTool(candidate.name)
-    ) ?? lastTool([currentTurn], (candidate) => isFileMutationTool(candidate.name))
+    ) ?? lastTool(
+      [currentTurn],
+      (candidate) =>
+        candidate.name !== WORKSPACE_RECONCILIATION_TOOL &&
+        (isFileMutationTool(candidate.name) ||
+          (candidate.fileChanges?.changes.length ?? 0) > 0)
+    ) ?? lastTool(
+      [currentTurn],
+      (candidate) => (candidate.fileChanges?.changes.length ?? 0) > 0
+    )
+  const change = tool?.fileChanges?.changes.at(-1)
+  const path = change?.path ?? tool?.target
   if (
     tool === null ||
-    tool.target === null ||
-    tool.target.trim() === "" ||
+    path === null ||
+    path === undefined ||
+    path.trim() === "" ||
     tool.status === "error"
   ) {
     return null
   }
   return {
     eventId: tool.id,
-    path: tool.target,
+    path,
     phase: tool.status === "running" ? "editing" : "completed",
-    preview: tool.preview
+    preview: change?.preview ?? tool.preview
   }
 }
 

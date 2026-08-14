@@ -30,8 +30,10 @@ const review = (over: Partial<AdversarialReview> = {}): AdversarialReview => ({
   sessionId: "s1",
   prNumber: 42,
   headSha: "abc123",
-  cli: "claude",
-  model: "claude-fable-5",
+  connectionId: null,
+  providerId: null,
+  modelId: null,
+  legacyModel: "claude-fable-5",
   createdAt: "2026-07-16T10:00:00.000Z",
   findings: [
     {
@@ -67,6 +69,32 @@ describe("ReviewStore", () => {
       })
     )
     expect(read).toStrictEqual(stored)
+  })
+
+  it("migrates harness-era review identity without retaining a harness field", async () => {
+    mkdirSync(join(temp.root, "reviews"), { recursive: true })
+    writeFileSync(
+      join(temp.root, "reviews", "s1.json"),
+      JSON.stringify({
+        ...review(),
+        connectionId: undefined,
+        providerId: undefined,
+        modelId: undefined,
+        legacyModel: undefined,
+        cli: "claude",
+        model: "claude-fable-5"
+      })
+    )
+
+    const stored = await run(ReviewStore.get("s1"))
+    expect(stored).toMatchObject({
+      connectionId: null,
+      providerId: null,
+      modelId: null,
+      legacyModel: "claude-fable-5"
+    })
+    expect(stored).not.toHaveProperty("cli")
+    expect(stored).not.toHaveProperty("model")
   })
 
   // Only the last review is kept — the previous head's findings are stale the

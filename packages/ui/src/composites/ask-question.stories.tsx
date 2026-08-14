@@ -95,7 +95,6 @@ function AskFlow() {
       <ConversationView
         messages={messages}
         mode="plan"
-        cli="claude"
         question={question}
         onAnswerQuestion={onAnswerQuestion}
         onSend={() => {}}

@@ -33,6 +33,7 @@ const addProject = async (window: Page, projectPath: string) => {
   const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…")
   await directorySearch.fill(projectPath)
   await directorySearch.press("Enter")
+  await expect(window.getByText(projectPath, { exact: true })).toBeVisible()
   await window.getByRole("button", { name: "Choose current folder" }).click()
   await window.getByRole("button", { name: "Add project" }).click()
 }
@@ -177,7 +178,7 @@ test("creates an isolated worktree workspace from a selected base branch", async
   expect(existsSync(persisted.worktreePath)).toBe(true)
 })
 
-test("migrates a legacy repository and session into the project workspace hierarchy", async ({
+test("migrates an existing repository and session into the project workspace hierarchy", async ({
   launchApp
 }) => {
   const legacy = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
@@ -187,7 +188,6 @@ test("migrates a legacy repository and session into the project workspace hierar
     branch: "main",
     title: "Legacy workspace",
     status: "idle",
-    cli: "opencode",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -212,20 +212,22 @@ test("migrates a legacy repository and session into the project workspace hierar
   expect(migrated.id).toBe("s_legacy_project")
   expect(migrated.worktreePath).toBe(launched.repoPath)
   expect(migrated.projectId).toBe(projects[0].id)
-  expect(migrated.cli).toBe("codex")
+  expect(migrated.connectionId).toBe("jingler-e2e-connection")
 })
 
 test("adds a project creates a workspace selects capabilities and completes an enhanced plan", async ({
   launchApp
 }) => {
-  const launched = await launchApp({ configured: true })
+  const launched = await launchApp({
+    configured: true,
+    piFixture: { scenarioId: "plan-mode", authRoute: "api-key" }
+  })
   const projectPath = makeProject(launched.home, "journey-project")
   await expect(appShell(launched.window)).toBeVisible()
   await addProject(launched.window, projectPath)
-  await launched.window.getByRole("button", { name: /^Model:/ }).click()
-  await expect(launched.window.getByRole("option", { name: /^Claude Code\b/ })).toBeVisible()
-  await launched.window.getByRole("option", { name: /^Codex CLI\b/ }).click()
-  await launched.window.getByRole("option", { name: /^GPT-5\.6 Luna\b/ }).click()
+  await expect(
+    launched.window.getByRole("button", { name: "Model: Deterministic pi model" })
+  ).toBeVisible()
   await createWorkspace(launched.window, {
     checkout: "Worktree",
     task: "[[plan]] refactor auth to a TokenStore"
@@ -233,8 +235,8 @@ test("adds a project creates a workspace selects capabilities and completes an e
 
   await expect.poll(() => {
     const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
-    return persisted.chats[0].model
-  }).toBe("gpt-5.6-luna")
+    return persisted.chats[0].modelId
+  }).toBe("jingler-e2e/eval-model")
 
   await expect(launched.window.getByRole("button", { name: /^Model:/ })).toBeVisible()
   await launched.window.getByPlaceholder(/Message .+…/).press("Enter")

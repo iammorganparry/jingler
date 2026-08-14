@@ -16,8 +16,7 @@ const SUBSCRIPTION_RENEWAL_SKEW_SECONDS = 30
 export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
   async #ledger(subject: string): Promise<ManagedAuthSubscriptionLedger> {
     const restored =
-      (await this.ctx.storage.get<ManagedAuthState>(STATE_KEY)) ??
-      emptyManagedAuthState()
+      (await this.ctx.storage.get<ManagedAuthState>(STATE_KEY)) ?? emptyManagedAuthState()
     return new ManagedAuthSubscriptionLedger(subject, restored)
   }
 
@@ -71,10 +70,7 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
     if (!ledger.apply(snapshot, { leaseExpiresAt })) return false
     await this.#persist(ledger)
     await this.ctx.storage.setAlarm(
-      Math.max(
-        Date.now() + 1_000,
-        (leaseExpiresAt - SUBSCRIPTION_RENEWAL_SKEW_SECONDS) * 1_000
-      )
+      Math.max(Date.now() + 1_000, (leaseExpiresAt - SUBSCRIPTION_RENEWAL_SKEW_SECONDS) * 1_000)
     )
     await this.#fanOut(ledger.snapshot())
     return true
@@ -101,30 +97,36 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
 
     if (url.pathname === "/v1/sessions/register" && request.method === "POST") {
       const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null
+      const claimSlot = typeof body?.claimSlot === "boolean" ? body.claimSlot : null
       if (sessionId === null) return json({ error: "sessionId is required" }, 400)
+      if (claimSlot === null) return json({ error: "claimSlot is required" }, 400)
       const now = Math.floor(Date.now() / 1_000)
       const connected = !ledger.needsSubscription(now) || (await this.#subscribe(subject))
       const current = connected ? await this.#ledger(subject) : ledger
       const auth = current.authorize("managed.session.execute", now)
-      const credentialHandles = {
-        codex: current.credentialHandle("codex", now),
-        claude: current.credentialHandle("claude", now),
-        github: current.credentialHandle("github", now)
+      const providerConnections = current.providerConnections(now)
+      const githubCapabilityHandle = current.credentialHandle("github", now)
+      if (!(connected && auth.admitted && providerConnections.length > 0)) {
+        return json({
+          connected,
+          auth,
+          providerConnections,
+          githubCapabilityHandle
+        })
       }
-      if (!(connected && auth.admitted &&
-        (credentialHandles.codex !== null || credentialHandles.claude !== null))) {
-        return json({ connected, auth, credentialHandles })
+      if (claimSlot) {
+        try {
+          current.registerSession(sessionId, now)
+        } catch {
+          return json({ error: "Managed session concurrency exceeded" }, 429)
+        }
+        await this.#persist(current)
       }
-      try {
-        current.registerSession(sessionId, now)
-      } catch {
-        return json({ error: "Managed session concurrency exceeded" }, 429)
-      }
-      await this.#persist(current)
       return json({
         connected,
         auth,
-        credentialHandles
+        providerConnections,
+        githubCapabilityHandle
       })
     }
 
@@ -145,18 +147,12 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
     if (url.pathname === "/v1/capabilities" && request.method === "POST") {
       const now = Math.floor(Date.now() / 1_000)
       const initial = ledger.authorize("managed.session.execute", now)
-      const current = initial.admitted || !(await this.#subscribe(subject))
-        ? ledger
-        : await this.#ledger(subject)
+      const current =
+        initial.admitted || !(await this.#subscribe(subject)) ? ledger : await this.#ledger(subject)
       const admitted = current.authorize("managed.session.execute", now).admitted
       return json({
         version: 1,
-        harnesses: admitted
-          ? [
-              ...(current.credentialHandle("codex", now) === null ? [] : ["codex"]),
-              ...(current.credentialHandle("claude", now) === null ? [] : ["claude"])
-            ]
-          : []
+        providerConnections: admitted ? current.providerConnections(now) : []
       })
     }
 

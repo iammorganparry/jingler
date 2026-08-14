@@ -21,7 +21,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/context",
     title: "Long running session",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -32,14 +31,21 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   }
 ]
 
+const piFixture = {
+  scenarioId: "context-compaction",
+  authRoute: "api-key" as const,
+  reasoning: ["low", "medium", "high"] as const
+}
+
 test("compacts a session and keeps its history intact", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
-    sessions: seededSessions
+    sessions: seededSessions,
+    piFixture
   })
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
 
   // ── A first turn, so there is a conversation worth summarising ──
@@ -48,15 +54,17 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
   await composer.press("Enter")
 
   // Wait for the turn to settle — the meter only appears once usage is reported.
-  await expect(window.getByText("src/routes/billing.ts").first()).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("src/routes/billing.ts").first()).toBeVisible({
+    timeout: 20_000
+  })
 
   // ── The meter reads a live snapshot across the RPC boundary ──
   const meter = window.getByRole("button", { name: "Compact now" })
   await expect(meter).toBeVisible({ timeout: 20_000 })
-  // 42.1k is the scripted adapter's reported context size. Seeing it here proves
+  // The scripted provider reports context in the 40k range. Seeing it here proves
   // the Usage event reached the renderer AND that `Context.state` resolved a
   // trigger point — the meter renders nothing without one.
-  await expect(meter).toContainText("42.1k")
+  await expect(meter).toContainText(/4\d(?:\.\d)?k/)
 
   // ── Compact ──
   await meter.click()
@@ -64,8 +72,12 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
   // The widget must SAY a compaction is happening — the state the user cannot
   // cause themselves and previously had no word for. It resolves to "compacts
   // next turn" once the summary lands.
-  await expect(window.getByText(/compacting…|compacts next turn/)).toBeVisible({ timeout: 20_000 })
-  await expect(window.getByText("compacts next turn")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText(/compacting…|compacts next turn/)).toBeVisible({
+    timeout: 20_000
+  })
+  await expect(window.getByText("compacts next turn")).toBeVisible({
+    timeout: 20_000
+  })
 
   // ── The next turn runs on the reseeded conversation ──
   await composer.click()
@@ -73,7 +85,9 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
   await composer.press("Enter")
 
   // The marker lands in the transcript, above the reply that ran on it.
-  await expect(window.getByText("Context compacted")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("Context compacted")).toBeVisible({
+    timeout: 20_000
+  })
 
   // ── What the user is left with ──
   // The earlier turn is STILL THERE. This is the property that distinguishes
@@ -96,15 +110,15 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
 /**
  * The regression guard for the streamed-digest bug.
  *
- * A real harness streams its summary token by token, so the manager collects the
+ * A real provider streams its summary token by token, so the manager collects the
  * reply as many `Assistant` deltas and reassembles them. It once joined those
  * fragments with "\n" instead of "": a newline injected inside a JSON string
  * value made the reply invalid JSON, `parseDigest` returned null, and EVERY real
  * digest failed — the session showed "compaction failed" and never compacted.
  *
- * Unit tests missed it because the fake adapters emit the reply as ONE event,
+ * Unit tests missed it because earlier fixtures emitted the reply as ONE event,
  * where the separator is a no-op. This test only means anything because the
- * scripted digest now streams in chunks (see `scriptedRun` in adapter.ts), so a
+ * deterministic pi digest streams in chunks, so a
  * boundary lands mid-string exactly as it does in production. If the join
  * regresses, the digest fails to parse and every assertion below times out.
  */
@@ -112,16 +126,19 @@ test("reassembles a digest that arrives as streamed deltas", async ({ launchApp 
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
-    sessions: seededSessions
+    sessions: seededSessions,
+    piFixture
   })
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
 
   await composer.click()
   await composer.pressSequentially("Add rate limiting to the refund endpoint.")
   await composer.press("Enter")
-  await expect(window.getByText("src/routes/billing.ts").first()).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("src/routes/billing.ts").first()).toBeVisible({
+    timeout: 20_000
+  })
 
   const meter = window.getByRole("button", { name: "Compact now" })
   await expect(meter).toBeVisible({ timeout: 20_000 })
@@ -129,14 +146,18 @@ test("reassembles a digest that arrives as streamed deltas", async ({ launchApp 
 
   // The digest PARSED. With the "\n" join this never happens: the reply is
   // invalid JSON, the manager fails, and the meter reads "compaction failed".
-  await expect(window.getByText("compacts next turn")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("compacts next turn")).toBeVisible({
+    timeout: 20_000
+  })
   await expect(window.getByText("compaction failed")).toHaveCount(0)
 
   // Apply the swap, then inspect the summary the manager reassembled.
   await composer.click()
   await composer.pressSequentially("What did we decide about the token bucket?")
   await composer.press("Enter")
-  await expect(window.getByText("Context compacted")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("Context compacted")).toBeVisible({
+    timeout: 20_000
+  })
   await window.getByText("Context compacted").click()
 
   // Multi-word strings that the chunker split ACROSS delta boundaries, rendered
@@ -153,27 +174,28 @@ test("exposes the token levers in Settings", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
-    sessions: seededSessions
+    sessions: seededSessions,
+    piFixture
   })
 
   await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("Measure this conversation before opening settings.")
+  await composer.press("Enter")
+  await expect(window.getByRole("button", { name: "Compact now" })).toBeVisible({
+    timeout: 20_000
+  })
+
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await expect(window.getByRole("button", { name: "Close settings" })).toBeVisible()
   await window.getByRole("button", { name: /Context/ }).click()
 
-  // The budget, and — the part that makes it meaningful — what it means per
-  // harness. Claude's current default is a 1M-window model, so the new 500k
-  // quality budget binds before the model's safety margin.
+  // The budget and the live, provider-reported occupancy must survive the
+  // runtime, persistence, RPC, and Settings boundaries together.
   await expect(window.getByText("500k tokens")).toBeVisible()
-  // One row per harness, and Claude is no longer the only 1M family — Codex's
-  // GPT-5.6 reads the same. So assert the reading appears for EVERY harness that
-  // has it rather than picking one arbitrarily, which is the honest version of
-  // the claim and does not quietly stop testing when a third 1M harness lands.
-  const oneMillion = window.getByText("500k of 1M")
-  expect(await oneMillion.count()).toBeGreaterThan(0)
-  for (const row of await oneMillion.all()) await expect(row).toBeVisible()
-
-  // The cost answer, stated rather than implied.
-  await expect(window.getByText(/no API key/)).toBeVisible()
+  const sessionsPanel = window.getByText("Your sessions right now").locator("..")
+  await expect(sessionsPanel).toBeVisible()
+  await expect(sessionsPanel.getByText("Long running session")).toBeVisible()
+  await expect(sessionsPanel.getByText(/\d+(?:\.\d+)?k context/)).toBeVisible()
 })

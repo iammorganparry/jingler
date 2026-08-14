@@ -2,6 +2,9 @@ import type { SeedSession } from "./fixtures.js"
 import { appShell, expect, test } from "./fixtures.js"
 import { type FakeMemoryRequest, startFakeAuthServer } from "./fake-auth.js"
 
+const COMPLETED_PI_REPLY = /^Completed through deterministic pi\./u
+const FAILED_MEMORY_MCP = /jingler-memory: failed/u
+
 const memoryRequestCount = (
   requests: ReadonlyArray<FakeMemoryRequest>,
   name: "memory_search" | "memory_read"
@@ -21,17 +24,13 @@ const sourceIngestRequests = (
     (request) => request.path === "/api/memory/sources" && request.httpMethod === "POST"
   )
 
-const seededSession = (
-  cli: "claude" | "codex",
-  repoPath: string
-): ReadonlyArray<SeedSession> => [
+const seededSession = (repoPath: string): ReadonlyArray<SeedSession> => [
   {
-    id: `s_automatic_memory_${cli}`,
+    id: "s_automatic_memory",
     repo: "widget",
-    branch: `chore/automatic-memory-${cli}`,
-    title: `Automatic memory ${cli}`,
+    branch: "chore/automatic-memory",
+    title: "Automatic memory",
     status: "idle",
-    cli,
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -42,58 +41,91 @@ const seededSession = (
   }
 ]
 
-for (const cli of ["claude", "codex"] as const) {
-  test(`${cli} receives accepted memory without raw settled-turn capture`, async ({
-    launchApp
-  }) => {
-    const fake = await startFakeAuthServer()
-    try {
-      const app = await launchApp({
-        authServer: fake,
-        configured: true,
-        withRepo: true,
-        sessions: ({ repoPath }) => seededSession(cli, repoPath),
-        config: { memory: { enabled: true, organizationId: "org-e2e" } }
-      })
+test("pi receives accepted memory without raw settled-turn capture", async ({ launchApp }) => {
+  const fake = await startFakeAuthServer()
+  try {
+    const app = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "memory-recall", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
 
-      await expect(appShell(app.window)).toBeVisible()
-      const composer = app.window.getByPlaceholder(
-        cli === "claude" ? "Message Claude…" : "Message Codex…"
-      )
-      await composer.fill("alpha")
-      await composer.press("Enter")
-      await expect(app.window.getByText("1 passed", { exact: true })).toBeVisible({
-        timeout: 30_000
-      })
-      await expect(
-        app.window
-          .getByTestId(`session-row-s_automatic_memory_${cli}`)
-          .getByText("Idle", { exact: true })
-      ).toBeVisible({ timeout: 30_000 })
+    await expect(appShell(app.window)).toBeVisible()
+    const composer = app.window.getByPlaceholder("Message the agent…")
+    await composer.fill("alpha")
+    await composer.press("Enter")
+    await expect(app.window.getByText("Completed through deterministic pi.")).toBeVisible({
+      timeout: 30_000
+    })
+    await expect(
+      app.window
+        .getByTestId("session-row-s_automatic_memory")
+        .getByText("Idle", { exact: true })
+    ).toBeVisible({ timeout: 30_000 })
 
-      await expect
-        .poll(() => memoryRequestCount(fake.memoryRequests, "memory_search"))
-        .toBe(1)
-      await expect
-        .poll(() => memoryRequestCount(fake.memoryRequests, "memory_read"))
-        .toBeGreaterThan(0)
+    await expect
+      .poll(() => memoryRequestCount(fake.memoryRequests, "memory_search"))
+      .toBe(1)
+    await expect
+      .poll(() => memoryRequestCount(fake.memoryRequests, "memory_read"))
+      .toBeGreaterThan(0)
 
-      const recall = recalledRequests(fake.memoryRequests)
-      expect(recall[0]?.mcpName).toBe("memory_search")
-      expect(recall.some((request) => request.mcpName === "memory_read")).toBe(true)
-      expect(recall.every((request) => request.hasCookie === false)).toBe(true)
-      expect(recall.every((request) => request.hasSessionId === false)).toBe(true)
-      expect(fake.memoryRequests.some(
-        (request) =>
-          request.rpcMethod === "tools/call" &&
-          request.mcpMethod === null &&
-          request.mcpName === null
-      )).toBe(true)
-      expect(sourceIngestRequests(fake.memoryRequests)).toEqual([])
+    const recall = recalledRequests(fake.memoryRequests)
+    expect(recall[0]?.mcpName).toBe("memory_search")
+    expect(recall.some((request) => request.mcpName === "memory_read")).toBe(true)
+    expect(recall.every((request) => request.hasCookie === false)).toBe(true)
+    expect(recall.every((request) => request.hasSessionId === false)).toBe(true)
+    expect(fake.memoryRequests.some(
+      (request) =>
+        request.rpcMethod === "tools/call" &&
+        request.mcpMethod === null &&
+        request.mcpName === null
+    )).toBe(true)
+    expect(sourceIngestRequests(fake.memoryRequests)).toEqual([])
 
-      await app.app.close()
-    } finally {
-      await fake.close()
-    }
-  })
-}
+    await app.app.close()
+  } finally {
+    await fake.close()
+  }
+})
+
+test("an unavailable memory MCP does not abort Jingler's real pi tools", async ({
+  launchApp
+}) => {
+  const fake = await startFakeAuthServer()
+  try {
+    const app = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "memory-mcp-isolation", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    const completed = app.window.getByText(COMPLETED_PI_REPLY)
+    const composer = app.window.getByPlaceholder("Message the agent…")
+
+    await composer.fill("Warm the managed memory attachment.")
+    await composer.press("Enter")
+    await expect(completed).toHaveCount(1, { timeout: 30_000 })
+
+    fake.setMemoryAvailable(false)
+    await composer.fill("Continue with Jingler's available tools.")
+    await composer.press("Enter")
+    await expect(completed).toHaveCount(2, { timeout: 30_000 })
+
+    await app.window.getByRole("button", { name: "Account menu" }).click()
+    await app.window.getByRole("menuitem", { name: "Settings" }).click()
+    await app.window.getByRole("button", { name: "Runtime" }).click()
+    await expect(
+      app.window
+        .getByRole("region", { name: "Runtime inspector" })
+        .getByText(FAILED_MEMORY_MCP)
+    ).toBeVisible()
+  } finally {
+    await fake.close()
+  }
+})

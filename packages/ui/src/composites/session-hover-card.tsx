@@ -45,7 +45,11 @@ export function SessionHoverCard({
       {/* The harness leads the card because it leads the rail cell — the icon
           you hovered is the first thing the card confirms. */}
       <span className="flex min-w-0 items-center gap-1.5">
-        <ProviderIcon cli={session.cli} size={13} className="flex-none" />
+        <ProviderIcon
+          providerId={session.providerId ?? undefined}
+          size={13}
+          className="flex-none"
+        />
         <span className="truncate text-[12.5px] font-semibold leading-snug text-text-bright">
           {session.title || UNTITLED_SESSION}
         </span>

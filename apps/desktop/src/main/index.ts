@@ -12,14 +12,13 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import {
-  DiscoveryService,
   killAllChildren,
   killAllPtysSync,
-  ModelsService,
   PlanStore,
   PluginHost,
   SecretStore,
-  SessionStore
+  SessionStore,
+  RuntimeRecoveryService
 } from "@jingler/cli-adapters"
 import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { Effect } from "effect"
@@ -75,24 +74,6 @@ const enableCodexDiagnostics = (): void => {
     `[codex-diagnostics] redacted traces: ${process.env.JINGLER_CODEX_DIAGNOSTICS_DIR}`
   )
 }
-
-/**
- * Warm `ModelsService`'s cache before anything asks for it.
- *
- * Discovering models is the slowest read the app makes: it probes for each CLI
- * and then asks the Codex CLI for its catalogue over its app-server protocol.
- * Doing that lazily means the first session's model chip fills in a beat late.
- * Doing it here means it happens while the window paints and the user signs in —
- * by the time anyone opens a session, `Models.catalog` is a cache hit.
- *
- * Deliberately fire-and-forget: it must never delay the window or fail the boot.
- * A cold cache is only ever a slower chip, never a broken app, so nothing waits
- * on this and every error is swallowed.
- */
-const prefetchModels = Effect.gen(function* () {
-  const clis = yield* DiscoveryService.list()
-  yield* ModelsService.catalog(clis)
-}).pipe(Effect.ignore)
 
 const recoverInterruptedPlans = (updatedBefore: string) => Effect.gen(function* () {
   const sessions = yield* SessionStore.list()
@@ -447,9 +428,13 @@ if (!gotPrimaryLock) {
     // recovery on the window-creation path: a corrupt artifact or unavailable
     // volume must not launch Jingler with no window.
     void runtime.runPromise(recoverInterruptedPlans(new Date().toISOString()))
-    // Not awaited — the catalogue warms in the background while the window opens.
-    void runtime.runPromise(prefetchModels)
-
+    void runtime.runPromise(
+      RuntimeRecoveryService.reconcile.pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.logError(`Could not recover interrupted runtime mutations: ${String(cause)}`)
+        )
+      )
+    )
     // Themes, before the window. Both of these have to happen ahead of
     // `createWindow` or the first frame is painted in the wrong theme: the
     // background colour is read by `BrowserWindow` at construction, and the
@@ -468,7 +453,12 @@ if (!gotPrimaryLock) {
     createWindow()
 
     // Self-update only makes sense in a packaged build (dev has no update feed).
-    if (app.isPackaged) initAutoUpdater()
+    if (
+      app.isPackaged &&
+      process.env.JINGLER_DISABLE_AUTO_UPDATE !== "1"
+    ) {
+      initAutoUpdater()
+    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -30,7 +30,7 @@ import { delimiter, isAbsolute, relative, resolve, sep } from "node:path"
  * be lost. Credentials are untouched: registry auth lives in `~/.npmrc`, which
  * every package manager reads directly, so stripping `npm_config_*` cannot
  * sign anyone out. Metered-key withholding is a separate concern with a
- * separate rationale; see `harnessEnv` in `subscription.ts`.
+ * separate rationale; provider credentials are resolved by ProviderConnections.
  *
  * Pure, so the decision is testable without spawning a process. Returns a COPY:
  * callers hand this to `spawn` as a REPLACEMENT environment, not a patch.

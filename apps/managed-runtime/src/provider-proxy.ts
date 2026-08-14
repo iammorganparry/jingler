@@ -1,3 +1,4 @@
+import { Either, Schema } from "effect"
 import type { ManagedRuntimeEnv } from "./runtime-env.js"
 
 const ALLOWED_PROVIDER_HOSTS = new Set([
@@ -8,26 +9,32 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.anthropic.com"
 ])
 
-interface ProviderCredential {
-  readonly authorizationHeader: string
-  readonly upstream?: "github-api" | "openai-api" | "chatgpt-codex" | "anthropic-api"
-  readonly accountId?: string
-}
+const BoundedIdentifier = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))
+const AuthorizationHeader = Schema.String.pipe(Schema.minLength(8), Schema.maxLength(16_384))
+const ProviderCredential = Schema.Struct({
+  authorizationHeader: AuthorizationHeader,
+  upstream: Schema.optional(
+    Schema.Literal("github-api", "openai-api", "chatgpt-codex", "anthropic-api")
+  ),
+  accountId: Schema.optional(BoundedIdentifier)
+})
+type ProviderCredential = Schema.Schema.Type<typeof ProviderCredential>
 
 export interface ProviderAuthorizationScope {
   readonly subject: string
   readonly capabilityHandle: string
 }
 
-export const providerAuthorizationScope = (
-  value: unknown
-): ProviderAuthorizationScope | null => {
-  if (typeof value !== "object" || value === null) return null
-  const fields = Object.fromEntries(Object.entries(value))
-  return typeof fields.subject === "string" &&
-    typeof fields.capabilityHandle === "string"
-    ? { subject: fields.subject, capabilityHandle: fields.capabilityHandle }
-    : null
+const ProviderAuthorizationScope = Schema.Struct({
+  subject: BoundedIdentifier,
+  capabilityHandle: BoundedIdentifier
+})
+
+export const providerAuthorizationScope = (value: unknown): ProviderAuthorizationScope | null => {
+  const decoded = Schema.decodeUnknownEither(ProviderAuthorizationScope)(value, {
+    onExcessProperty: "error"
+  })
+  return Either.isRight(decoded) ? decoded.right : null
 }
 
 export interface ProviderProxyDependencies {
@@ -46,35 +53,38 @@ export interface ControlPlaneProviderFetchDependencies {
 }
 
 /** Route only ChatGPT subscription traffic away from Cloudflare's blocked egress range. */
-export const createControlPlaneProviderFetch = (
-  dependencies: ControlPlaneProviderFetchDependencies
-): typeof globalThis.fetch => async (input, init) => {
-  const request = input instanceof Request ? input : new Request(input, init)
-  const upstream = new URL(request.url)
-  if (
-    upstream.origin !== "https://chatgpt.com" ||
-    !upstream.pathname.startsWith("/backend-api/codex/")
-  ) {
-    return Reflect.apply(dependencies.fetch, globalThis, [request])
+export const createControlPlaneProviderFetch =
+  (dependencies: ControlPlaneProviderFetchDependencies): typeof globalThis.fetch =>
+  async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    const upstream = new URL(request.url)
+    if (
+      upstream.origin !== "https://chatgpt.com" ||
+      !upstream.pathname.startsWith("/backend-api/codex/")
+    ) {
+      return Reflect.apply(dependencies.fetch, globalThis, [request])
+    }
+    const path = upstream.pathname.slice("/backend-api/codex".length)
+    const target = new URL(
+      `/api/internal/managed-provider/codex${path}${upstream.search}`,
+      dependencies.controlPlaneUrl
+    )
+    const headers = new Headers(request.headers)
+    headers.set("x-jingler-service-secret", dependencies.serviceSecret)
+    const requestInit: RequestInit & { duplex?: "half" } = {
+      method: request.method,
+      headers,
+      body: request.body,
+      redirect: "manual"
+    }
+    if (request.body !== null) requestInit.duplex = "half"
+    return Reflect.apply(dependencies.fetch, globalThis, [new Request(target, requestInit)])
   }
-  const path = upstream.pathname.slice("/backend-api/codex".length)
-  const target = new URL(
-    `/api/internal/managed-provider/codex${path}${upstream.search}`,
-    dependencies.controlPlaneUrl
-  )
-  const headers = new Headers(request.headers)
-  headers.set("x-jingler-service-secret", dependencies.serviceSecret)
-  const requestInit: RequestInit & { duplex?: "half" } = {
-    method: request.method,
-    headers,
-    body: request.body,
-    redirect: "manual"
-  }
-  if (request.body !== null) requestInit.duplex = "half"
-  return Reflect.apply(dependencies.fetch, globalThis, [new Request(target, requestInit)])
-}
 
 const DEFAULT_MAX_EGRESS_BYTES = 100 * 1024 * 1024
+
+const codexSubscriptionPath = (pathname: string): string =>
+  pathname.replace(/^\/v1\/codex(?=\/|$)|^\/v1(?=\/|$)|^\/codex(?=\/|$)/u, "") || "/"
 
 const boundedStream = (
   stream: ReadableStream<Uint8Array> | null,
@@ -82,16 +92,18 @@ const boundedStream = (
 ): ReadableStream<Uint8Array> | null => {
   if (stream === null) return null
   let transferred = 0
-  return stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      transferred += chunk.byteLength
-      if (transferred > maxBytes) {
-        controller.error(new Error("Managed provider transfer exceeded its egress limit"))
-        return
+  return stream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        transferred += chunk.byteLength
+        if (transferred > maxBytes) {
+          controller.error(new Error("Managed provider transfer exceeded its egress limit"))
+          return
+        }
+        controller.enqueue(chunk)
       }
-      controller.enqueue(chunk)
-    }
-  }))
+    })
+  )
 }
 
 export const resolveProviderCredential = async (
@@ -117,41 +129,31 @@ export const resolveProviderCredential = async (
     }
   )
   if (!response.ok) {
-    console.warn(JSON.stringify({
-      component: "managed-provider-proxy",
-      event: "capability_resolution_denied",
-      provider,
-      status: response.status
-    }))
+    console.warn(
+      JSON.stringify({
+        component: "managed-provider-proxy",
+        event: "capability_resolution_denied",
+        provider,
+        status: response.status
+      })
+    )
     return null
   }
-  const body: unknown = await response.json()
+  const decoded = Schema.decodeUnknownEither(ProviderCredential)(await response.json(), {
+    onExcessProperty: "error"
+  })
+  if (Either.isLeft(decoded)) return null
+  const credential = decoded.right
+  const authorizationHeader = credential.authorizationHeader
   if (
-    typeof body !== "object" ||
-    body === null ||
-    !("authorizationHeader" in body) ||
-    typeof body.authorizationHeader !== "string" ||
-    !(body.authorizationHeader.startsWith("Bearer ") ||
-      body.authorizationHeader.startsWith("X-Api-Key "))
+    authorizationHeader.includes("\r") ||
+    authorizationHeader.includes("\n") ||
+    (!(authorizationHeader.startsWith("Bearer ") && authorizationHeader.length > 7) &&
+      !(authorizationHeader.startsWith("X-Api-Key ") && authorizationHeader.length > 10))
   ) {
     return null
   }
-  const upstream = "upstream" in body && typeof body.upstream === "string"
-    ? body.upstream
-    : undefined
-  const accountId = "accountId" in body && typeof body.accountId === "string"
-    ? body.accountId
-    : undefined
-  if (
-    upstream !== undefined &&
-    upstream !== "github-api" &&
-    upstream !== "openai-api" &&
-    upstream !== "chatgpt-codex" &&
-    upstream !== "anthropic-api"
-  ) {
-    return null
-  }
-  return { authorizationHeader: body.authorizationHeader, upstream, accountId }
+  return credential
 }
 
 /** Provider credentials exist only between resolution and the upstream fetch. */
@@ -165,11 +167,14 @@ export const proxyProviderRequest = async (
     readonly method: "GET" | "POST"
     readonly body?: ReadableStream<Uint8Array> | null
     readonly contentType?: string | null
+    readonly contentEncoding?: string | null
     readonly accept?: string | null
     readonly userAgent?: string | null
     readonly originator?: string | null
     readonly openAiBeta?: string | null
     readonly anthropicBeta?: string | null
+    readonly sessionId?: string | null
+    readonly clientRequestId?: string | null
     readonly contentLength?: number | null
   },
   dependencies: ProviderProxyDependencies
@@ -177,9 +182,7 @@ export const proxyProviderRequest = async (
   let upstream = new URL(input.upstreamUrl)
   const configuredLimit = dependencies.maxEgressBytes
   const maxEgressBytes =
-    configuredLimit !== undefined &&
-    Number.isSafeInteger(configuredLimit) &&
-    configuredLimit > 0
+    configuredLimit !== undefined && Number.isSafeInteger(configuredLimit) && configuredLimit > 0
       ? configuredLimit
       : DEFAULT_MAX_EGRESS_BYTES
   if (upstream.protocol !== "https:" || !ALLOWED_PROVIDER_HOSTS.has(upstream.hostname)) {
@@ -192,22 +195,20 @@ export const proxyProviderRequest = async (
   ) {
     return Response.json({ error: "Provider request exceeds its egress limit" }, { status: 413 })
   }
-  const credential = await dependencies.resolve(
-    input.subject,
-    input.capabilityHandle
-  )
+  const credential = await dependencies.resolve(input.subject, input.capabilityHandle)
   if (credential === null) {
     return Response.json({ error: "Provider authorization unavailable" }, { status: 403 })
   }
   if (input.provider === "codex" && credential.upstream === "chatgpt-codex") {
-    const path = upstream.pathname.replace(/^\/v1(?=\/|$)/u, "")
+    const path = codexSubscriptionPath(upstream.pathname)
     upstream = new URL(`https://chatgpt.com/backend-api/codex${path}${upstream.search}`)
   }
-  const expectedUpstream = input.provider === "claude"
-    ? "anthropic-api"
-    : input.provider === "codex"
-      ? (credential.upstream ?? "openai-api")
-      : "github-api"
+  const expectedUpstream =
+    input.provider === "claude"
+      ? "anthropic-api"
+      : input.provider === "codex"
+        ? (credential.upstream ?? "openai-api")
+        : "github-api"
   const validDestination =
     (expectedUpstream === "github-api" &&
       (upstream.hostname === "github.com" || upstream.hostname === "api.github.com")) ||
@@ -224,7 +225,7 @@ export const proxyProviderRequest = async (
         ? "application/json"
         : input.provider === "claude"
           ? "application/json"
-        : "application/vnd.github+json"),
+          : "application/vnd.github+json"),
     "user-agent": input.userAgent ?? "Jingler-Managed-Runtime"
   })
   if (
@@ -251,6 +252,9 @@ export const proxyProviderRequest = async (
     if (input.anthropicBeta) headers.set("anthropic-beta", input.anthropicBeta)
   }
   if (input.contentType) headers.set("content-type", input.contentType)
+  if (input.contentEncoding) headers.set("content-encoding", input.contentEncoding)
+  if (input.sessionId) headers.set("session-id", input.sessionId)
+  if (input.clientRequestId) headers.set("x-client-request-id", input.clientRequestId)
   const requestInit: RequestInit & { duplex?: "half" } = {
     method: input.method,
     headers,

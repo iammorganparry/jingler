@@ -1,7 +1,4 @@
-import type {
-  ManagedRuntimeAction,
-  ManagedRuntimeGrantClaims
-} from "@jingler/core"
+import type { ManagedRuntimeAction, ManagedRuntimeGrantClaims } from "@jingler/core"
 import {
   MANAGED_RUNTIME_GRANT_MAX_TTL_SECONDS,
   ManagedRuntimeGrantClaims as ManagedRuntimeGrantClaimsSchema
@@ -45,8 +42,7 @@ const base64Url = (bytes: Uint8Array): string => {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")
 }
 
-const encodeJson = (value: unknown): string =>
-  base64Url(encoder.encode(JSON.stringify(value)))
+const encodeJson = (value: object): string => base64Url(encoder.encode(JSON.stringify(value)))
 
 const decodeBase64Url = (value: string): Uint8Array<ArrayBuffer> => {
   const normalized = value.replaceAll("-", "+").replaceAll("_", "/")
@@ -58,10 +54,7 @@ const decodeBase64Url = (value: string): Uint8Array<ArrayBuffer> => {
   return bytes
 }
 
-const hmacKey = (
-  secret: string,
-  usage: Array<"sign" | "verify">
-): Promise<CryptoKey> =>
+const hmacKey = (secret: string, usage: Array<"sign" | "verify">): Promise<CryptoKey> =>
   crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
@@ -72,11 +65,13 @@ const hmacKey = (
 
 export const issueManagedRuntimeGrant = async (
   input: IssueManagedRuntimeGrantInput,
-  secret: string,
+  secret: string | undefined,
   nowSeconds = Math.floor(Date.now() / 1_000),
   grantId = `grant_${crypto.randomUUID().replaceAll("-", "")}`
 ): Promise<{ grant: string; claims: ManagedRuntimeGrantClaims }> => {
-  if (secret.length < 32) throw new Error("Managed runtime grant secret is invalid")
+  if (typeof secret !== "string" || secret.length < 32) {
+    throw new Error("Managed runtime grant secret is invalid")
+  }
   const claims = Schema.decodeUnknownSync(ManagedRuntimeGrantClaimsSchema)({
     version: 1,
     issuer: "jingler",
@@ -87,7 +82,11 @@ export const issueManagedRuntimeGrant = async (
     issuedAt: nowSeconds,
     expiresAt: nowSeconds + MANAGED_RUNTIME_GRANT_MAX_TTL_SECONDS
   })
-  const header = encodeJson({ alg: "HS256", typ: "JinglerManagedGrant", version: 1 })
+  const header = encodeJson({
+    alg: "HS256",
+    typ: "JinglerManagedGrant",
+    version: 1
+  })
   const payload = encodeJson(claims)
   const signed = `${header}.${payload}`
   const signature = await crypto.subtle.sign(
@@ -166,8 +165,7 @@ export const verifyManagedRuntimeGrant = async (
     }
     if (
       (expected.subject !== undefined && claims.subject !== expected.subject) ||
-      (expected.environmentId !== undefined &&
-        claims.environmentId !== expected.environmentId) ||
+      (expected.environmentId !== undefined && claims.environmentId !== expected.environmentId) ||
       (expected.sessionId !== undefined && claims.sessionId !== expected.sessionId)
     ) {
       return { ok: false, reason: "wrong-scope" }

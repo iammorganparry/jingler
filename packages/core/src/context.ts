@@ -8,7 +8,7 @@ import { Schema } from "effect"
 // The rule this encodes: schemas live in the module that OWNS the concept —
 // `ContextConfig` with the rest of the config in `domain.ts`, `ContextDigest`
 // with the transcript in `conversation.ts` — and this module stays pure policy.
-import type { CliKind } from "./domain.js"
+import type { ProviderId } from "./runtime/provider-connection.js"
 
 /**
  * ── The quality band ────────────────────────────────────────────────────────
@@ -63,8 +63,7 @@ const SAFETY_RATIO = 0.75
  * Matched by longest id prefix, because harness model ids are unstable
  * (`sonnet`, `claude-sonnet-4-5`, `claude-sonnet-4-5-20250929` are one model).
  */
-const WINDOW_PREFIXES: Partial<Record<CliKind, ReadonlyArray<readonly [string, number]>>> = {
-  claude: [
+const ANTHROPIC_WINDOW_PREFIXES: ReadonlyArray<readonly [string, number]> = [
     // Fable's 1M window is the whole reason a percentage-of-window rule fails —
     // 75% of 1M is 750k, deep into the rot. The budget wins here, by design.
     ["claude-fable", 1_000_000],
@@ -104,20 +103,20 @@ const WINDOW_PREFIXES: Partial<Record<CliKind, ReadonlyArray<readonly [string, n
     // No Haiku 1M model is established here. A low guess compacts early; a high
     // one can run into the harness ceiling without any way to reconcile down.
     ["haiku", 200_000]
-  ],
-  // GPT-5.6 has the same 1M context treatment as current Claude models. Some
-  // Codex builds still report the older 258.4k effective-session value through
-  // `thread/tokenUsage/updated.modelContextWindow`; the context manager treats
-  // this known model value as a floor so stale telemetry cannot force an early
-  // compaction.
-  codex: [
-    ["gpt-5.6-sol", 1_000_000],
-    ["gpt-5.6-terra", 1_000_000],
-    ["gpt-5.6-luna", 1_000_000],
-    ["gpt-5.6", 1_000_000],
-    ["gpt-5", 272_000]
-  ]
-}
+]
+
+// GPT-5.6 has the same 1M context treatment as current Claude models. Some
+// Codex builds still report the older 258.4k effective-session value through
+// `thread/tokenUsage/updated.modelContextWindow`; the context manager treats
+// this known model value as a floor so stale telemetry cannot force an early
+// compaction.
+const OPENAI_WINDOW_PREFIXES: ReadonlyArray<readonly [string, number]> = [
+  ["gpt-5.6-sol", 1_000_000],
+  ["gpt-5.6-terra", 1_000_000],
+  ["gpt-5.6-luna", 1_000_000],
+  ["gpt-5.6", 1_000_000],
+  ["gpt-5", 272_000]
+]
 
 /**
  * The floor used when no prefix matches but we still know the harness's family.
@@ -128,33 +127,41 @@ const WINDOW_PREFIXES: Partial<Record<CliKind, ReadonlyArray<readonly [string, n
  * from the user's own credentials across ~167 providers, so there is no honest
  * default — those users declare it themselves via the Settings override.
  */
-const DEFAULT_WINDOW: Record<CliKind, number | null> = {
-  claude: 200_000,
-  codex: 272_000,
-  cursor: null,
-  opencode: null
+const windowProfile = (
+  providerId: ProviderId | null
+): {
+  readonly prefixes: ReadonlyArray<readonly [string, number]>
+  readonly defaultWindow: number | null
+} => {
+  if (providerId === "anthropic") {
+    return { prefixes: ANTHROPIC_WINDOW_PREFIXES, defaultWindow: 200_000 }
+  }
+  if (providerId === "openai" || providerId === "openai-codex") {
+    return { prefixes: OPENAI_WINDOW_PREFIXES, defaultWindow: 272_000 }
+  }
+  return { prefixes: [], defaultWindow: null }
 }
 
 /**
- * The hard ceiling for `cli`/`model`, in tokens, or `null` when unknown.
+ * The hard ceiling for a provider/model pair, in tokens, or `null` when unknown.
  *
  * `override` is the user's per-provider Settings value and always wins — it is
  * the only way an opencode user gets auto-compaction at all, and the escape
  * hatch when a harness ships a model whose window we don't yet know.
  */
 export const contextWindowFor = (
-  cli: CliKind,
+  providerId: ProviderId | null,
   model: string | null,
   override?: number | null
 ): number | null => {
   if (override !== undefined && override !== null && override > 0) return override
   const id = (model ?? "").toLowerCase()
-  const table = WINDOW_PREFIXES[cli] ?? []
+  const profile = windowProfile(providerId)
   // Longest prefix wins, so `claude-fable-5` can't be captured by a shorter id.
-  const match = table
+  const match = profile.prefixes
     .filter(([prefix]) => id.includes(prefix))
     .sort((a, b) => b[0].length - a[0].length)[0]
-  return match?.[1] ?? DEFAULT_WINDOW[cli]
+  return match?.[1] ?? profile.defaultWindow
 }
 
 /**
@@ -301,36 +308,6 @@ export const shouldHoldSwap = (input: SwapGateInput): boolean => {
   if (!Number.isFinite(input.deferrals) || input.deferrals >= MAX_SWAP_DEFERRALS) return false
   return input.midFlow || input.localHold
 }
-
-/**
- * ── The digest model ───────────────────────────────────────────────────────
- *
- * The summary run goes through the SESSION'S OWN harness binary, so it inherits
- * the user's existing subscription and quota. There is no API key, no separate
- * client, and no incremental cost beyond tokens they already pay for.
- *
- * Mirrors `reviewModelFor`, but inverted: a review deliberately reaches for a
- * STRONGER model than wrote the code, whereas a digest is a mechanical
- * summarisation and should reach for the CHEAPEST tier that can do it. That is
- * what `ProviderConfig.backgroundModel` has always been documented as — "small/
- * fast model for summaries & side tasks" — and this is its first consumer.
- */
-export const DEFAULT_DIGEST_MODEL: Record<CliKind, string> = {
-  claude: "haiku",
-  // The cheapest tier in the Codex fallback list. Live discovery surfaces the
-  // real catalogue; Settings is where a user picks something else.
-  codex: "gpt-5.5",
-  // No headless adapter — a digest on Cursor is refused before this is read.
-  // Present only to keep the record total.
-  cursor: "auto",
-  // opencode Zen's free tier: the honest zero-config answer for a harness whose
-  // catalogue comes from the user's own credentials.
-  opencode: "opencode/north-mini-code-free"
-}
-
-/** The digest model for `cli`, honouring the user's `backgroundModel` override. */
-export const digestModelFor = (cli: CliKind, configured?: string): string =>
-  configured && configured.length > 0 ? configured : DEFAULT_DIGEST_MODEL[cli]
 
 /**
  * ── Wire types ─────────────────────────────────────────────────────────────

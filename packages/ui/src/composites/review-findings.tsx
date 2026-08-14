@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import type { AdversarialReview, ReviewFinding, ReviewPhase, ReviewSeverity } from "@jingler/core"
+import { adversarialReviewModelLabel } from "@jingler/core"
 import { destinationOf, findingLocation, partitionFindings, resolvedCount } from "@jingler/core"
 import {
   AlertTriangle,
@@ -441,7 +442,7 @@ export function ReviewFindings({
 
       {review !== null && (
         <span className="font-mono text-[10px] text-dim">
-          {review.model} · {review.headSha.slice(0, 7)}
+          {adversarialReviewModelLabel(review)} · {review.headSha.slice(0, 7)}
         </span>
       )}
     </div>

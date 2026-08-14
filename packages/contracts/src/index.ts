@@ -1,7 +1,5 @@
 import {
   AdversarialReview,
-  HarnessBilling,
-  HarnessCapability,
   ArchiveReason,
   AssetFileEntry,
   AssetPayload,
@@ -10,8 +8,6 @@ import {
   AuthProvider,
   AuthSession,
   BrowserBounds,
-  CliInfo,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
@@ -35,7 +31,6 @@ import {
   ContextConfig,
   ContextSnapshot,
   Message,
-  ModelOption,
   AuthSessionInfo,
   AuthSessionRequest,
   LoadedPlugin,
@@ -60,7 +55,6 @@ import {
   PlanMentionDelivery,
   PlanTemplateConfig,
   PrFileChange,
-  McpInjectionTarget,
   McpServerStatus,
   MemoryConfig,
   MemoryOrganizationRole,
@@ -74,19 +68,13 @@ import {
   OAuthClientInfo,
   PrMergeMethod,
   BackgroundTask,
-  PrState,
   SessionPrStatus,
   PrSummary,
-  ProviderConfig,
-  ProviderModels,
   Project,
   ProjectDirectoryListing,
   PublishCheckpoint,
   PullRequest,
   QuestionAnswer,
-  ClaudeReasoningSetting,
-  CodexReasoningSetting,
-  ReasoningEffort,
   ReasoningSetting,
   Repo,
   ReviewComment,
@@ -102,6 +90,28 @@ import {
   Usage,
   VsCodeTheme,
   WorkspaceConfig,
+  RuntimeDiagnosticSnapshot,
+  RuntimeRecoveryError,
+  ModelCertification,
+  ProviderCatalog,
+  ProviderConnection,
+  ProviderConnectionError,
+  ProviderLoginEvent,
+  ConnectClaudeTokenInput,
+  StartCodexLoginInput,
+  ProviderConnectionInput,
+  SetProviderApiKeyInput,
+  SetDefaultProviderModelInput,
+  SetSessionProviderModelInput,
+  VerifyProviderModelInput,
+  AgentResourceRpcError,
+  ManagedMcpImportInput,
+  ManagedMcpServer,
+  ManagedResource,
+  ManagedResourceSelector,
+  ManagedResourceScope,
+  ResourceDetectionResult,
+  ResourceImportResult,
   FONT_SCALE_RANGE
 } from "@jingler/core"
 import {
@@ -118,7 +128,6 @@ import {
   EnvironmentError,
   EnvironmentHandoffError,
   ConnectorError,
-  DiscoveryError,
   GitHubApiError,
   GitError,
   PluginError,
@@ -451,21 +460,131 @@ export class AssetListRpcs extends RpcGroup.make(
  * IPC; serialization is JSON. See `apps/desktop/src/main/rpc` for the wiring.
  */
 export class JinglerCoreRpcs extends RpcGroup.make(
-  /** List every known coding CLI and whether it is installed on this host. */
-  /**
-   * What each installed harness will actually be billed to.
-   *
-   * Read-only and cheap. Exists because the failure it reports was silent: an
-   * exported API key overriding a paid subscription, with nothing on screen to
-   * say so.
-   */
-  Rpc.make("Billing.paths", {
-    success: Schema.Array(HarnessBilling)
+  Rpc.make("RuntimeDiagnostics.get", {
+    success: Schema.NullOr(RuntimeDiagnosticSnapshot),
+    payload: { runId: Schema.String }
   }),
 
-  Rpc.make("Discovery.list", {
-    success: Schema.Array(CliInfo),
-    error: DiscoveryError
+  Rpc.make("RuntimeDiagnostics.latest", {
+    success: Schema.NullOr(RuntimeDiagnosticSnapshot)
+  }),
+
+  Rpc.make("RuntimeDiagnostics.export", {
+    success: Schema.String,
+    payload: { runId: Schema.String }
+  }),
+
+  Rpc.make("Provider.list", {
+    success: ProviderCatalog,
+    error: ProviderConnectionError
+  }),
+
+  Rpc.make("Provider.status", {
+    success: Schema.Array(ProviderConnection),
+    error: ProviderConnectionError
+  }),
+
+  Rpc.make("Provider.loginEvents", {
+    success: ProviderLoginEvent,
+    stream: true
+  }),
+
+  Rpc.make("Provider.connectClaudeToken", {
+    success: ProviderConnection,
+    error: ProviderConnectionError,
+    payload: ConnectClaudeTokenInput
+  }),
+
+  Rpc.make("Provider.startCodexLogin", {
+    success: ProviderConnection,
+    error: ProviderConnectionError,
+    payload: StartCodexLoginInput
+  }),
+
+  Rpc.make("Provider.cancelLogin", {
+    success: Schema.Void,
+    error: ProviderConnectionError,
+    payload: ProviderConnectionInput
+  }),
+
+  Rpc.make("Provider.setApiKey", {
+    success: ProviderConnection,
+    error: ProviderConnectionError,
+    payload: SetProviderApiKeyInput
+  }),
+
+  Rpc.make("Provider.refresh", {
+    success: ProviderConnection,
+    error: ProviderConnectionError,
+    payload: ProviderConnectionInput
+  }),
+
+  Rpc.make("Provider.logout", {
+    success: Schema.Void,
+    error: ProviderConnectionError,
+    payload: ProviderConnectionInput
+  }),
+
+  Rpc.make("Provider.verifyModel", {
+    success: ModelCertification,
+    error: ProviderConnectionError,
+    payload: VerifyProviderModelInput
+  }),
+
+  Rpc.make("AgentResources.list", {
+    success: Schema.Array(ManagedResource),
+    error: AgentResourceRpcError
+  }),
+
+  Rpc.make("AgentResources.detect", {
+    success: ResourceDetectionResult,
+    error: AgentResourceRpcError,
+    payload: { sessionId: Schema.NullOr(Schema.String) }
+  }),
+
+  Rpc.make("AgentResources.importFiles", {
+    success: ResourceImportResult,
+    error: AgentResourceRpcError,
+    payload: {
+      sessionId: Schema.NullOr(Schema.String),
+      sourcePaths: Schema.Array(Schema.String),
+      scope: ManagedResourceScope
+    }
+  }),
+
+  Rpc.make("AgentResources.importMcp", {
+    success: ManagedMcpServer,
+    error: AgentResourceRpcError,
+    payload: ManagedMcpImportInput
+  }),
+
+  Rpc.make("AgentResources.remove", {
+    error: AgentResourceRpcError,
+    payload: ManagedResourceSelector
+  }),
+
+  Rpc.make("AgentResources.setEnabled", {
+    error: AgentResourceRpcError,
+    payload: {
+      ...ManagedResourceSelector.fields,
+      enabled: Schema.Boolean
+    }
+  }),
+
+  Rpc.make("AgentResources.reveal", {
+    error: AgentResourceRpcError,
+    payload: ManagedResourceSelector
+  }),
+
+  Rpc.make("AgentResources.enabledForTarget", {
+    success: Schema.Array(ManagedResource),
+    error: AgentResourceRpcError,
+    payload: { targetId: Schema.String }
+  }),
+
+  Rpc.make("AgentResources.watch", {
+    success: Schema.Array(ManagedResource),
+    stream: true
   }),
 
   Rpc.make("Environment.list", {
@@ -478,7 +597,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     error: EnvironmentError
   }),
 
-  /** Safe, versioned repository/harness catalogue announced by one paired device. */
+  /** Safe, versioned runtime catalogue announced by one paired device. */
   Rpc.make("Environment.discovery", {
     success: EnvironmentDiscovery,
     error: EnvironmentError,
@@ -751,6 +870,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /** Confirm that an uncertain mutation has been inspected; the call is never replayed. */
+  Rpc.make("Sessions.resolveRuntimeRecovery", {
+    success: Session,
+    error: RuntimeRecoveryError,
+    payload: {
+      sessionId: Schema.String,
+      runId: Schema.String,
+      callId: Schema.String
+    }
+  }),
+
   /** Regenerate an auto-titled session's title from its transcript; returns it. */
   Rpc.make("Sessions.retitle", {
     success: Session,
@@ -953,20 +1083,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
-  /** Change the current provider's native thinking settings. */
+  /** Change one chat's provider-neutral thinking settings. */
   Rpc.make("Agent.setReasoning", {
-    payload: Schema.Union(
-      Schema.Struct({
-        sessionId: Schema.String,
-        cli: Schema.Literal("claude"),
-        reasoning: Schema.optional(ClaudeReasoningSetting)
-      }),
-      Schema.Struct({
-        sessionId: Schema.String,
-        cli: Schema.Literal("codex"),
-        reasoning: Schema.optional(CodexReasoningSetting)
-      })
-    )
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      reasoning: Schema.optional(ReasoningSetting)
+    }
   }),
 
   /**
@@ -1023,26 +1146,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * Observe a plan's workers without starting or retrying them.
    *
    * The stream begins with a reset snapshot and then carries lifecycle and
-   * normalized harness activity for the producing chat that owns execution.
+   * normalized runtime activity for the producing chat that owns execution.
    */
-  /**
-   * Change a session's harness and/or model (used on the next turn — a turn
-   * already streaming finishes on the old one).
-   *
-   * Model and harness move together because a model id only means something to
-   * the harness that offers it: `opus` is nonsense to Codex. Switching `cli`
-   * also drops the session's `resumeId` (a Codex thread id is meaningless to
-   * Claude) so the new harness starts a fresh thread.
-   */
-  Rpc.make("Agent.setHarness", {
+  /** Change one conversation's certified provider connection/model atomically. */
+  Rpc.make("Agent.setModel", {
     success: Session,
     error: Schema.Union(GitError, SessionNotFoundError),
-    payload: {
-      sessionId: Schema.String,
-      chatId: Schema.String,
-      cli: CliKind,
-      model: Schema.String
-    }
+    payload: SetSessionProviderModelInput
   }),
 
   /** Stop a running agent (denies any pending gate). */
@@ -1054,7 +1164,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /**
    * Kill ONE live sub-agent, leaving the turn (and its siblings) running.
    *
-   * `agentId` is the tab's id — the spawning tool_use id — not the harness's
+   * `agentId` is the tab's id — the spawning tool-call id — not the runtime's
    * task id. The tab has only ever known the former; the run that owns the
    * sub-agent is the only place the two are correlated, so the translation
    * happens there rather than being pushed onto the renderer.
@@ -1072,8 +1182,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   }),
 
   /**
-   * Add input to a live Codex turn. Compaction temporarily defers it; harnesses
-   * without native steering report unsupported so the renderer can stop/replay.
+   * Add input to a live pi turn. Compaction temporarily defers it; providers
+   * without steering support report unsupported so the renderer can stop/replay.
    */
   Rpc.make("Agent.steer", {
     success: Schema.Union(
@@ -1147,21 +1257,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    */
   Rpc.make("OpenConnector.test", {
     success: McpServerStatus,
-    error: ConfigError
-  }),
-
-  /**
-   * What each harness would ACTUALLY be launched with — resolved through the same
-   * `OpenConnectorService.injection(cli)` the runner calls, not re-derived from the
-   * config in the renderer.
-   *
-   * Without this, "the tools reach every agent" was a claim the UI made and nothing
-   * checked: the master switch, the per-harness opt-out, a missing token and a
-   * harness with no run path all produce the same green settings screen. Each row
-   * carries the reason it is off, so the answer is diagnosable rather than boolean.
-   */
-  Rpc.make("OpenConnector.injection", {
-    success: Schema.Array(McpInjectionTarget),
     error: ConfigError
   }),
 
@@ -1251,25 +1346,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
-  /** List the models a harness supports (live from the provider; for the chip). */
-  Rpc.make("Models.list", {
-    success: Schema.Array(ModelOption),
-    payload: { cli: CliKind }
-  }),
-
-  /**
-   * Every installed harness with its models — the composer's model menu, which
-   * lets the user switch provider by picking a model under its section. One
-   * round trip instead of one per harness.
-   */
-  Rpc.make("Models.catalog", {
-    success: Schema.Array(ProviderModels)
-  }),
-
-  Rpc.make("Models.capabilities", {
-    success: Schema.Array(HarnessCapability)
-  }),
-
   /** Provider usage / rate-limit windows for the Usage & limits modal. */
   Rpc.make("Usage.get", {
     success: Usage
@@ -1278,7 +1354,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /**
    * A session's context accounting — what the meter renders and what Settings
    * lists. Cheap enough to poll: it reads in-memory state plus the persisted
-   * session, and never touches a harness.
+   * session, and never contacts a provider.
    */
   Rpc.make("Context.state", {
     success: ContextSnapshot,
@@ -1478,14 +1554,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     })
   }),
 
-  /**
-   * Persist which harness NEW sessions start on. One standing answer, set in
-   * Settings · Providers, in place of the New Session dialog's old select.
-   */
-  Rpc.make("Config.setDefaultCli", {
+  /** Persist the certified provider connection and model as one canonical selection. */
+  Rpc.make("Config.setDefaultProviderModel", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: Schema.Struct({ cli: CliKind })
+    payload: SetDefaultProviderModelInput
+  }),
+
+  /** Persist that first-run provider authentication was completed or skipped. */
+  Rpc.make("Config.completeProviderSetup", {
+    success: WorkspaceConfig,
+    error: ConfigError
   }),
 
   /**
@@ -1542,12 +1621,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { template: PlanTemplateConfig }
   }),
 
-  /** Persist one CLI's provider defaults (model, mode, reasoning, …). */
-  Rpc.make("Config.setProvider", {
-    success: WorkspaceConfig,
-    error: ConfigError,
-    payload: { cli: CliKind, provider: ProviderConfig }
-  })
 ) {}
 
 /** Review, preview, theme, and plugin half of the renderer RPC client. */

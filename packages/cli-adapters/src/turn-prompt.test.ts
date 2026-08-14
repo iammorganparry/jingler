@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   composeTurnPrompt,
-  isCodexSkillInvocation,
+  isSkillInvocation,
   isSlashCommand,
   leadsWithCommand,
   managedToolsNote,
@@ -31,22 +31,18 @@ describe("isSlashCommand", () => {
   })
 })
 
-describe("isCodexSkillInvocation", () => {
-  it("recognises explicit Codex skill tokens without treating paths as skills", () => {
-    expect(isCodexSkillInvocation("$babysit-pr get it to main")).toBe(true)
-    expect(isCodexSkillInvocation("/Users/morgan/repo")).toBe(false)
+describe("isSkillInvocation", () => {
+  it("recognises explicit skill tokens without treating paths as skills", () => {
+    expect(isSkillInvocation("$babysit-pr get it to main")).toBe(true)
+    expect(isSkillInvocation("/Users/morgan/repo")).toBe(false)
   })
 })
 
 describe("leadsWithCommand", () => {
-  it("asks the harness, not just the text", () => {
-    // `$skill` is Codex syntax. Treating it as a command elsewhere would push the
-    // notes behind a message that never needed to lead.
-    expect(leadsWithCommand("codex", "$deploy now")).toBe(true)
-    expect(leadsWithCommand("claude", "$deploy now")).toBe(false)
-    // Slash commands lead on every harness.
-    expect(leadsWithCommand("claude", "/plan")).toBe(true)
-    expect(leadsWithCommand("codex", "/plan")).toBe(true)
+  it("keeps pi commands and skills ahead of injected context", () => {
+    expect(leadsWithCommand("$deploy now")).toBe(true)
+    expect(leadsWithCommand("/plan")).toBe(true)
+    expect(leadsWithCommand("explain /plan")).toBe(false)
   })
 })
 

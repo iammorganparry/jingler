@@ -9,10 +9,10 @@ import type {
   OAuthClientInfo
 } from "@jingler/core"
 import { ConnectorError } from "@jingler/core"
-import { Effect } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { ConfigService } from "./config.js"
 import { SecretStore } from "./secret-store.js"
-import { isRecord, normalizeEndpoint, str, strArray } from "./mcp-config.js"
+import { normalizeEndpoint } from "./runtime/mcp/endpoint.js"
 
 /**
  * Typed HTTP client for the self-hosted OpenConnector instance that backs the MCP
@@ -34,10 +34,23 @@ import { isRecord, normalizeEndpoint, str, strArray } from "./mcp-config.js"
 /** Per-request wall-clock cap, matching `mcp-probe.ts`'s probe timeout. */
 const REQUEST_TIMEOUT = "15 seconds"
 
-// isRecord / str / strArray / normalizeEndpoint are shared from mcp-config.ts.
-// `num` and `arr` are local — no equivalent lives in the shared module yet.
-const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined)
-const arr = (v: unknown): ReadonlyArray<unknown> => (Array.isArray(v) ? v : [])
+const UnknownRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const isRecord = Schema.is(UnknownRecord)
+const str = (value: unknown): string | undefined =>
+  Option.getOrUndefined(Schema.decodeUnknownOption(Schema.String)(value))
+const strArray = (value: unknown): ReadonlyArray<string> =>
+  Option.getOrElse(
+    Schema.decodeUnknownOption(Schema.Array(Schema.String))(value),
+    () => []
+  )
+
+const num = (value: unknown): number | undefined =>
+  Option.getOrUndefined(Schema.decodeUnknownOption(Schema.Number)(value))
+const arr = (value: unknown): ReadonlyArray<unknown> =>
+  Option.getOrElse(
+    Schema.decodeUnknownOption(Schema.Array(Schema.Unknown))(value),
+    () => []
+  )
 
 /** Map a JSON array through `fn`, dropping entries that don't parse. */
 const mapArray = <T>(data: unknown, fn: (raw: unknown) => T | undefined): ReadonlyArray<T> =>

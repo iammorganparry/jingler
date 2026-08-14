@@ -21,7 +21,7 @@ import { PrStatusGlyph } from "./pr-glyph.js"
 import { Badge } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { ThinkingOrb } from "../components/loading.js"
-import { ProviderIcon, PROVIDER_LABEL } from "../components/provider-icon.js"
+import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { ContextMenu, type ContextMenuItem } from "../components/context-menu.js"
 import { displayStatusLabel, displayStatusTone, statusTextClass } from "../tokens.js"
@@ -443,10 +443,10 @@ export function SessionRow({
             {executionLocation === "cloud" ? <Cloud size={12} /> : <Monitor size={12} />}
           </span>
           <span
-            title={`${PROVIDER_LABEL[session.cli]} harness`}
+            title={providerLabel(session.providerId)}
             className="flex size-4 flex-none items-center justify-center"
           >
-            <ProviderIcon cli={session.cli} size={12} />
+            <ProviderIcon providerId={session.providerId ?? undefined} size={12} />
           </span>
         </div>
       </div>

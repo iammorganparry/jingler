@@ -130,7 +130,7 @@ export function QuestionCard({
       {/* Header: icon · eyebrow · question count · progress dots */}
       <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-2.5">
         <CircleHelp size={14} className="flex-none text-blue" />
-        <Eyebrow className="flex-1 text-muted-foreground">Claude needs your input</Eyebrow>
+        <Eyebrow className="flex-1 text-muted-foreground">Agent needs your input</Eyebrow>
         <span className="font-mono text-[10.5px] tabular-nums text-dim">
           Question {qi + 1} of {n}
         </span>

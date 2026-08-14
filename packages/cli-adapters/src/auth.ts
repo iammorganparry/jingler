@@ -14,7 +14,7 @@
  */
 import type { AuthProvider, AuthSession } from "@jingler/core"
 import { AuthError } from "@jingler/core"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { SecretStore } from "./secret-store.js"
 
 /** Base URL of the auth backend. Overridable (prod deploy, e2e fake server). */
@@ -39,6 +39,25 @@ interface SessionResponse {
     | { readonly id: string; readonly email: string; readonly name?: string; readonly image?: string | null }
     | null
 }
+
+const SignInResponse = Schema.Struct({ url: Schema.String })
+const AuthServerErrorResponse = Schema.Struct({
+  code: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.String)
+})
+
+const decodeResponse = <A, I>(
+  response: Response,
+  schema: Schema.Schema<A, I>,
+  message: string
+): Effect.Effect<A, AuthError> =>
+  Effect.tryPromise({
+    try: (): Promise<unknown> => response.json(),
+    catch: () => new AuthError({ message })
+  }).pipe(
+    Effect.flatMap(Schema.decodeUnknown(schema)),
+    Effect.mapError(() => new AuthError({ message }))
+  )
 
 export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthService", {
   accessors: true,
@@ -82,7 +101,7 @@ export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthSer
         }
       })
 
-    /** POST to the auth server, mapping any failure to a user-facing `AuthError`. */
+    /** POST to the auth server, mapping transport failure to a user-facing `AuthError`. */
     const post = (path: string, payload: unknown): Effect.Effect<Response, AuthError> =>
       Effect.tryPromise({
         try: () =>
@@ -92,12 +111,7 @@ export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthSer
             body: JSON.stringify(payload)
           }),
         catch: () => new AuthError({ message: "Couldn't reach the sign-in service." })
-      }).pipe(
-        Effect.filterOrFail(
-          (res) => res.ok,
-          () => new AuthError({ message: "The sign-in service rejected the request." })
-        )
-      )
+      })
 
     /** Get the provider OAuth URL to open in the system browser. */
     const startSignIn = (provider: AuthProvider): Effect.Effect<string, AuthError> =>
@@ -106,11 +120,23 @@ export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthSer
           provider,
           callbackURL: desktopCallback(authBaseUrl())
         })
-        const body = yield* Effect.tryPromise({
-          try: () => res.json() as Promise<{ url?: string }>,
-          catch: () => new AuthError({ message: "Unexpected sign-in response." })
-        })
-        if (!body.url) return yield* Effect.fail(new AuthError({ message: "No sign-in URL returned." }))
+        if (!res.ok) {
+          const serverError = yield* decodeResponse(
+            res,
+            AuthServerErrorResponse,
+            "The sign-in service rejected the request."
+          ).pipe(Effect.option)
+          if (serverError._tag === "Some" && serverError.value.code === "PROVIDER_NOT_FOUND") {
+            const label = provider === "github" ? "GitHub" : "Google"
+            return yield* Effect.fail(
+              new AuthError({ message: `${label} sign-in is unavailable. Use email instead.` })
+            )
+          }
+          return yield* Effect.fail(
+            new AuthError({ message: "The sign-in service rejected the request." })
+          )
+        }
+        const body = yield* decodeResponse(res, SignInResponse, "Unexpected sign-in response.")
         return body.url
       })
 
@@ -120,11 +146,18 @@ export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthSer
      * ignores it for existing accounts).
      */
     const sendMagicLink = (email: string, name?: string): Effect.Effect<void, AuthError> =>
-      post("/api/auth/sign-in/magic-link", {
-        email,
-        ...(name ? { name } : {}),
-        callbackURL: desktopCallback(authBaseUrl())
-      }).pipe(Effect.asVoid)
+      Effect.gen(function* () {
+        const response = yield* post("/api/auth/sign-in/magic-link", {
+          email,
+          ...(name ? { name } : {}),
+          callbackURL: desktopCallback(authBaseUrl())
+        })
+        if (!response.ok) {
+          return yield* Effect.fail(
+            new AuthError({ message: "The sign-in service rejected the request." })
+          )
+        }
+      })
 
     /** Revoke on the server (best effort) and always clear the local token. */
     const signOut = (): Effect.Effect<void> =>

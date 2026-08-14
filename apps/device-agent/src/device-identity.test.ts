@@ -79,6 +79,14 @@ describe("device identity", () => {
     devicePublicKey.x = identity.publicKey.value
     const signature = Buffer.from(identity.sign(payload), "base64url")
     expect(verify(null, payload, { key: devicePublicKey, format: "jwk" }, signature)).toBe(true)
-    expect(Object.keys(identity).sort()).toStrictEqual(["deriveSessionSecret", "encryptionPublicKey", "publicKey", "sign", "signChallenge"])
+    expect(Object.keys(identity).sort()).toStrictEqual([
+      "deriveSessionSecret",
+      "encryptionPublicKey",
+      "protectSecret",
+      "publicKey",
+      "sign",
+      "signChallenge",
+      "unprotectSecret"
+    ])
   })
 })

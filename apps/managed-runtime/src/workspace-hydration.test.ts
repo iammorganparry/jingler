@@ -1,13 +1,12 @@
 import { createWorkspaceProvisioningPlan } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import {
-  hydrateWorkspace,
-  type WorkspaceCommandExecutor
-} from "./workspace-hydration.js"
+import { hydrateWorkspace, type WorkspaceCommandExecutor } from "./workspace-hydration.js"
 
 const headSha = "a".repeat(40)
 
-const executor = (expectedBranch: string): {
+const executor = (
+  expectedBranch: string
+): {
   executor: WorkspaceCommandExecutor
   commands: string[]
   calls: Array<{
@@ -29,11 +28,12 @@ const executor = (expectedBranch: string): {
         calls.push({ command, options })
         return {
           success: true,
-          stdout: command === "git rev-parse HEAD"
-            ? headSha
-            : command === "git branch --show-current"
-              ? expectedBranch
-              : "",
+          stdout:
+            command === "git rev-parse HEAD"
+              ? headSha
+              : command === "git branch --show-current"
+                ? expectedBranch
+                : "",
           stderr: ""
         }
       }
@@ -90,9 +90,7 @@ describe("managed workspace hydration", () => {
       path: "/workspace"
     })
     expect(fake.commands).toContain(`git fetch --no-tags --depth=1 origin '${headSha}'`)
-    expect(fake.commands).toContain(
-      `git checkout --quiet --force -B 'feature/cloud' '${headSha}'`
-    )
+    expect(fake.commands).toContain(`git checkout --quiet --force -B 'feature/cloud' '${headSha}'`)
   })
 
   it("is idempotent and never installs dependency trees", async () => {
@@ -104,6 +102,19 @@ describe("managed workspace hydration", () => {
     )
     expect(fake.commands.join("\n")).not.toMatch(/pnpm|npm install|node_modules/iu)
     expect(fake.commands[0]).toBe("test -d .git || git init --quiet .")
+  })
+
+  it("hydrates a public repository without an authorization header", async () => {
+    const fake = executor("feature/cloud")
+    await hydrateWorkspace(
+      fake.executor,
+      plan({ kind: "new" }),
+      "https://github.com/jingler/example.git",
+      { canonicalRepositoryUrl: "https://github.com/jingler/example.git" }
+    )
+    const fetch = fake.calls.find(({ command }) => command.includes("fetch"))
+    expect(fetch?.command).toBe(`git fetch --no-tags --depth=1 origin '${headSha}'`)
+    expect(fetch?.options.env).toBeUndefined()
   })
 
   it("uses only an opaque proxy capability and restores the canonical remote", async () => {

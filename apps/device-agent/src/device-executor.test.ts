@@ -6,6 +6,12 @@ import type {
   Project,
   Session
 } from "@jingler/core"
+import {
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId
+} from "@jingler/core"
+import { Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
   DeviceOperationError,
@@ -113,7 +119,9 @@ describe("device session command executor", () => {
     const input: CreateSessionInput = {
       repoPath: "/repos/jingler",
       repoName: "jingler",
-      cli: "codex",
+      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("codex-subscription"),
+      providerId: Schema.decodeUnknownSync(ProviderId)("openai-codex"),
+      modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5.6-sol"),
       baseBranch: "main"
     }
     const result = await makeDeviceSessionCommandExecutor(dependencies).execute(
@@ -147,6 +155,60 @@ describe("device session command executor", () => {
         branch: "fix/cloud-title"
       })
     })
+  })
+
+  it("streams canonical file-change evidence from the target runtime", async () => {
+    const dependencies = {
+      ...services(),
+      run: vi.fn(async (_sessionId, _input, emit) => {
+        await emit({
+          _tag: "ToolEnd",
+          id: "tool-call-1",
+          status: "success",
+          meta: null,
+          diff: { added: 1, removed: 1 },
+          preview: "rename",
+          fileChanges: {
+            id: "change-set-1",
+            callId: "tool-call-1",
+            changes: [{
+              status: "R",
+              path: "src/new.ts",
+              oldPath: "src/old.ts",
+              added: 1,
+              removed: 1,
+              binary: false,
+              noNewlineAtEnd: false,
+              beforeBytes: 10,
+              afterBytes: 12,
+              preview: "rename",
+              patchArtifactId: "artifact-1"
+            }],
+            totals: { added: 1, removed: 1 },
+            authoritative: true,
+            reconciledAt: "2026-08-10T00:00:00.000Z"
+          }
+        })
+        return resultSession
+      })
+    } satisfies DeviceExecutorServices
+    const emitted: Array<unknown> = []
+
+    await makeDeviceSessionCommandExecutor(dependencies).execute(
+      command("Agent.run", { chatId: "chat_1", text: "rename it" }),
+      async (event) => { emitted.push(event) }
+    )
+
+    expect(emitted).toEqual([{
+      kind: "event",
+      payload: expect.objectContaining({
+        _tag: "ToolEnd",
+        fileChanges: expect.objectContaining({
+          authoritative: true,
+          changes: [expect.objectContaining({ status: "R", oldPath: "src/old.ts" })]
+        })
+      })
+    }])
   })
 
   it("routes live control operations to the same session and chat", async () => {

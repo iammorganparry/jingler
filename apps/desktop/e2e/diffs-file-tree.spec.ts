@@ -13,7 +13,6 @@ const seeded = (worktreePath: string): SeedSession => ({
   branch: "jingler/pierre-review",
   title: "Pierre review session",
   status: "idle",
-  cli: "claude",
   diff: { added: 2, removed: 2 },
   prNumber: null,
   costUsd: 0,

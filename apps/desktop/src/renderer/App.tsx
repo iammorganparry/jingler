@@ -10,14 +10,12 @@ import type {
   Attachment,
   ContextConfig,
   VsCodeTheme,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
-  ProviderConfig,
   PublishCheckpoint,
   Session,
   SessionActivity,
@@ -99,7 +97,9 @@ import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useConnectorCenter } from "./use-connector-center.js";
 import { useOpenConnector } from "./use-open-connector.js";
-import { useInjectionTargets } from "./use-injection-targets.js";
+import { useProviderCatalog } from "./use-provider-catalog.js";
+import { useAgentsSettings } from "./use-agents-settings.js";
+import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useEnvironments } from "./use-environments.js";
 import { useProjects } from "./use-projects.js";
 import {
@@ -357,7 +357,7 @@ function AuthedApp({
   // has persisted past this window, and clear it the instant a session recovers.
   const relayGraceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relayBannerVisible = useRef(false);
-  const { clis, repos, reposDir, sessions } = state.context;
+  const { repos, reposDir, sessions } = state.context;
   // Merged with the built-ins inside `SessionPane`, through the same registry —
   // a plugin tab is not a separate region of the tab bar.
   const pluginTabs = usePluginTabs();
@@ -438,13 +438,15 @@ function AuthedApp({
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
   const connector = useConnectorCenter();
   const unifiedMcp = useOpenConnector();
-  const injectionTargets = useInjectionTargets(unifiedMcp.config);
+  const providerCatalog = useProviderCatalog();
+  const agentsSettings = useAgentsSettings();
+  const runtimeInspector = useRuntimeInspector();
   const environmentController = useEnvironments();
   const projectController = useProjects();
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
 
   // Provider capabilities are versioned by the auth Durable Object. Refresh the
-  // unified inventory after every GitHub auth refresh so managed harness choices
+  // unified inventory after every GitHub auth refresh so managed provider choices
   // change without restarting the desktop; active turns are fenced server-side.
   useEffect(() => {
     environmentController.send({ type: "REFRESH" });
@@ -454,10 +456,6 @@ function AuthedApp({
   const configQuery = useQuery({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
-  });
-  const modelCapabilitiesQuery = useQuery({
-    queryKey: ["model-capabilities"],
-    queryFn: () => rpc.modelsCapabilities(),
   });
   const usageQuery = useQuery({
     queryKey: ["usage"],
@@ -477,16 +475,38 @@ function AuthedApp({
   // feeds the Settings control's active preset — the transcript reads the var
   // set in conversation-pane.tsx, so scaling stays scoped there.
   const fontScale = clampFontScale(configQuery.data?.fontScale);
-  const providersConfig = configQuery.data?.providers ?? null;
-  // Absent means "the first installed harness" — resolved downstream by
-  // `newSessionCli`, so a fresh install creates sessions without a visit to
-  // Settings.
-  const defaultCli = configQuery.data?.defaultCli ?? null;
   const contextConfig = configQuery.data?.context ?? null;
   const starredRepos = configQuery.data?.starredRepos ?? [];
   const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
   const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
   const usage = usageQuery.data ?? null;
+
+  const contextTargets = sessions.flatMap((session) => {
+    const chat =
+      session.chats.find(
+        (candidate) => candidate.id === session.activeChatId,
+      ) ?? session.chats[0];
+    return chat === undefined ? [] : [{ session, chat }];
+  });
+  const contextQueries = useQueries({
+    queries: contextTargets.map(({ session, chat }) => ({
+      queryKey: [
+        "context",
+        session.id,
+        chat.id,
+        chat.connectionId,
+        chat.modelId,
+      ] as const,
+      queryFn: () => rpc.contextState(session.id, chat.id),
+      enabled: sessionsLoaded,
+    })),
+  });
+  const contextSessions = contextTargets.flatMap(({ session }, index) => {
+    const snapshot = contextQueries[index]?.data;
+    return snapshot === undefined
+      ? []
+      : [{ id: session.id, title: session.title, snapshot }];
+  });
 
   // The usage modal loads on open; GitHub refreshes live through its machine.
   const loadUsage = () => usageQuery.refetch().then(() => undefined);
@@ -567,14 +587,6 @@ function AuthedApp({
       }),
     onReveal: (path: string) => void rpc.themeReveal(path),
   };
-  const saveDefaultCli = (cli: CliKind) =>
-    rpc.configSetDefaultCli(cli).then((saved) => {
-      qc.setQueryData(["config"], saved);
-    });
-  const saveProvider = (cli: CliKind, config: ProviderConfig) =>
-    rpc.configSetProvider(cli, config).then((saved) => {
-      qc.setQueryData(["config"], saved);
-    });
   const saveContextConfig = (config: ContextConfig) =>
     rpc.configSetContext(config).then((saved) => {
       qc.setQueryData(["config"], saved);
@@ -637,7 +649,8 @@ function AuthedApp({
   ) => {
     const session = await rpc.sessionsCreateFromPr(input, onProgress);
     void rememberLastRepo(input.repoPath);
-    if (input.initialPrompt || images.length > 0) setFirstMessage(session.id, images);
+    if (input.initialPrompt || images.length > 0)
+      setFirstMessage(session.id, images);
     send({ type: "SESSION_CREATED", session });
     return session;
   };
@@ -648,7 +661,8 @@ function AuthedApp({
   ) => {
     const session = await rpc.sessionsCreateFromIssue(input, onProgress);
     void rememberLastRepo(input.repoPath);
-    if (input.task.trim() || images.length > 0) setFirstMessage(session.id, images);
+    if (input.task.trim() || images.length > 0)
+      setFirstMessage(session.id, images);
     send({ type: "SESSION_CREATED", session });
     return session;
   };
@@ -782,7 +796,9 @@ function AuthedApp({
             installation.id,
             installation.status,
             installation.repositorySelection,
-            ...(installation.repositories ?? []).map((repository) => repository.id).sort(),
+            ...(installation.repositories ?? [])
+              .map((repository) => repository.id)
+              .sort(),
           ].join(":"),
         )
         .sort()
@@ -1314,22 +1330,90 @@ function AuthedApp({
   }
 
   if (state.matches("setup")) {
+    const setupStep = state.matches({ setup: "github" })
+      ? "github"
+      : state.matches({ setup: "provider" })
+        ? "provider"
+        : state.matches({ setup: "resources" })
+          ? "resources"
+          : "workspace";
+    const providerBusy =
+      state.matches({ setup: { provider: "refreshing" } }) ||
+      state.matches({ setup: { provider: "authenticating" } }) ||
+      state.matches({ setup: { provider: "completing" } });
+    const resourcesBusy =
+      state.matches({ setup: { resources: "detecting" } }) ||
+      state.matches({ setup: { resources: "importing" } });
     return (
       <SetupScreen
-        step={state.matches({ setup: "github" }) ? "github" : "workspace"}
-        clis={clis}
+        step={setupStep}
         github={github.connection}
+        providerCatalog={state.context.providerCatalog}
+        providerLoginEvent={state.context.providerLoginEvent}
+        providerPendingAuthKind={state.context.providerPendingAuthKind}
+        resourceDetection={state.context.resourceDetection}
+        error={state.context.error}
         repos={repos}
         reposDir={reposDir}
         busy={
-          state.matches({ setup: { workspace: "choosing" } }) || github.busy
+          state.matches({ setup: { workspace: "choosing" } }) ||
+          github.busy ||
+          providerBusy ||
+          resourcesBusy
         }
         onChooseDir={() => send({ type: "CHOOSE" })}
         onContinue={() => send({ type: "CONTINUE" })}
         onConnectGithub={
           github.connection.connected ? github.manage : github.connect
         }
-        onSkipGithub={() => send({ type: "SKIP_GITHUB" })}
+        onSkipGithub={() => {
+          github.cancel();
+          send({ type: "SKIP_GITHUB" });
+        }}
+        onConnectClaude={(token) =>
+          send({
+            type: "CONNECT_CLAUDE",
+            kind: "claude-setup-token",
+            id: crypto.randomUUID(),
+            token,
+            targetId: "desktop",
+          })
+        }
+        onStartCodex={(method) =>
+          send({
+            type: "START_CODEX",
+            kind: "openai-codex-oauth",
+            id: crypto.randomUUID(),
+            method,
+            targetId: "desktop",
+          })
+        }
+        onConnectApi={(providerId, apiKey) =>
+          send({
+            type: "CONNECT_API",
+            kind: "api-key",
+            id: crypto.randomUUID(),
+            providerId,
+            apiKey,
+            targetId: "desktop",
+          })
+        }
+        onContinueProvider={() => send({ type: "CONTINUE_PROVIDER" })}
+        onSkipProvider={() => send({ type: "SKIP_PROVIDER" })}
+        onCancelAuth={() => send({ type: "CANCEL_AUTH" })}
+        onRetryProvider={() => {
+          if (state.matches({ setup: { provider: "authFailed" } })) {
+            send({ type: "RETRY_AUTH" });
+          } else {
+            send({ type: "RETRY_PROVIDER" });
+          }
+        }}
+        onImportResources={(candidates) =>
+          send({ type: "IMPORT_RESOURCES", candidates })
+        }
+        onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
+        onCancelResourceImport={() => send({ type: "CANCEL_RESOURCE_IMPORT" })}
+        onRetryResources={() => send({ type: "RETRY_RESOURCES" })}
       />
     );
   }
@@ -1345,8 +1429,6 @@ function AuthedApp({
         </div>
       )}
       <JinglerApp
-        clis={clis}
-        modelCapabilities={modelCapabilitiesQuery.data ?? []}
         tabContributions={pluginTabs}
         paneContributions={pluginPanes}
         pluginCommands={pluginCommands}
@@ -1440,35 +1522,89 @@ function AuthedApp({
             onRetry: () => environmentController.send({ type: "RETRY" }),
           },
         }}
-        providersConfig={providersConfig}
-        onSaveProvider={saveProvider}
-        defaultCli={defaultCli}
-        onSaveDefaultCli={saveDefaultCli}
+        providerConnections={{
+          catalog: providerCatalog.catalog,
+          defaultConnectionId: configQuery.data?.defaultConnectionId ?? null,
+          defaultModelId: configQuery.data?.defaultModelId ?? null,
+          busy: providerCatalog.busy,
+          pendingAuthKind: providerCatalog.pendingAuthKind,
+          error: providerCatalog.error,
+          onReload: providerCatalog.reload,
+          onRefresh: providerCatalog.refresh,
+          onVerify: providerCatalog.verify,
+          onMakeDefault: providerCatalog.makeDefault,
+          onLogout: providerCatalog.logout,
+          onConnectClaude: providerCatalog.connectClaude,
+          onStartCodex: providerCatalog.startCodex,
+          onSetApiKey: providerCatalog.setApiKey,
+        }}
+        agents={{
+          resources: agentsSettings.snapshot.context.resources,
+          detection: agentsSettings.snapshot.context.detection,
+          selectedCandidateIds:
+            agentsSettings.snapshot.context.selectedCandidateIds,
+          loading:
+            agentsSettings.snapshot.matches("loading") ||
+            agentsSettings.snapshot.matches("detecting") ||
+            agentsSettings.snapshot.matches("importing") ||
+            agentsSettings.snapshot.matches("mutating"),
+          reviewing: agentsSettings.snapshot.matches("reviewing"),
+          error: agentsSettings.snapshot.context.error,
+          onDetect: () => agentsSettings.send({ type: "DETECT" }),
+          onToggleCandidate: (id) =>
+            agentsSettings.send({ type: "TOGGLE_CANDIDATE", id }),
+          onImportSelected: () =>
+            agentsSettings.send({ type: "IMPORT_SELECTED" }),
+          onCancelDetection: () =>
+            agentsSettings.send({ type: "CANCEL_DETECTION" }),
+          onSetEnabled: (selector, enabled) =>
+            agentsSettings.send({ type: "SET_ENABLED", selector, enabled }),
+          onReveal: (selector) => agentsSettings.send({ type: "REVEAL", selector }),
+          onRemove: (selector) => agentsSettings.send({ type: "REMOVE", selector }),
+          onRetry: () => agentsSettings.send({ type: "RETRY" }),
+        }}
+        runtimeInspector={{
+          snapshot: runtimeInspector.snapshot.context.snapshot,
+          loading:
+            runtimeInspector.snapshot.matches("loading") ||
+            runtimeInspector.snapshot.matches("exporting"),
+          exported: runtimeInspector.snapshot.context.exported !== null,
+          error: runtimeInspector.snapshot.context.error,
+          onRefresh: () => runtimeInspector.send({ type: "REFRESH" }),
+          onExport: () => runtimeInspector.send({ type: "EXPORT" }),
+        }}
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
+        contextSessions={contextSessions}
         planTemplate={configQuery.data?.planTemplate ?? null}
         onSavePlanTemplate={savePlanTemplate}
-        loadModels={rpc.modelsList}
         unifiedMcp={unifiedMcp}
-        injection={{
-          targets: injectionTargets.targets,
-          loading: injectionTargets.loading,
-          onToggle: injectionTargets.setEnabled,
-        }}
         connector={connector}
         environments={environmentController.environments}
         loadEnvironmentDiscovery={rpc.environmentsDiscovery}
         loadBranches={async (repoPath, environmentId) => {
-          return rpc.workspaceBranches(repoPath, environmentId)
+          return rpc.workspaceBranches(repoPath, environmentId);
         }}
         issueProviders={issueProviders}
         loadPullRequests={(project, search, mine) => {
-          const githubSlug = repos.find((repo) => repo.path === project.path)?.githubSlug ?? undefined;
-          return rpc.githubListPrs(project.path, { search, mine, ...(githubSlug ? { githubSlug } : {}) });
+          const githubSlug =
+            repos.find((repo) => repo.path === project.path)?.githubSlug ??
+            undefined;
+          return rpc.githubListPrs(project.path, {
+            search,
+            mine,
+            ...(githubSlug ? { githubSlug } : {}),
+          });
         }}
         loadGithubIssues={(project, search, mine) => {
-          const githubSlug = repos.find((repo) => repo.path === project.path)?.githubSlug ?? undefined;
-          return rpc.githubListIssues(project.path, { search, mine, ...(githubSlug ? { githubSlug } : {}) });
+          const githubSlug =
+            repos.find((repo) => repo.path === project.path)?.githubSlug ??
+            undefined;
+          return rpc.githubListIssues(project.path, {
+            search,
+            mine,
+            ...(githubSlug ? { githubSlug } : {}),
+          });
         }}
         loadProviderIssues={(providerId, project, search, mine) =>
           rpc.pluginsIssueProviderList({
@@ -1476,7 +1612,8 @@ function AuthedApp({
             repository: { name: project.name, path: project.path },
             search,
             mine,
-          })}
+          })
+        }
         onCreateSession={createSession}
         onCreateSessionFromPr={createSessionFromPr}
         onCreateSessionFromIssue={createSessionFromIssue}
@@ -1492,6 +1629,7 @@ function AuthedApp({
           <ConversationPane
             session={session}
             environments={environmentController.environments}
+            providerCatalog={providerCatalog.catalog}
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}
@@ -1502,6 +1640,8 @@ function AuthedApp({
             onInitialPromptConsumed={consumeInitialPrompt}
             onOpenFile={(_sessionId, path) => ctx.onOpenFile(path)}
             onSelectFiles={ctx.onSelectFiles}
+            onSelectChanges={ctx.onSelectChanges}
+            onOpenProviderSettings={ctx.onOpenProviderSettings}
             paneFocused={ctx.paneFocused ?? true}
           />
         )}

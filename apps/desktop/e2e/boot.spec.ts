@@ -20,7 +20,6 @@ test("a configured workspace boots into the app shell with its sessions", async 
     branch: "chore/seed-session",
     title: "Seeded session",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,

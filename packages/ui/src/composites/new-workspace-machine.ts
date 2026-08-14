@@ -1,22 +1,21 @@
 import type {
   Attachment,
-  CliInfo,
-  CliKind,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
   Environment,
-  HarnessCapability,
   IssueProviderDescriptor,
   IssueSummary,
   PermissionMode,
+  ProviderCatalog,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   PrSummary,
-  ProvidersConfig,
   Project,
   ReasoningSetting
 } from "@jingler/core"
 import type { SessionCreationPhase } from "@jingler/contracts"
-import { defaultModeFor, newSessionCli } from "@jingler/core"
 import { assign, fromCallback, fromPromise, setup } from "xstate"
 
 export type NewSessionSource = "blank" | "branch" | "pr" | "github" | `provider:${string}`
@@ -24,12 +23,10 @@ export type NewSessionSource = "blank" | "branch" | "pr" | "github" | `provider:
 export interface NewWorkspaceDeps {
   projects: ReadonlyArray<Project>
   environments?: ReadonlyArray<Environment>
-  clis: ReadonlyArray<CliInfo>
-  capabilities: ReadonlyArray<HarnessCapability>
   issueProviders?: ReadonlyArray<IssueProviderDescriptor>
-  defaultCli?: CliKind | null
-  defaultModel?: string | null
-  providers?: ProvidersConfig | null
+  providerCatalog?: ProviderCatalog | null
+  defaultConnectionId?: ProviderConnectionId | null
+  defaultModelId?: ProviderModelId | null
   defaultProjectId?: string | null
   loadBranches: (path: string, environmentId?: string) => Promise<ReadonlyArray<string>>
   prepareProject: (projectId: string, environmentId?: string) => Promise<Project>
@@ -59,10 +56,11 @@ export interface NewWorkspaceContext {
   selectedIssue: IssueSummary | null
   draft: string
   attachments: ReadonlyArray<Attachment>
-  cli: CliKind | ""
-  model: string
   mode: PermissionMode
   reasoning?: ReasoningSetting
+  connectionId: ProviderConnectionId | null
+  providerId: ProviderId | null
+  modelId: ProviderModelId | null
   provisioningPhase: SessionCreationPhase | null
   error: string | null
 }
@@ -81,10 +79,15 @@ type NewWorkspaceEvent =
   | { type: "SELECT_ISSUE"; issue: IssueSummary }
   | { type: "SET_DRAFT"; draft: string }
   | { type: "SET_ATTACHMENTS"; attachments: ReadonlyArray<Attachment> }
-  | { type: "SET_HARNESS"; cli: CliKind; model: string }
+  | {
+      type: "SET_MODEL"
+      connectionId: ProviderConnectionId
+      providerId: ProviderId
+      modelId: ProviderModelId
+    }
   | { type: "SET_MODE"; mode: PermissionMode }
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
-  | { type: "SYNC_HARNESSES" }
+  | { type: "SYNC_MODELS" }
   | { type: "SUBMIT" }
   | { type: "PROVISION_PROGRESS"; phase: SessionCreationPhase }
   | { type: "PROVISION_DONE" }
@@ -98,40 +101,34 @@ const preferredBranch = (branches: ReadonlyArray<string>): string =>
   branches.find((branch) => branch === "master") ??
   branches[0] ?? ""
 
-const harnessSelection = (
+const providerSelection = (
   deps: NewWorkspaceDeps,
-  currentCli: CliKind | "" = "",
-  currentModel = ""
-): { cli: CliKind | ""; model: string } => {
-  const preferredCli = newSessionCli(deps.clis, deps.defaultCli)
-  const capability =
-    deps.capabilities.find((candidate) => candidate.cli === currentCli) ??
-    deps.capabilities.find((candidate) => candidate.cli === preferredCli) ??
-    deps.capabilities[0]
-  if (capability === undefined) return { cli: preferredCli ?? "", model: "" }
-  return {
-    cli: capability.cli,
-    model:
-      capability.models.find((candidate) => candidate.id === currentModel)?.id ??
-      (capability.cli === preferredCli
-        ? capability.models.find((candidate) => candidate.id === deps.defaultModel)?.id
-        : undefined) ??
-      capability.models[0]?.id ?? ""
-  }
+  currentConnectionId: ProviderConnectionId | null = null,
+  currentModelId: ProviderModelId | null = null
+): {
+  connectionId: ProviderConnectionId | null
+  providerId: ProviderId | null
+  modelId: ProviderModelId | null
+} => {
+  const choices = (deps.providerCatalog?.connections ?? []).flatMap(({ connection, models }) =>
+    models
+      .filter(({ selectable }) => selectable)
+      .map((model) => ({
+        connectionId: connection.id,
+        providerId: model.providerId,
+        modelId: model.id
+      }))
+  )
+  const selected =
+    choices.find((choice) =>
+      choice.connectionId === currentConnectionId && choice.modelId === currentModelId
+    ) ??
+    choices.find((choice) =>
+      choice.connectionId === deps.defaultConnectionId && choice.modelId === deps.defaultModelId
+    ) ??
+    choices[0]
+  return selected ?? { connectionId: null, providerId: null, modelId: null }
 }
-
-const providerReasoning = (deps: NewWorkspaceDeps, cli: CliKind | ""): ReasoningSetting | undefined => {
-  if (cli === "") return
-  const provider = deps.providers?.[cli]
-  if (provider === undefined || (provider.thinkingEnabled === undefined && provider.reasoningEffort === undefined)) return
-  return {
-    enabled: provider.thinkingEnabled ?? true,
-    ...(provider.reasoningEffort === undefined ? {} : { effort: provider.reasoningEffort })
-  }
-}
-
-const selectionMode = (deps: NewWorkspaceDeps, cli: CliKind | ""): PermissionMode =>
-  cli === "" ? "accept-edits" : defaultModeFor(cli, deps.providers?.[cli]?.defaultMode)
 
 const errorText = (cause: unknown, fallback: string): string =>
   cause instanceof Error ? cause.message : fallback
@@ -202,7 +199,7 @@ export const newWorkspaceMachine = setup({
         return { pullRequests: [] as ReadonlyArray<PrSummary>, issues: await input.deps.loadGithubIssues(input.project, input.search, input.mine) }
       }
       const providerId = input.source.startsWith("provider:") ? input.source.slice("provider:".length) : ""
-      if (!providerId || !input.deps.loadProviderIssues) throw new Error("This issue provider is unavailable.")
+      if (!(providerId && input.deps.loadProviderIssues)) throw new Error("This issue provider is unavailable.")
       return { pullRequests: [] as ReadonlyArray<PrSummary>, issues: await input.deps.loadProviderIssues(providerId, input.project, input.search, input.mine) }
     }),
     submit: fromCallback(({ input, sendBack }: { input: {
@@ -223,8 +220,9 @@ export const newWorkspaceMachine = setup({
     canSubmit: ({ context }) =>
       context.resolvedProject !== null &&
       context.baseBranch.length > 0 &&
-      context.cli !== "" &&
-      context.model !== "" &&
+      context.connectionId !== null &&
+      context.providerId !== null &&
+      context.modelId !== null &&
       (context.source === "pr" ? context.selectedPr !== null :
         context.source === "github" || context.source.startsWith("provider:") ? context.selectedIssue !== null : true)
   },
@@ -235,7 +233,7 @@ export const newWorkspaceMachine = setup({
       const selected = deps.projects.find((project) => project.id === requested) ??
         deps.projects.find((project) => project.id === deps.defaultProjectId) ??
         deps.projects.find((project) => project.availability === "available")
-      const harness = harnessSelection(deps)
+      const provider = providerSelection(deps)
       return {
         projectId: selected?.id ?? "",
         environmentId: "local",
@@ -246,20 +244,26 @@ export const newWorkspaceMachine = setup({
         ...resetSource,
         draft: "",
         attachments: [] as ReadonlyArray<Attachment>,
-        ...harness,
-        mode: selectionMode(deps, harness.cli),
-        reasoning: providerReasoning(deps, harness.cli),
+        ...provider,
+        mode: "accept-edits" as const,
+        reasoning: undefined,
         provisioningPhase: null,
         error: null
       }
     }),
-    syncHarnesses: assign(({ context }) => harnessSelection(context.getDeps(), context.cli, context.model)),
-    setHarness: assign(({ context, event }) => {
-      if (event.type !== "SET_HARNESS") return {}
-      if (event.cli === context.cli) return { cli: event.cli, model: event.model }
-      const deps = context.getDeps()
-      return { cli: event.cli, model: event.model, mode: selectionMode(deps, event.cli), reasoning: providerReasoning(deps, event.cli) }
-    }),
+    syncProviderModels: assign(({ context }) =>
+      providerSelection(context.getDeps(), context.connectionId, context.modelId)
+    ),
+    setProviderModel: assign(({ event }) =>
+      event.type === "SET_MODEL"
+        ? {
+            connectionId: event.connectionId,
+            providerId: event.providerId,
+            modelId: event.modelId,
+            reasoning: undefined
+          }
+        : {}
+    ),
     setMode: assign(({ event }) => event.type === "SET_MODE" ? { mode: event.mode } : {}),
     setReasoning: assign(({ event }) => event.type === "SET_REASONING" ? { reasoning: event.reasoning } : {}),
     setSource: assign(({ event }) => event.type === "SET_SOURCE" ? { ...resetSource, source: event.source, draft: "", error: null } : {}),
@@ -301,14 +305,18 @@ export const newWorkspaceMachine = setup({
     ...resetSource,
     draft: "",
     attachments: [],
-    cli: "",
-    model: "",
     mode: "accept-edits",
     reasoning: undefined,
+    connectionId: null,
+    providerId: null,
+    modelId: null,
     provisioningPhase: null,
     error: null
   }),
-  on: { SYNC_HARNESSES: { actions: "syncHarnesses" } },
+  on: {
+    SYNC_MODELS: { actions: "syncProviderModels" },
+    SET_MODEL: { actions: "setProviderModel" }
+  },
   states: {
     closed: { on: { OPEN: { target: "loading", actions: "seed" } } },
     loading: {
@@ -344,7 +352,6 @@ export const newWorkspaceMachine = setup({
             error: null
           }))
         },
-        SET_HARNESS: { actions: "setHarness" },
         SET_MODE: { actions: "setMode" },
         SET_REASONING: { actions: "setReasoning" }
       }
@@ -366,7 +373,6 @@ export const newWorkspaceMachine = setup({
         SELECT_ISSUE: { actions: assign(({ event }) => ({ selectedIssue: event.issue, draft: [event.issue.title, event.issue.body].filter(Boolean).join("\n\n") })) },
         SET_DRAFT: { actions: assign(({ event }) => ({ draft: event.draft })) },
         SET_ATTACHMENTS: { actions: assign(({ event }) => ({ attachments: event.attachments })) },
-        SET_HARNESS: { actions: "setHarness" },
         SET_MODE: { actions: "setMode" },
         SET_REASONING: { actions: "setReasoning" },
         SUBMIT: { guard: "canSubmit", target: "submitting", actions: "beginSubmit" }
@@ -396,25 +402,36 @@ export const newWorkspaceMachine = setup({
           run: (onProgress) => {
             const project = context.resolvedProject
             if (project === null) return Promise.reject(new Error("Select a project."))
-            if (context.cli === "") return Promise.reject(new Error("Select a harness."))
+            const canonical =
+              context.connectionId !== null &&
+              context.providerId !== null &&
+              context.modelId !== null
+                ? {
+                    connectionId: context.connectionId,
+                    providerId: context.providerId,
+                    modelId: context.modelId
+                }
+                : null
+            if (canonical === null) {
+              return Promise.reject(new Error("Select a certified provider model."))
+            }
             const common = {
               projectId: project.id,
               ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
               repoPath: project.path,
               repoName: project.name,
-              cli: context.cli,
-              model: context.model,
+              ...canonical,
               mode: context.mode,
               reasoning: context.reasoning ?? null
             }
             if (context.source === "pr") {
               const createFromPr = context.getDeps().onCreateFromPr
-              if (!context.selectedPr || !createFromPr) return Promise.reject(new Error("Select a pull request."))
+              if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
               return createFromPr({ ...common, ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}), pr: context.selectedPr }, context.attachments, onProgress)
             }
             if (context.source === "github" || context.source.startsWith("provider:")) {
               const createFromIssue = context.getDeps().onCreateFromIssue
-              if (!context.selectedIssue || !createFromIssue) return Promise.reject(new Error("Select an issue."))
+              if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
               return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
             }
             return context.getDeps().onCreate({

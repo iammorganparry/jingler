@@ -9,24 +9,48 @@ import {
   test
 } from "./fixtures.js"
 
+const PI_FIXTURE = {
+  scenarioId: "plan-mode",
+  authRoute: "api-key" as const
+}
+
 const session = (id = "s_enhanced_plan") =>
-  ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
-    id,
-    repo: "widget",
-    repoPath,
-    branch: "main",
-    title: "Enhanced plan workspace",
-    status: "idle",
-    cli: "claude",
-    diff: { added: 0, removed: 0 },
-    prNumber: null,
-    costUsd: 0,
-    tokens: 0,
-    updatedAt: "2026-07-28T00:00:00.000Z",
-    worktreePath: repoPath,
-    workspaceMode: "direct",
-    mode: "accept-edits"
-  }]
+  ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => {
+    const chatId = `${id}_chat`
+    return [
+      {
+        id,
+        repo: "widget",
+        repoPath,
+        branch: "main",
+        title: "Enhanced plan workspace",
+        status: "idle",
+        connectionId: "jingler-e2e-connection",
+        providerId: "jingler-e2e",
+        modelId: "jingler-e2e/eval-model",
+        diff: { added: 0, removed: 0 },
+        prNumber: null,
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: "2026-07-28T00:00:00.000Z",
+        worktreePath: repoPath,
+        workspaceMode: "direct",
+        chats: [
+          {
+            id: chatId,
+            title: null,
+            createdAt: "2026-07-28T00:00:00.000Z",
+            updatedAt: "2026-07-28T00:00:00.000Z",
+            mode: "accept-edits",
+            connectionId: "jingler-e2e-connection",
+            providerId: "jingler-e2e",
+            modelId: "jingler-e2e/eval-model"
+          }
+        ],
+        activeChatId: chatId
+      }
+    ]
+  }
 
 const currentPlanPath = (launched: LaunchedApp): string =>
   join(planDirectory(launched.home, launched.repoPath), "current-plan.json")
@@ -36,6 +60,10 @@ const readPlan = (launched: LaunchedApp) =>
 
 const proposePlan = async (launched: LaunchedApp, prompt = "[[plan]] refactor auth to a TokenStore") => {
   const composer = launched.window.getByPlaceholder(/Message .+…/)
+  await composer.click()
+  await launched.window.keyboard.press("Shift+Tab")
+  await launched.window.keyboard.press("Shift+Tab")
+  await expect(launched.window.locator("[data-mode='plan']")).toContainText("Enhanced Plan")
   await composer.fill(prompt)
   await composer.press("Enter")
   await expect.poll(() => existsSync(currentPlanPath(launched)), { timeout: 20_000 }).toBe(true)
@@ -56,6 +84,7 @@ test("approving executes the plan in the producing agent and records task progre
   const launched = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: PI_FIXTURE,
     sessions: session()
   })
   await expect(appShell(launched.window)).toBeVisible()
@@ -82,6 +111,7 @@ test("the producing agent amends an approved plan in place without regressing co
   const launched = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: PI_FIXTURE,
     sessions: session("s_amended_plan")
   })
   await expect(appShell(launched.window)).toBeVisible()
@@ -115,19 +145,12 @@ test("the producing agent amends an approved plan in place without regressing co
   await expect(launched.window.getByRole("button", { name: /Approve & implement/ })).toHaveCount(0)
 })
 
-test("Jingler tools replace provider-native plan mode with enhanced Plan", async ({ launchApp }) => {
+test("plan mode always uses Jingler's structured Plan", async ({ launchApp }) => {
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    sessions: session("s_enhanced_label"),
-    config: {
-      openConnector: {
-        endpoint: "",
-        enabled: false,
-        serverName: "open-connector",
-        preferJinglerTools: true
-      }
-    }
+    piFixture: PI_FIXTURE,
+    sessions: session("s_enhanced_label")
   })
   await expect(appShell(launched.window)).toBeVisible()
   const composer = launched.window.getByPlaceholder(/Message .+…/)
@@ -137,39 +160,12 @@ test("Jingler tools replace provider-native plan mode with enhanced Plan", async
   await expect(launched.window.locator("[data-mode='plan']")).toContainText("Enhanced Plan")
 })
 
-test("disabling Jingler tools restores the selected provider native plan mode", async ({ launchApp }) => {
-  const launched = await launchApp({
-    configured: true,
-    withRepo: true,
-    sessions: session("s_native_label"),
-    config: {
-      openConnector: {
-        endpoint: "",
-        enabled: false,
-        serverName: "open-connector",
-        preferJinglerTools: false
-      }
-    }
-  })
-  await expect(appShell(launched.window)).toBeVisible()
-  const composer = launched.window.getByPlaceholder(/Message .+…/)
-  await composer.click()
-  await launched.window.keyboard.press("Shift+Tab")
-  await launched.window.keyboard.press("Shift+Tab")
-  const surface = launched.window.locator("[data-mode='plan']")
-  await expect(surface).toContainText("Plan")
-  await expect(surface).not.toContainText("Enhanced Plan")
-
-  await composer.fill("[[storm]] Use the provider-native planning flow.")
-  await composer.press("Enter")
-  await expect(launched.window.getByText("Scanned four files.")).toBeVisible()
-  expect(existsSync(currentPlanPath(launched))).toBe(false)
-})
 
 test("restart preserves completed tasks in a partially executed plan", async ({ launchApp }) => {
   const first = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: PI_FIXTURE,
     sessions: session("s_restart_progress")
   })
   await expect(appShell(first.window)).toBeVisible()
@@ -186,7 +182,8 @@ test("restart preserves completed tasks in a partially executed plan", async ({ 
     reposDir: first.reposDir,
     userDataDir: first.userDataDir,
     configured: true,
-    withRepo: true
+    withRepo: true,
+    piFixture: PI_FIXTURE
   })
   await expect(appShell(reopened.window)).toBeVisible()
   await reopened.window.getByRole("button", { name: "Plan Review" }).first().click()

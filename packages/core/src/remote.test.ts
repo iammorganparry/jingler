@@ -31,7 +31,6 @@ const publicKey = {
 const capabilities = {
   version: 1,
   capabilities: ["session.start", "session.observe"],
-  harnesses: ["codex"],
   maxConcurrentSessions: 2
 } as const
 
@@ -132,7 +131,6 @@ describe("authoritative device control plane contracts", () => {
         capabilities: {
           version: 1,
           capabilities: ["session.start"],
-          harnesses: ["codex"],
           maxConcurrentSessions: 2
         }
       }

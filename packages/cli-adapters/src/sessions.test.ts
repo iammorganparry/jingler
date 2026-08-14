@@ -7,7 +7,7 @@ import {
   writeFileSync
 } from "node:fs"
 import { basename, join } from "node:path"
-import { Cause, Effect, Layer } from "effect"
+import { Cause, Effect, Layer, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type {
   CreateSessionFromIssueInput,
@@ -16,14 +16,20 @@ import type {
   GitHubRelayEvent,
   Session
 } from "@jingler/core"
-import { GitHubApiError, workspaceModeOf } from "@jingler/core"
+import {
+  GitHubApiError,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
+  workspaceModeOf
+} from "@jingler/core"
 import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
 import {
   isSessionPublishBranchReady,
   SessionStore,
   migrateRepoName,
-  migrateUnsupportedHarness
+  migrateSessionChats
 } from "./sessions.js"
 import {
   failureOf,
@@ -37,6 +43,10 @@ import type { FakeCommandHandler } from "./test-support.js"
 
 const activeChat = (session: Session) =>
   session.chats.find((chat) => chat.id === session.activeChatId)!
+
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
 
 const feedbackEvent = (patch: Partial<GitHubRelayEvent> = {}): GitHubRelayEvent => ({
   version: 1,
@@ -101,9 +111,23 @@ describe("SessionStore", () => {
     repoPath,
     repoName: "trigify-app",
     title: "Fix Login Bug!",
-    cli: "claude",
+    connectionId,
+    providerId,
+    modelId,
     baseBranch: "main",
     ...over
+  })
+
+  it("persists canonical provider identity on a new session and chat", async () => {
+    const result = await runExit(
+      SessionStore.create(input()).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value).toMatchObject({ connectionId, providerId, modelId })
+    expect(activeChat(result.value)).toMatchObject({ connectionId, providerId, modelId })
   })
 
   /**
@@ -144,7 +168,7 @@ describe("SessionStore", () => {
           const keeper = yield* store.create(input({ title: "Keeper" }))
           // `remove` shells out to git for seconds; a write landing in that
           // window was previously discarded by a list captured before it.
-          yield* Effect.all([store.remove(doomed.id), store.setModel(keeper.id, "opus")], {
+          yield* Effect.all([store.remove(doomed.id), store.setMode(keeper.id, "auto")], {
             concurrency: 2
           })
           return yield* store.list()
@@ -155,7 +179,7 @@ describe("SessionStore", () => {
       expect(result._tag).toBe("Success")
       if (result._tag !== "Success") return
       expect(result.value.map((s) => s.title)).toEqual(["Keeper"])
-      expect(activeChat(result.value[0]!).model).toBe("opus")
+      expect(activeChat(result.value[0]!).mode).toBe("auto")
     })
 
     it("admits only one of two racing direct creates for the same repository", async () => {
@@ -445,7 +469,7 @@ describe("SessionStore", () => {
         const { updated } = yield* Effect.all(
           {
             updated: store.setPersistent(created.id, true),
-            model: store.setModel(created.id, "opus")
+            mode: store.setMode(created.id, "auto")
           },
           { concurrency: 2 }
         )
@@ -461,7 +485,7 @@ describe("SessionStore", () => {
     if (exit._tag !== "Success") return
     expect(exit.value.updated.persistent).toBe(true)
     expect(exit.value.reloaded.persistent).toBe(true)
-    expect(activeChat(exit.value.reloaded).model).toBe("opus")
+    expect(activeChat(exit.value.reloaded).mode).toBe("auto")
     expect(
       JSON.parse(readFileSync(join(temp.root, "sessions.json"), "utf-8"))
     ).toEqual(
@@ -478,8 +502,7 @@ describe("SessionStore", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Multi chat" }), {
-          defaultMode: "auto",
-          defaultModel: "opus"
+          defaultMode: "auto"
         })
         const firstChatId = created.activeChatId
         const withSecond = yield* SessionStore.createChat(created.id)
@@ -508,15 +531,14 @@ describe("SessionStore", () => {
     expect(exit.value.replaced.activeChatId).toBe(exit.value.replaced.chats[0]!.id)
     expect(exit.value.replaced.activeChatId).not.toBe(exit.value.secondChatId)
     expect(exit.value.replaced.chats[0]!.mode).toBe("auto")
-    expect(exit.value.replaced.chats[0]!.model).toBe("opus")
+    expect(exit.value.replaced.chats[0]!.modelId).toBe(modelId)
   })
 
   it("persists closed chats and reopens them with their original identity and settings", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Recover chat" }), {
-          defaultMode: "auto",
-          defaultModel: "opus"
+          defaultMode: "auto"
         })
         const originalId = created.activeChatId
         yield* SessionStore.renameChat(created.id, originalId, "Main workspace")
@@ -536,7 +558,7 @@ describe("SessionStore", () => {
         id: exit.value.originalId,
         title: "Main workspace",
         mode: "auto",
-        model: "opus"
+        modelId
       })
     ])
     expect(exit.value.reopened.activeChatId).toBe(exit.value.originalId)
@@ -546,16 +568,15 @@ describe("SessionStore", () => {
         id: exit.value.originalId,
         title: "Main workspace",
         mode: "auto",
-        model: "opus"
+        modelId
       })
     )
   })
 
-  it("stamps provider mode, model, and reasoning defaults when supplied", async () => {
+  it("stamps provider identity, mode, and reasoning defaults when supplied", async () => {
     const withDefaults = await runExit(
       SessionStore.create(input(), {
         defaultMode: "plan",
-        defaultModel: "opus",
         defaultReasoning: { enabled: false, effort: "high" }
       }).pipe(Effect.provide(services)),
       temp.layer
@@ -563,8 +584,8 @@ describe("SessionStore", () => {
     expect(withDefaults._tag).toBe("Success")
     if (withDefaults._tag === "Success") {
       expect(activeChat(withDefaults.value).mode).toBe("plan")
-      expect(activeChat(withDefaults.value).model).toBe("opus")
-      expect(withDefaults.value.reasoning?.claude).toStrictEqual({
+      expect(activeChat(withDefaults.value).modelId).toBe(modelId)
+      expect(activeChat(withDefaults.value).reasoning).toStrictEqual({
         enabled: false,
         effort: "high"
       })
@@ -577,8 +598,8 @@ describe("SessionStore", () => {
     expect(noDefaults._tag).toBe("Success")
     if (noDefaults._tag === "Success") {
       expect(activeChat(noDefaults.value).mode).toBeUndefined()
-      expect(activeChat(noDefaults.value).model).toBeUndefined()
-      expect(noDefaults.value.reasoningEffort).toBeUndefined()
+      expect(activeChat(noDefaults.value).modelId).toBe(modelId)
+      expect(activeChat(noDefaults.value).reasoning).toBeUndefined()
     }
   })
 
@@ -681,14 +702,17 @@ describe("SessionStore", () => {
     }, "feature/direct")).toBe(false)
   })
 
-  it("keeps the native resume id while reasoning changes", async () => {
+  it("keeps the pi session id while chat reasoning changes", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Two threads" }))
-        yield* SessionStore.setResumeId(created.id, "normal-thread")
-        yield* SessionStore.setReasoningEffort(created.id, "ultrathink")
+        yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+        yield* SessionStore.setReasoning(created.id, created.activeChatId, {
+          enabled: true,
+          effort: "xhigh"
+        })
         const configured = yield* SessionStore.get(created.id)
-        yield* SessionStore.setReasoningEffort(created.id, undefined)
+        yield* SessionStore.setReasoning(created.id, created.activeChatId, undefined)
         const cleared = yield* SessionStore.get(created.id)
         return { configured, cleared }
       }).pipe(Effect.provide(services)),
@@ -696,13 +720,32 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(activeChat(exit.value.configured).resumeId).toBe("normal-thread")
-    expect(exit.value.configured.reasoning?.claude).toStrictEqual({
+    expect(activeChat(exit.value.configured).piSessionId).toBe("pi-session.jsonl")
+    expect(activeChat(exit.value.configured).reasoning).toStrictEqual({
       enabled: true,
       effort: "xhigh"
     })
-    expect(activeChat(exit.value.cleared).resumeId).toBe("normal-thread")
-    expect(exit.value.cleared.reasoning?.claude).toBeUndefined()
+    expect(activeChat(exit.value.cleared).piSessionId).toBe("pi-session.jsonl")
+    expect(activeChat(exit.value.cleared).reasoning).toBeUndefined()
+  })
+
+  it("persists pi continuation identity on the owning chat", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Pi thread" }))
+        yield* SessionStore.setPiSessionId(
+          created.id,
+          created.activeChatId,
+          "pi-session.jsonl"
+        )
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.piSessionId).toBe("pi-session.jsonl")
+    expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
   })
 
   it("falls back to the 'session' slug when the title has no alphanumerics", async () => {
@@ -968,12 +1011,18 @@ describe("SessionStore", () => {
     expect(result.value.persisted.githubFeedbackSemanticKeys).toEqual(["comment-1"])
   })
 
-  it("setMode / setModel persist onto the session across a fresh read", async () => {
+  it("setMode and setProviderModel persist across a fresh read", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Configurable" }))
         yield* SessionStore.setMode(created.id, "auto")
-        yield* SessionStore.setModel(created.id, "sonnet")
+        yield* SessionStore.setProviderModel(
+          created.id,
+          created.activeChatId,
+          connectionId,
+          providerId,
+          Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus")
+        )
         return created.id
       }).pipe(Effect.provide(services)),
       temp.layer
@@ -988,7 +1037,7 @@ describe("SessionStore", () => {
     expect(reread._tag).toBe("Success")
     if (reread._tag === "Success") {
       expect(activeChat(reread.value).mode).toBe("auto")
-      expect(activeChat(reread.value).model).toBe("sonnet")
+      expect(activeChat(reread.value).modelId).toBe("anthropic/claude-opus")
     }
   })
 
@@ -1021,7 +1070,7 @@ describe("SessionStore", () => {
    * in renderer state — so a session reopened at 290k read as 0 and would happily
    * run to the hard ceiling before anything noticed.
    */
-  describe("setContextTokens / clearResumeId", () => {
+  describe("context occupancy and pi reseeding", () => {
     it("persists the latest context reading across a fresh read", async () => {
       const exit = await runExit(
         Effect.gen(function* () {
@@ -1076,165 +1125,101 @@ describe("SessionStore", () => {
       expect(exit.value.contextTokens).toBe(5_000)
     })
 
-    // How compaction reseeds: drop the harness thread, keep everything else. The
+    // How compaction reseeds: drop the pi session, keep everything else. The
     // transcript on disk is deliberately untouched.
-    it("drops the resume id so the next turn starts a fresh conversation", async () => {
+    it("drops the pi session id so the next turn starts a fresh conversation", async () => {
       const exit = await runExit(
         Effect.gen(function* () {
           const created = yield* SessionStore.create(input({ title: "Reseeded" }))
-          yield* SessionStore.setResumeId(created.id, "thread_abc")
-          yield* SessionStore.clearResumeId(created.id)
+          yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+          yield* SessionStore.clearPiSessionId(created.id)
           return yield* SessionStore.get(created.id)
         }).pipe(Effect.provide(services)),
         temp.layer
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(activeChat(exit.value).resumeId).toBeUndefined()
+      expect(activeChat(exit.value).piSessionId).toBeUndefined()
       // The session itself is otherwise intact — only the thread pointer went.
       expect(exit.value.title).toBe("Reseeded")
-      expect(exit.value.cli).toBe("claude")
+      expect(exit.value.providerId).toBe(providerId)
     })
   })
 
-  describe("setHarness", () => {
-    it("keeps the resume id when only the model changes", async () => {
+  describe("setProviderModel", () => {
+    it("switches identity atomically and clears incompatible continuation state", async () => {
+      const nextConnection = Schema.decodeUnknownSync(ProviderConnectionId)("codex-pro")
+      const nextProvider = Schema.decodeUnknownSync(ProviderId)("openai-codex")
+      const nextModel = Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5")
       const exit = await runExit(
         Effect.gen(function* () {
-          const created = yield* SessionStore.create(input({ title: "Switcher" }))
-          yield* SessionStore.setResumeId(created.id, "thread_from_claude")
-          yield* SessionStore.setHarness(created.id, "claude", "haiku")
-          return yield* SessionStore.get(created.id)
-        }).pipe(Effect.provide(services)),
-        temp.layer
-      )
-      expect(exit._tag).toBe("Success")
-      if (exit._tag !== "Success") return
-      expect(activeChat(exit.value).model).toBe("haiku")
-      expect(exit.value.cli).toBe("claude")
-      // Same harness → the thread is still valid, so continuation must survive.
-      expect(activeChat(exit.value).resumeId).toBe("thread_from_claude")
-    })
-
-    it("drops the resume id when the harness changes", async () => {
-      const exit = await runExit(
-        Effect.gen(function* () {
-          const created = yield* SessionStore.create(input({ title: "Switcher" }))
-          yield* SessionStore.setResumeId(created.id, "thread_from_claude")
-          yield* SessionStore.setHarness(created.id, "codex", "gpt-5.6-sol")
-          return yield* SessionStore.get(created.id)
-        }).pipe(Effect.provide(services)),
-        temp.layer
-      )
-      expect(exit._tag).toBe("Success")
-      if (exit._tag !== "Success") return
-      expect(exit.value.cli).toBe("codex")
-      expect(activeChat(exit.value).model).toBe("gpt-5.6-sol")
-      expect(activeChat(exit.value).resumeId).toBeUndefined()
-    })
-
-    it("normalizes every chat when the session-wide harness changes", async () => {
-      const exit = await runExit(
-        Effect.gen(function* () {
-          const created = yield* SessionStore.create(input({ title: "Multi switch" }), {
-            defaultMode: "plan",
-            defaultModel: "sonnet"
+          const created = yield* SessionStore.create(input({
+            title: "Provider switch",
+            connectionId,
+            providerId,
+            modelId
+          }))
+          yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+          yield* SessionStore.setReasoning(created.id, created.activeChatId, {
+            enabled: true,
+            effort: "max"
           })
-          yield* SessionStore.setResumeId(created.id, created.activeChatId, "claude-one")
-          const withSecond = yield* SessionStore.createChat(created.id)
-          yield* SessionStore.setResumeId(created.id, withSecond.activeChatId, "claude-two")
-          yield* SessionStore.setHarness(
+          yield* SessionStore.setProviderModel(
             created.id,
-            withSecond.activeChatId,
-            "codex",
-            "gpt-5.6-sol"
+            created.activeChatId,
+            nextConnection,
+            nextProvider,
+            nextModel
           )
           return yield* SessionStore.get(created.id)
         }).pipe(Effect.provide(services)),
         temp.layer
       )
+
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(exit.value.cli).toBe("codex")
-      expect(exit.value.chats.map((chat) => chat.resumeId)).toStrictEqual([
-        undefined,
-        undefined
-      ])
-      expect(exit.value.chats.map((chat) => chat.mode)).toStrictEqual(["plan", "plan"])
-      expect(exit.value.chats.map((chat) => chat.model)).toStrictEqual([
-        undefined,
-        "gpt-5.6-sol"
-      ])
+      expect(exit.value).toMatchObject({
+        connectionId: nextConnection,
+        providerId: nextProvider,
+        modelId: nextModel,
+        connectionSelectionRequired: false,
+        modelSelectionRequired: false
+      })
+      expect(exit.value.piSessionId).toBeUndefined()
+      expect(activeChat(exit.value)).toMatchObject({
+        connectionId: nextConnection,
+        providerId: nextProvider,
+        modelId: nextModel
+      })
+      expect(activeChat(exit.value).piSessionId).toBeUndefined()
+      expect(activeChat(exit.value).reasoning).toBeUndefined()
     })
 
-    /**
-     * Codex holds a plan turn through the fenced ` ```plan ` block, so switching
-     * to it mid-plan is no longer a downgrade. Coercing here would have thrown
-     * away the operator's in-flight planning session for no reason.
-     */
-    it("keeps plan mode when switching to another harness that can plan", async () => {
+    it("keeps an existing pi session when the exact selection is re-applied", async () => {
       const exit = await runExit(
         Effect.gen(function* () {
-          const created = yield* SessionStore.create(input({ title: "Switcher" }))
-          yield* SessionStore.setMode(created.id, "plan")
-          yield* SessionStore.setHarness(created.id, "codex", "gpt-5.6-sol")
+          const created = yield* SessionStore.create(input({
+            title: "Same provider",
+            connectionId,
+            providerId,
+            modelId
+          }))
+          yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+          yield* SessionStore.setProviderModel(
+            created.id,
+            created.activeChatId,
+            connectionId,
+            providerId,
+            modelId
+          )
           return yield* SessionStore.get(created.id)
         }).pipe(Effect.provide(services)),
         temp.layer
       )
-      expect(exit._tag).toBe("Success")
-      if (exit._tag !== "Success") return
-      expect(activeChat(exit.value).mode).toBe("plan")
-    })
 
-    /**
-     * Cursor has no real adapter — it falls through to the scripted stub — so a
-     * "plan" it produced would be fabricated. Handing the runner a mode the new
-     * harness cannot honour is exactly what this coercion exists to prevent.
-     */
-    it("coerces plan mode when switching to a harness that cannot plan", async () => {
-      const exit = await runExit(
-        Effect.gen(function* () {
-          const created = yield* SessionStore.create(input({ title: "Switcher" }))
-          yield* SessionStore.setMode(created.id, "plan")
-          yield* SessionStore.setHarness(created.id, "cursor", "composer-1")
-          return yield* SessionStore.get(created.id)
-        }).pipe(Effect.provide(services)),
-        temp.layer
-      )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(activeChat(exit.value).mode).toBe("ask")
-    })
-
-    it("leaves plan mode alone when staying on Claude", async () => {
-      const exit = await runExit(
-        Effect.gen(function* () {
-          const created = yield* SessionStore.create(input({ title: "Switcher" }))
-          yield* SessionStore.setMode(created.id, "plan")
-          yield* SessionStore.setHarness(created.id, "claude", "opus")
-          return yield* SessionStore.get(created.id)
-        }).pipe(Effect.provide(services)),
-        temp.layer
-      )
-      expect(exit._tag).toBe("Success")
-      if (exit._tag !== "Success") return
-      expect(activeChat(exit.value).mode).toBe("plan")
-    })
-
-    it("does not disturb a non-plan mode on switch", async () => {
-      const exit = await runExit(
-        Effect.gen(function* () {
-          const created = yield* SessionStore.create(input({ title: "Switcher" }))
-          yield* SessionStore.setMode(created.id, "auto")
-          yield* SessionStore.setHarness(created.id, "codex", "gpt-5.6-sol")
-          return yield* SessionStore.get(created.id)
-        }).pipe(Effect.provide(services)),
-        temp.layer
-      )
-      expect(exit._tag).toBe("Success")
-      if (exit._tag !== "Success") return
-      expect(activeChat(exit.value).mode).toBe("auto")
+      expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
     })
   })
 
@@ -1246,7 +1231,9 @@ describe("SessionStore", () => {
   const prInput = (over: Partial<CreateSessionFromPrInput["pr"]> = {}): CreateSessionFromPrInput => ({
     repoPath,
     repoName: "trigify-app",
-    cli: "claude",
+    connectionId,
+    providerId,
+    modelId,
     pr: { number: 482, title: "Fix Auth Refresh", headRefName: "chore/bump", baseRefName: "main", ...over }
   })
 
@@ -1315,8 +1302,7 @@ describe("SessionStore", () => {
     )
     const exit = await runExit(
       SessionStore.createFromPr(prInput(), {
-        defaultMode: "plan",
-        defaultModel: "opus"
+        defaultMode: "plan"
       }).pipe(Effect.provide(prServices)),
       env
     )
@@ -1334,7 +1320,7 @@ describe("SessionStore", () => {
     expect(s.title).toBe("Fix Auth Refresh")
     expect(activeChat(s)).toMatchObject({
       mode: "plan",
-      model: "opus"
+      modelId
     })
     // The slug carries the PR number so same-titled PRs never collide.
     expect(s.worktreePath).toBe(join(temp.root, "worktrees", "trigify-app", "fix-auth-refresh-482"))
@@ -1650,7 +1636,9 @@ describe("SessionStore", () => {
   ): CreateSessionFromIssueInput => ({
     repoPath,
     repoName: "trigify-app",
-    cli: "claude",
+    connectionId,
+    providerId,
+    modelId,
     baseBranch: "main",
     issue: {
       providerId: "github",
@@ -1673,8 +1661,7 @@ describe("SessionStore", () => {
   it("createFromIssue starts detached, links the issue, and seeds the task", async () => {
     const exit = await runExit(
       SessionStore.createFromIssue(issueInput(), {
-        defaultMode: "plan",
-        defaultModel: "opus"
+        defaultMode: "plan"
       }).pipe(Effect.provide(services)),
       temp.layer
     )
@@ -1704,7 +1691,7 @@ describe("SessionStore", () => {
     expect(s.prNumber).toBe(null)
     expect(activeChat(s)).toMatchObject({
       mode: "plan",
-      model: "opus"
+      modelId
     })
   })
 
@@ -2027,23 +2014,32 @@ describe("migrateRepoName", () => {
 })
 
 describe("legacy harness migration", () => {
-  it("migrates an unsupported legacy harness without changing transcript or workspace identity", () => {
-    const legacy = {
-      id: "s_legacy",
-      cli: "opencode",
-      repoPath: "/repos/jingler",
-      worktreePath: "/worktrees/jingler/task",
-      chats: [{ id: "c_1", model: "openrouter/model", resumeId: "remote-thread" }]
-    }
-    const migrated = migrateUnsupportedHarness(legacy) as Record<string, unknown>
+  it("moves legacy provider reasoning onto matching active and closed chats", () => {
+    const migrated = migrateSessionChats({
+      id: "s_reasoning",
+      cli: "claude",
+      providerId: "anthropic",
+      updatedAt: "2026-08-11T00:00:00.000Z",
+      reasoning: {
+        claude: { enabled: true, effort: "max" },
+        codex: { enabled: true, effort: "high" }
+      },
+      chats: [
+        { id: "c_claude", providerId: "anthropic" },
+        { id: "c_codex", providerId: "openai-codex" }
+      ],
+      closedChats: [{ id: "c_closed", providerId: "openai" }],
+      activeChatId: "c_claude"
+    }) as Record<string, unknown>
 
-    expect(migrated).toMatchObject({
-      id: legacy.id,
-      cli: "codex",
-      repoPath: legacy.repoPath,
-      worktreePath: legacy.worktreePath,
-      chats: [{ id: "c_1", model: "gpt-5.6-sol" }]
-    })
     expect(migrated).not.toHaveProperty("reasoning")
+    expect(migrated.chats).toEqual([
+      expect.objectContaining({ reasoning: { enabled: true, effort: "max" } }),
+      expect.objectContaining({ reasoning: { enabled: true, effort: "high" } })
+    ])
+    expect(migrated.closedChats).toEqual([
+      expect.objectContaining({ reasoning: { enabled: true, effort: "high" } })
+    ])
   })
+
 })

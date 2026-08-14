@@ -1,7 +1,5 @@
 import { Option, Schema } from "effect"
-import { CliKind } from "./cli.js"
 import type { Plan } from "./conversation.js"
-import type { ReasoningEffort } from "./domain.js"
 
 /**
  * Jingler's plan document is a fully structured DTO — an Effect `Schema` the
@@ -244,45 +242,10 @@ export type PlanPrdSection = Schema.Schema.Type<typeof PlanPrdSection>
 export const PlanStageComplexity = Schema.Literal("low", "medium", "high")
 export type PlanStageComplexity = Schema.Schema.Type<typeof PlanStageComplexity>
 
-export interface ProviderReasoningCapabilities {
-  /** Whether the harness accepts an explicit on/off thinking setting. */
-  readonly explicitToggle: boolean
-  /** Provider-native effort values in display order. */
-  readonly efforts: ReadonlyArray<ReasoningEffort>
-}
-
-const CODEX_REASONING_CAPABILITIES: ProviderReasoningCapabilities = {
-  explicitToggle: false,
-  efforts: ["low", "medium", "high", "xhigh"]
-}
-
-/**
- * Provider reasoning capabilities shared by config validation and every UI that
- * offers reasoning controls. Undefined uses the Codex-compatible default that
- * session controls historically show before a harness is selected.
- */
-export const providerReasoningCapabilitiesFor = (
-  cli: Schema.Schema.Type<typeof CliKind> | undefined
-): ProviderReasoningCapabilities => {
-  switch (cli) {
-    case "claude":
-      return {
-        explicitToggle: true,
-        efforts: ["low", "medium", "high", "xhigh", "max"]
-      }
-    case "cursor":
-      return { explicitToggle: false, efforts: [] }
-    case "codex":
-    case "opencode":
-    case undefined:
-      return CODEX_REASONING_CAPABILITIES
-  }
-}
-
 /** Legacy worker metadata accepted only while decoding historical plans. */
 const LegacyPlanStageAssignment = Schema.Struct({
   agentId: Schema.String,
-  cli: CliKind,
+  cli: Schema.Literal("claude", "codex", "cursor", "opencode"),
   model: Schema.String,
   reason: Schema.String,
   reasoning: Schema.optional(Schema.Unknown)

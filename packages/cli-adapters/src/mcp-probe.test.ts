@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { Duration, Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import type { McpLaunch, ParsedMcpServer } from "./mcp-config.js"
+import type { McpLaunch, ParsedMcpServer } from "./runtime/mcp/attachment.js"
 import { PROBE_TIMEOUT, probeAll, probeServer } from "./mcp-probe.js"
 
 const FAKE_SERVER = fileURLToPath(new URL("./mcp-fixtures/fake-mcp-server.mjs", import.meta.url))
@@ -18,7 +18,6 @@ const stdio = (
 ): ParsedMcpServer => ({
   server: {
     name,
-    cli: "claude",
     transport: "stdio",
     scope: "user",
     target: `node ${name}`,
@@ -38,7 +37,6 @@ const stdio = (
 const remote = (name: string, url: string): ParsedMcpServer => ({
   server: {
     name,
-    cli: "claude",
     transport: "http",
     scope: "user",
     target: url,
@@ -85,7 +83,7 @@ describe("probeServer — reachable states", () => {
     })
   })
 
-  it("reports disabled without probing a server the harness won't load", async () => {
+  it("reports disabled without probing a managed server", async () => {
     // Points at `crash`: if this were probed it would fail, so `disabled` proves we skipped it.
     const status = await run(probeServer(stdio("off", ["crash"], { enabled: false }), null, now))
     expect(status.state).toBe("disabled")
@@ -160,51 +158,6 @@ describe("probeServer — timeout", () => {
    */
   it("defaults to a timeout generous enough for a cold npx fetch", () => {
     expect(Duration.toMillis(PROBE_TIMEOUT)).toBeGreaterThanOrEqual(10_000)
-  })
-})
-
-/**
- * The trust boundary. A project-scope entry from a harness that gates project
- * config behind its own prompt could have been committed by any repo you cloned,
- * and the harness hasn't asked yet — so we list it and refuse to run it.
- *
- * Every case here points the launch half at `crash`: if the entry were probed the
- * status would be `failed`, so `unknown` is proof no process was spawned.
- */
-describe("probeServer — un-gated project servers are never spawned", () => {
-  const projectEntry = (cli: "claude" | "codex" | "cursor" | "opencode"): ParsedMcpServer => {
-    const base = stdio("proj", ["crash"])
-    return { ...base, server: { ...base.server, cli, scope: "project" } }
-  }
-
-  it.each([["cursor" as const], ["opencode" as const]])(
-    "reports %s's project server as unknown without running it",
-    async (cli) => {
-      const status = await run(probeServer(projectEntry(cli), null, now))
-      expect(status.state).toBe("unknown")
-      expect(status.toolCount).toBeNull()
-      expect(status.error).toBeNull()
-    }
-  )
-
-  /** Claude's project servers ARE gated in config we read, so an approved one is fair game. */
-  it("still probes claude's project servers, whose approval we can see", async () => {
-    const status = await run(probeServer(projectEntry("claude"), null, now))
-    expect(status.state).toBe("failed")
-  })
-
-  it("still probes user-scope servers for an un-gated harness", async () => {
-    const base = stdio("userSrv", ["crash"])
-    const userScope = { ...base, server: { ...base.server, cli: "cursor" as const, scope: "user" as const } }
-    const status = await run(probeServer(userScope, null, now))
-    expect(status.state).toBe("failed")
-  })
-
-  it("still probes local-scope servers, which are this machine's own config", async () => {
-    const base = stdio("localSrv", ["crash"])
-    const localScope = { ...base, server: { ...base.server, cli: "cursor" as const, scope: "local" as const } }
-    const status = await run(probeServer(localScope, null, now))
-    expect(status.state).toBe("failed")
   })
 })
 

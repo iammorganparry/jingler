@@ -1,21 +1,27 @@
 import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
+import { AgentRuntime } from "@jingler/cli-adapters/runtime/agent/agent-runtime"
+import { AgentTurnDriverLive } from "@jingler/cli-adapters/runtime/agent/agent-turn-driver-live"
+import {
+  makePiAgentRuntimeLive
+} from "@jingler/cli-adapters/runtime/agent/pi-runtime-live"
+import { RuntimeDiagnostics } from "@jingler/cli-adapters/runtime/diagnostics/runtime-diagnostics"
+import { AgentResourcesLive } from "@jingler/cli-adapters/runtime/resources/resource-services-live"
+import { AssetService } from "@jingler/cli-adapters/asset"
 import { AgentRunner } from "@jingler/cli-adapters/agent-runner"
 import { AppPaths } from "@jingler/cli-adapters/app-paths"
+import { makeAppPaths } from "@jingler/cli-adapters/app-paths-factory"
 import { BackgroundTaskStore } from "@jingler/cli-adapters/background-tasks"
 import { BrowserControlMcpService } from "@jingler/cli-adapters/browser-control-mcp-service"
 import { ConfigService } from "@jingler/cli-adapters/config"
 import { ContextManager } from "@jingler/cli-adapters/context-manager"
-import { DiscoveryService } from "@jingler/cli-adapters/discovery"
 import { GitService } from "@jingler/cli-adapters/git"
 import { GitHubApi, parseGitHubRemote } from "@jingler/cli-adapters/github-api"
 import { GitHubAuth } from "@jingler/cli-adapters/github-auth"
-import { HarnessCliAdapterLive } from "@jingler/cli-adapters/harness-adapter"
 import { OpenConnectorService } from "@jingler/cli-adapters/open-connector"
 import { PlanStore } from "@jingler/cli-adapters/plan-store"
 import { ProjectService } from "@jingler/cli-adapters/projects"
-import { InMemorySecretStoreLive } from "@jingler/cli-adapters/secret-store"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
 import { WorkspaceService } from "@jingler/cli-adapters/workspace"
@@ -25,8 +31,8 @@ import {
   importWorkspaceHandoff
 } from "@jingler/cli-adapters/workspace-handoff"
 import {
-  claudePublishMetadataGenerator,
-  isCommitSubjectSafe
+  isCommitSubjectSafe,
+  makeAgentRuntimePublishMetadataGenerator
 } from "@jingler/cli-adapters/publish-metadata"
 import { isSessionPublishBranchReady } from "@jingler/cli-adapters/sessions"
 import {
@@ -57,8 +63,11 @@ import type {
   Project as ProjectValue,
   StreamEvent as StreamEventValue
 } from "@jingler/core"
+import { loadDeviceE2ePiRuntime } from "./e2e/pi-runtime.js"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
 import type { SessionCommandExecutor } from "./session-handler.js"
+import { makeDeviceProviderLayers } from "./provider-runtime.js"
+import { makeDeviceSecretStoreLive } from "./device-secret-store.js"
 
 type JsonRecord = Readonly<Record<string, unknown>>
 
@@ -324,21 +333,8 @@ export const makeDeviceSessionCommandExecutor = (
   }
 })
 
-const appPathsLayer = (root: string) => Layer.succeed(AppPaths, {
-  root,
-  configFile: join(root, "config.json"),
-  sessionsFile: join(root, "sessions.json"),
-  projectsFile: join(root, "projects.json"),
-  worktreesDir: join(root, "worktrees"),
-  transcriptsDir: join(root, "transcripts"),
-  reviewsDir: join(root, "reviews"),
-  plansDir: join(root, ".jingler"),
-  themesDir: join(root, "themes"),
-  pluginsDir: join(root, "plugins"),
-  pluginStorageDir: join(root, "plugin-storage"),
-  authFile: join(root, "auth.enc"),
-  openConnectorFile: join(root, "open-connector.enc")
-})
+const appPathsLayer = (root: string) =>
+  Layer.succeed(AppPaths, makeAppPaths(root))
 
 /** Headless devices have no embedded browser; harness injection receives no browser MCP. */
 const HeadlessBrowserControlLive = Layer.succeed(
@@ -349,7 +345,38 @@ const HeadlessBrowserControlLive = Layer.succeed(
   })
 )
 
-const deviceRuntime = (root: string) => {
+const deviceRuntime = (root: string, targetId: string) => {
+  const e2eRuntime = loadDeviceE2ePiRuntime(targetId)
+  const providers = makeDeviceProviderLayers(
+    targetId,
+    process.env,
+    e2eRuntime?.providers,
+    (initialDeviceSecrets) => {
+      const paths = makeAppPaths(root)
+      return makeDeviceSecretStoreLive(
+        paths.deviceIdentityFile,
+        paths.deviceSecretsFile,
+        initialDeviceSecrets
+      )
+    }
+  )
+  const assets = AssetService.Default.pipe(Layer.provide(NodeContext.layer))
+  const embeddedPi = makePiAgentRuntimeLive({
+    configureModelRuntime: async (runtime) => {
+      providers.configureModelRuntime(runtime)
+      await e2eRuntime?.configureModelRuntime(runtime)
+    }
+  })
+  const piRuntime = embeddedPi.pipe(
+    Layer.provide(RuntimeDiagnostics.Default),
+    Layer.provide(assets),
+    Layer.provide(AgentResourcesLive),
+    Layer.provide(providers.ProviderConnectionsLive),
+    Layer.provide(providers.SecretStoreLive)
+  )
+  const agentExecution = AgentTurnDriverLive.pipe(
+    Layer.provideMerge(piRuntime)
+  )
   const services = Layer.mergeAll(
     AgentRunner.Default,
     SessionStore.Default,
@@ -358,16 +385,15 @@ const deviceRuntime = (root: string) => {
     PlanStore.Default,
     ProjectService.Default,
     ContextManager.Default,
-    DiscoveryService.Default,
     ConfigService.Default,
     GitHubApi.Default.pipe(Layer.provideMerge(GitHubAuth.Default)),
     GitService.Default,
     WorkspaceService.Default,
     OpenConnectorService.Default
   ).pipe(
-    Layer.provideMerge(HarnessCliAdapterLive),
+    Layer.provideMerge(agentExecution),
     Layer.provideMerge(HeadlessBrowserControlLive),
-    Layer.provideMerge(InMemorySecretStoreLive),
+    Layer.provideMerge(providers.SecretStoreLive),
     Layer.provideMerge(appPathsLayer(root)),
     Layer.provideMerge(NodeContext.layer)
   )
@@ -392,9 +418,10 @@ const safeProjectDirectory = (name: string): string => {
 
 /** Install the real cli-adapters runtime used by the `serve` command. */
 export const makeLiveDeviceSessionCommandExecutor = (
-  jinglerRoot: string
+  jinglerRoot: string,
+  targetId = "device"
 ): SessionCommandExecutor => {
-  const runtime = deviceRuntime(jinglerRoot)
+  const runtime = deviceRuntime(jinglerRoot, targetId)
   // ManagedRuntime has every service retained by `deviceRuntime`; preserve the
   // individual operation's error channel while closing its environment here.
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>): Promise<A> =>
@@ -421,15 +448,28 @@ export const makeLiveDeviceSessionCommandExecutor = (
     create: (input) => run(SessionStore.create(input)),
     createFromPr: (input) => run(SessionStore.createFromPr(input)),
     createFromIssue: (input) => run(SessionStore.createFromIssue(input)),
-    continuation: (source, requestedSessionId) => run(SessionStore.create({
-      ...(source.environmentId === undefined ? {} : { environmentId: source.environmentId }),
-      ...(requestedSessionId === undefined ? {} : { requestedSessionId }),
-      repoPath: source.repoPath ?? source.worktreePath ?? "",
-      repoName: source.repo,
-      title: source.title,
-      cli: source.cli,
-      baseBranch: source.baseBranch ?? source.branch,
-      useWorktree: true
+    continuation: (source, requestedSessionId) => run(Effect.gen(function* () {
+      if (
+        source.connectionId === undefined ||
+        source.providerId === undefined ||
+        source.modelId === undefined
+      ) {
+        return yield* Effect.fail(
+          new Error("The source session needs a certified provider connection before continuation.")
+        )
+      }
+      return yield* SessionStore.create({
+        ...(source.environmentId === undefined ? {} : { environmentId: source.environmentId }),
+        ...(requestedSessionId === undefined ? {} : { requestedSessionId }),
+        repoPath: source.repoPath ?? source.worktreePath ?? "",
+        repoName: source.repo,
+        title: source.title,
+        connectionId: source.connectionId,
+        providerId: source.providerId,
+        modelId: source.modelId,
+        baseBranch: source.baseBranch ?? source.branch,
+        useWorktree: true
+      })
     })),
     listProjects: () => run(listProjects),
     registerProject: (input) => run(ProjectService.register(input)),
@@ -566,7 +606,8 @@ export const makeLiveDeviceSessionCommandExecutor = (
           return yield* Effect.fail(new Error("The remote worktree is not on its validated session branch."))
         }
         const messages = yield* TranscriptStore.list(session.activeChatId)
-        const metadata = yield* claudePublishMetadataGenerator.generate({
+        const agentRuntime = yield* AgentRuntime
+        const metadata = yield* makeAgentRuntimePublishMetadataGenerator(agentRuntime).generate({
           session,
           messages,
           changedPaths: inspection.changedPaths,

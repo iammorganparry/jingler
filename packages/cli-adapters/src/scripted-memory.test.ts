@@ -1,30 +1,43 @@
-import { Effect } from "effect"
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  ProviderConnectionId,
+  ProviderModelId
+} from "@jingler/core"
+import { Effect, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   PlanDecision,
   scriptedRun,
   type AgentContext,
-  type SessionSpec
-} from "./adapter.js"
+  type AgentTurnSpec
+} from "./agent-turn-driver.js"
 
-const spec = (): SessionSpec => ({
-  cli: "claude",
-  repo: "acme/widget",
-  branch: "main",
+const spec = (): AgentTurnSpec => ({
+  sessionId: "session-1",
+  chatId: "chat-1",
+  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+  modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-test"),
+  role: "conversation",
+  priorMessages: [],
+  piSessionId: null,
+  seed: null,
+  targetCapabilities: {
+    versions: CURRENT_RUNTIME_CONTRACTS,
+    toolIds: [],
+    resourceIds: [],
+    targetId: "desktop"
+  },
   cwd: "/tmp/widget",
   prompt: "[[memory-propose]] Remember the reusable limiter.",
   images: [],
-  binPath: null,
   mode: "auto",
-  model: null,
-  resumeId: null,
-  remoteMcpServers: [
-    {
+  mcp: {
+    memory: {
       name: "jingler-memory",
       url: "http://127.0.0.1:43123/mcp",
       headers: { authorization: "Bearer test-only" }
     }
-  ]
+  }
 })
 
 const context: AgentContext = {

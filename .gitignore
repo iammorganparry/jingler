@@ -30,6 +30,10 @@ playwright-report/
 blob-report/
 .playwright/
 
+# Local real-app QA profiles. These contain generated Chromium state and
+# machine-local Jingler data; keep them available for manual QA, never in git.
+/tmp/real-qa-*/
+
 # electron-builder output
 release/
 

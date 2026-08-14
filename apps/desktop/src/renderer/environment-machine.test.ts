@@ -11,7 +11,6 @@ const environment: Environment = {
   capabilities: {
     version: 1,
     capabilities: ["session.start"],
-    harnesses: ["codex"],
     maxConcurrentSessions: 2
   },
   state: "online",

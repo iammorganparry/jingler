@@ -17,7 +17,9 @@ describe("managed command runner", () => {
       await emit({ kind: "event", payload: { type: "text", text: "hello" } })
       return { status: "complete" }
     })
-    await runManagedCommand(command, { execute }, (frame) => frames.push(frame))
+    await runManagedCommand(command, { execute }, (frame) => {
+      frames.push(frame)
+    })
     expect(execute).toHaveBeenCalledWith(command, expect.any(Function))
     expect(frames).toEqual([
       {
@@ -33,7 +35,9 @@ describe("managed command runner", () => {
     await runManagedCommand(
       command,
       { execute: async () => { throw new Error("provider unavailable") } },
-      (frame) => frames.push(frame)
+      (frame) => {
+        frames.push(frame)
+      }
     )
     expect(frames).toEqual([
       {
@@ -41,5 +45,27 @@ describe("managed command runner", () => {
         payload: { code: "operation-failed", message: "provider unavailable" }
       }
     ])
+  })
+
+  it("does not finish before the terminal frame has flushed", async () => {
+    let release: (() => void) | undefined
+    const flushed = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const running = runManagedCommand(
+      command,
+      { execute: async () => ({ status: "complete" }) },
+      () => flushed
+    )
+    let settled = false
+    void running.then(() => {
+      settled = true
+    })
+
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    release?.()
+    await running
+    expect(settled).toBe(true)
   })
 })

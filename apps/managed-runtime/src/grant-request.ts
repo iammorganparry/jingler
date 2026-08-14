@@ -1,48 +1,28 @@
-import type { ManagedRuntimeAction } from "@jingler/core"
+import { ManagedRuntimeAction, ManagedRuntimeProviderSelection } from "@jingler/core"
+import { Either, Schema } from "effect"
 
-const managedRuntimeActions: readonly ManagedRuntimeAction[] = [
-  "session.start",
-  "session.input",
-  "session.cancel",
-  "session.observe"
-]
+export const ManagedGrantRegistrationRequest = Schema.Struct({
+  version: Schema.Literal(1),
+  subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  environmentId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  sessionId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  reservationId: Schema.NullOr(Schema.String.pipe(Schema.minLength(8), Schema.maxLength(128))),
+  actions: Schema.Array(ManagedRuntimeAction).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  environmentGeneration: Schema.Int.pipe(Schema.positive()),
+  ...ManagedRuntimeProviderSelection.fields
+})
+export type ManagedGrantRegistrationRequest = Schema.Schema.Type<
+  typeof ManagedGrantRegistrationRequest
+>
 
-const isManagedRuntimeAction = (value: unknown): value is ManagedRuntimeAction =>
-  typeof value === "string" && managedRuntimeActions.some((action) => action === value)
+export const claimsManagedSessionSlot = (actions: ReadonlyArray<ManagedRuntimeAction>): boolean =>
+  actions.some((action) => action === "session.start" || action === "session.input")
 
-export const decodeManagedGrantRequest = (value: unknown): {
-  subject: string
-  environmentId: string
-  sessionId: string
-  actions: ManagedRuntimeAction[]
-  environmentGeneration: number
-  reservationId: string | null
-} | null => {
-  if (typeof value !== "object" || value === null) return null
-  const fields = Object.fromEntries(Object.entries(value))
-  if (
-    fields.version !== 1 ||
-    typeof fields.subject !== "string" ||
-    typeof fields.environmentId !== "string" ||
-    typeof fields.sessionId !== "string" ||
-    !(
-      fields.reservationId === null ||
-      (typeof fields.reservationId === "string" && fields.reservationId.length >= 8)
-    ) ||
-    !Array.isArray(fields.actions) ||
-    !fields.actions.every(isManagedRuntimeAction) ||
-    typeof fields.environmentGeneration !== "number" ||
-    !Number.isSafeInteger(fields.environmentGeneration) ||
-    fields.environmentGeneration < 1
-  ) {
-    return null
-  }
-  return {
-    subject: fields.subject,
-    environmentId: fields.environmentId,
-    sessionId: fields.sessionId,
-    reservationId: fields.reservationId,
-    actions: fields.actions,
-    environmentGeneration: fields.environmentGeneration
-  }
+export const decodeManagedGrantRequest = (
+  value: unknown
+): ManagedGrantRegistrationRequest | null => {
+  const decoded = Schema.decodeUnknownEither(ManagedGrantRegistrationRequest)(value, {
+    onExcessProperty: "error"
+  })
+  return Either.isRight(decoded) ? decoded.right : null
 }

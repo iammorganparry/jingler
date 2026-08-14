@@ -9,6 +9,8 @@ describe("managed Codex control-plane proxy", () => {
       expect(String(input)).toBe("https://chatgpt.com/backend-api/codex/v1/responses")
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer oauth-secret")
       expect(new Headers(init?.headers).get("user-agent")).toBe("codex_cli_rs/0.147.0")
+      expect(new Headers(init?.headers).get("content-encoding")).toBe("zstd")
+      expect(new Headers(init?.headers).get("session-id")).toBe("session_1")
       return Response.json({ id: "response_1" })
     })
     const response = await proxyManagedCodexRequest(
@@ -17,6 +19,8 @@ describe("managed Codex control-plane proxy", () => {
         headers: {
           authorization: "Bearer oauth-secret",
           "content-type": "application/json",
+          "content-encoding": "zstd",
+          "session-id": "session_1",
           "user-agent": "codex_cli_rs/0.147.0",
           "x-jingler-service-secret": secret
         },

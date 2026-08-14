@@ -3,13 +3,14 @@ import type {
   CreateSessionInput,
   Environment,
   GitHubCloneRepository,
-  HarnessCapability,
   IssueSummary,
   PrSummary,
   Project,
   Session,
   SessionActivity
 } from "@jingler/core"
+import { ProviderCatalog } from "@jingler/core"
+import { Schema } from "effect"
 import { useRef, useState } from "react"
 import { expect, fireEvent, fn, userEvent, waitFor, within } from "storybook/test"
 import { CircleDot, GitBranch, GitPullRequest, Sparkles } from "lucide-react"
@@ -169,7 +170,6 @@ const sidebarSession = (
   repo: "jingler",
   branch: `chore/${input.id}`,
   status: "idle",
-  cli: "codex",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -207,7 +207,6 @@ const BUILDBOX: Environment = {
   capabilities: {
     version: 1,
     capabilities: ["session.start"],
-    harnesses: ["claude", "codex"],
     maxConcurrentSessions: 4
   },
   state: "online",
@@ -215,43 +214,39 @@ const BUILDBOX: Environment = {
   lastSeenAt: Date.now()
 }
 
-const clis = [
-  {
-    kind: "claude" as const,
-    label: "Claude Code",
-    binPath: "/usr/local/bin/claude",
-    version: "2.1.0",
-    available: true
-  },
-  {
-    kind: "codex" as const,
-    label: "Codex CLI",
-    binPath: "/usr/local/bin/codex",
-    version: "0.144.1",
-    available: true
-  }
-]
-
-const CAPABILITIES: ReadonlyArray<HarnessCapability> = [
-  {
-    cli: "claude",
-    label: "Claude Code",
-    modes: [{ id: "ask", label: "Ask", kind: "execute" }],
-    models: [
-      { id: "opus", label: "Opus 5", description: "Deep reasoning" },
-      { id: "haiku", label: "Haiku 4.5", description: "Fast tasks" }
-    ]
-  },
-  {
-    cli: "codex",
-    label: "Codex CLI",
-    modes: [{ id: "auto", label: "Auto", kind: "execute" }],
-    models: [
-      { id: "gpt-5.6-sol", label: "gpt-5.6-sol", description: "Frontier coding" },
-      { id: "gpt-5.6-luna", label: "gpt-5.6-luna", description: "Fast coding" }
-    ]
-  }
-]
+const PROVIDER_CATALOG = Schema.decodeSync(ProviderCatalog)({
+  refreshedAt: "2026-08-10T00:00:00.000Z",
+  stale: false,
+  connections: [{
+    connection: {
+      id: "openai-codex-local",
+      providerId: "openai-codex",
+      authKind: "openai-codex-oauth",
+      account: { fingerprint: "storybook", displayLabel: "Storybook account" },
+      targetId: "local",
+      status: "authenticated",
+      subscription: {
+        entitlement: "active",
+        planLabel: "Plus",
+        expiresAt: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        confirmedBillingRoute: "subscription"
+      },
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    },
+    models: [{
+      providerId: "openai-codex",
+      id: "openai-codex/gpt-5.6-sol",
+      label: "GPT-5.6 Sol",
+      capabilities: { contextWindow: 400_000, reasoning: ["low", "medium", "high"], vision: true },
+      verification: "certified",
+      selectable: true,
+      certificationKey: "storybook-certification"
+    }]
+  }]
+})
 
 const projectForHost = (
   projects: ReadonlyArray<Project>,
@@ -380,7 +375,6 @@ function NewSessionStory({
       <SessionConversation
         sessions={sidebarSessions}
         environments={args.environments}
-        clis={args.clis}
         activeSessionId={null}
         onSelectSession={() => {}}
         liveActivity={sidebarActivity}
@@ -627,9 +621,9 @@ function SessionSourcePrototype({ initialSource = "blank" }: { initialSource?: P
                 : "Message the agent, tag @files, or use /commands and /skills"}
             repo="jingler"
             branch={branch}
-            cli="codex"
-            model="gpt-5.6-sol"
-            capabilities={CAPABILITIES}
+            providerCatalog={PROVIDER_CATALOG}
+            connectionId={PROVIDER_CATALOG.connections[0]!.connection.id}
+            modelId={PROVIDER_CATALOG.connections[0]!.models[0]!.id}
             mode="auto"
             onSend={() => {}}
           />
@@ -644,7 +638,6 @@ function SessionSourceStory({ initialSource }: { initialSource?: PreviewSource }
     <div className="flex h-screen w-full bg-panel">
       <SessionConversation
         sessions={SIDEBAR_SESSIONS}
-        clis={clis}
         activeSessionId={null}
         onSelectSession={() => {}}
         onNewSession={() => {}}
@@ -664,10 +657,9 @@ const meta = {
     open: true,
     projects: PROJECTS,
     environments: [BUILDBOX],
-    clis,
-    capabilities: CAPABILITIES,
-    defaultCli: "codex",
-    defaultModel: "gpt-5.6-sol",
+    providerCatalog: PROVIDER_CATALOG,
+    defaultConnectionId: PROVIDER_CATALOG.connections[0]!.connection.id,
+    defaultModelId: PROVIDER_CATALOG.connections[0]!.models[0]!.id,
     defaultProjectId: "project-jingler",
     prepareProject: (projectId, environmentId) =>
       projectForHost(PROJECTS, projectId, environmentId),
@@ -852,9 +844,9 @@ export const FirstPromptFlow: Story = {
       expect(canvas.getByRole("button", { name: "Base branch" })).toHaveTextContent("main")
     )
     await userEvent.click(canvas.getByRole("button", { name: /^Model:/ }))
-    expect(body.getByRole("option", { name: /Claude Code.*2 models/i })).toBeVisible()
-    await userEvent.click(body.getByRole("option", { name: /Claude Code.*2 models/i }))
-    await userEvent.click(body.getByRole("option", { name: /Opus 5/i }))
+    expect(body.getByRole("option", { name: /ChatGPT Codex.*1 model/i })).toBeVisible()
+    await userEvent.click(body.getByRole("option", { name: /ChatGPT Codex.*1 model/i }))
+    await userEvent.click(body.getByRole("option", { name: /GPT-5.6 Sol/i }))
     fireEvent.change(composer, { target: { value: "Refine the empty-state transitions" } })
     fireEvent.keyDown(composer, { key: "Enter", code: "Enter" })
 
@@ -862,8 +854,9 @@ export const FirstPromptFlow: Story = {
       expect(args.onCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: "project-jingler",
-          cli: "claude",
-          model: "opus",
+          connectionId: "openai-codex-local",
+          providerId: "openai-codex",
+          modelId: "openai-codex/gpt-5.6-sol",
           initialPrompt: "Refine the empty-state transitions",
           useWorktree: true
         })

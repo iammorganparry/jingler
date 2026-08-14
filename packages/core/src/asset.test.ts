@@ -86,6 +86,8 @@ describe("extensionToLanguage", () => {
     // an unknown grammar.
     expect(extensionToLanguage(".gitignore")).toBeNull()
     expect(extensionToLanguage("LICENSE")).toBeNull()
+    expect(extensionToLanguage("archive.bin")).toBeNull()
+    expect(extensionToLanguage("notes.custom")).toBeNull()
   })
 })
 

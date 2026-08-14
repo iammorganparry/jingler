@@ -1,105 +1,139 @@
-import { createHash } from "node:crypto"
-import { createServer, type Server } from "node:http"
-import type { AddressInfo } from "node:net"
-import type { MemoryDashboardSummary } from "@jingler/contracts"
+import { createHash } from "node:crypto";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import type { MemoryDashboardSummary } from "@jingler/contracts";
+import {
+  CURRENT_RUNTIME_CONTRACTS,
+  ManagedProviderCredential as ManagedProviderCredentialSchema,
+} from "@jingler/core";
+import { Either, Schema } from "effect";
 
-const MEMORY_PROTOCOL = "2026-07-28"
-const DEFAULT_TOKEN = "e2e-token"
-const DEFAULT_PAID_ORGANIZATIONS = ["org-e2e", "org-other"] as const
-const CREDENTIAL_PATTERN = /\b(?:api[_-]?key|password|secret)\s*[:=]|\bsk-[A-Za-z0-9_-]{8,}/i
+const MEMORY_PROTOCOL = "2026-07-28";
+const MEMORY_TOOL_NAMES = [
+  "memory_dashboard",
+  "memory_suggestions",
+  "memory_graph",
+  "memory_graph_neighborhood",
+  "memory_reviews",
+  "memory_navigation",
+  "memory_search",
+  "memory_export",
+  "memory_read",
+  "memory_propose",
+  "memory_workflow_status",
+  "memory_edge_evidence",
+  "memory_review",
+] as const;
+const DEFAULT_TOKEN = "e2e-token";
+const DEFAULT_PAID_ORGANIZATIONS = ["org-e2e", "org-other"] as const;
+const CREDENTIAL_PATTERN =
+  /\b(?:api[_-]?key|password|secret)\s*[:=]|\bsk-[A-Za-z0-9_-]{8,}/i;
 
-type ProposalStatus = "open" | "accepted" | "rejected" | "superseded"
+type ProposalStatus = "open" | "accepted" | "rejected" | "superseded";
 
 interface FakePage {
-  readonly id: string
-  readonly path: string
-  readonly title: string
-  readonly revision: number
-  readonly body: string
-  readonly aliases: ReadonlyArray<string>
-  readonly tags: ReadonlyArray<string>
+  readonly id: string;
+  readonly path: string;
+  readonly title: string;
+  readonly revision: number;
+  readonly body: string;
+  readonly aliases: ReadonlyArray<string>;
+  readonly tags: ReadonlyArray<string>;
   readonly citations: ReadonlyArray<{
-    readonly id: string
-    readonly sourceId: string
-    readonly locator?: string
-    readonly quote?: string
-  }>
-  readonly authorId: string
-  readonly sourceIds: ReadonlyArray<string>
+    readonly id: string;
+    readonly sourceId: string;
+    readonly locator?: string;
+    readonly quote?: string;
+  }>;
+  readonly authorId: string;
+  readonly sourceIds: ReadonlyArray<string>;
 }
 
 interface FakeProposalPage {
-  readonly id: string
-  readonly pageId: string
-  readonly baseRevisionId: string
-  readonly markdown: string
-  readonly summary: string
+  readonly id: string;
+  readonly pageId: string;
+  readonly baseRevisionId: string;
+  readonly markdown: string;
+  readonly summary: string;
 }
 
 interface FakeProposal {
-  readonly id: string
-  readonly workflowId: string
-  readonly sourceId: string
-  readonly proposedBy: string
-  readonly createdAt: string
-  status: ProposalStatus
-  readonly changeKind: "factual" | "mechanical"
-  readonly pages: ReadonlyArray<FakeProposalPage>
+  readonly id: string;
+  readonly workflowId: string;
+  readonly sourceId: string;
+  readonly proposedBy: string;
+  readonly createdAt: string;
+  status: ProposalStatus;
+  readonly changeKind: "factual" | "mechanical";
+  readonly pages: ReadonlyArray<FakeProposalPage>;
 }
 
 interface FakeOrganizationMemory {
-  readonly pages: Map<string, FakePage>
-  readonly proposals: Array<FakeProposal>
-  readonly workflows: Map<string, FakeMemoryWorkflow>
-  readonly sourceIds: Set<string>
-  secretRejections: number
-  readonly reviewDecisions: Array<string>
+  readonly pages: Map<string, FakePage>;
+  readonly proposals: Array<FakeProposal>;
+  readonly workflows: Map<string, FakeMemoryWorkflow>;
+  readonly sourceIds: Set<string>;
+  secretRejections: number;
+  readonly reviewDecisions: Array<string>;
 }
 
 interface FakeMemoryWorkflow {
-  readonly id: string
-  readonly sourceId: string
-  readonly page: FakePage
-  status: "queued" | "published"
+  readonly id: string;
+  readonly sourceId: string;
+  readonly page: FakePage;
+  status: "queued" | "published";
 }
 
 export interface FakeMemoryRequest {
-  readonly path: string
-  readonly httpMethod: string
-  readonly rpcMethod: string | null
-  readonly mcpMethod: string | null
-  readonly mcpName: string | null
-  readonly toolName: string | null
-  readonly organizationId: string | null
-  readonly protocolVersion: string | null
-  readonly metadataProtocolVersion: string | null
-  readonly hasCookie: boolean
-  readonly hasSessionId: boolean
-  readonly requestId: string | null
-  readonly toolArguments: Readonly<Record<string, unknown>> | null
-  readonly assignedInstance: "next-a" | "next-b" | null
+  readonly path: string;
+  readonly httpMethod: string;
+  readonly rpcMethod: string | null;
+  readonly mcpMethod: string | null;
+  readonly mcpName: string | null;
+  readonly toolName: string | null;
+  readonly organizationId: string | null;
+  readonly protocolVersion: string | null;
+  readonly metadataProtocolVersion: string | null;
+  readonly hasCookie: boolean;
+  readonly hasSessionId: boolean;
+  readonly requestId: string | null;
+  readonly toolArguments: Readonly<Record<string, unknown>> | null;
+  readonly assignedInstance: "next-a" | "next-b" | null;
+}
+
+export interface FakeManagedRequest {
+  readonly path: string;
+  readonly connectionId: string | null;
+  readonly providerId: string | null;
+  readonly modelId: string | null;
+  readonly authKind: string | null;
+  readonly billingRoute: string | null;
+  readonly accountIdPresent: boolean;
+  readonly credentialPresent: boolean;
 }
 
 export interface FakeMemorySnapshot {
-  readonly organizationId: string
-  readonly acceptedPageIds: ReadonlyArray<string>
-  readonly acceptedRevisions: Readonly<Record<string, number>>
-  readonly proposalStatuses: Readonly<Record<string, ProposalStatus>>
-  readonly sourceCount: number
-  readonly secretRejections: number
-  readonly reviewDecisions: ReadonlyArray<string>
+  readonly organizationId: string;
+  readonly acceptedPageIds: ReadonlyArray<string>;
+  readonly acceptedRevisions: Readonly<Record<string, number>>;
+  readonly proposalStatuses: Readonly<Record<string, ProposalStatus>>;
+  readonly sourceCount: number;
+  readonly secretRejections: number;
+  readonly reviewDecisions: ReadonlyArray<string>;
 }
 
 export interface FakeAuthServerOptions {
-  readonly token?: string
-  readonly paidOrganizationIds?: ReadonlyArray<string>
-  readonly unavailable?: boolean
-  readonly acceptedLearningOrganizationIds?: ReadonlyArray<string>
-  readonly reviewProposals?: boolean
+  readonly token?: string;
+  readonly paidOrganizationIds?: ReadonlyArray<string>;
+  readonly unavailable?: boolean;
+  readonly acceptedLearningOrganizationIds?: ReadonlyArray<string>;
+  readonly reviewProposals?: boolean;
   /** Forward production `/api/devices` desktop routes to the hermetic device relay. */
-  readonly deviceRelayUrl?: string
-  readonly listenHost?: string
-  readonly publicHost?: string
+  readonly deviceRelayUrl?: string;
+  readonly listenHost?: string;
+  readonly publicHost?: string;
+  readonly unavailableSocialProviders?: ReadonlyArray<"github" | "google">;
+  readonly managedRuntime?: "current" | "missing" | "stale";
 }
 
 /**
@@ -110,148 +144,203 @@ export interface FakeAuthServerOptions {
  * full-loop without a real Postgres, Vercel deployment, or Cloudflare account.
  */
 export interface FakeAuthServer {
-  readonly url: string
-  readonly token: string
-  readonly sentEmails: ReadonlyArray<string>
-  readonly memoryRequests: ReadonlyArray<FakeMemoryRequest>
-  readonly memorySnapshot: (organizationId: string) => FakeMemorySnapshot
-  readonly setMemoryAvailable: (available: boolean) => void
-  readonly close: () => Promise<void>
+  readonly url: string;
+  readonly token: string;
+  readonly sentEmails: ReadonlyArray<string>;
+  readonly memoryRequests: ReadonlyArray<FakeMemoryRequest>;
+  readonly managedRequests: ReadonlyArray<FakeManagedRequest>;
+  readonly memorySnapshot: (organizationId: string) => FakeMemorySnapshot;
+  readonly setMemoryAvailable: (available: boolean) => void;
+  readonly close: () => Promise<void>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const jsonBody = (value: unknown): Record<string, unknown> =>
-  isRecord(value) ? value : {}
+  isRecord(value) ? value : {};
 
-const MARKDOWN_HEADING_PATTERN = /^#\s+(.+?)\s*$/m
+interface RedactedManagedCredential {
+  readonly connectionId: string;
+  readonly providerId: string;
+  readonly authKind: string;
+  readonly billingRoute: string;
+  readonly accountIdPresent: boolean;
+}
+
+const managedCredential = (
+  header: string | string[] | undefined,
+): RedactedManagedCredential | null => {
+  if (typeof header !== "string") return null;
+  try {
+    const decoded = Schema.decodeUnknownEither(ManagedProviderCredentialSchema)(
+      JSON.parse(Buffer.from(header, "base64url").toString("utf8")),
+      { onExcessProperty: "error" },
+    );
+    if (Either.isLeft(decoded)) return null;
+    return {
+      connectionId: decoded.right.connectionId,
+      providerId: decoded.right.providerId,
+      authKind: decoded.right.authKind,
+      billingRoute: decoded.right.billingRoute,
+      accountIdPresent: decoded.right.accountId !== null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const MARKDOWN_HEADING_PATTERN = /^#\s+(.+?)\s*$/m;
 
 const proposedPage = (
   pageId: string,
   markdown: string,
   sourceId: string,
-  current?: FakePage
+  current?: FakePage,
 ): FakePage => ({
   id: pageId,
   path: current?.path ?? `learning/${pageId}.md`,
-  title: MARKDOWN_HEADING_PATTERN.exec(markdown)?.[1]?.trim() ?? current?.title ?? pageId,
+  title:
+    MARKDOWN_HEADING_PATTERN.exec(markdown)?.[1]?.trim() ??
+    current?.title ??
+    pageId,
   revision: (current?.revision ?? 0) + 1,
   body: markdown,
   aliases: current?.aliases ?? [],
   tags: current?.tags ?? ["compiled-learning"],
-  citations: [{ id: "agent-proposal", sourceId, locator: "agent memory proposal" }],
+  citations: [
+    { id: "agent-proposal", sourceId, locator: "agent memory proposal" },
+  ],
   authorId: "agent:e2e",
-  sourceIds: [...new Set([...(current?.sourceIds ?? []), sourceId])]
-})
+  sourceIds: [...new Set([...(current?.sourceIds ?? []), sourceId])],
+});
 
 const proposalIdentity = (
   pageId: string,
   baseRevisionId: string,
-  markdown: string
-): string => createHash("sha256")
-  .update([pageId, baseRevisionId, markdown].join("\u0000"))
-  .digest("hex")
+  markdown: string,
+): string =>
+  createHash("sha256")
+    .update([pageId, baseRevisionId, markdown].join("\u0000"))
+    .digest("hex");
 
 const fakeMemoryProposal = (
   state: FakeOrganizationMemory,
-  args: Readonly<Record<string, unknown>>
+  args: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> => {
-  const pageId = typeof args.pageId === "string" ? args.pageId.trim() : ""
-  const baseRevisionId = typeof args.baseRevisionId === "string"
-    ? args.baseRevisionId.trim()
-    : ""
-  const markdown = typeof args.markdown === "string" ? args.markdown.trim() : ""
-  if (pageId.length === 0 || baseRevisionId.length === 0 || markdown.length === 0) {
+  const pageId = typeof args.pageId === "string" ? args.pageId.trim() : "";
+  const baseRevisionId =
+    typeof args.baseRevisionId === "string" ? args.baseRevisionId.trim() : "";
+  const markdown =
+    typeof args.markdown === "string" ? args.markdown.trim() : "";
+  if (
+    pageId.length === 0 ||
+    baseRevisionId.length === 0 ||
+    markdown.length === 0
+  ) {
     return {
       status: "invalid",
       code: "invalid",
-      message: "memory_propose requires pageId, baseRevisionId, and markdown"
-    }
+      message: "memory_propose requires pageId, baseRevisionId, and markdown",
+    };
   }
   if (CREDENTIAL_PATTERN.test(markdown)) {
-    state.secretRejections += 1
+    state.secretRejections += 1;
     return {
       status: "conflict",
       code: "conflict",
       httpStatus: 409,
-      conflicts: [{
-        pageId,
-        expectedBaseRevisionId: baseRevisionId,
-        currentHeadRevisionId: "lint:credential-shaped-content"
-      }]
-    }
+      conflicts: [
+        {
+          pageId,
+          expectedBaseRevisionId: baseRevisionId,
+          currentHeadRevisionId: "lint:credential-shaped-content",
+        },
+      ],
+    };
   }
 
-  const current = state.pages.get(pageId)
+  const current = state.pages.get(pageId);
   if (baseRevisionId === "new") {
     if (current !== undefined) {
       return {
         status: "conflict",
         code: "conflict",
         httpStatus: 409,
-        conflicts: [{
-          pageId,
-          expectedBaseRevisionId: "new",
-          currentHeadRevisionId: `revision:${pageId}:${current.revision}`
-        }]
-      }
+        conflicts: [
+          {
+            pageId,
+            expectedBaseRevisionId: "new",
+            currentHeadRevisionId: `revision:${pageId}:${current.revision}`,
+          },
+        ],
+      };
     }
-    const identity = proposalIdentity(pageId, baseRevisionId, markdown)
-    const sourceId = `source:proposal-${identity}`
-    const workflowId = `compiler-${identity}`
-    state.sourceIds.add(sourceId)
+    const identity = proposalIdentity(pageId, baseRevisionId, markdown);
+    const sourceId = `source:proposal-${identity}`;
+    const workflowId = `compiler-${identity}`;
+    state.sourceIds.add(sourceId);
     if (!state.workflows.has(workflowId)) {
       state.workflows.set(workflowId, {
         id: workflowId,
         sourceId,
         page: proposedPage(pageId, markdown, sourceId),
-        status: "queued"
-      })
+        status: "queued",
+      });
     }
-    return { workflowId, status: state.workflows.get(workflowId)?.status ?? "queued" }
+    return {
+      workflowId,
+      status: state.workflows.get(workflowId)?.status ?? "queued",
+    };
   }
 
   if (current === undefined) {
-    return { status: "not_found", code: "not_found", httpStatus: 404, pageId }
+    return { status: "not_found", code: "not_found", httpStatus: 404, pageId };
   }
-  const currentRevisionId = `revision:${pageId}:${current.revision}`
+  const currentRevisionId = `revision:${pageId}:${current.revision}`;
   if (baseRevisionId !== currentRevisionId) {
     return {
       status: "conflict",
       code: "conflict",
       httpStatus: 409,
-      conflicts: [{
-        pageId,
-        expectedBaseRevisionId: baseRevisionId,
-        currentHeadRevisionId: currentRevisionId
-      }]
-    }
+      conflicts: [
+        {
+          pageId,
+          expectedBaseRevisionId: baseRevisionId,
+          currentHeadRevisionId: currentRevisionId,
+        },
+      ],
+    };
   }
-  const identity = proposalIdentity(pageId, baseRevisionId, markdown)
-  const sourceId = `source:proposal-${identity}`
-  state.sourceIds.add(sourceId)
-  state.pages.set(pageId, proposedPage(pageId, markdown, sourceId, current))
+  const identity = proposalIdentity(pageId, baseRevisionId, markdown);
+  const sourceId = `source:proposal-${identity}`;
+  state.sourceIds.add(sourceId);
+  state.pages.set(pageId, proposedPage(pageId, markdown, sourceId, current));
   return {
     status: "accepted",
     proposalId: `proposal-${identity}`,
     revisionId: `revision:proposal-${identity}`,
-    revision: current.revision + 1
-  }
-}
+    revision: current.revision + 1,
+  };
+};
 
 const fakeMemoryWorkflowStatus = (
   state: FakeOrganizationMemory,
-  args: Readonly<Record<string, unknown>>
+  args: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> => {
-  const workflowId = typeof args.workflowId === "string" ? args.workflowId : ""
-  const workflow = state.workflows.get(workflowId)
+  const workflowId = typeof args.workflowId === "string" ? args.workflowId : "";
+  const workflow = state.workflows.get(workflowId);
   if (workflow === undefined) {
-    return { status: "not_found", code: "not_found", httpStatus: 404, workflowId }
+    return {
+      status: "not_found",
+      code: "not_found",
+      httpStatus: 404,
+      workflowId,
+    };
   }
   if (workflow.status === "queued") {
-    state.pages.set(workflow.page.id, workflow.page)
-    workflow.status = "published"
+    state.pages.set(workflow.page.id, workflow.page);
+    workflow.status = "published";
   }
   return {
     workflowId,
@@ -260,15 +349,15 @@ const fakeMemoryWorkflowStatus = (
       status: "published",
       workflowId,
       proposalId: `proposal:${workflowId}`,
-      proposalIds: [`proposal:${workflowId}:${workflow.page.id}`]
-    }
-  }
-}
+      proposalIds: [`proposal:${workflowId}:${workflow.page.id}`],
+    },
+  };
+};
 
 const basePages = (organizationId: string): ReadonlyArray<FakePage> => {
-  const other = organizationId !== "org-e2e"
-  const prefix = other ? "other-" : ""
-  const titlePrefix = other ? "Other organization " : ""
+  const other = organizationId !== "org-e2e";
+  const prefix = other ? "other-" : "";
+  const titlePrefix = other ? "Other organization " : "";
   return [
     {
       id: `${prefix}alpha`,
@@ -278,9 +367,15 @@ const basePages = (organizationId: string): ReadonlyArray<FakePage> => {
       body: `# ${titlePrefix}Alpha memory\n\nThe accepted architecture links to [[${prefix}beta]]. [^source-alpha]`,
       aliases: [],
       tags: ["architecture"],
-      citations: [{ id: "source-alpha", sourceId: `source:${organizationId}:alpha`, locator: "L1-L8" }],
+      citations: [
+        {
+          id: "source-alpha",
+          sourceId: `source:${organizationId}:alpha`,
+          locator: "L1-L8",
+        },
+      ],
       authorId: "user:alpha",
-      sourceIds: [`source:${organizationId}:alpha`]
+      sourceIds: [`source:${organizationId}:alpha`],
     },
     {
       id: `${prefix}beta`,
@@ -290,12 +385,18 @@ const basePages = (organizationId: string): ReadonlyArray<FakePage> => {
       body: `# ${titlePrefix}Beta memory\n\nThis accepted page is the architecture target. [^source-beta]`,
       aliases: [],
       tags: ["architecture"],
-      citations: [{ id: "source-beta", sourceId: `source:${organizationId}:beta`, locator: "L1-L4" }],
+      citations: [
+        {
+          id: "source-beta",
+          sourceId: `source:${organizationId}:beta`,
+          locator: "L1-L4",
+        },
+      ],
       authorId: "user:beta",
-      sourceIds: [`source:${organizationId}:beta`]
-    }
-  ]
-}
+      sourceIds: [`source:${organizationId}:beta`],
+    },
+  ];
+};
 
 const fixedProposals = (): Array<FakeProposal> => [
   {
@@ -306,13 +407,17 @@ const fixedProposals = (): Array<FakeProposal> => [
     createdAt: "2026-08-01T08:00:00.000Z",
     status: "open",
     changeKind: "factual",
-    pages: [{
-      id: "proposal-page:stale",
-      pageId: "alpha",
-      baseRevisionId: "revision:alpha:1",
-      summary: "An intentionally stale edit used to verify conflict handling.",
-      markdown: "---\nid: alpha\ntitle: Alpha memory\nrevision: 3\n---\n\nStale overwrite attempt. [^stale]\n"
-    }]
+    pages: [
+      {
+        id: "proposal-page:stale",
+        pageId: "alpha",
+        baseRevisionId: "revision:alpha:1",
+        summary:
+          "An intentionally stale edit used to verify conflict handling.",
+        markdown:
+          "---\nid: alpha\ntitle: Alpha memory\nrevision: 3\n---\n\nStale overwrite attempt. [^stale]\n",
+      },
+    ],
   },
   {
     id: "proposal:secret",
@@ -322,15 +427,18 @@ const fixedProposals = (): Array<FakeProposal> => [
     createdAt: "2026-08-01T09:00:00.000Z",
     status: "open",
     changeKind: "factual",
-    pages: [{
-      id: "proposal-page:secret",
-      pageId: "secret-page",
-      baseRevisionId: "revision:secret-page:0",
-      summary: "Credential-shaped content must fail lint before publication.",
-      markdown: "---\nid: secret-page\ntitle: Secret-shaped proposal\nrevision: 1\n---\n\napi_key=sk-test-never-publish [^secret]\n"
-    }]
-  }
-]
+    pages: [
+      {
+        id: "proposal-page:secret",
+        pageId: "secret-page",
+        baseRevisionId: "revision:secret-page:0",
+        summary: "Credential-shaped content must fail lint before publication.",
+        markdown:
+          "---\nid: secret-page\ntitle: Secret-shaped proposal\nrevision: 1\n---\n\napi_key=sk-test-never-publish [^secret]\n",
+      },
+    ],
+  },
+];
 
 const acceptedLearningPages = (sourceId: string): ReadonlyArray<FakePage> => [
   {
@@ -343,7 +451,7 @@ const acceptedLearningPages = (sourceId: string): ReadonlyArray<FakePage> => [
     tags: ["backend", "reliability"],
     citations: [{ id: "session", sourceId, locator: "settled agent session" }],
     authorId: "reviewer:e2e",
-    sourceIds: [sourceId]
+    sourceIds: [sourceId],
   },
   {
     id: "shared-checklist",
@@ -355,9 +463,9 @@ const acceptedLearningPages = (sourceId: string): ReadonlyArray<FakePage> => [
     tags: ["backend", "testing"],
     citations: [{ id: "session", sourceId, locator: "settled agent session" }],
     authorId: "reviewer:e2e",
-    sourceIds: [sourceId]
-  }
-]
+    sourceIds: [sourceId],
+  },
+];
 
 const capturedProposal = (sourceId: string): FakeProposal => ({
   id: "proposal:captured-learning",
@@ -372,18 +480,22 @@ const capturedProposal = (sourceId: string): FakeProposal => ({
       id: "proposal-page:shared-learning",
       pageId: "shared-learning",
       baseRevisionId: "revision:shared-learning:0",
-      summary: "Publish the cited rate-limiting learning from the settled session.",
-      markdown: "---\nid: shared-learning\ntitle: Refund rate limiting\nrevision: 1\n---\n\nReuse the token bucket for POST /refund. [[shared-checklist]] [^session]\n"
+      summary:
+        "Publish the cited rate-limiting learning from the settled session.",
+      markdown:
+        "---\nid: shared-learning\ntitle: Refund rate limiting\nrevision: 1\n---\n\nReuse the token bucket for POST /refund. [[shared-checklist]] [^session]\n",
     },
     {
       id: "proposal-page:shared-checklist",
       pageId: "shared-checklist",
       baseRevisionId: "revision:shared-checklist:0",
-      summary: "Add the companion verification checklist in the same publication.",
-      markdown: "---\nid: shared-checklist\ntitle: Refund rate-limit checklist\nrevision: 1\n---\n\nVerify the accepted route and its 429 response. [^session]\n"
-    }
-  ]
-})
+      summary:
+        "Add the companion verification checklist in the same publication.",
+      markdown:
+        "---\nid: shared-checklist\ntitle: Refund rate-limit checklist\nrevision: 1\n---\n\nVerify the accepted route and its 429 response. [^session]\n",
+    },
+  ],
+});
 
 const pageResponse = (page: FakePage) => ({
   page: {
@@ -394,7 +506,7 @@ const pageResponse = (page: FakePage) => ({
     aliases: page.aliases,
     tags: page.tags,
     body: page.body,
-    citations: page.citations
+    citations: page.citations,
   },
   revision: {
     id: `revision:${page.id}:${page.revision}`,
@@ -402,44 +514,74 @@ const pageResponse = (page: FakePage) => ({
     revision: page.revision,
     authorId: page.authorId,
     createdAt: "2026-08-01T00:00:00.000Z",
-    acceptedAt: "2026-08-01T00:10:00.000Z"
+    acceptedAt: "2026-08-01T00:10:00.000Z",
   },
   sourceIds: page.sourceIds,
   citationIds: page.citations.map((citation) => citation.id),
-  backlinks: []
-})
+  backlinks: [],
+});
 
 const graphFor = (organizationId: string, state: FakeOrganizationMemory) => {
-  const pages = [...state.pages.values()].sort((left, right) => left.id.localeCompare(right.id))
-  const alphaId = organizationId === "org-e2e" ? "alpha" : "other-alpha"
-  const betaId = organizationId === "org-e2e" ? "beta" : "other-beta"
-  const edges: Array<{ id: string; sourceId: string; targetId: string; kind: "wikilink" | "dependency" }> = [
-    { id: `edge:${organizationId}:alpha-beta`, sourceId: `page:${alphaId}`, targetId: `page:${betaId}`, kind: "wikilink" }
-  ]
+  const pages = [...state.pages.values()].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+  const alphaId = organizationId === "org-e2e" ? "alpha" : "other-alpha";
+  const betaId = organizationId === "org-e2e" ? "beta" : "other-beta";
+  const edges: Array<{
+    id: string;
+    sourceId: string;
+    targetId: string;
+    kind: "wikilink" | "dependency";
+  }> = [
+    {
+      id: `edge:${organizationId}:alpha-beta`,
+      sourceId: `page:${alphaId}`,
+      targetId: `page:${betaId}`,
+      kind: "wikilink",
+    },
+  ];
   if (state.pages.has("shared-learning")) {
     edges.push(
-      { id: "edge:e2e:alpha-shared", sourceId: "page:alpha", targetId: "page:shared-learning", kind: "wikilink" },
-      { id: "edge:e2e:shared-checklist", sourceId: "page:shared-learning", targetId: "page:shared-checklist", kind: "dependency" }
-    )
+      {
+        id: "edge:e2e:alpha-shared",
+        sourceId: "page:alpha",
+        targetId: "page:shared-learning",
+        kind: "wikilink",
+      },
+      {
+        id: "edge:e2e:shared-checklist",
+        sourceId: "page:shared-learning",
+        targetId: "page:shared-checklist",
+        kind: "dependency",
+      },
+    );
   }
   const nodes = pages.map((page, index) => ({
     id: `page:${page.id}`,
     kind: "page",
     title: page.title,
     pageId: page.id,
-    topicId: page.id.startsWith("shared-") ? "topic:reliability" : "topic:architecture",
+    topicId: page.id.startsWith("shared-")
+      ? "topic:reliability"
+      : "topic:architecture",
     degree: {
-      incoming: edges.filter((edge) => edge.targetId === `page:${page.id}`).length,
-      outgoing: edges.filter((edge) => edge.sourceId === `page:${page.id}`).length
+      incoming: edges.filter((edge) => edge.targetId === `page:${page.id}`)
+        .length,
+      outgoing: edges.filter((edge) => edge.sourceId === `page:${page.id}`)
+        .length,
     },
     freshness: index % 2 === 0 ? "fresh" : "stale",
     health: {
       brokenLinks: page.id === alphaId ? 1 : 0,
       contradictions: 0,
-      orphan: !edges.some((edge) => edge.sourceId === `page:${page.id}` || edge.targetId === `page:${page.id}`)
-    }
-  }))
-  const added = Math.max(0, pages.length - 2)
+      orphan: !edges.some(
+        (edge) =>
+          edge.sourceId === `page:${page.id}` ||
+          edge.targetId === `page:${page.id}`,
+      ),
+    },
+  }));
+  const added = Math.max(0, pages.length - 2);
   return {
     version: 1,
     totalNodes: 10_000 + added,
@@ -447,15 +589,27 @@ const graphFor = (organizationId: string, state: FakeOrganizationMemory) => {
     nodes,
     edges,
     clusters: [
-      { id: "topic:architecture", label: "Architecture", nodeCount: 9_800, sampleNodeIds: [`page:${alphaId}`] },
+      {
+        id: "topic:architecture",
+        label: "Architecture",
+        nodeCount: 9_800,
+        sampleNodeIds: [`page:${alphaId}`],
+      },
       ...(state.pages.has("shared-learning")
-        ? [{ id: "topic:reliability", label: "Reliability", nodeCount: 202, sampleNodeIds: ["page:shared-learning"] }]
-        : [])
+        ? [
+            {
+              id: "topic:reliability",
+              label: "Reliability",
+              nodeCount: 202,
+              sampleNodeIds: ["page:shared-learning"],
+            },
+          ]
+        : []),
     ],
     truncated: true,
-    nextCursor: String(nodes.length)
-  }
-}
+    nextCursor: String(nodes.length),
+  };
+};
 
 /**
  * Time-scoped fields shrink with a shorter window, exactly as the worker's
@@ -469,23 +623,42 @@ const RANGE_SEARCHES: Readonly<Record<string, number>> = {
   "7d": 9,
   "30d": 32,
   "90d": 63,
-  all: 90
-}
-const rangeScale = (range: string): number => RANGE_SEARCHES[range] ?? RANGE_SEARCHES.all!
+  all: 90,
+};
+const rangeScale = (range: string): number =>
+  RANGE_SEARCHES[range] ?? RANGE_SEARCHES.all!;
 
-const dashboardFor = (state: FakeOrganizationMemory, range = "all"): MemoryDashboardSummary => {
-  const added = Math.max(0, state.pages.size - 2)
+const dashboardFor = (
+  state: FakeOrganizationMemory,
+  range = "all",
+): MemoryDashboardSummary => {
+  const added = Math.max(0, state.pages.size - 2);
   // Derive every windowed retrieval count from the same per-range anchor so the
   // whole block moves together, the way a real time-scoped aggregation would.
-  const searches = rangeScale(range)
+  const searches = rangeScale(range);
   return {
     version: 1,
     asOf: "2026-08-01T00:00:00.000Z",
-    growth: { acceptedPages: 10_000 + added, revisions: 12_400 + added, sources: 3_100 + state.sourceIds.size, daily: [{ day: "2026-08-01", pages: 12 + added, revisions: 30 + added }] },
-    citationCoverage: { citations: 15_000 + added, citedPages: 9_200 + added, totalPages: 10_000 + added, ratio: 0.92 },
+    growth: {
+      acceptedPages: 10_000 + added,
+      revisions: 12_400 + added,
+      sources: 3_100 + state.sourceIds.size,
+      daily: [{ day: "2026-08-01", pages: 12 + added, revisions: 30 + added }],
+    },
+    citationCoverage: {
+      citations: 15_000 + added,
+      citedPages: 9_200 + added,
+      totalPages: 10_000 + added,
+      ratio: 0.92,
+    },
     freshness: { fresh: 8_000 + added, aging: 1_200, stale: 800, unknown: 0 },
     health: { orphanPages: 20, brokenLinks: 4, contradictions: 2 },
-    connectivity: { pages: 10_000 + added, directedLinks: 22_000 + added, connectedPages: 9_980 + added, averageDegree: 4.4 },
+    connectivity: {
+      pages: 10_000 + added,
+      directedLinks: 22_000 + added,
+      connectedPages: 9_980 + added,
+      averageDegree: 4.4,
+    },
     retrieval: {
       searches,
       reads: Math.round(searches * 0.6),
@@ -497,10 +670,10 @@ const dashboardFor = (state: FakeOrganizationMemory, range = "all"): MemoryDashb
       resultsReturned: searches * 6,
       uniqueQueryHashes: Math.round(searches * 0.9),
       medianDurationMs: 8,
-      p95DurationMs: 21
-    }
-  }
-}
+      p95DurationMs: 21,
+    },
+  };
+};
 
 /**
  * Advisory relatedness suggestions in the worker's `MemorySuggestionsView` wire
@@ -509,21 +682,24 @@ const dashboardFor = (state: FakeOrganizationMemory, range = "all"): MemoryDashb
  * so the inspector's "related pages" panel can only ever be advisory. The fake
  * stays lexical-only (no turbopuffer), matching a deployment with no vector key.
  */
-const suggestionsFor = (organizationId: string, state: FakeOrganizationMemory) => {
-  const has = (id: string): boolean => state.pages.has(id)
+const suggestionsFor = (
+  organizationId: string,
+  state: FakeOrganizationMemory,
+) => {
+  const has = (id: string): boolean => state.pages.has(id);
   const suggestions: Array<{
-    sourceId: string
-    targetId: string
-    method: "lexical" | "embedding"
-    score: number
+    sourceId: string;
+    targetId: string;
+    method: "lexical" | "embedding";
+    score: number;
     evidence: {
-      method: "lexical" | "embedding"
-      cosine: number
-      sharedTerms?: ReadonlyArray<string>
-      sharedTags?: ReadonlyArray<string>
-      sharedSources?: ReadonlyArray<string>
-    }
-  }> = []
+      method: "lexical" | "embedding";
+      cosine: number;
+      sharedTerms?: ReadonlyArray<string>;
+      sharedTags?: ReadonlyArray<string>;
+      sharedSources?: ReadonlyArray<string>;
+    };
+  }> = [];
   // The learning scenario adds shared-learning/shared-checklist. alpha and
   // shared-checklist are NOT joined by any accepted edge (alpha→beta,
   // alpha→shared-learning, shared-learning→shared-checklist are), so this pair
@@ -539,142 +715,194 @@ const suggestionsFor = (organizationId: string, state: FakeOrganizationMemory) =
         cosine: 0.37,
         sharedTerms: ["architecture", "accepted", "route"],
         sharedTags: ["backend"],
-        sharedSources: []
-      }
-    })
+        sharedSources: [],
+      },
+    });
   }
-  return { version: 1 as const, vectorSource: "lexical" as const, suggestions }
-}
+  return { version: 1 as const, vectorSource: "lexical" as const, suggestions };
+};
 
-const normalizeOptions = (value: string | FakeAuthServerOptions): Required<Omit<FakeAuthServerOptions, "acceptedLearningOrganizationIds" | "deviceRelayUrl">> & { readonly acceptedLearningOrganizationIds: ReadonlyArray<string>; readonly deviceRelayUrl?: string } =>
+const normalizeOptions = (
+  value: string | FakeAuthServerOptions,
+): Required<
+  Omit<
+    FakeAuthServerOptions,
+    "acceptedLearningOrganizationIds" | "deviceRelayUrl"
+  >
+> & {
+  readonly acceptedLearningOrganizationIds: ReadonlyArray<string>;
+  readonly deviceRelayUrl?: string;
+} =>
   typeof value === "string"
-    ? { token: value, paidOrganizationIds: DEFAULT_PAID_ORGANIZATIONS, unavailable: false, acceptedLearningOrganizationIds: [], reviewProposals: true, listenHost: "127.0.0.1", publicHost: "127.0.0.1" }
+    ? {
+        token: value,
+        paidOrganizationIds: DEFAULT_PAID_ORGANIZATIONS,
+        unavailable: false,
+        acceptedLearningOrganizationIds: [],
+        reviewProposals: true,
+        managedRuntime: "current",
+        unavailableSocialProviders: [],
+        listenHost: "127.0.0.1",
+        publicHost: "127.0.0.1",
+      }
     : {
         token: value.token ?? DEFAULT_TOKEN,
-        paidOrganizationIds: value.paidOrganizationIds ?? DEFAULT_PAID_ORGANIZATIONS,
+        paidOrganizationIds:
+          value.paidOrganizationIds ?? DEFAULT_PAID_ORGANIZATIONS,
         unavailable: value.unavailable ?? false,
-        acceptedLearningOrganizationIds: value.acceptedLearningOrganizationIds ?? [],
+        acceptedLearningOrganizationIds:
+          value.acceptedLearningOrganizationIds ?? [],
         reviewProposals: value.reviewProposals ?? true,
+        managedRuntime: value.managedRuntime ?? "current",
+        unavailableSocialProviders: value.unavailableSocialProviders ?? [],
         listenHost: value.listenHost ?? "127.0.0.1",
         publicHost: value.publicHost ?? "127.0.0.1",
-        ...(value.deviceRelayUrl ? { deviceRelayUrl: value.deviceRelayUrl } : {})
-      }
+        ...(value.deviceRelayUrl
+          ? { deviceRelayUrl: value.deviceRelayUrl }
+          : {}),
+      };
 
 export const startFakeAuthServer = async (
-  input: string | FakeAuthServerOptions = {}
+  input: string | FakeAuthServerOptions = {},
 ): Promise<FakeAuthServer> => {
-  const options = normalizeOptions(input)
-  const sentEmails: Array<string> = []
-  const requests: Array<FakeMemoryRequest> = []
-  const organizations = new Map<string, FakeOrganizationMemory>()
-  let memoryAvailable = !options.unavailable
-  let requestSequence = 0
+  const options = normalizeOptions(input);
+  const sentEmails: Array<string> = [];
+  const requests: Array<FakeMemoryRequest> = [];
+  const managedRequests: Array<FakeManagedRequest> = [];
+  const organizations = new Map<string, FakeOrganizationMemory>();
+  let memoryAvailable = !options.unavailable;
+  let requestSequence = 0;
 
   const stateFor = (organizationId: string): FakeOrganizationMemory => {
-    const existing = organizations.get(organizationId)
-    if (existing !== undefined) return existing
+    const existing = organizations.get(organizationId);
+    if (existing !== undefined) return existing;
     const state: FakeOrganizationMemory = {
       pages: new Map(basePages(organizationId).map((page) => [page.id, page])),
-      proposals: organizationId === "org-e2e" && options.reviewProposals ? fixedProposals() : [],
+      proposals:
+        organizationId === "org-e2e" && options.reviewProposals
+          ? fixedProposals()
+          : [],
       workflows: new Map(),
       sourceIds: new Set(),
       secretRejections: 0,
-      reviewDecisions: []
-    }
+      reviewDecisions: [],
+    };
     if (options.acceptedLearningOrganizationIds.includes(organizationId)) {
-      const sourceId = "session-digest:seeded-learning"
-      state.sourceIds.add(sourceId)
-      for (const page of acceptedLearningPages(sourceId)) state.pages.set(page.id, page)
+      const sourceId = "session-digest:seeded-learning";
+      state.sourceIds.add(sourceId);
+      for (const page of acceptedLearningPages(sourceId))
+        state.pages.set(page.id, page);
     }
-    organizations.set(organizationId, state)
-    return state
-  }
+    organizations.set(organizationId, state);
+    return state;
+  };
 
-  const grantFor = (organizationId: string): string => `e2e-memory-grant:${organizationId}`
-  const organizationFromGrant = (authorization: string | undefined): string | null => {
-    const prefix = "Bearer e2e-memory-grant:"
-    return authorization?.startsWith(prefix) ? authorization.slice(prefix.length) : null
-  }
+  const grantFor = (organizationId: string): string =>
+    `e2e-memory-grant:${organizationId}`;
+  const organizationFromGrant = (
+    authorization: string | undefined,
+  ): string | null => {
+    const prefix = "Bearer e2e-memory-grant:";
+    return authorization?.startsWith(prefix)
+      ? authorization.slice(prefix.length)
+      : null;
+  };
 
   const server: Server = createServer((req, res) => {
-    const host = req.headers.host ?? "localhost"
-    const url = new URL(req.url ?? "/", `http://${host}`)
-    const json = (code: number, body: unknown, headers: Readonly<Record<string, string>> = {}) => {
-      res.writeHead(code, { "Content-Type": "application/json", ...headers })
-      res.end(JSON.stringify(body))
-    }
+    const host = req.headers.host ?? "localhost";
+    const url = new URL(req.url ?? "/", `http://${host}`);
+    const json = (
+      code: number,
+      body: unknown,
+      headers: Readonly<Record<string, string>> = {},
+    ) => {
+      res.writeHead(code, { "Content-Type": "application/json", ...headers });
+      res.end(JSON.stringify(body));
+    };
     const readJson = (): Promise<unknown> =>
       new Promise((resolve) => {
-        let body = ""
-        req.on("data", (chunk) => (body += chunk))
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
         req.on("end", () => {
           try {
-            resolve(JSON.parse(body))
+            resolve(JSON.parse(body));
           } catch {
-            resolve(null)
+            resolve(null);
           }
-        })
-      })
+        });
+      });
 
     if (options.deviceRelayUrl && url.pathname.startsWith("/api/devices")) {
       void (async () => {
-        const body = req.method === "GET" ? undefined : JSON.stringify(await readJson())
-        const forwarded = await fetch(`${options.deviceRelayUrl}${url.pathname}${url.search}`, {
-          method: req.method,
-          headers: {
-            ...(typeof req.headers.authorization === "string" ? { authorization: req.headers.authorization } : {}),
-            ...(body ? { "content-type": "application/json" } : {})
+        const body =
+          req.method === "GET" ? undefined : JSON.stringify(await readJson());
+        const forwarded = await fetch(
+          `${options.deviceRelayUrl}${url.pathname}${url.search}`,
+          {
+            method: req.method,
+            headers: {
+              ...(typeof req.headers.authorization === "string"
+                ? { authorization: req.headers.authorization }
+                : {}),
+              ...(body ? { "content-type": "application/json" } : {}),
+            },
+            ...(body ? { body } : {}),
           },
-          ...(body ? { body } : {})
-        })
-        res.writeHead(forwarded.status, { "content-type": forwarded.headers.get("content-type") ?? "application/json" })
-        res.end(await forwarded.text())
-      })().catch(() => json(502, { error: "device relay unavailable" }))
-      return
+        );
+        res.writeHead(forwarded.status, {
+          "content-type":
+            forwarded.headers.get("content-type") ?? "application/json",
+        });
+        res.end(await forwarded.text());
+      })().catch(() => json(502, { error: "device relay unavailable" }));
+      return;
     }
 
     if (url.pathname === "/api/environments" && req.method === "GET") {
-      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
+      if (req.headers.authorization !== `Bearer ${options.token}`)
+        return json(401, {});
       void (async () => {
         const owned = options.deviceRelayUrl
           ? await fetch(`${options.deviceRelayUrl}/api/devices`, {
-              headers: { authorization: `Bearer ${options.token}` }
+              headers: { authorization: `Bearer ${options.token}` },
             })
               .then((response) => response.json())
               .then((body) =>
                 Array.isArray((body as { devices?: unknown }).devices)
-                  ? ((body as { devices: Array<Record<string, unknown>> }).devices).map(
-                      (device) => ({
-                        kind: "owned",
-                        id: device.deviceId,
-                        name: device.displayName,
-                        platform: device.platform,
-                        capabilities: device.capabilities,
-                        state:
-                          Array.isArray(
-                            (
-                              device.capabilities as
-                                | { capabilities?: unknown }
-                                | undefined
-                            )?.capabilities
-                          ) &&
-                          !(
-                            device.capabilities as {
-                              capabilities: Array<unknown>
-                            }
-                          ).capabilities.includes("session.start")
-                            ? "incompatible"
-                            : ((device.presence as { state?: unknown } | undefined)
-                                ?.state ?? "offline"),
-                        agentVersion: device.agentVersion ?? null,
-                        lastSeenAt:
-                          (device.presence as { lastSeenAt?: unknown } | undefined)?.lastSeenAt ??
-                          null
-                      })
-                    )
-                  : []
+                  ? (
+                      body as { devices: Array<Record<string, unknown>> }
+                    ).devices.map((device) => ({
+                      kind: "owned",
+                      id: device.deviceId,
+                      name: device.displayName,
+                      platform: device.platform,
+                      capabilities: device.capabilities,
+                      state:
+                        Array.isArray(
+                          (
+                            device.capabilities as
+                              { capabilities?: unknown } | undefined
+                          )?.capabilities,
+                        ) &&
+                        !(
+                          device.capabilities as {
+                            capabilities: Array<unknown>;
+                          }
+                        ).capabilities.includes("session.start")
+                          ? "incompatible"
+                          : ((
+                              device.presence as { state?: unknown } | undefined
+                            )?.state ?? "offline"),
+                      agentVersion: device.agentVersion ?? null,
+                      lastSeenAt:
+                        (
+                          device.presence as
+                            { lastSeenAt?: unknown } | undefined
+                        )?.lastSeenAt ?? null,
+                    }))
+                  : [],
               )
-          : []
+          : [];
         json(200, {
           version: 1,
           environments: [
@@ -690,10 +918,24 @@ export const startFakeAuthServer = async (
                   "session.start",
                   "session.input",
                   "session.cancel",
-                  "session.observe"
+                  "session.observe",
                 ],
-                harnesses: ["codex"],
-                maxConcurrentSessions: 1
+                maxConcurrentSessions: 1,
+                ...(options.managedRuntime === "missing"
+                  ? {}
+                  : {
+                      runtime: {
+                        versions: {
+                          ...CURRENT_RUNTIME_CONTRACTS,
+                          ...(options.managedRuntime === "stale"
+                            ? { piSdk: "stale" }
+                            : {}),
+                        },
+                        toolIds: [],
+                        resourceIds: [],
+                        targetId: "managed_cloud_e2e_account",
+                      },
+                    }),
               },
               state: "online",
               agentVersion: null,
@@ -702,46 +944,74 @@ export const startFakeAuthServer = async (
               instanceType: "basic",
               generation: 1,
               createdAt: 0,
-              updatedAt: 0
-            }
-          ]
-        })
-      })().catch(() => json(502, { error: "environment inventory unavailable" }))
-      return
+              updatedAt: 0,
+            },
+          ],
+        });
+      })().catch(() =>
+        json(502, { error: "environment inventory unavailable" }),
+      );
+      return;
     }
 
     if (
-      url.pathname === "/api/environments/managed/managed_cloud_e2e_account/workspaces" &&
+      url.pathname ===
+        "/api/environments/managed/managed_cloud_e2e_account/workspaces" &&
       req.method === "POST"
     ) {
-      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
-      setTimeout(() => {
-        json(503, { error: "Scripted Cloud startup stopped before allocation" })
-      }, 2_000)
-      return
+      if (req.headers.authorization !== `Bearer ${options.token}`)
+        return json(401, {});
+      void readJson().then((value) => {
+        const body = jsonBody(value);
+        const credential = managedCredential(
+          req.headers["x-jingler-provider-credential"],
+        );
+        managedRequests.push({
+          path: url.pathname,
+          connectionId:
+            typeof body.connectionId === "string" ? body.connectionId : null,
+          providerId:
+            typeof body.providerId === "string" ? body.providerId : null,
+          modelId: typeof body.modelId === "string" ? body.modelId : null,
+          authKind: credential?.authKind ?? null,
+          billingRoute: credential?.billingRoute ?? null,
+          accountIdPresent: credential?.accountIdPresent ?? false,
+          credentialPresent: credential !== null,
+        });
+        setTimeout(() => {
+          json(503, {
+            error: "Scripted Cloud startup stopped before allocation",
+          });
+        }, 2_000);
+      });
+      return;
     }
 
     if (url.pathname === "/api/memory/organizations" && req.method === "GET") {
-      if (!memoryAvailable) return json(503, { error: "memory unavailable" })
-      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
+      if (!memoryAvailable) return json(503, { error: "memory unavailable" });
+      if (req.headers.authorization !== `Bearer ${options.token}`)
+        return json(401, {});
       return json(200, {
         organizations: options.paidOrganizationIds.map((id) => ({
           id,
           name: id === "org-e2e" ? "Jingler Team" : "Other Team",
           role: "owner",
-          privileges: ["read", "propose", "review", "schema"]
-        }))
-      })
+          privileges: ["read", "propose", "review", "schema"],
+        })),
+      });
     }
 
     if (url.pathname === "/api/memory/grant" && req.method === "POST") {
-      if (!memoryAvailable) return json(503, { error: "memory unavailable" })
-      if (req.headers.authorization !== `Bearer ${options.token}`) return json(401, {})
+      if (!memoryAvailable) return json(503, { error: "memory unavailable" });
+      if (req.headers.authorization !== `Bearer ${options.token}`)
+        return json(401, {});
       readJson().then((value) => {
-        const body = jsonBody(value)
-        const organizationId = typeof body.organizationId === "string" ? body.organizationId : ""
-        if (!options.paidOrganizationIds.includes(organizationId)) return json(403, { error: "active paid membership required" })
-        stateFor(organizationId)
+        const body = jsonBody(value);
+        const organizationId =
+          typeof body.organizationId === "string" ? body.organizationId : "";
+        if (!options.paidOrganizationIds.includes(organizationId))
+          return json(403, { error: "active paid membership required" });
+        stateFor(organizationId);
         return json(200, {
           grant: grantFor(organizationId),
           claims: {
@@ -753,17 +1023,18 @@ export const startFakeAuthServer = async (
             privileges: ["read", "propose", "review", "schema"],
             issuedAt: 1_700_000_000,
             expiresAt: 4_102_444_800,
-            grantId: `grant-e2e-${organizationId}`
-          }
-        })
-      })
-      return
+            grantId: `grant-e2e-${organizationId}`,
+          },
+        });
+      });
+      return;
     }
 
     if (url.pathname === "/api/memory/sources" && req.method === "POST") {
-      const organizationId = typeof req.headers["x-jingler-organization-id"] === "string"
-        ? req.headers["x-jingler-organization-id"]
-        : null
+      const organizationId =
+        typeof req.headers["x-jingler-organization-id"] === "string"
+          ? req.headers["x-jingler-organization-id"]
+          : null;
       requests.push({
         path: url.pathname,
         httpMethod: req.method,
@@ -778,75 +1049,105 @@ export const startFakeAuthServer = async (
         hasSessionId: req.headers["mcp-session-id"] !== undefined,
         requestId: null,
         toolArguments: null,
-        assignedInstance: null
-      })
-      if (!memoryAvailable) return json(503, { error: "memory unavailable" })
-      const requestedOrganizationId = req.headers["x-jingler-organization-id"]
-      const grantOrganization = organizationFromGrant(req.headers.authorization)
+        assignedInstance: null,
+      });
+      if (!memoryAvailable) return json(503, { error: "memory unavailable" });
+      const requestedOrganizationId = req.headers["x-jingler-organization-id"];
+      const grantOrganization = organizationFromGrant(
+        req.headers.authorization,
+      );
       if (
         typeof requestedOrganizationId !== "string" ||
         grantOrganization !== requestedOrganizationId
-      ) return json(401, {})
+      )
+        return json(401, {});
       readJson().then((value) => {
-        const body = jsonBody(value)
-        const source = jsonBody(body.source)
-        const sourceId = typeof source.id === "string" ? source.id : ""
-        const content = typeof body.content === "string" ? body.content : ""
-        if (sourceId.length === 0 || req.headers["x-idempotency-key"] !== sourceId) return json(400, { error: "invalid digest" })
-        const state = stateFor(requestedOrganizationId)
+        const body = jsonBody(value);
+        const source = jsonBody(body.source);
+        const sourceId = typeof source.id === "string" ? source.id : "";
+        const content = typeof body.content === "string" ? body.content : "";
+        if (
+          sourceId.length === 0 ||
+          req.headers["x-idempotency-key"] !== sourceId
+        )
+          return json(400, { error: "invalid digest" });
+        const state = stateFor(requestedOrganizationId);
         if (CREDENTIAL_PATTERN.test(content)) {
-          state.secretRejections += 1
-          state.reviewDecisions.push(`source:${sourceId}:secret-rejected`)
-          return json(422, { error: "credential-shaped content rejected" })
+          state.secretRejections += 1;
+          state.reviewDecisions.push(`source:${sourceId}:secret-rejected`);
+          return json(422, { error: "credential-shaped content rejected" });
         }
         if (!state.sourceIds.has(sourceId)) {
-          state.sourceIds.add(sourceId)
-          if (!state.proposals.some((proposal) => proposal.id === "proposal:captured-learning")) {
-            state.proposals.push(capturedProposal(sourceId))
+          state.sourceIds.add(sourceId);
+          if (
+            !state.proposals.some(
+              (proposal) => proposal.id === "proposal:captured-learning",
+            )
+          ) {
+            state.proposals.push(capturedProposal(sourceId));
           }
         }
         return json(201, {
           source: { ...source, id: sourceId },
           contentHash: "sha256:e2e-captured",
           contentKey: `organizations/${requestedOrganizationId}/sources/blobs/e2e-captured`,
-          workflowId: "compiler-captured-learning"
-        })
-      })
-      return
+          workflowId: "compiler-captured-learning",
+        });
+      });
+      return;
     }
 
     if (url.pathname === "/api/mcp" && req.method === "POST") {
-      if (!memoryAvailable) return json(503, { error: "memory unavailable" })
+      if (!memoryAvailable) return json(503, { error: "memory unavailable" });
       readJson().then((value) => {
-        const body = jsonBody(value)
-        const params = jsonBody(body.params)
-        const metadata = jsonBody(params._meta)
-        const organizationId = typeof req.headers["x-jingler-organization-id"] === "string"
-          ? req.headers["x-jingler-organization-id"]
-          : null
-        const assignedInstance = requestSequence % 2 === 0 ? "next-a" : "next-b"
-        requestSequence += 1
-        const rpcMethod = typeof body.method === "string" ? body.method : null
-        const mcpMethod = typeof req.headers["mcp-method"] === "string" ? req.headers["mcp-method"] : null
-        const mcpName = typeof req.headers["mcp-name"] === "string" ? req.headers["mcp-name"] : null
+        const body = jsonBody(value);
+        const params = jsonBody(body.params);
+        const metadata = jsonBody(params._meta);
+        const organizationId =
+          typeof req.headers["x-jingler-organization-id"] === "string"
+            ? req.headers["x-jingler-organization-id"]
+            : null;
+        const assignedInstance =
+          requestSequence % 2 === 0 ? "next-a" : "next-b";
+        requestSequence += 1;
+        const rpcMethod = typeof body.method === "string" ? body.method : null;
+        const mcpMethod =
+          typeof req.headers["mcp-method"] === "string"
+            ? req.headers["mcp-method"]
+            : null;
+        const mcpName =
+          typeof req.headers["mcp-name"] === "string"
+            ? req.headers["mcp-name"]
+            : null;
         requests.push({
           path: url.pathname,
           httpMethod: req.method ?? "",
           rpcMethod,
           mcpMethod,
           mcpName,
-          toolName: rpcMethod === "tools/call" && typeof params.name === "string"
-            ? params.name
-            : null,
+          toolName:
+            rpcMethod === "tools/call" && typeof params.name === "string"
+              ? params.name
+              : null,
           organizationId,
-          protocolVersion: typeof req.headers["mcp-protocol-version"] === "string" ? req.headers["mcp-protocol-version"] : null,
-          metadataProtocolVersion: typeof metadata["io.modelcontextprotocol/protocolVersion"] === "string" ? metadata["io.modelcontextprotocol/protocolVersion"] : null,
+          protocolVersion:
+            typeof req.headers["mcp-protocol-version"] === "string"
+              ? req.headers["mcp-protocol-version"]
+              : null,
+          metadataProtocolVersion:
+            typeof metadata["io.modelcontextprotocol/protocolVersion"] ===
+            "string"
+              ? metadata["io.modelcontextprotocol/protocolVersion"]
+              : null,
           hasCookie: req.headers.cookie !== undefined,
           hasSessionId: req.headers["mcp-session-id"] !== undefined,
           requestId: typeof body.id === "string" ? body.id : null,
-          toolArguments: rpcMethod === "tools/call" ? { ...jsonBody(params.arguments) } : null,
-          assignedInstance
-        })
+          toolArguments:
+            rpcMethod === "tools/call"
+              ? { ...jsonBody(params.arguments) }
+              : null,
+          assignedInstance,
+        });
 
         if (
           organizationId === null ||
@@ -859,67 +1160,131 @@ export const startFakeAuthServer = async (
           ) ||
           req.headers["mcp-session-id"] !== undefined
         ) {
-          return json(401, { error: "invalid stateless MCP request" }, { "x-fake-next-instance": assignedInstance })
+          return json(
+            401,
+            { error: "invalid stateless MCP request" },
+            { "x-fake-next-instance": assignedInstance },
+          );
         }
-        if (rpcMethod === "initialize") return json(400, { error: "initialize is unsupported" })
-        if (rpcMethod === "server/discover") {
+        if (rpcMethod === "initialize") {
           return json(200, {
             jsonrpc: "2.0",
             id: body.id,
             result: {
-              resultType: "complete",
-              protocolVersion: MEMORY_PROTOCOL,
+              protocolVersion:
+                typeof params.protocolVersion === "string"
+                  ? params.protocolVersion
+                  : "2025-06-18",
+              capabilities: { tools: { listChanged: false } },
               serverInfo: { name: "jingler-team-memory", version: "1.0.0" },
-              capabilities: { tools: { listChanged: false } }
-            }
-          }, { "x-fake-next-instance": assignedInstance })
+            },
+          });
+        }
+        if (rpcMethod === "notifications/initialized") {
+          res.writeHead(202);
+          res.end();
+          return;
+        }
+        if (rpcMethod === "tools/list") {
+          return json(200, {
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              tools: MEMORY_TOOL_NAMES.map((name) => ({
+                name,
+                inputSchema: { type: "object", additionalProperties: true },
+              })),
+            },
+          });
+        }
+        if (rpcMethod === "server/discover") {
+          return json(
+            200,
+            {
+              jsonrpc: "2.0",
+              id: body.id,
+              result: {
+                resultType: "complete",
+                protocolVersion: MEMORY_PROTOCOL,
+                serverInfo: { name: "jingler-team-memory", version: "1.0.0" },
+                capabilities: { tools: { listChanged: false } },
+              },
+            },
+            { "x-fake-next-instance": assignedInstance },
+          );
         }
         if (
           rpcMethod !== "tools/call" ||
           typeof params.name !== "string" ||
           (mcpName !== null && params.name !== mcpName)
         ) {
-          return json(400, { error: "tool call headers do not match body" }, { "x-fake-next-instance": assignedInstance })
+          return json(
+            400,
+            { error: "tool call headers do not match body" },
+            { "x-fake-next-instance": assignedInstance },
+          );
         }
-        const state = stateFor(organizationId)
-        const args = jsonBody(params.arguments)
-        const graph = graphFor(organizationId, state)
-        let data: unknown
+        const state = stateFor(organizationId);
+        const args = jsonBody(params.arguments);
+        const graph = graphFor(organizationId, state);
+        let data: unknown;
         switch (params.name) {
           case "memory_dashboard":
-            data = dashboardFor(state, typeof args.range === "string" ? args.range : "all")
-            break
+            data = dashboardFor(
+              state,
+              typeof args.range === "string" ? args.range : "all",
+            );
+            break;
           case "memory_suggestions":
             data = {
               ...suggestionsFor(organizationId, state),
-              suggestions: suggestionsFor(organizationId, state).suggestions.filter(
+              suggestions: suggestionsFor(
+                organizationId,
+                state,
+              ).suggestions.filter(
                 (suggestion) =>
                   typeof args.pageId !== "string" ||
                   suggestion.sourceId === args.pageId ||
-                  suggestion.targetId === args.pageId
-              )
-            }
-            break
+                  suggestion.targetId === args.pageId,
+              ),
+            };
+            break;
           case "memory_graph":
           case "memory_graph_neighborhood":
-            data = graph
-            break
+            data = graph;
+            break;
           case "memory_reviews":
-            data = { reviews: state.proposals }
-            break
+            data = { reviews: state.proposals };
+            break;
           case "memory_navigation":
             data = {
               indexMarkdown: `# Index\n${[...state.pages.values()].map((page) => `- [[${page.id}|${page.title}]]`).join("\n")}\n`,
-              logMarkdown: "# Log\n"
-            }
-            break
+              logMarkdown: "# Log\n",
+            };
+            break;
           case "memory_search": {
-            const query = typeof args.query === "string" ? args.query.trim().toLocaleLowerCase() : ""
+            const query =
+              typeof args.query === "string"
+                ? args.query.trim().toLocaleLowerCase()
+                : "";
             const results = [...state.pages.values()]
-              .filter((page) => query.length > 0 && `${page.title} ${page.body} ${page.aliases.join(" ")}`.toLocaleLowerCase().includes(query))
-              .map((page) => ({ pageId: page.id, revisionId: `revision:${page.id}:${page.revision}`, revision: page.revision, path: page.path, title: page.title, snippet: page.body.slice(0, 180) }))
-            data = { query, results, total: results.length }
-            break
+              .filter(
+                (page) =>
+                  query.length > 0 &&
+                  `${page.title} ${page.body} ${page.aliases.join(" ")}`
+                    .toLocaleLowerCase()
+                    .includes(query),
+              )
+              .map((page) => ({
+                pageId: page.id,
+                revisionId: `revision:${page.id}:${page.revision}`,
+                revision: page.revision,
+                path: page.path,
+                title: page.title,
+                snippet: page.body.slice(0, 180),
+              }));
+            data = { query, results, total: results.length };
+            break;
           }
           case "memory_export": {
             data = {
@@ -927,146 +1292,246 @@ export const startFakeAuthServer = async (
               version: 1,
               files: [
                 { path: ".obsidian/app.json", content: "{}" },
-                ...[...state.pages.values()].map((page) => ({ path: page.path, content: page.body }))
-              ]
-            }
-            break
+                ...[...state.pages.values()].map((page) => ({
+                  path: page.path,
+                  content: page.body,
+                })),
+              ],
+            };
+            break;
           }
           case "memory_read": {
-            const page = typeof args.pageId === "string" ? state.pages.get(args.pageId) : undefined
-            data = page === undefined ? {} : pageResponse(page)
-            break
+            const page =
+              typeof args.pageId === "string"
+                ? state.pages.get(args.pageId)
+                : undefined;
+            data = page === undefined ? {} : pageResponse(page);
+            break;
           }
           case "memory_propose": {
-            data = fakeMemoryProposal(state, args)
-            break
+            data = fakeMemoryProposal(state, args);
+            break;
           }
           case "memory_workflow_status": {
-            data = fakeMemoryWorkflowStatus(state, args)
-            break
+            data = fakeMemoryWorkflowStatus(state, args);
+            break;
           }
           case "memory_edge_evidence": {
-            const edgeId = typeof args.edgeId === "string" ? args.edgeId : ""
-            const edge = graph.edges.find((candidate) => candidate.id === edgeId) ?? graph.edges[0]
-            const shared = edge?.id === "edge:e2e:alpha-shared"
-            data = edge === undefined ? {} : {
-              edge,
-              evidence: {
-                kind: edge.kind,
-                pageId: shared ? "alpha" : organizationId === "org-e2e" ? "alpha" : "other-alpha",
-                path: shared ? "alpha.md" : organizationId === "org-e2e" ? "alpha.md" : "other-alpha.md",
-                line: 4,
-                column: 1,
-                raw: shared ? "[[shared-learning]]" : organizationId === "org-e2e" ? "[[beta]]" : "[[other-beta]]"
-              }
-            }
-            break
+            const edgeId = typeof args.edgeId === "string" ? args.edgeId : "";
+            const edge =
+              graph.edges.find((candidate) => candidate.id === edgeId) ??
+              graph.edges[0];
+            const shared = edge?.id === "edge:e2e:alpha-shared";
+            data =
+              edge === undefined
+                ? {}
+                : {
+                    edge,
+                    evidence: {
+                      kind: edge.kind,
+                      pageId: shared
+                        ? "alpha"
+                        : organizationId === "org-e2e"
+                          ? "alpha"
+                          : "other-alpha",
+                      path: shared
+                        ? "alpha.md"
+                        : organizationId === "org-e2e"
+                          ? "alpha.md"
+                          : "other-alpha.md",
+                      line: 4,
+                      column: 1,
+                      raw: shared
+                        ? "[[shared-learning]]"
+                        : organizationId === "org-e2e"
+                          ? "[[beta]]"
+                          : "[[other-beta]]",
+                    },
+                  };
+            break;
           }
           case "memory_review": {
-            const proposalId = typeof args.proposalId === "string" ? args.proposalId : ""
-            const action = args.action === "approve" ? "approve" : "reject"
-            const proposal = state.proposals.find((candidate) => candidate.id === proposalId)
+            const proposalId =
+              typeof args.proposalId === "string" ? args.proposalId : "";
+            const action = args.action === "approve" ? "approve" : "reject";
+            const proposal = state.proposals.find(
+              (candidate) => candidate.id === proposalId,
+            );
             if (proposal === undefined) {
-              data = { status: "conflict", conflicts: [{ pageId: "missing", expectedBaseRevisionId: "proposal", currentHeadRevisionId: "not-found" }] }
-              break
+              data = {
+                status: "conflict",
+                conflicts: [
+                  {
+                    pageId: "missing",
+                    expectedBaseRevisionId: "proposal",
+                    currentHeadRevisionId: "not-found",
+                  },
+                ],
+              };
+              break;
             }
             if (proposalId === "proposal:stale" && action === "approve") {
-              state.reviewDecisions.push("proposal:stale:conflict")
-              data = { status: "conflict", conflicts: [{ pageId: "alpha", expectedBaseRevisionId: "revision:alpha:1", currentHeadRevisionId: "revision:alpha:2" }] }
-              break
+              state.reviewDecisions.push("proposal:stale:conflict");
+              data = {
+                status: "conflict",
+                conflicts: [
+                  {
+                    pageId: "alpha",
+                    expectedBaseRevisionId: "revision:alpha:1",
+                    currentHeadRevisionId: "revision:alpha:2",
+                  },
+                ],
+              };
+              break;
             }
             if (proposalId === "proposal:secret" && action === "approve") {
-              state.secretRejections += 1
-              state.reviewDecisions.push("proposal:secret:secret-rejected")
-              data = { status: "conflict", conflicts: [{ pageId: "secret-page", expectedBaseRevisionId: "lint:clean", currentHeadRevisionId: "lint:credential-shaped-content" }] }
-              break
+              state.secretRejections += 1;
+              state.reviewDecisions.push("proposal:secret:secret-rejected");
+              data = {
+                status: "conflict",
+                conflicts: [
+                  {
+                    pageId: "secret-page",
+                    expectedBaseRevisionId: "lint:clean",
+                    currentHeadRevisionId: "lint:credential-shaped-content",
+                  },
+                ],
+              };
+              break;
             }
-            proposal.status = action === "approve" ? "accepted" : "rejected"
-            state.reviewDecisions.push(`${proposalId}:${proposal.status}`)
-            if (proposalId === "proposal:captured-learning" && proposal.status === "accepted") {
-              for (const page of acceptedLearningPages(proposal.sourceId)) state.pages.set(page.id, page)
+            proposal.status = action === "approve" ? "accepted" : "rejected";
+            state.reviewDecisions.push(`${proposalId}:${proposal.status}`);
+            if (
+              proposalId === "proposal:captured-learning" &&
+              proposal.status === "accepted"
+            ) {
+              for (const page of acceptedLearningPages(proposal.sourceId))
+                state.pages.set(page.id, page);
             }
-            data = { status: proposal.status, conflicts: [] }
-            break
+            data = { status: proposal.status, conflicts: [] };
+            break;
           }
           default:
-            data = {}
+            data = {};
         }
-        return json(200, {
-          jsonrpc: "2.0",
-          id: body.id,
-          result: {
-            resultType: "complete",
-            server: { name: "jingler-team-memory", version: "1.0.0" },
-            structuredContent: { data },
-            content: []
-          }
-        }, { "cache-control": "private, max-age=30", "x-fake-next-instance": assignedInstance })
-      })
-      return
+        return json(
+          200,
+          {
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              resultType: "complete",
+              server: { name: "jingler-team-memory", version: "1.0.0" },
+              structuredContent: { data },
+              content: [],
+            },
+          },
+          {
+            "cache-control": "private, max-age=30",
+            "x-fake-next-instance": assignedInstance,
+          },
+        );
+      });
+      return;
     }
 
-    if (url.pathname === "/api/mcp") return json(405, { error: "POST required" })
+    if (url.pathname === "/api/mcp")
+      return json(405, { error: "POST required" });
 
     if (url.pathname === "/api/auth/get-session") {
       if (req.headers.authorization === `Bearer ${options.token}`) {
         return json(200, {
           session: { expiresAt: "2099-01-01T00:00:00Z", token: options.token },
-          user: { id: "u_e2e", email: "e2e@jingler.dev", name: "E2E User", image: null }
-        })
+          user: {
+            id: "u_e2e",
+            email: "e2e@jingler.dev",
+            name: "E2E User",
+            image: null,
+          },
+        });
       }
-      return json(401, {})
+      return json(401, {});
     }
 
     if (url.pathname === "/api/auth/sign-in/social" && req.method === "POST") {
-      return json(200, { url: `http://${host}/desktop/callback?token=${options.token}`, redirect: true })
+      readJson().then((value) => {
+        const provider = jsonBody(value).provider;
+        if (
+          (provider === "github" || provider === "google") &&
+          options.unavailableSocialProviders.includes(provider)
+        ) {
+          return json(404, {
+            message: "Provider not found",
+            code: "PROVIDER_NOT_FOUND",
+          });
+        }
+        return json(200, {
+          url: `http://${host}/desktop/callback?token=${options.token}`,
+          redirect: true,
+        });
+      });
+      return;
     }
     if (url.pathname === "/desktop/callback") {
-      res.writeHead(302, { Location: `jingler://auth/callback?token=${options.token}` })
-      return res.end()
+      res.writeHead(302, {
+        Location: `jingler://auth/callback?token=${options.token}`,
+      });
+      return res.end();
     }
-    if (url.pathname === "/api/auth/sign-in/magic-link" && req.method === "POST") {
+    if (
+      url.pathname === "/api/auth/sign-in/magic-link" &&
+      req.method === "POST"
+    ) {
       readJson().then((value) => {
-        const email = jsonBody(value).email
-        if (typeof email === "string" && email.includes("fail")) return json(400, { error: "rejected" })
-        if (typeof email === "string") sentEmails.push(email)
-        return json(200, { status: true })
-      })
-      return
+        const email = jsonBody(value).email;
+        if (typeof email === "string" && email.includes("fail"))
+          return json(400, { error: "rejected" });
+        if (typeof email === "string") sentEmails.push(email);
+        return json(200, { status: true });
+      });
+      return;
     }
-    if (url.pathname === "/api/auth/sign-out" && req.method === "POST") return json(200, {})
-    return json(404, {})
-  })
+    if (url.pathname === "/api/auth/sign-out" && req.method === "POST")
+      return json(200, {});
+    return json(404, {});
+  });
 
-  await new Promise<void>((resolve) => server.listen(0, options.listenHost, resolve))
-  const { port } = server.address() as AddressInfo
+  await new Promise<void>((resolve) =>
+    server.listen(0, options.listenHost, resolve),
+  );
+  const { port } = server.address() as AddressInfo;
 
   return {
     url: `http://${options.publicHost}:${port}`,
     token: options.token,
     get sentEmails() {
-      return sentEmails
+      return sentEmails;
     },
     get memoryRequests() {
-      return requests
+      return requests;
+    },
+    get managedRequests() {
+      return managedRequests;
     },
     memorySnapshot: (organizationId) => {
-      const state = stateFor(organizationId)
+      const state = stateFor(organizationId);
       return {
         organizationId,
         acceptedPageIds: [...state.pages.keys()].sort(),
         acceptedRevisions: Object.fromEntries(
-          [...state.pages.values()].map((page) => [page.id, page.revision])
+          [...state.pages.values()].map((page) => [page.id, page.revision]),
         ),
-        proposalStatuses: Object.fromEntries(state.proposals.map((proposal) => [proposal.id, proposal.status])),
+        proposalStatuses: Object.fromEntries(
+          state.proposals.map((proposal) => [proposal.id, proposal.status]),
+        ),
         sourceCount: state.sourceIds.size,
         secretRejections: state.secretRejections,
-        reviewDecisions: [...state.reviewDecisions]
-      }
+        reviewDecisions: [...state.reviewDecisions],
+      };
     },
     setMemoryAvailable: (available) => {
-      memoryAvailable = available
+      memoryAvailable = available;
     },
-    close: () => new Promise<void>((resolve) => server.close(() => resolve()))
-  }
-}
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+};

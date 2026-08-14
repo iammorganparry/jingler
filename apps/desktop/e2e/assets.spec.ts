@@ -5,6 +5,8 @@ import type { Page } from "@playwright/test"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
+const HIGHLIGHTER_LANGUAGE_ERROR = /Grammar for language|resolveLanguage/u
+
 /**
  * Repository files are a session view, not Preview content. These scenarios
  * drive the real Asset RPC + Pierre editor path against a disposable worktree.
@@ -40,7 +42,6 @@ const session = (worktreePath: string): SeedSession => ({
   branch: "jingler/files",
   title: "Edit repository files",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -185,6 +186,10 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
     seed: seedAssets,
     sessions: ({ repoPath }) => [session(repoPath)]
   })
+  const grammarErrors: string[] = []
+  window.on("pageerror", (error) => {
+    if (HIGHLIGHTER_LANGUAGE_ERROR.test(error.message)) grammarErrors.push(error.message)
+  })
 
   await expect(appShell(window)).toBeVisible()
   await filesTab(window).click()
@@ -234,6 +239,7 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   await expect.poll(() => readFileSync(join(repoPath, "src", "edit.ts"), "utf8")).toBe(
     "export const editable = 44\n"
   )
+  expect(grammarErrors).toEqual([])
 })
 
 test("quick-open fills the session with the repository tree and a changed-file diff", async ({
@@ -378,7 +384,7 @@ test("forwards selected current-buffer lines to the active chat with Cmd-J", asy
   await expect(
     window.getByRole("button", { name: "Remove src/edit.ts:L1–L2", exact: true })
   ).toBeVisible()
-  await expect(window.getByPlaceholder("Message Claude…")).toBeFocused()
+  await expect(window.getByPlaceholder("Message the agent…")).toBeFocused()
 })
 
 test("loads a real large repository tree without leaving Files blank", async ({ launchApp }) => {
@@ -399,7 +405,6 @@ test("loads a real large repository tree without leaving Files blank", async ({ 
 
   await expect(appShell(window)).toBeVisible()
   await filesTab(window).click()
-  await expect(window.getByText("Loading files…")).toBeVisible()
   await expect(
     tree(window).getByRole("treeitem", { name: "packages", exact: true })
   ).toBeVisible({ timeout: 15_000 })

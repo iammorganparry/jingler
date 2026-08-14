@@ -71,6 +71,10 @@ export interface ConversationPaneCtx {
   onOpenFile: (path: string) => void
   /** Present the Files workspace without requiring a path to be selected. */
   onSelectFiles: () => void
+  /** Present canonical worktree changes for mutation recovery inspection. */
+  onSelectChanges: () => void
+  /** Open provider settings for authentication or certification recovery. */
+  onOpenProviderSettings: () => void
   /** Present the first renderable streamed draft using this pane's width. */
   onPlanDraftAvailable?: () => void
   /** The stage Plan Review should open at, until the one-shot target is consumed. */
@@ -166,6 +170,8 @@ export interface SessionPaneProps {
   liveDiff?: Record<string, DiffStat>
   /** Open the Settings view — the "connect GitHub" escape hatch on empty states. */
   onOpenSettings?: () => void
+  /** Open provider settings for runtime connection recovery. */
+  onOpenProviderSettings?: () => void
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
@@ -389,6 +395,8 @@ function SessionPaneBody(props: SessionPaneProps) {
             ctx.onSelectTab(BUILTIN_TAB.files)
           },
           onSelectFiles: () => ctx.onSelectTab(BUILTIN_TAB.files),
+          onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),
+          onOpenProviderSettings: props.onOpenProviderSettings ?? connectGithub,
           onPlanDraftAvailable: presentPlanDraft,
           planStepId: planStepTarget,
           onPlanStepSelected: () => setTarget(null),

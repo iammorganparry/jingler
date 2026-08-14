@@ -1,10 +1,17 @@
-import type { AdversarialReview, CliKind, ReviewFinding, ReviewSeverity, StreamEvent } from "@jingler/core"
-import { ReviewError } from "@jingler/core"
-import type { CommandExecutor, FileSystem, Path } from "@effect/platform"
+import type {
+  AdversarialReview,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
+  ReviewFinding,
+  ReviewSeverity,
+  StreamEvent
+} from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
+import type { FileSystem, Path } from "@effect/platform"
 import { Effect, PubSub, Ref, Schema, Stream } from "effect"
-import type { AgentContext, SessionSpec } from "./adapter.js"
-import { CliAdapter, PlanDecision } from "./adapter.js"
-import { DiscoveryService } from "./discovery.js"
+import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
+import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
 import type { AppPaths } from "./app-paths.js"
 import { ReviewStore } from "./review-store.js"
 import { SessionStore } from "./sessions.js"
@@ -15,10 +22,10 @@ import { adversarialPrompt } from "./review-prompt.js"
  *
  * Why this does NOT go through `AgentRunner`: `AgentRunner.prompt` is stateful —
  * it takes the model from the *session*, writes the transcript, persists the
- * harness `resumeId`, and parks on approval gates. All four are wrong here. A
+ * conversation continuation, and parks on approval gates. All four are wrong here. A
  * review must run on its own (usually stronger) model, leave no trace on the
  * session's conversation, and never block waiting for a human who isn't looking.
- * So we build our own `SessionSpec` and drive `CliAdapter` directly.
+ * So we build our own `AgentTurnSpec` and drive `AgentTurnDriver` directly.
  *
  * Two guarantees are structural rather than prompted:
  *
@@ -142,13 +149,10 @@ export const parseFindings = (text: string): ReadonlyArray<ReviewFinding> | null
 }
 
 /**
- * What a review run needs from its environment: the harness adapter, CLI
- * discovery, and the executor discovery shells out through.
+ * What a review run needs from its environment.
  */
 export type ReviewEnv =
-  | CliAdapter
-  | DiscoveryService
-  | CommandExecutor.CommandExecutor
+  | AgentTurnDriver
   | ReviewStore
   // A review is owned by ONE chat — the session's `activeChatId` at the moment it
   // starts — so `ReviewService` needs the store to read that owner. See `watch`.
@@ -166,8 +170,10 @@ export interface ReviewInput {
   readonly branch: string
   /** The PR's base branch, or null when the session doesn't record one. */
   readonly baseBranch: string | null
-  readonly cli: CliKind
-  readonly model: string
+  readonly connectionId: ProviderConnectionId
+  readonly providerId: ProviderId
+  readonly modelId: ProviderModelId
+  readonly targetId?: string
   readonly diff: string
 }
 
@@ -355,31 +361,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
       input: ReviewInput
     ): Effect.Effect<AdversarialReview, ReviewError, ReviewEnv> =>
       Effect.gen(function* () {
-        const adapter = yield* CliAdapter
-
-        // A harness with no binary — or one with no real adapter (cursor) — is
-        // dispatched to the deterministic SCRIPTED stub, which emits canned prose
-        // about an unrelated task. That would sail through as a successful review
-        // and get cached against this PR head, so the user reads fiction and the
-        // de-dupe never lets it retry. Fail loudly instead.
-        if (input.cli === "cursor") {
-          return yield* Effect.fail(
-            new ReviewError({
-              message:
-                "Cursor can't run an adversarial review yet — choose Claude, Codex or opencode in Settings · GitHub."
-            })
-          )
-        }
-        const binPath =
-          (yield* DiscoveryService.list().pipe(Effect.orElseSucceed(() => [])))
-            .find((c) => c.kind === input.cli)?.binPath ?? null
-        if (binPath === null) {
-          return yield* Effect.fail(
-            new ReviewError({
-              message: `The ${input.cli} CLI isn't installed or couldn't be found, so there is nothing to run the review with.`
-            })
-          )
-        }
+        const adapter = yield* AgentTurnDriver
 
         // A failed diff fetch must not fold to "". Reviewing "" produces a confident
         // "found nothing", which then gets cached against the real head SHA — so a
@@ -394,11 +376,23 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
         }
 
         const collected = yield* Ref.make<ReadonlyArray<string>>([])
+        const reviewChatId = yield* ownerFor(input.sessionId)
 
-        const spec: SessionSpec = {
-          cli: input.cli,
-          repo: input.repo,
-          branch: input.branch,
+        const spec: AgentTurnSpec = {
+          sessionId: input.sessionId,
+          chatId: reviewChatId ?? input.sessionId,
+          connectionId: input.connectionId,
+          modelId: input.modelId,
+          role: "review",
+          priorMessages: [],
+          piSessionId: null,
+          seed: null,
+          targetCapabilities: {
+            versions: CURRENT_RUNTIME_CONTRACTS,
+            toolIds: [],
+            resourceIds: [],
+            targetId: input.targetId ?? "desktop"
+          },
           cwd: input.cwd,
           prompt: adversarialPrompt({
             prNumber: input.prNumber,
@@ -406,26 +400,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
             baseBranch: input.baseBranch
           }),
           images: [],
-          binPath,
-          // Paired with the deny-all gate below. "ask" (not "plan") on purpose:
-          // plan mode drives the harness toward ExitPlanMode, and a reviewer that
-          // proposes a plan instead of reporting findings is useless.
-          mode: "ask",
-          // The reviewer's own model — NOT the session's. This is the whole point.
-          model: input.model,
-          resumeId: null,
-          // `resumeId: null` alone is NOT enough — the adapter's in-memory resume
-          // map wins over the spec, and our key is stable per session, so every
-          // re-review would silently resume the previous one and inherit the old
-          // head's diff and findings (the model then self-dedupes: "already
-          // reported this"). A review must be a pure function of THIS diff.
-          fresh: true,
-          // The load-bearing half of the read-only guarantee. The deny-all gate
-          // below is a denylist over tool names WE map, and the Codex adapter
-          // never calls it at all — so without this a Codex review would run
-          // `workspace-write` with approval `never` over the very worktree it was
-          // told not to touch. Each adapter enforces this in its own vocabulary.
-          readOnly: true
+          mode: "read-only"
         }
 
         const ctx: AgentContext = {
@@ -471,7 +446,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
           Effect.mapError(
             (cause) =>
               new ReviewError({
-                message: `The ${input.cli} reviewer failed to run: ${cause.message}`,
+                message: `The ${input.providerId} reviewer failed to run: ${cause.message}`,
                 cause
               })
           )
@@ -492,8 +467,9 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
           sessionId: input.sessionId,
           prNumber: input.prNumber,
           headSha: input.headSha,
-          cli: input.cli,
-          model: input.model,
+          connectionId: input.connectionId,
+          providerId: input.providerId,
+          modelId: input.modelId,
           createdAt: now,
           findings: findings ?? [],
           // A reviewer that ran but emitted no parseable block still produced a

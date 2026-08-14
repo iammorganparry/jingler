@@ -3,7 +3,7 @@ import { backgroundTaskMachine, newTaskContext, toBackgroundTask } from "@jingle
 import { Clock, Effect, Ref } from "effect"
 import type { Actor } from "xstate"
 import { createActor } from "xstate"
-import type { StopBackgroundTask } from "./adapter.js"
+import type { StopBackgroundTask } from "./agent-turn-driver.js"
 
 type TaskActor = Actor<typeof backgroundTaskMachine>
 /**

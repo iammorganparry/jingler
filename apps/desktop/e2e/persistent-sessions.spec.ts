@@ -25,7 +25,6 @@ const keptSession = (worktreePath: string): SeedSession => ({
   worktreePath,
   title: "Keep auth warm",
   status: "idle",
-  cli: "claude",
   diff: { added: 0, removed: 0 },
   prNumber: null,
   costUsd: 0,
@@ -215,16 +214,21 @@ test("a direct session completes a turn and deletion preserves its checkout", as
     false
   )
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
-  await expect(window.getByRole("button", { name: "Full Access" })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Accept Edits" })).toBeVisible()
   await composer.fill("Run the direct-checkout verification.")
   await composer.press("Enter")
-  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
+  await expect(
+    window.getByText("Completed through deterministic pi.", { exact: false })
+  ).toBeVisible({ timeout: 25_000 })
   await expect(composer).toBeVisible()
 
-  await row.click({ button: "right" })
-  await window.getByRole("menuitem", { name: "Delete" }).click()
+  await expect(sessionRow(window, "Run the direct-checkout verification")).toBeVisible()
+  await row.hover()
+  await window
+    .getByRole("button", { name: "Delete Run the direct-checkout verification" })
+    .click()
   const dialog = window.getByRole("dialog")
   await expect(
     dialog.getByText("The repository checkout will be left untouched.", {

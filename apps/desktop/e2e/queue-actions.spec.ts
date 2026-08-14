@@ -18,7 +18,6 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
     branch: "chore/queue-actions",
     title: "Queue actions",
     status: "idle",
-    cli: "claude",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,
@@ -29,6 +28,11 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   }
 ]
 
+const STREAMED_PLAN_FIXTURE = {
+  scenarioId: "plan-draft-stream",
+  authRoute: "api-key"
+} as const
+
 /**
  * Park a run so the composer is in its queueing form.
  *
@@ -37,7 +41,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
  * directly back to the planner as revision feedback.
  */
 const parkABusyRun = async (window: import("@playwright/test").Page): Promise<void> => {
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[queue-hold]] exercise queue actions")
   await composer.press("Enter")
   await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
@@ -49,11 +53,12 @@ test("Send now turns queued plan feedback into a real revision", async ({ launch
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
+    piFixture: STREAMED_PLAN_FIXTURE,
     sessions: seededSessions
   })
   await expect(appShell(window)).toBeVisible()
 
-  const composer = window.getByPlaceholder("Message Claude…")
+  const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[plan]] [[stream-plan]] refactor auth to a TokenStore")
   await composer.press("Enter")
 

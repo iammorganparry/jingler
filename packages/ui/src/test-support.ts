@@ -1,4 +1,56 @@
-import type { Session } from "@jingler/core"
+import {
+  ProviderCatalog,
+  type ReasoningEffort,
+  type Session
+} from "@jingler/core"
+import { Schema } from "effect"
+
+/** One certified provider connection for component tests and stories. */
+export const testProviderCatalog = (
+  reasoning: ReadonlyArray<ReasoningEffort> = [],
+  reasoningCanDisable = true,
+  reasoningDefault: ReasoningEffort | undefined = reasoning.includes("medium")
+    ? "medium"
+    : undefined
+) => Schema.decodeUnknownSync(ProviderCatalog)({
+  refreshedAt: "2026-08-10T00:00:00.000Z",
+  stale: false,
+  connections: [{
+    connection: {
+      id: "test-connection",
+      providerId: "openai-codex",
+      authKind: "openai-codex-oauth",
+      account: { fingerprint: "test-account", displayLabel: "Test account" },
+      targetId: "local",
+      status: "authenticated",
+      subscription: {
+        entitlement: "active",
+        planLabel: "Plus",
+        expiresAt: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        confirmedBillingRoute: "subscription"
+      },
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    },
+    models: [{
+      providerId: "openai-codex",
+      id: "openai-codex/gpt-test",
+      label: "GPT Test",
+      capabilities: {
+        contextWindow: 200_000,
+        reasoning,
+        reasoningCanDisable,
+        reasoningDefault,
+        vision: false
+      },
+      verification: "certified",
+      selectable: true,
+      certificationKey: "test-certification"
+    }]
+  }]
+})
 
 /**
  * A Session with sensible defaults, for tests and stories.
@@ -17,7 +69,9 @@ export const testSession = (over: Partial<Session> & { id: string }): Session =>
     branch: `chore/${over.id}`,
     title: over.id,
     status: "idle",
-    cli: "claude",
+    connectionId: "test-connection",
+    providerId: "openai-codex",
+    modelId: "openai-codex/gpt-test",
     diff: { added: 0, removed: 0 },
     prNumber: null,
     costUsd: 0,

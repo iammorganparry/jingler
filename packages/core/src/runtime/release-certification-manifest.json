@@ -1,0 +1,17 @@
+{
+  "format": "jingler-release-certification-manifest-v1",
+  "schemaVersion": 1,
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "versions": {
+    "behavior": "5",
+    "authentication": "3",
+    "prompt": "2",
+    "tools": "4",
+    "diff": "1",
+    "policy": "1",
+    "capabilities": "3",
+    "piSdk": "0.84.1"
+  },
+  "requiredScenarioIds": [],
+  "models": []
+}

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { CliInfo, GitHubConnection, ModelOption, ProvidersConfig } from "@jingler/core"
+import type { GitHubConnection } from "@jingler/core"
 import { SettingsView } from "./settings-view.js"
 import { ToolCall } from "./tool-call.js"
 import { ThoughtBlock } from "./thought-block.js"
@@ -95,17 +95,6 @@ export const ComposerStory: Story = {
   )
 }
 
-const DEMO_CLIS: ReadonlyArray<CliInfo> = [
-  { kind: "claude", label: "Claude Code", binPath: "/usr/local/bin/claude", version: "1.4.2", available: true },
-  { kind: "codex", label: "Codex", binPath: "/usr/local/bin/codex", version: "0.9.0", available: true },
-  { kind: "cursor", label: "Cursor Agent", binPath: null, version: null, available: false }
-]
-
-const DEMO_PROVIDERS: ProvidersConfig = {
-  claude: { enabled: true, defaultMode: "plan", defaultModel: "sonnet", reasoningEffort: "high" },
-  codex: { enabled: true, defaultMode: "accept-edits", defaultModel: "gpt-5-codex" }
-}
-
 const DEMO_GITHUB: GitHubConnection = {
   mode: "connected",
   enabled: true,
@@ -121,16 +110,6 @@ const DEMO_GITHUB: GitHubConnection = {
   }],
   lastRefreshedAt: "2026-08-04T09:00:00.000Z",
   error: null
-}
-
-const DEMO_MODELS: Record<string, ReadonlyArray<ModelOption>> = {
-  claude: [
-    { id: "opus", label: "Opus 4.1" },
-    { id: "sonnet", label: "Sonnet 4.5" },
-    { id: "haiku", label: "Haiku 4.5" }
-  ],
-  codex: [{ id: "gpt-5-codex", label: "gpt-5-codex" }],
-  cursor: []
 }
 
 const DEMO_TABS: ReadonlyArray<TerminalTab> = [
@@ -185,10 +164,6 @@ export const Settings: Story = {
   render: () => (
     <div className="flex h-[760px] w-[1180px] overflow-hidden rounded-lg border border-line bg-editor">
       <SettingsView
-        clis={DEMO_CLIS}
-        providers={DEMO_PROVIDERS}
-        onSaveProvider={() => {}}
-        loadModels={async (cli) => DEMO_MODELS[cli] ?? []}
         githubConnection={DEMO_GITHUB}
         github={{ enabled: true, autoCreatePr: false, autoDetectPr: true }}
         git={{ shareCheckedOutBranches: true }}

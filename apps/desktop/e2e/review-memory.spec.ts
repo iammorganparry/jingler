@@ -37,7 +37,6 @@ const seeded = (worktreePath: string): SeedSession => ({
   branch: "chore/review-memory",
   title: "Review memory session",
   status: "idle",
-  cli: "claude",
   diff: { added: FILES * LINES, removed: 0 },
   prNumber: null,
   costUsd: 0,

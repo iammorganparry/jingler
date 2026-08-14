@@ -1,14 +1,14 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Session, StreamEvent } from "@jingler/core"
-import { Effect, Layer, Ref } from "effect"
+import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import { Effect, Layer, Ref, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { CliAdapter } from "./adapter.js"
-import type { CliAdapterShape, SessionSpec } from "./adapter.js"
+import { AgentTurnDriver } from "./agent-turn-driver.js"
+import type { AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { ConfigService } from "./config.js"
 import { ContextManager } from "./context-manager.js"
-import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { fakeCommandExecutor, withTempRoot } from "./test-support.js"
@@ -32,6 +32,8 @@ beforeEach(() => {
 afterEach(() => temp.cleanup())
 
 const SESSION = "s_ctx"
+const providerModel = (model: string) =>
+  Schema.decodeUnknownSync(ProviderModelId)(`anthropic/${model}`)
 
 /** A host where every harness is installed, so discovery reports them available. */
 const installed: FakeCommandHandler = (command, args) => {
@@ -63,12 +65,12 @@ const MID_FLOW_REPLY = `\`\`\`json
 \`\`\``
 
 interface Recorder {
-  readonly specs: Array<SessionSpec>
+  readonly specs: Array<AgentTurnSpec>
   readonly runs: { count: number }
 }
 
 /**
- * A `CliAdapter` that records the spec it was handed and replies with `reply`.
+ * A `AgentTurnDriver` that records the spec it was handed and replies with `reply`.
  * Recording the spec is how we assert the no-extra-cost property: the digest has
  * to arrive at the user's own binary, on the cheap tier, with `fresh`.
  */
@@ -76,10 +78,10 @@ const recordingAdapter = (
   reply: string,
   recorder: Recorder,
   behaviour: "ok" | "hang" | "delay" = "ok"
-): Layer.Layer<CliAdapter> =>
+): Layer.Layer<AgentTurnDriver> =>
   Layer.succeed(
-    CliAdapter,
-    CliAdapter.of({
+    AgentTurnDriver,
+    AgentTurnDriver.of({
       run: (_sessionId, spec, ctx) =>
         Effect.gen(function* () {
           recorder.specs.push(spec)
@@ -89,11 +91,11 @@ const recordingAdapter = (
           yield* ctx.emit({ _tag: "Assistant", text: reply } as StreamEvent)
         }),
       stop: () => Effect.void
-    } satisfies CliAdapterShape)
+    } satisfies AgentTurnDriverShape)
   )
 
 /**
- * A `CliAdapter` that STREAMS its reply as several `Assistant` deltas — the shape
+ * A `AgentTurnDriver` that STREAMS its reply as several `Assistant` deltas — the shape
  * a real harness produces (text arrives token by token via `text_delta`), and the
  * one `recordingAdapter` never exercised because it emits the whole reply at once.
  *
@@ -101,10 +103,10 @@ const recordingAdapter = (
  * fragments, and if it joins them with anything but "" a boundary that falls
  * inside a JSON string value corrupts the reply into invalid JSON.
  */
-const streamingAdapter = (parts: ReadonlyArray<string>): Layer.Layer<CliAdapter> =>
+const streamingAdapter = (parts: ReadonlyArray<string>): Layer.Layer<AgentTurnDriver> =>
   Layer.succeed(
-    CliAdapter,
-    CliAdapter.of({
+    AgentTurnDriver,
+    AgentTurnDriver.of({
       run: (_sessionId, _spec, ctx) =>
         Effect.gen(function* () {
           for (const text of parts) {
@@ -112,10 +114,10 @@ const streamingAdapter = (parts: ReadonlyArray<string>): Layer.Layer<CliAdapter>
           }
         }),
       stop: () => Effect.void
-    } satisfies CliAdapterShape)
+    } satisfies AgentTurnDriverShape)
   )
 
-const layersFor = (adapter: Layer.Layer<CliAdapter>) =>
+const layersFor = (adapter: Layer.Layer<AgentTurnDriver>) =>
   Layer.mergeAll(
     ContextManager.Default,
     SessionStore.Default,
@@ -124,7 +126,6 @@ const layersFor = (adapter: Layer.Layer<CliAdapter>) =>
     // clearest possible "this session is mid-flow".
     BackgroundTaskStore.Default,
     ConfigService.Default,
-    DiscoveryService.Default,
     adapter,
     fakeCommandExecutor(installed),
     temp.layer
@@ -134,13 +135,18 @@ const layersFor = (adapter: Layer.Layer<CliAdapter>) =>
 const seed = (over: Partial<Session> = {}, withTranscript = true) =>
   Effect.gen(function* () {
     const now = new Date().toISOString()
+    const selectedProviderId = over.providerId ??
+      Schema.decodeUnknownSync(ProviderId)("anthropic")
+    const selectedModelId = over.modelId ?? providerModel("claude-opus-4-1")
     const session: Session = {
       id: SESSION,
       repo: "trigify-app",
       branch: "chore/ctx",
       title: "Context",
       status: "idle",
-      cli: "claude",
+      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+      providerId: selectedProviderId,
+      modelId: selectedModelId,
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -151,15 +157,15 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
         title: null,
         createdAt: now,
         updatedAt: now,
-        model: over.model ?? "claude-opus-4-1",
+        connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+        providerId: selectedProviderId,
+        modelId: selectedModelId,
         ...(over.contextTokens === undefined ? {} : { contextTokens: over.contextTokens }),
-        ...(over.resumeId === undefined ? {} : { resumeId: over.resumeId })
       }],
       activeChatId: SESSION,
       worktreePath: temp.root,
       // A known 200k legacy model keeps the manager's timing scenarios compact;
       // current 1M aliases are covered explicitly below.
-      model: "claude-opus-4-1",
       ...over
     }
     // Write straight to the store's file: `SessionStore.create` would fork a real
@@ -194,7 +200,7 @@ const seed = (over: Partial<Session> = {}, withTranscript = true) =>
  */
 const run = <A, E, R>(
   program: Effect.Effect<A, E, R>,
-  adapter: Layer.Layer<CliAdapter>
+  adapter: Layer.Layer<AgentTurnDriver>
 ): Promise<A> =>
   Effect.runPromise(
     program.pipe(Effect.orDie, Effect.provide(layersFor(adapter))) as Effect.Effect<A>
@@ -314,6 +320,38 @@ describe("ContextManager.observe", () => {
     expect(digest!.digest.throughMessageId).toBe("m2")
   })
 
+  it("uses the active chat's canonical runtime identity for its digest", async () => {
+    const rec = recorder()
+    await run(
+      Effect.gen(function* () {
+        const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+        const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
+        const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
+        yield* seed({
+          connectionId,
+          providerId,
+          modelId,
+          chats: [{
+            id: SESSION,
+            title: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            connectionId,
+            providerId,
+            modelId
+          }]
+        })
+        yield* observeAndSettle(900_000, rec)
+      }),
+      recordingAdapter(GOOD_REPLY, rec)
+    )
+
+    expect(rec.specs[0]).toMatchObject({
+      role: "context-digest",
+      targetCapabilities: { targetId: "desktop" }
+    })
+  })
+
   /**
    * The regression: a real harness streams its reply token by token, so the
    * manager sees many `Assistant` deltas, not one. Joining them with "\n" put a
@@ -341,49 +379,7 @@ describe("ContextManager.observe", () => {
     expect(digest!.digest.goal).toBe("Add rate limiting to the refund route")
   })
 
-  /**
-   * The no-extra-cost guarantee, asserted at the only place it can be: the spec
-   * handed to the adapter. The summary must run through the session's OWN
-   * harness binary — the CLI the user has already logged into — on the cheapest
-   * model that harness offers. No API client is constructed anywhere in this
-   * path, so there is no second credential and no surprise bill.
-   */
-  it("summarises through the session's own authenticated harness, on the cheap tier", async () => {
-    const rec = recorder()
-    const discovered = await run(
-      Effect.gen(function* () {
-        yield* seed()
-        yield* observeAndSettle(180_000, rec)
-        const clis = yield* DiscoveryService.list()
-        return clis.find((c) => c.kind === "claude")?.binPath ?? null
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    const spec = rec.specs[0]!
-    expect(spec.cli).toBe("claude")
-    /**
-     * The digest must go to whatever binary DISCOVERY resolved for this
-     * session's harness — that it is the user's own authenticated CLI is the
-     * whole no-extra-cost claim.
-     *
-     * Compared against discovery's own answer rather than asserted non-null: on
-     * a machine with Claude installed the absolute-candidate probe finds a real
-     * path, and on a clean CI runner it finds nothing. Asserting non-null passed
-     * locally and failed in CI while the code was correct in both cases — null
-     * simply means "fall through to the scripted adapter", exactly as any other
-     * run would.
-     */
-    expect(spec.binPath).toBe(discovered)
-    // haiku, not the session's sonnet — `DEFAULT_DIGEST_MODEL`.
-    expect(spec.model).toBe("haiku")
-    expect(spec.model).not.toBe("sonnet")
-  })
-
-  // `resumeId: null` alone is not enough — the adapter prefers its in-memory
-  // resume map, so without `fresh` the digest run would resume the very
-  // conversation it is trying to summarise and inherit the context we are
-  // attempting to shed.
-  it("runs fresh and read-only, so it cannot resume or mutate the worktree", async () => {
+  it("summarises through the selected certified pi model", async () => {
     const rec = recorder()
     await run(
       Effect.gen(function* () {
@@ -393,12 +389,21 @@ describe("ContextManager.observe", () => {
       recordingAdapter(GOOD_REPLY, rec)
     )
     const spec = rec.specs[0]!
-    expect(spec.fresh).toBe(true)
-    expect(spec.readOnly).toBe(true)
-    expect(spec.resumeId).toBeNull()
-    // Not "plan": plan mode steers the harness toward proposing a plan instead
-    // of answering, and a summariser that proposes a plan is useless.
-    expect(spec.mode).toBe("ask")
+    expect(spec.modelId).toBe("anthropic/claude-opus-4-1")
+  })
+
+  it("runs in a fresh read-only pi session", async () => {
+    const rec = recorder()
+    await run(
+      Effect.gen(function* () {
+        yield* seed()
+        yield* observeAndSettle(180_000, rec)
+      }),
+      recordingAdapter(GOOD_REPLY, rec)
+    )
+    const spec = rec.specs[0]!
+    expect(spec.piSessionId).toBeNull()
+    expect(spec.mode).toBe("read-only")
   })
 
   it("does not fork a second digest while one is already in flight", async () => {
@@ -683,7 +688,7 @@ describe("window correction", () => {
     const snap = await run(
       Effect.gen(function* () {
         // An unknown model falls back to 200k from the table…
-        yield* seed({ model: "some-new-tier" })
+        yield* seed({ modelId: providerModel("some-new-tier") })
         // …but a session cannot hold 598k inside a 200k window.
         yield* ContextManager.observe(SESSION, 598_000, null)
         return yield* ContextManager.snapshot(SESSION)
@@ -699,7 +704,7 @@ describe("window correction", () => {
     const rec = recorder()
     const snap = await run(
       Effect.gen(function* () {
-        yield* seed({ model: "some-new-tier" })
+        yield* seed({ modelId: providerModel("some-new-tier") })
         yield* ContextManager.observe(SESSION, 598_000, null)
         // A compaction (or simply a smaller turn) shrinks the working set. The
         // CEILING did not move.
@@ -717,7 +722,7 @@ describe("window correction", () => {
     const rec = recorder()
     const snap = await run(
       Effect.gen(function* () {
-        yield* seed({ model: "claude-opus-4-8" })
+        yield* seed({ modelId: providerModel("claude-opus-4-8") })
         yield* ContextManager.observe(SESSION, 213_600, null)
         return yield* ContextManager.snapshot(SESSION)
       }),
@@ -998,78 +1003,6 @@ describe("ContextManager.compactNow", () => {
 
 })
 
-describe("ContextManager.prepareUnknownCodexResume", () => {
-  it("compacts a large legacy Codex resume before reusing its thread", async () => {
-    const rec = recorder()
-    const digest = await run(
-      Effect.gen(function* () {
-        yield* seed({
-          cli: "codex",
-          model: "gpt-5.6-sol",
-          resumeId: "legacy-thread",
-          contextTokens: 0
-        })
-        yield* TranscriptStore.append(SESSION, {
-          id: "m3",
-          role: "assistant",
-          parts: [{ _tag: "Text", text: "x".repeat(510_000) }],
-          streaming: false,
-          createdAt: new Date().toISOString()
-        })
-        yield* ContextManager.prepareUnknownCodexResume(SESSION)
-        return yield* ContextManager.applyWhenReady(SESSION)
-      }),
-      recordingAdapter(GOOD_REPLY, rec, "delay")
-    )
-    expect(rec.runs.count).toBe(1)
-    expect(digest).not.toBeNull()
-  })
-
-  it("does not compact a small unknown Codex resume", async () => {
-    const rec = recorder()
-    await run(
-      Effect.gen(function* () {
-        yield* seed({
-          cli: "codex",
-          model: "gpt-5.6-sol",
-          resumeId: "legacy-thread",
-          contextTokens: 0
-        })
-        yield* ContextManager.prepareUnknownCodexResume(SESSION)
-        yield* settle()
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(rec.runs.count).toBe(0)
-  })
-
-  it("respects an auto-compaction opt-out", async () => {
-    const rec = recorder()
-    await run(
-      Effect.gen(function* () {
-        yield* seed({
-          cli: "codex",
-          model: "gpt-5.6-sol",
-          resumeId: "legacy-thread",
-          contextTokens: 0
-        })
-        yield* TranscriptStore.append(SESSION, {
-          id: "m3",
-          role: "assistant",
-          parts: [{ _tag: "Text", text: "x".repeat(510_000) }],
-          streaming: false,
-          createdAt: new Date().toISOString()
-        })
-        yield* ConfigService.setContext({ auto: false, budgetTokens: 500_000 })
-        yield* ContextManager.prepareUnknownCodexResume(SESSION)
-        yield* settle()
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(rec.runs.count).toBe(0)
-  })
-})
-
 describe("ContextManager.cancel", () => {
   it("interrupts an in-flight digest so a stopped session stops summarising", async () => {
     const rec = recorder()
@@ -1110,7 +1043,7 @@ describe("ContextManager.snapshot", () => {
     const rec = recorder()
     const snap = await run(
       Effect.gen(function* () {
-        yield* seed({ model: "sonnet" })
+        yield* seed({ modelId: providerModel("sonnet") })
         yield* turnEnd(100_000)
         return yield* ContextManager.snapshot(SESSION)
       }),
@@ -1126,7 +1059,7 @@ describe("ContextManager.snapshot", () => {
     const rec = recorder()
     const snap = await run(
       Effect.gen(function* () {
-        yield* seed({ model: "some-new-tier" })
+        yield* seed({ modelId: providerModel("some-new-tier") })
         yield* turnEnd(250_000, 1_000_000)
         return yield* ContextManager.snapshot(SESSION)
       }),
@@ -1136,27 +1069,6 @@ describe("ContextManager.snapshot", () => {
     expect(snap.triggerAt).toBe(500_000)
     expect(snap.phase).toBe("idle")
     expect(rec.runs.count).toBe(0)
-  })
-
-  // The user's explicit Settings value is also the escape hatch for a harness
-  // whose self-report we have reason to distrust, so it still wins.
-  it("lets the user's configured window override the harness report", async () => {
-    const rec = recorder()
-    const snap = await run(
-      Effect.gen(function* () {
-        yield* seed({ model: "claude-opus-4-8" })
-        yield* ConfigService.setProvider("claude", {
-          enabled: true,
-          defaultMode: "accept-edits",
-          contextWindow: 200_000
-        })
-        yield* turnEnd(100_000, 1_000_000)
-        return yield* ContextManager.snapshot(SESSION)
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-    expect(snap.window).toBe(200_000)
-    expect(snap.triggerAt).toBe(150_000)
   })
 
   // A freshly reopened session must show its real size before its first turn,
@@ -1180,8 +1092,8 @@ describe("ContextManager.snapshot", () => {
         // Exact bad value persisted by s_royal-liskov when the SDK's cumulative
         // turn usage was mistaken for context occupancy.
         yield* seed({
-          cli: "codex",
-          model: "gpt-5.6-sol",
+          providerId: Schema.decodeUnknownSync(ProviderId)("openai-codex"),
+          modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5.6-sol"),
           contextTokens: 2_979_284
         })
         const before = yield* ContextManager.snapshot(SESSION)
@@ -1240,7 +1152,15 @@ describe("chat-scoped context", () => {
       const now = new Date().toISOString()
       return yield* seed({
         chats: [
-          { id: CHAT, title: null, createdAt: now, updatedAt: now, model: "claude-opus-4-1" }
+          {
+            id: CHAT,
+            title: null,
+            createdAt: now,
+            updatedAt: now,
+            connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+            providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+            modelId: providerModel("claude-opus-4-1")
+          }
         ],
         activeChatId: CHAT
       })

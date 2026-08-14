@@ -50,7 +50,7 @@ const session = (issue?: IssueReference): SessionSnapshot => ({
   repo: "acme/web",
   branch: "eng-123",
   title: "Retry failed payments",
-  cli: "codex",
+  providerId: "openai-codex",
   prNumber: null,
   linkedIssue: issue,
   worktreePath: "/tmp/acme-web"

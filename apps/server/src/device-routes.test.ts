@@ -31,7 +31,6 @@ const device = {
   capabilities: {
     version: 1,
     capabilities: ["session.start", "session.observe"],
-    harnesses: ["codex"],
     maxConcurrentSessions: 2
   },
   state: "active",

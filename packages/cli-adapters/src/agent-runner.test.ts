@@ -11,21 +11,28 @@ import type {
   Session,
   StreamEvent
 } from "@jingler/core"
-import { CliExecError, findApprovedPlan, STOPPED_NOTE } from "@jingler/core"
-import { Deferred, Effect, Fiber, Layer, Ref, Stream, TestClock, TestContext } from "effect"
+import {
+  AgentRunError,
+  findApprovedPlan,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
+  STOPPED_NOTE
+} from "@jingler/core"
+import { Deferred, Effect, Fiber, Layer, Ref, Schema, Stream, TestClock, TestContext } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
-  CliAdapter,
-  makeScriptedCliAdapter,
+  AgentTurnDriver,
+  makeScriptedAgentTurnDriver,
   scriptedPlan,
   scriptedPlanEmission,
   scriptedPlanPrd
-} from "./adapter.js"
+} from "./agent-turn-driver.js"
 import type {
-  CliAdapterShape,
+  AgentTurnDriverShape,
   PermissionDecision,
-  SessionSpec
-} from "./adapter.js"
+  AgentTurnSpec
+} from "./agent-turn-driver.js"
 import { ConfigService } from "./config.js"
 import {
   InMemorySecretStoreLive,
@@ -38,9 +45,8 @@ import {
   isContextOverflowFailure,
   planEvidenceFromText
 } from "./agent-runner.js"
-import { composeRemoteMcpServers } from "./mcp-config.js"
+import { composeRemoteMcpServers } from "./runtime/mcp/attachment.js"
 import { ContextManager } from "./context-manager.js"
-import { DiscoveryService } from "./discovery.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
@@ -59,6 +65,11 @@ const PREVIEW_MCP: BrowserControlMcpAttachment = {
   headerEnvironment: { Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION" }
 }
 const browserAcquireCalls: Array<{ readonly sessionId: string; readonly ownerId: string }> = []
+const TEST_RUNTIME = {
+  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("test-connection"),
+  providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+  modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-test")
+} as const
 
 /** Main-only Preview attachment normally owned by the app-scoped listener. */
 const BrowserControlMcpServiceTest = Layer.succeed(
@@ -95,14 +106,14 @@ beforeEach(() => {
       branch: "chore/test",
       title: "Test",
       status: "idle",
-      cli: "claude",
+      ...TEST_RUNTIME,
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
       tokens: 0,
       updatedAt: now,
       worktreePath: temp.root,
-      chats: [{ id: SESSION, title: null, createdAt: now, updatedAt: now }],
+      chats: [{ id: SESSION, title: null, createdAt: now, updatedAt: now, ...TEST_RUNTIME }],
       activeChatId: SESSION
     }])
   )
@@ -168,6 +179,7 @@ const chatForSession = (
   title: null,
   createdAt: updatedAt,
   updatedAt,
+  ...TEST_RUNTIME,
   ...fields
 })
 
@@ -183,8 +195,7 @@ const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
     TranscriptStore.Default,
     BackgroundTaskStore.Default,
     PlanStore.Default,
-    makeScriptedCliAdapter(0),
-    DiscoveryService.Default,
+    makeScriptedAgentTurnDriver(0),
     ContextManager.Default,
     temp.layer
   )
@@ -270,20 +281,20 @@ describe("AgentRunner saveDraftPlan", () => {
     annotations: []
   }
 
-  const draftingAdapter = (plan: PlanPrd): Layer.Layer<CliAdapter> =>
+  const draftingAdapter = (plan: PlanPrd): Layer.Layer<AgentTurnDriver> =>
     Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, _spec, ctx) =>
           (ctx.saveDraftPlan ?? (() => Effect.void))(plan).pipe(
             Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
-          ) as ReturnType<CliAdapterShape["run"]>,
+          ) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
 
   const runWith = (
-    adapter: Layer.Layer<CliAdapter>,
+    adapter: Layer.Layer<AgentTurnDriver>,
     seed?: Effect.Effect<unknown, never, PlanStore | PlanStoreEnv>
   ) =>
     Effect.runPromise(
@@ -308,7 +319,6 @@ describe("AgentRunner saveDraftPlan", () => {
             BackgroundTaskStore.Default,
             PlanStore.Default,
             adapter,
-            DiscoveryService.Default,
             ContextManager.Default,
             temp.layer
           )
@@ -361,14 +371,14 @@ describe("AgentRunner saveDraftPlan", () => {
   it("scrubs the draft's raw JSON block from the transcript, keeping the prose", async () => {
     const block = ["```json", JSON.stringify({ mode: "draft", plan: VALID_PLAN }), "```"].join("\n")
     const emittingDraftAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, _spec, ctx) =>
           Effect.gen(function* () {
             yield* ctx.emit({ _tag: "Assistant", text: `Here is the draft.\n\n${block}` })
             yield* (ctx.saveDraftPlan ?? (() => Effect.void))(VALID_PLAN, block)
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<CliAdapterShape["run"]>,
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
@@ -427,10 +437,10 @@ describe("AgentRunner saveDraftPlan", () => {
 
 describe("AgentRunner remote MCP attachments", () => {
   it("supplies configured and Preview HTTP entries without persisting their bearers", async () => {
-    const captured: SessionSpec[] = []
+    const captured: AgentTurnSpec[] = []
     const recordingAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, spec, ctx) =>
           Effect.sync(() => captured.push(spec)).pipe(
             Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
@@ -449,7 +459,6 @@ describe("AgentRunner remote MCP attachments", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -470,13 +479,13 @@ describe("AgentRunner remote MCP attachments", () => {
     )
 
     expect(captured).toHaveLength(1)
-    expect(captured[0]!.mcpPolicy).toBe("managed-only")
     expect(captured[0]!.prompt).toContain("<managed-tools>")
     expect(browserAcquireCalls).toStrictEqual([
       { sessionId: SESSION, ownerId: `${SESSION}:${SESSION}` }
     ])
-    expect(captured[0]!.remoteMcpServers).toStrictEqual([
-      {
+    expect(captured[0]!.mcp).toStrictEqual({
+      memory: null,
+      openConnector: {
         name: "operator-tools",
         url: "https://connector.example/mcp",
         headers: { Authorization: "Bearer connector-secret" },
@@ -484,56 +493,12 @@ describe("AgentRunner remote MCP attachments", () => {
           Authorization: "JINGLER_OPEN_CONNECTOR_AUTHORIZATION"
         }
       },
-      PREVIEW_MCP
-    ])
+      browser: PREVIEW_MCP
+    })
     const persistedSession = readFileSync(join(temp.root, "sessions.json"), "utf8")
     expect(persistedSession).not.toContain("connector-secret")
     expect(persistedSession).not.toContain("preview-secret")
     expect(persistedSession).not.toContain("remoteMcpServers")
-  })
-
-  it("allows operators to merge native harness tools back in", async () => {
-    const captured: SessionSpec[] = []
-    const recordingAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
-        run: (_sessionId, spec, ctx) =>
-          Effect.sync(() => captured.push(spec)).pipe(
-            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
-          ),
-        stop: () => Effect.void
-      })
-    )
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      recordingAdapter,
-      DiscoveryService.Default,
-      ContextManager.Default,
-      temp.layer
-    )
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* OpenConnectorService.set({
-          endpoint: "https://connector.example",
-          enabled: true,
-          serverName: "open-connector",
-          preferJinglerTools: false
-        }, "token")
-        yield* (yield* AgentRunner).prompt(SESSION, SESSION, "use native tools").pipe(Stream.runDrain)
-      }).pipe(Effect.provide(base))
-    )
-
-    expect(captured[0]!.mcpPolicy).toBe("merge")
-    expect(captured[0]!.prompt).not.toContain("<managed-tools>")
   })
 
   it("keeps a Jingler-owned attachment when an operator connector claims its name", () => {
@@ -605,10 +570,10 @@ describe("AgentRunner team memory", () => {
   it("injects bounded agent reflection and never captures the raw settled turn", async () => {
     const requests: Request[] = []
     installMemoryFetch(requests)
-    const captured: SessionSpec[] = []
+    const captured: AgentTurnSpec[] = []
     const recordingAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, spec, ctx) =>
           Effect.sync(() => captured.push(spec)).pipe(
             Effect.zipRight(
@@ -636,7 +601,6 @@ describe("AgentRunner team memory", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -652,10 +616,8 @@ describe("AgentRunner team memory", () => {
       }).pipe(Effect.provide(base))
     )
 
-    expect(captured[0]?.remoteMcpServers?.map((server) => server.name)).toStrictEqual([
-      "jingler-memory",
-      "jingler-browser"
-    ])
+    expect(captured[0]?.mcp?.memory?.name).toBe("jingler-memory")
+    expect(captured[0]?.mcp?.browser?.name).toBe("jingler-browser")
     expect(captured[0]?.prompt).toContain("memory_navigation")
     expect(captured[0]?.prompt).toContain("memory_workflow_status")
     expect(captured[0]?.prompt).toContain("at most three standalone decisions")
@@ -673,8 +635,8 @@ describe("AgentRunner team memory", () => {
     const requests: Request[] = []
     installMemoryFetch(requests)
     const failedAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, _spec, ctx) =>
           ctx.emit({ _tag: "Failed", message: "provider failed" }),
         stop: () => Effect.void
@@ -691,7 +653,6 @@ describe("AgentRunner team memory", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       failedAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -713,8 +674,8 @@ describe("AgentRunner team memory", () => {
       announceStarted = resolve
     })
     const pendingAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: () => Effect.sync(announceStarted).pipe(Effect.zipRight(Effect.never)),
         stop: () => Effect.void
       })
@@ -730,7 +691,6 @@ describe("AgentRunner team memory", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       pendingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -784,10 +744,10 @@ describe("AgentRunner HITL gating", () => {
   const probeAdapter = (out: {
     command: PermissionDecision | null
     edit: PermissionDecision | null
-  }): Layer.Layer<CliAdapter> =>
+  }): Layer.Layer<AgentTurnDriver> =>
     Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, _spec, ctx) =>
           Effect.gen(function* () {
             out.command = yield* ctx.canUseTool({
@@ -803,7 +763,7 @@ describe("AgentRunner HITL gating", () => {
               command: null
             })
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<CliAdapterShape["run"]>,
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
@@ -824,7 +784,6 @@ describe("AgentRunner HITL gating", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       probeAdapter(out),
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -876,9 +835,9 @@ describe("AgentRunner HITL gating", () => {
 
 describe("AgentRunner sub-agents", () => {
   // An adapter that emits a main line, then a sub-agent's whole lifecycle, then done.
-  const subagentAdapter: Layer.Layer<CliAdapter> = Layer.succeed(
-    CliAdapter,
-    CliAdapter.of({
+  const subagentAdapter: Layer.Layer<AgentTurnDriver> = Layer.succeed(
+    AgentTurnDriver,
+    AgentTurnDriver.of({
       run: (_sessionId, _spec, ctx) =>
         Effect.gen(function* () {
           yield* ctx.emit({ _tag: "Assistant", text: "main output" })
@@ -893,7 +852,7 @@ describe("AgentRunner sub-agents", () => {
           yield* ctx.emit({ _tag: "ToolStart", id: "r1", name: "Read", target: "a.ts", agentId: "task_1" })
           yield* ctx.emit({ _tag: "SubagentEnded", id: "task_1", status: "done" })
           yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-        }) as ReturnType<CliAdapterShape["run"]>,
+        }) as ReturnType<AgentTurnDriverShape["run"]>,
       stop: () => Effect.void
     })
   )
@@ -909,9 +868,9 @@ describe("AgentRunner sub-agents", () => {
    * event comes LAST, so the runner must carry the whole sub-agent lifecycle to the
    * consumer and settle exactly once at the end.
    */
-  const heldTurnAdapter: Layer.Layer<CliAdapter> = Layer.succeed(
-    CliAdapter,
-    CliAdapter.of({
+  const heldTurnAdapter: Layer.Layer<AgentTurnDriver> = Layer.succeed(
+    AgentTurnDriver,
+    AgentTurnDriver.of({
       run: (_sessionId, _spec, ctx) =>
         Effect.gen(function* () {
           yield* ctx.emit({ _tag: "Assistant", text: "delegating" })
@@ -929,12 +888,12 @@ describe("AgentRunner sub-agents", () => {
           yield* Effect.sleep("20 millis")
           yield* ctx.emit({ _tag: "SubagentEnded", id: "task_1", status: "done" })
           yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-        }) as ReturnType<CliAdapterShape["run"]>,
+        }) as ReturnType<AgentTurnDriverShape["run"]>,
       stop: () => Effect.void
     })
   )
 
-  const runSubagentPrompt = (adapter: Layer.Layer<CliAdapter> = subagentAdapter) => {
+  const runSubagentPrompt = (adapter: Layer.Layer<AgentTurnDriver> = subagentAdapter) => {
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
@@ -944,10 +903,8 @@ describe("AgentRunner sub-agents", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
       adapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1016,10 +973,8 @@ describe("AgentRunner image attachments", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
-      makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
+      makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1054,8 +1009,7 @@ describe("AgentRunner hidden prompt context", () => {
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
       PlanStore.Default,
-      makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
+      makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       temp.layer
     )
@@ -1097,10 +1051,8 @@ describe("AgentRunner AskUserQuestion", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
-      makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
+      makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1153,10 +1105,8 @@ describe("AgentRunner ids", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
-      makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
+      makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1195,10 +1145,8 @@ describe("AgentRunner allowlist", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
-      makeScriptedCliAdapter(0),
-    DiscoveryService.Default,
+      makeScriptedAgentTurnDriver(0),
     ContextManager.Default,
     ConfigService.Default,
       temp.layer
@@ -1239,10 +1187,8 @@ describe("AgentRunner plan mode", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
-      makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
+      makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -1262,7 +1208,7 @@ describe("AgentRunner plan mode", () => {
       branch: "b",
       title: "t",
       status: "idle",
-      cli: "claude",
+      ...TEST_RUNTIME,
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -1355,8 +1301,7 @@ describe("AgentRunner plan mode", () => {
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
       planStoreWithImmediateWatcher,
-      makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
+      makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       temp.layer
     )
@@ -1824,10 +1769,10 @@ describe("AgentRunner plan mode", () => {
 })
 
 describe("AgentRunner model", () => {
-  // A harness that reports its real model on init (as the Claude adapter does).
+  // Provider metadata must not replace the certified model selected for the run.
   const modelReportingAdapter = Layer.succeed(
-    CliAdapter,
-    CliAdapter.of({
+    AgentTurnDriver,
+    AgentTurnDriver.of({
       run: (sessionId, _spec, ctx) =>
         ctx
           .emit({ _tag: "Started", sessionId, model: "opus-live" })
@@ -1836,15 +1781,13 @@ describe("AgentRunner model", () => {
     })
   )
 
-  it("persists the harness's actual model (reported on init) onto the session", async () => {
-    // Seed a session on disk so the runner can persist its model back.
+  it("does not replace the certified model id with provider event metadata", async () => {
     const session: Session = {
       id: SESSION,
       repo: "r",
       branch: "b",
       title: "t",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -1865,23 +1808,21 @@ describe("AgentRunner model", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
       modelReportingAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
     )
-    const model = await Effect.runPromise(
+    const persistedModelId = await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.prompt(SESSION, SESSION, "hi").pipe(Stream.runDrain)
         const persisted = yield* SessionStore.get(SESSION)
-        return persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.model
+        return persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.modelId
       }).pipe(Effect.provide(base))
     )
-    expect(model).toBe("opus-live")
+    expect(persistedModelId).toBe("anthropic/claude-test")
   })
 })
 
@@ -1896,7 +1837,7 @@ describe("AgentRunner plan library", () => {
       branch: "chore/mysession",
       title: "My session",
       status: "idle",
-      cli: "claude",
+      ...TEST_RUNTIME,
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -1916,12 +1857,12 @@ describe("AgentRunner plan library", () => {
   /** An adapter that records the prompt it was handed, then completes. */
   const recordingAdapter = (out: {
     prompt: string | null
-    specs?: Array<SessionSpec>
+    specs?: Array<AgentTurnSpec>
     reply?: string
-  }): Layer.Layer<CliAdapter> =>
+  }): Layer.Layer<AgentTurnDriver> =>
     Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, spec, ctx) =>
           Effect.gen(function* () {
             out.prompt = spec.prompt
@@ -1930,12 +1871,12 @@ describe("AgentRunner plan library", () => {
               yield* ctx.emit({ _tag: "Assistant", text: out.reply })
             }
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<CliAdapterShape["run"]>,
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
 
-  const baseWithAdapter = (adapter: Layer.Layer<CliAdapter>) =>
+  const baseWithAdapter = (adapter: Layer.Layer<AgentTurnDriver>) =>
     Layer.mergeAll(
       AgentRunner.Default,
       OpenConnectorService.Default,
@@ -1947,14 +1888,13 @@ describe("AgentRunner plan library", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       adapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
 
   it("keeps plan mode transient so approval restores the selected agent's execution policy", async () => {
     seedSessionWithWorktree("plan")
-    const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
+    const captured: { prompt: string | null; specs: Array<AgentTurnSpec> } = {
       prompt: null,
       specs: []
     }
@@ -1981,10 +1921,6 @@ describe("AgentRunner plan library", () => {
     expect(captured.specs).toHaveLength(2)
     for (const spec of captured.specs) {
       expect(spec.mode).toBe("plan")
-      // `mode: plan` is the read-only boundary. A permanent `readOnly` flag
-      // would survive the in-turn approval and strand Codex in its read-only
-      // sandbox instead of restoring Auto.
-      expect(spec.readOnly).toBeUndefined()
     }
     expect(captured.specs[0]?.prompt).toContain("<managed-tools>")
     expect(captured.specs[1]?.prompt).toContain("<session-context>")
@@ -1994,7 +1930,7 @@ describe("AgentRunner plan library", () => {
   it("preserves the operator's execution mode for direct turns", async () => {
     for (const mode of ["ask", "accept-edits", "auto"] as const) {
       seedSessionWithWorktree(mode)
-      const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
+      const captured: { prompt: string | null; specs: Array<AgentTurnSpec> } = {
         prompt: null,
         specs: []
       }
@@ -2009,35 +1945,26 @@ describe("AgentRunner plan library", () => {
 
       expect(captured.specs).toHaveLength(1)
       expect(captured.specs[0]?.mode).toBe(mode)
-      expect(captured.specs[0]?.readOnly).toBeUndefined()
     }
   })
 
-  it("leaves plan protocol and capture with the native harness when Jingler tools are disabled", async () => {
+  it("always attaches Jingler's managed tool contract to plan runs", async () => {
     seedSessionWithWorktree("plan")
-    const captured: { prompt: string | null; specs: Array<SessionSpec> } = {
+    const captured: { prompt: string | null; specs: Array<AgentTurnSpec> } = {
       prompt: null,
       specs: []
     }
     await Effect.runPromise(
       Effect.gen(function* () {
-        yield* OpenConnectorService.set({
-          endpoint: "",
-          enabled: false,
-          serverName: "open-connector",
-          preferJinglerTools: false
-        })
         yield* (yield* AgentRunner)
-          .prompt(SESSION, SESSION, "Plan this using the harness's native flow.")
+          .prompt(SESSION, SESSION, "Plan this work.")
           .pipe(Stream.runDrain)
       }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
     )
 
     expect(captured.specs).toHaveLength(1)
     expect(captured.specs[0]?.mode).toBe("plan")
-    expect(captured.specs[0]?.enhancedPlan).toBe(false)
-    expect(captured.prompt).not.toContain("PLAN MODE —")
-    expect(captured.prompt).not.toContain("PlanPrdStage")
+    expect(captured.prompt).toContain("<managed-tools>")
   })
 
   it("executes and verifies bounded work directly without proposing a plan", async () => {
@@ -2057,7 +1984,7 @@ describe("AgentRunner plan library", () => {
           document: yield* PlanStore.readDocument(WT)
         }
       }).pipe(
-        Effect.provide(baseWithAdapter(makeScriptedCliAdapter(0)))
+        Effect.provide(baseWithAdapter(makeScriptedAgentTurnDriver(0)))
       )
     )
 
@@ -2182,10 +2109,8 @@ describe("AgentRunner plan library", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
-      makeScriptedCliAdapter(0),
-      DiscoveryService.Default,
+      makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2216,14 +2141,14 @@ describe("AgentRunner plan library", () => {
       "Extract the token store, update callers, and run the auth tests."
     )
     const fallbackAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (sessionId, _spec, ctx) =>
           Effect.gen(function* () {
             yield* ctx.emit({ _tag: "Started", sessionId })
             yield* ctx.proposePlan(fallback)
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<CliAdapterShape["run"]>,
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
@@ -2268,8 +2193,8 @@ describe("AgentRunner plan library", () => {
     ].join("\n")
     const streamedPlan = scriptedPlanPrd("streamed", 1)
     const streamedAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (sessionId, _spec, ctx) =>
           Effect.gen(function* () {
             yield* ctx.emit({ _tag: "Started", sessionId })
@@ -2279,7 +2204,7 @@ describe("AgentRunner plan library", () => {
               reply.slice(reply.indexOf("```json"))
             )
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<CliAdapterShape["run"]>,
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
@@ -2321,15 +2246,15 @@ describe("AgentRunner plan library", () => {
     ].join("\n")
     const payloadPlan = scriptedPlanPrd("payload", 1)
     const payloadAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (sessionId, _spec, ctx) =>
           Effect.gen(function* () {
             yield* ctx.emit({ _tag: "Started", sessionId })
             yield* ctx.emit({ _tag: "Assistant", text: visibleExample })
             yield* ctx.proposePlan(payloadPlan)
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<CliAdapterShape["run"]>,
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
@@ -2372,10 +2297,8 @@ describe("AgentRunner plan library", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter(captured),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2423,10 +2346,8 @@ describe("AgentRunner plan library", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter(captured),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2459,7 +2380,6 @@ describe("AgentRunner plan library", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       recordingAdapter(captured),
-      DiscoveryService.Default,
       ContextManager.Default,
       temp.layer
     )
@@ -2499,7 +2419,6 @@ describe("AgentRunner resume across restarts", () => {
       branch: "b",
       title: "t",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -2513,28 +2432,28 @@ describe("AgentRunner resume across restarts", () => {
     writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
   }
 
-  // An adapter that records the resume id it was handed and reports `harnessId`
-  // as the harness's own session id (on Started) — the value that should persist.
+  // A driver that records the pi session id it was handed and reports the next
+  // persistent pi identity on Started.
   const resumeAdapter = (
-    captured: { resumeId: string | null },
-    harnessId: string
-  ): Layer.Layer<CliAdapter> =>
+    captured: { piSessionId: string | null },
+    nextPiSessionId: string
+  ): Layer.Layer<AgentTurnDriver> =>
     Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, spec, ctx) =>
           Effect.gen(function* () {
-            captured.resumeId = spec.resumeId
-            yield* ctx.emit({ _tag: "Started", sessionId: harnessId })
+            captured.piSessionId = spec.piSessionId
+            yield* ctx.emit({ _tag: "Started", sessionId: nextPiSessionId })
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<CliAdapterShape["run"]>,
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
 
-  it("persists the harness session id and resumes with it on the next run (survives a restart)", async () => {
+  it("persists the pi session id and resumes it after restart", async () => {
     seedBareSession()
-    const captured: { resumeId: string | null } = { resumeId: null }
+    const captured: { piSessionId: string | null } = { piSessionId: null }
     const base = Layer.mergeAll(
       AgentRunner.Default,
     OpenConnectorService.Default,
@@ -2544,16 +2463,14 @@ describe("AgentRunner resume across restarts", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
       resumeAdapter(captured, "sdk-123"),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
     )
 
-    // First run: no prior resume id; the harness reports "sdk-123" on Started.
+    // First run: no prior pi session id; the runtime reports "sdk-123" on Started.
     await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
@@ -2561,26 +2478,26 @@ describe("AgentRunner resume across restarts", () => {
         yield* runner.prompt(SESSION, SESSION, "start").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
-    expect(captured.resumeId).toBeNull()
+    expect(captured.piSessionId).toBeNull()
 
     // It was persisted on the session (survives an app restart).
     const persisted = await Effect.runPromise(
       SessionStore.get(SESSION).pipe(Effect.provide(Layer.merge(SessionStore.Default, temp.layer)))
     )
     expect(
-      persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.resumeId
+      persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.piSessionId
     ).toBe("sdk-123")
 
     // A SECOND run through a FRESH runner (= a restart, empty in-memory map) picks
-    // the id up from persistence and hands it to the adapter as spec.resumeId.
-    captured.resumeId = null
+    // the id up from persistence and hands it to pi.
+    captured.piSessionId = null
     await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.prompt(SESSION, SESSION, "continue").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
-    expect(captured.resumeId).toBe("sdk-123")
+    expect(captured.piSessionId).toBe("sdk-123")
   })
 })
 
@@ -2594,7 +2511,6 @@ describe("AgentRunner plan progress across turns", () => {
       branch: "chore/crossturn",
       title: "Cross-turn session",
       status: "idle",
-      cli: "claude",
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -2615,11 +2531,11 @@ describe("AgentRunner plan progress across turns", () => {
    * and execution runs on across many later turns, each with its own assistant
    * message. `edit` is the path the second turn writes.
    */
-  const twoTurnAdapter = (edit: string, plan?: (p: PlanPrd) => PlanPrd): Layer.Layer<CliAdapter> => {
+  const twoTurnAdapter = (edit: string, plan?: (p: PlanPrd) => PlanPrd): Layer.Layer<AgentTurnDriver> => {
     let turn = 0
     return Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (sessionId, _spec, ctx) =>
           Effect.gen(function* () {
             turn += 1
@@ -2639,7 +2555,7 @@ describe("AgentRunner plan progress across turns", () => {
               preview: null
             })
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<CliAdapterShape["run"]>,
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
         stop: () => Effect.void
       })
     )
@@ -2656,10 +2572,8 @@ describe("AgentRunner plan progress across turns", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
       twoTurnAdapter(edit, plan),
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -2728,20 +2642,6 @@ describe("AgentRunner plan progress across turns", () => {
   })
 })
 
-/**
- * No harness discovered.
- *
- * The real DiscoveryService shells out (`which claude`, filesystem probes) as
- * part of every `prompt` setup. These tests wait on the run actually starting, so
- * that probe sits inside the window they measure — and under load it blew the
- * budget and made them flake. The runner doesn't need a real binary here: the
- * adapter is injected.
- */
-const noHarnesses: Layer.Layer<DiscoveryService> = Layer.succeed(
-  DiscoveryService,
-  new DiscoveryService({ list: () => Effect.succeed([]) })
-)
-
 describe("AgentRunner failures", () => {
   it("refuses a direct turn after the shared checkout moves to another branch", async () => {
     const repoPath = initGitRepo(join(temp.root, "direct-repo"), {
@@ -2757,7 +2657,6 @@ describe("AgentRunner failures", () => {
           branch: "main",
           title: "Direct",
           status: "idle",
-          cli: "claude",
           diff: { added: 0, removed: 0 },
           prNumber: null,
           costUsd: 0,
@@ -2775,8 +2674,8 @@ describe("AgentRunner failures", () => {
 
     let adapterCalled = false
     const unusedAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: () =>
           Effect.sync(() => {
             adapterCalled = true
@@ -2796,7 +2695,6 @@ describe("AgentRunner failures", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       unusedAdapter,
-      noHarnesses,
       temp.layer
     )
 
@@ -2829,7 +2727,6 @@ describe("AgentRunner failures", () => {
           branch: "main",
           title: "Live direct",
           status: "idle",
-          cli: "claude",
           diff: { added: 0, removed: 0 },
           prNumber: null,
           costUsd: 0,
@@ -2844,8 +2741,8 @@ describe("AgentRunner failures", () => {
       ])
     )
     const switchingAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: () =>
           Effect.sync(() => {
             execFileSync("git", ["switch", "feature/other"], { cwd: repoPath })
@@ -2865,7 +2762,6 @@ describe("AgentRunner failures", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       switchingAdapter,
-      noHarnesses,
       temp.layer
     )
 
@@ -2896,23 +2792,25 @@ describe("AgentRunner failures", () => {
           branch: "chore/auth",
           title: "Auth failure",
           status: "idle",
-          cli: "claude",
+          ...TEST_RUNTIME,
           diff: { added: 0, removed: 0 },
           prNumber: null,
           costUsd: 0,
           tokens: 0,
           updatedAt: "2026-07-20T00:00:00.000Z",
           worktreePath: temp.root,
+          chats: [chatForSession("2026-07-20T00:00:00.000Z", { mode: "auto" })],
+          activeChatId: SESSION,
           mode: "auto"
         }
       ])
     )
     const failingAdapter = Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: () =>
           Effect.fail(
-            new CliExecError({
+            new AgentRunError({
               kind: "claude",
               message: "Claude authentication failed. Run `claude auth login` in a terminal, then try again."
             })
@@ -2932,7 +2830,6 @@ describe("AgentRunner failures", () => {
       BackgroundTaskStore.Default,
       PlanStore.Default,
       failingAdapter,
-      noHarnesses,
       temp.layer
     )
 
@@ -2955,17 +2852,17 @@ describe("AgentRunner stop", () => {
    * An agent that runs until something interrupts it. `started` fires once it's
    * really going, and `interrupted` once it's torn down — mirroring the real
    * Claude adapter, which aborts its CLI process in exactly such an `onInterrupt`
-   * finalizer. That finalizer is the ONLY route to the process: `CliAdapter.stop`
+   * finalizer. That finalizer is the ONLY route to the process: `AgentTurnDriver.stop`
    * is a no-op in every implementation.
    */
   const hangingAdapter = (
     started: Deferred.Deferred<boolean>,
     interrupted: Deferred.Deferred<boolean>,
     gate?: { readonly wanted: boolean }
-  ): Layer.Layer<CliAdapter> =>
+  ): Layer.Layer<AgentTurnDriver> =>
     Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, _spec, ctx) =>
           Effect.gen(function* () {
             yield* ctx.emit({ _tag: "Assistant", text: "working…" })
@@ -2981,7 +2878,7 @@ describe("AgentRunner stop", () => {
             }
             yield* Effect.never
           }).pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, true))) as ReturnType<
-            CliAdapterShape["run"]
+            AgentTurnDriverShape["run"]
           >,
         stop: () => Effect.void
       })
@@ -3000,10 +2897,10 @@ describe("AgentRunner stop", () => {
   const settledThenLingeringAdapter = (
     settled: Deferred.Deferred<boolean>,
     interrupted: Deferred.Deferred<boolean>
-  ): Layer.Layer<CliAdapter> =>
+  ): Layer.Layer<AgentTurnDriver> =>
     Layer.succeed(
-      CliAdapter,
-      CliAdapter.of({
+      AgentTurnDriver,
+      AgentTurnDriver.of({
         run: (_sessionId, _spec, ctx) =>
           Effect.gen(function* () {
             // Register the stop handle the dock's button reaches, exactly as a real
@@ -3033,7 +2930,7 @@ describe("AgentRunner stop", () => {
             // The turn has settled. The harness lives on, servicing the task.
             yield* Effect.never
           }).pipe(Effect.onInterrupt(() => Deferred.succeed(interrupted, true))) as ReturnType<
-            CliAdapterShape["run"]
+            AgentTurnDriverShape["run"]
           >,
         stop: () => Effect.void
       })
@@ -3063,7 +2960,6 @@ describe("AgentRunner stop", () => {
         ContextManager.Default,
         ConfigService.Default,
         hangingAdapter(started, interrupted, opts.gate),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3121,7 +3017,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         hangingAdapter(started, interrupted),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3178,7 +3073,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3229,7 +3123,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3284,7 +3177,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3343,8 +3235,7 @@ describe("AgentRunner stop", () => {
         BackgroundTaskStore.Default,
         PlanStore.Default,
         ContextManager.Default,
-        makeScriptedCliAdapter(0),
-        noHarnesses,
+        makeScriptedAgentTurnDriver(0),
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3391,8 +3282,8 @@ describe("AgentRunner stop", () => {
       const order = yield* Ref.make<ReadonlyArray<string>>([])
       const note = (what: string) => Ref.update(order, (l) => [...l, what])
       const slowAdapter = Layer.succeed(
-        CliAdapter,
-        CliAdapter.of({
+        AgentTurnDriver,
+        AgentTurnDriver.of({
           run: (_sessionId, spec, ctx) =>
             (spec.prompt.includes("second")
               ? Effect.gen(function* () {
@@ -3408,7 +3299,7 @@ describe("AgentRunner stop", () => {
                   // A real harness takes time to tear its child down; without
                   // that, "B waited" and "B raced and won" look identical.
                   Effect.onInterrupt(() => Effect.sleep("400 millis").pipe(Effect.zipRight(note("A-torn-down"))))
-                )) as ReturnType<CliAdapterShape["run"]>,
+                )) as ReturnType<AgentTurnDriverShape["run"]>,
           stop: () => Effect.void
         })
       )
@@ -3424,7 +3315,6 @@ describe("AgentRunner stop", () => {
         PlanStore.Default,
         ContextManager.Default,
         slowAdapter,
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3471,15 +3361,15 @@ describe("AgentRunner first-event watchdog", () => {
     const events = await Effect.gen(function* () {
       const entered = yield* Deferred.make<boolean>()
       const muteAdapter = Layer.succeed(
-        CliAdapter,
-        CliAdapter.of({
+        AgentTurnDriver,
+        AgentTurnDriver.of({
           run: () =>
             Effect.gen(function* () {
               // Signals that the run is live WITHOUT emitting — the case a
               // finalizer cannot see, because nothing ever ends.
               yield* Deferred.succeed(entered, true)
               yield* Effect.never
-            }) as ReturnType<CliAdapterShape["run"]>,
+            }) as ReturnType<AgentTurnDriverShape["run"]>,
           stop: () => Effect.void
         })
       )
@@ -3495,7 +3385,6 @@ describe("AgentRunner first-event watchdog", () => {
         PlanStore.Default,
         ContextManager.Default,
         muteAdapter,
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3524,14 +3413,14 @@ describe("AgentRunner first-event watchdog", () => {
     const events = await Effect.gen(function* () {
       const spoke = yield* Deferred.make<boolean>()
       const chattyAdapter = Layer.succeed(
-        CliAdapter,
-        CliAdapter.of({
+        AgentTurnDriver,
+        AgentTurnDriver.of({
           run: (_sessionId, _spec, ctx) =>
             Effect.gen(function* () {
               yield* ctx.emit({ _tag: "Assistant", text: "thinking hard" })
               yield* Deferred.succeed(spoke, true)
               yield* Effect.never
-            }) as ReturnType<CliAdapterShape["run"]>,
+            }) as ReturnType<AgentTurnDriverShape["run"]>,
           stop: () => Effect.void
         })
       )
@@ -3547,7 +3436,6 @@ describe("AgentRunner first-event watchdog", () => {
         PlanStore.Default,
         ContextManager.Default,
         chattyAdapter,
-        noHarnesses,
         temp.layer
       )
       return yield* Effect.gen(function* () {
@@ -3570,7 +3458,7 @@ describe("AgentRunner first-event watchdog", () => {
 
 describe("AgentRunner live tool output", () => {
   /** A harness that streams a running command's stdout, then settles with no output of its own. */
-  const deltaAdapter = Layer.succeed(CliAdapter, {
+  const deltaAdapter = Layer.succeed(AgentTurnDriver, {
     run: (_sessionId, _spec, { emit }) =>
       Effect.gen(function* () {
         yield* emit({ _tag: "Started", sessionId: "harness-1" })
@@ -3595,10 +3483,8 @@ describe("AgentRunner live tool output", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-    BackgroundTaskStore.Default,
       PlanStore.Default,
       deltaAdapter,
-      DiscoveryService.Default,
       ContextManager.Default,
       ConfigService.Default,
       temp.layer
@@ -3649,8 +3535,7 @@ describe("AgentRunner usage accrual", () => {
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
       PlanStore.Default,
-      makeScriptedCliAdapter(0),
-      noHarnesses,
+      makeScriptedAgentTurnDriver(0),
       temp.layer
     )
     const totals = await Effect.gen(function* () {
@@ -3664,13 +3549,15 @@ describe("AgentRunner usage accrual", () => {
             branch: "b",
             title: "t",
             status: "idle",
-            cli: "claude",
+            ...TEST_RUNTIME,
             diff: { added: 0, removed: 0 },
             prNumber: null,
             costUsd: 0,
             tokens: 0,
             updatedAt: "2026-07-19T00:00:00.000Z",
-            worktreePath: temp.root
+            worktreePath: temp.root,
+            chats: [chatForSession("2026-07-19T00:00:00.000Z")],
+            activeChatId: SESSION
           }
         ])
       )

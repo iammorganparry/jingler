@@ -1,4 +1,4 @@
-import { CliExecError } from "@jingler/core"
+import { AgentRunError } from "@jingler/core"
 
 export type RouteFailureClassification =
   | "transient-provider"
@@ -50,7 +50,7 @@ const OPERATOR = [
 ]
 
 const messageOf = (failure: unknown): { readonly message: string; readonly kind: string | null } => {
-  if (failure instanceof CliExecError) return { message: failure.message, kind: failure.kind }
+  if (failure instanceof AgentRunError) return { message: failure.message, kind: failure.kind }
   if (failure instanceof Error) return { message: failure.message, kind: failure.name }
   if (typeof failure === "string") return { message: failure, kind: null }
   return { message: "The harness failed without an actionable error.", kind: null }

@@ -1,7 +1,7 @@
 import { Deferred, Effect, Option, Ref } from "effect"
 import type { DurationInput } from "effect/Duration"
 import type { Attachment } from "@jingler/core"
-import type { SteerTurn } from "./adapter.js"
+import type { SteerTurn } from "./agent-turn-driver.js"
 
 export const STEER_HANDLER_TIMEOUT = "10 seconds"
 export const STEER_REPLY_FIRST_CHUNK_TIMEOUT = "15 seconds"

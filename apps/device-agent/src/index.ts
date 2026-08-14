@@ -1,3 +1,11 @@
+import { readFile } from "node:fs/promises"
+import { createConnection } from "node:net"
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth"
+import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
+import { Schema } from "effect"
+import { installDeviceService, removeDeviceService } from "./device-service.js"
+import { makeLiveDeviceSessionCommandExecutor } from "./device-executor.js"
+import { runManagedCommand } from "./managed-command.js"
 import {
   deviceAgentPaths,
   deviceStatus,
@@ -7,25 +15,31 @@ import {
   rotateLocalDeviceKey,
   serveDevice
 } from "./runtime.js"
-import { installDeviceService, removeDeviceService } from "./device-service.js"
-import { createConnection } from "node:net"
-import { readFile } from "node:fs/promises"
-import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
-import { Schema } from "effect"
-import { makeLiveDeviceSessionCommandExecutor } from "./device-executor.js"
-import { runManagedCommand } from "./managed-command.js"
+
+// pi-ai deliberately keeps OAuth implementations behind bundler-opaque
+// imports. The device agent is a standalone bundle, so register the package's
+// static loaders before ModelRuntime can resolve a subscription credential.
+registerBunOAuthFlows()
 
 const args = process.argv.slice(2)
 const command = args[0]
+const writeProtocolOutput = process.stdout.write.bind(process.stdout)
 
 const option = (name: string): string | undefined => {
   const index = args.indexOf(name)
   return index >= 0 ? args[index + 1] : undefined
 }
 
-const print = (value: unknown): void => {
-  process.stdout.write(`${JSON.stringify(value)}\n`)
-}
+const print = (value: object): Promise<void> =>
+  new Promise((resolve, reject) => {
+    // pi redirects process.stdout while an agent is running so model noise is
+    // kept off the protocol stream. Retain the original writer for the device
+    // protocol itself, including its terminal frame.
+    writeProtocolOutput(`${JSON.stringify(value)}\n`, (error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
 
 const usage = (): never => {
   process.stderr.write("Usage: jingler-device <enroll|serve|managed-command|install-service|status|rotate-key|revoke-local> [options]\n")
@@ -53,8 +67,11 @@ const main = async (): Promise<void> => {
     case "managed-command": {
       const inputFile = option("--input")
       const root = option("--root")
-      if (!inputFile || !root) {
-        throw new Error("managed-command requires --input and --root")
+      const targetId = option("--target-id")
+      if (!inputFile || !root || !targetId) {
+        throw new Error(
+          "managed-command requires --input, --root and --target-id"
+        )
       }
       const command = Schema.decodeUnknownSync(RemoteSessionCommandSchema)(
         JSON.parse(await readFile(inputFile, "utf8")),
@@ -62,7 +79,7 @@ const main = async (): Promise<void> => {
       )
       await runManagedCommand(
         command,
-        makeLiveDeviceSessionCommandExecutor(root),
+        makeLiveDeviceSessionCommandExecutor(root, targetId),
         print
       )
       // This entrypoint is deliberately one-shot. The shared cli-adapters
@@ -102,7 +119,7 @@ const main = async (): Promise<void> => {
           ...(process.env.JINGLER_HOME ? { jinglerHome: process.env.JINGLER_HOME } : {})
         })
       }
-      print(result)
+      await print(result)
       return
     }
     case "serve": {
@@ -119,10 +136,10 @@ const main = async (): Promise<void> => {
         await revokeLocalDevice()
         await removeDeviceService()
       }
-      // Some harness adapters own long-lived Node handles (for example an
+      // Runtime services may own long-lived Node handles (for example an
       // embedded callback server). At this point the control connection and
-      // every tracked session task have settled, so do not let those adapter
-      // handles keep a revoked or stopped daemon orphaned under launchd.
+      // every tracked session task have settled, so do not let those handles
+      // keep a revoked or stopped daemon orphaned under launchd.
       process.exit(0)
       return
     }
@@ -134,7 +151,7 @@ const main = async (): Promise<void> => {
         throw new Error("install-service requires --subject, --device-id and --server")
       }
       await persistEnrollment(deviceAgentPaths(), { subject, deviceId, serverUrl })
-      print(
+      await print(
         await installDeviceService({
           ...(process.env.JINGLER_HOME ? { jinglerHome: process.env.JINGLER_HOME } : {})
         })
@@ -142,15 +159,15 @@ const main = async (): Promise<void> => {
       return
     }
     case "status":
-      print(await deviceStatus())
+      await print(await deviceStatus())
       return
     case "rotate-key":
-      print({ version: 1, publicKey: await rotateLocalDeviceKey() })
+      await print({ version: 1, publicKey: await rotateLocalDeviceKey() })
       return
     case "revoke-local":
       await removeDeviceService()
       await revokeLocalDevice()
-      print({ version: 1, state: "unpaired" })
+      await print({ version: 1, state: "unpaired" })
       return
     default:
       usage()

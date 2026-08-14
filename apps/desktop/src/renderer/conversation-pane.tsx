@@ -8,10 +8,8 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
-  CliKind,
   Environment,
-  HarnessCapability,
-  PermissionMode,
+  ProviderCatalog,
   Session
 } from "@jingler/core"
 import {
@@ -31,6 +29,7 @@ import {
   MAIN_AGENT,
   PlanReview,
   ResizeHandle,
+  RuntimeRecoveryCard,
   useContainerWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
@@ -48,6 +47,7 @@ import {
 } from "./code-reference.js"
 import { useConversation } from "./use-conversation.js"
 import { usePlanDocument } from "./use-plan-document.js"
+import { matchesCanonicalPlan } from "./plan-document-machine.js"
 import {
   runWithDirectPlanThreadDispatch,
   shouldRecoverPendingPlanMessage
@@ -67,28 +67,9 @@ import {
   rpcFailureReason,
   rpcFailureTag
 } from "./rpc-failure.js"
+import { providerRecoveryOf } from "./provider-recovery.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
-
-const harnessUnavailableMessage = (
-  capabilities: ReadonlyArray<HarnessCapability> | undefined,
-  selection: { cli: CliKind; model: string; mode: PermissionMode }
-): string | undefined => {
-  if (capabilities === undefined) return undefined
-
-  const capability = capabilities.find(({ cli }) => cli === selection.cli)
-  if (capability === undefined) {
-    const label = selection.cli === "claude" ? "Claude Code" : "Codex CLI"
-    return `${label} is unavailable. Choose an installed harness to continue.`
-  }
-  if (!capability.models.some(({ id }) => id === selection.model)) {
-    return `Model ${selection.model} is unavailable. Choose a supported model to continue.`
-  }
-  if (!capability.modes.some(({ id }) => id === selection.mode)) {
-    return `Mode ${selection.mode} is unavailable. Choose a supported mode to continue.`
-  }
-  return undefined
-}
 
 const initialPlanSplitRatio = (): number => {
   try {
@@ -113,12 +94,17 @@ export function ConversationPane({
   onInitialPromptConsumed,
   onOpenFile,
   environments,
+  providerCatalog,
   onSelectFiles,
+  onSelectChanges,
+  onOpenProviderSettings,
   paneFocused = true
 }: {
   session: Session
   /** Live paired-device catalogue owned by the app-level environment controller. */
   environments: ReadonlyArray<Environment>
+  /** Certified provider connections available on this execution target. */
+  providerCatalog?: ProviderCatalog | null
   /**
    * Which face of the session to show: the transcript, the Plan Review, or both
    * side by side. `split` renders the SAME Plan Review beside the transcript
@@ -151,6 +137,10 @@ export function ConversationPane({
   onOpenFile?: (sessionId: string, path: string) => void
   /** Present Files beside the conversation when follow mode is enabled here. */
   onSelectFiles?: () => void
+  /** Open the canonical Changes view from uncertain-mutation recovery. */
+  onSelectChanges?: () => void
+  /** Open provider settings for auth, target, migration, or certification recovery. */
+  onOpenProviderSettings?: () => void
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -224,6 +214,9 @@ export function ConversationPane({
     }
   }, [convo.planDraftPresentationNonce, onPlanDraftAvailable, session.id])
   const canonicalPlan = usePlanDocument(session.id)
+  const canApprovePlan =
+    canonicalPlan.canApprove &&
+    matchesCanonicalPlan(canonicalPlan.document, convo.plan)
   const initialThreadDispatches = useRef(new Set<string>())
   // A direct reply RPC persists its pending message before it finishes routing.
   // Plan.watch can publish that intermediate revision, so tell the recovery
@@ -314,24 +307,26 @@ export function ConversationPane({
     [effectivePlanSplitRatio, planSplitRowWidth]
   )
 
-  // Background tasks. Gated on the HARNESS's capability, read from discovery —
-  // only Claude reports a live task set and accepts a per-task stop, so the dock
-  // stays hidden elsewhere rather than offering a button with nothing to aim at.
-  const clisQuery = useQuery({ queryKey: ["clis"], queryFn: () => rpc.discoveryList() })
-  /**
-   * The model a handed-off message runs on: the operator's own default for this
-   * harness (Settings · Providers), NOT this chat's pinned model — the point of
-   * handing off is to escape this chat's setup. Null when they've never set one,
-   * which means "leave the new chat on whatever it starts with".
-   */
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
-  const capabilitiesQuery = useQuery({
-    queryKey: ["model-capabilities"],
-    queryFn: () => rpc.modelsCapabilities()
-  })
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
-  const composerDisabledReason = harnessUnavailableMessage(capabilitiesQuery.data, convo)
+  const providerRecovery = providerCatalog
+    ? providerRecoveryOf(providerCatalog, {
+        ...convo,
+        connectionSelectionRequired: session.connectionSelectionRequired,
+        modelSelectionRequired: session.modelSelectionRequired,
+        targetId: session.environmentId ?? "desktop",
+        target: environments.find((environment) => environment.id === session.environmentId)
+      })
+    : undefined
+  const composerDisabledReason = typeof providerRecovery === "string"
+    ? providerRecovery
+    : providerRecovery?.message
+  const mutationRecovery = useMutation({
+    mutationFn: (input: { readonly runId: string; readonly callId: string }) =>
+      rpc.sessionsResolveRuntimeRecovery(session.id, input.runId, input.callId),
+    onSuccess: publishSessionUpdate
+  })
   // Conversation text-size multiplier, scoped to the transcript wrapper below via
   // a `--sb-font-scale` CSS var. Set HERE rather than on document.documentElement
   // on purpose: the shared `.sb-md` calc() rules must only scale inside the
@@ -339,10 +334,10 @@ export function ConversationPane({
   // same markdown but stay put, per the setting's stated scope. Elements outside
   // this wrapper never see the var, so their calc() falls back to 1×.
   const fontScale = clampFontScale(providersQuery.data?.fontScale)
-  const handoffModel = providersQuery.data?.providers?.[convo.cli]?.defaultModel ?? null
-  const backgroundTasksSupported =
-    clisQuery.data?.find((c) => c.kind === convo.cli)?.backgroundTasks ?? false
-  const bgTasks = useBackgroundTasks(session.id, backgroundTasksSupported)
+  const handoffModel = providerCatalog?.connections
+    .flatMap(({ models }) => models)
+    .find(({ id }) => id === convo.modelId)?.label ?? null
+  const bgTasks = useBackgroundTasks(session.id)
 
   /**
    * Context accounting for the meter.
@@ -353,8 +348,7 @@ export function ConversationPane({
    * the harness reporting context at all — the meter renders nothing when
    * `triggerAt` is null, and asking for a snapshot we would not draw is waste.
    */
-  const contextReporting =
-    clisQuery.data?.find((c) => c.kind === convo.cli)?.contextReporting ?? false
+  const contextReporting = true
   /**
    * The session's context accounting.
    *
@@ -365,17 +359,12 @@ export function ConversationPane({
    * appear at all. It also fired one RPC per token update. The live number comes
    * from `convo.tokens` instead.
    *
-   * It IS keyed on the harness and model, because the trigger point is derived
-   * from them: a session switched from Claude to Codex has a different window
-   * and therefore a different budget. Keyed on the session alone, the meter and
-   * the Compact now action would keep pointing at the old harness's numbers —
-   * and because a disabled query still serves its last data, switching to a
-   * harness that reports nothing (Cursor) would leave the previous harness's
-   * meter on screen rather than hiding it.
+   * It is keyed on the exact connection and model because their context windows
+   * can differ even within one provider.
    */
   const [requested, setRequested] = useState(false)
   const contextQuery = useQuery({
-    queryKey: ["context", session.id, activeChat.id, convo.cli, convo.model],
+    queryKey: ["context", session.id, activeChat.id, convo.connectionId, convo.modelId],
     queryFn: () => rpc.contextState(session.id, activeChat.id),
     enabled: contextReporting,
     /**
@@ -502,12 +491,6 @@ export function ConversationPane({
         publishSessionUpdate(updated)
         if (item === undefined) return
         const actor = getConversationActor(updated, updated.activeChatId)
-        // `createChat` activates the new chat, so this is the chat the operator is
-        // now looking at. Put it on the default model before the send, so the very
-        // first turn runs on the intended harness rather than switching under it.
-        if (handoffModel !== null && handoffModel !== convo.model) {
-          actor.send({ type: "SET_HARNESS", cli: convo.cli, model: handoffModel })
-        }
         actor.send({
           type: "SEND",
           text: item.text,
@@ -636,7 +619,7 @@ export function ConversationPane({
 
   const activeAgentTranscript = activeSubagent === null ? null : {
     message: activeSubagent.message,
-    cli: activeSubagent.cli ?? convo.cli
+    providerId: session.providerId
   }
 
   // Drilling into an agent shows its children AND its own transcript; a crumb
@@ -664,7 +647,7 @@ export function ConversationPane({
       draft={canonicalPlan.draft}
       syncState={canonicalPlan.state}
       syncError={canonicalPlan.error ?? convo.planActionError}
-      canApprove={canonicalPlan.canApprove}
+      canApprove={canApprovePlan}
       compact={view === "split"}
       patch={convo.patch}
       knownFiles={knownFiles}
@@ -913,14 +896,26 @@ export function ConversationPane({
           </button>
         </div>
       )}
-      {composerDisabledReason !== undefined && (
-        <div
-          role="alert"
-          className="flex flex-none items-center border-b border-yellow/30 bg-yellow/5 px-3 py-2 text-[11px] text-yellow"
-        >
-          {composerDisabledReason}
-        </div>
+      {typeof providerRecovery !== "string" && providerRecovery !== undefined && (
+        <RuntimeRecoveryCard
+          title={providerRecovery.title}
+          message={providerRecovery.message}
+          actionLabel="Open providers"
+          onAction={() => onOpenProviderSettings?.()}
+        />
       )}
+      {session.runtimeRecovery?.uncertainMutations.map((mutation) => (
+        <RuntimeRecoveryCard
+          key={`${mutation.runId}:${mutation.callId}`}
+          title="Inspect an uncertain workspace mutation"
+          message="Jingler restarted before this tool settled. The call will not be replayed; inspect the workspace before continuing."
+          detail={`${mutation.toolId} · ${mutation.targetCategory ?? "workspace"} · ${mutation.startedAt}`}
+          actionLabel={mutationRecovery.isPending ? "Saving…" : "Mark inspected"}
+          actionDisabled={mutationRecovery.isPending}
+          onAction={() => mutationRecovery.mutate({ runId: mutation.runId, callId: mutation.callId })}
+          onInspect={() => onSelectChanges?.()}
+        />
+      ))}
       {activeAgentTranscript !== null ? (
         <AgentView agent={activeAgentTranscript} />
       ) : (
@@ -930,7 +925,6 @@ export function ConversationPane({
           loadingHistory={convo.loadingHistory}
           onLoadEarlier={convo.loadOlder}
           mode={convo.mode}
-          cli={convo.cli}
           skills={convo.skills}
           files={convo.files}
           paused={convo.paused}
@@ -978,11 +972,14 @@ export function ConversationPane({
               ? `Hand off — run this in a new chat on ${handoffModel}`
               : "Hand off — run this in a new chat"
           }
-          model={convo.model}
-          catalog={convo.catalog}
-          capabilities={capabilitiesQuery.data}
+          providerCatalog={providerCatalog}
+          connectionId={convo.connectionId}
+          providerId={convo.providerId}
+          modelId={convo.modelId}
           composerDisabledReason={composerDisabledReason}
-          onSetHarness={convo.setHarness}
+          onSetModel={({ connectionId, providerId, modelId }) =>
+            convo.setModel(connectionId, providerId, modelId)
+          }
           onSend={sendPrompt}
           onStop={convo.stop}
           onDecideGate={convo.decideGate}
@@ -993,13 +990,13 @@ export function ConversationPane({
           question={convo.question}
           onAnswerQuestion={convo.answerQuestion}
           onApprovePlan={
-            canonicalPlan.canApprove && canonicalPlan.document !== null
+            canApprovePlan && canonicalPlan.document !== null
               ? (id, executionMode) =>
                   convo.approvePlan(id, executionMode, canonicalPlan.document?.revision)
               : undefined
           }
           onResumePlan={
-            canonicalPlan.canApprove && canonicalPlan.document !== null
+            canApprovePlan && canonicalPlan.document !== null
               ? (id) => convo.resumePlan(id, canonicalPlan.document?.revision)
               : undefined
           }
@@ -1032,7 +1029,6 @@ export function ConversationPane({
           // transcript is on screen — only the focused pane still has to be checked.
           autoFocusComposer={paneFocused}
           focusKey={activeChat.id}
-          useJinglerTools={providersQuery.data?.openConnector?.preferJinglerTools ?? true}
           followAgent={fileBrowser.followEnabled}
           onToggleFollowAgent={toggleFollowAgent}
           archived={
@@ -1049,11 +1045,11 @@ export function ConversationPane({
         />
       )}
       {/*
-        Background tasks dock — harness work that OUTLIVES this turn. Sits below
+        Background tasks dock — runtime work that OUTLIVES this turn. Sits below
         the conversation (not in the sub-agent tab bar, which is per-run and
         cleared on the next turn) so a task the operator needs to stop can't be
-        swept away while it is still running. Renders nothing when the harness
-        has no per-task support or there is nothing to show.
+        swept away while it is still running. Renders nothing when there is no
+        task to show.
       */}
       {viewingTask && (
         <BackgroundTaskOutput
@@ -1064,7 +1060,7 @@ export function ConversationPane({
       )}
       <BackgroundTaskDock
         tasks={bgTasks.tasks}
-        supported={backgroundTasksSupported}
+        supported
         onStop={bgTasks.stop}
         onDismiss={bgTasks.dismiss}
         onView={(taskId) => {
