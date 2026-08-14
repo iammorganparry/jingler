@@ -10,6 +10,8 @@ export interface ManagedProviderEnvironment extends Readonly<
   readonly JINGLER_PROVIDER_ACCESS: string;
   readonly JINGLER_PROVIDER_EXPIRES_AT: string;
   readonly JINGLER_PROVIDER_BASE_URL: string;
+  readonly JINGLER_WEB_SEARCH_PROVIDER: string;
+  readonly JINGLER_WEB_SEARCH_URL: string;
 }
 
 const base64Url = (value: string): string =>
@@ -43,6 +45,7 @@ export const managedProviderEnvironment = (input: {
   readonly origin: string;
   readonly sessionId: string;
   readonly nonce: string;
+  readonly webSearchProvider?: "exa" | "firecrawl";
 }): ManagedProviderEnvironment => {
   const baseUrl = `${input.origin.replace(/\/$/u, "")}/v1/provider/${input.capability.proxy}/${encodeURIComponent(input.sessionId)}${input.capability.proxy === "codex" ? "/v1" : ""}`;
   return {
@@ -53,5 +56,10 @@ export const managedProviderEnvironment = (input: {
     JINGLER_PROVIDER_ACCESS: proxyAccess(input.capability, input.nonce),
     JINGLER_PROVIDER_EXPIRES_AT: String(input.capability.expiresAt * 1_000),
     JINGLER_PROVIDER_BASE_URL: baseUrl,
+    JINGLER_WEB_SEARCH_PROVIDER: input.webSearchProvider ?? "",
+    JINGLER_WEB_SEARCH_URL:
+      input.webSearchProvider === undefined
+        ? ""
+        : `${input.origin.replace(/\/$/u, "")}/v1/web-search/${input.webSearchProvider}/${encodeURIComponent(input.sessionId)}`,
   };
 };

@@ -2,6 +2,7 @@ import {
   ManagedRuntimeProviderSelection,
   managedRuntimeActionForOperation,
   type ManagedProviderCapability as ManagedProviderCapabilityValue,
+  type ManagedWebSearchCapability,
   type ManagedRuntimeProviderSelection as ManagedRuntimeProviderSelectionValue,
   type ManagedRuntimeAction,
   type RemoteSessionCommand,
@@ -55,6 +56,7 @@ interface RuntimeMetadata {
   readonly authorized: boolean;
   readonly providerConnection: ManagedProviderCapabilityValue;
   readonly modelId: ManagedRuntimeProviderSelectionValue["modelId"];
+  readonly webSearchCapabilities?: ReadonlyArray<ManagedWebSearchCapability>;
   readonly githubCapabilityHandle: string | null;
   readonly repositorySlug: string | null;
   readonly providerTokenHash: string | null;
@@ -68,6 +70,8 @@ const METADATA_KEY = "runtime-metadata";
 const JOURNAL_KEY = "session-journal";
 const PROVIDER_AUTHORIZATION_PATH =
   /^\/v1\/provider-authorization\/(codex|claude)$/u;
+const WEB_SEARCH_AUTHORIZATION_PATH =
+  /^\/v1\/web-search-authorization\/(exa|firecrawl)$/u;
 
 const shellQuote = (value: string): string =>
   `'${value.replaceAll("'", "'\\''")}'`;
@@ -420,6 +424,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         origin: managedRuntimeSandboxOrigin(this.env),
         sessionId: command.sessionId,
         nonce: crypto.randomUUID().replaceAll("-", ""),
+        webSearchProvider: (metadata.webSearchCapabilities ?? [])[0]?.provider,
       });
       await this.ctx.storage.put(METADATA_KEY, {
         ...metadata,
@@ -662,6 +667,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         authorized: true,
         providerConnection: body.providerConnection,
         modelId: body.modelId,
+        webSearchCapabilities: body.webSearchCapabilities,
         githubCapabilityHandle: body.githubCapabilityHandle,
         repositorySlug: body.repositorySlug ?? previous?.repositorySlug ?? null,
         providerTokenHash: previous?.providerTokenHash ?? null,
@@ -702,6 +708,17 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         await this.ctx.storage.put(METADATA_KEY, {
           ...next,
           providerConnection: providerConnection ?? metadata.providerConnection,
+          webSearchCapabilities:
+            snapshot?.credentialCapabilities.flatMap((capability) =>
+              (capability.provider === "exa" || capability.provider === "firecrawl") &&
+              capability.expiresAt > now
+                ? [{
+                    provider: capability.provider,
+                    handle: capability.handle,
+                    expiresAt: capability.expiresAt
+                  }]
+                : []
+            ) ?? [],
           githubCapabilityHandle:
             snapshot?.credentialCapabilities.find(
               (capability) =>
@@ -804,6 +821,33 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       return json({
         subject: metadata.subject,
         capabilityHandle: metadata.providerConnection.handle,
+      });
+    }
+
+    const webSearchAuthorization = url.pathname.match(
+      WEB_SEARCH_AUTHORIZATION_PATH,
+    );
+    if (webSearchAuthorization !== null && request.method === "POST") {
+      const token = bearerManagedGrant(request);
+      const tokenMatches =
+        token !== null &&
+        metadata.providerTokenHash !== null &&
+        (await sha256Hex(token)) === metadata.providerTokenHash;
+      const capability = (metadata.webSearchCapabilities ?? []).find(
+        (candidate) => candidate.provider === webSearchAuthorization[1],
+      );
+      if (
+        !metadata.authorized ||
+        metadata.processId === null ||
+        !tokenMatches ||
+        capability === undefined ||
+        capability.expiresAt <= Math.floor(Date.now() / 1_000)
+      ) {
+        return json({ error: "WebSearch authorization unavailable" }, 403);
+      }
+      return json({
+        subject: metadata.subject,
+        capabilityHandle: capability.handle,
       });
     }
 

@@ -1,12 +1,18 @@
 import { join } from "node:path"
 import type { PiRunSpec } from "@jingler/core"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
 import { SecretStore } from "../../secret-store.js"
 import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
+import { BrowserControlPort } from "../../browser-control-port.js"
+import {
+  browserWebSearchPort,
+  WebSearchService,
+  withWebSearchFallback
+} from "../../web-search.js"
 import { ProviderConnections } from "../providers/provider-connections.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { ImportedMcpService } from "../resources/imported-mcp-service.js"
@@ -52,6 +58,8 @@ export const makePiAgentRuntimeLive = (
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
     const workspace = yield* makeWorkspaceInspectionPort
+    const webSearch = yield* Effect.serviceOption(WebSearchService)
+    const browserControl = yield* Effect.serviceOption(BrowserControlPort)
     const mutations = yield* makeWorkspaceMutationPort
     const credentials = new AgentSecretStore(secretStore)
 
@@ -116,6 +124,14 @@ export const makePiAgentRuntimeLive = (
         sessionId: spec.piSessionId ?? spec.runId
       }),
       createToolRegistry: (spec, context, tracker) => {
+        const runWebSearch = Option.isSome(webSearch)
+          ? Option.isSome(browserControl) && context.mcp?.browser !== undefined
+            ? withWebSearchFallback(
+                webSearch.value,
+                browserWebSearchPort(browserControl.value.forSession(spec.sessionId))
+              )
+            : webSearch.value
+          : undefined
         if (!tracker) {
           return Effect.fail(
             new AgentRuntimeError({
@@ -139,6 +155,7 @@ export const makePiAgentRuntimeLive = (
             context,
             cwd: spec.cwd,
             workspace,
+            ...(runWebSearch === undefined ? {} : { webSearch: runWebSearch }),
             mcp: {
               ...context.mcp,
               imported: managedMcp.map((server) =>

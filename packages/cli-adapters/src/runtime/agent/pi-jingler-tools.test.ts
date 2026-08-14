@@ -2,7 +2,7 @@ import { defaultPlan } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
-import { createJinglerControlTools } from "./pi-jingler-tools.js"
+import { createJinglerControlTools, createJinglerTools } from "./pi-jingler-tools.js"
 
 const runtimeContext = (overrides: Partial<AgentRuntimeContext> = {}): AgentRuntimeContext => ({
   ...inactiveRuntimeActivity,
@@ -11,6 +11,27 @@ const runtimeContext = (overrides: Partial<AgentRuntimeContext> = {}): AgentRunt
   saveDraftPlan: () => Effect.void,
   proposePlan: () => Effect.succeed({ _tag: "Reject" }),
   ...overrides
+})
+
+describe("Jingler target-owned tools", () => {
+  it("registers WebSearch only when the runtime target supplies an executable route", async () => {
+    const withoutSearch = await Effect.runPromise(createJinglerTools({
+      context: runtimeContext(),
+      cwd: "/workspace"
+    }))
+    expect(withoutSearch.capabilitiesFor("conversation", "ask").map(({ id }) => id))
+      .not.toContain("web_search")
+
+    const withSearch = await Effect.runPromise(createJinglerTools({
+      context: runtimeContext(),
+      cwd: "/workspace",
+      webSearch: {
+        search: () => Effect.succeed({ route: "native", results: [] })
+      }
+    }))
+    expect(withSearch.capabilitiesFor("conversation", "ask").map(({ id }) => id))
+      .toContain("web_search")
+  })
 })
 
 describe("Jingler pi control tools", () => {

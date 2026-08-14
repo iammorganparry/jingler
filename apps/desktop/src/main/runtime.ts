@@ -41,6 +41,9 @@ import {
   BackgroundTaskStore,
   UsageService,
   WorkspaceService,
+  WebSearchCredentialService,
+  WebSearchService,
+  makeWebSearchService,
   RuntimeDiagnostics,
   RuntimeRecoveryService
 } from "@jingler/cli-adapters"
@@ -113,7 +116,17 @@ const EmbeddedPiRuntimeLive = e2ePiFixture === null
       configureToolRegistry: configureE2ePiTools
     })
 
+const WebSearchLive = Layer.effect(
+  WebSearchService,
+  makeWebSearchService()
+).pipe(
+  Layer.provide(WebSearchCredentialService.Default),
+  Layer.provide(SecretStoreLayer),
+  Layer.provide(ConfigService.Default)
+)
+
 const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
+  Layer.provide(WebSearchLive),
   Layer.provide(AssetLayer),
   Layer.provide(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),

@@ -75,8 +75,9 @@ export class WebSearchCredentialService extends Effect.Service<WebSearchCredenti
         ]),
         resolveKey: (provider: WebSearchProvider) =>
           resolve(provider).pipe(Effect.map((credential) => credential?.apiKey ?? null)),
-        set: (input: SetWebSearchCredentialInput) =>
-          credentials.writeWebSearch(input.provider, {
+        set: (input: SetWebSearchCredentialInput) => {
+          const other = input.provider === "exa" ? "firecrawl" : "exa"
+          return credentials.writeWebSearch(input.provider, {
             apiKey: input.apiKey,
             validatedAt: null,
             cloudSynced: false
@@ -94,8 +95,11 @@ export class WebSearchCredentialService extends Effect.Service<WebSearchCredenti
                 )
               )
             ),
+            Effect.zipRight(syncCloud(other, null)),
+            Effect.zipRight(credentials.deleteWebSearch(other).pipe(Effect.ignore)),
             Effect.zipRight(statusFor(input.provider))
-          ),
+          )
+        },
         markValidated: (
           provider: WebSearchProvider,
           options: { readonly cloudSynced: boolean; readonly validatedAt?: string }

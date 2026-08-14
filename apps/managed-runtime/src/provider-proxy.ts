@@ -6,7 +6,9 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   "api.github.com",
   "api.openai.com",
   "chatgpt.com",
-  "api.anthropic.com"
+  "api.anthropic.com",
+  "api.exa.ai",
+  "api.firecrawl.dev"
 ])
 
 const BoundedIdentifier = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))
@@ -14,7 +16,14 @@ const AuthorizationHeader = Schema.String.pipe(Schema.minLength(8), Schema.maxLe
 const ProviderCredential = Schema.Struct({
   authorizationHeader: AuthorizationHeader,
   upstream: Schema.optional(
-    Schema.Literal("github-api", "openai-api", "chatgpt-codex", "anthropic-api")
+    Schema.Literal(
+      "github-api",
+      "openai-api",
+      "chatgpt-codex",
+      "anthropic-api",
+      "exa-api",
+      "firecrawl-api"
+    )
   ),
   accountId: Schema.optional(BoundedIdentifier)
 })
@@ -110,7 +119,7 @@ export const resolveProviderCredential = async (
   env: ManagedRuntimeEnv,
   subject: string,
   capabilityHandle: string,
-  provider: "github" | "codex" | "claude" = "github"
+  provider: "github" | "codex" | "claude" | "exa" | "firecrawl" = "github"
 ): Promise<ProviderCredential | null> => {
   const response = await env.AUTH_STATE.getByName(subject).fetch(
     "https://auth-state.internal/v1/capabilities/resolve",
@@ -160,7 +169,7 @@ export const resolveProviderCredential = async (
 export const proxyProviderRequest = async (
   input: {
     readonly subject: string
-    readonly provider?: "github" | "codex" | "claude"
+    readonly provider?: "github" | "codex" | "claude" | "exa" | "firecrawl"
     readonly gitSmartHttp?: boolean
     readonly capabilityHandle: string
     readonly upstreamUrl: string
@@ -208,24 +217,28 @@ export const proxyProviderRequest = async (
       ? "anthropic-api"
       : input.provider === "codex"
         ? (credential.upstream ?? "openai-api")
-        : "github-api"
+        : input.provider === "exa"
+          ? "exa-api"
+          : input.provider === "firecrawl"
+            ? "firecrawl-api"
+            : "github-api"
   const validDestination =
     (expectedUpstream === "github-api" &&
       (upstream.hostname === "github.com" || upstream.hostname === "api.github.com")) ||
     (expectedUpstream === "openai-api" && upstream.hostname === "api.openai.com") ||
     (expectedUpstream === "chatgpt-codex" && upstream.hostname === "chatgpt.com") ||
-    (expectedUpstream === "anthropic-api" && upstream.hostname === "api.anthropic.com")
+    (expectedUpstream === "anthropic-api" && upstream.hostname === "api.anthropic.com") ||
+    (expectedUpstream === "exa-api" && upstream.hostname === "api.exa.ai") ||
+    (expectedUpstream === "firecrawl-api" && upstream.hostname === "api.firecrawl.dev")
   if (!validDestination) {
     return Response.json({ error: "Provider capability destination mismatch" }, { status: 403 })
   }
   const headers = new Headers({
     accept:
       input.accept ??
-      (input.provider === "codex"
-        ? "application/json"
-        : input.provider === "claude"
-          ? "application/json"
-          : "application/vnd.github+json"),
+      (input.provider === "github"
+        ? "application/vnd.github+json"
+        : "application/json"),
     "user-agent": input.userAgent ?? "Jingler-Managed-Runtime"
   })
   if (

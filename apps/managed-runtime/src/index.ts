@@ -557,6 +557,57 @@ export default {
         }
       }
     }
+    const webSearchProxyMatch = url.pathname.match(
+      /^\/v1\/web-search\/(exa|firecrawl)\/([^/]+)$/u,
+    );
+    if (webSearchProxyMatch !== null && request.method === "POST") {
+      const provider = webSearchProxyMatch[1] as "exa" | "firecrawl";
+      const sessionId = decodeURIComponent(webSearchProxyMatch[2] ?? "");
+      const authorization = await env.MANAGED_SESSION.getByName(
+        sessionId,
+      ).fetch(
+        `https://managed-session.internal/v1/web-search-authorization/${provider}`,
+        {
+          method: "POST",
+          headers: {
+            authorization: request.headers.get("authorization") ?? "",
+          },
+        },
+      );
+      if (!authorization.ok) {
+        return json({ error: "WebSearch authorization unavailable" }, 403);
+      }
+      const scope = providerAuthorizationScope(await authorization.json());
+      if (scope === null) {
+        return json({ error: "WebSearch authorization unavailable" }, 403);
+      }
+      return proxyProviderRequest(
+        {
+          provider,
+          subject: scope.subject,
+          capabilityHandle: scope.capabilityHandle,
+          upstreamUrl:
+            provider === "exa"
+              ? "https://api.exa.ai/search"
+              : "https://api.firecrawl.dev/v1/search",
+          method: "POST",
+          body: request.body,
+          contentType: request.headers.get("content-type"),
+          accept: request.headers.get("accept"),
+          contentLength: Number(request.headers.get("content-length") ?? 0),
+        },
+        {
+          resolve: (subject, handle) =>
+            resolveProviderCredential(env, subject, handle, provider),
+          fetch,
+          maxEgressBytes: Math.min(
+            Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES),
+            512 * 1_024,
+          ),
+        },
+      );
+    }
+
     const providerProxyMatch = url.pathname.match(
       /^\/v1\/provider\/(codex|claude)\/([^/]+)(\/.*)$/u,
     );

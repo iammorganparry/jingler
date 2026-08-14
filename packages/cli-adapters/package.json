@@ -39,6 +39,7 @@
     "./workspace": "./src/workspace.ts",
     "./transcripts": "./src/transcripts.ts",
     "./workspace-handoff": "./src/workspace-handoff.ts",
+    "./web-search": "./src/web-search.ts",
     "./test-support": "./src/test-support.ts"
   },
   "scripts": {
