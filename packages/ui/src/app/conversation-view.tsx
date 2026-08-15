@@ -445,9 +445,23 @@ export function ConversationView({
   // instead of at its newest message. So a scroll event may only turn the
   // follow OFF when a real gesture (wheel, touch, pointer on the scrollbar,
   // scrolling keys) marked the movement as the operator's.
-  const userScrollIntent = useRef(false)
+  // Intent is a TIMESTAMP, not a latch. The first version latched a boolean
+  // and cleared it whenever a scroll event landed near the bottom — but while
+  // a reply streams, the per-token bottom-pin IS such an event, so it wiped
+  // the operator's in-flight wheel-up before it travelled the 80px threshold
+  // and the next token yanked the view back down: the "bouncing" transcript.
+  // A recent-gesture window needs no clearing, so programmatic pins can't
+  // steal it; it simply expires.
+  const lastUserScrollAt = useRef(0)
   const markUserScroll = useCallback(() => {
-    userScrollIntent.current = true
+    lastUserScrollAt.current = performance.now()
+  }, [])
+  const onUserWheel = useCallback((event: { deltaY: number }) => {
+    lastUserScrollAt.current = performance.now()
+    // Wheeling UP is an unambiguous "stop following" — honour it immediately
+    // rather than waiting for the resulting scroll to clear the threshold,
+    // which a mid-stream pin could pre-empt.
+    if (event.deltaY < 0) stick.current = false
   }, [])
   const onScroll = useCallback(() => {
     const el = scrollRef.current
@@ -455,12 +469,9 @@ export function ConversationView({
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
     if (nearBottom) {
       stick.current = true
-      // Back at the bottom: the gesture is spent. Later measurement churn
-      // must not inherit it and silently pause the follow again.
-      userScrollIntent.current = false
       return
     }
-    if (userScrollIntent.current) stick.current = false
+    if (performance.now() - lastUserScrollAt.current < 600) stick.current = false
   }, [])
 
   return (
@@ -479,7 +490,7 @@ export function ConversationView({
           ref={scrollRef}
           data-testid="conversation-scroll"
           onScroll={onScroll}
-          onWheel={markUserScroll}
+          onWheel={onUserWheel}
           onTouchMove={markUserScroll}
           onPointerDown={markUserScroll}
           onKeyDown={markUserScroll}
