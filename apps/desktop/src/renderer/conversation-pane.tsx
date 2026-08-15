@@ -969,6 +969,27 @@ export function ConversationPane({
           onAction={() => onOpenProviderSettings?.()}
         />
       )}
+      {mutationRecovery.error !== null && (
+        <div
+          role="alert"
+          className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
+        >
+          <span className="min-w-0 flex-1">
+            {rpcFailureMessage(
+              mutationRecovery.error,
+              "Could not mark the mutation inspected."
+            )}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss mutation recovery error"
+            onClick={() => mutationRecovery.reset()}
+            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {session.runtimeRecovery?.uncertainMutations.map((mutation) => (
         <RuntimeRecoveryCard
           key={`${mutation.runId}:${mutation.callId}`}

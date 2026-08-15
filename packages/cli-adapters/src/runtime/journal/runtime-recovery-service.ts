@@ -82,7 +82,13 @@ export class RuntimeRecoveryService extends Effect.Service<RuntimeRecoveryServic
           const pending = session.runtimeRecovery?.uncertainMutations.some(
             (mutation) => mutation.runId === runId && mutation.callId === callId
           ) ?? false
-          if (!pending) return yield* fail("Mutation recovery is no longer pending")
+          // A banner can outlive its store entry — an earlier click, a second
+          // window, or a resolution from before a restart. Resolving something
+          // already resolved IS the requested outcome, so hand back the
+          // current session (which carries no pending entry) and let the stale
+          // banner clear, rather than failing a click that looks like it did
+          // nothing.
+          if (!pending) return session
           yield* journal(runId).acknowledge(callId).pipe(
             Effect.mapError(() => new RuntimeRecoveryError({ message: "Could not update the runtime journal" }))
           )
