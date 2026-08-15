@@ -41,6 +41,40 @@ export class ConfigError extends Schema.TaggedError<ConfigError>()(
   }
 ) {}
 
+/** Renderer-safe admission failure for one automatic Offload Compute job. */
+export class OffloadAdmissionError extends Schema.TaggedError<OffloadAdmissionError>()(
+  "OffloadAdmissionError",
+  {
+    reason: Schema.Literal(
+      "authentication",
+      "disabled",
+      "invalid-input",
+      "authorization",
+      "concurrency",
+      "unavailable"
+    ),
+    message: Schema.String
+  }
+) {}
+
+/** Renderer-safe failure while capturing or transferring an offload snapshot. */
+export class OffloadSnapshotError extends Schema.TaggedError<OffloadSnapshotError>()(
+  "OffloadSnapshotError",
+  {
+    reason: Schema.Literal(
+      "not-git",
+      "moving-worktree",
+      "unsafe-path",
+      "secret-path",
+      "unsupported-file",
+      "too-large",
+      "capture-failed",
+      "upload-failed"
+    ),
+    message: Schema.String
+  }
+) {}
+
 /** Renderer-safe failure from pairing or managing an execution environment. */
 export class EnvironmentError extends Schema.TaggedError<EnvironmentError>()(
   "EnvironmentError",

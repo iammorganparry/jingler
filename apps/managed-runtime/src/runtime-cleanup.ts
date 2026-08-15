@@ -1,4 +1,5 @@
 import type { ManagedRuntimeEnv } from "./runtime-env.js"
+import { INTERNAL_ROUTES } from "./internal-routes.js"
 
 const unregisterRuntimeSession = (
   env: ManagedRuntimeEnv,
@@ -6,7 +7,7 @@ const unregisterRuntimeSession = (
   sessionId: string
 ): Promise<Response> =>
   env.MANAGED_ACCOUNT.getByName(subject).fetch(
-    "https://managed-account.internal/v1/sessions/unregister",
+    INTERNAL_ROUTES.managedAccount.sessionUnregister,
     {
       method: "POST",
       headers: { "content-type": "application/json" },

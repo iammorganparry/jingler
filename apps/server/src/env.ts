@@ -138,6 +138,10 @@ export const loadEnv = (environment: Environment = process.env) => {
     "MANAGED_ENVIRONMENTS_ENABLED",
     false
   )
+  const offloadComputeEnabled = enabled(environment, "OFFLOAD_COMPUTE_ENABLED", false)
+  if (offloadComputeEnabled && !managedEnvironmentsEnabled) {
+    throw new Error("OFFLOAD_COMPUTE_ENABLED requires MANAGED_ENVIRONMENTS_ENABLED")
+  }
   const authSecret = secret(environment, "BETTER_AUTH_SECRET", "dev-insecure-secret-change-me")
   const cronSecret = secret(environment, "CRON_SECRET", "dev-cron-secret-change-me")
   if (nodeEnv === "production" && Buffer.byteLength(cronSecret, "utf8") < 32) {
@@ -339,6 +343,8 @@ export const loadEnv = (environment: Environment = process.env) => {
     deviceBootstrapTtlSeconds,
     /** Rollback-safe gate: migrations and runtime deploy before this is enabled. */
     managedEnvironmentsEnabled,
+    /** Independent circuit breaker for one-shot automatic compute jobs. */
+    offloadComputeEnabled,
     managedRuntimeUrl,
     managedRuntimeServiceSecret,
     authStateUrl,

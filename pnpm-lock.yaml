@@ -296,6 +296,9 @@ importers:
       effect:
         specifier: ^3.21.4
         version: 3.21.4
+      jose:
+        specifier: 6.2.3
+        version: 6.2.3
     devDependencies:
       '@jingler/tsconfig':
         specifier: workspace:*

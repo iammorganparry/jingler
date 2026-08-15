@@ -23,6 +23,7 @@ import {
   ConfigService,
   WebSearchCredentialService,
   makeAgentRuntimeTitleGenerator,
+  makeOffloadCommandRouter,
   EnvironmentService,
   RemoteSessionService,
   routeSessionOperation,
@@ -196,6 +197,7 @@ import { showNotification, shouldNotify } from "./notifications.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
 import { createZipArchive } from "./zip.js";
+import { primeOffloadSessions } from "./offload-session-primer.js";
 import {
   dialGitHubRelay,
   GitHubRelayConnection,
@@ -2137,6 +2139,8 @@ export const archiveSession = (
 ) =>
   Effect.gen(function* () {
     yield* SessionStore.archive(sessionId, reason);
+    const offload = yield* makeOffloadCommandRouter
+    yield* offload.destroySession(sessionId).pipe(Effect.ignore)
     const route = yield* GitHubAuth.sessionRoutes().pipe(
       Effect.map(
         (routes) =>
@@ -2193,6 +2197,12 @@ export const restoreSession = (sessionId: string) =>
   Effect.gen(function* () {
     yield* SessionStore.restore(sessionId);
     const session = yield* SessionStore.get(sessionId);
+    if (session.worktreePath) {
+      const offload = yield* makeOffloadCommandRouter
+      yield* Effect.forkDaemon(
+        offload.primeSession(session.worktreePath, session.id).pipe(Effect.ignore)
+      )
+    }
     if (
       linkedRelaySession(session) &&
       session.githubInstallationId &&
@@ -4743,6 +4753,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       yield* browserControl.revoke(sessionId);
       yield* preview.deleteSession(sessionId);
       yield* BackgroundTaskStore.clear(sessionId);
+      const offload = yield* makeOffloadCommandRouter
+      yield* offload.destroySession(sessionId).pipe(Effect.ignore)
       yield* SessionStore.remove(sessionId);
       if (relayRoute) {
         yield* GitHubAuth.unlinkSessionRoute(relayRoute.relaySessionId).pipe(
@@ -5231,6 +5243,19 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Config.setContext": (context) => ConfigService.setContext(context),
   "Config.setMemory": (memory) => ConfigService.setMemory(memory),
+  "Config.setOffloadCompute": (offloadCompute) =>
+    Effect.gen(function* () {
+      const updated = yield* ConfigService.setOffloadCompute(offloadCompute)
+      if (!offloadCompute.enabled) return updated
+      const router = yield* makeOffloadCommandRouter
+      const sessions = yield* SessionStore.list()
+      yield* Effect.forkDaemon(
+        primeOffloadSessions(sessions, (cwd, sessionId) =>
+          router.primeSession(cwd, sessionId)
+        )
+      )
+      return updated
+    }),
   "Memory.request": memoryRpcRequest,
   "Memory.suggestions": ({ organizationId, pageId, limit }) =>
     memorySuggestions(organizationId, pageId, limit ?? 5),

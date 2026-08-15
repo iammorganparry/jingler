@@ -22,6 +22,7 @@ import {
 } from "./github-app.js"
 import {
   createGitHubRoutes,
+  managedGitHubCapabilityForRepository,
   type GitHubConnectionStore,
   type GitHubRoutesDependencies,
   type GitHubSessionRouteStore
@@ -45,6 +46,7 @@ const githubInstallation = (
 
 interface Harness {
   readonly routes: ReturnType<typeof createGitHubRoutes>
+  readonly dependencies: GitHubRoutesDependencies
   readonly authorizations: Map<string, GitHubAuthorizationRecord>
   readonly states: Map<string, GitHubCallbackStateRecord & { readonly stateHash: string }>
   readonly setInstallations: (value: ReadonlyArray<GitHubApiInstallation>) => void
@@ -453,6 +455,7 @@ const harness = (): Harness => {
 
   return {
     routes: createGitHubRoutes(() => dependencies),
+    dependencies,
     authorizations,
     states,
     setInstallations: (value) => {
@@ -500,6 +503,23 @@ const connect = async (value: Harness, userId = "user-1"): Promise<Response> => 
 }
 
 describe("GitHub connection routes", () => {
+  it("proves managed access to the exact requested repository", async () => {
+    const value = harness()
+    expect((await connect(value)).status).toBe(302)
+    value.setRepositories([{ id: "301", fullName: "acme/widget" }])
+
+    await expect(managedGitHubCapabilityForRepository(
+      "user-1",
+      "acme/widget",
+      () => value.dependencies
+    )).resolves.toMatchObject({ authorizationHeader: "Bearer ghu_user-secret" })
+    await expect(managedGitHubCapabilityForRepository(
+      "user-1",
+      "other/private",
+      () => value.dependencies
+    )).resolves.toBeNull()
+  })
+
   it("completes user authorization and returns renderer-safe identity/installations", async () => {
     const value = harness()
     const callback = await connect(value)

@@ -16,6 +16,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OffloadComputeSettings,
   PublishCheckpoint,
   Session,
   SessionActivity,
@@ -101,6 +102,7 @@ import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useAgentsSettings } from "./use-agents-settings.js";
 import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useEnvironments } from "./use-environments.js";
+import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
 import {
   PluginProvider,
@@ -435,6 +437,18 @@ function AuthedApp({
     browserDock.reconcileSessions(sessions.map((session) => session.id));
   }, [browserDock.reconcileSessions, sessions, sessionsLoaded]);
   const qc = useQueryClient();
+  const offloadSettingsMachine = useMemo(
+    () => createOffloadSettingsMachine({
+      save: (settings) => rpc.configSetOffloadCompute(settings).then((saved) => {
+        qc.setQueryData(["config"], saved);
+        return saved.offloadCompute ?? settings;
+      })
+    }),
+    [qc]
+  );
+  const [offloadSettingsState, sendOffloadSettings] = useMachine(
+    offloadSettingsMachine
+  );
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
   const connector = useConnectorCenter();
   const unifiedMcp = useOpenConnector();
@@ -493,6 +507,13 @@ function AuthedApp({
   const githubConfig = configQuery.data?.github ?? null;
   const gitConfig = configQuery.data?.git ?? null;
   const notificationsConfig = configQuery.data?.notifications ?? null;
+  const persistedOffloadCompute = configQuery.data?.offloadCompute ?? null;
+  useEffect(() => {
+    if (persistedOffloadCompute !== null) {
+      sendOffloadSettings({ type: "SYNC", settings: persistedOffloadCompute });
+    }
+  }, [persistedOffloadCompute, sendOffloadSettings]);
+  const offloadCompute = offloadSettingsState.context.settings;
   // Absent means on — plan mode's commands are read-only.
   const planAutoRun = configQuery.data?.planAutoRun ?? true;
   // Absent means off — ADHD mode shapes completion summaries, so it remains an
@@ -549,6 +570,9 @@ function AuthedApp({
     rpc.configSetNotifications(config).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
+  const saveOffloadCompute = (settings: OffloadComputeSettings) => {
+    sendOffloadSettings({ type: "SET", settings });
+  };
   const savePlanAutoRun = (value: boolean) =>
     rpc.configSetPlanAutoRun(value).then((saved) => {
       qc.setQueryData(["config"], saved);
@@ -1504,6 +1528,17 @@ function AuthedApp({
         onSaveGitConfig={saveGitConfig}
         notificationsConfig={notificationsConfig}
         onSaveNotificationsConfig={saveNotificationsConfig}
+        offloadCompute={offloadCompute}
+        onSaveOffloadCompute={saveOffloadCompute}
+        offloadStatus={
+          offloadSettingsState.matches("saving")
+            ? "priming"
+            : offloadSettingsState.matches("failed")
+              ? "failed"
+              : offloadCompute.enabled
+                ? "ready"
+                : "disabled"
+        }
         webSearch={{
           status: webSearchQuery.data ?? null,
           loading: webSearchQuery.isLoading,
