@@ -11,7 +11,12 @@ export const E2E_HELD_SUBAGENTS_TOOL = "jingler_e2e_held_subagents"
 export const E2E_HOLD_TOOL = "jingler_e2e_hold"
 export const E2E_REVIEW_PAUSE_TOOL = "jingler_e2e_review_pause"
 
-export const E2eBackgroundKind = Schema.Literal("watch", "agent", "complete")
+export const E2eBackgroundKind = Schema.Literal(
+  "watch",
+  "agent",
+  "complete",
+  "legacy-agent"
+)
 export type E2eBackgroundKind = Schema.Schema.Type<typeof E2eBackgroundKind>
 
 const publishAll = (
@@ -112,6 +117,37 @@ const startAgent = (
     { _tag: "BackgroundTasksChanged", ids: [taskId] }
   ])
 
+const startLegacyAgent = (
+  context: AgentRuntimeContext,
+  toolUseId: string
+): Effect.Effect<void> =>
+  publishAll(context, [
+    {
+      _tag: "SubagentStarted",
+      id: toolUseId,
+      name: "Legacy Scout",
+      description: "Inspect the compatibility path",
+      parentId: null
+    },
+    {
+      _tag: "Assistant",
+      text: "Legacy transcript remains visible in Fleet.",
+      agentId: toolUseId
+    }
+  ]).pipe(
+    Effect.tap(() => Effect.sync(() => {
+      Effect.runFork(
+        Effect.sleep("2 seconds").pipe(
+          Effect.zipRight(publishAll(context, [{
+            _tag: "SubagentEnded",
+            id: toolUseId,
+            status: "done"
+          }]))
+        )
+      )
+    }))
+  )
+
 const executeBackgroundFixture = (
   context: AgentRuntimeContext,
   spec: PiRunSpec,
@@ -122,7 +158,9 @@ const executeBackgroundFixture = (
   return (
     kind === "agent"
       ? startAgent(context, taskId, toolUseId)
-      : startWatcher(context, taskId, kind === "complete")
+      : kind === "legacy-agent"
+        ? startLegacyAgent(context, toolUseId)
+        : startWatcher(context, taskId, kind === "complete")
   ).pipe(Effect.as({ started: kind }))
 }
 

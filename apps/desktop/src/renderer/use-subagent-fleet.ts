@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react"
 import { useActorRef, useSelector } from "@xstate/react"
 import type {
+  Subagent,
   SubagentFleetControlAction,
   SubagentFleetControlOutcome,
   SubagentFleetEvent,
@@ -10,7 +11,9 @@ import { SUBAGENT_FLEET_PROTOCOL_VERSION } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
 import {
   MAIN_FLEET_AGENT,
+  legacySubagentNodeId,
   parentPiSessionIdFromFleetEvents,
+  projectLegacySubagents,
   subagentFleetMachine
 } from "./subagent-fleet-machine.js"
 
@@ -18,6 +21,8 @@ export interface SubagentFleetController {
   readonly nodes: ReadonlyArray<SubagentFleetNode>
   readonly selectedId: string
   readonly selectedNode: SubagentFleetNode | null
+  readonly selectedLegacyAgent: Subagent | null
+  readonly legacyAgentFor: (node: SubagentFleetNode) => Subagent | null
   readonly expanded: boolean
   readonly height: number
   readonly pending: boolean
@@ -38,17 +43,27 @@ export function useSubagentFleet(input: {
   readonly chatId: string
   readonly piSessionId: string | null
   readonly events: ReadonlyArray<SubagentFleetEvent>
+  readonly legacyAgents?: ReadonlyArray<Subagent>
 }): SubagentFleetController {
   const parentPiSessionId = parentPiSessionIdFromFleetEvents(
     input.events,
     input.piSessionId ?? `${input.sessionId}:${input.chatId}`
   )
+  const legacyAgents = input.legacyAgents ?? []
+  const projectedLegacy = useMemo(
+    () => projectLegacySubagents(parentPiSessionId, legacyAgents),
+    [parentPiSessionId, legacyAgents]
+  )
+  const events = useMemo(
+    () => [...input.events, ...projectedLegacy],
+    [input.events, projectedLegacy]
+  )
   const actor = useActorRef(subagentFleetMachine, {
     input: { parentPiSessionId }
   })
   useEffect(() => {
-    actor.send({ type: "SYNC", events: input.events })
-  }, [actor, input.events])
+    actor.send({ type: "SYNC", events })
+  }, [actor, events])
   useEffect(() => {
     if (input.piSessionId === null && input.events.length === 0) return
     let active = true
@@ -63,7 +78,7 @@ export function useSubagentFleet(input: {
         actor.send({
           type: "SYNC",
           events: [
-            ...input.events,
+            ...events,
             {
               _tag: "Snapshot",
               version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -87,7 +102,8 @@ export function useSubagentFleet(input: {
   }, [
     actor,
     input.chatId,
-    input.events,
+    events,
+    input.events.length,
     input.piSessionId,
     input.sessionId,
     parentPiSessionId
@@ -97,11 +113,23 @@ export function useSubagentFleet(input: {
     () => context.tree.nodes.find((node) => node.id === context.selectedId) ?? null,
     [context.tree.nodes, context.selectedId]
   )
+  const legacyByNodeId = useMemo(
+    () => new Map(legacyAgents.map((agent) => [
+      legacySubagentNodeId(parentPiSessionId, agent.id),
+      agent
+    ])),
+    [legacyAgents, parentPiSessionId]
+  )
+  const legacyAgentFor = (node: SubagentFleetNode): Subagent | null =>
+    legacyByNodeId.get(node.id) ?? null
 
   return {
     nodes: context.tree.nodes,
     selectedId: context.selectedId,
     selectedNode,
+    selectedLegacyAgent:
+      selectedNode === null ? null : legacyAgentFor(selectedNode),
+    legacyAgentFor,
     expanded: context.expanded,
     height: context.height,
     pending: context.pendingRequestId !== null,

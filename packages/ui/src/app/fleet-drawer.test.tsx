@@ -83,6 +83,31 @@ describe("FleetDrawer", () => {
     )
   })
 
+  it("keeps read-only reviewer transcripts visible and preserves legacy close", () => {
+    const onDismiss = vi.fn()
+    const reviewer = node({ status: "completed" })
+    render(
+      <FleetDrawer
+        nodes={[reviewer]}
+        selectedId={reviewer.id}
+        expanded
+        height={180}
+        onSelect={vi.fn()}
+        onToggle={vi.fn()}
+        onResize={vi.fn()}
+        onControl={vi.fn()}
+        canControl={() => false}
+        canDismiss={() => true}
+        onDismiss={onDismiss}
+      />
+    )
+
+    expect(screen.getByPlaceholderText("Read-only agent").getAttribute("disabled"))
+      .not.toBeNull()
+    fireEvent.click(screen.getByLabelText("Close reviewer"))
+    expect(onDismiss).toHaveBeenCalledWith(reviewer)
+  })
+
   it("collapses to one composer-adjacent summary row", () => {
     render(
       <FleetDrawer

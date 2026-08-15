@@ -561,11 +561,18 @@ export function ConversationPane({
     [activeChat.id]
   )
 
+  const legacyFleetAgents = useMemo(
+    () => convo.reviewer === null
+      ? convo.subagents
+      : [...convo.subagents, convo.reviewer],
+    [convo.reviewer, convo.subagents]
+  )
   const fleet = useSubagentFleet({
     sessionId: session.id,
     chatId: activeChat.id,
     piSessionId: activeChat.piSessionId ?? null,
-    events: convo.subagentFleetEvents
+    events: convo.subagentFleetEvents,
+    legacyAgents: legacyFleetAgents
   })
   const childTranscriptQuery = useQuery({
     queryKey: [
@@ -582,7 +589,10 @@ export function ConversationPane({
       fleet.selectedNode!.parentPiSessionId,
       fleet.selectedNode!.runId
     ),
-    enabled: fleet.selectedNode?.sessionFile !== null && fleet.selectedNode !== null,
+    enabled:
+      fleet.selectedNode !== null &&
+      fleet.selectedLegacyAgent === null &&
+      fleet.selectedNode.sessionFile !== null,
     refetchInterval: fleet.selectedNode?.status === "running" ? 1_500 : false
   })
   const fleetDrawer = (
@@ -596,7 +606,31 @@ export function ConversationPane({
       onSelect={fleet.select}
       onToggle={fleet.toggle}
       onResize={fleet.resize}
+      canControl={(node, action) => {
+        const legacy = fleet.legacyAgentFor(node)
+        if (legacy === null) return true
+        return legacy.status === "working" &&
+          convo.subagents.some(({ id }) => id === legacy.id) &&
+          action === "stop"
+      }}
+      canDismiss={(node) => {
+        const legacy = fleet.legacyAgentFor(node)
+        return legacy !== null &&
+          legacy.status !== "working" &&
+          convo.subagents.some(({ id }) => id === legacy.id)
+      }}
+      onDismiss={(node) => {
+        const legacy = fleet.legacyAgentFor(node)
+        if (legacy !== null) convo.closeSubagent(legacy.id)
+      }}
       onControl={(node, action, message, replyTo) => {
+        const legacy = fleet.legacyAgentFor(node)
+        if (legacy !== null) {
+          if (action === "stop" && legacy.status === "working") {
+            convo.stopSubagent(legacy.id)
+          }
+          return
+        }
         fleet.control(node, action, message, replyTo).catch(() => {})
       }}
       onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
@@ -868,12 +902,20 @@ export function ConversationPane({
       {fleet.selectedId !== MAIN_FLEET_AGENT && fleet.selectedNode ? (
         <FleetAgentView
           node={fleet.selectedNode}
-          messages={childTranscriptQuery.data ?? []}
+          messages={
+            fleet.selectedLegacyAgent === null
+              ? (childTranscriptQuery.data ?? [])
+              : [fleet.selectedLegacyAgent.message]
+          }
           providerId={session.providerId}
-          loading={childTranscriptQuery.isLoading}
-          error={childTranscriptQuery.error
-            ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
-            : null}
+          loading={
+            fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading
+          }
+          error={
+            fleet.selectedLegacyAgent === null && childTranscriptQuery.error
+              ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
+              : null
+          }
           fleetSlot={fleetDrawer}
         />
       ) : (

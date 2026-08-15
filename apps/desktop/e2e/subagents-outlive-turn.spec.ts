@@ -50,6 +50,31 @@ test("Fleet stays composer-adjacent while subagents run and the operator steers 
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
+test("normalized compatibility agents stay inspectable and dismissible in Fleet", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByPlaceholder("Message the agent…").fill("[[legacy-agent]] inspect compatibility")
+  await window.getByPlaceholder("Message the agent…").press("Enter")
+
+  const fleet = window.getByTestId("fleet-drawer")
+  const legacy = fleet.getByRole("button", { name: /Legacy Scout/ })
+  await expect(legacy).toBeVisible({ timeout: 15_000 })
+  await legacy.click()
+  await expect(window.getByTestId("fleet-agent-transcript")).toContainText(
+    "Legacy transcript remains visible in Fleet."
+  )
+  await expect(fleet.getByTestId(/fleet-agent-legacy:/)).toHaveAttribute(
+    "data-agent-status",
+    "completed",
+    { timeout: 15_000 }
+  )
+  await fleet.getByRole("button", { name: "Close Legacy Scout" }).click()
+  await expect(fleet).toBeHidden()
+})
+
 test("selecting a Fleet child shows its session view and Main restores the composer", async ({
   launchApp
 }) => {

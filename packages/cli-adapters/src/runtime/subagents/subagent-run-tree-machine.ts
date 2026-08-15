@@ -7,6 +7,7 @@ import type {
 import { assign, createActor, setup } from "xstate"
 
 const MAX_SEEN_EVENTS = 512
+const MAX_NODE_CLOCKS = 1_024
 const ACTIVE_STATUSES: ReadonlySet<SubagentFleetStatus> = new Set([
   "queued",
   "running",
@@ -14,10 +15,17 @@ const ACTIVE_STATUSES: ReadonlySet<SubagentFleetStatus> = new Set([
   "needs-attention"
 ])
 
+export interface SubagentNodeClock {
+  readonly id: string
+  readonly occurredAt: number
+  readonly present: boolean
+}
+
 export interface SubagentRunTreeContext {
   readonly parentPiSessionId: string
   readonly nodes: ReadonlyArray<SubagentFleetNode>
   readonly seenEventIds: ReadonlyArray<string>
+  readonly nodeClocks: ReadonlyArray<SubagentNodeClock>
   readonly generatedAt: number
   readonly totalActive: number
   readonly omitted: number
@@ -25,6 +33,9 @@ export interface SubagentRunTreeContext {
 }
 
 type RunTreeEvent = { readonly type: "INGEST"; readonly event: SubagentFleetEvent }
+
+const belongsToParent = (parentPiSessionId: string, id: string): boolean =>
+  id.startsWith(`${parentPiSessionId}/`)
 
 const createsCycle = (
   nodes: ReadonlyArray<SubagentFleetNode>,
@@ -58,27 +69,94 @@ const upsert = (
   )
 }
 
+const clockFor = (
+  clocks: ReadonlyArray<SubagentNodeClock>,
+  id: string
+): SubagentNodeClock | undefined => clocks.find((clock) => clock.id === id)
+
+const setClock = (
+  clocks: ReadonlyArray<SubagentNodeClock>,
+  next: SubagentNodeClock
+): ReadonlyArray<SubagentNodeClock> => [
+  ...clocks.filter((clock) => clock.id !== next.id),
+  next
+].slice(-MAX_NODE_CLOCKS)
+
+const withSeen = (
+  context: SubagentRunTreeContext,
+  event: SubagentFleetEvent
+): SubagentRunTreeContext => ({
+  ...context,
+  seenEventIds: [...context.seenEventIds, event.eventId].slice(-MAX_SEEN_EVENTS)
+})
+
+const validNode = (
+  parentPiSessionId: string,
+  node: SubagentFleetNode
+): boolean =>
+  node.parentPiSessionId === parentPiSessionId &&
+  belongsToParent(parentPiSessionId, node.id) &&
+  (node.parentId === null || belongsToParent(parentPiSessionId, node.parentId))
+
 const reconcileSnapshot = (
   current: SubagentRunTreeContext,
   snapshot: SubagentFleetSnapshot
-): ReadonlyArray<SubagentFleetNode> => {
-  if (snapshot.parentPiSessionId !== current.parentPiSessionId) return current.nodes
+): SubagentRunTreeContext => {
+  if (
+    snapshot.parentPiSessionId !== current.parentPiSessionId ||
+    snapshot.nodes.some((node) => !validNode(current.parentPiSessionId, node))
+  ) return current
   const activeIds = new Set(snapshot.nodes.map(({ id }) => id))
-  let nodes: ReadonlyArray<SubagentFleetNode> = current.nodes.map((node) =>
-    ACTIVE_STATUSES.has(node.status) &&
+  let nodes = current.nodes
+  let nodeClocks = current.nodeClocks
+  for (const node of current.nodes) {
+    const clock = clockFor(nodeClocks, node.id)
+    if (
+      ACTIVE_STATUSES.has(node.status) &&
       !activeIds.has(node.id) &&
-      node.updatedAt <= snapshot.generatedAt
+      (clock?.occurredAt ?? node.updatedAt) <= snapshot.generatedAt
+    ) {
+      nodes = upsert(nodes, {
+        ...node,
+        status: "unknown",
+        updatedAt: snapshot.generatedAt,
+        completedAt: snapshot.generatedAt,
+        currentTool: null
+      })
+      nodeClocks = setClock(nodeClocks, {
+        id: node.id,
+        occurredAt: snapshot.generatedAt,
+        present: true
+      })
+    }
+  }
+  for (const node of snapshot.nodes) {
+    const clock = clockFor(nodeClocks, node.id)
+    if (
+      clock &&
+      (clock.occurredAt > snapshot.generatedAt ||
+        (clock.occurredAt === snapshot.generatedAt && !clock.present))
+    ) continue
+    nodes = upsert(nodes, node)
+    nodeClocks = setClock(nodeClocks, {
+      id: node.id,
+      occurredAt: snapshot.generatedAt,
+      present: true
+    })
+  }
+  return {
+    ...current,
+    nodes,
+    nodeClocks,
+    ...(snapshot.generatedAt >= current.generatedAt
       ? {
-          ...node,
-          status: "unknown" as const,
-          updatedAt: snapshot.generatedAt,
-          completedAt: snapshot.generatedAt,
-          currentTool: null
+          generatedAt: snapshot.generatedAt,
+          totalActive: snapshot.totalActive,
+          omitted: snapshot.omitted,
+          activeCapacity: snapshot.activeCapacity
         }
-      : node
-  )
-  for (const node of snapshot.nodes) nodes = upsert(nodes, node)
-  return nodes
+      : {})
+  }
 }
 
 export const reduceSubagentFleetEvent = (
@@ -86,36 +164,56 @@ export const reduceSubagentFleetEvent = (
   event: SubagentFleetEvent
 ): SubagentRunTreeContext => {
   if (context.seenEventIds.includes(event.eventId)) return context
-  const seenEventIds = [
-    ...context.seenEventIds,
-    event.eventId
-  ].slice(-MAX_SEEN_EVENTS)
   if (event._tag === "Snapshot") {
-    return {
-      ...context,
-      nodes: reconcileSnapshot(context, event.snapshot),
-      seenEventIds,
-      generatedAt: Math.max(context.generatedAt, event.snapshot.generatedAt),
-      totalActive: event.snapshot.totalActive,
-      omitted: event.snapshot.omitted,
-      activeCapacity: event.snapshot.activeCapacity
-    }
+    const reconciled = reconcileSnapshot(context, event.snapshot)
+    return reconciled === context ? context : withSeen(reconciled, event)
   }
   if (event._tag === "Remove") {
-    return {
+    if (!belongsToParent(context.parentPiSessionId, event.id)) return context
+    const clock = clockFor(context.nodeClocks, event.id)
+    if (clock && clock.occurredAt > event.occurredAt) return withSeen(context, event)
+    return withSeen({
       ...context,
       nodes: context.nodes.filter((node) => node.id !== event.id),
-      seenEventIds,
+      nodeClocks: setClock(context.nodeClocks, {
+        id: event.id,
+        occurredAt: event.occurredAt,
+        present: false
+      }),
       generatedAt: Math.max(context.generatedAt, event.occurredAt)
-    }
+    }, event)
   }
-  return {
+  if (!validNode(context.parentPiSessionId, event.node)) return context
+  const clock = clockFor(context.nodeClocks, event.node.id)
+  if (
+    clock &&
+    (clock.occurredAt > event.occurredAt ||
+      (clock.occurredAt === event.occurredAt && !clock.present))
+  ) return withSeen(context, event)
+  return withSeen({
     ...context,
     nodes: upsert(context.nodes, event.node),
-    seenEventIds,
+    nodeClocks: setClock(context.nodeClocks, {
+      id: event.node.id,
+      occurredAt: event.occurredAt,
+      present: true
+    }),
     generatedAt: Math.max(context.generatedAt, event.occurredAt)
-  }
+  }, event)
 }
+
+export const emptySubagentRunTree = (
+  parentPiSessionId: string
+): SubagentRunTreeContext => ({
+  parentPiSessionId,
+  nodes: [],
+  seenEventIds: [],
+  nodeClocks: [],
+  generatedAt: 0,
+  totalActive: 0,
+  omitted: 0,
+  activeCapacity: { used: 0, limit: 0 }
+})
 
 export const subagentRunTreeMachine = setup({
   types: {
@@ -126,15 +224,7 @@ export const subagentRunTreeMachine = setup({
 }).createMachine({
   id: "subagent-run-tree",
   initial: "active",
-  context: ({ input }) => ({
-    parentPiSessionId: input.parentPiSessionId,
-    nodes: [],
-    seenEventIds: [],
-    generatedAt: 0,
-    totalActive: 0,
-    omitted: 0,
-    activeCapacity: { used: 0, limit: 0 }
-  }),
+  context: ({ input }) => emptySubagentRunTree(input.parentPiSessionId),
   states: {
     active: {
       on: {
