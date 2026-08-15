@@ -268,19 +268,44 @@ function SessionPaneBody(props: SessionPaneProps) {
     paneWidth === 0 || paneWidth >= SESSION_AUXILIARY_SPLIT_BREAKPOINT
   const [auxiliaryRatio, setAuxiliaryRatio] = useState(initialSessionAuxiliaryRatio)
   const effectiveAuxiliaryRatio = clampedSessionAuxiliaryRatio(auxiliaryRatio, paneWidth)
-  const adjustAuxiliarySplit = useCallback(
-    (deltaX: number) => {
-      if (paneWidth <= 0) return
-      const next = resizedSessionAuxiliaryRatio(effectiveAuxiliaryRatio, paneWidth, deltaX)
-      setAuxiliaryRatio(next)
-      try {
-        localStorage.setItem(SESSION_AUXILIARY_RATIO_KEY, String(next))
-      } catch {
-        /* A private/quota-limited renderer still keeps the in-memory ratio. */
-      }
-    },
-    [effectiveAuxiliaryRatio, paneWidth]
-  )
+  /**
+   * Live drag state for the auxiliary split. A drag emits a delta per
+   * POINTERMOVE, and routing each one through `setAuxiliaryRatio` re-rendered
+   * the entire pane — conversation, composer, and the code view's full Pierre
+   * diff, whose wrapper re-runs its render on every parent render — sixty
+   * times a second. On a session with real changes open, one drag doubled the
+   * renderer's memory. So the drag writes the panel's width to the DOM
+   * directly and React state commits ONCE, on release.
+   */
+  const auxiliaryPanelRef = useRef<HTMLDivElement | null>(null)
+  const dragAuxiliaryRatio = useRef<number | null>(null)
+  const liveAuxiliaryState = useRef({ ratio: effectiveAuxiliaryRatio, paneWidth })
+  liveAuxiliaryState.current = { ratio: effectiveAuxiliaryRatio, paneWidth }
+  const auxiliaryPanelWidth = (ratio: number): string =>
+    `calc(${ratio * 100}% - ${ratio * SESSION_AUXILIARY_SPLIT_HANDLE_WIDTH}px)`
+  const adjustAuxiliarySplit = useCallback((deltaX: number) => {
+    const { ratio, paneWidth: width } = liveAuxiliaryState.current
+    if (width <= 0) return
+    const next = resizedSessionAuxiliaryRatio(
+      dragAuxiliaryRatio.current ?? ratio,
+      width,
+      deltaX
+    )
+    dragAuxiliaryRatio.current = next
+    const panel = auxiliaryPanelRef.current
+    if (panel) panel.style.width = auxiliaryPanelWidth(next)
+  }, [])
+  const commitAuxiliarySplit = useCallback(() => {
+    const next = dragAuxiliaryRatio.current
+    dragAuxiliaryRatio.current = null
+    if (next === null) return
+    setAuxiliaryRatio(next)
+    try {
+      localStorage.setItem(SESSION_AUXILIARY_RATIO_KEY, String(next))
+    } catch {
+      /* A private/quota-limited renderer still keeps the in-memory ratio. */
+    }
+  }, [])
   const openPlanReview = useCallback(
     (stepId?: string) => {
       setTarget(stepId ? { sessionId: props.session.id, stepId } : null)
@@ -594,15 +619,17 @@ function SessionPaneBody(props: SessionPaneProps) {
               <ResizeHandle
                 aria-label={`Resize ${activeContribution?.label ?? "session view"}`}
                 onResize={adjustAuxiliarySplit}
+                onResizeEnd={commitAuxiliarySplit}
               />
               <div
+                ref={auxiliaryPanelRef}
                 data-testid={
                   activeTab === BUILTIN_TAB.browser
                     ? "session-browser-panel"
                     : "session-auxiliary-panel"
                 }
                 style={{
-                  width: `calc(${effectiveAuxiliaryRatio * 100}% - ${effectiveAuxiliaryRatio * SESSION_AUXILIARY_SPLIT_HANDLE_WIDTH}px)`
+                  width: auxiliaryPanelWidth(effectiveAuxiliaryRatio)
                 }}
                 className="flex min-h-0 min-w-0 flex-none overflow-hidden"
               >

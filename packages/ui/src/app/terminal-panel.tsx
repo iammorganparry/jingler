@@ -59,17 +59,47 @@ export function TerminalDock(props: TerminalDockProps) {
   const dock = effectiveDock(preferredDock, shellWidth)
   const isBottom = dock === "bottom"
   // Both hooks always run (stable order); we drive the axis that's docked.
-  const height = useResizableWidth({ storageKey: HEIGHT.key, initial: HEIGHT.initial, min: HEIGHT.min, max: HEIGHT.max })
-  const width = useResizableWidth({ storageKey: WIDTH.key, initial: WIDTH.initial, min: WIDTH.min, max: WIDTH.max })
+  // Drags paint the dock's size straight onto the element — every terminal
+  // stays mounted in here, and a setState per pointermove re-rendered (and
+  // re-fit) all of them sixty times a second. State commits on release.
+  const dockEl = useRef<HTMLDivElement | null>(null)
+  const shellWidthRef = useRef(shellWidth)
+  shellWidthRef.current = shellWidth
+  const height = useResizableWidth({
+    storageKey: HEIGHT.key,
+    initial: HEIGHT.initial,
+    min: HEIGHT.min,
+    max: HEIGHT.max,
+    applyLive: (value) => {
+      const el = dockEl.current
+      if (el) el.style.height = `${value}px`
+    }
+  })
+  const width = useResizableWidth({
+    storageKey: WIDTH.key,
+    initial: WIDTH.initial,
+    min: WIDTH.min,
+    max: WIDTH.max,
+    applyLive: (value) => {
+      const el = dockEl.current
+      // The same shell-relative cap the committed render applies below.
+      if (el) el.style.width = `${clampDockWidth(value, shellWidthRef.current)}px`
+    }
+  })
 
   // Dragging the edge toward the content (up / left) GROWS the dock → invert.
   const onResize = useCallback(
     (delta: number) => (isBottom ? height.adjust(-delta) : width.adjust(-delta)),
     [isBottom, height, width]
   )
+  const onResizeEnd = useCallback(
+    () => (isBottom ? height.commit() : width.commit()),
+    [isBottom, height, width]
+  )
 
   return (
     <div
+      ref={dockEl}
       className={cn(
         "relative flex flex-none flex-col bg-sunken",
         isBottom ? "border-t border-hairline" : "border-l border-hairline",
@@ -86,7 +116,11 @@ export function TerminalDock(props: TerminalDockProps) {
           : undefined
       }
     >
-      <DockResizeEdge orientation={isBottom ? "horizontal" : "vertical"} onResize={onResize} />
+      <DockResizeEdge
+        orientation={isBottom ? "horizontal" : "vertical"}
+        onResize={onResize}
+        onResizeEnd={onResizeEnd}
+      />
 
       {/* Tab strip */}
       <div className="flex h-9 flex-none items-stretch border-b border-hairline bg-panel pr-1.5">
@@ -239,10 +273,13 @@ function EmptyDock({ onNew }: { onNew: () => void }) {
  */
 function DockResizeEdge({
   orientation,
-  onResize
+  onResize,
+  onResizeEnd
 }: {
   orientation: "horizontal" | "vertical"
   onResize: (delta: number) => void
+  /** Drag released — commit the live size to state/storage. */
+  onResizeEnd?: () => void
 }) {
   const horizontal = orientation === "horizontal"
   const last = useRef(0)
@@ -260,6 +297,7 @@ function DockResizeEdge({
       if (!dragging.current) return
       dragging.current = false
       setActive(false)
+      onResizeEnd?.()
       document.body.style.cursor = ""
       document.body.style.userSelect = ""
     }
@@ -269,7 +307,7 @@ function DockResizeEdge({
       window.removeEventListener("pointermove", move)
       window.removeEventListener("pointerup", up)
     }
-  }, [horizontal, onResize])
+  }, [horizontal, onResize, onResizeEnd])
 
   return (
     <div
