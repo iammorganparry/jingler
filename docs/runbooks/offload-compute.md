@@ -18,6 +18,33 @@ calls the authenticated offload smoke probe. A deployment is not healthy until
 that probe confirms R2, the Sandbox image/executor, seccomp egress denial,
 unprivileged read-only source enforcement, and the lifecycle object.
 
+## Automatic routing and owned-device targets
+
+Enabling Offload Compute does not hand off every eligible command. The desktop
+keeps work local while it has headroom and hands off only when available memory
+falls below 20%, or system-wide CPU utilization averages at least 80% across ten
+one-second samples. An incomplete CPU window stays local; low memory can trigger
+immediately.
+
+The General settings pane selects either Cloud Sandbox or one specific online
+owned device. Device IDs are persisted, not display names. Selection is strictly
+fail-closed: an offline, revoked, incompatible, or unreachable selected device
+never falls back to another device, Cloud Sandbox, or local execution.
+
+Owned-device jobs use the same bounded, secret-filtered workspace snapshot as
+cloud jobs. The desktop sends it over the authenticated device tunnel in bounded
+chunks. The device reassembles and verifies the digest, restores into a private
+temporary workspace, installs dependencies with lifecycle scripts disabled and
+a clean HOME, and executes literal executable/argv without a shell. Timeout,
+output overflow, cancellation, and source mutation are rejected; no remote
+source changes are synchronized back. Completed and abandoned device job data is
+pruned after three hours.
+
+For an owned-device incident, first use **Settings → General → Refresh devices**
+to verify presence, then inspect relay health and device-agent logs. Do not switch
+the preference to Cloud merely to mask an unavailable selected device: that is
+an explicit routing-policy change, not a retry.
+
 ## Manual smoke and benchmark
 
 ```sh

@@ -20,9 +20,14 @@ import { GitService } from "./git.js"
 import { parseGitHubRemote } from "./github-remote.js"
 import {
   captureOffloadSnapshot,
-  uploadOffloadSnapshot
+  uploadOffloadSnapshot,
+  type CapturedOffloadSnapshot
 } from "./offload-snapshot.js"
 import { SecretStore } from "./secret-store.js"
+import {
+  makeResourcePressureMonitor,
+  type ResourcePressurePort
+} from "./resource-pressure.js"
 import {
   ToolError,
   type ToolExecutionContext
@@ -35,6 +40,17 @@ export interface OffloadedCommandResult {
   readonly stderr: string
   readonly offloaded: true
   readonly jobId: string
+}
+
+export interface OwnedDeviceOffloadPort {
+  readonly execute: (input: {
+    readonly deviceId: string
+    readonly jobId: string
+    readonly snapshot: CapturedOffloadSnapshot
+    readonly command: OffloadAdmissionRequest["command"]
+    readonly limits: OffloadAdmissionRequest["limits"]
+    readonly context: ToolExecutionContext
+  }) => Effect.Effect<OffloadedCommandResult, ToolError>
 }
 
 export interface OffloadCommandRouterPort {
@@ -134,13 +150,24 @@ const reportEvents = (
   }
 }
 
-const delay = (milliseconds: number, signal: AbortSignal): Promise<void> =>
+export const interruptibleDelay = (
+  milliseconds: number,
+  signal: AbortSignal
+): Promise<void> =>
   new Promise((resolve, reject) => {
-    const timeout = setTimeout(resolve, milliseconds)
-    signal.addEventListener("abort", () => {
+    let settled = false
+    const finish = (result: "elapsed" | "aborted"): void => {
+      if (settled) return
+      settled = true
       clearTimeout(timeout)
-      reject(new ToolError("cancelled", "Remote command cancelled", true))
-    }, { once: true })
+      signal.removeEventListener("abort", onAbort)
+      if (result === "elapsed") resolve()
+      else reject(new ToolError("cancelled", "Remote command cancelled", true))
+    }
+    const onAbort = (): void => finish("aborted")
+    const timeout = setTimeout(() => finish("elapsed"), milliseconds)
+    signal.addEventListener("abort", onAbort, { once: true })
+    if (signal.aborted) onAbort()
   })
 
 interface PollInput {
@@ -181,7 +208,7 @@ export const pollResult = async (input: PollInput): Promise<OffloadedCommandResu
     ).catch(() => null)
     if (response === null) {
       consecutiveFailures += 1
-      await delay(
+      await interruptibleDelay(
         Math.min(10_000, 500 * (2 ** Math.min(consecutiveFailures - 1, 5))),
         input.context.signal
       )
@@ -201,12 +228,15 @@ export const pollResult = async (input: PollInput): Promise<OffloadedCommandResu
     cursor = page.cursor
     reportEvents(page.events, input.context)
     if (page.result !== null) return terminal(page.result)
-    await delay(500, input.context.signal)
+    await interruptibleDelay(500, input.context.signal)
   }
 }
 
 /** Capture desktop services once; each command remains an Effect-owned workflow. */
-export const makeOffloadCommandRouter = Effect.gen(function* () {
+export const makeOffloadCommandRouterWithOwnedDevice = (
+  ownedDevice?: OwnedDeviceOffloadPort,
+  resourcePressure: ResourcePressurePort = makeResourcePressureMonitor()
+) => Effect.gen(function* () {
   const config = yield* ConfigService
   const secrets = yield* SecretStore
   const git = yield* GitService
@@ -227,6 +257,8 @@ export const makeOffloadCommandRouter = Effect.gen(function* () {
         Effect.mapError(() => failure("Could not read Offload Compute settings"))
       ))?.offloadCompute ?? DEFAULT_OFFLOAD_COMPUTE_SETTINGS
       if (!settings.enabled) return "disabled" as const
+      resourcePressure.start()
+      if (settings.target.kind === "owned-device") return "accepted" as const
       const token = yield* secrets.get
       if (token === null) return yield* Effect.fail(failure("Sign in before using Offload Compute"))
       const [remote, headSha] = yield* Effect.all([
@@ -296,12 +328,34 @@ export const makeOffloadCommandRouter = Effect.gen(function* () {
     const observed = parseObservedAgentShellCommand(source)
     const routing = classifyOffloadCommand(settings, observed.command)
     if (routing.target === "local") return null
+    resourcePressure.start()
+    if (!resourcePressure.isSqueezed()) return null
 
     context.progress({ message: "Offload Compute: capturing", completed: null, total: null })
     const snapshotStarted = Date.now()
     const snapshot = yield* captureOffloadSnapshot(cwd).pipe(
       Effect.mapError((cause) => failure(cause.message))
     )
+    const limits = {
+      timeoutSeconds: OFFLOAD_TIMEOUT_MAX_SECONDS,
+      snapshotBytes: snapshot.identity.bytes,
+      outputBytes: OFFLOAD_OUTPUT_MAX_BYTES
+    }
+    if (settings.target.kind === "owned-device") {
+      if (ownedDevice === undefined) {
+        return yield* Effect.fail(failure(
+          "The selected owned device is unavailable; Offload Compute did not fall back"
+        ))
+      }
+      return yield* ownedDevice.execute({
+        deviceId: settings.target.deviceId,
+        jobId: opaqueId("request", context.idempotencyKey ?? source).replace(/^request_/u, "job_"),
+        snapshot,
+        command: routing.command,
+        limits,
+        context
+      }).pipe(Effect.map((result) => ({ ...result, command: source })))
+    }
     const remote = yield* closeGit(git.remoteUrl(cwd)).pipe(
       Effect.mapError(() => failure("Offload Compute requires a GitHub origin"))
     )
@@ -321,11 +375,7 @@ export const makeOffloadCommandRouter = Effect.gen(function* () {
       snapshot: snapshot.identity,
       command: routing.command,
       clientTimings: { snapshotMs: Date.now() - snapshotStarted },
-      limits: {
-        timeoutSeconds: OFFLOAD_TIMEOUT_MAX_SECONDS,
-        snapshotBytes: snapshot.identity.bytes,
-        outputBytes: OFFLOAD_OUTPUT_MAX_BYTES
-      }
+      limits
     }
     const admit = async (): Promise<OffloadAdmissionResponse> =>
       decodeResponse(
@@ -386,3 +436,5 @@ export const makeOffloadCommandRouter = Effect.gen(function* () {
 
   return { primeSession, destroySession, executeIfEligible } satisfies OffloadCommandRouterPort
 })
+
+export const makeOffloadCommandRouter = makeOffloadCommandRouterWithOwnedDevice()

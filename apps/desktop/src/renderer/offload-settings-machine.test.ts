@@ -3,8 +3,8 @@ import { createActor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
 import { createOffloadSettingsMachine } from "./offload-settings-machine.js"
 
-const enabled = { enabled: true, explicitCommands: [] } as const
-const disabled = { enabled: false, explicitCommands: [] } as const
+const enabled = { enabled: true, target: { kind: "cloud" }, explicitCommands: [] } as const
+const disabled = { enabled: false, target: { kind: "cloud" }, explicitCommands: [] } as const
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
   for (let attempt = 0; attempt < 50; attempt += 1) {

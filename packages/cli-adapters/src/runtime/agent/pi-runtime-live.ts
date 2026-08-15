@@ -1,9 +1,11 @@
 import { join } from "node:path"
 import type { PiRunSpec } from "@jingler/core"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
 import { SecretStore } from "../../secret-store.js"
-import { makeOffloadCommandRouter } from "../../offload-command-router.js"
+import { makeOffloadCommandRouterWithOwnedDevice } from "../../offload-command-router.js"
+import { makeOwnedDeviceOffloadPort } from "../../owned-device-offload.js"
+import { RemoteSessionService } from "../../remote-session.js"
 import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
@@ -54,7 +56,12 @@ export const makePiAgentRuntimeLive = (
     const diagnostics = yield* RuntimeDiagnostics
     const workspace = yield* makeWorkspaceInspectionPort
     const mutations = yield* makeWorkspaceMutationPort
-    const offload = yield* makeOffloadCommandRouter
+    const remoteSessions = yield* Effect.serviceOption(RemoteSessionService)
+    const offload = yield* makeOffloadCommandRouterWithOwnedDevice(
+      Option.isSome(remoteSessions)
+        ? makeOwnedDeviceOffloadPort(remoteSessions.value)
+        : undefined
+    )
     const credentials = new AgentSecretStore(secretStore)
 
     const factory = makePiSessionFactory({

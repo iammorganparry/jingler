@@ -617,6 +617,15 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
         )
       : fauxAssistantMessage("Explicit local retry completed.")
   }
+  if (latestOperatorText(context).includes("[[offload-owned-device]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+          COMMAND_TOOL,
+          { command: "node -e \"process.stdout.write('owned device test clean\\\\n')\"" },
+          "offload-owned-device-1"
+        )
+      : fauxAssistantMessage("Tests completed on the selected owned device.")
+  }
   if (latestOperatorText(context).includes("[[offload-typecheck]]")) {
     return recentToolResultCount(context, COMMAND_TOOL) === 0
       ? callTool(COMMAND_TOOL, { command: "pnpm typecheck" }, "offload-typecheck-1")

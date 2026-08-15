@@ -66,14 +66,27 @@ export const OffloadAllowedCommand = Schema.Struct({
 })
 export type OffloadAllowedCommand = Schema.Schema.Type<typeof OffloadAllowedCommand>
 
+export const OffloadComputeTarget = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("cloud") }),
+  Schema.Struct({
+    kind: Schema.Literal("owned-device"),
+    deviceId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))
+  })
+)
+export type OffloadComputeTarget = Schema.Schema.Type<typeof OffloadComputeTarget>
+
 export const OffloadComputeSettings = Schema.Struct({
   enabled: Schema.Boolean,
+  target: Schema.optionalWith(OffloadComputeTarget, {
+    default: () => ({ kind: "cloud" as const })
+  }),
   explicitCommands: Schema.Array(OffloadAllowedCommand).pipe(Schema.maxItems(32))
 })
 export type OffloadComputeSettings = Schema.Schema.Type<typeof OffloadComputeSettings>
 
 export const DEFAULT_OFFLOAD_COMPUTE_SETTINGS: OffloadComputeSettings = {
   enabled: false,
+  target: { kind: "cloud" },
   explicitCommands: []
 }
 
@@ -111,6 +124,44 @@ const OpaqueOffloadId = Schema.String.pipe(
 const Sha256Digest = Schema.String.pipe(
   Schema.pattern(/^[a-f0-9]{64}$/u, { identifier: "ContentDigest" })
 )
+const OwnedDeviceOffloadJobId = Schema.String.pipe(
+  Schema.pattern(/^job_[a-zA-Z0-9_-]{16,128}$/u),
+  Schema.maxLength(132)
+)
+
+export const OwnedDeviceOffloadBegin = Schema.Struct({
+  jobId: OwnedDeviceOffloadJobId,
+  snapshotDigest: Sha256Digest,
+  snapshotBytes: Schema.Int.pipe(Schema.between(1, OFFLOAD_SNAPSHOT_MAX_BYTES)),
+  compressedBytes: Schema.Int.pipe(
+    Schema.between(1, OFFLOAD_SNAPSHOT_MAX_BYTES + 64 * 1024)
+  ),
+  chunkCount: Schema.Int.pipe(Schema.between(1, 512)),
+  command: OffloadResolvedCommand,
+  limits: OffloadJobLimits
+})
+export type OwnedDeviceOffloadBegin = Schema.Schema.Type<typeof OwnedDeviceOffloadBegin>
+
+export const OwnedDeviceOffloadChunk = Schema.Struct({
+  jobId: OwnedDeviceOffloadJobId,
+  index: Schema.Int.pipe(Schema.between(0, 511)),
+  contentBase64: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(700_000))
+})
+export type OwnedDeviceOffloadChunk = Schema.Schema.Type<typeof OwnedDeviceOffloadChunk>
+
+export const OwnedDeviceOffloadExecute = Schema.Struct({ jobId: OwnedDeviceOffloadJobId })
+export type OwnedDeviceOffloadExecute = Schema.Schema.Type<typeof OwnedDeviceOffloadExecute>
+
+export const OwnedDeviceOffloadResult = Schema.Struct({
+  exitCode: Schema.Int,
+  stdout: Schema.String.pipe(Schema.maxLength(OFFLOAD_OUTPUT_MAX_BYTES)),
+  stderr: Schema.String.pipe(Schema.maxLength(OFFLOAD_OUTPUT_MAX_BYTES)),
+  outputTruncated: Schema.Boolean,
+  timedOut: Schema.Boolean,
+  sourceMutated: Schema.Boolean,
+  commandMs: Schema.Int.pipe(Schema.nonNegative())
+})
+export type OwnedDeviceOffloadResult = Schema.Schema.Type<typeof OwnedDeviceOffloadResult>
 
 export const OffloadRepositorySlug = Schema.String.pipe(
   Schema.pattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u, {

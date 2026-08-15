@@ -208,6 +208,7 @@ describe("ConfigService", () => {
   it("persists Offload Compute settings across unrelated saves", async () => {
     const offloadCompute = {
       enabled: true,
+      target: { kind: "cloud" },
       explicitCommands: [
         {
           id: "verify-generated",

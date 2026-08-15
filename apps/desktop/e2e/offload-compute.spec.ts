@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { writeFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, test, type SeedSession } from "./fixtures.js"
 import { startFakeAuthServer } from "./fake-auth.js"
@@ -23,7 +23,10 @@ const session = (repoPath: string): SeedSession => ({
 
 const prepareRepository = (repoPath: string): ReadonlyArray<SeedSession> => {
   writeFileSync(join(repoPath, "package.json"), JSON.stringify({
-    scripts: { typecheck: "printf 'local typecheck clean\\n'" }
+    scripts: {
+      typecheck: "printf 'local typecheck clean\\n'",
+      test: "printf 'owned device test clean\\n'"
+    }
   }))
   execFileSync("git", ["add", "package.json"], { cwd: repoPath })
   execFileSync("git", ["commit", "-qm", "add typecheck fixture"], { cwd: repoPath })
@@ -46,6 +49,7 @@ test("enables, primes, automatically routes, and restores Offload Compute status
 }) => {
   const app = await launchApp({
     configured: true,
+    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
     withRepo: true,
     config: {
       offloadCompute: { enabled: false, explicitCommands: [] }
@@ -87,6 +91,7 @@ test("enables, primes, automatically routes, and restores Offload Compute status
     reposDir: app.reposDir,
     userDataDir: app.userDataDir,
     configured: true,
+    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
     authServer: app.authServer
   })
   await expect(appShell(reopened.window)).toBeVisible()
@@ -107,11 +112,85 @@ test("enables, primes, automatically routes, and restores Offload Compute status
     .toBeGreaterThan(primesBeforeRestore)
 })
 
+test("selects, persists, and executes on a specific fail-closed owned device", async ({
+  launchApp
+}) => {
+  const app = await launchApp({
+    configured: true,
+    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
+    withRepo: true,
+    remoteEnvironment: true,
+    config: {
+      offloadCompute: {
+        enabled: false,
+        explicitCommands: [{
+          id: "owned-device-probe",
+          command: {
+            executable: "node",
+            args: ["-e", "process.stdout.write('owned device test clean\\n')"],
+            cwd: "."
+          }
+        }]
+      }
+    },
+    sessions: ({ repoPath }) => prepareRepository(repoPath)
+  })
+  await expect(appShell(app.window)).toBeVisible()
+  await app.window.getByRole("button", { name: "Account menu" }).click()
+  await app.window.getByRole("menuitem", { name: "Settings" }).click()
+  await app.window.getByRole("button", { name: /^Devices/ }).click()
+  await app.window.getByRole("button", { name: "Add owned machine" }).click()
+  await expect(app.window.getByLabel("SSH host or alias")).toBeVisible()
+  await app.window.getByText("buildbox", { exact: true }).click()
+  await app.window.getByRole("button", { name: "Connect environment" }).click()
+  await expect(app.window.getByRole("status")).toContainText("buildbox")
+  await app.window.keyboard.press("Escape")
+  await app.window.getByRole("button", { name: "Refresh" }).click()
+  await expect(app.window.getByText("online", { exact: true })).toBeVisible({ timeout: 15_000 })
+  await app.window.getByRole("button", { name: /^General/ }).click()
+  const target = app.window.getByRole("combobox", { name: "Offload Compute target" })
+  await expect(target).toBeVisible()
+  await app.window.getByRole("button", { name: "Refresh devices" }).click()
+  await expect(target.locator('option[value="owned-device"]')).toBeEnabled()
+  await target.selectOption("owned-device")
+  const device = app.window.getByRole("combobox", { name: "Owned device for Offload Compute" })
+  await expect(device).toBeVisible()
+  const deviceId = await device.inputValue()
+  expect(deviceId).not.toBe("")
+  await expect.poll(() => {
+    const config = JSON.parse(readFileSync(join(app.home, "jingler", "config.json"), "utf8")) as {
+      offloadCompute?: { target?: { kind: string; deviceId?: string } }
+    }
+    return config.offloadCompute?.target
+  }).toEqual({ kind: "owned-device", deviceId })
+  await app.window.getByRole("switch", { name: "Offload Compute" }).click()
+  await expect.poll(() => {
+    const config = JSON.parse(readFileSync(join(app.home, "jingler", "config.json"), "utf8")) as {
+      offloadCompute?: { enabled?: boolean; target?: { kind: string; deviceId?: string } }
+    }
+    return config.offloadCompute
+  }).toMatchObject({ enabled: true, target: { kind: "owned-device", deviceId } })
+
+  await app.window.getByRole("button", { name: "Close settings" }).click()
+  const composer = app.window.getByRole("textbox", { name: /Message/ })
+  await composer.fill("[[offload-owned-device]] Run the tests.")
+  await composer.press("Enter")
+  const remoteTool = app.window.getByRole("button", { name: /command_execute/ })
+  await expect(remoteTool).toBeVisible()
+  await remoteTool.click()
+  await expect(app.window.getByText("owned device test clean", { exact: false }))
+    .toBeVisible({ timeout: 30_000 })
+  await expect(app.window.getByText("Tests completed on the selected owned device."))
+    .toBeVisible()
+  expect(app.authServer.offloadRequests).toHaveLength(0)
+})
+
 test("keeps eligible commands local while Offload Compute is disabled", async ({
   launchApp
 }) => {
   const app = await launchApp({
     configured: true,
+    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
     withRepo: true,
     config: {
       offloadCompute: { enabled: false, explicitCommands: [] }
@@ -136,6 +215,7 @@ test("cancels the active remote command through the existing Stop control", asyn
     const app = await launchApp({
       authServer,
       configured: true,
+    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
       withRepo: true,
       config: {
         offloadCompute: { enabled: true, explicitCommands: [] }
@@ -164,6 +244,7 @@ test("reports remote failure and requires an explicit local retry", async ({
     const app = await launchApp({
       authServer,
       configured: true,
+    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
       withRepo: true,
       config: {
         offloadCompute: { enabled: true, explicitCommands: [] }

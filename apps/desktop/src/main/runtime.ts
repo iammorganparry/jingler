@@ -113,7 +113,17 @@ const EmbeddedPiRuntimeLive = e2ePiFixture === null
       configureToolRegistry: configureE2ePiTools
     })
 
+const RemoteSessionsLive = RemoteSessionService.Default.pipe(
+  Layer.provideMerge(
+    EnvironmentService.Default.pipe(
+      Layer.provide(RemoteBootstrapService.Default),
+      Layer.provide(ProviderConnectionsLive)
+    )
+  )
+)
+
 const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
+  Layer.provide(RemoteSessionsLive),
   Layer.provide(ConfigService.Default),
   Layer.provide(GitService.Default),
   Layer.provide(AssetLayer),
@@ -132,16 +142,7 @@ const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(RuntimeRecoveryService.Default),
   Layer.provideMerge(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
-  Layer.provide(
-    RemoteSessionService.Default.pipe(
-      Layer.provideMerge(
-        EnvironmentService.Default.pipe(
-          Layer.provide(RemoteBootstrapService.Default),
-          Layer.provide(ProviderConnectionsLive)
-        )
-      )
-    )
-  ),
+  Layer.provide(RemoteSessionsLive),
   // AuthService requires SecretStore, satisfied by SecretStoreLive (merged below).
   Layer.provide(AuthService.Default),
   // Merged into one stage to stay inside `pipe`'s 20-argument limit. AssetService

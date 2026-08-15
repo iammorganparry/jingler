@@ -35,6 +35,7 @@ const command = (
 
 const enabled = {
   enabled: true,
+  target: { kind: "cloud" },
   explicitCommands: []
 } as const
 
@@ -140,6 +141,7 @@ describe("Offload Compute explicit command classification", () => {
   it("routes an exact project allowlist command", () => {
     const settings = {
       enabled: true,
+      target: { kind: "cloud" },
       explicitCommands: [
         {
           id: "verify-generated",
@@ -175,6 +177,13 @@ describe("Offload Compute explicit command classification", () => {
 })
 
 describe("Offload Compute schemas", () => {
+  it("migrates cloud-only settings to the cloud target", () => {
+    expect(Schema.decodeUnknownSync(OffloadComputeSettings)({
+      enabled: true,
+      explicitCommands: []
+    }).target).toEqual({ kind: "cloud" })
+  })
+
   it("accepts bounded settings, commands, snapshots, events, and results", () => {
     expect(Either.isRight(decode(OffloadComputeSettings, enabled))).toBe(true)
     expect(

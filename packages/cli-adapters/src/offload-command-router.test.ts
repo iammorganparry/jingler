@@ -13,9 +13,11 @@ import { AppPaths, type AppPathsShape } from "./app-paths.js"
 import { ConfigService } from "./config.js"
 import { GitService } from "./git.js"
 import {
-  makeOffloadCommandRouter,
+  interruptibleDelay,
+  makeOffloadCommandRouterWithOwnedDevice,
   pollResult,
-  type OffloadCommandRouterPort
+  type OffloadCommandRouterPort,
+  type OwnedDeviceOffloadPort
 } from "./offload-command-router.js"
 import {
   makeInMemorySecretStore,
@@ -52,10 +54,16 @@ const paths = (): AppPathsShape => ({
   diagnosticsDir: join(root, "diagnostics")
 })
 
-const router = async (): Promise<OffloadCommandRouterPort> => {
+const router = async (
+  squeezed = true,
+  ownedDevice?: OwnedDeviceOffloadPort
+): Promise<OffloadCommandRouterPort> => {
   const secrets = await Effect.runPromise(makeInMemorySecretStore("desktop-token"))
   return Effect.runPromise(
-    makeOffloadCommandRouter.pipe(
+    makeOffloadCommandRouterWithOwnedDevice(ownedDevice, {
+      start: () => undefined,
+      isSqueezed: () => squeezed
+    }).pipe(
       Effect.provide(ConfigService.Default),
       Effect.provide(GitService.Default),
       Effect.provide(Layer.succeed(SecretStore, secrets)),
@@ -100,6 +108,34 @@ const admission = {
   expiresAt: Math.floor(Date.now() / 1_000) + 300
 } as const
 
+describe("interruptible offload polling delay", () => {
+  it("removes its abort listener when a normal timeout elapses", async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const added = vi.spyOn(controller.signal, "addEventListener")
+    const removed = vi.spyOn(controller.signal, "removeEventListener")
+
+    const waiting = interruptibleDelay(500, controller.signal)
+    await vi.advanceTimersByTimeAsync(500)
+    await waiting
+
+    const listener = added.mock.calls[0]?.[1]
+    expect(listener).toBeDefined()
+    expect(removed).toHaveBeenCalledWith("abort", listener)
+    vi.useRealTimers()
+  })
+
+  it("removes its abort listener when cancellation wins", async () => {
+    const controller = new AbortController()
+    const removed = vi.spyOn(controller.signal, "removeEventListener")
+    const waiting = interruptibleDelay(500, controller.signal)
+    controller.abort()
+
+    await expect(waiting).rejects.toMatchObject({ code: "cancelled" })
+    expect(removed).toHaveBeenCalledOnce()
+  })
+})
+
 describe("automatic Offload Compute routing", () => {
   it("keeps the local path untouched while disabled", async () => {
     await writeFile(paths().configFile, JSON.stringify({
@@ -109,6 +145,24 @@ describe("automatic Offload Compute routing", () => {
     }))
     const result = await Effect.runPromise(
       (await router()).executeIfEligible(
+        workspace,
+        "session-one",
+        "pnpm typecheck",
+        context()
+      )
+    )
+    expect(result).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps eligible work local while the host has CPU and memory headroom", async () => {
+    await writeFile(paths().configFile, JSON.stringify({
+      reposDir: null,
+      createdAt: new Date().toISOString(),
+      offloadCompute: { enabled: true, explicitCommands: [] }
+    }))
+    const result = await Effect.runPromise(
+      (await router(false)).executeIfEligible(
         workspace,
         "session-one",
         "pnpm typecheck",
@@ -147,6 +201,58 @@ describe("automatic Offload Compute routing", () => {
       deadlineAt: Date.now() - 1
     })).rejects.toThrow("deadline expired")
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/cancel")
+  })
+
+  it("routes a pressured eligible command only to the selected owned device", async () => {
+    await writeFile(paths().configFile, JSON.stringify({
+      reposDir: null,
+      createdAt: new Date().toISOString(),
+      offloadCompute: {
+        enabled: true,
+        target: { kind: "owned-device", deviceId: "device_selected" },
+        explicitCommands: []
+      }
+    }))
+    const execute = vi.fn<OwnedDeviceOffloadPort["execute"]>(() => Effect.succeed({
+      command: "pnpm typecheck",
+      exitCode: 0,
+      stdout: "owned device",
+      stderr: "",
+      offloaded: true,
+      jobId: "job_abcdefghijklmnop"
+    }))
+
+    const result = await Effect.runPromise(
+      (await router(true, { execute })).executeIfEligible(
+        workspace,
+        "session-one",
+        "pnpm typecheck",
+        context()
+      )
+    )
+
+    expect(result?.stdout).toBe("owned device")
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      deviceId: "device_selected"
+    }))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when the selected owned-device transport is unavailable", async () => {
+    await writeFile(paths().configFile, JSON.stringify({
+      reposDir: null,
+      createdAt: new Date().toISOString(),
+      offloadCompute: {
+        enabled: true,
+        target: { kind: "owned-device", deviceId: "device_offline" },
+        explicitCommands: []
+      }
+    }))
+
+    await expect(Effect.runPromise(
+      (await router()).executeIfEligible(workspace, "session-one", "pnpm typecheck", context())
+    )).rejects.toThrow("did not fall back")
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("refreshes an indeterminate upload and returns the eligible remote result", async () => {
