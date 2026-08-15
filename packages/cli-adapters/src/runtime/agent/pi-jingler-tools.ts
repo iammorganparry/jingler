@@ -193,5 +193,14 @@ export const createJinglerTools = (
         : registerMcpTools(registry, mcpSources))
       registry.setMcpHealth(report.health)
     }
+    if (
+      input.context.memoryAttachmentStatus === "failed" &&
+      !registry.mcpHealth().some(({ name }) => name === "jingler-memory")
+    ) {
+      registry.setMcpHealth([
+        ...registry.mcpHealth(),
+        { name: "jingler-memory", status: "failed" }
+      ])
+    }
     return registry
   })

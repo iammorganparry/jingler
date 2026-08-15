@@ -383,6 +383,9 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
 
         const collected = yield* Ref.make<ReadonlyArray<string>>([])
         const reviewChatId = yield* ownerFor(input.sessionId)
+        const memoryConfigured = Option.isSome(memoryService)
+          ? yield* (memoryService.value.isConfigured?.() ?? Effect.succeed(true))
+          : false
 
         const baseSpec: AgentTurnSpec = {
           sessionId: input.sessionId,
@@ -406,7 +409,8 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
             baseBranch: input.baseBranch
           }),
           images: [],
-          mode: "read-only"
+          mode: "read-only",
+          memoryAttachmentStatus: memoryConfigured ? "failed" : "disabled"
         }
         const memoryAttachment = Option.isSome(memoryService)
           ? yield* memoryService.value.attachment(

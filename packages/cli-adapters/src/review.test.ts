@@ -83,11 +83,15 @@ afterEach(() => {
 })
 
 const memoryLayer = (
-  attachment: MemoryAttachmentServiceShape["attachment"]
+  attachment: MemoryAttachmentServiceShape["attachment"],
+  configured = true
 ): Layer.Layer<MemoryAttachmentService> =>
   Layer.succeed(
     MemoryAttachmentService,
-    MemoryAttachmentService.of({ attachment })
+    MemoryAttachmentService.of({
+      attachment,
+      isConfigured: () => Effect.succeed(configured)
+    })
   )
 
 const env = (
@@ -280,7 +284,47 @@ describe("ReviewService — spec", () => {
       scope: "review:s1:abc123"
     })
     expect(spec?.mcp?.memory?.name).toBe("jingler-memory")
+    expect(spec?.memoryAttachmentStatus).toBe("available")
     expect(spec?.prompt).toContain("<recalled-memories")
+  })
+
+  it("reports a configured but unavailable memory attachment to the runtime", async () => {
+    let spec: AgentTurnSpec | undefined
+    const adapter = stubAdapter((_id, captured, ctx) =>
+      Effect.gen(function* () {
+        spec = captured
+        yield* emitJson(ctx, '{"findings":[]}')
+      })
+    )
+    const memory = memoryLayer(() => Effect.succeed(null))
+
+    await Effect.runPromise(
+      ReviewService.run(INPUT).pipe(
+        Effect.provide(env(adapter, noHarnesses, ReviewStore.Default, memory))
+      )
+    )
+
+    expect(spec?.memoryAttachmentStatus).toBe("failed")
+    expect(spec?.mcp?.memory).toBeUndefined()
+  })
+
+  it("does not report intentionally disabled memory as failed", async () => {
+    let spec: AgentTurnSpec | undefined
+    const adapter = stubAdapter((_id, captured, ctx) =>
+      Effect.gen(function* () {
+        spec = captured
+        yield* emitJson(ctx, '{"findings":[]}')
+      })
+    )
+    const memory = memoryLayer(() => Effect.succeed(null), false)
+
+    await Effect.runPromise(
+      ReviewService.run(INPUT).pipe(
+        Effect.provide(env(adapter, noHarnesses, ReviewStore.Default, memory))
+      )
+    )
+
+    expect(spec?.memoryAttachmentStatus).toBe("disabled")
   })
 
   it("runs on the configured review model, not the session's", async () => {

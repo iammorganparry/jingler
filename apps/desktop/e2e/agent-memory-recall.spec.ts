@@ -189,6 +189,7 @@ test("an unavailable memory MCP does not abort Jingler's real pi tools", async (
 }) => {
   const fake = await startFakeAuthServer()
   try {
+    fake.setMemoryAvailable(false)
     const app = await launchApp({
       authServer: fake,
       configured: true,
@@ -200,14 +201,9 @@ test("an unavailable memory MCP does not abort Jingler's real pi tools", async (
     const completed = app.window.getByText(COMPLETED_PI_REPLY)
     const composer = app.window.getByPlaceholder("Message the agent…")
 
-    await composer.fill("Warm the managed memory attachment.")
+    await composer.fill("Continue with Jingler's available tools while memory is offline.")
     await composer.press("Enter")
     await expect(completed).toHaveCount(1, { timeout: 30_000 })
-
-    fake.setMemoryAvailable(false)
-    await composer.fill("Continue with Jingler's available tools.")
-    await composer.press("Enter")
-    await expect(completed).toHaveCount(2, { timeout: 30_000 })
 
     await app.window.getByRole("button", { name: "Account menu" }).click()
     await app.window.getByRole("menuitem", { name: "Settings" }).click()

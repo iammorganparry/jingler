@@ -32,6 +32,7 @@ import {
   planDocumentToPlan,
   planStageSemanticFingerprint,
   planTaskProtocolTokens,
+  MEMORY_CONFIG_DEFAULT,
   PLAN_AUTO_RUN_DEFAULT,
   resumePlanPrompt,
   setQuestionAnswers,
@@ -1051,6 +1052,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // The pure query builder adds stable project identity without the
           // machine-local checkout path; MemoryService redacts and bounds it at
           // the network boundary.
+          const memoryConfig = workspaceConfig?.memory ?? MEMORY_CONFIG_DEFAULT
+          const memoryAttempted =
+            memoryConfig.enabled &&
+            memoryConfig.organizationId !== null &&
+            memoryConfig.organizationId.length > 0
           const memoryAttachment = yield* memoryService.attachment(
             memoryRecallQuery({
               operatorText,
@@ -1111,7 +1117,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             images,
             mode,
             reasoning: reasoning ?? chat.reasoning ?? null,
-            mcp
+            mcp,
+            memoryAttachmentStatus: !memoryAttempted
+              ? "disabled"
+              : memoryAttachment === null
+                ? "failed"
+                : "available"
           }
           const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
 

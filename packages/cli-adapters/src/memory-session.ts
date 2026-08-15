@@ -1,5 +1,7 @@
+import { MEMORY_CONFIG_DEFAULT } from "@jingler/core"
 import type { AgentTurnSpec } from "./agent-turn-driver.js"
 import { Context, Effect, Layer } from "effect"
+import { ConfigService } from "./config.js"
 import {
   MemoryService,
   type MemoryAttachment,
@@ -8,6 +10,7 @@ import {
 import { composeTurnPrompt, leadsWithCommand } from "./turn-prompt.js"
 
 export interface MemoryAttachmentServiceShape {
+  readonly isConfigured?: () => Effect.Effect<boolean>
   readonly attachment: (
     query?: string,
     recallScope?: string
@@ -26,6 +29,16 @@ export const MemoryAttachmentServiceLive = Layer.effect(
     const memory = yield* MemoryService
     const environment = yield* Effect.context<MemoryServiceEnvironment>()
     return MemoryAttachmentService.of({
+      isConfigured: () => ConfigService.get().pipe(
+        Effect.provide(environment),
+        Effect.map((config) => {
+          const memory = config?.memory ?? MEMORY_CONFIG_DEFAULT
+          return memory.enabled &&
+            memory.organizationId !== null &&
+            memory.organizationId.length > 0
+        }),
+        Effect.orElseSucceed(() => false)
+      ),
       attachment: (query, recallScope) =>
         memory.attachment(query, recallScope).pipe(Effect.provide(environment))
     })
@@ -47,6 +60,7 @@ export const attachMemoryToSessionSpec = (
     ? spec
     : {
         ...spec,
+        memoryAttachmentStatus: "available",
         prompt: composeTurnPrompt(
           spec.prompt,
           { memory: attachment.instructions },

@@ -122,6 +122,29 @@ describe("tool-call-scoped recall", () => {
     expect(calls).toEqual(["Tool: command_execute:pnpm:test"])
   })
 
+  it("delivers an advisory to only one concurrent caller per signature", async () => {
+    let resolveAttachment!: (value: MemoryAttachment) => void
+    const pendingAttachment = new Promise<MemoryAttachment>((resolve) => {
+      resolveAttachment = resolve
+    })
+    const memory = makeToolMemory({
+      runId: "run-concurrent",
+      memory: { attachment: () => Effect.promise(() => pendingAttachment) }
+    })
+
+    const firstPending = memory.recall(request("call-1"), "execute")
+    const secondPending = memory.recall(request("call-2"), "execute")
+    resolveAttachment(attachment([
+      "<recalled-memories>",
+      '<recalled-memory>{"pageId":"cli-gotcha","revisionId":"rev-1"}</recalled-memory>',
+      "</recalled-memories>"
+    ].join("")))
+
+    const advisories = await Promise.all([firstPending, secondPending])
+    expect(advisories.filter((advisory) => advisory !== null)).toHaveLength(1)
+    expect(advisories.filter((advisory) => advisory === null)).toHaveLength(1)
+  })
+
   it("records a bounded failed-call candidate without altering the error", async () => {
     const memory = makeToolMemory({
       runId: "run-2",
@@ -167,10 +190,17 @@ describe("tool-call-scoped recall", () => {
     ])
   })
 
-  it("bounds a stalled recall and still executes the tool", async () => {
+  it("interrupts a stalled recall fiber and still executes the tool", async () => {
+    let finalized = false
     const memory = makeToolMemory({
       runId: "run-timeout",
-      memory: { attachment: () => Effect.never }
+      memory: {
+        attachment: () => Effect.never.pipe(
+          Effect.ensuring(Effect.sync(() => {
+            finalized = true
+          }))
+        )
+      }
     })
     const registry = commandRegistry(async () => "ran", memory)
     const startedAt = Date.now()
@@ -178,6 +208,7 @@ describe("tool-call-scoped recall", () => {
     const result = await Effect.runPromise(registry.execute(request("call-1")))
 
     expect(result.value).toBe("ran")
+    expect(finalized).toBe(true)
     expect(Date.now() - startedAt).toBeLessThan(2_250)
   })
 
