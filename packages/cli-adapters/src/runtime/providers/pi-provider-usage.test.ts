@@ -76,6 +76,58 @@ describe("fetchPiProviderUsage", () => {
     expect(read.reason).toContain("setup-token")
   })
 
+  it("borrows the Claude CLI login when the setup-token is rejected", async () => {
+    const fetchSpy = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const auth = new Headers(init?.headers).get("Authorization")
+      return auth === "Bearer cli-oauth-token"
+        ? jsonResponse({
+            subscription_type: "max",
+            limits: [{ kind: "session", percent: 14, resets_at: "2026-08-14T13:59:59+00:00" }]
+          })
+        : jsonResponse(null, false, 403)
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const usage = usageOf(await fetchPiProviderUsage({
+      authKind: "claude-setup-token",
+      access: "pasted-setup-token",
+      accountId: null,
+      fallbackAccess: async () => "cli-oauth-token",
+      signal
+    }))
+    expect(usage.plan).toBe("Max")
+    expect(usage.windows).toHaveLength(1)
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it("names both rejections when the borrowed CLI login also fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(null, false, 403)))
+    const read = await fetchPiProviderUsage({
+      authKind: "claude-setup-token",
+      access: "pasted-setup-token",
+      accountId: null,
+      fallbackAccess: async () => "cli-oauth-token",
+      signal
+    })
+    if (read === null || read.available) throw new Error("expected unavailable")
+    expect(read.reason).toContain("both")
+    expect(read.reason).toContain("HTTP 403")
+  })
+
+  it("skips the retry when no distinct CLI login exists", async () => {
+    const fetchSpy = vi.fn(async () => jsonResponse(null, false, 403))
+    vi.stubGlobal("fetch", fetchSpy)
+    const read = await fetchPiProviderUsage({
+      authKind: "claude-setup-token",
+      access: "same-token",
+      accountId: null,
+      fallbackAccess: async () => "same-token",
+      signal
+    })
+    if (read === null || read.available) throw new Error("expected unavailable")
+    expect(read.reason).toContain("Sign in to the Claude CLI")
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
   it("maps Codex plan windows plus additional per-model limits (captured shape)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       jsonResponse({

@@ -150,10 +150,15 @@ const anthropicKeyedWindows = (
   })
 }
 
-const fetchAnthropicOAuthUsage = async (
+/** One usage request: a settled read, or a 401/403 the caller may retry. */
+type AnthropicAttempt =
+  | { readonly kind: "settled"; readonly read: ProviderUsageRead }
+  | { readonly kind: "rejected"; readonly status: number }
+
+const requestAnthropicUsage = async (
   access: string,
   signal: AbortSignal
-): Promise<ProviderUsageRead> => {
+): Promise<AnthropicAttempt> => {
   const { status, body } = await getJson(
     ANTHROPIC_USAGE_URL,
     {
@@ -164,28 +169,61 @@ const fetchAnthropicOAuthUsage = async (
     signal
   )
   if (body === null) {
-    return unavailable(
-      status === 401 || status === 403
-        ? `Anthropic's usage endpoint rejected this credential (HTTP ${status}) — a pasted setup-token may not carry the usage scope.`
-        : `Anthropic's usage endpoint answered HTTP ${status}.`
-    )
+    if (status === 401 || status === 403) return { kind: "rejected", status }
+    return {
+      kind: "settled",
+      read: unavailable(`Anthropic's usage endpoint answered HTTP ${status}.`)
+    }
   }
   const usage = Option.getOrNull(decodeAnthropicUsage(body))
   if (usage === null) {
-    return unavailable("Anthropic's usage response no longer matches the known shape.")
+    return {
+      kind: "settled",
+      read: unavailable("Anthropic's usage response no longer matches the known shape.")
+    }
   }
   const fromLimits = anthropicLimitWindows(usage)
   const windows = fromLimits.length > 0 ? fromLimits : anthropicKeyedWindows(usage)
   if (windows.length === 0) {
-    return unavailable("Anthropic reported no usage windows for this account.")
-  }
-  return {
-    available: true,
-    usage: {
-      plan: usage.subscription_type === null ? null : titleCase(usage.subscription_type),
-      windows
+    return {
+      kind: "settled",
+      read: unavailable("Anthropic reported no usage windows for this account.")
     }
   }
+  return {
+    kind: "settled",
+    read: {
+      available: true,
+      usage: {
+        plan: usage.subscription_type === null ? null : titleCase(usage.subscription_type),
+        windows
+      }
+    }
+  }
+}
+
+const fetchAnthropicOAuthUsage = async (
+  access: string,
+  fallbackAccess: (() => Promise<string | null>) | null,
+  signal: AbortSignal
+): Promise<ProviderUsageRead> => {
+  const primary = await requestAnthropicUsage(access, signal)
+  if (primary.kind === "settled") return primary.read
+  // A pasted setup-token authenticates inference but not the usage scope, so
+  // the endpoint rejects it. The Claude CLI's own browser-login token does
+  // carry the scope — borrow it for this one read before giving up.
+  const borrowed =
+    fallbackAccess === null ? null : await fallbackAccess().catch(() => null)
+  if (borrowed === null || borrowed === access) {
+    return unavailable(
+      `Anthropic's usage endpoint rejected this credential (HTTP ${primary.status}) — a pasted setup-token doesn't carry the usage scope. Sign in to the Claude CLI on this machine and Jingler reads usage from it instead.`
+    )
+  }
+  const fallback = await requestAnthropicUsage(borrowed, signal)
+  if (fallback.kind === "settled") return fallback.read
+  return unavailable(
+    `Anthropic's usage endpoint rejected both this credential and the Claude CLI's login (HTTP ${fallback.status}).`
+  )
 }
 
 // ── OpenAI Codex (ChatGPT subscription) ──────────────────────────────────────
@@ -325,10 +363,20 @@ export const fetchPiProviderUsage = async (input: {
   readonly authKind: AuthKind
   readonly access: string
   readonly accountId: string | null
+  /**
+   * Lazy alternate credential tried only after the stored one is rejected —
+   * on desktop, the local Claude CLI's own OAuth login. Null for targets
+   * where no such local credential exists (remote devices).
+   */
+  readonly fallbackAccess?: (() => Promise<string | null>) | null
   readonly signal: AbortSignal
 }): Promise<ProviderUsageRead> => {
   if (input.authKind === "claude-setup-token") {
-    return fetchAnthropicOAuthUsage(input.access, input.signal)
+    return fetchAnthropicOAuthUsage(
+      input.access,
+      input.fallbackAccess ?? null,
+      input.signal
+    )
   }
   if (input.authKind === "openai-codex-oauth") {
     return fetchCodexUsage(input.access, input.accountId, input.signal)

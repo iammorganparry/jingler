@@ -68,6 +68,7 @@ import {
   runPublishMachineExclusive,
   UsageService,
   fetchPiProviderUsage,
+  readLocalClaudeCliAccessToken,
   adoptableChatIdentities,
   sessionNeedsRuntimeIdentity,
   WorkspaceService,
@@ -5283,6 +5284,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                           authKind: entry.connection.authKind,
                           access: credential.access,
                           accountId: credential.accountId,
+                          // Only the desktop target can borrow the local
+                          // Claude CLI login; a remote device's keychain is
+                          // not reachable from here.
+                          fallbackAccess:
+                            entry.connection.targetId === "desktop"
+                              ? () => readLocalClaudeCliAccessToken()
+                              : null,
                           signal,
                         }),
                       ),
