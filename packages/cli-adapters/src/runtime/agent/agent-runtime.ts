@@ -1,11 +1,15 @@
 import type {
+  Message,
   PermissionMode,
   PiRunSpec,
   Plan,
   PlanPrd,
   QuestionAnswer,
   QuestionRequest,
-  StreamEvent
+  StreamEvent,
+  SubagentFleetControlOutcome,
+  SubagentFleetControlRequest,
+  SubagentFleetSnapshot
 } from "@jingler/core"
 import { Context, Data, Effect, type Stream } from "effect"
 import type { JinglerMcpAttachments } from "../tools/mcp-tools.js"
@@ -70,6 +74,22 @@ export interface AgentRuntimeShape {
   ) => Stream.Stream<StreamEvent, AgentRuntimeError>
   readonly steer: (piSessionId: string, text: string) => Effect.Effect<void, AgentRuntimeError>
   readonly interrupt: (piSessionId: string) => Effect.Effect<void, AgentRuntimeError>
+  readonly controlSubagent: (
+    sessionId: string,
+    chatId: string,
+    request: SubagentFleetControlRequest
+  ) => Effect.Effect<SubagentFleetControlOutcome, AgentRuntimeError>
+  readonly subagentFleetSnapshot: (
+    sessionId: string,
+    chatId: string,
+    parentPiSessionId: string
+  ) => Effect.Effect<SubagentFleetSnapshot, AgentRuntimeError>
+  readonly subagentTranscript: (
+    sessionId: string,
+    chatId: string,
+    parentPiSessionId: string,
+    runId: string
+  ) => Effect.Effect<ReadonlyArray<Message>, AgentRuntimeError>
 }
 
 export class AgentRuntime extends Context.Tag("@jingler/AgentRuntime")<

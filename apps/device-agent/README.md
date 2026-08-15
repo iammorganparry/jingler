@@ -9,14 +9,20 @@ Git and harness credentials. A desktop BetterAuth token is never installed here.
 
 ```bash
 pnpm --filter @jingler/device-agent build
-node apps/device-agent/dist/jingler-device.mjs pair \
+mkdir -p /tmp/jingler-device-runtime
+tar -xzf apps/device-agent/dist/jingler-device-runtime.tgz \
+  -C /tmp/jingler-device-runtime
+node /tmp/jingler-device-runtime/jingler-device.mjs pair \
   --relay https://device-relay.jingler.dev --json
 ```
 
-The desktop's SSH flow runs the equivalent command through an existing trusted
-SSH alias, claims the one-time result while signed in, and installs `serve` as a
-per-user launchd or systemd service. If the host does not already provide Node
-22, bootstrap installs a pinned, checksum-verified private runtime under
+The desktop's SSH flow uploads the versioned managed-runtime archive through an
+existing trusted SSH alias, extracts it as a new release, atomically switches the
+`managed-runtime/current` symlink, claims the one-time result while signed in,
+and installs `serve` as a per-user launchd or systemd service. The archive carries
+the exact Pi CLI and pi-subagents package tree; it never uses an ambient agent
+installation. If the host does not already provide Node 22, bootstrap installs a
+pinned, checksum-verified private Node runtime under
 `~/.local/share/jingler/runtime`. SSH is a bootstrap transport only; normal work
 uses the relay.
 

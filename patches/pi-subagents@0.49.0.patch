@@ -1,0 +1,171 @@
+diff --git a/src/extension/index.ts b/src/extension/index.ts
+index fa7a5d60c9a5e7c0f8f41eb8fa2f48b237678816..600fcee5225990ae283b2b0e2bcd88e0e6260d46 100644
+--- a/src/extension/index.ts
++++ b/src/extension/index.ts
+@@ -569,6 +569,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 		events: pi.events,
+ 		getContext: () => state.lastUiContext,
+ 		execute: (id, params, signal, onUpdate, ctx) => executor.executePublic(id, params, signal, onUpdate, ctx),
++		replySupervisor: (requestId, message) => supervisorChannel.reply(requestId, message),
+ 		state,
+ 	});
+ 
+diff --git a/src/extension/rpc.ts b/src/extension/rpc.ts
+index 9dd171b3cfb97d2253fb3244ced4ebed4508df47..b396153b7b5da83d7413d7786d016e94dea2f841 100644
+--- a/src/extension/rpc.ts
++++ b/src/extension/rpc.ts
+@@ -26,7 +26,7 @@ export const SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
+ export const SUBAGENT_RPC_READY_EVENT = "subagents:rpc:v1:ready";
+ export const SUBAGENT_RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
+ 
+-export const SUBAGENT_RPC_METHODS = ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"] as const;
++export const SUBAGENT_RPC_METHODS = ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume", "reply"] as const;
+ export type SubagentRpcMethod = typeof SUBAGENT_RPC_METHODS[number];
+ 
+ export interface SubagentRpcRequestEnvelope {
+@@ -282,6 +282,7 @@ interface RegisterSubagentRpcBridgeOptions {
+ 	resultsDir?: string;
+ 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
+ 	now?: () => number;
++	replySupervisor?: (requestId: string, message: string) => { requestId: string; runId: string; agent: string };
+ 	/** Native live state, projected into the optional public fleet-status capability. */
+ 	state?: SubagentState;
+ }
+@@ -531,6 +532,17 @@ async function handleRequest(
+ ): Promise<unknown> {
+ 	const ctx = options.getContext();
+ 	if (request.method === "ping") return pingData(ctx);
++	if (request.method === "reply") {
++		const input = assertRecordParams(request.params, "reply");
++		if (typeof input.requestId !== "string" || !input.requestId.trim()) {
++			throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty requestId.");
++		}
++		if (typeof input.message !== "string" || !input.message.trim()) {
++			throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty message.");
++		}
++		if (!options.replySupervisor) throw new SubagentRpcError("invalid_state", "Supervisor reply is unavailable.");
++		return options.replySupervisor(input.requestId.trim(), input.message.trim());
++	}
+ 	if (!ctx) throw new SubagentRpcError("no_active_session", "No active extension context for subagent RPC.");
+ 
+ 	if (request.method === "spawn") {
+diff --git a/src/intercom/native-supervisor-channel.ts b/src/intercom/native-supervisor-channel.ts
+index 3e30e8b49e774d82fd62f07acba1266e44e7197a..92aacfc4e4cb6df1e4cdd2850565cf153897c18e 100644
+--- a/src/intercom/native-supervisor-channel.ts
++++ b/src/intercom/native-supervisor-channel.ts
+@@ -634,7 +634,12 @@ function buildParentIntercomTool(pending: Map<string, PendingSupervisorRequest>,
+ 	};
+ }
+ 
+-export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentState, deps: NativeSupervisorChannelDeps = {}): { start: () => void; dispose: () => void; pending: Map<string, PendingSupervisorRequest> } {
++export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentState, deps: NativeSupervisorChannelDeps = {}): {
++	start: () => void;
++	dispose: () => void;
++	pending: Map<string, PendingSupervisorRequest>;
++	reply: (requestId: string, message: string) => { requestId: string; runId: string; agent: string };
++} {
+ 	const watch = deps.watch ?? fs.watch;
+ 	const pending = new Map<string, PendingSupervisorRequest>();
+ 	const seenFiles = new Set<string>();
+@@ -808,6 +813,13 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 			pending.clear();
+ 			seenFiles.clear();
+ 		},
++		reply: (requestId, message) => {
++			const request = pending.get(requestId);
++			if (!request) throw new Error(`No pending supervisor request found for replyTo '${requestId}'.`);
++			writeReply(request, message);
++			pending.delete(request.id);
++			return { requestId: request.id, runId: request.runId, agent: request.agent };
++		},
+ 		pending,
+ 	};
+ }
+diff --git a/src/runs/shared/pi-spawn.ts b/src/runs/shared/pi-spawn.ts
+index 26081e0..a297f12 100644
+--- a/src/runs/shared/pi-spawn.ts
++++ b/src/runs/shared/pi-spawn.ts
+@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
+ 
+ export const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
+ export const PI_SUBAGENT_PI_BINARY_ENV = "PI_SUBAGENT_PI_BINARY";
++export const PI_SUBAGENT_PI_BINARY_ARGS_ENV = "PI_SUBAGENT_PI_BINARY_ARGS";
++export const PI_SUBAGENT_ELECTRON_RUN_AS_NODE_ENV = "PI_SUBAGENT_ELECTRON_RUN_AS_NODE";
+ 
+ export function findPiPackageRootFromEntry(
+ 	entryPoint: string,
+@@ -59,6 +61,12 @@ interface PiSpawnCommand {
+ 	args: string[];
+ }
+ 
++export function getPiSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
++	return env[PI_SUBAGENT_ELECTRON_RUN_AS_NODE_ENV] === "1"
++		? { ...env, ELECTRON_RUN_AS_NODE: "1" }
++		: env;
++}
++
+ function isRunnableNodeScript(
+ 	filePath: string,
+ 	existsSync: (filePath: string) => boolean,
+@@ -143,7 +151,18 @@ export function getPiSpawnCommand(
+ 	const env = deps.env ?? process.env;
+ 	const piBinary = env[PI_SUBAGENT_PI_BINARY_ENV]?.trim();
+ 	if (piBinary) {
+-		return { command: piBinary, args };
++		const prefixValue = env[PI_SUBAGENT_PI_BINARY_ARGS_ENV]?.trim();
++		if (!prefixValue) return { command: piBinary, args };
++		let prefixArgs: unknown;
++		try {
++			prefixArgs = JSON.parse(prefixValue);
++		} catch {
++			throw new Error(`${PI_SUBAGENT_PI_BINARY_ARGS_ENV} must be a JSON string array.`);
++		}
++		if (!Array.isArray(prefixArgs) || !prefixArgs.every((value): value is string => typeof value === "string")) {
++			throw new Error(`${PI_SUBAGENT_PI_BINARY_ARGS_ENV} must be a JSON string array.`);
++		}
++		return { command: piBinary, args: [...prefixArgs, ...args] };
+ 	}
+ 
+ 	const execPath = deps.execPath ?? process.execPath;
+diff --git a/src/runs/foreground/execution.ts b/src/runs/foreground/execution.ts
+index b9aa998..9d123b1 100644
+--- a/src/runs/foreground/execution.ts
++++ b/src/runs/foreground/execution.ts
+@@ -55,7 +55,7 @@ import { buildSkillInjection, resolveSkillsWithFallback } from "../../agents/skills.ts";
+ import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
+ import { evaluateCompletionMutationGuard } from "../shared/completion-guard.ts";
+ import { arbitrateCompletionGuardRescue } from "../shared/llm-intent-arbiter.ts";
+-import { getPiSpawnCommand } from "../shared/pi-spawn.ts";
++import { getPiSpawnCommand, getPiSpawnEnv } from "../shared/pi-spawn.ts";
+ import { createJsonlWriter } from "../../shared/jsonl-writer.ts";
+ import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
+ import { resolvePermissionRules } from "../shared/permissions.ts";
+@@ -483,6 +483,6 @@ export async function executeSingleAgent(
+ 		const proc = spawn(spawnSpec.command, spawnSpec.args, {
+ 			cwd: options.cwd ?? runtimeCwd,
+-			env: spawnEnv,
++			env: getPiSpawnEnv(spawnEnv),
+ 			stdio: ["ignore", "pipe", "pipe"],
+ 			windowsHide: true,
+ 		});
+diff --git a/src/runs/background/subagent-runner.ts b/src/runs/background/subagent-runner.ts
+index 14093e4..249f293 100644
+--- a/src/runs/background/subagent-runner.ts
++++ b/src/runs/background/subagent-runner.ts
+@@ -10,6 +10,6 @@ import { createChildTranscriptWriter, type ChildTranscriptWriter } from "../../shared/child-transcript.ts";
+ import { closeSteerInbox, consumeInterruptRequest, consumeSteerRequests, deliverInterruptRequest, deliverStopRequest, deliverTimeoutRequest, enqueueStepSteer, steerAcksDir, steerCapabilityPath, stepSteerInboxDir, watchAsyncControlInbox, type SteerAck, type SteerCapability, type SteerRequest } from "./control-channel.ts";
+ import { appendJsonl as appendRawJsonl, formatOutputArtifactContent, getArtifactPaths, writeArtifact, writeMetadata } from "../../shared/artifacts.ts";
+-import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
++import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, getPiSpawnEnv, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
+ import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
+ import {
+ 	type ActivityState,
+@@ -554,7 +554,7 @@ export async function runPiStreaming(
+ 		const child = spawn(spawnSpec.command, spawnSpec.args, {
+ 			cwd,
+ 			stdio: ["ignore", "pipe", "pipe"],
+-			env: spawnEnv,
++			env: getPiSpawnEnv(spawnEnv),
+ 			windowsHide: true,
+ 			detached: process.platform !== "win32",
+ 		});

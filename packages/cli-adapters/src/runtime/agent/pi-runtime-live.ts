@@ -35,6 +35,8 @@ import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
+import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
+import { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
 
 const connectionFailure = (message: string, cause?: unknown) =>
@@ -54,7 +56,7 @@ export interface PiAgentRuntimeLiveOptions {
 /** Composition for the embedded pi runtime and Jingler-owned tools. */
 export const makePiAgentRuntimeLive = (
   options: PiAgentRuntimeLiveOptions = {}
-) => Layer.effect(
+) => Layer.scoped(
   AgentRuntime,
   Effect.gen(function* () {
     const paths = yield* AppPaths
@@ -90,11 +92,30 @@ export const makePiAgentRuntimeLive = (
         : undefined
     )
     const credentials = new AgentSecretStore(secretStore)
+    const subagentBroker = yield* Effect.acquireRelease(
+      Effect.sync(() => new SubagentCapabilityBroker()),
+      (broker) => Effect.promise(() => broker.close())
+    )
+    const childCredentials = new PiChildCredentials(
+      join(paths.managedResourcesDir, "subagent-credentials"),
+      credentials
+    )
+    yield* childCredentials.clear().pipe(
+      Effect.mapError((cause) =>
+        new AgentRuntimeError({
+          reason: "runtime",
+          message: cause.message,
+          cause
+        })
+      )
+    )
 
     const factory = makePiSessionFactory({
       agentDir: paths.managedResourcesDir,
       sessionsDir: paths.piSessionsDir,
       credentials,
+      childCredentials,
+      subagentBroker,
       resolveConnection: (spec) =>
         Effect.gen(function* () {
           const connections = yield* providers.status.pipe(

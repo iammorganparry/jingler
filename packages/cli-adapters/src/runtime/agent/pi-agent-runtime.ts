@@ -1,6 +1,15 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
-import { PlanPrd, type FileChangeSet, type PiRunSpec, type StreamEvent } from "@jingler/core"
-import { Effect, Option, Queue, Ref, Schema, Stream } from "effect"
+import {
+  PlanPrd,
+  type FileChangeSet,
+  type Message,
+  type PiRunSpec,
+  type StreamEvent,
+  type SubagentFleetControlOutcome,
+  type SubagentFleetControlRequest,
+  type SubagentFleetSnapshot
+} from "@jingler/core"
+import { Effect, Option, Queue, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
@@ -9,10 +18,19 @@ import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
 export const MEMORY_REFLECTION_TIMEOUT_MS = 15_000
 
 export interface PiSessionHandle {
+  /** Resumable Pi session file/id persisted by Jingler. */
   readonly id: string
+  /** Internal Pi session identity used by pi-subagents lifecycle events. */
+  readonly parentPiSessionId: string
   readonly modelId: string
   readonly contextWindow: number | null
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
+  readonly subscribeFleet: (listener: (event: StreamEvent) => void) => () => void
+  readonly controlSubagent: (
+    request: SubagentFleetControlRequest
+  ) => Promise<SubagentFleetControlOutcome>
+  readonly subagentFleetSnapshot: () => Promise<SubagentFleetSnapshot>
+  readonly subagentTranscript: (runId: string) => Promise<ReadonlyArray<Message>>
   readonly prompt: (text: string) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>
@@ -157,6 +175,7 @@ const subscribeToSession = (
   sink: EventSink,
   planDraft: PlanToolDraftStream
 ): (() => void) => {
+  const unsubscribeFleet = handle.subscribeFleet((event) => sink.emit(event))
   const normalize = createPiEventNormalizer()
   let reflectionStarted = false
   let reflectionActive = false
@@ -168,7 +187,7 @@ const subscribeToSession = (
     if (reflectionTimeout !== null) clearTimeout(reflectionTimeout)
     reflectionTimeout = null
   }
-  const unsubscribe = handle.subscribe((event) => {
+  const unsubscribeSession = handle.subscribe((event) => {
     if (!reflectionActive) {
       const providerFailure = piProviderFailure(event)
       if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
@@ -228,7 +247,8 @@ const subscribeToSession = (
   })
   return () => {
     finishReflection()
-    unsubscribe()
+    unsubscribeFleet()
+    unsubscribeSession()
   }
 }
 
@@ -253,17 +273,138 @@ const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): 
   )
 }
 
+interface RetainedPiSession {
+  readonly handle: PiSessionHandle
+  readonly sessionId: string
+  readonly chatId: string
+  readonly aliases: ReadonlySet<string>
+  activeTurns: number
+  reapTimer: ReturnType<typeof setTimeout> | null
+  disposing: boolean
+}
+
+class PiSessionRegistry {
+  readonly #aliases = new Map<string, RetainedPiSession>()
+
+  constructor(
+    readonly factory: PiSessionFactory,
+    readonly reapIntervalMs: number
+  ) {}
+
+  acquire(
+    spec: PiRunSpec,
+    context: AgentRuntimeContext
+  ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
+    const retained = spec.piSessionId === null
+      ? undefined
+      : this.#aliases.get(spec.piSessionId)
+    if (retained) {
+      if (retained.sessionId !== spec.sessionId || retained.chatId !== spec.chatId) {
+        return Effect.fail(new AgentRuntimeError({
+          reason: "runtime",
+          message: "Retained Pi session does not belong to this chat"
+        }))
+      }
+      if (retained.disposing || retained.activeTurns !== 0) {
+        return Effect.fail(new AgentRuntimeError({
+          reason: "runtime",
+          message: `pi session is already active: ${spec.piSessionId}`
+        }))
+      }
+      if (retained.handle.modelId !== String(spec.modelId)) {
+        return Effect.fail(new AgentRuntimeError({
+          reason: "runtime",
+          message: "Cannot resume a retained Pi session with a different model"
+        }))
+      }
+      if (retained.reapTimer !== null) clearTimeout(retained.reapTimer)
+      retained.reapTimer = null
+      retained.activeTurns = 1
+      return Effect.succeed(retained)
+    }
+    return this.factory.create(spec, context).pipe(
+      Effect.map((handle) => {
+        const aliases = new Set([handle.id, handle.parentPiSessionId])
+        const record: RetainedPiSession = {
+          handle,
+          sessionId: spec.sessionId,
+          chatId: spec.chatId,
+          aliases,
+          activeTurns: 1,
+          reapTimer: null,
+          disposing: false
+        }
+        for (const alias of aliases) this.#aliases.set(alias, record)
+        return record
+      })
+    )
+  }
+
+  lookup(id: string): PiSessionHandle | undefined {
+    return this.#aliases.get(id)?.handle
+  }
+
+  lookupOwned(
+    sessionId: string,
+    chatId: string,
+    id: string
+  ): PiSessionHandle | undefined {
+    const record = this.#aliases.get(id)
+    return record?.sessionId === sessionId && record.chatId === chatId
+      ? record.handle
+      : undefined
+  }
+
+  async release(record: RetainedPiSession): Promise<void> {
+    record.activeTurns = Math.max(0, record.activeTurns - 1)
+    if (record.activeTurns > 0 || record.disposing) return
+    await this.#reconcileLifetime(record)
+  }
+
+  async #reconcileLifetime(record: RetainedPiSession): Promise<void> {
+    if (record.activeTurns > 0 || record.disposing) return
+    try {
+      const snapshot = await record.handle.subagentFleetSnapshot()
+      if (snapshot.totalActive === 0) {
+        await this.#dispose(record)
+        return
+      }
+    } catch {
+      // A failed status read is not evidence that detached children are gone.
+    }
+    if (record.reapTimer !== null) clearTimeout(record.reapTimer)
+    record.reapTimer = setTimeout(() => {
+      record.reapTimer = null
+      void this.#reconcileLifetime(record)
+    }, this.reapIntervalMs)
+    record.reapTimer.unref?.()
+  }
+
+  async #dispose(record: RetainedPiSession): Promise<void> {
+    if (record.disposing) return
+    record.disposing = true
+    if (record.reapTimer !== null) clearTimeout(record.reapTimer)
+    record.reapTimer = null
+    try {
+      await record.handle.dispose()
+    } finally {
+      for (const alias of record.aliases) {
+        if (this.#aliases.get(alias) === record) this.#aliases.delete(alias)
+      }
+    }
+  }
+}
+
 const runSession = (
-  factory: PiSessionFactory,
-  sessions: Ref.Ref<Map<string, PiSessionHandle>>,
+  sessions: PiSessionRegistry,
   spec: PiRunSpec,
   context: AgentRuntimeContext
 ): Stream.Stream<StreamEvent, AgentRuntimeError> =>
   Stream.unwrap(
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<StreamEvent>()
-      const handle = yield* factory.create(spec, context)
-      yield* Ref.update(sessions, (current) => new Map(current).set(handle.id, handle))
+      const record = yield* sessions.acquire(spec, context)
+      const handle = record.handle
       const sink = makeEventSink(queue, handle.observe)
       const planDraft = createPlanToolDraftStream(() => `plan-draft:${spec.runId}`)
       sink.emit({
@@ -277,22 +418,10 @@ const runSession = (
         Stream.takeUntil((event) => event._tag === "Done" || event._tag === "Failed"),
         Stream.ensuring(
           Queue.shutdown(queue).pipe(
-            Effect.zipRight(
-              Effect.promise(async () => {
-                try {
-                  unsubscribe()
-                } finally {
-                  await handle.dispose()
-                }
-              })
-            ),
-            Effect.zipRight(
-              Ref.update(sessions, (current) => {
-                const next = new Map(current)
-                next.delete(handle.id)
-                return next
-              })
-            )
+            Effect.zipRight(Effect.promise(async () => {
+              unsubscribe()
+              await sessions.release(record)
+            }))
           )
         )
       )
@@ -308,39 +437,76 @@ const runSession = (
     )
   )
 
-export const makePiAgentRuntime = (factory: PiSessionFactory): Effect.Effect<AgentRuntimeShape> =>
-  Effect.gen(function* () {
-    const sessions = yield* Ref.make(new Map<string, PiSessionHandle>())
+export interface PiAgentRuntimeOptions {
+  /** Internal deterministic-test seam; production uses conservative polling. */
+  readonly retainedSessionPollMs?: number
+}
 
-    const withSession = (
+export const makePiAgentRuntime = (
+  factory: PiSessionFactory,
+  options: PiAgentRuntimeOptions = {}
+): Effect.Effect<AgentRuntimeShape> =>
+  Effect.sync(() => {
+    const sessions = new PiSessionRegistry(
+      factory,
+      options.retainedSessionPollMs ?? 1_000
+    )
+
+    const sessionOperation = <Value>(
+      session: PiSessionHandle | undefined,
       id: string,
-      action: (session: PiSessionHandle) => Promise<void>
-    ): Effect.Effect<void, AgentRuntimeError> =>
-      Ref.get(sessions).pipe(
-        Effect.flatMap((active) => {
-          const session = active.get(id)
-          return session
-            ? Effect.tryPromise({
-                try: () => action(session),
-                catch: (cause) =>
-                  new AgentRuntimeError({
-                    reason: "runtime",
-                    message: "pi session operation failed",
-                    cause
-                  })
+      action: (session: PiSessionHandle) => Promise<Value>
+    ): Effect.Effect<Value, AgentRuntimeError> => {
+      return session
+        ? Effect.tryPromise({
+            try: () => action(session),
+            catch: (cause) =>
+              new AgentRuntimeError({
+                reason: "runtime",
+                message: "pi session operation failed",
+                cause
               })
-            : Effect.fail(
-                new AgentRuntimeError({
-                  reason: "runtime",
-                  message: `pi session is not active: ${id}`
-                })
-              )
-        })
-      )
+          })
+        : Effect.fail(
+            new AgentRuntimeError({
+              reason: "runtime",
+              message: `pi session is not active: ${id}`
+            })
+          )
+    }
 
     return {
-      run: (spec, context) => runSession(factory, sessions, spec, context),
-      steer: (id, text) => withSession(id, (session) => session.steer(text)),
-      interrupt: (id) => withSession(id, (session) => session.interrupt())
+      run: (spec, context) => runSession(sessions, spec, context),
+      steer: (id, text) => sessionOperation(
+        sessions.lookup(id),
+        id,
+        (session) => session.steer(text)
+      ),
+      interrupt: (id) => sessionOperation(
+        sessions.lookup(id),
+        id,
+        (session) => session.interrupt()
+      ),
+      controlSubagent: (sessionId, chatId, request) => sessionOperation(
+        sessions.lookupOwned(sessionId, chatId, request.parentPiSessionId),
+        request.parentPiSessionId,
+        (session) => session.controlSubagent(request)
+      ),
+      subagentFleetSnapshot: (sessionId, chatId, parentPiSessionId) =>
+        sessionOperation(
+          sessions.lookupOwned(sessionId, chatId, parentPiSessionId),
+          parentPiSessionId,
+          (session) => session.subagentFleetSnapshot()
+        ),
+      subagentTranscript: (
+        sessionId,
+        chatId,
+        parentPiSessionId,
+        runId
+      ) => sessionOperation(
+        sessions.lookupOwned(sessionId, chatId, parentPiSessionId),
+        parentPiSessionId,
+        (session) => session.subagentTranscript(runId)
+      )
     }
   })

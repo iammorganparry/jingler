@@ -32,7 +32,9 @@ import type {
   Session,
   SessionStatus,
   Skill,
-  Subagent
+  Subagent,
+  SubagentFleetControlOutcome,
+  SubagentFleetEvent
 } from "@jingler/core"
 import { latestPlan, pendingPlan, pendingQuestion } from "@jingler/core"
 import type { QueuedMessage } from "./conversation-machine.js"
@@ -72,6 +74,8 @@ export interface Conversation {
   readonly steeringId: string | null
   /** Live sub-agents (harness `Task` spawns) for the current turn — watch-only tabs. */
   readonly subagents: ReadonlyArray<Subagent>
+  readonly subagentFleetEvents: ReadonlyArray<SubagentFleetEvent>
+  readonly subagentControlOutcomes: ReadonlyArray<SubagentFleetControlOutcome>
   /** Tokens currently occupying the main agent's context window. */
   readonly tokens: number
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
@@ -251,7 +255,8 @@ export function useConversation(
   const {
     messages, mode, reasoning, skills, files,
     connectionId, providerId, modelId, patch, queued, steeringId,
-    subagents, tokens, hasMoreHistory, loadingHistory,
+    subagents, subagentFleetEvents, subagentControlOutcomes,
+    tokens, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt,
     planDraft, planDraftPresentationNonce
   } = state.context
@@ -296,6 +301,8 @@ export function useConversation(
     queued,
     steeringId,
     subagents,
+    subagentFleetEvents,
+    subagentControlOutcomes,
     tokens,
     runStartedAt,
     reviewer,

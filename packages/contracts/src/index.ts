@@ -84,6 +84,9 @@ import {
   SettledSessionStatus,
   Skill,
   StreamEvent,
+  SubagentFleetControlOutcome,
+  SubagentFleetControlRequest,
+  SubagentFleetSnapshot,
   TerminalChunk,
   TerminalInfo,
   ThemeCatalog,
@@ -1191,6 +1194,40 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       chatId: Schema.String,
       agentId: Schema.String
+    }
+  }),
+
+  /** Reconcile the active first-class Fleet independently of the parent turn stream. */
+  Rpc.make("Agent.subagentFleetSnapshot", {
+    success: SubagentFleetSnapshot,
+    error: GitError,
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      parentPiSessionId: Schema.String
+    }
+  }),
+
+  /** Read one exact child session through the runtime's trusted session-root policy. */
+  Rpc.make("Agent.subagentTranscript", {
+    success: Schema.Array(Message),
+    error: GitError,
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      parentPiSessionId: Schema.String,
+      runId: Schema.String
+    }
+  }),
+
+  /** Control one exact pi-subagents run and return its reconciled acknowledgement. */
+  Rpc.make("Agent.controlSubagent", {
+    success: SubagentFleetControlOutcome,
+    error: GitError,
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      request: SubagentFleetControlRequest
     }
   }),
 

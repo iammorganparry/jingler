@@ -12,5 +12,5 @@ export const resolveDeviceAgentBundlePath = (
   mainDir: string
 ): string =>
   packaged
-    ? join(resourcesPath, "device-agent", "jingler-device.mjs")
-    : join(mainDir, "../../../device-agent/dist/jingler-device.mjs")
+    ? join(resourcesPath, "device-agent", "jingler-device-runtime.tgz")
+    : join(mainDir, "../../../device-agent/dist/jingler-device-runtime.tgz")

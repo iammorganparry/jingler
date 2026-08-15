@@ -52,6 +52,26 @@ const services = (): DeviceExecutorServices => ({
   answerQuestion: vi.fn(async () => undefined),
   steer: vi.fn(async () => ({ status: "accepted" })),
   stop: vi.fn(async () => undefined),
+  subagentFleetSnapshot: vi.fn(async () => ({
+    version: 1 as const,
+    parentPiSessionId: "pi-session",
+    generatedAt: 1,
+    totalActive: 0,
+    omitted: 0,
+    activeCapacity: { used: 0, limit: 0 },
+    nodes: []
+  })),
+  subagentTranscript: vi.fn(async () => []),
+  controlSubagent: vi.fn(async (request) => ({
+    version: 1 as const,
+    requestId: request.requestId,
+    runId: request.runId,
+    action: request.action,
+    acknowledged: true,
+    status: "accepted" as const,
+    message: "acknowledged",
+    acknowledgedAt: 1
+  })),
   transcriptPage: vi.fn(async () => ({ messages: [], hasMore: false })),
   diff: vi.fn(async () => "diff --git"),
   files: vi.fn(async () => ["src/index.ts"]),
@@ -238,6 +258,34 @@ describe("device session command executor", () => {
       command("Agent.stop", { chatId: "chat_1" }),
       async () => undefined
     )
+    const control = {
+      version: 1 as const,
+      requestId: "control-1",
+      parentPiSessionId: "parent-pi",
+      runId: "child-run",
+      action: "stop" as const,
+      message: null,
+      replyTo: null
+    }
+    await executor.execute(
+      command("Agent.controlSubagent", { chatId: "chat_1", request: control }),
+      async () => undefined
+    )
+    await executor.execute(
+      command("Agent.subagentFleetSnapshot", {
+        chatId: "chat_1",
+        parentPiSessionId: "parent-pi"
+      }),
+      async () => undefined
+    )
+    await executor.execute(
+      command("Agent.subagentTranscript", {
+        chatId: "chat_1",
+        parentPiSessionId: "parent-pi",
+        runId: "child-run"
+      }),
+      async () => undefined
+    )
     expect(dependencies.decideGate).toHaveBeenCalledWith(
       "session_1",
       { chatId: "chat_1", gateId: "gate_1", decision: "allow" }
@@ -245,6 +293,22 @@ describe("device session command executor", () => {
     expect(dependencies.answerQuestion).toHaveBeenCalledWith(
       "session_1",
       { chatId: "chat_1", requestId: "question_1", answers: [] }
+    )
+    expect(dependencies.controlSubagent).toHaveBeenCalledWith(
+      "session_1",
+      "chat_1",
+      control
+    )
+    expect(dependencies.subagentFleetSnapshot).toHaveBeenCalledWith(
+      "session_1",
+      "chat_1",
+      "parent-pi"
+    )
+    expect(dependencies.subagentTranscript).toHaveBeenCalledWith(
+      "session_1",
+      "chat_1",
+      "parent-pi",
+      "child-run"
     )
     expect(dependencies.stop).toHaveBeenCalledWith("session_1", "chat_1")
   })

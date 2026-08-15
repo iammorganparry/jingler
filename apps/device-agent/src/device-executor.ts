@@ -58,6 +58,8 @@ import {
   RemotePublishPrepared,
   Session,
   StreamEvent,
+  SubagentFleetControlRequest,
+  SubagentFleetSnapshot,
   WorkspaceTransferCheckpoint
 } from "@jingler/core"
 import type {
@@ -69,7 +71,11 @@ import type {
   OwnedDeviceOffloadResult as OwnedOffloadResult,
   Session as SessionValue,
   Project as ProjectValue,
-  StreamEvent as StreamEventValue
+  Message as MessageValue,
+  StreamEvent as StreamEventValue,
+  SubagentFleetControlOutcome as SubagentFleetControlOutcomeValue,
+  SubagentFleetControlRequest as SubagentFleetControlRequestValue,
+  SubagentFleetSnapshot as SubagentFleetSnapshotValue
 } from "@jingler/core"
 import { loadDeviceE2ePiRuntime } from "./e2e/pi-runtime.js"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
@@ -116,6 +122,19 @@ const decodePayload = <A, I>(
 }
 
 const ChatIdPayload = Schema.Struct({ chatId: Schema.String })
+const SubagentFleetSnapshotPayload = Schema.Struct({
+  chatId: Schema.String,
+  parentPiSessionId: Schema.String
+})
+const SubagentTranscriptPayload = Schema.Struct({
+  chatId: Schema.String,
+  parentPiSessionId: Schema.String,
+  runId: Schema.String
+})
+const SubagentControlPayload = Schema.Struct({
+  chatId: Schema.String,
+  request: SubagentFleetControlRequest
+})
 const RunPayload = Schema.Struct({
   chatId: Schema.String,
   text: Schema.String,
@@ -221,6 +240,22 @@ export interface DeviceExecutorServices {
     input: Schema.Schema.Type<typeof SteerPayload>
   ) => Promise<unknown>
   readonly stop: (sessionId: string, chatId: string) => Promise<void>
+  readonly subagentFleetSnapshot: (
+    sessionId: string,
+    chatId: string,
+    parentPiSessionId: string
+  ) => Promise<SubagentFleetSnapshotValue>
+  readonly subagentTranscript: (
+    sessionId: string,
+    chatId: string,
+    parentPiSessionId: string,
+    runId: string
+  ) => Promise<ReadonlyArray<MessageValue>>
+  readonly controlSubagent: (
+    sessionId: string,
+    chatId: string,
+    input: SubagentFleetControlRequestValue
+  ) => Promise<SubagentFleetControlOutcomeValue>
   readonly transcriptPage: (
     input: Schema.Schema.Type<typeof TranscriptPagePayload>
   ) => Promise<unknown>
@@ -289,6 +324,31 @@ export const makeDeviceSessionCommandExecutor = (
         return services.steer(command.sessionId, decodePayload(command, SteerPayload))
       case "Agent.stop":
         return services.stop(command.sessionId, decodePayload(command, ChatIdPayload).chatId)
+      case "Agent.subagentFleetSnapshot": {
+        const input = decodePayload(command, SubagentFleetSnapshotPayload)
+        return services.subagentFleetSnapshot(
+          command.sessionId,
+          input.chatId,
+          input.parentPiSessionId
+        )
+      }
+      case "Agent.subagentTranscript": {
+        const input = decodePayload(command, SubagentTranscriptPayload)
+        return services.subagentTranscript(
+          command.sessionId,
+          input.chatId,
+          input.parentPiSessionId,
+          input.runId
+        )
+      }
+      case "Agent.controlSubagent": {
+          const input = decodePayload(command, SubagentControlPayload)
+          return services.controlSubagent(
+            command.sessionId,
+            input.chatId,
+            input.request
+          )
+        }
       case "Sessions.transcriptPage": {
         const page = await services.transcriptPage(
           decodePayload(command, TranscriptPagePayload)
@@ -560,6 +620,38 @@ export const makeLiveDeviceSessionCommandExecutor = (
     ),
     stop: (sessionId, chatId) => run(
       Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId))
+    ),
+    subagentFleetSnapshot: (sessionId, chatId, parentPiSessionId) => run(
+      Effect.flatMap(
+        AgentRuntime,
+        (runtime) => runtime.subagentFleetSnapshot(
+          sessionId,
+          chatId,
+          parentPiSessionId
+        )
+      )
+    ),
+    subagentTranscript: (
+      sessionId,
+      chatId,
+      parentPiSessionId,
+      runId
+    ) => run(
+      Effect.flatMap(
+        AgentRuntime,
+        (runtime) => runtime.subagentTranscript(
+          sessionId,
+          chatId,
+          parentPiSessionId,
+          runId
+        )
+      )
+    ),
+    controlSubagent: (sessionId, chatId, input) => run(
+      Effect.flatMap(
+        AgentRuntime,
+        (runtime) => runtime.controlSubagent(sessionId, chatId, input)
+      )
     ),
     transcriptPage: (input) => run(TranscriptStore.listPage(input.chatId, {
       ...(input.before === undefined ? {} : { before: input.before }),

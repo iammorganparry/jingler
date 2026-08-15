@@ -8,7 +8,14 @@ const here = dirname(fileURLToPath(import.meta.url))
 export const DESKTOP_ROOT = resolve(here, "..")
 export const MAIN_ENTRY = resolve(DESKTOP_ROOT, "out/main/index.js")
 const REPO_ROOT = resolve(DESKTOP_ROOT, "../..")
-export const DEVICE_AGENT_ENTRY = resolve(REPO_ROOT, "apps/device-agent/dist/jingler-device.mjs")
+export const DEVICE_AGENT_ENTRY = resolve(
+  REPO_ROOT,
+  "apps/device-agent/dist/runtime-payload/jingler-device.mjs"
+)
+export const DEVICE_AGENT_ARCHIVE = resolve(
+  REPO_ROOT,
+  "apps/device-agent/dist/jingler-device-runtime.tgz"
+)
 const BUILDER_CONFIG = resolve(DESKTOP_ROOT, "electron-builder.yml")
 const BUNDLED_PLUGIN_IDS = readBundledPluginIds(BUILDER_CONFIG)
 const BUNDLED_PLUGIN_ENTRIES = BUNDLED_PLUGIN_IDS.flatMap((id) => [
@@ -36,7 +43,7 @@ export default function globalSetup(): void {
     buildBundledPlugins()
   }
   if (reuseBuild && existsSync(MAIN_ENTRY)) {
-    if (!existsSync(DEVICE_AGENT_ENTRY)) {
+    if (!existsSync(DEVICE_AGENT_ENTRY) || !existsSync(DEVICE_AGENT_ARCHIVE)) {
       execFileSync("pnpm", ["--filter", "@jingler/device-agent", "build"], {
         cwd: REPO_ROOT,
         stdio: "inherit"

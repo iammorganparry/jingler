@@ -1,15 +1,24 @@
+import { basename, dirname, join } from "node:path"
 import {
   createAgentSession,
+  createEventBus,
   ModelRuntime,
   SessionManager,
   SettingsManager,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
+  type EventBus,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
+import { createJiti } from "jiti"
+import type {
+  RegisterSubagentCapabilityCeilingOptions,
+  SubagentCapabilityCeilingHandle
+} from "pi-subagents/capability-ceiling"
 import type {
   Message,
   PiRunSpec,
+  SubagentFleetControlRequest,
   ProviderConnection,
   RuntimeDiagnosticSnapshot,
   StreamEvent
@@ -27,12 +36,35 @@ import { createJinglerControlTools } from "./pi-jingler-tools.js"
 import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-resources.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools, isMemoryReflectionTool } from "./pi-tool-bridge.js"
+import { piSupervisorAttention } from "./pi-events.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
+import {
+  JINGLER_SUBAGENT_AGENT_NAMES,
+  preparePiSubagentsRuntime
+} from "../subagents/pi-subagents-bootstrap.js"
+import type { PiChildCredentials } from "../subagents/pi-child-credentials.js"
+import type { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
+import { PiSubagentLifecycleAdapter } from "../subagents/pi-subagent-lifecycle-adapter.js"
 
 export class PiSessionFactoryError extends Data.TaggedError("PiSessionFactoryError")<{
   readonly message: string
   readonly cause?: unknown
 }> {}
+
+interface CapabilityCeilingModule {
+  readonly registerSubagentCapabilityCeiling: (
+    options: RegisterSubagentCapabilityCeilingOptions
+  ) => SubagentCapabilityCeilingHandle
+}
+
+const jiti = createJiti(import.meta.url)
+let capabilityCeilingModule: Promise<CapabilityCeilingModule> | null = null
+const loadCapabilityCeiling = (): Promise<CapabilityCeilingModule> => {
+  capabilityCeilingModule ??= jiti.import<CapabilityCeilingModule>(
+    "pi-subagents/capability-ceiling"
+  )
+  return capabilityCeilingModule
+}
 
 export interface PiSessionFactoryOptions {
   readonly agentDir: string
@@ -54,6 +86,8 @@ export interface PiSessionFactoryOptions {
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
   readonly createSession?: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>
   readonly recordDiagnostic?: (snapshot: RuntimeDiagnosticSnapshot) => Effect.Effect<void>
+  readonly childCredentials?: PiChildCredentials
+  readonly subagentBroker?: SubagentCapabilityBroker
 }
 
 const modelIdForProvider = (spec: PiRunSpec, connection: ProviderConnection) => {
@@ -128,6 +162,7 @@ const createResources = (
   registry: ToolRegistry | undefined
 ) => {
   const tools = registry?.capabilitiesFor(spec.role, spec.mode) ?? []
+  const eventBus = createEventBus()
   const compiled = (options.promptCompiler ?? new PromptCompiler()).compile({
     layers: runtimeInvariantLayers(spec.role, spec.mode),
     tools,
@@ -136,11 +171,12 @@ const createResources = (
   return createLockedPiResources({
     cwd: spec.cwd,
     agentDir: options.agentDir,
-    systemPrompt: compiled.text
+    systemPrompt: compiled.text,
+    eventBus
   }).pipe(
     Effect.flatMap((resources) =>
       assertLockedPiResources(resources, compiled.text).pipe(
-        Effect.as({ loader: resources, manifest: compiled.manifest })
+        Effect.as({ loader: resources, manifest: compiled.manifest, eventBus })
       )
     ),
     Effect.mapError(
@@ -165,6 +201,7 @@ interface EmbeddedSessionInput {
 
 interface EmbeddedSession {
   readonly result: CreateAgentSessionResult
+  readonly connection: ProviderConnection
   readonly contextWindow: number
   readonly setMemoryReflectionActive: (active: boolean) => void
 }
@@ -217,6 +254,7 @@ const createEmbeddedSession = (
       })
       return {
         result,
+        connection,
         contextWindow: model.contextWindow,
         setMemoryReflectionActive: (active) => {
           memoryReflectionActive = active
@@ -241,24 +279,70 @@ interface SessionHandleInput {
   readonly snapshot: WorktreeSnapshot | null
   readonly registry: ToolRegistry | undefined
   readonly observe?: (event: StreamEvent) => void
+  readonly childCredentials?: PiChildCredentials
+  readonly subagentBroker?: SubagentCapabilityBroker
+  readonly subagentCeiling?: SubagentCapabilityCeilingHandle
+  readonly lifecycle: PiSubagentLifecycleAdapter
+  readonly fleetListeners: Set<(event: StreamEvent) => void>
 }
 
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
-  const { embedded, spec, tracker, snapshot, registry, observe } = input
+  const {
+    embedded,
+    spec,
+    tracker,
+    snapshot,
+    registry,
+    observe,
+    childCredentials,
+    subagentBroker,
+    subagentCeiling,
+    lifecycle,
+    fleetListeners
+  } = input
   const { session } = embedded.result
   return {
     id: session.sessionFile ?? session.sessionId,
+    parentPiSessionId: session.sessionId,
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
-    subscribe: (listener) => session.subscribe(listener),
+    subscribe: (listener) => session.subscribe((event) => {
+      const attention = piSupervisorAttention(event)
+      if (attention) lifecycle.attention(attention)
+      listener(event)
+    }),
+    subscribeFleet: (listener) => {
+      fleetListeners.add(listener)
+      return () => fleetListeners.delete(listener)
+    },
+    controlSubagent: async (request) => {
+      const outcome = await lifecycle.control(request)
+      const projected: StreamEvent = {
+        _tag: "SubagentFleetControlAcknowledged",
+        outcome
+      }
+      for (const listener of fleetListeners) listener(projected)
+      return outcome
+    },
+    subagentFleetSnapshot: () => lifecycle.refresh(),
+    subagentTranscript: (runId) => lifecycle.transcript(runId),
     prompt: (text) => session.prompt(text),
     steer: (text) => session.steer(text),
     interrupt: () => session.abort(),
     dispose: async () => {
       try {
+        lifecycle.stop()
+        fleetListeners.clear()
         session.dispose()
       } finally {
-        if (tracker) await Effect.runPromise(tracker.dispose())
+        subagentCeiling?.dispose()
+        await Promise.all([
+          tracker ? Effect.runPromise(tracker.dispose()) : Promise.resolve(),
+          childCredentials
+            ? Effect.runPromise(childCredentials.remove(session.sessionId))
+            : Promise.resolve(),
+          Promise.resolve(subagentBroker?.unregister(session.sessionId))
+        ])
       }
     },
     usage: () => {
@@ -302,6 +386,16 @@ const createSessionHandle = (
         })
       )
     }
+    yield* preparePiSubagentsRuntime(options.agentDir).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AgentRuntimeError({
+            reason: "runtime",
+            message: cause.message,
+            cause
+          })
+      )
+    )
     const prepared = yield* createResources(options, spec, registry)
     const snapshot = tracker
       ? yield* tracker.capture(spec.cwd).pipe(
@@ -322,6 +416,106 @@ const createSessionHandle = (
       context,
       registry
     })
+    const fleetListeners = new Set<(event: StreamEvent) => void>()
+    const lifecycle = new PiSubagentLifecycleAdapter({
+      events: prepared.eventBus,
+      parentPiSessionId: embedded.result.session.sessionId,
+      emit: (event) => {
+        const projected: StreamEvent = { _tag: "SubagentFleetChanged", event }
+        for (const listener of fleetListeners) listener(projected)
+      },
+      trustedSessionRoots: embedded.result.session.sessionFile
+        ? [join(
+            dirname(embedded.result.session.sessionFile),
+            basename(embedded.result.session.sessionFile, ".jsonl")
+          )]
+        : []
+    })
+    lifecycle.start()
+    lifecycle.beginPolling()
+    if ((options.childCredentials === undefined) !== (options.subagentBroker === undefined)) {
+      lifecycle.stop()
+      embedded.result.session.dispose()
+      return yield* Effect.fail(
+        new AgentRuntimeError({
+          reason: "runtime",
+          message: "The subagent credential store and capability broker must be configured together"
+        })
+      )
+    }
+    let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
+    if (options.childCredentials && options.subagentBroker) {
+      const parentPiSessionId = embedded.result.session.sessionId
+      const capability = yield* Effect.tryPromise({
+        try: () => options.subagentBroker!.register({
+          parentPiSessionId,
+          agents: JINGLER_SUBAGENT_AGENT_NAMES,
+          spec,
+          registry,
+          context
+        }),
+        catch: (cause) =>
+          new AgentRuntimeError({
+            reason: "runtime",
+            message: cause instanceof Error
+              ? `Could not register the child capability broker: ${cause.message}`
+              : "Could not register the child capability broker",
+            cause
+          })
+      }).pipe(
+        Effect.onError(() => Effect.sync(() => {
+          lifecycle.stop()
+          embedded.result.session.dispose()
+        }))
+      )
+      const capabilityCeiling = yield* Effect.tryPromise({
+        try: loadCapabilityCeiling,
+        catch: (cause) => new AgentRuntimeError({
+          reason: "runtime",
+          message: "Could not load the pi-subagents capability ceiling",
+          cause
+        })
+      }).pipe(
+        Effect.onError(() => Effect.sync(() => {
+          options.subagentBroker!.unregister(parentPiSessionId)
+          lifecycle.stop()
+          embedded.result.session.dispose()
+        }))
+      )
+      subagentCeiling = capabilityCeiling.registerSubagentCapabilityCeiling({
+        sessionId: parentPiSessionId,
+        source: "jingler-runtime",
+        ceiling: {
+          allowedTools: [
+            ...new Set(capability.flatMap(({ tools }) => tools.map(({ id }) => id))),
+            "contact_supervisor",
+            "subagent"
+          ],
+          allowedAgents: [...JINGLER_SUBAGENT_AGENT_NAMES],
+          denyExtensions: false
+        }
+      })
+      yield* options.childCredentials
+        .materialize(parentPiSessionId, embedded.connection, capability)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new AgentRuntimeError({
+                reason: "authentication",
+                message: cause.message,
+                cause
+              })
+          ),
+          Effect.onError(() =>
+            Effect.sync(() => {
+              options.subagentBroker!.unregister(parentPiSessionId)
+              subagentCeiling?.dispose()
+              lifecycle.stop()
+              embedded.result.session.dispose()
+            })
+          )
+        )
+    }
     const diagnostic = makeRuntimeDiagnosticObserver({
       runId: spec.runId,
       sessionId: spec.sessionId,
@@ -337,7 +531,19 @@ const createSessionHandle = (
           Effect.runFork(recordDiagnostic(diagnostic.observe(event)))
         }
       : undefined
-    return toHandle({ embedded, spec, tracker, snapshot, registry, observe })
+    return toHandle({
+      embedded,
+      spec,
+      tracker,
+      snapshot,
+      registry,
+      observe,
+      childCredentials: options.childCredentials,
+      subagentBroker: options.subagentBroker,
+      lifecycle,
+      fleetListeners,
+      ...(subagentCeiling ? { subagentCeiling } : {})
+    })
   })
 
 /** Construct the real embedded pi session from Jingler-owned contracts only. */

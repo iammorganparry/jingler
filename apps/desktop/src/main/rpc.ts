@@ -112,6 +112,8 @@ import {
   WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema,
   EnvironmentHandoffError,
   StreamEvent as StreamEventSchema,
+  SubagentFleetControlOutcome,
+  SubagentFleetSnapshot,
   Message as MessageSchema,
   Session as SessionSchema,
   PublishCheckpoint as PublishCheckpointSchema,
@@ -5233,6 +5235,101 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   // `BackgroundTaskStore` holds.
   "Agent.stopSubagent": ({ sessionId, chatId, agentId }) =>
     BackgroundTaskStore.stopHandled(sessionId, chatId, agentId),
+  "Agent.subagentFleetSnapshot": ({
+    sessionId,
+    chatId,
+    parentPiSessionId
+  }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      const runtime = yield* AgentRuntime
+      const remote = yield* RemoteSessionService
+      return yield* routeSessionOperation(
+        session,
+        "Agent.subagentFleetSnapshot",
+        { chatId, parentPiSessionId },
+        {
+          execute: () => runtime.subagentFleetSnapshot(
+            sessionId,
+            chatId,
+            parentPiSessionId
+          )
+        },
+        {
+          execute: () => remote.request(
+            session,
+            "Agent.subagentFleetSnapshot",
+            { chatId, parentPiSessionId }
+          ).pipe(Effect.flatMap(Schema.decodeUnknown(SubagentFleetSnapshot)))
+        }
+      )
+    }).pipe(
+      Effect.mapError(
+        (cause) => new GitError({ message: "Could not reconcile the subagent Fleet", cause })
+      )
+    ),
+  "Agent.subagentTranscript": ({
+    sessionId,
+    chatId,
+    parentPiSessionId,
+    runId
+  }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      const runtime = yield* AgentRuntime
+      const remote = yield* RemoteSessionService
+      return yield* routeSessionOperation(
+        session,
+        "Agent.subagentTranscript",
+        { chatId, parentPiSessionId, runId },
+        {
+          execute: () => runtime.subagentTranscript(
+            sessionId,
+            chatId,
+            parentPiSessionId,
+            runId
+          )
+        },
+        {
+          execute: () => remote.request(
+            session,
+            "Agent.subagentTranscript",
+            { chatId, parentPiSessionId, runId }
+          ).pipe(Effect.flatMap(Schema.decodeUnknown(Schema.Array(MessageSchema))))
+        }
+      )
+    }).pipe(
+      Effect.mapError(
+        (cause) => new GitError({ message: "Could not read the subagent transcript", cause })
+      )
+    ),
+  "Agent.controlSubagent": ({ sessionId, chatId, request }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      const runtime = yield* AgentRuntime
+      const remote = yield* RemoteSessionService
+      return yield* routeSessionOperation(
+        session,
+        "Agent.controlSubagent",
+        { chatId, request },
+        {
+          execute: () => runtime.controlSubagent(sessionId, chatId, request)
+        },
+        {
+          execute: () => remote.request(
+            session,
+            "Agent.controlSubagent",
+            { chatId, request }
+          ).pipe(
+            Effect.flatMap(Schema.decodeUnknown(SubagentFleetControlOutcome))
+          )
+        }
+      )
+    }).pipe(
+      Effect.mapError(
+        (cause) => new GitError({ message: "Could not control the subagent", cause })
+      )
+    ),
   "Agent.steer": ({ sessionId, chatId, text, images }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);

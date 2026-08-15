@@ -13,21 +13,15 @@ import type {
   ProviderCatalog,
   Session
 } from "@jingler/core"
+import { clampFontScale } from "@jingler/core"
 import {
-  agentChildren,
-  agentPath,
-  clampFontScale
-} from "@jingler/core"
-import {
-  AgentTabBar,
-  AgentView,
-  type AgentTabItem,
   AttachmentSourceProvider,
   OpenAssetProvider,
   BackgroundTaskDock,
   BackgroundTaskOutput,
   ConversationView,
-  MAIN_AGENT,
+  FleetAgentView,
+  FleetDrawer,
   PlanReview,
   ResizeHandle,
   RuntimeRecoveryCard,
@@ -48,6 +42,7 @@ import {
   serializeCodeReferences
 } from "./code-reference.js"
 import { useConversation } from "./use-conversation.js"
+import { MAIN_FLEET_AGENT, useSubagentFleet } from "./use-subagent-fleet.js"
 import { usePlanDocument } from "./use-plan-document.js"
 import { matchesCanonicalPlan } from "./plan-document-machine.js"
 import {
@@ -634,72 +629,81 @@ export function ConversationPane({
     [activeChat.id]
   )
 
-  const [selectedAgent, setSelectedAgent] = useState<string>(MAIN_AGENT)
-  // The reviewer sits in the same bar as the turn's sub-agents but is not one of
-  // them (it is a whole agent run of its own, started by the PR tab or the
-  // background auto-review), so it is appended here rather than living in the list.
-  const subagentsAndReviewer =
-    convo.reviewer ? [...convo.subagents, convo.reviewer] : convo.subagents
-  const activeSubagent =
-    subagentsAndReviewer.find((agent) => agent.id === selectedAgent) ?? null
-  const activeAgent = activeSubagent !== null ? selectedAgent : MAIN_AGENT
-
-  // Sub-agents nest, so the bar shows one level at a time: `level` is the agent
-  // whose children are listed (MAIN_AGENT = the top level). Derived the same way
-  // as the selection — if the drilled-into agent is gone (the list resets on the
-  // next run) we fall back to the top level rather than stranding an empty bar.
-  const [level, setLevel] = useState<string>(MAIN_AGENT)
-  const effectiveLevel =
-    level !== MAIN_AGENT && convo.subagents.some((s) => s.id === level) ? level : MAIN_AGENT
-  const levelAgents = agentChildren(
-    convo.subagents,
-    effectiveLevel === MAIN_AGENT ? null : effectiveLevel
+  const legacyFleetAgents = useMemo(
+    () => convo.reviewer === null
+      ? convo.subagents
+      : [...convo.subagents, convo.reviewer],
+    [convo.reviewer, convo.subagents]
   )
-  // Workers are plan-scoped peers of top-level Claude sub-agents. They never
-  // enter the Claude drill tree, and the reviewer remains last as before.
-  const barAgents: ReadonlyArray<AgentTabItem> = [
-    ...levelAgents.map(
-      (agent): AgentTabItem => ({
-        id: agent.id,
-        name: agent.name,
-        description: agent.description,
-        status: agent.status,
-        hasChildren: convo.subagents.some((child) => child.parentId === agent.id),
-        action: agent.status === "working" ? "stop" : "close"
-      })
+  const fleet = useSubagentFleet({
+    sessionId: session.id,
+    chatId: activeChat.id,
+    piSessionId: activeChat.piSessionId ?? null,
+    events: convo.subagentFleetEvents,
+    legacyAgents: legacyFleetAgents
+  })
+  const childTranscriptQuery = useQuery({
+    queryKey: [
+      "subagent-transcript",
+      session.id,
+      activeChat.id,
+      fleet.selectedNode?.parentPiSessionId,
+      fleet.selectedNode?.runId,
+      fleet.selectedNode?.updatedAt
+    ],
+    queryFn: () => rpc.agentSubagentTranscript(
+      session.id,
+      activeChat.id,
+      fleet.selectedNode!.parentPiSessionId,
+      fleet.selectedNode!.runId
     ),
-    ...(effectiveLevel === MAIN_AGENT && convo.reviewer !== null
-      ? [
-          {
-            id: convo.reviewer.id,
-            name: convo.reviewer.name,
-            description: convo.reviewer.description,
-            status: convo.reviewer.status,
-            hasChildren: false
+    enabled:
+      fleet.selectedNode !== null &&
+      fleet.selectedLegacyAgent === null &&
+      fleet.selectedNode.sessionFile !== null,
+    refetchInterval: fleet.selectedNode?.status === "running" ? 1_500 : false
+  })
+  const fleetDrawer = (
+    <FleetDrawer
+      nodes={fleet.nodes}
+      selectedId={fleet.selectedId}
+      expanded={fleet.expanded}
+      height={fleet.height}
+      pending={fleet.pending}
+      outcomeMessage={fleet.lastOutcome?.message ?? null}
+      onSelect={fleet.select}
+      onToggle={fleet.toggle}
+      onResize={fleet.resize}
+      canControl={(node, action) => {
+        const legacy = fleet.legacyAgentFor(node)
+        if (legacy === null) return true
+        return legacy.status === "working" &&
+          convo.subagents.some(({ id }) => id === legacy.id) &&
+          action === "stop"
+      }}
+      canDismiss={(node) => {
+        const legacy = fleet.legacyAgentFor(node)
+        return legacy !== null &&
+          legacy.status !== "working" &&
+          convo.subagents.some(({ id }) => id === legacy.id)
+      }}
+      onDismiss={(node) => {
+        const legacy = fleet.legacyAgentFor(node)
+        if (legacy !== null) convo.closeSubagent(legacy.id)
+      }}
+      onControl={(node, action, message, replyTo) => {
+        const legacy = fleet.legacyAgentFor(node)
+        if (legacy !== null) {
+          if (action === "stop" && legacy.status === "working") {
+            convo.stopSubagent(legacy.id)
           }
-        ]
-      : [])
-  ]
-  const trail =
-    effectiveLevel === MAIN_AGENT
-      ? []
-      : agentPath(convo.subagents, effectiveLevel).map((s) => ({ id: s.id, name: s.name }))
-
-  const activeAgentTranscript = activeSubagent === null ? null : {
-    message: activeSubagent.message,
-    providerId: session.providerId
-  }
-
-  // Drilling into an agent shows its children AND its own transcript; a crumb
-  // jumps the level back up. Both keep the two states in step.
-  const goToAgent = (id: string) => {
-    setLevel(id)
-    setSelectedAgent(id)
-  }
-  const goToMain = () => {
-    setLevel(MAIN_AGENT)
-    setSelectedAgent(MAIN_AGENT)
-  }
+          return
+        }
+        fleet.control(node, action, message, replyTo).catch(() => {})
+      }}
+      onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
+    />
+  )
 
   // Live agent status + Plan-tab presence are published by the conversation
   // registry (from the actor's own subscription), so they stay correct even
@@ -855,27 +859,6 @@ export function ConversationPane({
         it; this outer row did not, so the constraint stopped one level short. */}
     <div ref={planSplitRowRef} className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {barAgents.length > 0 && (
-        <AgentTabBar
-          agents={barAgents}
-          trail={trail}
-          active={activeAgent}
-          onChange={setSelectedAgent}
-          onDrill={goToAgent}
-          onNavigate={(id) => (id === MAIN_AGENT ? goToMain() : goToAgent(id))}
-          onStop={(id) => {
-            convo.stopSubagent(id)
-          }}
-          onClose={(id) => {
-            // Back to Main FIRST. Both the transcript being read and the level
-            // being browsed can point at the tab about to vanish (or at one of
-            // its children, which go with it), and a pane left pointing at a
-            // retracted id renders an empty transcript with no way back.
-            if (activeAgent === id || effectiveLevel === id) goToMain()
-            convo.closeSubagent(id)
-          }}
-        />
-      )}
       {continuationEnvironmentId !== null && (
         <div
           role="alert"
@@ -1005,11 +988,29 @@ export function ConversationPane({
           onInspect={() => onSelectChanges?.()}
         />
       ))}
-      {activeAgentTranscript !== null ? (
-        <AgentView agent={activeAgentTranscript} />
+      {fleet.selectedId !== MAIN_FLEET_AGENT && fleet.selectedNode ? (
+        <FleetAgentView
+          node={fleet.selectedNode}
+          messages={
+            fleet.selectedLegacyAgent === null
+              ? (childTranscriptQuery.data ?? [])
+              : [fleet.selectedLegacyAgent.message]
+          }
+          providerId={session.providerId}
+          loading={
+            fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading
+          }
+          error={
+            fleet.selectedLegacyAgent === null && childTranscriptQuery.error
+              ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
+              : null
+          }
+          fleetSlot={fleetDrawer}
+        />
       ) : (
         <ConversationView
           messages={convo.messages}
+          fleetSlot={fleetDrawer}
           hasMoreHistory={convo.hasMoreHistory}
           loadingHistory={convo.loadingHistory}
           onLoadEarlier={convo.loadOlder}

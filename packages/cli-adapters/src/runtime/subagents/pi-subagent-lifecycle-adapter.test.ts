@@ -1,0 +1,254 @@
+import { createEventBus } from "@earendil-works/pi-coding-agent"
+import type { SubagentFleetEvent } from "@jingler/core"
+import { describe, expect, it } from "vitest"
+import { PiSubagentLifecycleAdapter } from "./pi-subagent-lifecycle-adapter.js"
+
+const parent = "parent-session"
+
+describe("PiSubagentLifecycleAdapter", () => {
+  it("projects async and nested completion events with stable transcript identities", () => {
+    const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
+    let now = 10
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      emit: (event) => emitted.push(event),
+      now: () => now
+    })
+    adapter.start()
+    events.emit("subagent:async-started", {
+      lifecycleArtifactVersion: 3,
+      id: "run-1",
+      sessionId: parent,
+      agent: "fanout",
+      goal: "Coordinate review"
+    })
+    events.emit("subagent:async-started", {
+      lifecycleArtifactVersion: 3,
+      id: "run-2",
+      sessionId: parent,
+      agent: "scout",
+      goal: "Inspect one branch",
+      parentWorkflowRunId: "run-1"
+    })
+    now = 20
+    events.emit("subagent:async-complete", {
+      runId: "run-1",
+      sessionId: parent,
+      state: "complete",
+      success: true,
+      results: [{
+        index: 0,
+        agent: "reviewer",
+        success: true,
+        sessionPath: "/sessions/reviewer.jsonl",
+        artifactPath: "/artifacts/review.md",
+        model: "anthropic/claude-test:high",
+        usage: {
+          input: 12,
+          output: 8,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: 0.02,
+          turns: 2
+        }
+      }, {
+        index: 1,
+        agent: "worker",
+        success: true,
+        sessionPath: "/sessions/worker.jsonl",
+        model: "anthropic/claude-test:high"
+      }]
+    })
+
+    expect(adapter.snapshot().nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: `${parent}/run-1`,
+        runId: "run-1",
+        agent: "fanout",
+        status: "completed"
+      }),
+      expect.objectContaining({
+        id: `${parent}/run-1/0`,
+        parentId: `${parent}/run-1`,
+        agent: "reviewer",
+        sessionFile: "/sessions/reviewer.jsonl",
+        artifacts: [expect.objectContaining({ path: "/artifacts/review.md" })]
+      }),
+      expect.objectContaining({
+        id: `${parent}/run-1/1`,
+        parentId: `${parent}/run-1`,
+        agent: "worker",
+        sessionFile: "/sessions/worker.jsonl"
+      }),
+      expect.objectContaining({
+        id: `${parent}/run-2`,
+        parentId: `${parent}/run-1`,
+        agent: "scout",
+        status: "running"
+      })
+    ]))
+    expect(adapter.snapshot().nodes).toHaveLength(4)
+    expect(emitted.filter(({ _tag }) => _tag === "Upsert")).toHaveLength(5)
+    adapter.stop()
+  })
+
+  it("reconciles bounded RPC fleet status and ignores malformed or foreign events", async () => {
+    const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      emit: (event) => emitted.push(event),
+      now: () => 50
+    })
+    adapter.start()
+    events.emit("subagent:async-started", { id: 12 })
+    events.emit("subagent:async-started", {
+      id: "foreign",
+      sessionId: "other",
+      agent: "worker"
+    })
+    const unsubscribe = events.on("subagents:rpc:v1:request", (request) => {
+      if (!request || typeof request !== "object" || !("requestId" in request)) return
+      const requestId = request.requestId
+      if (typeof requestId !== "string") return
+      events.emit(`subagents:rpc:v1:reply:${requestId}`, {
+        version: 1,
+        requestId,
+        method: "status",
+        success: true,
+        data: {
+          fleet: {
+            version: 1,
+            entries: [{
+              key: "active-1",
+              agent: "scout",
+              model: "anthropic/claude-test:low",
+              startedAt: 40,
+              tokens: { input: 3, output: 2, total: 5 },
+              goal: "Inspect"
+            }],
+            totalActive: 1,
+            topLevelAsyncCapacity: { used: 1, limit: 4 },
+            omitted: 0
+          }
+        }
+      })
+    })
+
+    const snapshot = await adapter.refresh()
+
+    expect(snapshot.nodes).toMatchObject([{
+      id: `${parent}/active/active-1`,
+      agent: "scout",
+      status: "running",
+      usage: { totalTokens: 5 }
+    }])
+    expect(emitted).toHaveLength(1)
+    unsubscribe()
+    adapter.stop()
+  })
+
+  it("returns factual acknowledgements for exact lifecycle controls", async () => {
+    const events = createEventBus()
+    const methods: string[] = []
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      emit: () => undefined,
+      now: () => 30
+    })
+    adapter.start()
+    const unsubscribe = events.on("subagents:rpc:v1:request", (request) => {
+      if (!request || typeof request !== "object" || !("requestId" in request) || !("method" in request)) return
+      if (typeof request.requestId !== "string" || typeof request.method !== "string") return
+      methods.push(request.method)
+      events.emit(`subagents:rpc:v1:reply:${request.requestId}`, request.method === "stop"
+        ? {
+            version: 1,
+            requestId: request.requestId,
+            method: request.method,
+            success: false,
+            error: { code: "invalid_state", message: "Run is complete" }
+          }
+        : {
+            version: 1,
+            requestId: request.requestId,
+            method: request.method,
+            success: true,
+            data: { delivered: true }
+          })
+    })
+    const base = {
+      version: 1 as const,
+      parentPiSessionId: parent,
+      runId: "run-1",
+      replyTo: null
+    }
+
+    adapter.attention({
+      requestId: "attention-1",
+      runId: "run-1",
+      childIndex: 0,
+      agent: "worker",
+      reason: "need_decision",
+      message: "Choose an API"
+    })
+    expect(adapter.snapshot().nodes[0]?.status).toBe("needs-attention")
+    await expect(adapter.control({
+      ...base,
+      requestId: "steer-1",
+      action: "steer",
+      message: "Check tests"
+    })).resolves.toMatchObject({ acknowledged: true, status: "accepted" })
+    await expect(adapter.control({
+      ...base,
+      requestId: "reply-1",
+      action: "reply",
+      message: "Use the public API",
+      replyTo: "attention-1"
+    })).resolves.toMatchObject({ acknowledged: true, status: "accepted" })
+    expect(adapter.snapshot().nodes[0]).toMatchObject({
+      status: "running",
+      attention: null
+    })
+    await expect(adapter.control({
+      ...base,
+      requestId: "stop-1",
+      action: "stop",
+      message: null
+    })).resolves.toMatchObject({ acknowledged: false, status: "invalid-state" })
+    expect(methods).toEqual(["steer", "reply", "stop"])
+    unsubscribe()
+    adapter.stop()
+  })
+
+  it("does not leave an observed process reported as running", () => {
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      emit: () => undefined,
+      now: () => 20
+    })
+    adapter.start()
+    events.emit("subagent:async-started", {
+      id: "run-1",
+      sessionId: parent,
+      agent: "worker"
+    })
+    events.emit("subagent:process-terminal", {
+      runId: "run-1",
+      state: "observed",
+      observedAt: 20
+    })
+
+    expect(adapter.snapshot().nodes[0]).toMatchObject({
+      status: "unknown",
+      completedAt: 20
+    })
+    adapter.stop()
+  })
+})

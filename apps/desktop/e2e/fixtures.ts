@@ -28,7 +28,11 @@ import {
   type FakeDeviceRelay,
 } from "./fake-device-relay.js";
 import { installFakeSshHost } from "./fake-ssh-host.js";
-import { DEVICE_AGENT_ENTRY, MAIN_ENTRY } from "./global-setup.js";
+import {
+  DEVICE_AGENT_ARCHIVE,
+  DEVICE_AGENT_ENTRY,
+  MAIN_ENTRY
+} from "./global-setup.js";
 import type { Chat, RuntimeRecoveryState } from "@jingler/core";
 import {
   E2E_PI_CONNECTION_ID,
@@ -734,7 +738,7 @@ export const test = base.extend<{
           ...(deviceRelay
             ? {
                 JINGLER_DEVICE_RELAY_URL: deviceRelay.url,
-                JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ENTRY,
+                JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ARCHIVE,
                 JINGLER_SSH_DIR: join(home, ".ssh"),
                 JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl"),
               }

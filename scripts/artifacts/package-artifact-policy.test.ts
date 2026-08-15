@@ -18,7 +18,9 @@ describe("package artifact policy", () => {
     expect(auditDeviceBundle(piBundle)).toEqual([])
     expect(auditDesktopArchive([
       "/node_modules/@earendil-works/pi-ai/package.json",
-      "/node_modules/@earendil-works/pi-coding-agent/package.json"
+      "/node_modules/@earendil-works/pi-coding-agent/package.json",
+      "/node_modules/pi-subagents/package.json",
+      "/node_modules/jiti/package.json"
     ])).toEqual([])
   })
 
@@ -39,7 +41,9 @@ describe("package artifact policy", () => {
   it("requires pi and forbids legacy SDKs in runtime manifests", () => {
     expect(auditRuntimeDependencies({ dependencies: {
       "@earendil-works/pi-ai": "0.84.1",
-      "@earendil-works/pi-coding-agent": "0.84.1"
+      "@earendil-works/pi-coding-agent": "0.84.1",
+      "pi-subagents": "0.49.0",
+      "jiti": "^2.7.0"
     } }, "desktop")).toEqual([])
     expect(auditRuntimeDependencies({ dependencies: {
       "@anthropic-ai/claude-agent-sdk": "1.0.0"

@@ -370,7 +370,7 @@ const uploadDeviceAgent = (
             "ConnectTimeout=10",
             ...(target.port === undefined ? [] : ["-P", String(target.port)]),
             input.agentBundlePath,
-            `${target.destination}:.jingler-device-upload.mjs`
+            `${target.destination}:.jingler-device-runtime-upload.tgz`
           ],
           { shell: false }
         ),
@@ -429,10 +429,24 @@ export const bootstrapRemoteDevice = (
 ): Effect.Effect<PendingDeviceRegistrationResponse, SshBootstrapError> =>
   Effect.suspend(() => executeBootstrap(input, pairingCommand(input.relayUrl), runner))
 
-const INSTALLED_AGENT = '"$HOME/.local/share/jingler/jingler-device.mjs"'
+const INSTALLED_AGENT =
+  '"$HOME/.local/share/jingler/managed-runtime/current/jingler-device.mjs"'
 const INSTALLED_NODE = '"$HOME/.local/share/jingler/runtime/bin/node"'
-const INSTALL_AGENT =
-  'mkdir -p "$HOME/.local/share/jingler" && install -m 700 .jingler-device-upload.mjs ' + INSTALLED_AGENT
+const INSTALL_AGENT = [
+  'managed_root="$HOME/.local/share/jingler/managed-runtime"',
+  'mkdir -p "$managed_root/releases"',
+  'next="$(mktemp -d "$managed_root/releases/staging-XXXXXX")"',
+  'tar -xzf .jingler-device-runtime-upload.tgz -C "$next"',
+  'test -f "$next/jingler-device.mjs" && test -f "$next/node_modules/pi-subagents/index.ts"',
+  'chmod 700 "$next/jingler-device.mjs" "$next/runtime-assets/pi-subagent-wrapper.mjs"',
+  'release="$(mktemp -d "$managed_root/releases/runtime-XXXXXX")"',
+  'rmdir "$release" && mv "$next" "$release"',
+  'rm -f "$managed_root/current.next"',
+  'ln -s "$release" "$managed_root/current.next"',
+  'if [ "$(uname -s)" = Darwin ]; then mv -fh "$managed_root/current.next" "$managed_root/current"; else mv -Tf "$managed_root/current.next" "$managed_root/current"; fi',
+  'for old_release in "$managed_root/releases"/*; do if [ "$old_release" != "$release" ]; then rm -rf "$old_release"; fi; done',
+  'rm -f .jingler-device-runtime-upload.tgz'
+].join(" && ")
 const INSTALL_RUNTIME = [
   'runtime_root="$HOME/.local/share/jingler/runtime"',
   'node_bin="$runtime_root/bin/node"',

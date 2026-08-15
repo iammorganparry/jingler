@@ -39,6 +39,34 @@ const spec: PiRunSpec = {
   }
 }
 
+const fleetSeams: Pick<
+  PiSessionHandle,
+  "parentPiSessionId" | "subscribeFleet" | "controlSubagent" | "subagentFleetSnapshot" | "subagentTranscript"
+> = {
+  parentPiSessionId: "pi-session-internal",
+  subscribeFleet: () => () => undefined,
+  subagentFleetSnapshot: async () => ({
+    version: 1,
+    parentPiSessionId: "pi-session",
+    generatedAt: 1,
+    totalActive: 0,
+    omitted: 0,
+    activeCapacity: { used: 0, limit: 0 },
+    nodes: []
+  }),
+  subagentTranscript: async () => [],
+  controlSubagent: async (request) => ({
+    version: 1,
+    requestId: request.requestId,
+    runId: request.runId,
+    action: request.action,
+    acknowledged: true,
+    status: "accepted",
+    message: "acknowledged",
+    acknowledgedAt: 1
+  })
+}
+
 const context: AgentRuntimeContext = {
   ...inactiveRuntimeActivity,
   canUseTool: () => Effect.succeed("allow"),
@@ -72,6 +100,7 @@ describe("PiAgentRuntime", () => {
       disposed = true
     })
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-1",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -113,6 +142,7 @@ describe("PiAgentRuntime", () => {
     const reflectionPrompt = vi.fn(() => "<memory-reflection>Reflect silently.</memory-reflection>")
     const setMemoryReflectionActive = vi.fn()
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-memory-reflection",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -160,6 +190,7 @@ describe("PiAgentRuntime", () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     let promptCount = 0
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-reflection-provider-failure",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -214,6 +245,7 @@ describe("PiAgentRuntime", () => {
         listener?.({ type: "agent_settled" })
       })
       const handle: PiSessionHandle = {
+        ...fleetSeams,
         id: "pi-session-reflection-timeout",
         modelId: "anthropic/claude-sonnet",
         contextWindow: 200_000,
@@ -249,6 +281,7 @@ describe("PiAgentRuntime", () => {
   it("delivers the terminal event before closing a slow consumer", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-slow-consumer",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -287,6 +320,7 @@ describe("PiAgentRuntime", () => {
   it("keeps a provider error provisional when pi retries successfully", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-retry",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -332,6 +366,7 @@ describe("PiAgentRuntime", () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const reconcile = vi.fn(async () => null)
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-provider-failure",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -388,6 +423,7 @@ describe("PiAgentRuntime", () => {
       ]
     } as never
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-plan-draft",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -438,8 +474,109 @@ describe("PiAgentRuntime", () => {
     ).toEqual(["composing", "complete"])
   })
 
+  it("retains a detached Fleet across parent settlement and persisted continuation", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    let childActive = true
+    const dispose = vi.fn()
+    const prompt = vi.fn(async () => {
+      listener?.({ type: "agent_settled" })
+    })
+    const controlSubagent = vi.fn(fleetSeams.controlSubagent)
+    const handle: PiSessionHandle = {
+      ...fleetSeams,
+      id: "/sessions/parent.jsonl",
+      parentPiSessionId: "pi-parent-internal",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt,
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose,
+      subagentFleetSnapshot: async () => ({
+        version: 1,
+        parentPiSessionId: "pi-parent-internal",
+        generatedAt: Date.now(),
+        totalActive: childActive ? 1 : 0,
+        omitted: 0,
+        activeCapacity: { used: childActive ? 1 : 0, limit: 4 },
+        nodes: []
+      }),
+      subagentTranscript: async () => [{
+        id: "message-1",
+        role: "assistant",
+        parts: [{ _tag: "Text", text: "still working" }],
+        streaming: false,
+        createdAt: "2026-08-10T00:00:00.000Z"
+      }],
+      controlSubagent,
+      usage: () => ({ costUsd: 0, tokens: 1 })
+    }
+    const create = vi.fn(() => Effect.succeed(handle))
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
+    )
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
+    expect(dispose).not.toHaveBeenCalled()
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "/sessions/parent.jsonl")))
+      .resolves.toMatchObject({ totalActive: 1 })
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "pi-parent-internal")))
+      .resolves.toMatchObject({ totalActive: 1 })
+    await expect(Effect.runPromise(
+      runtime.subagentTranscript(
+        "session-1",
+        "chat-1",
+        "pi-parent-internal",
+        "child-1"
+      )
+    )).resolves.toHaveLength(1)
+    const foreignChat = await Effect.runPromise(Effect.either(
+      runtime.subagentTranscript(
+        "session-1",
+        "another-chat",
+        "pi-parent-internal",
+        "child-1"
+      )
+    ))
+    expect(foreignChat._tag).toBe("Left")
+    await Effect.runPromise(runtime.controlSubagent("session-1", "chat-1", {
+      version: 1,
+      requestId: "control-1",
+      parentPiSessionId: "pi-parent-internal",
+      runId: "child-1",
+      action: "stop",
+      message: null,
+      replyTo: null
+    }))
+    expect(controlSubagent).toHaveBeenCalledOnce()
+
+    await Effect.runPromise(Stream.runCollect(runtime.run({
+      ...spec,
+      runId: "run-2",
+      prompt: "continue",
+      piSessionId: "/sessions/parent.jsonl"
+    }, context)))
+    expect(create).toHaveBeenCalledOnce()
+    expect(prompt).toHaveBeenCalledTimes(2)
+    expect(dispose).not.toHaveBeenCalled()
+
+    childActive = false
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
+    const missing = await Effect.runPromise(
+      Effect.either(runtime.subagentFleetSnapshot("session-1", "chat-1", "pi-parent-internal"))
+    )
+    expect(missing._tag).toBe("Left")
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "/sessions/parent.jsonl")))
+      .rejects.toMatchObject({ message: "pi session is not active: /sessions/parent.jsonl" })
+  })
+
   it("surfaces prompt rejection when final reconciliation also rejects", async () => {
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-2",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -470,6 +607,7 @@ describe("PiAgentRuntime reconciliation", () => {
   it("emits final file reconciliation before the terminal event", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-3",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,

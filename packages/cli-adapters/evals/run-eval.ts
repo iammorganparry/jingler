@@ -18,7 +18,13 @@ import { runDeterministicScenario } from "./deterministic-runtime.js"
 import { AtomicJsonFile } from "../src/runtime/persistence/atomic-json-file.js"
 
 const deterministicTraces = (): Promise<ReadonlyArray<EvalTrace>> =>
-  Promise.all(CORE_PI_SCENARIOS.map((scenario) => runDeterministicScenario(scenario.id)))
+  Effect.runPromise(
+    Effect.forEach(
+      CORE_PI_SCENARIOS,
+      (scenario) => Effect.promise(() => runDeterministicScenario(scenario.id)),
+      { concurrency: 1 }
+    )
+  )
 
 const secretValues = (): ReadonlyArray<string> =>
   (process.env.JINGLER_EVAL_SECRET_NAMES ?? "")
@@ -130,5 +136,7 @@ const report = redactReport(JSON.stringify({
 }, null, 2), [...secretValues(), ...liveCredentialValues])
 const reportPath = process.env.JINGLER_EVAL_REPORT
 if (reportPath) await writeFile(reportPath, report, "utf8")
-process.stdout.write(`${report}\n${markdown(mode, results)}`)
-if (results.some((result) => result.status !== "passed")) process.exitCode = 1
+await new Promise<void>((resolve) => {
+  process.stdout.write(`${report}\n${markdown(mode, results)}`, () => resolve())
+})
+process.exit(results.some((result) => result.status !== "passed") ? 1 : 0)

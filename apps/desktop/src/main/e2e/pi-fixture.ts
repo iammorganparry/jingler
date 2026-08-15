@@ -276,6 +276,7 @@ const browserUrlFrom = (context: PiContext): string => {
 
 const backgroundKindFrom = (context: PiContext): E2eBackgroundKind | null => {
   const prompt = latestOperatorText(context)
+  if (prompt.includes("[[legacy-agent]]")) return "legacy-agent"
   if (prompt.includes("[[background-agent]]")) return "agent"
   if (prompt.includes("[[background-completes]]")) return "complete"
   if (prompt.includes("[[background")) return "watch"
@@ -295,7 +296,9 @@ const backgroundResponse = (
   return fauxAssistantMessage(
     kind === "agent"
       ? "Delegated the survey to a background agent."
-      : "Started a watcher in the background."
+      : kind === "legacy-agent"
+        ? "Delegated through the normalized compatibility path."
+        : "Started a watcher in the background."
   )
 }
 

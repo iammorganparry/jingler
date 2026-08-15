@@ -206,7 +206,7 @@ jobs:
           RESOURCES_PATH=$(dirname "$ASAR_PATH")
           JINGLER_DESKTOP_ASAR="$ASAR_PATH" \
           JINGLER_DESKTOP_RESOURCES="$RESOURCES_PATH" \
-          JINGLER_DEVICE_BUNDLE="$RESOURCES_PATH/device-agent/jingler-device.mjs" \
+          JINGLER_DEVICE_BUNDLE="$RESOURCES_PATH/device-agent/jingler-device-runtime.tgz" \
           pnpm artifacts:check
 
   # Flip the draft release electron-builder created to public + latest.

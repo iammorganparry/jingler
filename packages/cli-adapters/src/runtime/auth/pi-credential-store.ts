@@ -10,7 +10,7 @@ import type {
   StoredProviderCredential
 } from "./credential-store.js"
 
-const toPiCredential = (
+export const toPiCredential = (
   credential: StoredProviderCredential
 ): Credential =>
   credential.authKind === "openai-codex-oauth" ||

@@ -922,9 +922,9 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
  * The adversarial reviewer is a full agent run. Before this it ran completely
  * unobserved — a bare "Reviewing…" spinner for minutes, with its output dropped
  * on the floor. It must now report where it is on the button, and be watchable in
- * the agent tab bar like any other agent.
+ * the Fleet drawer like any other agent.
  */
-test("a running adversarial review reports its phase and appears in the agent tab bar", async ({
+test("a running adversarial review reports its phase and appears in Fleet", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -969,7 +969,7 @@ test("a running adversarial review reports its phase and appears in the agent ta
     window.getByRole("button", { name: /Reading the code…|Thinking…|Writing findings…/ })
   ).toBeVisible({ timeout: 20_000 })
 
-  // …and the reviewer is watchable in the agent tab bar, mid-run.
+  // …and the reviewer is watchable in Fleet, mid-run.
   await window.getByTestId("active-chat-tab").first().click()
   await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
 })

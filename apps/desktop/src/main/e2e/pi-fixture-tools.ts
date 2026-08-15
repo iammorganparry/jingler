@@ -11,7 +11,12 @@ export const E2E_HELD_SUBAGENTS_TOOL = "jingler_e2e_held_subagents"
 export const E2E_HOLD_TOOL = "jingler_e2e_hold"
 export const E2E_REVIEW_PAUSE_TOOL = "jingler_e2e_review_pause"
 
-export const E2eBackgroundKind = Schema.Literal("watch", "agent", "complete")
+export const E2eBackgroundKind = Schema.Literal(
+  "watch",
+  "agent",
+  "complete",
+  "legacy-agent"
+)
 export type E2eBackgroundKind = Schema.Schema.Type<typeof E2eBackgroundKind>
 
 const publishAll = (
@@ -112,6 +117,37 @@ const startAgent = (
     { _tag: "BackgroundTasksChanged", ids: [taskId] }
   ])
 
+const startLegacyAgent = (
+  context: AgentRuntimeContext,
+  toolUseId: string
+): Effect.Effect<void> =>
+  publishAll(context, [
+    {
+      _tag: "SubagentStarted",
+      id: toolUseId,
+      name: "Legacy Scout",
+      description: "Inspect the compatibility path",
+      parentId: null
+    },
+    {
+      _tag: "Assistant",
+      text: "Legacy transcript remains visible in Fleet.",
+      agentId: toolUseId
+    }
+  ]).pipe(
+    Effect.tap(() => Effect.sync(() => {
+      Effect.runFork(
+        Effect.sleep("2 seconds").pipe(
+          Effect.zipRight(publishAll(context, [{
+            _tag: "SubagentEnded",
+            id: toolUseId,
+            status: "done"
+          }]))
+        )
+      )
+    }))
+  )
+
 const executeBackgroundFixture = (
   context: AgentRuntimeContext,
   spec: PiRunSpec,
@@ -122,7 +158,9 @@ const executeBackgroundFixture = (
   return (
     kind === "agent"
       ? startAgent(context, taskId, toolUseId)
-      : startWatcher(context, taskId, kind === "complete")
+      : kind === "legacy-agent"
+        ? startLegacyAgent(context, toolUseId)
+        : startWatcher(context, taskId, kind === "complete")
   ).pipe(Effect.as({ started: kind }))
 }
 
@@ -175,27 +213,53 @@ const heldSubagentEvents = (
   phase: "start" | "settle"
 ): ReadonlyArray<StreamEvent> => {
   const { first, second } = heldSubagentIds(runId)
-  return phase === "start"
-    ? [
-        {
-          _tag: "SubagentStarted",
-          id: first,
-          name: "Explore",
-          description: "Survey the tab bar",
-          parentId: null
+  const parentPiSessionId = `e2e-parent-${runId}`
+  const at = phase === "start" ? 10 : 20
+  const fleetNode = (
+    id: string,
+    agent: string,
+    task: string
+  ): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => ({
+    _tag: "SubagentFleetChanged",
+    event: {
+      _tag: "Upsert",
+      version: 1,
+      eventId: `${phase}:${id}`,
+      occurredAt: at,
+      node: {
+        id: `${parentPiSessionId}/${id}`,
+        runId: id,
+        parentId: null,
+        parentPiSessionId,
+        agent,
+        task,
+        model: "e2e/pi-fixture:high",
+        status: phase === "start" ? "running" : "completed",
+        background: false,
+        sessionFile: null,
+        currentTool: phase === "start" ? "workspace_read_file" : null,
+        startedAt: 10,
+        updatedAt: at,
+        completedAt: phase === "start" ? null : at,
+        usage: {
+          inputTokens: phase === "start" ? 0 : 120,
+          outputTokens: phase === "start" ? 0 : 40,
+          totalTokens: phase === "start" ? 0 : 160,
+          costUsd: 0,
+          durationMs: phase === "start" ? 0 : 10,
+          toolCalls: phase === "start" ? 0 : 1
         },
-        {
-          _tag: "SubagentStarted",
-          id: second,
-          name: "Explore",
-          description: "Audit the theme tokens",
-          parentId: null
-        }
-      ]
-    : [
-        { _tag: "SubagentEnded", id: first, status: "done" },
-        { _tag: "SubagentEnded", id: second, status: "done" }
-      ]
+        artifacts: phase === "start"
+          ? []
+          : [{ kind: "report", path: `reports/${id}.md`, label: "Report" }],
+        attention: null
+      }
+    }
+  })
+  return [
+    fleetNode(first, "Explore", "Survey the tab bar"),
+    fleetNode(second, "Explore", "Audit the theme tokens")
+  ]
 }
 
 const registerHeldSubagentsTool = (

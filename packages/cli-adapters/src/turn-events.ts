@@ -39,7 +39,12 @@ export type EventRoute =
 export const routeOf = (event: StreamEvent): EventRoute => {
   if (isBackgroundTaskEvent(event)) return "background-task"
   if (isSubagentEvent(event)) return "subagent"
-  if (event._tag === "ToolDelta" || event._tag === "PlanDraft") {
+  if (
+    event._tag === "ToolDelta" ||
+    event._tag === "PlanDraft" ||
+    event._tag === "SubagentFleetChanged" ||
+    event._tag === "SubagentFleetControlAcknowledged"
+  ) {
     return "stream-only"
   }
   return "transcript"

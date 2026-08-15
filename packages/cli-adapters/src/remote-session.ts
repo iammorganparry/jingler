@@ -326,7 +326,7 @@ const openSshChannel = (
           ? []
           : ["-p", String(input.target.port)]),
         destination,
-        'exec "$HOME/.local/share/jingler/runtime/bin/node" "$HOME/.local/share/jingler/jingler-device.mjs" direct-session',
+        'agent="$HOME/.local/share/jingler/managed-runtime/current/jingler-device.mjs"; [ -f "$agent" ] || agent="$HOME/.local/share/jingler/jingler-device.mjs"; exec "$HOME/.local/share/jingler/runtime/bin/node" "$agent" direct-session',
       ],
       { shell: false, stdio: ["pipe", "pipe", "pipe"] },
     );
