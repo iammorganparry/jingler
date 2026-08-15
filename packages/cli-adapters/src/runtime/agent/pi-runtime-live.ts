@@ -2,7 +2,12 @@ import { join } from "node:path"
 import type { PiRunSpec } from "@jingler/core"
 import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
+import { EnvironmentService } from "../../environment.js"
 import { SecretStore } from "../../secret-store.js"
+import { MemoryAttachmentService } from "../../memory-session.js"
+import { makeOffloadCommandRouterWithOwnedDevice } from "../../offload-command-router.js"
+import { makeOwnedDeviceOffloadPort } from "../../owned-device-offload.js"
+import { RemoteSessionService } from "../../remote-session.js"
 import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
@@ -19,6 +24,7 @@ import { ImportedMcpService } from "../resources/imported-mcp-service.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
+import { makeToolMemory } from "../tools/tool-memory.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
 import {
   makeWorkspaceMutationPort,
@@ -59,10 +65,32 @@ export const makePiAgentRuntimeLive = (
     const importedMcp = yield* ImportedMcpService
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
+    const memory = yield* Effect.serviceOption(MemoryAttachmentService)
     const workspace = yield* makeWorkspaceInspectionPort
     const webSearch = yield* Effect.serviceOption(WebSearchService)
     const browserControl = yield* Effect.serviceOption(BrowserControlPort)
     const mutations = yield* makeWorkspaceMutationPort
+    const remoteSessions = yield* Effect.serviceOption(RemoteSessionService)
+    const environments = yield* Effect.serviceOption(EnvironmentService)
+    const offload = yield* makeOffloadCommandRouterWithOwnedDevice(
+      Option.isSome(remoteSessions) && Option.isSome(environments)
+        ? makeOwnedDeviceOffloadPort(
+            remoteSessions.value,
+            (deviceId) => Effect.gen(function* () {
+              for (let attempt = 0; attempt < 3; attempt += 1) {
+                const inventory = yield* environments.value.list
+                if (inventory.some((environment) =>
+                  environment.id === deviceId &&
+                  environment.kind === "owned" &&
+                  environment.state === "online"
+                )) return true
+                if (attempt < 2) yield* Effect.sleep(250)
+              }
+              return false
+            })
+          )
+        : undefined
+    )
     const credentials = new AgentSecretStore(secretStore)
     const subagentBroker = yield* Effect.acquireRelease(
       Effect.sync(() => new SubagentCapabilityBroker()),
@@ -134,7 +162,7 @@ export const makePiAgentRuntimeLive = (
             return yield* Effect.fail(
               new AgentRuntimeError({
                 reason: "certification",
-                message: "The selected model is not certified for this connection"
+                message: "The selected model is not available on this connection"
               })
             )
           }
@@ -145,6 +173,9 @@ export const makePiAgentRuntimeLive = (
         sessionId: spec.piSessionId ?? spec.runId
       }),
       createToolRegistry: (spec, context, tracker) => {
+        Effect.runFork(
+          offload.primeSession(spec.cwd, spec.sessionId).pipe(Effect.ignore)
+        )
         const runWebSearch = Option.isSome(webSearch)
           ? Option.isSome(browserControl) && context.mcp?.browser != null
             ? withWebSearchFallback(
@@ -186,6 +217,9 @@ export const makePiAgentRuntimeLive = (
               )
             },
             registryOptions: {
+              ...(Option.isSome(memory)
+                ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }
+                : {}),
               observer: createMutationObserver({
                 cwd: spec.cwd,
                 runId: spec.runId,
@@ -202,7 +236,10 @@ export const makePiAgentRuntimeLive = (
               registerManagedFileTools(registry, managedResources, managedFiles)
             )),
             Effect.tap((registry) => Effect.sync(() =>
-              registerWorkspaceMutationTools(registry, spec.cwd, mutations)
+              registerWorkspaceMutationTools(registry, spec.cwd, mutations, {
+                sessionId: spec.sessionId,
+                offload
+              })
             )),
             Effect.tap((registry) =>
               options.configureToolRegistry?.({ registry, spec, context }) ?? Effect.void

@@ -79,6 +79,10 @@ export interface SessionSplitProps {
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderTerminalDock?: (session: Session) => ReactNode
   terminalDockSide?: DockSide
+  /** Whether the per-session terminal dock is open (tints the view rail's toggle). */
+  terminalActive?: boolean
+  /** Toggle the per-session terminal dock (the view rail's terminal button). */
+  onToggleTerminal?: () => void
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
    *
@@ -152,6 +156,13 @@ export function SessionSplit(props: SessionSplitProps) {
         tabContributions={props.tabContributions}
         renderReview={props.renderReview}
         renderCode={props.renderCode}
+        // The terminal dock follows the FOCUSED pane's session (dockSession),
+        // so only that pane's rail gets the toggle — a button on an unfocused
+        // pane would open a terminal for a different session than it labels.
+        terminalActive={session.id === dockSessionId ? props.terminalActive : undefined}
+        onToggleTerminal={
+          session.id === dockSessionId ? props.onToggleTerminal : undefined
+        }
         // No close control in a group of one: there is nothing to close back to,
         // so it would only be a way to blank the app.
         onClosePane={single || !props.onClosePane ? undefined : () => props.onClosePane?.(index)}
@@ -176,7 +187,6 @@ export function SessionSplit(props: SessionSplitProps) {
   // prop re-runs its queries; unmounting it would throw away the xterm buffer.
   const dock =
     dockSession && props.renderTerminalDock ? props.renderTerminalDock(dockSession) : null
-  const filesFocused = dockSessionId !== null && activeTabs[dockSessionId] === "files"
   // Where each dock GOES. The same pure rule the docks apply to their own
   // borders and size (`dock-fit.ts`), evaluated against the same shell width, so
   // placement and appearance can't disagree — a right-docked panel rendered into
@@ -189,17 +199,19 @@ export function SessionSplit(props: SessionSplitProps) {
   const pluginDocks = dockedPanes(props.paneContributions ?? [], (side) =>
     effectiveDock(side, shellWidth)
   )
+  // Docks are NOT hidden while the Files tab is focused. They used to be —
+  // and since a closed dock already CSS-hides itself, the only thing that
+  // wrapper ever suppressed was a dock the operator explicitly opened: with
+  // the file viewer up, the terminal toggle flipped state behind an
+  // invisible panel and read as broken.
   const renderDock = (pane: PaneContribution) => (
     <div
       key={pane.id}
       data-testid={`plugin-dock-${pane.id}`}
-      className={filesFocused ? "hidden" : "flex min-h-0 min-w-0"}
+      className="flex min-h-0 min-w-0"
     >
       {pane.render(dockSession)}
     </div>
-  )
-  const builtInDock = (node: ReactNode) => (
-    <div className={filesFocused ? "hidden" : "contents"}>{node}</div>
   )
 
   // RIGHT-docked panes sit beside the whole split; BOTTOM-docked ones stack under
@@ -217,10 +229,10 @@ export function SessionSplit(props: SessionSplitProps) {
           onResize={props.onResize}
           emptyState={props.emptyState}
         />
-        {termSide === "right" ? builtInDock(dock) : null}
+        {termSide === "right" ? dock : null}
         {pluginDocks.right.map(renderDock)}
       </div>
-      {termSide === "bottom" ? builtInDock(dock) : null}
+      {termSide === "bottom" ? dock : null}
       {pluginDocks.bottom.map(renderDock)}
     </div>
   )

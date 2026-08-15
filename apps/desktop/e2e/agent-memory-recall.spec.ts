@@ -1,4 +1,4 @@
-import type { SeedSession } from "./fixtures.js"
+import type { LaunchedApp, SeedSession } from "./fixtures.js"
 import { appShell, expect, test } from "./fixtures.js"
 import { type FakeMemoryRequest, startFakeAuthServer } from "./fake-auth.js"
 
@@ -24,6 +24,39 @@ const sourceIngestRequests = (
     (request) => request.path === "/api/memory/sources" && request.httpMethod === "POST"
   )
 
+const expectLifecycleTraffic = (requests: ReadonlyArray<FakeMemoryRequest>): void => {
+  const calls = requests.filter((request) => request.rpcMethod === "tools/call")
+  expect(calls.some(
+    (request) =>
+      request.mcpName === "memory_search" &&
+      String(request.toolArguments?.query).includes("Project: widget")
+  )).toBe(true)
+  expect(calls.some(
+    (request) =>
+      request.mcpName === "memory_search" &&
+      request.toolArguments?.query === "Tool: command_execute:printf"
+  )).toBe(true)
+  expect(calls.some(
+    (request) =>
+      request.mcpName === "memory_read" &&
+      request.toolArguments?.pageId === "command-printf"
+  )).toBe(true)
+  expect(calls.find((request) => request.toolName === "memory_propose")?.toolArguments)
+    .toMatchObject({ pageId: "pi-command-learning", baseRevisionId: "new" })
+  expect(calls.some(
+    (request) =>
+      request.toolName === "memory_workflow_status" &&
+      typeof request.toolArguments?.workflowId === "string"
+  )).toBe(true)
+}
+
+const runRecallTurn = async (app: LaunchedApp): Promise<void> => {
+  const composer = app.window.getByPlaceholder("Message the agent…")
+  await composer.fill("How should reusable printf templates handle percent signs?")
+  await composer.press("Enter")
+  await expect(app.window.getByText(COMPLETED_PI_REPLY)).toBeVisible({ timeout: 30_000 })
+}
+
 const seededSession = (repoPath: string): ReadonlyArray<SeedSession> => [
   {
     id: "s_automatic_memory",
@@ -40,6 +73,65 @@ const seededSession = (repoPath: string): ReadonlyArray<SeedSession> => [
     mode: "auto"
   }
 ]
+
+test("pi recalls, applies a tool advisory, publishes, and shares a learning within one organization", async ({ launchApp }) => {
+  const fake = await startFakeAuthServer({ reviewProposals: false, toolMemoryPage: true })
+  try {
+    const author = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "memory-lifecycle", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    const composer = author.window.getByPlaceholder("Message the agent…")
+    await composer.fill("Use the accepted alpha architecture while checking a reusable printf command.")
+    await composer.press("Enter")
+    await expect(
+      author.window.getByText("PI memory lifecycle completed with a cited tool advisory.")
+    ).toBeVisible({ timeout: 30_000 })
+    await expect.poll(() => fake.memorySnapshot("org-e2e").acceptedPageIds, { timeout: 30_000 })
+      .toContain("pi-command-learning")
+
+    expectLifecycleTraffic(fake.memoryRequests)
+    await author.app.close()
+
+    const teammateRequestStart = fake.memoryRequests.length
+    const teammate = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "default", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    await runRecallTurn(teammate)
+    expect(fake.memoryRequests.slice(teammateRequestStart).some(
+      (request) =>
+        request.mcpName === "memory_read" &&
+        request.toolArguments?.pageId === "pi-command-learning" &&
+        request.organizationId === "org-e2e"
+    )).toBe(true)
+    await teammate.app.close()
+
+    const outsiderRequestStart = fake.memoryRequests.length
+    const outsider = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "default", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-other" } }
+    })
+    await runRecallTurn(outsider)
+    expect(fake.memoryRequests.slice(outsiderRequestStart).some(
+      (request) => request.toolArguments?.pageId === "pi-command-learning"
+    )).toBe(false)
+  } finally {
+    await fake.close()
+  }
+})
 
 test("pi receives accepted memory without raw settled-turn capture", async ({ launchApp }) => {
   const fake = await startFakeAuthServer()
@@ -97,6 +189,7 @@ test("an unavailable memory MCP does not abort Jingler's real pi tools", async (
 }) => {
   const fake = await startFakeAuthServer()
   try {
+    fake.setMemoryAvailable(false)
     const app = await launchApp({
       authServer: fake,
       configured: true,
@@ -108,14 +201,9 @@ test("an unavailable memory MCP does not abort Jingler's real pi tools", async (
     const completed = app.window.getByText(COMPLETED_PI_REPLY)
     const composer = app.window.getByPlaceholder("Message the agent…")
 
-    await composer.fill("Warm the managed memory attachment.")
+    await composer.fill("Continue with Jingler's available tools while memory is offline.")
     await composer.press("Enter")
     await expect(completed).toHaveCount(1, { timeout: 30_000 })
-
-    fake.setMemoryAvailable(false)
-    await composer.fill("Continue with Jingler's available tools.")
-    await composer.press("Enter")
-    await expect(completed).toHaveCount(2, { timeout: 30_000 })
 
     await app.window.getByRole("button", { name: "Account menu" }).click()
     await app.window.getByRole("menuitem", { name: "Settings" }).click()

@@ -23,6 +23,7 @@ import {
   GitHubEventStore,
   GitService,
   MemoryServiceLive,
+  MemoryAttachmentServiceLive,
   makePiAgentRuntimeLive,
   PiAgentRuntimeLive,
   PlanStore,
@@ -100,7 +101,11 @@ const RuntimeRoleLayers = Layer.mergeAll(
   // layer memoization therefore builds one app-lifetime MemoryService for both
   // runner captures and renderer RPCs, keeping the outbox lock and proxy shared.
   MemoryServiceLive,
-  ReviewService.Default,
+  ReviewService.Default.pipe(
+    Layer.provide(
+      MemoryAttachmentServiceLive.pipe(Layer.provide(MemoryServiceLive))
+    )
+  ),
   ContextManager.Default
 )
 
@@ -116,6 +121,15 @@ const EmbeddedPiRuntimeLive = e2ePiFixture === null
       configureToolRegistry: configureE2ePiTools
     })
 
+const RemoteSessionsLive = RemoteSessionService.Default.pipe(
+  Layer.provideMerge(
+    EnvironmentService.Default.pipe(
+      Layer.provide(RemoteBootstrapService.Default),
+      Layer.provide(ProviderConnectionsLive)
+    )
+  )
+)
+
 const WebSearchLive = Layer.effect(
   WebSearchService,
   makeWebSearchService()
@@ -126,10 +140,17 @@ const WebSearchLive = Layer.effect(
 )
 
 const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
+  Layer.provide(RemoteSessionsLive),
   Layer.provide(WebSearchLive),
+  Layer.provide(ConfigService.Default),
+  Layer.provide(GitService.Default),
   Layer.provide(AssetLayer),
   Layer.provide(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
+  Layer.provide(
+    MemoryAttachmentServiceLive.pipe(Layer.provide(MemoryServiceLive))
+  ),
+  Layer.provide(ConfigService.Default),
   Layer.provide(SecretStoreLayer)
 )
 
@@ -143,16 +164,7 @@ const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(RuntimeRecoveryService.Default),
   Layer.provideMerge(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
-  Layer.provide(
-    RemoteSessionService.Default.pipe(
-      Layer.provideMerge(
-        EnvironmentService.Default.pipe(
-          Layer.provide(RemoteBootstrapService.Default),
-          Layer.provide(ProviderConnectionsLive)
-        )
-      )
-    )
-  ),
+  Layer.provide(RemoteSessionsLive),
   // AuthService requires SecretStore, satisfied by SecretStoreLive (merged below).
   Layer.provide(AuthService.Default),
   Layer.provideMerge(WebSearchCredentialService.Default),

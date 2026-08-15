@@ -11,6 +11,18 @@ import { fields, json, readJson } from "./worker-http.js"
 const STATE_KEY = "auth-coordinator"
 const USER_KEY = "user-id"
 const SUBSCRIPTION_RENEWAL_SKEW_SECONDS = 30
+const OFFLOAD_JOBS_KEY = "offload-jobs"
+const OFFLOAD_USES_KEY = "offload-grant-uses"
+// Four retrying 15-minute phases, a retrying 35-minute execution phase, and
+// queue/event waits can exceed two hours. Cleanup releases this early; six
+// hours is the conservative crash-only lease for the complete Workflow bound.
+const OFFLOAD_SLOT_SECONDS = 6 * 60 * 60
+
+interface ActiveOffloadJob {
+  readonly jobId: string
+  readonly idempotencyKey: string
+  readonly expiresAt: number
+}
 
 /** One coordinator per account; it is the only auth-state subscriber for its sandboxes. */
 export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
@@ -94,6 +106,78 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
     if (subject === null) return json({ error: "subject is required" }, 400)
     await this.ctx.storage.put(USER_KEY, subject)
     const ledger = await this.#ledger(subject)
+
+    if (url.pathname === "/v1/offload/authorize" && request.method === "POST") {
+      const now = Math.floor(Date.now() / 1_000)
+      const connected = !ledger.needsSubscription(now) || (await this.#subscribe(subject))
+      const current = connected ? await this.#ledger(subject) : ledger
+      const auth = current.authorize("managed.session.execute", now)
+      const githubCapabilityHandle = current.credentialHandle("github", now)
+      return connected && auth.admitted && githubCapabilityHandle !== null
+        ? json({ authStateVersion: auth.authStateVersion, githubCapabilityHandle, claimed: false })
+        : json({ error: "Managed offload is not authorized" }, 403)
+    }
+
+    if (url.pathname === "/v1/offload/register" && request.method === "POST") {
+      const jobId = typeof body?.jobId === "string" ? body.jobId : null
+      const idempotencyKey = typeof body?.idempotencyKey === "string"
+        ? body.idempotencyKey
+        : null
+      if (jobId === null || idempotencyKey === null) {
+        return json({ error: "job scope is required" }, 400)
+      }
+      const now = Math.floor(Date.now() / 1_000)
+      const connected = !ledger.needsSubscription(now) || (await this.#subscribe(subject))
+      const current = connected ? await this.#ledger(subject) : ledger
+      const auth = current.authorize("managed.session.execute", now)
+      const githubCapabilityHandle = current.credentialHandle("github", now)
+      if (!(connected && auth.admitted && githubCapabilityHandle !== null)) {
+        return json({ error: "Managed offload is not authorized" }, 403)
+      }
+      const active = (
+        (await this.ctx.storage.get<ReadonlyArray<ActiveOffloadJob>>(OFFLOAD_JOBS_KEY)) ?? []
+      ).filter((candidate) => candidate.expiresAt > now)
+      const existing = active.find((candidate) => candidate.idempotencyKey === idempotencyKey)
+      if (existing !== undefined && existing.jobId !== jobId) {
+        return json({ error: "Offload idempotency scope changed" }, 409)
+      }
+      if (existing === undefined && active.length >= 1) {
+        return json({ error: "Offload concurrency exceeded" }, 429)
+      }
+      if (existing === undefined) {
+        active.push({ jobId, idempotencyKey, expiresAt: now + OFFLOAD_SLOT_SECONDS })
+        await this.ctx.storage.put(OFFLOAD_JOBS_KEY, active)
+      }
+      return json({
+        authStateVersion: auth.authStateVersion,
+        githubCapabilityHandle,
+        claimed: existing === undefined
+      })
+    }
+
+    if (url.pathname === "/v1/offload/unregister" && request.method === "POST") {
+      const jobId = typeof body?.jobId === "string" ? body.jobId : null
+      if (jobId === null) return json({ error: "jobId is required" }, 400)
+      const active =
+        (await this.ctx.storage.get<ReadonlyArray<ActiveOffloadJob>>(OFFLOAD_JOBS_KEY)) ?? []
+      await this.ctx.storage.put(
+        OFFLOAD_JOBS_KEY,
+        active.filter((candidate) => candidate.jobId !== jobId)
+      )
+      return json({ ok: true })
+    }
+
+    if (url.pathname === "/v1/offload/grants/consume" && request.method === "POST") {
+      const use = typeof body?.use === "string" ? body.use : null
+      if (use === null) return json({ error: "grant use is required" }, 400)
+      const uses = new Set(
+        (await this.ctx.storage.get<ReadonlyArray<string>>(OFFLOAD_USES_KEY)) ?? []
+      )
+      if (uses.has(use)) return json({ error: "Offload grant was already used" }, 409)
+      uses.add(use)
+      await this.ctx.storage.put(OFFLOAD_USES_KEY, [...uses].slice(-256))
+      return json({ consumed: true })
+    }
 
     if (url.pathname === "/v1/sessions/register" && request.method === "POST") {
       const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null

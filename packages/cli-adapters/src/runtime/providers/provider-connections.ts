@@ -65,6 +65,10 @@ export interface ProviderConnectionsShape {
   readonly logout: (
     id: ProviderConnectionId
   ) => Effect.Effect<void, ProviderConnectionsError>
+  /** Fully removes the connection: broker state, credential, and persistence. */
+  readonly remove: (
+    id: ProviderConnectionId
+  ) => Effect.Effect<void, ProviderConnectionsError>
   readonly verifyModel: ProviderConnectionsOptions["verifyModel"]
 }
 
@@ -207,6 +211,11 @@ export const makeProviderConnections = (
         ),
       logout: (id) =>
         brokerCall(options.broker.logout(id)).pipe(
+          Effect.zipRight(removeConnection(document, id)),
+          refreshCatalog
+        ),
+      remove: (id) =>
+        brokerCall(options.broker.delete(id)).pipe(
           Effect.zipRight(removeConnection(document, id)),
           refreshCatalog
         ),

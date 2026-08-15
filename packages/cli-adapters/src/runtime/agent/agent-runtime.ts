@@ -53,6 +53,8 @@ export type RuntimePlanDecision =
 export interface AgentRuntimeContext {
   /** Main-process-only capability attachments for this run. */
   readonly mcp?: JinglerMcpAttachments
+  /** Main-process attachment outcome; failed remains visible without memory tools. */
+  readonly memoryAttachmentStatus?: "disabled" | "available" | "failed"
   /** Publish Jingler-owned lifecycle events produced by first-class tools. */
   readonly publishEvent: (event: StreamEvent) => Effect.Effect<void>
   /** Publish a task-local stop handle for the background-task dock. */

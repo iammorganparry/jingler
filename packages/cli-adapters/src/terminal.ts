@@ -38,6 +38,14 @@ const FLUSH_BYTES = 32 * 1024
 const HIGH_WATER = 4 * 1024 * 1024
 /** Bounded outbound mailbox depth (frames) — backpressure kicks in past this. */
 const MAILBOX_CAP = 512
+/**
+ * How long an EXITED terminal's record (info + compacted scrollback) stays
+ * available for re-attach/list before it is reclaimed. The native pty and its
+ * listeners are released the moment the process exits — this TTL bounds only
+ * the ≤256 KB replay snapshot. Without it, every shell that ever exited kept
+ * its full handle resident until app quit.
+ */
+const EXITED_TTL_MS = 5 * 60 * 1000
 
 /**
  * A fixed-capacity byte buffer holding the most-recent output for replay. Trims
@@ -234,18 +242,16 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
             pty.onData((data) => {
               handle.ring.push(data)
               handle.live?.push(data)
-            }),
-            pty.onExit(({ exitCode }) => {
-              info.status = "exited"
-              info.exitCode = exitCode
-              handle.live?.exit(exitCode)
             })
           ]
 
-          handle.teardown = () => {
-            // Idempotent via the set: `kill` then quit (or two quits racing) must
-            // not dispose one PTY's listeners twice.
-            if (!teardowns.delete(handle.teardown)) return
+          // The heavy half of reclaim — native pty + listener closures — split
+          // out so `onExit` can run it WITHOUT forgetting the terminal: the
+          // record (info + scrollback) must survive exit for re-attach/list.
+          let ptyReleased = false
+          const releasePty = (): void => {
+            if (ptyReleased) return
+            ptyReleased = true
             for (const listener of listeners) {
               try {
                 listener.dispose()
@@ -253,14 +259,44 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
                 /* already disposed */
               }
             }
-            handle.live?.dispose()
-            handle.live = null
-            handles.delete(id)
             try {
               handle.pty.kill()
             } catch {
               /* already dead */
             }
+          }
+
+          let reap: ReturnType<typeof setTimeout> | null = null
+
+          listeners.push(
+            pty.onExit(({ exitCode }) => {
+              info.status = "exited"
+              info.exitCode = exitCode
+              handle.live?.exit(exitCode)
+              // The process is gone; nothing else will ever arrive. Free the
+              // native handle and listeners NOW rather than at app quit —
+              // exited-but-unkilled terminals used to hold both forever.
+              releasePty()
+              // Compact the ring's chunk list into one string for replay.
+              const finalOutput = handle.ring.read()
+              handle.ring = new RingBuffer(RING_CAP)
+              handle.ring.push(finalOutput)
+              // Bound the snapshot's lifetime; `teardown` cancels this if an
+              // explicit kill or app quit reclaims the record first.
+              reap = setTimeout(() => handle.teardown(), EXITED_TTL_MS)
+              reap.unref?.()
+            })
+          )
+
+          handle.teardown = () => {
+            // Idempotent via the set: `kill` then quit (or two quits racing) must
+            // not dispose one PTY's listeners twice.
+            if (!teardowns.delete(handle.teardown)) return
+            if (reap !== null) clearTimeout(reap)
+            releasePty()
+            handle.live?.dispose()
+            handle.live = null
+            handles.delete(id)
           }
 
           teardowns.add(handle.teardown)

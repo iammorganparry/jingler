@@ -11,7 +11,10 @@ import { Eyebrow } from "../../components/eyebrow.js";
 import { Spinner } from "../../components/loading.js";
 import { ProviderIcon } from "../../components/provider-icon.js";
 import { ProviderAuthForms } from "../../composites/provider-auth-forms.js";
-import { providerAuthRouteLabel } from "../../lib/provider-connection-labels.js";
+import {
+  entitlementIssueLabel,
+  providerAuthRouteLabel,
+} from "../../lib/provider-connection-labels.js";
 
 export interface ProviderSetupStepProps {
   catalog: ProviderCatalog | null;
@@ -50,6 +53,27 @@ export function ProviderSetupStep({
     catalog?.connections.filter(
       ({ connection }) => connection.status === "authenticated",
     ) ?? [];
+  const accountKey = (connection: {
+    providerId: string;
+    authKind: AuthKind;
+    account: { fingerprint: string } | null;
+  }) =>
+    `${connection.providerId}:${connection.authKind}:${connection.account?.fingerprint ?? ""}`;
+  const authenticatedAccounts = new Set(
+    authenticatedConnections.map(({ connection }) => accountKey(connection)),
+  );
+  const seenUnconfirmed = new Set<string>();
+  const unconfirmedConnections = (catalog?.connections ?? []).filter(
+    ({ connection }) => {
+      if (connection.status !== "entitlement-unconfirmed") return false;
+      const key = accountKey(connection);
+      // A later authenticated attempt supersedes stale unconfirmed duplicates.
+      if (authenticatedAccounts.has(key)) return false;
+      if (seenUnconfirmed.has(key)) return false;
+      seenUnconfirmed.add(key);
+      return true;
+    },
+  );
   const progressLabel =
     pendingAuthKind === "claude-setup-token"
       ? "Connecting Claude…"
@@ -92,6 +116,17 @@ export function ProviderSetupStep({
           </div>
         </Callout>
       )}
+
+      {unconfirmedConnections.map(({ connection }) => (
+        <Callout key={connection.id} tone="yellow">
+          <div className="flex flex-col gap-0.5">
+            <span className="font-medium">
+              {providerAuthRouteLabel(connection.authKind)} needs attention
+            </span>
+            <span>{entitlementIssueLabel(connection.subscription)}</span>
+          </div>
+        </Callout>
+      ))}
 
       {authenticatedConnections.length === 0 ? (
         authForms

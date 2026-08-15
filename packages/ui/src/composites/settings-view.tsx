@@ -4,6 +4,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OffloadComputeSettings,
   PlanTemplateConfig,
   ContextConfig,
   ContextSnapshot,
@@ -222,6 +223,10 @@ export interface SettingsViewProps {
   /** Desktop-notification prefs; absent means the defaults, not "off". */
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
+  /** Automatic read-only cloud routing for eligible agent commands. */
+  offloadCompute?: OffloadComputeSettings | null
+  onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
+  offloadStatus?: "disabled" | "priming" | "ready" | "failed"
   /** Whether plan mode runs commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
@@ -270,6 +275,9 @@ export function SettingsView({
   onSaveGit,
   notifications,
   onSaveNotifications,
+  offloadCompute,
+  onSaveOffloadCompute,
+  offloadStatus,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -374,6 +382,13 @@ export function SettingsView({
         <GeneralSection
           notifications={notifications}
           onSaveNotifications={onSaveNotifications}
+          offloadCompute={offloadCompute}
+          onSaveOffloadCompute={onSaveOffloadCompute}
+          offloadStatus={offloadStatus}
+          offloadEnvironments={devices?.environments.filter((environment) =>
+            environment.kind === "owned"
+          ) ?? []}
+          onRefreshOffloadEnvironments={devices?.onRefresh}
           planAutoRun={planAutoRun}
           onSavePlanAutoRun={onSavePlanAutoRun}
           adhdMode={adhdMode}
@@ -904,6 +919,11 @@ function FontSizeRow({
 function GeneralSection({
   notifications,
   onSaveNotifications,
+  offloadCompute,
+  onSaveOffloadCompute,
+  offloadStatus,
+  offloadEnvironments,
+  onRefreshOffloadEnvironments,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -914,6 +934,11 @@ function GeneralSection({
 }: {
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
+  offloadCompute?: OffloadComputeSettings | null
+  onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
+  offloadStatus?: "disabled" | "priming" | "ready" | "failed"
+  offloadEnvironments: ReadonlyArray<Environment>
+  onRefreshOffloadEnvironments?: () => void | Promise<void>
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
   adhdMode?: boolean | null
@@ -922,6 +947,22 @@ function GeneralSection({
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
   webSearch?: WebSearchSettingsProps
 }) {
+  const [offloadDraft, setOffloadDraft] = React.useState<boolean>(
+    offloadCompute?.enabled ?? false
+  )
+  React.useEffect(
+    () => setOffloadDraft(offloadCompute?.enabled ?? false),
+    [offloadCompute?.enabled]
+  )
+  const offloadTarget = offloadCompute?.target ?? { kind: "cloud" as const }
+  const saveOffload = (settings: Partial<OffloadComputeSettings>): void => {
+    void onSaveOffloadCompute?.({
+      enabled: offloadDraft,
+      target: offloadTarget,
+      explicitCommands: offloadCompute?.explicitCommands ?? [],
+      ...settings
+    })
+  }
   // Absent means ON, matching `PLAN_AUTO_RUN_DEFAULT` in the domain.
   const [planDraft, setPlanDraft] = React.useState<boolean>(planAutoRun ?? true)
   React.useEffect(() => setPlanDraft(planAutoRun ?? true), [planAutoRun])
@@ -955,6 +996,90 @@ function GeneralSection({
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
       <div className="mx-auto w-full max-w-[560px]">
         <div className="mb-1 flex items-center gap-2 border-b border-hairline pb-2.5">
+          <span className="text-[13px] font-semibold text-text-bright">
+            Compute
+          </span>
+        </div>
+        <div className="divide-y divide-hairline">
+          <ToggleRow
+            label="Offload Compute"
+            description="When this machine is under sustained CPU or memory pressure, automatically run eligible lint, typecheck, test, build, and allowlisted argv on your preferred Cloud Sandbox or owned device. Interactive, stateful, shell-composed, and unknown commands stay local."
+            checked={offloadDraft}
+            onChange={(enabled) => {
+              setOffloadDraft(enabled)
+              saveOffload({ enabled })
+            }}
+          />
+          <div className="space-y-2 px-1 py-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-medium text-muted-foreground" htmlFor="offload-target">
+                  Compute target
+                </label>
+                <button
+                  type="button"
+                  className="text-[10px] text-blue hover:underline"
+                  onClick={() => void onRefreshOffloadEnvironments?.()}
+                >
+                  Refresh devices
+                </button>
+              </div>
+              <select
+                id="offload-target"
+                aria-label="Offload Compute target"
+                className="w-full rounded-md border border-line bg-sunken px-2 py-1.5 text-[12px] text-text-bright"
+                value={offloadTarget.kind}
+                onChange={(event) => {
+                  if (event.target.value === "cloud") saveOffload({ target: { kind: "cloud" } })
+                  else if (offloadEnvironments[0]) {
+                    saveOffload({
+                      target: { kind: "owned-device", deviceId: offloadEnvironments[0].id }
+                    })
+                  }
+                }}
+              >
+                <option value="cloud">Cloud Sandbox</option>
+                <option value="owned-device" disabled={offloadEnvironments.length === 0}>
+                  Owned device
+                </option>
+              </select>
+              {offloadTarget.kind === "owned-device" && (
+                <select
+                  aria-label="Owned device for Offload Compute"
+                  className="w-full rounded-md border border-line bg-sunken px-2 py-1.5 text-[12px] text-text-bright"
+                  value={offloadTarget.deviceId}
+                  onChange={(event) => saveOffload({
+                    target: { kind: "owned-device", deviceId: event.target.value }
+                  })}
+                >
+                  {offloadEnvironments.map((environment) => (
+                    <option key={environment.id} value={environment.id}>
+                      {environment.name}{environment.state === "online" ? " · online" : " · offline"}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="text-[10px] text-dim">
+                The selected target is fail-closed; unavailable devices never fall back to cloud or local execution.
+              </p>
+          </div>
+          {offloadStatus === "priming" ? (
+            <p className="px-1 py-2 text-[11px] text-muted-foreground" role="status">
+              Saving Offload Compute settings…
+            </p>
+          ) : offloadStatus === "ready" ? (
+            <p className="px-1 py-2 text-[11px] text-success" role="status">
+              {offloadTarget.kind === "cloud"
+                ? "Cloud compute is enabled; eligible sessions prime in the background."
+                : "Owned-device compute is enabled and will fail closed if that device is unavailable."}
+            </p>
+          ) : offloadStatus === "failed" ? (
+            <p className="px-1 py-2 text-[11px] text-danger" role="alert">
+              Offload Compute settings could not be saved.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
           <span className="text-[13px] font-semibold text-text-bright">
             Planning
           </span>

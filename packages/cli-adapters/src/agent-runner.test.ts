@@ -623,6 +623,14 @@ describe("AgentRunner team memory", () => {
     expect(captured[0]?.prompt).toContain("at most three standalone decisions")
     expect(captured[0]?.prompt).toContain("Exclude progress narration")
     expect(captured[0]?.prompt).toContain("Initial recall completed with no accepted matches")
+    const searchRequest = requests.find(
+      (request) => request.headers.get("mcp-name") === "memory_search"
+    )
+    const searchBody = await searchRequest?.clone().json() as {
+      params?: { arguments?: { query?: string } }
+    } | undefined
+    expect(searchBody?.params?.arguments?.query).toContain("Project: widget")
+    expect(searchBody?.params?.arguments?.query).toContain("Branch: chore/test")
     expect(requests.some((request) => request.url.endsWith("/api/memory/sources"))).toBe(false)
     expect(JSON.stringify(transcript)).not.toContain("memory-grant-value")
     expect(JSON.stringify(transcript)).not.toContain("jingler-user-token")
@@ -1350,6 +1358,42 @@ describe("AgentRunner plan mode", () => {
     const events = result.right
     expect(events.some((event) => event._tag === "PlanProposed")).toBe(true)
     expect(ranTool(events, "plan-edit-1")).toBe(true)
+  })
+
+  it("steers a corrective for an unknown-stage checkpoint and replays it once the plan is amended", async () => {
+    const program = Effect.gen(function* () {
+      const runner = yield* AgentRunner
+      yield* runner.setMode(SESSION, "plan")
+      yield* runner.prompt(SESSION, SESSION, "[[plan]] [[plan-unknown-stage]] refactor auth").pipe(
+        Stream.tap((event) =>
+          event._tag === "PlanProposed"
+            ? runner.approvePlan(SESSION, event.plan.id).pipe(Effect.asVoid)
+            : Effect.void
+        ),
+        Stream.runDrain
+      )
+      return {
+        transcript: yield* TranscriptStore.list(SESSION),
+        document: yield* PlanStore.readDocument(temp.root)
+      }
+    })
+    const result = await Effect.runPromise(program.pipe(Effect.provide(base())))
+
+    // The runner told the agent its checkpoint was dropped and how to recover.
+    const assistantText = result.transcript
+      .flatMap((message) => message.parts)
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("\n")
+    expect(assistantText).toContain("Corrective received:")
+    expect(assistantText).toContain("[plan-sync]")
+    expect(assistantText).toContain("jingler_submit_plan")
+    // The amendment landed as a new canonical stage, and the checkpoint that
+    // was dropped against the old revision applied on replay — the driver
+    // never re-emits the marker after amending.
+    const ghost = result.document?.plan.stages.find((stage) => stage.id === "s_99")
+    expect(ghost).toBeDefined()
+    expect((ghost?.tasks ?? []).map((task) => task.status)).toEqual(["completed"])
   })
 
   it("approves the exact edited canonical revision and completes only from criterion evidence", async () => {

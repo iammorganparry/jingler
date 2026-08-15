@@ -49,6 +49,7 @@ import type {
   McpServerStatus,
   OpenConnectorConfig,
   OpenConnectorDefaults,
+  OffloadComputeSettings,
   ConnectorProvider,
   ConnectorProviderDetail,
   ConnectorConnection,
@@ -353,6 +354,8 @@ export const rpc = {
     run((c) => c.Provider.refresh({ connectionId })),
   providerLogout: (connectionId: ProviderConnectionId): Promise<void> =>
     run((c) => c.Provider.logout({ connectionId })),
+  providerRemoveConnection: (connectionId: ProviderConnectionId): Promise<void> =>
+    run((c) => c.Provider.removeConnection({ connectionId })),
   providerVerifyModel: (
     connectionId: ProviderConnectionId,
     modelId: ProviderModelId
@@ -925,6 +928,11 @@ export const rpc = {
   /** Persist ADHD mode; resolves with the whole updated config. */
   configSetAdhdMode: (adhdMode: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setAdhdMode({ adhdMode })),
+  /** Persist automatic compute routing and shell-free command allowlists. */
+  configSetOffloadCompute: (
+    offloadCompute: OffloadComputeSettings
+  ): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setOffloadCompute(offloadCompute)),
   /** Persist the conversation + code text-size multiplier. */
   configSetFontScale: (fontScale: number): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setFontScale({ fontScale })),

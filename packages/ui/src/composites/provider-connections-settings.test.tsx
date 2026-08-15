@@ -197,15 +197,15 @@ describe("ProviderConnectionsSettings", () => {
     ).toBeTruthy()
   })
 
-  it("checks an unverified model from its chip and logs out the selected connection", () => {
-    const onVerify = vi.fn()
+  it("makes an unverified model the default from its chip and logs out the selected connection", () => {
+    const onMakeDefault = vi.fn()
     const onLogout = vi.fn()
     render(
       <ProviderConnectionsSettings
         catalog={catalog}
         onRefresh={vi.fn()}
-        onVerify={onVerify}
-        onMakeDefault={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={onMakeDefault}
         onLogout={onLogout}
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
@@ -215,11 +215,37 @@ describe("ProviderConnectionsSettings", () => {
     expect(screen.queryByRole("button", { name: "Verify" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: /^Claude New/u }))
     fireEvent.click(screen.getByRole("button", { name: "Log out" }))
-    expect(onVerify).toHaveBeenCalledWith(
-      "claude-max" as ProviderConnectionId,
-      "anthropic/claude-new" as ProviderModelId
-    )
+    expect(onMakeDefault).toHaveBeenCalledWith({
+      connectionId: "claude-max" as ProviderConnectionId,
+      providerId: "anthropic",
+      modelId: "anthropic/claude-new" as ProviderModelId
+    })
     expect(onLogout).toHaveBeenCalledWith("claude-max")
+  })
+
+  it("removes a connection from its list row without selecting it", () => {
+    const onLogout = vi.fn()
+    const onRemove = vi.fn()
+    render(
+      <ProviderConnectionsSettings
+        catalog={catalog}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={onLogout}
+        onRemove={onRemove}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
+      />
+    )
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Remove Claude Pro / Max setup-token connection"
+      })
+    )
+    expect(onRemove).toHaveBeenCalledWith("claude-max")
+    expect(onLogout).not.toHaveBeenCalled()
   })
 
   it("marks only a certified model as the canonical default", () => {
@@ -245,8 +271,8 @@ describe("ProviderConnectionsSettings", () => {
     })
   })
 
-  it("checks availability when the canonical default certification is stale", () => {
-    const onVerify = vi.fn()
+  it("keeps a stale-certified default usable and re-electable", () => {
+    const onMakeDefault = vi.fn()
     const stale = Schema.decodeSync(ProviderCatalog)({
       ...catalog,
       connections: [
@@ -269,8 +295,8 @@ describe("ProviderConnectionsSettings", () => {
         defaultConnectionId={"claude-max" as ProviderConnectionId}
         defaultModelId={"anthropic/claude-test" as ProviderModelId}
         onRefresh={vi.fn()}
-        onVerify={onVerify}
-        onMakeDefault={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={onMakeDefault}
         onLogout={vi.fn()}
         onConnectClaude={vi.fn()}
         onStartCodex={vi.fn()}
@@ -278,8 +304,9 @@ describe("ProviderConnectionsSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /^Claude Test/u }))
-    expect(onVerify).toHaveBeenCalledWith("claude-max", "anthropic/claude-test")
-    expect(screen.queryByText("Default")).toBeNull()
+    const chip = screen.getByRole("button", { name: /^Claude Test/u })
+    expect(chip.getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(chip)
+    expect(onMakeDefault).not.toHaveBeenCalled()
   })
 })

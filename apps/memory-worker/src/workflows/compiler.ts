@@ -11,7 +11,6 @@ import {
 import { Schema } from "effect"
 import { WorkflowEntrypoint } from "cloudflare:workers"
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers"
-import { buildCompilerPrompt } from "../compiler-prompt.js"
 import type { DurableObjectNamespaceLike } from "../env.js"
 import {
   NEW_PAGE_BASE_REVISION_ID,
@@ -55,7 +54,6 @@ export interface CompilerContext {
   readonly schemaPages: ReadonlyArray<MemoryPage>
   readonly candidates: ReadonlyArray<CompilerAcceptedPage>
   readonly indexMarkdown: string
-  readonly prompt: string
 }
 
 export interface CompilerGeneratedProposal {
@@ -100,6 +98,12 @@ export interface WorkflowEventLike<Payload> {
 export type CompilerWorkflowResult =
   | {
       readonly workflowId: string
+      readonly status: "no_durable_learning"
+      readonly proposalId: null
+      readonly proposalIds: ReadonlyArray<string>
+    }
+  | {
+      readonly workflowId: string
       readonly status: "pending_review"
       readonly proposalId: string
       readonly proposalIds: ReadonlyArray<string>
@@ -135,6 +139,14 @@ const WORD_PATTERN = /[\p{L}\p{N}][\p{L}\p{N}_-]*/gu
 const SENTENCE_BOUNDARY_PATTERN = /(?<=[.!?])\s+|\n+/u
 const MARKDOWN_HEADING_PATTERN = /^#{1,6}\s+.*$/gm
 const LIST_MARKER_PATTERN = /^[-*]\s+/
+const STRUCTURAL_LABEL_PATTERN = /^(?:goal|recent work|what i just did|next step|the immediate next action|decisions|decisions already made|files touched|open threads|other open threads|preferences|standing user preferences|midflow|midflow reason)\s*:?[\s-]*$/iu
+const PROGRESS_NARRATION_PATTERN = /^(?:plan_task|plan_result|step\s+\d+|ran\s+(?:pnpm|npm|yarn|bun|git|cargo|go)\b|running\s+(?:pnpm|npm|yarn|bun|git|cargo|go|tests?\s*$)|(?:working\s+on|starting|completed)\s+(?:stage|step|task|implementation|tests?|verification)\b|next\s+action\s*:|recent\s+work\s*:|what\s+i\s+just\s+did\s*:)/iu
+const ROUTING_STOP_WORDS = new Set([
+  "accepted", "after", "and", "are", "for", "from", "has", "have", "into", "must",
+  "remain", "remains", "should", "that", "the", "this", "was", "were", "with"
+])
+const IDENTITY_WORD_WEIGHT = 3
+const MIN_CANDIDATE_SCORE = 3
 
 export interface CompilerPageIdentity {
   readonly pageId: string
@@ -167,7 +179,7 @@ export const compilerPageIdentity = (
 const normalizedWords = (value: string): ReadonlySet<string> =>
   new Set(
     (value.normalize("NFKC").toLocaleLowerCase("en-US").match(WORD_PATTERN) ?? []).filter(
-      (word) => word.length > 2
+      (word) => word.length > 2 && !ROUTING_STOP_WORDS.has(word)
     )
   )
 
@@ -176,26 +188,39 @@ export const extractCompilerClaims = (content: string): ReadonlyArray<string> =>
     .replace(MARKDOWN_HEADING_PATTERN, "")
     .split(SENTENCE_BOUNDARY_PATTERN)
     .map((claim) => claim.replace(LIST_MARKER_PATTERN, "").trim())
-    .filter((claim) => claim.length >= 12 && claim.length <= 600)
+    .filter(
+      (claim) =>
+        claim.length >= 12 &&
+        claim.length <= 600 &&
+        !STRUCTURAL_LABEL_PATTERN.test(claim) &&
+        !PROGRESS_NARRATION_PATTERN.test(claim)
+    )
   return [...new Set(claims)].slice(0, MAX_COMPILER_CLAIMS)
 }
 
-const candidateScore = (page: MemoryPage, claims: ReadonlyArray<string>): number => {
+const pageRelevanceScore = (page: MemoryPage, claimText: string): number => {
   const identityWords = normalizedWords(
     [page.id, page.path, page.title, ...page.aliases, ...page.tags].join(" ")
   )
-  const claimWords = normalizedWords(claims.join(" "))
+  const bodyWords = normalizedWords(page.body)
+  const claimWords = normalizedWords(claimText)
   let score = 0
-  for (const word of claimWords) if (identityWords.has(word)) score += 1
+  for (const word of claimWords) {
+    if (identityWords.has(word)) score += IDENTITY_WORD_WEIGHT
+    else if (bodyWords.has(word)) score += 1
+  }
   return score
 }
+
+const candidateScore = (page: MemoryPage, claims: ReadonlyArray<string>): number =>
+  pageRelevanceScore(page, claims.join(" "))
 
 export const selectCompilerCandidates = (
   pages: ReadonlyArray<CompilerAcceptedPage>,
   claims: ReadonlyArray<string>
 ): ReadonlyArray<CompilerAcceptedPage> =>
   [...pages]
-    .filter((entry) => candidateScore(entry.page, claims) > 0)
+    .filter((entry) => candidateScore(entry.page, claims) >= MIN_CANDIDATE_SCORE)
     .sort(
       (left, right) =>
         candidateScore(right.page, claims) - candidateScore(left.page, claims) ||
@@ -203,15 +228,8 @@ export const selectCompilerCandidates = (
     )
     .slice(0, MAX_COMPILER_CANDIDATES)
 
-const scoreClaimForPage = (claim: string, page: MemoryPage): number => {
-  const claimWords = normalizedWords(claim)
-  const pageWords = normalizedWords(
-    [page.id, page.path, page.title, ...page.aliases, ...page.tags].join(" ")
-  )
-  let score = 0
-  for (const word of claimWords) if (pageWords.has(word)) score += 1
-  return score
-}
+const scoreClaimForPage = (claim: string, page: MemoryPage): number =>
+  pageRelevanceScore(page, claim)
 
 export class DeterministicCompilerModel implements CompilerModel {
   async generate(context: CompilerContext): Promise<CompilerGeneratedProposal> {
@@ -228,7 +246,9 @@ export class DeterministicCompilerModel implements CompilerModel {
       return { selection: "no_op", changeKind: "factual", drafts: [] }
     }
     const hasUnmatchedClaim = owned === undefined && novelClaims.some((claim) =>
-      context.candidates.every((candidate) => scoreClaimForPage(claim, candidate.page) === 0)
+      context.candidates.every(
+        (candidate) => scoreClaimForPage(claim, candidate.page) < MIN_CANDIDATE_SCORE
+      )
     )
     const existingPageLimit = Math.max(0, MAX_COMPILED_PAGES - (hasUnmatchedClaim ? 1 : 0))
     const selected = owned === undefined
@@ -247,7 +267,10 @@ export class DeterministicCompilerModel implements CompilerModel {
           compareText(left.page.id, right.page.id)
       )
       const best = ranked[0]
-      if (best === undefined || scoreClaimForPage(claim, best.page) === 0) {
+      if (
+        best === undefined ||
+        scoreClaimForPage(claim, best.page) < MIN_CANDIDATE_SCORE
+      ) {
         unmatchedClaims.push(claim)
       } else {
         claimsByPage.get(best.page.id)!.push(claim)
@@ -373,21 +396,14 @@ const readCompilerContext = async (
     claims,
     schemaPages,
     candidates,
-    indexMarkdown: navigation.indexMarkdown,
-    prompt: buildCompilerPrompt({
-      source: source.source,
-      claims,
-      schemaPages,
-      candidatePages: candidates.map(({ page }) => page),
-      indexMarkdown: navigation.indexMarkdown
-    })
+    indexMarkdown: navigation.indexMarkdown
   }
 }
 
 const compilerResult = (
   input: CompilerWorkflowInput,
   proposalSet: VaultProposalSet,
-  status: CompilerWorkflowResult["status"]
+  status: Exclude<CompilerWorkflowResult["status"], "no_durable_learning">
 ): CompilerWorkflowResult => ({
   workflowId: input.workflowId,
   status,
@@ -412,11 +428,15 @@ const validatedCompilerSource = async (
   return stored
 }
 
-const claimsForSource = (source: CompilerSource): ReadonlyArray<string> => {
-  const claims = extractCompilerClaims(source.content)
-  if (claims.length === 0) throw new CompilerWorkflowError("source contains no bounded claims")
-  return claims
-}
+const claimsForSource = (source: CompilerSource): ReadonlyArray<string> =>
+  extractCompilerClaims(source.content)
+
+const noDurableLearning = (input: CompilerWorkflowInput): CompilerWorkflowResult => ({
+  workflowId: input.workflowId,
+  status: "no_durable_learning",
+  proposalId: null,
+  proposalIds: []
+})
 
 export const runCompilerWorkflow = async (
   input: CompilerWorkflowInput,
@@ -426,10 +446,14 @@ export const runCompilerWorkflow = async (
 ): Promise<CompilerWorkflowResult> => {
   const source = await step.do("01-validate-source", () => validatedCompilerSource(repository, input))
   const claims = await step.do("02-extract-claims", () => claimsForSource(source))
+  if (claims.length === 0) return noDurableLearning(input)
   const context = await step.do("03-read-schema-index-and-candidates", () =>
     readCompilerContext(repository, input, source, claims)
   )
   const generated = await step.do("04-generate-bounded-proposal", () => model.generate(context))
+  if (generated.selection === "no_op" || generated.drafts.length === 0) {
+    return noDurableLearning(input)
+  }
   const proposalSetId = `proposal:${input.workflowId}`
   const proposalSet = await step.do("05-lint-and-persist-proposal", () =>
     repository.createProposalSet({

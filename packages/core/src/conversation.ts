@@ -2,6 +2,7 @@ import { Match, Schema } from "effect"
 import { DiffStat } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
 import { FileChangeSet } from "./runtime/file-change.js"
+import { ProviderId } from "./runtime/provider-connection.js"
 import {
   SubagentFleetControlOutcome,
   SubagentFleetEvent
@@ -481,7 +482,13 @@ export const Message = Schema.Struct({
   streaming: Schema.Boolean,
   createdAt: Schema.String,
   /** Optional for every transcript written before external instructions existed. */
-  externalInstruction: Schema.optional(ExternalInstructionIdentity)
+  externalInstruction: Schema.optional(ExternalInstructionIdentity),
+  /**
+   * Provider that produced this assistant turn, stamped at creation. Optional
+   * for transcripts from before mid-conversation model switching; the UI falls
+   * back to the chat's current provider.
+   */
+  providerId: Schema.optional(ProviderId)
 })
 export type Message = Schema.Schema.Type<typeof Message>
 
@@ -852,13 +859,15 @@ export const userMessage = (
 /** A fresh, empty assistant turn to be filled by streaming events. */
 export const assistantMessage = (
   id: string,
-  createdAt: string
+  createdAt: string,
+  providerId?: ProviderId
 ): Message => ({
   id,
   role: "assistant",
   parts: [],
   streaming: true,
-  createdAt
+  createdAt,
+  ...(providerId === undefined ? {} : { providerId })
 })
 
 /**
@@ -1905,10 +1914,13 @@ export const resumePlanPrompt = (plan: Plan): string => {
   return [
     "The plan below was approved. Implement it now — make the actual code changes and run what's needed.",
     "Do NOT re-plan or ask to enter plan mode again; proceed with the implementation.",
+    "The plan's end state is your target: after each stage, re-read the remaining stages and acceptance criteria, and keep working until every one is completed or explicitly blocked.",
     "Continue from the supplied execution checkpoints. Do not repeat tasks already marked completed.",
     "Whenever a listed task changes state, emit this exact checkpoint line immediately:",
     "PLAN_TASK stage=<stage-id> fingerprint=<fingerprint> task=<task-id> status=<in-progress|completed|blocked>",
-    "Use only the exact stage, fingerprint, and task ids supplied below. Do not repeat an unchanged status.",
+    "Mark a task in-progress the moment you begin its work and completed immediately after it verifies — never retroactively at the end of the turn.",
+    "Use only the exact stage, fingerprint, and task ids supplied below. Do not repeat an unchanged status. A marker naming a stage or task id that is not in the current plan is dropped — the operator never sees that progress.",
+    "If the operator asks for something new while you execute — or you discover work the plan is missing — fold it into the plan: FIRST call jingler_submit_plan with the complete updated plan (while a plan is executing it applies immediately, no re-approval), say where the addition landed, THEN emit PLAN_TASK markers using the updated plan's ids, and keep driving the plan to completion.",
     ...PLAN_EVIDENCE_INSTRUCTIONS,
     "",
     `Plan: ${plan.summary}`,

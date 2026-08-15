@@ -56,6 +56,23 @@ describe("Composer send row", () => {
     expect(repo.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  it("shows the dirty badge beside the repo, and hides it for a clean tree", () => {
+    const { rerender } = render(
+      <Composer repo="widget" branch="main" diff={{ files: 29, added: 689, removed: 38 }} />
+    )
+    const badge = screen.getByTestId("composer-dirty")
+    expect(badge.textContent).toBe("29+689−38")
+    expect(badge.getAttribute("title")).toBe("Uncommitted changes: 29 files, +689 −38")
+
+    // Clean tree (or no data at all) says nothing.
+    rerender(
+      <Composer repo="widget" branch="main" diff={{ files: 0, added: 0, removed: 0 }} />
+    )
+    expect(screen.queryByTestId("composer-dirty")).toBeNull()
+    rerender(<Composer repo="widget" branch="main" />)
+    expect(screen.queryByTestId("composer-dirty")).toBeNull()
+  })
+
   it("sends and stops through icon-only buttons named by their label", () => {
     const { rerender } = render(<Composer onStop={() => {}} />)
     expect(screen.getByRole("button", { name: /Send/ }).textContent).toBe("")

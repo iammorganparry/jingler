@@ -535,6 +535,42 @@ const activeUserToken = async (
  * never returned through an HTTP response or persisted outside its encrypted
  * authorities.
  */
+export const managedGitHubCapabilityForRepository = async (
+  userId: string,
+  repositorySlug: string,
+  resolveDependencies: () => GitHubRoutesDependencies = defaultDependencies
+): Promise<{
+  readonly authorizationHeader: string
+  readonly expiresAt: Date
+} | null> => {
+  const dependencies = resolveDependencies()
+  if (!(dependencies.enabled && dependencies.configured)) return null
+  const authorization = await dependencies.store.findAuthorizationByUserId(userId)
+  if (authorization === null) return null
+  const token = await activeUserToken(dependencies, authorization)
+  const installations = await dependencies.store.listInstallationsByAuthorizationId(
+    authorization.id
+  )
+  const normalized = repositorySlug.toLowerCase()
+  for (const installation of installations) {
+    if (installation.suspendedAt !== null) continue
+    // biome-ignore lint/performance/noAwaitInLoops: stop at the first installation proving repository access.
+    const repositories = await dependencies.github.listInstallationRepositories(
+      token.accessToken,
+      installation.installationId
+    )
+    if (repositories.some((repository) => repository.fullName.toLowerCase() === normalized)) {
+      return {
+        authorizationHeader: `Bearer ${token.accessToken}`,
+        expiresAt:
+          token.fields.accessTokenExpiresAt ??
+          new Date((dependencies.now ?? (() => new Date()))().getTime() + 24 * 60 * 60 * 1_000)
+      }
+    }
+  }
+  return null
+}
+
 export const managedGitHubCapabilityForUser = async (
   userId: string
 ): Promise<{

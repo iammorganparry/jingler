@@ -13,7 +13,9 @@ import { Effect, Option, Queue, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
-import { normalizePiEvent, piProviderFailure } from "./pi-events.js"
+import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
+
+export const MEMORY_REFLECTION_TIMEOUT_MS = 15_000
 
 export interface PiSessionHandle {
   /** Resumable Pi session file/id persisted by Jingler. */
@@ -36,6 +38,10 @@ export interface PiSessionHandle {
   readonly usage: () => { readonly costUsd: number; readonly tokens: number }
   readonly observe?: (event: StreamEvent) => void
   readonly reconcile?: () => Promise<FileChangeSet | null>
+  /** One hidden post-turn reflection prompt, or null when the run does not qualify. */
+  readonly memoryReflectionPrompt?: () => string | null
+  /** Structurally restrict tools while the hidden reflection phase is active. */
+  readonly setMemoryReflectionActive?: (active: boolean) => void
 }
 
 export interface PiSessionFactory {
@@ -149,41 +155,98 @@ const projectPlanDraft = (
   })
 }
 
+const settleSession = (
+  handle: PiSessionHandle,
+  sink: EventSink
+): Effect.Effect<void> => {
+  if (!sink.beginSettling()) return Effect.void
+  return reconcileWorkspace(handle, sink).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => sink.emit(sink.terminalEvent(handle.usage())))
+    ),
+    Effect.catchAll((error) =>
+      Effect.sync(() => sink.emit({ _tag: "Failed", message: error.message }))
+    )
+  )
+}
+
 const subscribeToSession = (
   handle: PiSessionHandle,
   sink: EventSink,
   planDraft: PlanToolDraftStream
 ): (() => void) => {
   const unsubscribeFleet = handle.subscribeFleet((event) => sink.emit(event))
+  const normalize = createPiEventNormalizer()
+  let reflectionStarted = false
+  let reflectionActive = false
+  let reflectionTimeout: ReturnType<typeof setTimeout> | null = null
+  const finishReflection = () => {
+    const wasActive = reflectionActive
+    reflectionActive = false
+    if (wasActive) handle.setMemoryReflectionActive?.(false)
+    if (reflectionTimeout !== null) clearTimeout(reflectionTimeout)
+    reflectionTimeout = null
+  }
   const unsubscribeSession = handle.subscribe((event) => {
-    const providerFailure = piProviderFailure(event)
-    if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
-    if (
-      (event.type === "auto_retry_end" && event.success) ||
-      (event.type === "message_end" &&
-        event.message.role === "assistant" &&
-        event.message.stopReason !== "error")
-    ) {
-      sink.noteProviderRecovery()
+    if (!reflectionActive) {
+      const providerFailure = piProviderFailure(event)
+      if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
+      if (
+        (event.type === "auto_retry_end" && event.success) ||
+        (event.type === "message_end" &&
+          event.message.role === "assistant" &&
+          event.message.stopReason !== "error")
+      ) {
+        sink.noteProviderRecovery()
+      }
+      const draft = projectPlanDraft(event, planDraft)
+      if (draft) sink.emit(draft)
+      const normalized = normalize(event, handle.contextWindow ?? undefined)
+      if (normalized) sink.emit(normalized)
     }
-    const draft = projectPlanDraft(event, planDraft)
-    if (draft) sink.emit(draft)
-    const normalized = normalizePiEvent(event, handle.contextWindow ?? undefined)
-    if (normalized) sink.emit(normalized)
-    if (event.type === "agent_settled" && sink.beginSettling()) {
-      Effect.runFork(
-        reconcileWorkspace(handle, sink).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => sink.emit(sink.terminalEvent(handle.usage())))
-          ),
-          Effect.catchAll((error) =>
-            Effect.sync(() => sink.emit({ _tag: "Failed", message: error.message }))
+    if (event.type !== "agent_settled") return
+
+    if (!reflectionStarted) {
+      const prompt = handle.memoryReflectionPrompt?.() ?? null
+      if (prompt !== null) {
+        reflectionStarted = true
+        reflectionActive = true
+        handle.setMemoryReflectionActive?.(true)
+        reflectionTimeout = setTimeout(() => {
+          reflectionTimeout = null
+          Effect.runFork(
+            Effect.tryPromise({
+              try: () => handle.interrupt(),
+              catch: () => null
+            }).pipe(Effect.catchAll(() => Effect.void))
+          )
+          Effect.runFork(settleSession(handle, sink))
+        }, MEMORY_REFLECTION_TIMEOUT_MS)
+        Effect.runFork(
+          Effect.tryPromise({
+            try: () => handle.prompt(prompt),
+            catch: (cause) =>
+              new AgentRuntimeError({
+                reason: "provider",
+                message: "pi memory reflection failed",
+                cause
+              })
+          }).pipe(
+            Effect.catchAll(() => {
+              finishReflection()
+              return settleSession(handle, sink)
+            })
           )
         )
-      )
+        return
+      }
     }
+
+    finishReflection()
+    Effect.runFork(settleSession(handle, sink))
   })
   return () => {
+    finishReflection()
     unsubscribeFleet()
     unsubscribeSession()
   }

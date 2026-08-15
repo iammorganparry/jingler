@@ -32,6 +32,7 @@ import {
   planDocumentToPlan,
   planStageSemanticFingerprint,
   planTaskProtocolTokens,
+  MEMORY_CONFIG_DEFAULT,
   PLAN_AUTO_RUN_DEFAULT,
   resumePlanPrompt,
   setQuestionAnswers,
@@ -56,11 +57,12 @@ import {
 } from "./turn-prompt.js"
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
-import { planNote } from "./plan-prompt.js"
+import { planExecutionNote, planNote } from "./plan-prompt.js"
 import { capturePlanEmission, stripPlanJsonBlock } from "./plan-json.js"
 import {
   planTaskProgressFingerprint,
   planTaskProgressFromText,
+  planExecutionCheckpoints,
   planWithExecutionProgress,
   resumeCanonicalPlanPrompt
 } from "./plan-task-progress.js"
@@ -83,6 +85,8 @@ import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
+import { memoryRecallQuery } from "./memory-recall.js"
+import { attachMemoryToSessionSpec } from "./memory-session.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -1006,7 +1010,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // would compete with the `ExitPlanMode` tool the harness is steered
           // toward. With Jingler tools disabled, the harness owns planning and
           // receives none of Jingler's structured plan protocol.
-          const planProtocol = mode === "plan" ? planNote() : null
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
@@ -1024,6 +1027,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ["approved", "executing", "needs-verification"].includes(activePlan.status)
               ? activePlan.id
               : null)
+          // An operator message mid-execution folds into the plan rather than
+          // derailing it; the note carries the live checkpoint state so the
+          // agent always has exact ids and fingerprints to mark against.
+          const planProtocol =
+            mode === "plan"
+              ? planNote()
+              : activePlanExecutionId !== null
+                ? planExecutionNote(
+                    activePlan !== null && activePlan.id === activePlanExecutionId
+                      ? planExecutionCheckpoints(activePlan)
+                      : []
+                  )
+                : null
           const operatorText = displayText ?? text
           const promptText = text
           // Resolve every remote MCP source once, here, where the full service
@@ -1046,19 +1062,29 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           ).acquire(sessionId, `${sessionId}:${chatId}`)
           // Jingler owns this pre-turn boundary, so recall is deterministic for
           // every harness (including Codex, which has no context-injecting hook).
-          // Pass only the raw operator text: injected policy/persona notes are not
-          // useful search terms and would dilute a narrow memory query.
+          // The pure query builder adds stable project identity without the
+          // machine-local checkout path; MemoryService redacts and bounds it at
+          // the network boundary.
+          const memoryConfig = workspaceConfig?.memory ?? MEMORY_CONFIG_DEFAULT
+          const memoryAttempted =
+            memoryConfig.enabled &&
+            memoryConfig.organizationId !== null &&
+            memoryConfig.organizationId.length > 0
           const memoryAttachment = yield* memoryService.attachment(
-            operatorText,
+            memoryRecallQuery({
+              operatorText,
+              repo: session.repo,
+              branch: session.branch
+            }),
             `${sessionId}:${chatId}`
           )
           const mcp = {
-            memory: memoryAttachment?.server ?? null,
+            memory: null,
             openConnector: remoteMcpServer(openConnectorServer),
             browser: browserAttachment
           }
 
-          const spec: AgentTurnSpec = {
+          const baseSpec: AgentTurnSpec = {
             sessionId,
             chatId,
             connectionId: chat.connectionId,
@@ -1095,7 +1121,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 primer,
                 planPointer,
                 adhd,
-                memory: memoryAttachment?.instructions ?? null,
                 tools: managedToolsNote(),
                 ask,
                 planProtocol
@@ -1105,8 +1130,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             images,
             mode,
             reasoning: reasoning ?? chat.reasoning ?? null,
-            mcp
+            mcp,
+            memoryAttachmentStatus: !memoryAttempted
+              ? "disabled"
+              : memoryAttachment === null
+                ? "failed"
+                : "available"
           }
+          const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
 
           // Clear the PERSISTED id too, so a crash between here and the harness
           // reporting its new id can't leave the session pointing at a thread
@@ -1156,7 +1187,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             images,
             externalInstruction
           )
-          const assistant = assistantMessage(`a_${chatId}_${an}`, now)
+          const assistant = assistantMessage(`a_${chatId}_${an}`, now, chat.providerId)
           const appended = yield* TranscriptStore.appendTurn(
             chatId,
             user,
@@ -1178,7 +1209,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const steeredReply = yield* Ref.make<RunReplyWaiter | null>(null)
           const replyGate = yield* Effect.makeSemaphore(1)
           const turnMutation = yield* Effect.makeSemaphore(1)
-          const executingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
+          // Seeded from the approval turn's explicit id OR the derived active
+          // plan: a follow-up operator message mid-execution is still a
+          // plan-execution turn, and its PLAN_TASK/PLAN_RESULT markers must
+          // persist exactly like the approval turn's. Leaving this null for
+          // follow-ups silently dropped every status the agent reported.
+          const executingPlanId = yield* Ref.make<string | null>(
+            planExecutionId ?? activePlanExecutionId
+          )
+          // Status settling stays EXPLICIT: only a turn that was started as an
+          // execution run (or promoted one mid-turn) may flip executing →
+          // needs-verification/done on settle. A chat message that merely rode
+          // along during execution reports progress but never ends the run.
+          const settlingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
 
           const out = yield* Mailbox.make<StreamEvent>()
           if (externalInstruction !== undefined) {
@@ -1221,6 +1264,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
           const persistedTaskMarkers = yield* Ref.make(new Set<string>())
+          // Marker keys already reported as dropped — the accumulated text
+          // re-parses on every delta, so without this one bad marker would warn
+          // hundreds of times per turn. Gates the warning only, never the
+          // apply: once the plan is amended the marker persists normally.
+          const droppedTaskMarkers = yield* Ref.make(new Set<string>())
+          // Unknown ids already steered back to the agent this run.
+          const steeredUnknownPlanIds = yield* Ref.make(new Set<string>())
 
           // toolUseId → the file an edit tool is writing, remembered at ToolStart so
           // its ToolEnd can mark the matching plan step done (see markPlanProgress).
@@ -1371,6 +1421,42 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * arbitrary deltas, so parsing individual events would lose progress
            * if the app stopped before the terminal response.
            */
+          /**
+           * A dropped marker is invisible progress: warn once per unique marker
+           * (not per stream delta), and close the loop with the agent — steer a
+           * one-time corrective so it amends the canonical plan via
+           * jingler_submit_plan instead of silently losing the checkpoint.
+           */
+          const reportDroppedTaskMarker = (
+            key: string,
+            warning: string,
+            unknownId: string
+          ): Effect.Effect<void> =>
+            Effect.gen(function* () {
+              const dropped = yield* Ref.get(droppedTaskMarkers)
+              if (dropped.has(key)) return
+              yield* Ref.update(droppedTaskMarkers, (s) => new Set(s).add(key))
+              yield* Effect.logWarning(warning)
+              const steered = yield* Ref.get(steeredUnknownPlanIds)
+              if (steered.has(unknownId)) return
+              yield* Ref.update(steeredUnknownPlanIds, (s) => new Set(s).add(unknownId))
+              const handler = yield* Ref.get(turnSteer)
+              if (handler === null) return
+              // Forked: this runs on the event-processing path, and a slow
+              // steer channel must never stall the stream behind its timeout.
+              yield* invokeSteer(
+                handler,
+                [
+                  // Deliberately avoids the literal marker token: display
+                  // stripping scrubs protocol text from transcripts, and this
+                  // notice may be echoed into one.
+                  `[plan-sync] Your plan checkpoint marker referenced "${unknownId}", which is not in the canonical plan — the marker was dropped and the operator cannot see that progress.`,
+                  "Call jingler_submit_plan with the COMPLETE updated plan (mid-execution amendments apply immediately, no re-approval), then re-emit the checkpoint using the updated plan's ids."
+                ].join("\n"),
+                []
+              ).pipe(Effect.asVoid, Effect.forkDaemon, Effect.asVoid)
+            })
+
           const recordPlanTaskProgress = (text: string): Effect.Effect<void> =>
             Effect.gen(function* () {
               if (worktreePath.length === 0) return
@@ -1390,10 +1476,33 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 const stage = canonical.plan.stages.find(
                   (candidate) => candidate.id === marker.stageId
                 )
+                if (stage === undefined) {
+                  yield* reportDroppedTaskMarker(
+                    key,
+                    `Plan task marker names unknown stage ${marker.stageId}; dropped.`,
+                    `stage ${marker.stageId}`
+                  )
+                  continue
+                }
+                if ((stage.tasks ?? []).every((task) => task.id !== marker.taskId)) {
+                  yield* reportDroppedTaskMarker(
+                    key,
+                    `Plan task marker names unknown task ${marker.taskId} in stage ${marker.stageId}; dropped.`,
+                    `task ${marker.taskId} in stage ${marker.stageId}`
+                  )
+                  continue
+                }
+                // Stage + task ids are the identity; a stale or missing
+                // fingerprint downgrades to a warning instead of a silent drop
+                // — an invisible status was exactly the failure mode reported.
                 if (
-                  stage === undefined ||
+                  marker.stageFingerprint.length > 0 &&
                   planTaskProgressFingerprint(stage) !== marker.stageFingerprint
-                ) continue
+                ) {
+                  yield* Effect.logWarning(
+                    `Plan task marker fingerprint for stage ${marker.stageId} does not match the current revision; applying by id.`
+                  )
+                }
                 const persisted = yield* PlanStore.setTaskStatusLatest(
                   worktreePath,
                   {
@@ -1420,7 +1529,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const finalizePlanVerification = (): Effect.Effect<void> =>
             Effect.gen(function* () {
               if (worktreePath.length === 0) return
-              const activePlanId = yield* Ref.get(executingPlanId)
+              const activePlanId = yield* Ref.get(settlingPlanId)
               if (activePlanId === null) return
               const document = yield* PlanStore.readDocument(worktreePath)
               if (
@@ -1725,6 +1834,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }
                 canonicalPlan = promotion.right.plan
                 yield* Ref.set(executingPlanId, canonicalPlan.id)
+                yield* Ref.set(settlingPlanId, canonicalPlan.id)
                 if (submittedBlock !== undefined) {
                   yield* turnMutation.withPermits(1)(
                     Effect.gen(function* () {
@@ -1746,6 +1856,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   )
                 }
                 yield* emit({ _tag: "PlanUpdated", plan: canonicalPlan })
+                // Replay checkpoints against the amended plan: a marker emitted
+                // BEFORE the amendment landed was dropped against the old
+                // revision, and if no further assistant delta arrives it would
+                // stay lost. The dedup sets gate warnings only, never applies.
+                const amendedText = (yield* Ref.get(acc)).parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* recordPlanTaskProgress(amendedText)
                 return PlanDecision.Approve({
                   mode: modeOnApproval({
                     prior: mode === "plan" ? undefined : mode,
@@ -1908,7 +2027,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               const at = yield* Effect.sync(() => new Date().toISOString())
               const settled = settleStreaming(yield* Ref.get(acc))
               const user = userMessage(`u_${chatId}_${yield* nextId}`, text, at, images)
-              const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at)
+              const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at, chat.providerId)
               yield* Ref.set(acc, assistant)
               yield* TranscriptStore.patchLast(chatId, () => settled).pipe(Effect.ignore)
               yield* TranscriptStore.append(chatId, user)
@@ -1925,7 +2044,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             new Map(m).set(chatId, {
               readPlan,
               applyPlan,
-              markPlanExecution: (planId) => Ref.set(executingPlanId, planId),
+              markPlanExecution: (planId) =>
+                Ref.set(executingPlanId, planId).pipe(
+                  Effect.zipRight(Ref.set(settlingPlanId, planId))
+                ),
               steer,
               clearReplyWaiter: (waiter) =>
                 Ref.update(steeredReply, (current) =>

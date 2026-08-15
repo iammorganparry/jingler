@@ -31,6 +31,8 @@ export interface AgentTurnSpec extends Omit<PiRunSpec, "runId"> {
   /** Secret-bearing, main-process-only capabilities; never persisted or sent over RPC. */
   /** Run-scoped Jingler MCP capabilities, kept distinct so source risk cannot drift. */
   readonly mcp?: JinglerMcpAttachments
+  /** Distinguishes disabled memory from an attempted attachment that failed open. */
+  readonly memoryAttachmentStatus?: "disabled" | "available" | "failed"
 }
 
 /** What the agent is asking permission to do, surfaced before it acts. */
@@ -999,6 +1001,66 @@ export const scriptedRun =
               false,
               spec.prompt.includes("[[complexity-routing]]")
             )
+            // `[[plan-unknown-stage]]` — the plan-sync loop: emit a checkpoint
+            // for a stage the approved plan does not have (the runner drops it
+            // and steers a corrective back), then submit the amended plan and
+            // let the runner replay the dropped checkpoint against it.
+            if (spec.prompt.includes("[[plan-unknown-stage]]")) {
+              let corrective: string | null = null
+              if (registerTurnSteer !== undefined) {
+                // A steer handler MUST NOT call `emit` (see [[held-subagents]]);
+                // it only records the text, and the loop below acknowledges it.
+                yield* registerTurnSteer((text) => {
+                  corrective = text
+                  return Promise.resolve("accepted" as const)
+                })
+              }
+              const ghost: PlanPrd["stages"][number] = {
+                id: "s_99",
+                title: "Hardening follow-up",
+                intent: "Hardening follow-up.",
+                approach: [],
+                tasks: [
+                  {
+                    id: "s_99.task.1",
+                    text: "Harden the refresh path",
+                    status: "pending" as const
+                  }
+                ],
+                files: [],
+                diagrams: [],
+                notes: [],
+                acceptance: [
+                  {
+                    id: "s_99.1",
+                    text: "Refresh path hardened",
+                    status: "pending" as const,
+                    evidence: null
+                  }
+                ]
+              }
+              yield* emit({
+                _tag: "Assistant",
+                text: `Starting the extra hardening work.\nPLAN_TASK stage=${ghost.id} fingerprint=${planTaskProgressFingerprint(ghost)} task=${ghost.tasks![0]!.id} status=completed\n`
+              })
+              for (let tick = 0; tick < 50 && corrective === null; tick++) {
+                yield* Effect.sleep("100 millis")
+              }
+              yield* emit({
+                _tag: "Assistant",
+                text:
+                  corrective === null
+                    ? "No corrective arrived."
+                    : `Corrective received: ${corrective}`
+              })
+              yield* proposePlan({
+                ...executionPlan,
+                stages: [...executionPlan.stages, ghost]
+              })
+              yield* emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+              if (registerTurnSteer !== undefined) yield* registerTurnSteer(null)
+              return
+            }
             // Each edit's path matches a plan step's files, so the runner marks that
             // step done — exercising the execution → plan-progress linkage.
             const edits: ReadonlyArray<{ id: string; path: string; preview: string; diff: { added: number; removed: number } }> = [

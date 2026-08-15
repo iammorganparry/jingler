@@ -69,4 +69,22 @@ describe("RuntimeRecoveryService", () => {
       { status: "failed", safeToRetry: false, failureCode: "operator-reviewed-uncertain-mutation" }
     ])
   })
+
+  it("resolving an already-resolved mutation succeeds with the clean session", async () => {
+    // A banner can outlive its store entry (an earlier click, a second window,
+    // a pre-restart resolution). The click must land as success — returning
+    // the recovery-free session so the stale banner clears — not fail into a
+    // button that appears to do nothing.
+    await mkdir(paths.runJournalsDir, { recursive: true })
+    await writeFile(paths.sessionsFile, JSON.stringify([session]))
+
+    const resolved = await Effect.runPromise(
+      RuntimeRecoveryService.resolve(session.id, "run-gone", "call-gone").pipe(
+        Effect.provide(layer)
+      )
+    )
+
+    expect(resolved.id).toBe(session.id)
+    expect(resolved.runtimeRecovery).toBeUndefined()
+  })
 })

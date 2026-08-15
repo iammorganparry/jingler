@@ -93,7 +93,19 @@ const services = (): DeviceExecutorServices => ({
     prBody: "Remote changes.",
     existingPrNumber: null
   })),
-  completePublish: vi.fn(async () => resultSession)
+  completePublish: vi.fn(async () => resultSession),
+  beginOffload: vi.fn(async () => undefined),
+  appendOffloadChunk: vi.fn(async () => undefined),
+  executeOffload: vi.fn(async () => ({
+    exitCode: 0,
+    stdout: "remote",
+    stderr: "",
+    outputTruncated: false,
+    timedOut: false,
+    sourceMutated: false,
+    commandMs: 1
+  })),
+  cancelOffload: vi.fn(async () => undefined)
 })
 
 const command = (operation: string, payload: unknown): RemoteSessionCommand => ({

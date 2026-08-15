@@ -89,6 +89,8 @@ export interface ConversationViewProps {
   branchPending?: boolean
   /** Repository backing the session, shown at the composer's bottom-left. */
   repo?: string
+  /** Live uncommitted worktree state for the composer's dirty badge. */
+  diff?: { files: number; added: number; removed: number } | null
   environments?: ReadonlyArray<import("@jingler/core").Environment>
   environmentId?: string
   environmentPending?: boolean
@@ -244,6 +246,7 @@ export function ConversationView({
   branch,
   branchPending = false,
   repo,
+  diff = null,
   environments,
   environmentId,
   environmentPending,
@@ -436,10 +439,42 @@ export function ConversationView({
 
   // Track whether we're parked at the bottom (within a small threshold), so
   // scrolling up to read pauses the auto-follow and scrolling back resumes it.
+  //
+  // Unsticking is a USER decision, never a layout artifact. Virtual rows
+  // measure in after the initial bottom-pin, and each correction fires scroll
+  // events whose distance-to-bottom is momentarily huge (a heavy transcript's
+  // estimates can be off by hundreds of thousands of px) — treating those as
+  // "the reader scrolled up" stranded a freshly opened session mid-transcript
+  // instead of at its newest message. So a scroll event may only turn the
+  // follow OFF when a real gesture (wheel, touch, pointer on the scrollbar,
+  // scrolling keys) marked the movement as the operator's.
+  // Intent is a TIMESTAMP, not a latch. The first version latched a boolean
+  // and cleared it whenever a scroll event landed near the bottom — but while
+  // a reply streams, the per-token bottom-pin IS such an event, so it wiped
+  // the operator's in-flight wheel-up before it travelled the 80px threshold
+  // and the next token yanked the view back down: the "bouncing" transcript.
+  // A recent-gesture window needs no clearing, so programmatic pins can't
+  // steal it; it simply expires.
+  const lastUserScrollAt = useRef(0)
+  const markUserScroll = useCallback(() => {
+    lastUserScrollAt.current = performance.now()
+  }, [])
+  const onUserWheel = useCallback((event: { deltaY: number }) => {
+    lastUserScrollAt.current = performance.now()
+    // Wheeling UP is an unambiguous "stop following" — honour it immediately
+    // rather than waiting for the resulting scroll to clear the threshold,
+    // which a mid-stream pin could pre-empt.
+    if (event.deltaY < 0) stick.current = false
+  }, [])
   const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (nearBottom) {
+      stick.current = true
+      return
+    }
+    if (performance.now() - lastUserScrollAt.current < 600) stick.current = false
   }, [])
 
   return (
@@ -458,6 +493,10 @@ export function ConversationView({
           ref={scrollRef}
           data-testid="conversation-scroll"
           onScroll={onScroll}
+          onWheel={onUserWheel}
+          onTouchMove={markUserScroll}
+          onPointerDown={markUserScroll}
+          onKeyDown={markUserScroll}
           className={cn(
             // `both-edges` reserves the scrollbar gutter symmetrically so the
             // centered content stays on the window's centre axis — matching the
@@ -504,7 +543,7 @@ export function ConversationView({
                   <div className="mx-auto w-full max-w-[760px] pb-6">
                     <MessageTurn
                       message={m}
-                      providerId={providerId}
+                      providerId={m.providerId ?? providerId}
                       onDecideGate={onDecideGate}
                       onApprovePlan={onApprovePlan}
                       onResumePlan={onResumePlan}
@@ -648,6 +687,7 @@ export function ConversationView({
                 branch={branch}
                 branchPending={branchPending}
                 repo={repo}
+                diff={diff}
                 environments={environments}
                 environmentId={environmentId}
                 environmentPending={environmentPending}

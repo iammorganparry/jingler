@@ -48,6 +48,9 @@ import {
   ExternalInstructionIdentity,
   GateDecision,
   Message,
+  OwnedDeviceOffloadBegin as OwnedOffloadBegin,
+  OwnedDeviceOffloadChunk as OwnedOffloadChunk,
+  OwnedDeviceOffloadExecute as OwnedOffloadExecute,
   QuestionAnswer,
   ReasoningSetting,
   Project,
@@ -65,6 +68,7 @@ import type {
   CreateSessionInput as CreateSessionInputValue,
   RemoteSessionCommand,
   RemotePublishPrepared as RemotePublishPreparedValue,
+  OwnedDeviceOffloadResult as OwnedOffloadResult,
   Session as SessionValue,
   Project as ProjectValue,
   Message as MessageValue,
@@ -76,6 +80,7 @@ import type {
 import { loadDeviceE2ePiRuntime } from "./e2e/pi-runtime.js"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
 import type { SessionCommandExecutor } from "./session-handler.js"
+import { makeOwnedDeviceOffloadExecutor } from "./offload-device.js"
 import { makeDeviceProviderLayers } from "./provider-runtime.js"
 import { makeDeviceSecretStoreLive } from "./device-secret-store.js"
 
@@ -264,6 +269,10 @@ export interface DeviceExecutorServices {
   readonly remove: (sessionId: string) => Promise<void>
   readonly preparePublish: (sessionId: string) => Promise<RemotePublishPreparedValue>
   readonly completePublish: (sessionId: string, prNumber: number) => Promise<SessionValue>
+  readonly beginOffload: (input: Schema.Schema.Type<typeof OwnedOffloadBegin>) => Promise<void>
+  readonly appendOffloadChunk: (input: Schema.Schema.Type<typeof OwnedOffloadChunk>) => Promise<void>
+  readonly executeOffload: (input: Schema.Schema.Type<typeof OwnedOffloadExecute>) => Promise<OwnedOffloadResult>
+  readonly cancelOffload: (input: Schema.Schema.Type<typeof OwnedOffloadExecute>) => Promise<void>
 }
 
 /**
@@ -387,6 +396,14 @@ export const makeDeviceSessionCommandExecutor = (
           command.sessionId,
           decodePayload(command, RemotePublishCompleteInput).prNumber
         )
+      case "Offload.begin":
+        return services.beginOffload(decodePayload(command, OwnedOffloadBegin))
+      case "Offload.chunk":
+        return services.appendOffloadChunk(decodePayload(command, OwnedOffloadChunk))
+      case "Offload.execute":
+        return services.executeOffload(decodePayload(command, OwnedOffloadExecute))
+      case "Offload.cancel":
+        return services.cancelOffload(decodePayload(command, OwnedOffloadExecute))
       default:
         throw new DeviceOperationError({
           reason: "unsupported",
@@ -438,6 +455,8 @@ const deviceRuntime = (root: string, targetId: string) => {
         Layer.provide(Layer.succeed(WebSearchService, managedWebSearch))
       )
   const piRuntime = embeddedWithSearch.pipe(
+    Layer.provide(ConfigService.Default),
+    Layer.provide(GitService.Default),
     Layer.provide(RuntimeDiagnostics.Default),
     Layer.provide(assets),
     Layer.provide(AgentResourcesLive),
@@ -492,6 +511,7 @@ export const makeLiveDeviceSessionCommandExecutor = (
   targetId = "device"
 ): SessionCommandExecutor => {
   const runtime = deviceRuntime(jinglerRoot, targetId)
+  const offload = makeOwnedDeviceOffloadExecutor(jinglerRoot)
   // ManagedRuntime has every service retained by `deviceRuntime`; preserve the
   // individual operation's error channel while closing its environment here.
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>): Promise<A> =>
@@ -753,6 +773,10 @@ export const makeLiveDeviceSessionCommandExecutor = (
       SessionStore.setPrNumber(sessionId, prNumber).pipe(
         Effect.andThen(SessionStore.get(sessionId))
       )
-    )
+    ),
+    beginOffload: offload.begin,
+    appendOffloadChunk: offload.chunk,
+    executeOffload: offload.execute,
+    cancelOffload: offload.cancel
   })
 }

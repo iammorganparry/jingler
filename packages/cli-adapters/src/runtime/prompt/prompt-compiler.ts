@@ -94,7 +94,7 @@ const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray
       : []),
     ...(ids.has("jingler_submit_plan")
       ? [
-          "Use jingler_submit_plan for a structured plan that needs operator review; do not substitute prose for the control action."
+          "Use jingler_submit_plan for a structured plan that needs operator review — and, while an approved plan is executing, to submit the complete amended plan (mid-execution amendments apply immediately). Do not substitute prose for the control action."
         ]
       : [])
   ]

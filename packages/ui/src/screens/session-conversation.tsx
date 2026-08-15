@@ -192,6 +192,10 @@ export interface SessionConversationProps {
    * the Settings or empty states. Absent in stories.
    */
   renderTerminalDock?: (session: Session) => ReactNode
+  /** Whether the per-session terminal dock is open (the view rail's toggle). */
+  terminalActive?: boolean
+  /** Toggle the per-session terminal dock from the view rail. */
+  onToggleTerminal?: () => void
   /** Which edge the terminal dock attaches to — drives the content column's flow. */
   terminalDockSide?: DockSide
   /** App version, shown in the sidebar footer. */
@@ -318,6 +322,8 @@ export function SessionConversation(props: SessionConversationProps) {
             renderCode={props.renderCode}
             renderTerminalDock={props.renderTerminalDock}
             terminalDockSide={props.terminalDockSide}
+            terminalActive={props.terminalActive}
+            onToggleTerminal={props.onToggleTerminal}
             selectTabRequest={props.selectTabRequest}
             onTabRequestHandled={props.onTabRequestHandled}
           />

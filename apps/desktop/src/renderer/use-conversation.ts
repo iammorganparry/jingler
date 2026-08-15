@@ -168,8 +168,90 @@ export function useConversation(
   useEffect(() => {
     actor.send({ type: "SESSION_UPDATED", session })
   }, [actor, session])
-  const state = useSelector(actor, (s) => s)
-  const send = actor.send
+  // The comparator is the storm-breaker: the actor emits a fresh snapshot
+  // OBJECT for every event, including ones whose transition assigns nothing —
+  // and profiling showed those no-op emissions re-rendering the entire pane
+  // (composer, chip menus, plan dock) continuously. Context is only replaced
+  // by `assign`, and this machine's state values are flat strings, so
+  // comparing those two identities keeps every render that could change
+  // output and drops the rest.
+  const state = useSelector(
+    actor,
+    (s) => s,
+    (a, b) => a === b || (a.context === b.context && a.value === b.value)
+  )
+
+  // Command callbacks, memoised per actor: `actor.send` never changes for a
+  // given actor, so none of these need a fresh identity per snapshot. Their
+  // stability is load-bearing for render cost — `MessageTurn` is memoised, and
+  // a new `decideGate` on every streamed token would un-memo every visible
+  // turn and rebuild the whole transcript per token.
+  const commands = useMemo(
+    () =>
+      ({
+        loadOlder: () => actor.send({ type: "LOAD_OLDER" }),
+        unqueue: (id) => actor.send({ type: "UNQUEUE", id }),
+        sendNow: (id) => actor.send({ type: "SEND_NOW", id }),
+        editQueued: (id, text) => actor.send({ type: "EDIT_QUEUED", id, text }),
+        commentPlanStep: (planId, stepId, body, anchor) =>
+          actor.send({
+            type: "COMMENT_PLAN_STEP",
+            planId,
+            stepId,
+            body,
+            ...(anchor ? { anchor } : {})
+          }),
+        dispatchPlanMessage: (input) =>
+          rpc.planDispatchMessage({ sessionId: session.id, ...input }),
+        revisePlan: (planId) => actor.send({ type: "REVISE_PLAN", planId }),
+        approvePlan: (planId, executionMode, revision) =>
+          actor.send({ type: "APPROVE_PLAN", planId, executionMode, revision }),
+        resumePlan: (planId, revision) =>
+          actor.send({ type: "RESUME_PLAN", planId, revision }),
+        sendPrompt: (text, images, agentContext) =>
+          actor.send({ type: "SEND", text, images, agentContext }),
+        decideGate: (gateId, decision) =>
+          actor.send({ type: "DECIDE_GATE", gateId, decision }),
+        answerQuestion: (requestId, answers) =>
+          actor.send({ type: "ANSWER_QUESTION", requestId, answers }),
+        setMode: (m) => actor.send({ type: "SET_MODE", mode: m }),
+        setReasoning: (value) =>
+          actor.send({ type: "SET_REASONING", reasoning: value }),
+        setModel: (connection, provider, selectedModel) =>
+          actor.send({
+            type: "SET_MODEL",
+            connectionId: connection,
+            providerId: provider,
+            modelId: selectedModel
+          }),
+        stop: () => actor.send({ type: "STOP" }),
+        stopSubagent: (agentId) => actor.send({ type: "STOP_SUBAGENT", agentId }),
+        closeSubagent: (agentId) => actor.send({ type: "CLOSE_SUBAGENT", agentId }),
+        refreshDiff: () => actor.send({ type: "REFRESH_DIFF" })
+      }) satisfies Pick<
+        Conversation,
+        | "loadOlder"
+        | "unqueue"
+        | "sendNow"
+        | "editQueued"
+        | "commentPlanStep"
+        | "dispatchPlanMessage"
+        | "revisePlan"
+        | "approvePlan"
+        | "resumePlan"
+        | "sendPrompt"
+        | "decideGate"
+        | "answerQuestion"
+        | "setMode"
+        | "setReasoning"
+        | "setModel"
+        | "stop"
+        | "stopSubagent"
+        | "closeSubagent"
+        | "refreshDiff"
+      >,
+    [actor, session.id]
+  )
   const {
     messages, mode, reasoning, skills, files,
     connectionId, providerId, modelId, patch, queued, steeringId,
@@ -202,10 +284,10 @@ export function useConversation(
     paused || question || openPlan ? "needs-input" : busy ? "thinking" : null
 
   return {
+    ...commands,
     messages,
     hasMoreHistory,
     loadingHistory,
-    loadOlder: () => send({ type: "LOAD_OLDER" }),
     mode,
     reasoning,
     skills,
@@ -226,37 +308,11 @@ export function useConversation(
     reviewer,
     reviewPhase,
     reviewStartedAt,
-    unqueue: (id) => send({ type: "UNQUEUE", id }),
-    sendNow: (id) => send({ type: "SEND_NOW", id }),
-    editQueued: (id, text) => send({ type: "EDIT_QUEUED", id, text }),
     question,
     plan,
     planDraft,
     planDraftPresentationNonce,
     planActionError: state.context.planActionError,
-    commentPlanStep: (planId, stepId, body, anchor) =>
-      send({ type: "COMMENT_PLAN_STEP", planId, stepId, body, ...(anchor ? { anchor } : {}) }),
-    dispatchPlanMessage: (input) =>
-      rpc.planDispatchMessage({ sessionId: session.id, ...input }),
-    revisePlan: (planId) => send({ type: "REVISE_PLAN", planId }),
-    approvePlan: (planId, executionMode, revision) =>
-      send({ type: "APPROVE_PLAN", planId, executionMode, revision }),
-    resumePlan: (planId, revision) => send({ type: "RESUME_PLAN", planId, revision }),
-    status,
-    sendPrompt: (text, images, agentContext) => send({ type: "SEND", text, images, agentContext }),
-    decideGate: (gateId, decision) => send({ type: "DECIDE_GATE", gateId, decision }),
-    answerQuestion: (requestId, answers) => send({ type: "ANSWER_QUESTION", requestId, answers }),
-    setMode: (m) => send({ type: "SET_MODE", mode: m }),
-    setReasoning: (value) => send({ type: "SET_REASONING", reasoning: value }),
-    setModel: (connection, provider, selectedModel) => send({
-      type: "SET_MODEL",
-      connectionId: connection,
-      providerId: provider,
-      modelId: selectedModel
-    }),
-    stop: () => send({ type: "STOP" }),
-    stopSubagent: (agentId) => send({ type: "STOP_SUBAGENT", agentId }),
-    closeSubagent: (agentId) => send({ type: "CLOSE_SUBAGENT", agentId }),
-    refreshDiff: () => send({ type: "REFRESH_DIFF" })
+    status
   }
 }

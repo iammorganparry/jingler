@@ -61,7 +61,15 @@ export function usePlanDocument(sessionId: string) {
     retainPlanDocumentActor(sessionId)
     return () => releasePlanDocumentActor(sessionId)
   }, [sessionId])
-  const snapshot = useSelector(actor, (state) => state)
+  // Same no-op-emission filter as `useConversation`: only re-render when the
+  // transition actually assigned new context or moved state. This hook feeds
+  // `PlanProgressDock`/`PlanReview`, which sit beside the transcript — an
+  // identity selector here re-rendered them on every actor event.
+  const snapshot = useSelector(
+    actor,
+    (state) => state,
+    (a, b) => a === b || (a.context === b.context && a.value === b.value)
+  )
 
   // Create a blank draft from the template so the operator can start authoring a
   // plan for the agent before any run has proposed one. The created document

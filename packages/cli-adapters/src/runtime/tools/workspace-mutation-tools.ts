@@ -6,6 +6,7 @@ import {
 } from "@effect/platform"
 import { Effect, Schema, Stream } from "effect"
 import { AssetService } from "../../asset.js"
+import type { OffloadCommandRouterPort } from "../../offload-command-router.js"
 import {
   ToolError,
   type ToolDefinition,
@@ -280,10 +281,16 @@ const fileTool = <Input, Encoded>(
   idempotency: "keyed"
 })
 
+export interface WorkspaceCommandRouting {
+  readonly sessionId: string
+  readonly offload: OffloadCommandRouterPort
+}
+
 export const registerWorkspaceMutationTools = (
   registry: ToolRegistry,
   cwd: string,
-  workspace: WorkspaceMutationPort
+  workspace: WorkspaceMutationPort,
+  routing?: WorkspaceCommandRouting
 ): void => {
   registry.register(
     fileTool({
@@ -326,18 +333,36 @@ export const registerWorkspaceMutationTools = (
   registry.register({
     id: "command_execute",
     version: "1",
-    description: "Run a shell command in the workspace and stream its output.",
-    input: Schema.Struct({ command: Schema.String.pipe(Schema.minLength(1)) }),
+    description: "Run a shell command in the workspace and stream its output. Commands are killed after 10 minutes — run servers/watchers detached and split longer work into smaller commands. Eligible commands offload automatically; only the operator can force local execution by disabling Offload Compute.",
+    input: Schema.Struct({
+      command: Schema.String.pipe(Schema.minLength(1))
+    }),
     risk: "execute",
     roles,
     modes,
-    timeoutMs: 24 * 60 * 60 * 1_000,
+    // 24h before: a command blocked on stdin or a foreground dev server hung
+    // the whole turn for the rest of the day.
+    timeoutMs: 10 * 60 * 1_000,
     outputBudget: 32_000,
     cancellable: true,
     idempotency: "unsafe",
     execute: ({ command }, context) =>
-      Effect.runPromise(workspace.execute(cwd, command, context), {
-        signal: context.signal
-      })
+      Effect.runPromise(
+        (routing
+          ? routing.offload.executeIfEligible(
+              cwd,
+              routing.sessionId,
+              command,
+              context
+            ).pipe(
+              Effect.flatMap((remote) =>
+                remote === null
+                  ? workspace.execute(cwd, command, context)
+                  : Effect.succeed(remote)
+              )
+            )
+          : workspace.execute(cwd, command, context)),
+        { signal: context.signal }
+      )
   })
 }

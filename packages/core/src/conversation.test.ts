@@ -688,6 +688,10 @@ describe("Plan flow", () => {
     expect(prompt.toLowerCase()).toContain("do not re-plan")
     expect(prompt).toContain("Do not repeat tasks already marked completed")
     expect(prompt).toContain("PLAN_TASK stage=<stage-id>")
+    // The amendment contract: new work goes through jingler_submit_plan FIRST,
+    // because a marker naming an id outside the canonical plan is dropped.
+    expect(prompt).toContain("jingler_submit_plan")
+    expect(prompt).toContain("dropped")
     // Includes the step titles so the resumed (memory-less) harness has the plan.
     expect(prompt).toContain(p.steps[0]!.title)
     if (p.raw) expect(prompt).toContain(p.raw)

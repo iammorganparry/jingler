@@ -213,13 +213,13 @@ describe("ProviderCatalogService route certification", () => {
 
     expect((await Effect.runPromise(service.refresh)).connections[0]?.models[0]).toMatchObject({
       verification: "unverified",
-      selectable: false
+      selectable: true
     })
   })
 })
 
 describe("ProviderCatalogService certification", () => {
-  it("surfaces unverified and stale models but does not select them", async () => {
+  it("surfaces unverified and stale labels while keeping models selectable", async () => {
     const certifications = new InMemoryModelCertificationStore()
     const service = await Effect.runPromise(makeProviderCatalogService({
       connections: Effect.succeed([connection]),
@@ -230,7 +230,7 @@ describe("ProviderCatalogService certification", () => {
     expect((await Effect.runPromise(service.refresh)).connections[0]?.models[0]?.verification).toBe("unverified")
     await certifications.put(certification({ versions: { ...CURRENT_RUNTIME_CONTRACTS, prompt: "old" } }))
     expect((await Effect.runPromise(service.refresh)).connections[0]?.models[0]?.verification).toBe("stale")
-    expect(await Effect.runPromise(service.selectable)).toStrictEqual([])
+    expect((await Effect.runPromise(service.selectable)).length).toBe(1)
   })
 
   it("prefers a current re-verification over older stale evidence", async () => {
@@ -298,7 +298,7 @@ describe("ProviderCatalogService refresh recovery", () => {
 
     expect((await Effect.runPromise(service.refresh)).connections[0]?.models[0]).toMatchObject({
       verification: "unverified",
-      selectable: false
+      selectable: true
     })
     await certifications.put(certification())
     discoveryFails = true

@@ -17,6 +17,7 @@
     "./github-api": "./src/github-api.ts",
     "./github-auth": "./src/github-auth.ts",
     "./open-connector": "./src/open-connector.ts",
+    "./offload-snapshot": "./src/offload-snapshot.ts",
     "./plan-store": "./src/plan-store.ts",
     "./projects": "./src/projects.ts",
     "./publish-metadata": "./src/publish-metadata.ts",

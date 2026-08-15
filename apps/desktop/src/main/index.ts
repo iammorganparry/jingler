@@ -314,7 +314,17 @@ if (!gotPrimaryLock) {
       // after every live plan actor has settled.
       const timeout = setTimeout(finish, 5_000)
       ipcMain.on(PLAN_FLUSH_COMPLETE_CHANNEL, completed)
-      window.webContents.send(PLAN_FLUSH_REQUEST_CHANNEL)
+      // A renderer that died first (dev Ctrl-C, crashed page) has nothing to
+      // flush — and `send` to a disposed frame throws instead of no-oping.
+      if (window.webContents.isDestroyed()) {
+        finish()
+        return
+      }
+      try {
+        window.webContents.send(PLAN_FLUSH_REQUEST_CHANNEL)
+      } catch {
+        finish()
+      }
     }
 
     window.on("close", (event) => {

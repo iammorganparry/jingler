@@ -13,6 +13,7 @@ import { env } from "./env.js"
 import { createGitHubRoutes, isLoopbackRedirect, withQuery } from "./github-routes.js"
 import { createDeviceRoutes } from "./device-routes.js"
 import { createEnvironmentRoutes } from "./environment-routes.js"
+import { createManagedOffloadRoutes } from "./managed-offload.js"
 import {
   basicInstanceCeilingMicrousd,
   ManagedUsageRepository
@@ -88,6 +89,9 @@ app.route("/api/devices", createDeviceRoutes())
 
 /** Unified account inventory and managed-compute lifecycle. */
 app.route("/api/environments", createEnvironmentRoutes())
+
+/** Authenticated one-shot admission for automatic Offload Compute jobs. */
+app.route("/api/offload", createManagedOffloadRoutes())
 
 /** ChatGPT blocks Cloudflare egress, so subscription-backed Codex uses this fixed host hop. */
 app.on(["GET", "POST"], "/api/internal/managed-provider/codex/*", (c) =>

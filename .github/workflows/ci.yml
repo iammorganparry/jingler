@@ -34,6 +34,13 @@ jobs:
         run: pnpm lint
 
       - name: Typecheck
+        env:
+          BETTER_AUTH_SECRET: ci-only-better-auth-placeholder-at-least-32-bytes
+          BETTER_AUTH_URL: https://ci.invalid
+          CRON_SECRET: ci-only-cron-placeholder-at-least-32-bytes
+          MEMORY_ENABLED: "false"
+          MEMORY_GRANT_SECRET: ci-only-memory-grant-placeholder
+          MEMORY_WORKER_SERVICE_SECRET: ci-only-memory-worker-placeholder
         run: pnpm typecheck
 
       # Unit + integration tests (Vitest). The full Electron Playwright suite is

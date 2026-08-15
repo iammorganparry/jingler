@@ -73,4 +73,27 @@ describe("ChatTabBar closed chats", () => {
     expect(screen.getByRole("button", { name: "Expand chats group" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Expand files group" })).toBeTruthy()
   })
+
+  it("closes all chats or files from the group label's context menu", () => {
+    const onCloseAllChats = vi.fn()
+    const onCloseAllFiles = vi.fn()
+    render(
+      <ChatTabBar
+        chats={[{ id: "chat-1", title: "Main" }]}
+        activeChatId="chat-1"
+        fileSlot={[<button key="one">app.ts</button>]}
+        onCloseAllChats={onCloseAllChats}
+        onCloseAllFiles={onCloseAllFiles}
+        {...chatCallbacks()}
+      />
+    )
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Collapse chats group" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close all chats" }))
+    expect(onCloseAllChats).toHaveBeenCalledOnce()
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Collapse files group" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close all files" }))
+    expect(onCloseAllFiles).toHaveBeenCalledOnce()
+  })
 })

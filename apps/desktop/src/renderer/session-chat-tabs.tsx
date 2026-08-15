@@ -57,6 +57,22 @@ export function SessionChatTabs({
     onSelectConversation()
     void rpc.sessionsReopenChat(session.id, chatId).then(publishSessionUpdate)
   }
+  // Sequential on purpose: each close recomputes the active chat, and the
+  // store answers the last close with a fresh replacement chat — racing them
+  // would interleave those rewrites.
+  const closeAllChats = () => {
+    void (async () => {
+      for (const chat of session.chats) {
+        await rpc.sessionsCloseChat(session.id, chat.id).then((updated) => {
+          clearDraft(chat.id)
+          rehomeSharedPlan(session.id, chat.id, updated.activeChatId)
+          disposeChatActor(session.id, chat.id)
+          publishSessionUpdate(updated)
+        }).catch(() => {})
+      }
+      onSelectConversation()
+    })()
+  }
 
   const selectFile = (path: string) => {
     files.open(path)
@@ -73,6 +89,10 @@ export function SessionChatTabs({
     }
     if (closingLast) onSelectConversation()
     else onSelectFiles()
+  }
+  const closeAllFiles = () => {
+    for (const path of [...files.openPaths]) files.close(path)
+    onSelectConversation()
   }
   const duplicateNames = new Set(
     files.openPaths
@@ -139,6 +159,8 @@ export function SessionChatTabs({
       onReopenChat={reopenChat}
       fileSlot={fileSlot}
       filesActive={filesActive}
+      onCloseAllChats={closeAllChats}
+      onCloseAllFiles={closeAllFiles}
     />
   )
 }

@@ -1,8 +1,10 @@
 # Shared team memory operations
 
-Shared Memory is an opt-in paid-team feature that turns settled agent sessions
-and other sources into a cited, review-gated Markdown wiki. The desktop talks to
-the public Next.js endpoint; only Next.js can reach the private Cloudflare vault.
+Shared Memory is an opt-in paid-team feature that turns agent-owned durable
+learning proposals and other sources into a cited Markdown wiki. Factual agent
+proposals publish automatically; stale revisions conflict rather than overwrite
+accepted memory. The desktop talks to the public Next.js endpoint; only Next.js
+can reach the private Cloudflare vault.
 
 ```text
 Claude / Codex / OpenCode + Memory UI
@@ -38,14 +40,43 @@ relatedness.
 4. Keep `MEMORY_ENABLED=false` during smoke tests. Enable it for paid-team
    organizations only after membership/billing metadata is current. Grant
    issuance still independently requires an active paid plan and membership.
-5. Enable Memory in a test desktop workspace, submit a settled session, review
-   the resulting proposal, retrieve it in a second session, and confirm a second
-   organization cannot find its stable page/source/revision IDs.
+5. Enable Memory in a test desktop workspace, run a PI turn that recalls and
+   proposes a durable learning, verify its workflow publishes, retrieve it in a
+   second session, and confirm a second organization cannot find its stable
+   page/source/revision IDs.
 
 `MEMORY_ENABLED=false` is the circuit breaker. It disables grants, MCP, and
 capture at Next.js; agent execution fails open and R2/accepted Markdown are not
-changed. Desktop workspaces also retain their own `memory.enabled` capture
-preference.
+changed. Desktop workspaces also retain their own `memory.enabled` preference.
+
+## PI agent runtime contract
+
+Memory is attached by Jingler before a PI run for conversation, plan,
+plan-execution, review, and background roles. Review is recall-only;
+context-digest runs are excluded. Attachment and lookup failures are fail-open
+and appear in Runtime diagnostics as `jingler-memory` health rather than
+silently removing other PI tools.
+
+Before an eligible non-command-led turn, Jingler derives a redacted query from
+the operator text plus repository and branch identity. It performs at most one
+lexical search and three accepted-page reads, then injects at most one bounded
+`<recalled-memories>` block containing page, revision, source, and citation IDs.
+Local checkout paths are never part of the query.
+
+Execute-risk tool calls have a second, run-scoped recall boundary. Shell calls
+use only the tool ID and normalized binary/subcommand; arguments, paths, and
+values are discarded. A matching accepted page pauses the first invocation and
+returns one bounded cited `<tool-memory>` advisory with a retryable result; the
+model must review, revise, or retry before the tool can execute. Lookup timeout
+or failure remains fail-open. Failed tool calls contribute only the newest three
+redacted, bounded candidates to end-of-turn reflection.
+
+A mutating turn with memory enabled and no proposal receives one hidden
+reflection nudge before PI settles. The agent may call `memory_propose` and poll
+`memory_workflow_status` to a terminal result; reflection prose is not shown to
+the operator. Jingler does **not** upload raw settled transcripts in current
+releases. Legacy capture outboxes are recovery-only. Narration-only compiler
+sources terminate as `no_durable_learning` without creating a proposal or page.
 
 ## Cloudflare Worker configuration
 
@@ -249,13 +280,14 @@ pnpm --filter @jingler/desktop exec playwright test \
 
 The memory e2e specs are Playwright `_electron`, local-only (not in CI), against
 a deterministic in-process fake — no real Cloudflare, turbopuffer, or Postgres.
-Coverage: teammate retrieval isolated per organization; review gating (stale
-conflict, secret rejection, paid-team enforcement, fail-open outage); stateless
-MCP (independent POSTs, no session ids, alternating instances); sidebar →
-dashboard → map → page navigation with the time-range drilldown, edge evidence,
-viewport restore, and reduced-motion; and advisory suggestions rendered
-non-authoritatively with promotion routed through the cited-wikilink page flow.
+Coverage: PI pre-turn recall, command-scoped advisory, proposal, workflow
+polling, second-session retrieval, and fail-open outage diagnostics; teammate
+retrieval isolated per organization; stale conflicts, secret rejection, and
+paid-team enforcement; stateless MCP (independent POSTs, no session ids,
+alternating instances); sidebar → dashboard → map → page navigation; and
+non-authoritative advisory suggestions.
 
 Electron e2e uses one deterministic stateful fake across app instances. It
 records protocol metadata but never bearer values, alternates simulated Next.js
-instances, publishes only after review, and keeps organization vaults separate.
+instances, auto-publishes factual proposals after workflow polling, preserves
+stale conflicts, and keeps organization vaults separate.

@@ -2,6 +2,7 @@
 export * from "./hooks/use-container-width.js"
 export * from "./hooks/width-tier.js"
 export * from "./lib/cn.js"
+export * from "./lib/native-overlay.js"
 export * from "./lib/review-feedback.js"
 export * from "./lib/connector-labels.js"
 export * from "./lib/relative-time.js"

@@ -180,12 +180,18 @@ function SidebarBody({
   pendingEnvironmentSession,
   pendingEnvironmentSessionActive = false,
   onSelectPendingEnvironmentSession,
+  onResizeEnd,
+  bodyRef,
   onCollapse
 }: SessionSidebarProps & {
   /** Current docked width in px. */
   width: number
   /** Drag deltas from the edge handle. */
   onResize?: (deltaX: number) => void
+  /** Drag released — commit the live width to state/storage. */
+  onResizeEnd?: () => void
+  /** The resized element, so a drag can paint width without a React render. */
+  bodyRef?: React.Ref<HTMLDivElement>
   /** Collapse to the icon rail (the header's `PanelLeft` button). */
   onCollapse?: () => void
 }) {
@@ -355,6 +361,7 @@ function SidebarBody({
 
   return (
     <div
+      ref={bodyRef}
       style={{ width }}
       data-testid="session-sidebar"
       className="relative flex flex-none flex-col overflow-hidden"
@@ -364,6 +371,7 @@ function SidebarBody({
       {onResize && (
         <ResizeHandle
           onResize={onResize}
+          onResizeEnd={onResizeEnd}
           aria-label="Resize sidebar"
           className="absolute inset-y-0 right-0 bg-transparent"
         />
@@ -962,7 +970,16 @@ export function SessionSidebar(props: SessionSidebarProps) {
   // component's own box, which is the sidebar and would always report ~266px
   // and so always claim to be cramped.
   const { width: shellWidth } = usePaneWidth()
-  const { width, adjust } = useResizableWidth(SIDEBAR_WIDTH)
+  // Drags paint the sidebar's width straight onto the element; state (and the
+  // re-render of every session row it implies) commits once, on release.
+  const sidebarEl = React.useRef<HTMLDivElement | null>(null)
+  const { width, adjust, commit } = useResizableWidth({
+    ...SIDEBAR_WIDTH,
+    applyLive: (value) => {
+      const el = sidebarEl.current
+      if (el) el.style.width = `${value}px`
+    }
+  })
   const [pinned, setPinned] = React.useState<boolean | null>(readPinned)
 
   // `shellWidth === 0` is the pre-measurement frame; treat it as roomy so the
@@ -998,6 +1015,8 @@ export function SessionSidebar(props: SessionSidebarProps) {
         {...props}
         width={width}
         onResize={adjust}
+        onResizeEnd={commit}
+        bodyRef={sidebarEl}
         onCollapse={() => setPin(false)}
       />
     )

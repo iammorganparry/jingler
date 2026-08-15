@@ -20,12 +20,17 @@ describe("observed provider billing routes", () => {
     })).toBeNull()
   })
 
-  it("does not mislabel Anthropic paid extra usage as Claude plan usage", () => {
+  it("confirms Claude subscription on pi's Anthropic OAuth route", () => {
     expect(classifyObservedBillingRoute("claude-setup-token", {
       provider: "anthropic",
       api: "anthropic-messages",
       baseUrl: "https://api.anthropic.com"
-    })).toBe("api")
+    })).toBe("subscription")
+    expect(classifyObservedBillingRoute("claude-setup-token", {
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://proxy.example.com"
+    })).toBeNull()
   })
 })
 

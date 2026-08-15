@@ -17,6 +17,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  OffloadComputeSettings,
   DiffStat,
   Environment,
   EnvironmentDiscovery,
@@ -200,6 +201,10 @@ export interface JinglerAppProps {
   onSaveNotificationsConfig?: (
     config: NotificationsConfig
   ) => Promise<void> | void
+  /** Automatic read-only cloud routing for eligible agent commands. */
+  offloadCompute?: OffloadComputeSettings | null
+  onSaveOffloadCompute?: (settings: OffloadComputeSettings) => Promise<void> | void
+  offloadStatus?: "disabled" | "priming" | "ready" | "failed"
   /** Redacted WebSearch settings plus write-only credential actions. */
   webSearch?: SettingsViewProps["webSearch"]
   /** Whether plan mode runs its read-only commands unattended; absent means on. */
@@ -452,6 +457,9 @@ export function JinglerApp({
   onSaveGitConfig,
   notificationsConfig,
   onSaveNotificationsConfig,
+  offloadCompute,
+  onSaveOffloadCompute,
+  offloadStatus,
   webSearch,
   planAutoRun,
   onSavePlanAutoRun,
@@ -1273,6 +1281,9 @@ export function JinglerApp({
               onSaveGit={onSaveGitConfig}
               notifications={notificationsConfig}
               onSaveNotifications={onSaveNotificationsConfig}
+              offloadCompute={offloadCompute}
+              onSaveOffloadCompute={onSaveOffloadCompute}
+              offloadStatus={offloadStatus}
               webSearch={webSearch}
               planAutoRun={planAutoRun}
               onSavePlanAutoRun={onSavePlanAutoRun}
@@ -1301,6 +1312,8 @@ export function JinglerApp({
         renderCode={renderCode}
         renderTerminalDock={renderTerminalDock}
         terminalDockSide={terminalDockSide}
+        terminalActive={terminalActive}
+        onToggleTerminal={onToggleTerminal}
         selectTabRequest={tabRequest}
         onTabRequestHandled={clearTabRequest}
         version={version}

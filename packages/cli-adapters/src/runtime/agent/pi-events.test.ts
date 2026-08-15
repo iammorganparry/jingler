@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  createPiEventNormalizer,
   normalizePiEvent,
   piProviderFailure,
   piSupervisorAttention
@@ -119,6 +120,44 @@ describe("pi event normalization", () => {
         args: { path: 42 }
       })
     ).toMatchObject({ target: null })
+  })
+})
+
+describe("createPiEventNormalizer", () => {
+  const thinkingEvent = (update: { type: string; delta?: string }) => ({
+    type: "message_update",
+    message: {} as never,
+    assistantMessageEvent: update as never
+  }) as never
+
+  it("times a reasoning run from first delta to end", () => {
+    let clock = 1_000
+    const normalize = createPiEventNormalizer(() => clock)
+    expect(normalize(thinkingEvent({ type: "thinking_delta", delta: "a" })))
+      .toEqual({ _tag: "Thinking", text: "a", seconds: null, done: false })
+    clock = 13_400
+    expect(normalize(thinkingEvent({ type: "thinking_end" })))
+      .toEqual({ _tag: "Thinking", text: "", seconds: 12, done: true })
+  })
+
+  it("times each chained reasoning run independently and floors at one second", () => {
+    let clock = 0
+    const normalize = createPiEventNormalizer(() => clock)
+    normalize(thinkingEvent({ type: "thinking_delta", delta: "a" }))
+    clock = 200
+    expect(normalize(thinkingEvent({ type: "thinking_end" })))
+      .toMatchObject({ seconds: 1, done: true })
+    clock = 5_000
+    normalize(thinkingEvent({ type: "thinking_delta", delta: "b" }))
+    clock = 8_000
+    expect(normalize(thinkingEvent({ type: "thinking_end" })))
+      .toMatchObject({ seconds: 3, done: true })
+  })
+
+  it("leaves an end without a run to the stateless projection", () => {
+    const normalize = createPiEventNormalizer(() => 0)
+    expect(normalize(thinkingEvent({ type: "thinking_end" })))
+      .toEqual({ _tag: "Thinking", text: "", seconds: null, done: true })
   })
 })
 

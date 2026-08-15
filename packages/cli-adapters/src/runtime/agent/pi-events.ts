@@ -15,7 +15,13 @@ const ToolDetails = Schema.Struct({ details: FileChangeDetails })
 const ToolTarget = Schema.Struct({
   path: Schema.optional(Schema.String),
   from: Schema.optional(Schema.String),
-  to: Schema.optional(Schema.String)
+  to: Schema.optional(Schema.String),
+  /** Execution tools (`command_execute`, pi's `bash`) target a command line. */
+  command: Schema.optional(Schema.String),
+  /** Browser tools target a URL, a CSS selector, or a JS expression. */
+  url: Schema.optional(Schema.String),
+  selector: Schema.optional(Schema.String),
+  expression: Schema.optional(Schema.String)
 })
 
 const decodeText = Schema.decodeUnknownOption(TextResultPart)
@@ -47,6 +53,10 @@ const toolTarget = (
 ): string | null => {
   const target = Option.getOrUndefined(decodeTarget(event.args))
   if (target?.path !== undefined) return target.path
+  if (target?.command !== undefined) return target.command
+  if (target?.url !== undefined) return target.url
+  if (target?.selector !== undefined) return target.selector
+  if (target?.expression !== undefined) return target.expression
   if (target?.from !== undefined && target.to !== undefined) {
     return `${target.from} → ${target.to}`
   }
@@ -170,6 +180,35 @@ const normalizeCompactionEnd = (
   tokensAfter: event.result?.estimatedTokensAfter ?? null,
   message: event.errorMessage ?? null
 })
+
+/**
+ * Stateful wrapper over `normalizePiEvent` that times reasoning runs: the
+ * clock starts on the first `thinking_delta` of a run and `thinking_end`
+ * carries the elapsed whole seconds, so the transcript can settle its
+ * "Thinking…" pill into "Thought for N seconds".
+ */
+export const createPiEventNormalizer = (now: () => number = Date.now) => {
+  let thinkingStartedAt: number | null = null
+  return (event: AgentSessionEvent, contextWindow?: number): StreamEvent | null => {
+    if (event.type === "message_update") {
+      const update = event.assistantMessageEvent
+      if (update.type === "thinking_delta" && thinkingStartedAt === null) {
+        thinkingStartedAt = now()
+      }
+      if (update.type === "thinking_end" && thinkingStartedAt !== null) {
+        const startedAt = thinkingStartedAt
+        thinkingStartedAt = null
+        return {
+          _tag: "Thinking",
+          text: "",
+          seconds: Math.max(1, Math.round((now() - startedAt) / 1000)),
+          done: true
+        }
+      }
+    }
+    return normalizePiEvent(event, contextWindow)
+  }
+}
 
 /** Provider-neutral projection of pi's observable event surface. */
 export const normalizePiEvent = (
