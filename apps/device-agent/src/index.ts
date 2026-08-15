@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { createConnection } from "node:net"
+import { join } from "node:path"
 import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth"
 import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
 import { Schema } from "effect"
@@ -20,6 +21,23 @@ import {
 // imports. The device agent is a standalone bundle, so register the package's
 // static loaders before ModelRuntime can resolve a subscription credential.
 registerBunOAuthFlows()
+
+// The managed device archive keeps the exact child Pi runtime beside this
+// bundle. Pin explicit paths before any remote session can create an embedded
+// parent, so pi-subagents never consults an ambient Pi installation.
+process.env.JINGLER_SUBAGENT_WRAPPER_PATH ??= join(
+  import.meta.dirname,
+  "runtime-assets",
+  "pi-subagent-wrapper.mjs"
+)
+process.env.JINGLER_SUBAGENT_PI_CLI_PATH ??= join(
+  import.meta.dirname,
+  "node_modules",
+  "@earendil-works",
+  "pi-coding-agent",
+  "dist",
+  "cli.js"
+)
 
 const args = process.argv.slice(2)
 const command = args[0]

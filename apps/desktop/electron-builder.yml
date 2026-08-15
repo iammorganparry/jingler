@@ -53,6 +53,11 @@ extraResources:
     to: icon.png
   - from: ../../THIRD-PARTY-LICENSES
     to: THIRD-PARTY-LICENSES
+  # Executed by the host Node installation and delegates into Electron's
+  # ELECTRON_RUN_AS_NODE mode, so detached pi-subagents children use the exact
+  # Pi runtime packaged with Jingler instead of an ambient `pi` from PATH.
+  - from: ../../packages/cli-adapters/runtime-assets/pi-subagent-wrapper.mjs
+    to: subagent-runtime/pi-subagent-wrapper.mjs
   - from: ../../plugins/github-issues
     to: plugins/github-issues
     filter:
@@ -65,11 +70,11 @@ extraResources:
       - jingler.plugin.json
       - dist/**
       - "!dist/**/*.map"
-  # Standalone Node 24 bundle copied to a paired host during SSH bootstrap.
-  # Keeping it outside app.asar lets Electron main stream the exact shipped
-  # bytes to the host without unpacking or executing them locally.
-  - from: ../device-agent/dist/jingler-device.mjs
-    to: device-agent/jingler-device.mjs
+  # Versioned managed runtime copied to a paired host during SSH bootstrap.
+  # It contains the device agent plus the exact Pi CLI and pi-subagents package
+  # tree, so remote delegation never depends on an ambient installation.
+  - from: ../device-agent/dist/jingler-device-runtime.tgz
+    to: device-agent/jingler-device-runtime.tgz
 
 # The one native module — @homebridge/node-pty-prebuilt-multiarch — must live
 # OUTSIDE the asar so its `.node` binary can be dlopen'd at runtime (asar-packed

@@ -12,7 +12,7 @@ describe("device agent bundle path", () => {
         "/ignored"
       )
     ).toBe(
-      "/Applications/Jingler.app/Contents/Resources/device-agent/jingler-device.mjs"
+      "/Applications/Jingler.app/Contents/Resources/device-agent/jingler-device-runtime.tgz"
     )
   })
 
@@ -23,7 +23,7 @@ describe("device agent bundle path", () => {
         "/ignored",
         "/repo/apps/desktop/out/main"
       )
-    ).toBe("/repo/apps/device-agent/dist/jingler-device.mjs")
+    ).toBe("/repo/apps/device-agent/dist/jingler-device-runtime.tgz")
   })
 
   it("builds bundled plugins and the device agent before starting the desktop dev server", () => {

@@ -2,6 +2,7 @@ const PI_PACKAGES = [
   "@earendil-works/pi-ai",
   "@earendil-works/pi-coding-agent"
 ]
+const SUBAGENT_PACKAGE = "pi-subagents"
 
 const LEGACY_HARNESS_PACKAGES = [
   "@anthropic-ai/claude-agent-sdk",
@@ -33,7 +34,7 @@ export const auditDeviceBundle = (source) => [
 export const auditDesktopArchive = (entries) => {
   const normalized = entries.map((entry) => entry.replace(LEADING_SLASH, ""))
   return [
-    ...PI_PACKAGES.flatMap((name) =>
+    ...[...PI_PACKAGES, SUBAGENT_PACKAGE].flatMap((name) =>
       normalized.includes(`${packageMarker(name)}package.json`)
         ? []
         : [`desktop archive is missing ${name}`]
@@ -54,7 +55,7 @@ export const auditDesktopArchive = (entries) => {
 export const auditRuntimeDependencies = (manifest, label) => {
   const dependencies = manifest.dependencies ?? {}
   return [
-    ...PI_PACKAGES.flatMap((name) =>
+    ...[...PI_PACKAGES, SUBAGENT_PACKAGE].flatMap((name) =>
       dependencies[name] ? [] : [`${label} does not declare ${name}`]
     ),
     ...LEGACY_HARNESS_PACKAGES.flatMap((name) =>

@@ -405,6 +405,22 @@ if (!gotPrimaryLock) {
 
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
+    if (app.isPackaged) {
+      process.env.JINGLER_SUBAGENT_WRAPPER_PATH ??= join(
+        process.resourcesPath,
+        "subagent-runtime",
+        "pi-subagent-wrapper.mjs"
+      )
+      process.env.JINGLER_SUBAGENT_PI_CLI_PATH ??= join(
+        process.resourcesPath,
+        "app.asar",
+        "node_modules",
+        "@earendil-works",
+        "pi-coding-agent",
+        "dist",
+        "cli.js"
+      )
+    }
     process.env.JINGLER_DEVICE_AGENT_BUNDLE ??= resolveDeviceAgentBundlePath(
       app.isPackaged,
       process.resourcesPath,

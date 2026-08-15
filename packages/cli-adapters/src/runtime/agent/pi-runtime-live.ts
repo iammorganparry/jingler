@@ -29,6 +29,7 @@ import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
+import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
 
 const connectionFailure = (message: string, cause?: unknown) =>
@@ -62,11 +63,25 @@ export const makePiAgentRuntimeLive = (
     const browserControl = yield* Effect.serviceOption(BrowserControlPort)
     const mutations = yield* makeWorkspaceMutationPort
     const credentials = new AgentSecretStore(secretStore)
+    const childCredentials = new PiChildCredentials(
+      join(paths.managedResourcesDir, "subagent-credentials"),
+      credentials
+    )
+    yield* childCredentials.clear().pipe(
+      Effect.mapError((cause) =>
+        new AgentRuntimeError({
+          reason: "runtime",
+          message: cause.message,
+          cause
+        })
+      )
+    )
 
     const factory = makePiSessionFactory({
       agentDir: paths.managedResourcesDir,
       sessionsDir: paths.piSessionsDir,
       credentials,
+      childCredentials,
       resolveConnection: (spec) =>
         Effect.gen(function* () {
           const connections = yield* providers.status.pipe(

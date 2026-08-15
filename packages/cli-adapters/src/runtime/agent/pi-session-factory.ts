@@ -28,6 +28,8 @@ import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-re
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
+import { preparePiSubagentsRuntime } from "../subagents/pi-subagents-bootstrap.js"
+import type { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 
 export class PiSessionFactoryError extends Data.TaggedError("PiSessionFactoryError")<{
   readonly message: string
@@ -54,6 +56,7 @@ export interface PiSessionFactoryOptions {
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
   readonly createSession?: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>
   readonly recordDiagnostic?: (snapshot: RuntimeDiagnosticSnapshot) => Effect.Effect<void>
+  readonly childCredentials?: PiChildCredentials
 }
 
 const modelIdForProvider = (spec: PiRunSpec, connection: ProviderConnection) => {
@@ -165,6 +168,7 @@ interface EmbeddedSessionInput {
 
 interface EmbeddedSession {
   readonly result: CreateAgentSessionResult
+  readonly connection: ProviderConnection
   readonly contextWindow: number
 }
 
@@ -208,7 +212,7 @@ const createEmbeddedSession = (
         tools: customTools.map((tool) => tool.name),
         customTools
       })
-      return { result, contextWindow: model.contextWindow }
+      return { result, connection, contextWindow: model.contextWindow }
     },
     catch: (cause) =>
       new AgentRuntimeError({
@@ -227,10 +231,11 @@ interface SessionHandleInput {
   readonly tracker: FileChangeTracker | undefined
   readonly snapshot: WorktreeSnapshot | null
   readonly observe?: (event: StreamEvent) => void
+  readonly childCredentials?: PiChildCredentials
 }
 
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
-  const { embedded, spec, tracker, snapshot, observe } = input
+  const { embedded, spec, tracker, snapshot, observe, childCredentials } = input
   const { session } = embedded.result
   return {
     id: session.sessionFile ?? session.sessionId,
@@ -244,7 +249,12 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       try {
         session.dispose()
       } finally {
-        if (tracker) await Effect.runPromise(tracker.dispose())
+        await Promise.all([
+          tracker ? Effect.runPromise(tracker.dispose()) : Promise.resolve(),
+          childCredentials
+            ? Effect.runPromise(childCredentials.remove(session.sessionId))
+            : Promise.resolve()
+        ])
       }
     },
     usage: () => {
@@ -282,6 +292,16 @@ const createSessionHandle = (
         })
       )
     }
+    yield* preparePiSubagentsRuntime(options.agentDir).pipe(
+      Effect.mapError(
+        (cause) =>
+          new AgentRuntimeError({
+            reason: "runtime",
+            message: cause.message,
+            cause
+          })
+      )
+    )
     const prepared = yield* createResources(options, spec, registry)
     const snapshot = tracker
       ? yield* tracker.capture(spec.cwd).pipe(
@@ -302,6 +322,23 @@ const createSessionHandle = (
       context,
       registry
     })
+    if (options.childCredentials) {
+      yield* options.childCredentials
+        .materialize(embedded.result.session.sessionId, embedded.connection)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new AgentRuntimeError({
+                reason: "authentication",
+                message: cause.message,
+                cause
+              })
+          ),
+          Effect.onError(() =>
+            Effect.sync(() => embedded.result.session.dispose())
+          )
+        )
+    }
     const diagnostic = makeRuntimeDiagnosticObserver({
       runId: spec.runId,
       sessionId: spec.sessionId,
@@ -317,7 +354,14 @@ const createSessionHandle = (
           Effect.runFork(recordDiagnostic(diagnostic.observe(event)))
         }
       : undefined
-    return toHandle({ embedded, spec, tracker, snapshot, observe })
+    return toHandle({
+      embedded,
+      spec,
+      tracker,
+      snapshot,
+      observe,
+      childCredentials: options.childCredentials
+    })
   })
 
 /** Construct the real embedded pi session from Jingler-owned contracts only. */

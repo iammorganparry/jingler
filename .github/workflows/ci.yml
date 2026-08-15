@@ -67,5 +67,5 @@ jobs:
         env:
           JINGLER_DESKTOP_ASAR: apps/desktop/release/linux-unpacked/resources/app.asar
           JINGLER_DESKTOP_RESOURCES: apps/desktop/release/linux-unpacked/resources
-          JINGLER_DEVICE_BUNDLE: apps/desktop/release/linux-unpacked/resources/device-agent/jingler-device.mjs
+          JINGLER_DEVICE_BUNDLE: apps/desktop/release/linux-unpacked/resources/device-agent/jingler-device-runtime.tgz
         run: pnpm artifacts:check

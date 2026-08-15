@@ -21,9 +21,20 @@ import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
 
 const roots: string[] = []
-afterEach(async () =>
-  Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
-)
+const originalEnvironment = {
+  PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
+  PI_SUBAGENT_PI_BINARY: process.env.PI_SUBAGENT_PI_BINARY,
+  JINGLER_SUBAGENT_PI_CLI: process.env.JINGLER_SUBAGENT_PI_CLI,
+  JINGLER_SUBAGENT_CREDENTIAL_ROOT: process.env.JINGLER_SUBAGENT_CREDENTIAL_ROOT,
+  JINGLER_SUBAGENT_NODE: process.env.JINGLER_SUBAGENT_NODE
+}
+afterEach(async () => {
+  for (const [name, value] of Object.entries(originalEnvironment)) {
+    if (value === undefined) delete process.env[name]
+    else process.env[name] = value
+  }
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+})
 
 const connection = Schema.decodeUnknownSync(ProviderConnection)({
   id: "anthropic-api",
@@ -123,7 +134,9 @@ describe("pi session creation", () => {
       "jingler_ask_question",
       "jingler_submit_plan"
     ])
-    expect(received?.resourceLoader?.getExtensions().extensions).toEqual([])
+    expect(received?.resourceLoader?.getExtensions().extensions).toEqual([
+      expect.objectContaining({ path: expect.stringContaining("pi-subagents") })
+    ])
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
       "Jingler's embedded engineering agent"
     )

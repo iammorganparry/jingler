@@ -59,7 +59,7 @@ describe("remote agent installation", () => {
           serverUrl: "https://api.example.test",
           credential: enrollmentCredential,
           displayName: "Build machine",
-          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
+          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device-runtime.tgz"
         },
         {
           run: async (binary, args, options) => {
@@ -88,7 +88,7 @@ describe("remote agent installation", () => {
           host: "buildbox",
           serverUrl: "https://api.example.test",
           credential: enrollmentCredential,
-          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
+          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device-runtime.tgz"
         },
         {
           run: async (binary) =>
@@ -128,7 +128,7 @@ describe("remote agent installation", () => {
           host: "buildbox",
           username: "morgan",
           relayUrl: "https://relay.example.test",
-          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
+          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device-runtime.tgz"
         },
         processRunner
       )
@@ -137,9 +137,13 @@ describe("remote agent installation", () => {
     expect(calls).toHaveLength(2)
     expect(calls[0]).toMatchObject({
       binary: "scp",
-      args: expect.not.arrayContaining(["-P"]),
+      args: expect.arrayContaining([
+        expect.stringContaining("jingler-device-runtime.tgz"),
+        expect.stringContaining(".jingler-device-runtime-upload.tgz")
+      ]),
       options: { shell: false }
     })
+    expect(calls[0]).toMatchObject({ args: expect.not.arrayContaining(["-P"]) })
     expect(calls[1]).toMatchObject({
       binary: "ssh",
       options: { shell: false }
@@ -153,7 +157,8 @@ describe("remote agent installation", () => {
       ])
     })
     const remoteCommand = (calls[1] as { args: ReadonlyArray<string> }).args.at(-1)
-    expect(remoteCommand).toBeDefined()
+    expect(remoteCommand).toContain("managed-runtime/current")
+    expect(remoteCommand).toContain("node_modules/pi-subagents/index.ts")
     expect(spawnSync("sh", ["-n", "-c", remoteCommand ?? ""]).status).toBe(0)
   })
 
@@ -190,7 +195,7 @@ describe("remote agent installation", () => {
         {
           host: "buildbox",
           relayUrl: "https://relay.example.test",
-          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device.mjs"
+          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device-runtime.tgz"
         },
         runner(denied, [])
       )
@@ -226,14 +231,14 @@ describe("remote agent installation", () => {
         {
           host: "buildbox",
           relayUrl: "https://relay.example.test",
-          agentBundlePath: "/repo/apps/device-agent/dist/jingler-device.mjs"
+          agentBundlePath: "/repo/apps/device-agent/dist/jingler-device-runtime.tgz"
         },
         runner(
           {
             exitCode: 1,
             stdout: "",
             stderr:
-              'scp: stat local "/repo/apps/device-agent/dist/jingler-device.mjs": No such file or directory\n'
+              'scp: stat local "/repo/apps/device-agent/dist/jingler-device-runtime.tgz": No such file or directory\n'
           },
           []
         )
