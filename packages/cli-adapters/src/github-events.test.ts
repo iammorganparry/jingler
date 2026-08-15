@@ -144,4 +144,10 @@ describe("GitHub feedback routing primitives", () => {
     expect(githubFeedbackInstruction(event())).toContain("Please handle the reconnect race.")
     expect(githubFeedbackInstruction(event({ actionable: false }))).toBeNull()
   })
+
+  it("permits resolving the addressed thread while still forbidding replies", () => {
+    const instruction = githubFeedbackInstruction(event())
+    expect(instruction).toContain("Do NOT post any comment, reply, or acknowledgement")
+    expect(instruction).toContain("MAY mark its review thread resolved")
+  })
 })
