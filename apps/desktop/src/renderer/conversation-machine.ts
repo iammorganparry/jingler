@@ -69,6 +69,7 @@ import {
 } from "xstate"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
+import { settleStoppedFleet } from "./subagent-fleet-machine.js"
 
 const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
@@ -1483,6 +1484,9 @@ export const conversationMachine = setup({
       return { messages }
     }),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
+    settleStoppedFleet: assign(({ context }) => ({
+      subagentFleetEvents: settleStoppedFleet(context.subagentFleetEvents, Date.now())
+    })),
     markHistoryLoading: assign(() => ({ loadingHistory: true })),
     /**
      * Prepend an older page. No overlap to dedupe — the store returns messages
@@ -2323,7 +2327,7 @@ export const conversationMachine = setup({
           sessionId: context.session.id,
           chatId: context.chatId
         }),
-        onDone: { target: "refreshingDiff" },
+        onDone: { target: "refreshingDiff", actions: "settleStoppedFleet" },
         // A failed stop still means we are no longer streaming: the turn was
         // already settled by `settleStoppedRun` on the way in.
         onError: { target: "refreshingDiff" }

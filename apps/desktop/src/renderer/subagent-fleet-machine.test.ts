@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { Subagent, SubagentFleetNode } from "@jingler/core"
 import {
   projectLegacySubagents,
+  settleStoppedFleet,
   subagentFleetMachine
 } from "./subagent-fleet-machine.js"
 
@@ -34,6 +35,27 @@ const node: SubagentFleetNode = {
 }
 
 describe("subagentFleetMachine", () => {
+  it("settles every active child after the parent stop is acknowledged", () => {
+    const events = settleStoppedFleet([{
+      _tag: "Upsert",
+      version: 1,
+      eventId: "start-1",
+      occurredAt: 10,
+      node
+    }], 20)
+    const stopped = events.at(-1)
+
+    expect(stopped?._tag).toBe("Upsert")
+    if (stopped?._tag !== "Upsert") return
+    expect(stopped.node).toMatchObject({
+      id: node.id,
+      status: "stopped",
+      currentTool: null,
+      updatedAt: 20,
+      completedAt: 20
+    })
+  })
+
   it("projects lifecycle events and falls back to Main when a selected child disappears", () => {
     const actor = createActor(subagentFleetMachine, {
       input: { parentPiSessionId: "fallback" }

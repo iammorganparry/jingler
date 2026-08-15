@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { useActorRef, useSelector } from "@xstate/react"
 import type {
   Subagent,
@@ -16,6 +16,8 @@ import {
   projectLegacySubagents,
   subagentFleetMachine
 } from "./subagent-fleet-machine.js"
+
+const EMPTY_LEGACY_AGENTS: ReadonlyArray<Subagent> = []
 
 export interface SubagentFleetController {
   readonly nodes: ReadonlyArray<SubagentFleetNode>
@@ -49,7 +51,7 @@ export function useSubagentFleet(input: {
     input.events,
     input.piSessionId ?? `${input.sessionId}:${input.chatId}`
   )
-  const legacyAgents = input.legacyAgents ?? []
+  const legacyAgents = input.legacyAgents ?? EMPTY_LEGACY_AGENTS
   const projectedLegacy = useMemo(
     () => projectLegacySubagents(parentPiSessionId, legacyAgents),
     [parentPiSessionId, legacyAgents]
@@ -58,16 +60,22 @@ export function useSubagentFleet(input: {
     () => [...input.events, ...projectedLegacy],
     [input.events, projectedLegacy]
   )
+  const eventsRef = useRef(events)
+  eventsRef.current = events
+  const refreshInFlightRef = useRef(false)
   const actor = useActorRef(subagentFleetMachine, {
     input: { parentPiSessionId }
   })
   useEffect(() => {
     actor.send({ type: "SYNC", events })
   }, [actor, events])
+  const hasFleetSession = input.piSessionId !== null || input.events.length > 0
   useEffect(() => {
-    if (input.piSessionId === null && input.events.length === 0) return
+    if (!hasFleetSession) return
     let active = true
     const refresh = async () => {
+      if (refreshInFlightRef.current) return
+      refreshInFlightRef.current = true
       try {
         const snapshot = await rpc.agentSubagentFleetSnapshot(
           input.sessionId,
@@ -78,7 +86,7 @@ export function useSubagentFleet(input: {
         actor.send({
           type: "SYNC",
           events: [
-            ...events,
+            ...eventsRef.current,
             {
               _tag: "Snapshot",
               version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -91,23 +99,17 @@ export function useSubagentFleet(input: {
       } catch {
         // The Pi session can legitimately be inactive before its first turn or
         // after disposal; lifecycle events remain the last factual projection.
+      } finally {
+        refreshInFlightRef.current = false
       }
     }
-    refresh()
-    const timer = window.setInterval(refresh, 1_500)
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 1_500)
     return () => {
       active = false
       window.clearInterval(timer)
     }
-  }, [
-    actor,
-    input.chatId,
-    events,
-    input.events.length,
-    input.piSessionId,
-    input.sessionId,
-    parentPiSessionId
-  ])
+  }, [actor, hasFleetSession, input.chatId, input.sessionId, parentPiSessionId])
   const context = useSelector(actor, (snapshot) => snapshot.context)
   const selectedNode = useMemo(
     () => context.tree.nodes.find((node) => node.id === context.selectedId) ?? null,

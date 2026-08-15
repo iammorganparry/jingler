@@ -143,6 +143,42 @@ const projectEvents = (
     .filter((event) => belongsToParent(event, parentPiSessionId))
     .reduce(reduceSubagentFleetEvent, emptySubagentRunTree(parentPiSessionId))
 
+const ACTIVE_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set([
+  "queued",
+  "running",
+  "paused",
+  "needs-attention"
+])
+
+export const settleStoppedFleet = (
+  events: ReadonlyArray<SubagentFleetEvent>,
+  occurredAt: number
+): ReadonlyArray<SubagentFleetEvent> => {
+  const parentPiSessionId = parentPiSessionIdFromFleetEvents(events, "")
+  if (parentPiSessionId === "") return events
+  const activeNodes = projectEvents(parentPiSessionId, events).nodes.filter((node) =>
+    ACTIVE_STATUSES.has(node.status)
+  )
+  if (activeNodes.length === 0) return events
+  return [
+    ...events,
+    ...activeNodes.map((node) => ({
+      _tag: "Upsert" as const,
+      version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+      eventId: `global-stop:${occurredAt}:${node.runId}`,
+      occurredAt,
+      node: {
+        ...node,
+        status: "stopped" as const,
+        currentTool: null,
+        updatedAt: occurredAt,
+        completedAt: occurredAt,
+        attention: null
+      }
+    }))
+  ].slice(-512)
+}
+
 const hasNode = (nodes: ReadonlyArray<SubagentFleetNode>, id: string): boolean =>
   nodes.some((node) => node.id === id)
 

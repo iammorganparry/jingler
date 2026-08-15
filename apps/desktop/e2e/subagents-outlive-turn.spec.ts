@@ -50,6 +50,30 @@ test("Fleet stays composer-adjacent while subagents run and the operator steers 
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
+test("global Stop reaps every held Fleet child and restores the idle composer", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[held-subagents]] stop the fleet")
+  await composer.press("Enter")
+
+  const fleet = window.getByTestId("fleet-drawer")
+  await expect(fleet.locator('[data-agent-status="running"]')).toHaveCount(2, {
+    timeout: 15_000
+  })
+  await window.getByRole("button", { name: "Stop", exact: true }).click()
+
+  await expect(fleet.locator('[data-agent-status="stopped"]')).toHaveCount(2, {
+    timeout: 15_000
+  })
+  await expect(fleet).toContainText("0 active · 2 total")
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
+  await expect(window.getByRole("button", { name: "Stop", exact: true })).toBeHidden()
+})
+
 test("normalized compatibility agents stay inspectable and dismissible in Fleet", async ({
   launchApp
 }) => {
