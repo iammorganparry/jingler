@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react"
+import { type ReactNode, type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react"
 import type {
   Attachment,
   ExecutionMode,
@@ -217,6 +217,8 @@ export interface ConversationViewProps {
   focusKey?: string
   /** Disable sending while preserving the model picker as the recovery path. */
   composerDisabledReason?: string
+  /** Composer-adjacent first-class subagent Fleet drawer. */
+  fleetSlot?: ReactNode
   /** Whether the session Files workspace follows this chat's agent mutations. */
   followAgent?: boolean
   /** Toggle follow mode; enabling may present Files beside the conversation. */
@@ -293,6 +295,7 @@ export function ConversationView({
   autoFocusComposer,
   focusKey,
   composerDisabledReason,
+  fleetSlot,
   followAgent = false,
   onToggleFollowAgent,
   archived,
@@ -522,6 +525,7 @@ export function ConversationView({
         {/* Same gutter + centered max-width as the transcript column above. */}
         <div className={cn("flex-none pb-[18px] pt-[11px]", gutter)}>
           <div className="mx-auto w-full max-w-[760px]">
+            {!archived && fleetSlot && <div className="mb-2">{fleetSlot}</div>}
             {!archived && planDocument && (
               <PlanProgressDock
                 document={planDocument}

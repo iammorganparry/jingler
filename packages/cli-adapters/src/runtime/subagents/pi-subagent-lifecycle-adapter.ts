@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { EventBus } from "@earendil-works/pi-coding-agent"
 import {
   SUBAGENT_FLEET_PROTOCOL_VERSION,
+  type Message,
   type SubagentFleetArtifact,
   type SubagentFleetControlOutcome,
   type SubagentFleetControlRequest,
@@ -13,6 +14,7 @@ import {
   type SubagentJsonValue
 } from "@jingler/core"
 import { Option, Schema } from "effect"
+import { readPiSubagentTranscript } from "./pi-subagent-transcript.js"
 import { createSubagentRunTreeActor } from "./subagent-run-tree-machine.js"
 
 const RPC_REQUEST_EVENT = "subagents:rpc:v1:request"
@@ -253,6 +255,7 @@ export interface PiSubagentLifecycleAdapterOptions {
   readonly events: EventBus
   readonly parentPiSessionId: string
   readonly emit: (event: SubagentFleetEvent) => void
+  readonly trustedSessionRoots?: ReadonlyArray<string>
   readonly now?: () => number
 }
 
@@ -264,6 +267,7 @@ export class PiSubagentLifecycleAdapter {
   readonly #actor
   readonly #unsubscribes: Array<() => void> = []
   readonly #asyncStarts = new Map<string, typeof AsyncStarted.Type>()
+  readonly #trustedSessionRoots = new Set<string>()
   #started = false
   #refreshTimer: NodeJS.Timeout | null = null
   #refreshInFlight = false
@@ -273,6 +277,7 @@ export class PiSubagentLifecycleAdapter {
     this.#parentPiSessionId = options.parentPiSessionId
     this.#emitExternal = options.emit
     this.#now = options.now ?? Date.now
+    for (const root of options.trustedSessionRoots ?? []) this.#trustedSessionRoots.add(root)
     this.#actor = createSubagentRunTreeActor(options.parentPiSessionId)
   }
 
@@ -323,6 +328,17 @@ export class PiSubagentLifecycleAdapter {
       activeCapacity: context.activeCapacity,
       nodes: context.nodes
     }
+  }
+
+  async transcript(runId: string): Promise<ReadonlyArray<Message>> {
+    const node = this.#actor.getSnapshot().context.nodes.find(
+      (candidate) => candidate.runId === runId
+    )
+    if (!node?.sessionFile) return []
+    return readPiSubagentTranscript({
+      sessionFile: node.sessionFile,
+      trustedRoots: [...this.#trustedSessionRoots]
+    })
   }
 
   attention(input: PiSubagentSupervisorAttentionInput): void {
@@ -422,8 +438,11 @@ export class PiSubagentLifecycleAdapter {
     const reply = await this.#requestStatus(requestId)
     const generatedAt = this.#now()
     const activeNodes = this.#activeNodes(reply, generatedAt)
+    const activeNodeIds = new Set(activeNodes.map((node) => node.id))
     const lifecycleNodes = this.#actor.getSnapshot().context.nodes.filter(
-      (node) => !node.id.startsWith(`${this.#parentPiSessionId}/active/`)
+      (node) =>
+        !node.id.startsWith(`${this.#parentPiSessionId}/active/`) &&
+        !activeNodeIds.has(node.id)
     )
     const nodes = [...lifecycleNodes, ...activeNodes]
     this.#publish({
@@ -474,32 +493,38 @@ export class PiSubagentLifecycleAdapter {
     reply: typeof FleetStatusReply.Type,
     generatedAt: number
   ): ReadonlyArray<SubagentFleetNode> {
-    return reply.data.fleet.entries.map((entry) => ({
-      id: `${this.#parentPiSessionId}/active/${entry.key}`,
-      runId: entry.key,
-      parentId: null,
-      parentPiSessionId: this.#parentPiSessionId,
-      agent: entry.agent,
-      task: entry.goal ?? "Active delegated work",
-      model: entry.model ?? null,
-      status: "running",
-      background: true,
-      sessionFile: null,
-      currentTool: null,
-      startedAt: entry.startedAt,
-      updatedAt: generatedAt,
-      completedAt: null,
-      usage: {
-        inputTokens: entry.tokens.input,
-        outputTokens: entry.tokens.output,
-        totalTokens: entry.tokens.total,
-        costUsd: 0,
-        durationMs: Math.max(0, generatedAt - entry.startedAt),
-        toolCalls: 0
-      },
-      artifacts: [],
-      attention: null
-    }))
+    const lifecycleNodes = this.#actor.getSnapshot().context.nodes
+    return reply.data.fleet.entries.map((entry) => {
+      const observed = lifecycleNodes.find(
+        (node) => node.agent === entry.agent && node.startedAt === entry.startedAt
+      )
+      return {
+        id: observed?.id ?? `${this.#parentPiSessionId}/active/${entry.key}`,
+        runId: observed?.runId ?? entry.key,
+        parentId: observed?.parentId ?? null,
+        parentPiSessionId: this.#parentPiSessionId,
+        agent: entry.agent,
+        task: observed?.task ?? entry.goal ?? "Active delegated work",
+        model: entry.model ?? observed?.model ?? null,
+        status: "running",
+        background: observed?.background ?? true,
+        sessionFile: observed?.sessionFile ?? null,
+        currentTool: observed?.currentTool ?? null,
+        startedAt: entry.startedAt,
+        updatedAt: generatedAt,
+        completedAt: null,
+        usage: {
+          inputTokens: entry.tokens.input,
+          outputTokens: entry.tokens.output,
+          totalTokens: entry.tokens.total,
+          costUsd: observed?.usage.costUsd ?? 0,
+          durationMs: Math.max(0, generatedAt - entry.startedAt),
+          toolCalls: observed?.usage.toolCalls ?? 0
+        },
+        artifacts: observed?.artifacts ?? [],
+        attention: observed?.attention ?? null
+      }
+    })
   }
 
   #request(method: string, params: SubagentJsonValue): Promise<void> {
@@ -570,6 +595,7 @@ export class PiSubagentLifecycleAdapter {
     const started = Option.getOrUndefined(Schema.decodeUnknownOption(AsyncStarted)(payload))
     if (!started || (started.sessionId && started.sessionId !== this.#parentPiSessionId)) return
     this.#asyncStarts.set(started.id, started)
+    if (started.sessionRoot) this.#trustedSessionRoots.add(started.sessionRoot)
     const now = this.#now()
     this.#publish({
       _tag: "Upsert",

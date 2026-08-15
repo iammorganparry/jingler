@@ -1037,18 +1037,20 @@ describe("conversationMachine — talking to the main agent while sub-agents run
     emit({
       _tag: "SubagentFleetChanged",
       event: {
-        _tag: "ReconcileAbsent",
-        parentPiSessionId: "pi-parent-1",
-        activeRunIds: [],
-        observedAt: 42
+        _tag: "Remove",
+        version: 1,
+        eventId: "remove-stale-1",
+        occurredAt: 42,
+        id: "pi-parent-1/stale-run"
       }
     })
 
     expect(actor.getSnapshot().context.subagentFleetEvents).toEqual([{
-      _tag: "ReconcileAbsent",
-      parentPiSessionId: "pi-parent-1",
-      activeRunIds: [],
-      observedAt: 42
+      _tag: "Remove",
+      version: 1,
+      eventId: "remove-stale-1",
+      occurredAt: 42,
+      id: "pi-parent-1/stale-run"
     }])
     emit({ _tag: "Done", costUsd: 0, tokens: 0 })
     await waitFor(actor, (snapshot) => snapshot.matches(idle))

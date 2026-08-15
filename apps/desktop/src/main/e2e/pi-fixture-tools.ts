@@ -175,27 +175,53 @@ const heldSubagentEvents = (
   phase: "start" | "settle"
 ): ReadonlyArray<StreamEvent> => {
   const { first, second } = heldSubagentIds(runId)
-  return phase === "start"
-    ? [
-        {
-          _tag: "SubagentStarted",
-          id: first,
-          name: "Explore",
-          description: "Survey the tab bar",
-          parentId: null
+  const parentPiSessionId = `e2e-parent-${runId}`
+  const at = phase === "start" ? 10 : 20
+  const fleetNode = (
+    id: string,
+    agent: string,
+    task: string
+  ): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => ({
+    _tag: "SubagentFleetChanged",
+    event: {
+      _tag: "Upsert",
+      version: 1,
+      eventId: `${phase}:${id}`,
+      occurredAt: at,
+      node: {
+        id: `${parentPiSessionId}/${id}`,
+        runId: id,
+        parentId: null,
+        parentPiSessionId,
+        agent,
+        task,
+        model: "e2e/pi-fixture:high",
+        status: phase === "start" ? "running" : "completed",
+        background: false,
+        sessionFile: null,
+        currentTool: phase === "start" ? "workspace_read_file" : null,
+        startedAt: 10,
+        updatedAt: at,
+        completedAt: phase === "start" ? null : at,
+        usage: {
+          inputTokens: phase === "start" ? 0 : 120,
+          outputTokens: phase === "start" ? 0 : 40,
+          totalTokens: phase === "start" ? 0 : 160,
+          costUsd: 0,
+          durationMs: phase === "start" ? 0 : 10,
+          toolCalls: phase === "start" ? 0 : 1
         },
-        {
-          _tag: "SubagentStarted",
-          id: second,
-          name: "Explore",
-          description: "Audit the theme tokens",
-          parentId: null
-        }
-      ]
-    : [
-        { _tag: "SubagentEnded", id: first, status: "done" },
-        { _tag: "SubagentEnded", id: second, status: "done" }
-      ]
+        artifacts: phase === "start"
+          ? []
+          : [{ kind: "report", path: `reports/${id}.md`, label: "Report" }],
+        attention: null
+      }
+    }
+  })
+  return [
+    fleetNode(first, "Explore", "Survey the tab bar"),
+    fleetNode(second, "Explore", "Audit the theme tokens")
+  ]
 }
 
 const registerHeldSubagentsTool = (

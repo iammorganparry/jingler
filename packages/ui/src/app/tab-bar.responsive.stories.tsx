@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { BOUNDARY_WIDTHS, LookFor, WidthLadder } from "../story-support.js"
 import { TabBar, type TabKey } from "./tab-bar.js"
-import { ChatTabBar } from "./agent-tab-bar.js"
+import { ChatTabBar } from "./chat-tab-bar.js"
 import { builtinDescriptor } from "./tab-contributions.js"
 
 const meta: Meta = { title: "Responsive/Tab Bar", parameters: { layout: "fullscreen" } }

@@ -1,3 +1,4 @@
+import { basename, dirname, join } from "node:path"
 import {
   createAgentSession,
   createEventBus,
@@ -290,6 +291,8 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       for (const listener of fleetListeners) listener(projected)
       return outcome
     },
+    subagentFleetSnapshot: () => lifecycle.refresh(),
+    subagentTranscript: (runId) => lifecycle.transcript(runId),
     prompt: (text) => session.prompt(text),
     steer: (text) => session.steer(text),
     interrupt: () => session.abort(),
@@ -381,7 +384,13 @@ const createSessionHandle = (
       emit: (event) => {
         const projected: StreamEvent = { _tag: "SubagentFleetChanged", event }
         for (const listener of fleetListeners) listener(projected)
-      }
+      },
+      trustedSessionRoots: embedded.result.session.sessionFile
+        ? [join(
+            dirname(embedded.result.session.sessionFile),
+            basename(embedded.result.session.sessionFile, ".jsonl")
+          )]
+        : []
     })
     lifecycle.start()
     lifecycle.beginPolling()

@@ -1,35 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import {
-  AgentTabBar,
-  ChatTabBar,
-  MAIN_AGENT,
-  type AgentTabItem,
-  type VisibleAgentStatus
-} from "./agent-tab-bar.js"
+import { ChatTabBar } from "./chat-tab-bar.js"
 
 afterEach(cleanup)
-
-const item = (
-  id: string,
-  status: VisibleAgentStatus,
-  action?: AgentTabItem["action"]
-): AgentTabItem => ({
-  id,
-  name: id,
-  description: `${id} description`,
-  status,
-  hasChildren: false,
-  ...(action === undefined ? {} : { action })
-})
-
-const callbacks = () => ({
-  onChange: vi.fn(),
-  onDrill: vi.fn(),
-  onNavigate: vi.fn(),
-  onStop: vi.fn(),
-  onClose: vi.fn()
-})
 
 describe("ChatTabBar closed chats", () => {
   const chatCallbacks = () => ({
@@ -102,37 +75,3 @@ describe("ChatTabBar closed chats", () => {
   })
 })
 
-describe("AgentTabBar legacy agents", () => {
-  it("preserves Main navigation, drill-in, settled close, and reviewer controls", () => {
-    const handlers = callbacks()
-    render(
-      <AgentTabBar
-        agents={[
-          {
-            ...item("Explore", "working", "stop"),
-            hasChildren: true
-          },
-          item("Settled", "done", "close"),
-          item("Reviewer", "done")
-        ]}
-        trail={[{ id: "parent", name: "Parent" }]}
-        active="Explore"
-        {...handlers}
-      />
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: "Main" }))
-    expect(handlers.onNavigate).toHaveBeenCalledWith(MAIN_AGENT)
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Show Explore's sub-agents" })
-    )
-    expect(handlers.onDrill).toHaveBeenCalledWith("Explore")
-
-    fireEvent.click(screen.getByRole("button", { name: "Close Settled" }))
-    expect(handlers.onClose).toHaveBeenCalledWith("Settled")
-
-    expect(screen.queryByRole("button", { name: "Close Reviewer" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Stop Reviewer" })).toBeNull()
-  })
-})

@@ -83,6 +83,7 @@ import type {
   StreamEvent,
   SubagentFleetControlOutcome,
   SubagentFleetControlRequest,
+  SubagentFleetSnapshot,
   TerminalChunk,
   ThemeCatalog,
   ThemeSummary,
@@ -878,6 +879,24 @@ export const rpc = {
     agentId: string
   ): Promise<void> =>
     run((c) => c.Agent.stopSubagent({ sessionId, chatId, agentId })),
+  agentSubagentFleetSnapshot: (
+    sessionId: string,
+    chatId: string,
+    parentPiSessionId: string
+  ): Promise<SubagentFleetSnapshot> =>
+    run((c) => c.Agent.subagentFleetSnapshot({ sessionId, chatId, parentPiSessionId })),
+  agentSubagentTranscript: (
+    sessionId: string,
+    chatId: string,
+    parentPiSessionId: string,
+    runId: string
+  ): Promise<ReadonlyArray<Message>> =>
+    run((c) => c.Agent.subagentTranscript({
+      sessionId,
+      chatId,
+      parentPiSessionId,
+      runId
+    })),
   agentControlSubagent: (
     sessionId: string,
     chatId: string,

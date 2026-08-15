@@ -81,7 +81,7 @@ const reconcileSnapshot = (
   return nodes
 }
 
-const reduceEvent = (
+export const reduceSubagentFleetEvent = (
   context: SubagentRunTreeContext,
   event: SubagentFleetEvent
 ): SubagentRunTreeContext => {
@@ -140,7 +140,7 @@ export const subagentRunTreeMachine = setup({
       on: {
         INGEST: {
           actions: assign(({ context, event }) =>
-            reduceEvent(context, event.event)
+            reduceSubagentFleetEvent(context, event.event)
           )
         }
       }

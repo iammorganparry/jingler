@@ -37,9 +37,19 @@ const spec: PiRunSpec = {
 
 const fleetSeams: Pick<
   PiSessionHandle,
-  "subscribeFleet" | "controlSubagent"
+  "subscribeFleet" | "controlSubagent" | "subagentFleetSnapshot" | "subagentTranscript"
 > = {
   subscribeFleet: () => () => undefined,
+  subagentFleetSnapshot: async () => ({
+    version: 1,
+    parentPiSessionId: "pi-session",
+    generatedAt: 1,
+    totalActive: 0,
+    omitted: 0,
+    activeCapacity: { used: 0, limit: 0 },
+    nodes: []
+  }),
+  subagentTranscript: async () => [],
   controlSubagent: async (request) => ({
     version: 1,
     requestId: request.requestId,

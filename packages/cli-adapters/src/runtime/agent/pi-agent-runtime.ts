@@ -2,10 +2,12 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
 import {
   PlanPrd,
   type FileChangeSet,
+  type Message,
   type PiRunSpec,
   type StreamEvent,
   type SubagentFleetControlOutcome,
-  type SubagentFleetControlRequest
+  type SubagentFleetControlRequest,
+  type SubagentFleetSnapshot
 } from "@jingler/core"
 import { Effect, Option, Queue, Ref, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
@@ -22,6 +24,8 @@ export interface PiSessionHandle {
   readonly controlSubagent: (
     request: SubagentFleetControlRequest
   ) => Promise<SubagentFleetControlOutcome>
+  readonly subagentFleetSnapshot: () => Promise<SubagentFleetSnapshot>
+  readonly subagentTranscript: (runId: string) => Promise<ReadonlyArray<Message>>
   readonly prompt: (text: string) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>
@@ -295,6 +299,14 @@ export const makePiAgentRuntime = (factory: PiSessionFactory): Effect.Effect<Age
       controlSubagent: (request) => withSession(
         request.parentPiSessionId,
         (session) => session.controlSubagent(request)
+      ),
+      subagentFleetSnapshot: (parentPiSessionId) => withSession(
+        parentPiSessionId,
+        (session) => session.subagentFleetSnapshot()
+      ),
+      subagentTranscript: (parentPiSessionId, runId) => withSession(
+        parentPiSessionId,
+        (session) => session.subagentTranscript(runId)
       )
     }
   })

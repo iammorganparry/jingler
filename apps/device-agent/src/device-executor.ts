@@ -56,6 +56,7 @@ import {
   Session,
   StreamEvent,
   SubagentFleetControlRequest,
+  SubagentFleetSnapshot,
   WorkspaceTransferCheckpoint
 } from "@jingler/core"
 import type {
@@ -66,9 +67,11 @@ import type {
   RemotePublishPrepared as RemotePublishPreparedValue,
   Session as SessionValue,
   Project as ProjectValue,
+  Message as MessageValue,
   StreamEvent as StreamEventValue,
   SubagentFleetControlOutcome as SubagentFleetControlOutcomeValue,
-  SubagentFleetControlRequest as SubagentFleetControlRequestValue
+  SubagentFleetControlRequest as SubagentFleetControlRequestValue,
+  SubagentFleetSnapshot as SubagentFleetSnapshotValue
 } from "@jingler/core"
 import { loadDeviceE2ePiRuntime } from "./e2e/pi-runtime.js"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
@@ -114,6 +117,15 @@ const decodePayload = <A, I>(
 }
 
 const ChatIdPayload = Schema.Struct({ chatId: Schema.String })
+const SubagentFleetSnapshotPayload = Schema.Struct({
+  chatId: Schema.String,
+  parentPiSessionId: Schema.String
+})
+const SubagentTranscriptPayload = Schema.Struct({
+  chatId: Schema.String,
+  parentPiSessionId: Schema.String,
+  runId: Schema.String
+})
 const SubagentControlPayload = Schema.Struct({
   chatId: Schema.String,
   request: SubagentFleetControlRequest
@@ -223,6 +235,13 @@ export interface DeviceExecutorServices {
     input: Schema.Schema.Type<typeof SteerPayload>
   ) => Promise<unknown>
   readonly stop: (sessionId: string, chatId: string) => Promise<void>
+  readonly subagentFleetSnapshot: (
+    parentPiSessionId: string
+  ) => Promise<SubagentFleetSnapshotValue>
+  readonly subagentTranscript: (
+    parentPiSessionId: string,
+    runId: string
+  ) => Promise<ReadonlyArray<MessageValue>>
   readonly controlSubagent: (
     input: SubagentFleetControlRequestValue
   ) => Promise<SubagentFleetControlOutcomeValue>
@@ -290,6 +309,14 @@ export const makeDeviceSessionCommandExecutor = (
         return services.steer(command.sessionId, decodePayload(command, SteerPayload))
       case "Agent.stop":
         return services.stop(command.sessionId, decodePayload(command, ChatIdPayload).chatId)
+      case "Agent.subagentFleetSnapshot": {
+        const input = decodePayload(command, SubagentFleetSnapshotPayload)
+        return services.subagentFleetSnapshot(input.parentPiSessionId)
+      }
+      case "Agent.subagentTranscript": {
+        const input = decodePayload(command, SubagentTranscriptPayload)
+        return services.subagentTranscript(input.parentPiSessionId, input.runId)
+      }
       case "Agent.controlSubagent":
         return services.controlSubagent(
           decodePayload(command, SubagentControlPayload).request
@@ -554,6 +581,18 @@ export const makeLiveDeviceSessionCommandExecutor = (
     ),
     stop: (sessionId, chatId) => run(
       Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId))
+    ),
+    subagentFleetSnapshot: (parentPiSessionId) => run(
+      Effect.flatMap(
+        AgentRuntime,
+        (runtime) => runtime.subagentFleetSnapshot(parentPiSessionId)
+      )
+    ),
+    subagentTranscript: (parentPiSessionId, runId) => run(
+      Effect.flatMap(
+        AgentRuntime,
+        (runtime) => runtime.subagentTranscript(parentPiSessionId, runId)
+      )
     ),
     controlSubagent: (input) => run(
       Effect.flatMap(AgentRuntime, (runtime) => runtime.controlSubagent(input))
