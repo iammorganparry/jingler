@@ -10,6 +10,7 @@ export const JINGLER_SUBAGENT_CREDENTIAL_ROOT =
   "JINGLER_SUBAGENT_CREDENTIAL_ROOT"
 export const JINGLER_SUBAGENT_PI_CLI = "JINGLER_SUBAGENT_PI_CLI"
 export const JINGLER_SUBAGENT_NODE = "JINGLER_SUBAGENT_NODE"
+export const JINGLER_SUBAGENT_CHILD_TOOLS = "JINGLER_SUBAGENT_CHILD_TOOLS"
 export const PI_SUBAGENT_PI_BINARY = "PI_SUBAGENT_PI_BINARY"
 
 export interface PiChildLauncherConfig {
@@ -17,6 +18,7 @@ export interface PiChildLauncherConfig {
   readonly piCliPath: string
   readonly credentialRoot: string
   readonly nodePath: string
+  readonly childToolsPath: string
 }
 
 export class PiChildLauncherError extends Data.TaggedError(
@@ -29,6 +31,11 @@ export class PiChildLauncherError extends Data.TaggedError(
 export const sourcePiChildWrapperPath = (): string =>
   fileURLToPath(
     new URL("../../../runtime-assets/pi-subagent-wrapper.mjs", import.meta.url)
+  )
+
+export const sourcePiChildToolsPath = (): string =>
+  fileURLToPath(
+    new URL("../../../runtime-assets/jingler-child-tools.mjs", import.meta.url)
   )
 
 export const installedPiCliPath = (): string =>
@@ -47,7 +54,9 @@ export const defaultPiChildLauncherConfig = (
     process.env.JINGLER_SUBAGENT_WRAPPER_PATH ?? sourcePiChildWrapperPath(),
   piCliPath: process.env.JINGLER_SUBAGENT_PI_CLI_PATH ?? installedPiCliPath(),
   credentialRoot: join(agentDir, "subagent-credentials"),
-  nodePath: process.execPath
+  nodePath: process.execPath,
+  childToolsPath:
+    process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ?? sourcePiChildToolsPath()
 })
 
 const pinEnvironment = (name: string, value: string): void => {
@@ -64,12 +73,17 @@ export const preparePiChildLauncher = (
 ): Effect.Effect<void, PiChildLauncherError> =>
   Effect.tryPromise({
     try: async () => {
-      await Promise.all([access(config.wrapperPath), access(config.piCliPath)])
+      await Promise.all([
+        access(config.wrapperPath),
+        access(config.piCliPath),
+        access(config.childToolsPath)
+      ])
       if (process.platform !== "win32") await chmod(config.wrapperPath, 0o755)
       pinEnvironment(PI_SUBAGENT_PI_BINARY, config.wrapperPath)
       pinEnvironment(JINGLER_SUBAGENT_PI_CLI, config.piCliPath)
       pinEnvironment(JINGLER_SUBAGENT_CREDENTIAL_ROOT, config.credentialRoot)
       pinEnvironment(JINGLER_SUBAGENT_NODE, config.nodePath)
+      pinEnvironment(JINGLER_SUBAGENT_CHILD_TOOLS, config.childToolsPath)
     },
     catch: (cause) =>
       new PiChildLauncherError({

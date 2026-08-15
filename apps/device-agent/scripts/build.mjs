@@ -42,6 +42,10 @@ await cp(
   resolve(payload, "runtime-assets/pi-subagent-wrapper.mjs")
 )
 await chmod(resolve(payload, "runtime-assets/pi-subagent-wrapper.mjs"), 0o755)
+await cp(
+  resolve(root, "packages/cli-adapters/runtime-assets/jingler-child-tools.mjs"),
+  resolve(payload, "runtime-assets/jingler-child-tools.mjs")
+)
 
 const packageRoots = [
   "pi-subagents",

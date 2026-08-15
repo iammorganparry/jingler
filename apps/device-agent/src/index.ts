@@ -38,6 +38,11 @@ process.env.JINGLER_SUBAGENT_PI_CLI_PATH ??= join(
   "dist",
   "cli.js"
 )
+process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??= join(
+  import.meta.dirname,
+  "runtime-assets",
+  "jingler-child-tools.mjs"
+)
 
 const args = process.argv.slice(2)
 const command = args[0]

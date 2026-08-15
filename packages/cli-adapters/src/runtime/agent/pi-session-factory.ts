@@ -7,6 +7,10 @@ import {
   type CreateAgentSessionResult,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
+import {
+  registerSubagentCapabilityCeiling,
+  type SubagentCapabilityCeilingHandle
+} from "pi-subagents/capability-ceiling"
 import type {
   Message,
   PiRunSpec,
@@ -28,8 +32,12 @@ import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-re
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
-import { preparePiSubagentsRuntime } from "../subagents/pi-subagents-bootstrap.js"
+import {
+  JINGLER_SUBAGENT_AGENT_NAMES,
+  preparePiSubagentsRuntime
+} from "../subagents/pi-subagents-bootstrap.js"
 import type { PiChildCredentials } from "../subagents/pi-child-credentials.js"
+import type { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 
 export class PiSessionFactoryError extends Data.TaggedError("PiSessionFactoryError")<{
   readonly message: string
@@ -57,6 +65,7 @@ export interface PiSessionFactoryOptions {
   readonly createSession?: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>
   readonly recordDiagnostic?: (snapshot: RuntimeDiagnosticSnapshot) => Effect.Effect<void>
   readonly childCredentials?: PiChildCredentials
+  readonly subagentBroker?: SubagentCapabilityBroker
 }
 
 const modelIdForProvider = (spec: PiRunSpec, connection: ProviderConnection) => {
@@ -232,10 +241,21 @@ interface SessionHandleInput {
   readonly snapshot: WorktreeSnapshot | null
   readonly observe?: (event: StreamEvent) => void
   readonly childCredentials?: PiChildCredentials
+  readonly subagentBroker?: SubagentCapabilityBroker
+  readonly subagentCeiling?: SubagentCapabilityCeilingHandle
 }
 
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
-  const { embedded, spec, tracker, snapshot, observe, childCredentials } = input
+  const {
+    embedded,
+    spec,
+    tracker,
+    snapshot,
+    observe,
+    childCredentials,
+    subagentBroker,
+    subagentCeiling
+  } = input
   const { session } = embedded.result
   return {
     id: session.sessionFile ?? session.sessionId,
@@ -249,11 +269,13 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       try {
         session.dispose()
       } finally {
+        subagentCeiling?.dispose()
         await Promise.all([
           tracker ? Effect.runPromise(tracker.dispose()) : Promise.resolve(),
           childCredentials
             ? Effect.runPromise(childCredentials.remove(session.sessionId))
-            : Promise.resolve()
+            : Promise.resolve(),
+          Promise.resolve(subagentBroker?.unregister(session.sessionId))
         ])
       }
     },
@@ -322,9 +344,47 @@ const createSessionHandle = (
       context,
       registry
     })
-    if (options.childCredentials) {
+    if ((options.childCredentials === undefined) !== (options.subagentBroker === undefined)) {
+      embedded.result.session.dispose()
+      return yield* Effect.fail(
+        new AgentRuntimeError({
+          reason: "runtime",
+          message: "The subagent credential store and capability broker must be configured together"
+        })
+      )
+    }
+    let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
+    if (options.childCredentials && options.subagentBroker) {
+      const parentPiSessionId = embedded.result.session.sessionId
+      const capability = yield* Effect.tryPromise({
+        try: () => options.subagentBroker!.register({
+          parentPiSessionId,
+          spec,
+          registry,
+          context
+        }),
+        catch: (cause) =>
+          new AgentRuntimeError({
+            reason: "runtime",
+            message: "Could not register the child capability broker",
+            cause
+          })
+      })
+      subagentCeiling = registerSubagentCapabilityCeiling({
+        sessionId: parentPiSessionId,
+        source: "jingler-runtime",
+        ceiling: {
+          allowedTools: [
+            ...capability.tools.map(({ id }) => id),
+            "contact_supervisor",
+            "subagent"
+          ],
+          allowedAgents: [...JINGLER_SUBAGENT_AGENT_NAMES],
+          denyExtensions: false
+        }
+      })
       yield* options.childCredentials
-        .materialize(embedded.result.session.sessionId, embedded.connection)
+        .materialize(parentPiSessionId, embedded.connection, capability)
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -335,7 +395,11 @@ const createSessionHandle = (
               })
           ),
           Effect.onError(() =>
-            Effect.sync(() => embedded.result.session.dispose())
+            Effect.sync(() => {
+              options.subagentBroker!.unregister(parentPiSessionId)
+              subagentCeiling?.dispose()
+              embedded.result.session.dispose()
+            })
           )
         )
     }
@@ -360,7 +424,9 @@ const createSessionHandle = (
       tracker,
       snapshot,
       observe,
-      childCredentials: options.childCredentials
+      childCredentials: options.childCredentials,
+      subagentBroker: options.subagentBroker,
+      ...(subagentCeiling ? { subagentCeiling } : {})
     })
   })
 

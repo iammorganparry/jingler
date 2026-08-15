@@ -420,6 +420,11 @@ if (!gotPrimaryLock) {
         "dist",
         "cli.js"
       )
+      process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??= join(
+        process.resourcesPath,
+        "subagent-runtime",
+        "jingler-child-tools.mjs"
+      )
     }
     process.env.JINGLER_DEVICE_AGENT_BUNDLE ??= resolveDeviceAgentBundlePath(
       app.isPackaged,

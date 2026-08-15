@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
-import { Data, Effect } from "effect"
+import { Data, Effect, Schema } from "effect"
 import {
   defaultPiChildLauncherConfig,
   preparePiChildLauncher
@@ -9,6 +9,38 @@ import {
 
 const require = createRequire(import.meta.url)
 export const PI_SUBAGENTS_EXTENSION_PATH = require.resolve("pi-subagents")
+const PI_SUBAGENTS_AGENT_DIR = join(
+  dirname(PI_SUBAGENTS_EXTENSION_PATH),
+  "agents"
+)
+export const JINGLER_SUBAGENT_AGENT_NAMES = [
+  "delegate",
+  "oracle",
+  "researcher",
+  "reviewer",
+  "scout",
+  "worker",
+  "fanout"
+] as const
+const BUILTIN_AGENTS = JINGLER_SUBAGENT_AGENT_NAMES.filter(
+  (agent) => agent !== "fanout"
+)
+const STANDARD_CHILD_TOOLS = "contact_supervisor"
+const FANOUT_CHILD_TOOLS = "subagent, contact_supervisor"
+
+const PiSubagentConfig = Schema.Struct({
+  artifactDir: Schema.Literal("session"),
+  asyncByDefault: Schema.Boolean,
+  asyncWidget: Schema.Boolean,
+  fleetView: Schema.Boolean,
+  inlineToolDisplay: Schema.Literal("summary"),
+  globalConcurrencyLimit: Schema.Number,
+  maxActiveAsyncRunsPerSession: Schema.Number,
+  maxSubagentSpawnsPerRun: Schema.Number,
+  maxSubagentSpawnsPerSession: Schema.Number,
+  missions: Schema.Struct({ enabled: Schema.Boolean }),
+  toolDescriptionMode: Schema.Literal("compact")
+})
 
 const CONFIG = {
   artifactDir: "session",
@@ -16,6 +48,10 @@ const CONFIG = {
   asyncWidget: false,
   fleetView: false,
   inlineToolDisplay: "summary",
+  globalConcurrencyLimit: 4,
+  maxActiveAsyncRunsPerSession: 4,
+  maxSubagentSpawnsPerRun: 8,
+  maxSubagentSpawnsPerSession: 16,
   missions: { enabled: false },
   toolDescriptionMode: "compact"
 } as const
@@ -32,7 +68,9 @@ const configPath = (agentDir: string): string =>
 
 const sameConfig = async (path: string): Promise<boolean> => {
   try {
-    const parsed: unknown = JSON.parse(await readFile(path, "utf8"))
+    const parsed = Schema.decodeUnknownSync(Schema.parseJson(PiSubagentConfig))(
+      await readFile(path, "utf8")
+    )
     return JSON.stringify(parsed) === JSON.stringify(CONFIG)
   } catch {
     return false
@@ -54,6 +92,61 @@ const writeConfig = async (path: string): Promise<void> => {
     await rm(temporary, { force: true })
     throw error
   }
+}
+
+const rewriteAgentProfile = (
+  source: string,
+  childToolsPath: string,
+  tools = STANDARD_CHILD_TOOLS
+): string => source
+  .replace(/^tools:.*$/m, `tools: ${tools}`)
+  .replace(/^inheritProjectContext:.*$/m, "inheritProjectContext: false")
+  .replace(
+    /^---\n/u,
+    `---\nextensions: ${JSON.stringify(childToolsPath)}\n`
+  )
+
+/**
+ * Shadow vendor profiles with Jingler-managed definitions. Brokered tools are
+ * registered by the explicit child extension; this frontmatter grants only
+ * supervisor coordination. The one fanout profile opts into nested spawning.
+ */
+export const materializePiSubagentProfiles = async (
+  agentDir: string,
+  childToolsPath: string
+): Promise<void> => {
+  const target = join(agentDir, "agents")
+  await mkdir(target, { recursive: true, mode: 0o700 })
+  await Promise.all(BUILTIN_AGENTS.map(async (agent) => {
+    const source = await readFile(join(PI_SUBAGENTS_AGENT_DIR, `${agent}.md`), "utf8")
+    await writeFile(
+      join(target, `${agent}.md`),
+      rewriteAgentProfile(source, childToolsPath),
+      { encoding: "utf8", mode: 0o600 }
+    )
+  }))
+  const delegate = await readFile(
+    join(PI_SUBAGENTS_AGENT_DIR, "delegate.md"),
+    "utf8"
+  )
+  const fanout = rewriteAgentProfile(
+    delegate
+      .replace(/^name: delegate$/m, "name: fanout")
+      .replace(
+        /^description:.*$/m,
+        "description: Explicit fan-out coordinator allowed to spawn bounded children"
+      )
+      .replace(
+        "You are a delegated agent.",
+        "You are a fan-out coordinator. Delegate bounded independent tasks, coordinate results, and do not edit the workspace directly."
+      ),
+    childToolsPath,
+    FANOUT_CHILD_TOOLS
+  )
+  await writeFile(join(target, "fanout.md"), fanout, {
+    encoding: "utf8",
+    mode: 0o600
+  })
 }
 
 /**
@@ -80,9 +173,9 @@ export const preparePiSubagentsRuntime = (
       }
       process.env.PI_CODING_AGENT_DIR = expected
       await writeConfig(configPath(expected))
-      await Effect.runPromise(
-        preparePiChildLauncher(defaultPiChildLauncherConfig(expected))
-      )
+      const launcher = defaultPiChildLauncherConfig(expected)
+      await materializePiSubagentProfiles(expected, launcher.childToolsPath)
+      await Effect.runPromise(preparePiChildLauncher(launcher))
     },
     catch: (cause) =>
       new PiSubagentsBootstrapError({

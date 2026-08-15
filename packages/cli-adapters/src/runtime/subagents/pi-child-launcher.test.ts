@@ -7,6 +7,7 @@ import { promisify } from "node:util"
 import { Effect } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import {
+  JINGLER_SUBAGENT_CHILD_TOOLS,
   JINGLER_SUBAGENT_CREDENTIAL_ROOT,
   JINGLER_SUBAGENT_NODE,
   JINGLER_SUBAGENT_PI_CLI,
@@ -20,7 +21,8 @@ const names = [
   PI_SUBAGENT_PI_BINARY,
   JINGLER_SUBAGENT_PI_CLI,
   JINGLER_SUBAGENT_CREDENTIAL_ROOT,
-  JINGLER_SUBAGENT_NODE
+  JINGLER_SUBAGENT_NODE,
+  JINGLER_SUBAGENT_CHILD_TOOLS
 ] as const
 const original = Object.fromEntries(names.map((name) => [name, process.env[name]]))
 afterEach(async () => {
@@ -49,7 +51,8 @@ describe("preparePiChildLauncher", () => {
       wrapperPath,
       piCliPath,
       credentialRoot: join(root, "credentials"),
-      nodePath: process.execPath
+      nodePath: process.execPath,
+      childToolsPath: piCliPath
     }))
 
     expect(process.env.PI_SUBAGENT_PI_BINARY).toBe(wrapperPath)
@@ -58,6 +61,7 @@ describe("preparePiChildLauncher", () => {
       join(root, "credentials")
     )
     expect(process.env.JINGLER_SUBAGENT_NODE).toBe(process.execPath)
+    expect(process.env.JINGLER_SUBAGENT_CHILD_TOOLS).toBe(piCliPath)
   })
 
   it("launches Pi with only the parent session credential directory", async () => {
@@ -72,7 +76,10 @@ describe("preparePiChildLauncher", () => {
     const output = join(root, "output.json")
     const fakeCli = join(root, "fake-cli.mjs")
     await mkdir(agentDir, { recursive: true })
-    await writeFile(join(agentDir, "auth.json"), "{}\n", { mode: 0o600 })
+    await Promise.all([
+      writeFile(join(agentDir, "auth.json"), "{}\n", { mode: 0o600 }),
+      writeFile(join(agentDir, "capability.json"), "{}\n", { mode: 0o600 })
+    ])
     await writeFile(
       fakeCli,
       `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(output)}, JSON.stringify({ agentDir: process.env.PI_CODING_AGENT_DIR, args: process.argv.slice(2) }))`
@@ -112,7 +119,8 @@ describe("preparePiChildLauncher", () => {
         wrapperPath,
         piCliPath,
         credentialRoot: join(root, "credentials"),
-      nodePath: process.execPath
+      nodePath: process.execPath,
+      childToolsPath: piCliPath
       }))
     )
 

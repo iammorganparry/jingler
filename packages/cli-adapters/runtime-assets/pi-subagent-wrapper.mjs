@@ -17,7 +17,8 @@ const nodePath = required("JINGLER_SUBAGENT_NODE")
 const key = createHash("sha256").update(parentSession).digest("hex")
 const agentDir = join(credentialRoot, key)
 const authPath = join(agentDir, "auth.json")
-await access(authPath)
+const capabilityPath = join(agentDir, "capability.json")
+await Promise.all([access(authPath), access(capabilityPath)])
 if (process.platform !== "win32") {
   const mode = (await stat(authPath)).mode & 0o777
   if (mode !== 0o600) {
@@ -28,7 +29,8 @@ if (process.platform !== "win32") {
 const env = {
   ...process.env,
   ELECTRON_RUN_AS_NODE: "1",
-  PI_CODING_AGENT_DIR: agentDir
+  PI_CODING_AGENT_DIR: agentDir,
+  JINGLER_SUBAGENT_CAPABILITY: capabilityPath
 }
 delete env.JINGLER_SUBAGENT_CREDENTIAL_ROOT
 

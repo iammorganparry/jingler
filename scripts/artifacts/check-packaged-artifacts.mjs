@@ -34,6 +34,7 @@ const deviceSource = execFileSync(
 const requiredDeviceEntries = [
   "./jingler-device.mjs",
   "./runtime-assets/pi-subagent-wrapper.mjs",
+  "./runtime-assets/jingler-child-tools.mjs",
   "./node_modules/pi-subagents/index.ts",
   "./node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
 ]
@@ -45,6 +46,9 @@ const issues = [
   ),
   ...auditRuntimeDependencies(desktopManifest, "desktop"),
   ...auditRuntimeDependencies(deviceManifest, "device agent"),
+  ...(existsSync(resolve(resourcesPath, "subagent-runtime", "jingler-child-tools.mjs"))
+    ? []
+    : ["desktop resources are missing the Jingler child tool bridge"]),
   ...(existsSync(resolve(resourcesPath, "THIRD-PARTY-LICENSES"))
     ? []
     : ["desktop resources are missing THIRD-PARTY-LICENSES"])

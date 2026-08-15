@@ -58,6 +58,8 @@ extraResources:
   # Pi runtime packaged with Jingler instead of an ambient `pi` from PATH.
   - from: ../../packages/cli-adapters/runtime-assets/pi-subagent-wrapper.mjs
     to: subagent-runtime/pi-subagent-wrapper.mjs
+  - from: ../../packages/cli-adapters/runtime-assets/jingler-child-tools.mjs
+    to: subagent-runtime/jingler-child-tools.mjs
   - from: ../../plugins/github-issues
     to: plugins/github-issues
     filter:

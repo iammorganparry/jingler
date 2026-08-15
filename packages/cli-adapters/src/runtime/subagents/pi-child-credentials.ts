@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto"
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import type { ProviderConnection } from "@jingler/core"
+import type {
+  ProviderConnection,
+  SubagentCapability
+} from "@jingler/core"
 import { Data, Effect } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import { toPiCredential } from "../auth/pi-credential-store.js"
@@ -28,7 +31,8 @@ export class PiChildCredentials {
 
   materialize(
     parentPiSessionId: string,
-    connection: ProviderConnection
+    connection: ProviderConnection,
+    capability: SubagentCapability
   ): Effect.Effect<string, PiChildCredentialError> {
     return this.credentials.read(connection.id).pipe(
       Effect.mapError(
@@ -49,21 +53,35 @@ export class PiChildCredentials {
               try: async () => {
                 const directory = this.directory(parentPiSessionId)
                 const authPath = join(directory, "auth.json")
-                const temporary = `${authPath}.${process.pid}.next`
+                const capabilityPath = join(directory, "capability.json")
+                const authTemporary = `${authPath}.${process.pid}.next`
+                const capabilityTemporary = `${capabilityPath}.${process.pid}.next`
                 await mkdir(directory, { recursive: true, mode: 0o700 })
                 await chmod(directory, 0o700)
                 try {
                   await writeFile(
-                    temporary,
+                    authTemporary,
                     `${JSON.stringify({
                       [connection.providerId]: toPiCredential(stored)
                     })}\n`,
                     { encoding: "utf8", flag: "wx", mode: 0o600 }
                   )
-                  await rename(temporary, authPath)
-                  await chmod(authPath, 0o600)
+                  await writeFile(
+                    capabilityTemporary,
+                    `${JSON.stringify(capability)}\n`,
+                    { encoding: "utf8", flag: "wx", mode: 0o600 }
+                  )
+                  await rename(authTemporary, authPath)
+                  await rename(capabilityTemporary, capabilityPath)
+                  await Promise.all([
+                    chmod(authPath, 0o600),
+                    chmod(capabilityPath, 0o600)
+                  ])
                 } catch (error) {
-                  await rm(temporary, { force: true })
+                  await Promise.all([
+                    rm(authTemporary, { force: true }),
+                    rm(capabilityTemporary, { force: true })
+                  ])
                   throw error
                 }
                 return directory
@@ -96,12 +114,3 @@ export class PiChildCredentials {
     })
   }
 }
-
-export const readChildCredential = (
-  root: string,
-  parentPiSessionId: string
-): Promise<unknown> =>
-  readFile(
-    join(root, childCredentialKey(parentPiSessionId), "auth.json"),
-    "utf8"
-  ).then(JSON.parse)
