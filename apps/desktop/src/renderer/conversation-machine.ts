@@ -33,7 +33,9 @@ import type {
   SettledSessionStatus,
   Skill,
   StreamEvent,
-  Subagent
+  Subagent,
+  SubagentFleetControlOutcome,
+  SubagentFleetEvent
 } from "@jingler/core"
 import {
   activityOf,
@@ -189,6 +191,9 @@ export interface ConversationContext {
    * when an agent finishes; never persisted (transcripts.json holds the main turn).
    */
   readonly subagents: ReadonlyArray<Subagent>
+  /** Bounded first-class pi-subagents lifecycle feed for the per-chat Fleet actor. */
+  readonly subagentFleetEvents: ReadonlyArray<SubagentFleetEvent>
+  readonly subagentControlOutcomes: ReadonlyArray<SubagentFleetControlOutcome>
   /**
    * When set, the running turn is a stale-plan re-drive (`Agent.resumePlan`) for
    * this plan id rather than a normal `Agent.run`; cleared when the next normal
@@ -1371,6 +1376,19 @@ export const conversationMachine = setup({
       if (e._tag === "BackgroundTaskStarted") {
         return e.toolUseId === null ? {} : { subagents: retractSubagent(context.subagents, e.toolUseId) }
       }
+      if (e._tag === "SubagentFleetChanged") {
+        return {
+          subagentFleetEvents: [...context.subagentFleetEvents, e.event].slice(-512)
+        }
+      }
+      if (e._tag === "SubagentFleetControlAcknowledged") {
+        return {
+          subagentControlOutcomes: [
+            ...context.subagentControlOutcomes,
+            e.outcome
+          ].slice(-64)
+        }
+      }
       // Sub-agent-scoped events drive the watch-only tabs, not the main turn.
       if (isSubagentEvent(e)) {
         return { subagents: applySubagentEvent(context.subagents, e) }
@@ -2005,6 +2023,8 @@ export const conversationMachine = setup({
       queued: [],
       steeringId: null,
       subagents: [],
+      subagentFleetEvents: [],
+      subagentControlOutcomes: [],
       resumePlanId: null,
       resumePlanRevision: null,
       planActionError: null,

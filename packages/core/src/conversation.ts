@@ -2,6 +2,10 @@ import { Match, Schema } from "effect"
 import { DiffStat } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
 import { FileChangeSet } from "./runtime/file-change.js"
+import {
+  SubagentFleetControlOutcome,
+  SubagentFleetEvent
+} from "./runtime/subagent-fleet.js"
 
 /**
  * Conversation domain — the transcript model plus the normalized `StreamEvent`
@@ -708,6 +712,14 @@ export const StreamEvent = Schema.Union(
     id: Schema.String,
     status: SubagentStatus
   }),
+  /** Live pi-subagents run-tree update; the renderer owns Fleet projection. */
+  Schema.TaggedStruct("SubagentFleetChanged", {
+    event: SubagentFleetEvent
+  }),
+  /** Factual acknowledgement for an exact child lifecycle control request. */
+  Schema.TaggedStruct("SubagentFleetControlAcknowledged", {
+    outcome: SubagentFleetControlOutcome
+  }),
   /** A background task started — it will keep running after this turn ends. */
   Schema.TaggedStruct("BackgroundTaskStarted", {
     id: Schema.String,
@@ -1082,8 +1094,13 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
     // Sub-agent lifecycle events are conversation-level, not part of any single
     // turn — callers route them via `applySubagentEvent`. Ignored here so the
     // fold stays total even if one ever reaches the main message.
-    Match.tag("SubagentStarted", () => msg),
-    Match.tag("SubagentEnded", () => msg),
+    Match.tag(
+      "SubagentStarted",
+      "SubagentEnded",
+      "SubagentFleetChanged",
+      "SubagentFleetControlAcknowledged",
+      () => msg
+    ),
 
     // Background tasks are SESSION-level, not turn-level — that's the whole
     // point of them (they outlive the turn that spawned them). They fold into

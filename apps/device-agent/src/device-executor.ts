@@ -55,6 +55,7 @@ import {
   RemotePublishPrepared,
   Session,
   StreamEvent,
+  SubagentFleetControlRequest,
   WorkspaceTransferCheckpoint
 } from "@jingler/core"
 import type {
@@ -65,7 +66,9 @@ import type {
   RemotePublishPrepared as RemotePublishPreparedValue,
   Session as SessionValue,
   Project as ProjectValue,
-  StreamEvent as StreamEventValue
+  StreamEvent as StreamEventValue,
+  SubagentFleetControlOutcome as SubagentFleetControlOutcomeValue,
+  SubagentFleetControlRequest as SubagentFleetControlRequestValue
 } from "@jingler/core"
 import { loadDeviceE2ePiRuntime } from "./e2e/pi-runtime.js"
 import { Data, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
@@ -111,6 +114,10 @@ const decodePayload = <A, I>(
 }
 
 const ChatIdPayload = Schema.Struct({ chatId: Schema.String })
+const SubagentControlPayload = Schema.Struct({
+  chatId: Schema.String,
+  request: SubagentFleetControlRequest
+})
 const RunPayload = Schema.Struct({
   chatId: Schema.String,
   text: Schema.String,
@@ -216,6 +223,9 @@ export interface DeviceExecutorServices {
     input: Schema.Schema.Type<typeof SteerPayload>
   ) => Promise<unknown>
   readonly stop: (sessionId: string, chatId: string) => Promise<void>
+  readonly controlSubagent: (
+    input: SubagentFleetControlRequestValue
+  ) => Promise<SubagentFleetControlOutcomeValue>
   readonly transcriptPage: (
     input: Schema.Schema.Type<typeof TranscriptPagePayload>
   ) => Promise<unknown>
@@ -280,6 +290,10 @@ export const makeDeviceSessionCommandExecutor = (
         return services.steer(command.sessionId, decodePayload(command, SteerPayload))
       case "Agent.stop":
         return services.stop(command.sessionId, decodePayload(command, ChatIdPayload).chatId)
+      case "Agent.controlSubagent":
+        return services.controlSubagent(
+          decodePayload(command, SubagentControlPayload).request
+        )
       case "Sessions.transcriptPage": {
         const page = await services.transcriptPage(
           decodePayload(command, TranscriptPagePayload)
@@ -540,6 +554,9 @@ export const makeLiveDeviceSessionCommandExecutor = (
     ),
     stop: (sessionId, chatId) => run(
       Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId))
+    ),
+    controlSubagent: (input) => run(
+      Effect.flatMap(AgentRuntime, (runtime) => runtime.controlSubagent(input))
     ),
     transcriptPage: (input) => run(TranscriptStore.listPage(input.chatId, {
       ...(input.before === undefined ? {} : { before: input.before }),

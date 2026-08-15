@@ -1,0 +1,83 @@
+diff --git a/src/extension/index.ts b/src/extension/index.ts
+index fa7a5d60c9a5e7c0f8f41eb8fa2f48b237678816..600fcee5225990ae283b2b0e2bcd88e0e6260d46 100644
+--- a/src/extension/index.ts
++++ b/src/extension/index.ts
+@@ -569,6 +569,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 		events: pi.events,
+ 		getContext: () => state.lastUiContext,
+ 		execute: (id, params, signal, onUpdate, ctx) => executor.executePublic(id, params, signal, onUpdate, ctx),
++		replySupervisor: (requestId, message) => supervisorChannel.reply(requestId, message),
+ 		state,
+ 	});
+ 
+diff --git a/src/extension/rpc.ts b/src/extension/rpc.ts
+index 9dd171b3cfb97d2253fb3244ced4ebed4508df47..b396153b7b5da83d7413d7786d016e94dea2f841 100644
+--- a/src/extension/rpc.ts
++++ b/src/extension/rpc.ts
+@@ -26,7 +26,7 @@ export const SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
+ export const SUBAGENT_RPC_READY_EVENT = "subagents:rpc:v1:ready";
+ export const SUBAGENT_RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
+ 
+-export const SUBAGENT_RPC_METHODS = ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"] as const;
++export const SUBAGENT_RPC_METHODS = ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume", "reply"] as const;
+ export type SubagentRpcMethod = typeof SUBAGENT_RPC_METHODS[number];
+ 
+ export interface SubagentRpcRequestEnvelope {
+@@ -282,6 +282,7 @@ interface RegisterSubagentRpcBridgeOptions {
+ 	resultsDir?: string;
+ 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
+ 	now?: () => number;
++	replySupervisor?: (requestId: string, message: string) => { requestId: string; runId: string; agent: string };
+ 	/** Native live state, projected into the optional public fleet-status capability. */
+ 	state?: SubagentState;
+ }
+@@ -531,6 +532,17 @@ async function handleRequest(
+ ): Promise<unknown> {
+ 	const ctx = options.getContext();
+ 	if (request.method === "ping") return pingData(ctx);
++	if (request.method === "reply") {
++		const input = assertRecordParams(request.params, "reply");
++		if (typeof input.requestId !== "string" || !input.requestId.trim()) {
++			throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty requestId.");
++		}
++		if (typeof input.message !== "string" || !input.message.trim()) {
++			throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty message.");
++		}
++		if (!options.replySupervisor) throw new SubagentRpcError("invalid_state", "Supervisor reply is unavailable.");
++		return options.replySupervisor(input.requestId.trim(), input.message.trim());
++	}
+ 	if (!ctx) throw new SubagentRpcError("no_active_session", "No active extension context for subagent RPC.");
+ 
+ 	if (request.method === "spawn") {
+diff --git a/src/intercom/native-supervisor-channel.ts b/src/intercom/native-supervisor-channel.ts
+index 3e30e8b49e774d82fd62f07acba1266e44e7197a..92aacfc4e4cb6df1e4cdd2850565cf153897c18e 100644
+--- a/src/intercom/native-supervisor-channel.ts
++++ b/src/intercom/native-supervisor-channel.ts
+@@ -634,7 +634,12 @@ function buildParentIntercomTool(pending: Map<string, PendingSupervisorRequest>,
+ 	};
+ }
+ 
+-export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentState, deps: NativeSupervisorChannelDeps = {}): { start: () => void; dispose: () => void; pending: Map<string, PendingSupervisorRequest> } {
++export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentState, deps: NativeSupervisorChannelDeps = {}): {
++	start: () => void;
++	dispose: () => void;
++	pending: Map<string, PendingSupervisorRequest>;
++	reply: (requestId: string, message: string) => { requestId: string; runId: string; agent: string };
++} {
+ 	const watch = deps.watch ?? fs.watch;
+ 	const pending = new Map<string, PendingSupervisorRequest>();
+ 	const seenFiles = new Set<string>();
+@@ -808,6 +813,13 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 			pending.clear();
+ 			seenFiles.clear();
+ 		},
++		reply: (requestId, message) => {
++			const request = pending.get(requestId);
++			if (!request) throw new Error(`No pending supervisor request found for replyTo '${requestId}'.`);
++			writeReply(request, message);
++			pending.delete(request.id);
++			return { requestId: request.id, runId: request.runId, agent: request.agent };
++		},
+ 		pending,
+ 	};
+ }

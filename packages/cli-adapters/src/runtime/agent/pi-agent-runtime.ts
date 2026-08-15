@@ -1,5 +1,12 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
-import { PlanPrd, type FileChangeSet, type PiRunSpec, type StreamEvent } from "@jingler/core"
+import {
+  PlanPrd,
+  type FileChangeSet,
+  type PiRunSpec,
+  type StreamEvent,
+  type SubagentFleetControlOutcome,
+  type SubagentFleetControlRequest
+} from "@jingler/core"
 import { Effect, Option, Queue, Ref, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
@@ -11,6 +18,10 @@ export interface PiSessionHandle {
   readonly modelId: string
   readonly contextWindow: number | null
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
+  readonly subscribeFleet: (listener: (event: StreamEvent) => void) => () => void
+  readonly controlSubagent: (
+    request: SubagentFleetControlRequest
+  ) => Promise<SubagentFleetControlOutcome>
   readonly prompt: (text: string) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>
@@ -135,8 +146,9 @@ const subscribeToSession = (
   handle: PiSessionHandle,
   sink: EventSink,
   planDraft: PlanToolDraftStream
-): (() => void) =>
-  handle.subscribe((event) => {
+): (() => void) => {
+  const unsubscribeFleet = handle.subscribeFleet((event) => sink.emit(event))
+  const unsubscribeSession = handle.subscribe((event) => {
     const providerFailure = piProviderFailure(event)
     if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
     if (
@@ -164,6 +176,11 @@ const subscribeToSession = (
       )
     }
   })
+  return () => {
+    unsubscribeFleet()
+    unsubscribeSession()
+  }
+}
 
 const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): void => {
   Effect.runFork(
@@ -245,10 +262,10 @@ export const makePiAgentRuntime = (factory: PiSessionFactory): Effect.Effect<Age
   Effect.gen(function* () {
     const sessions = yield* Ref.make(new Map<string, PiSessionHandle>())
 
-    const withSession = (
+    const withSession = <Value>(
       id: string,
-      action: (session: PiSessionHandle) => Promise<void>
-    ): Effect.Effect<void, AgentRuntimeError> =>
+      action: (session: PiSessionHandle) => Promise<Value>
+    ): Effect.Effect<Value, AgentRuntimeError> =>
       Ref.get(sessions).pipe(
         Effect.flatMap((active) => {
           const session = active.get(id)
@@ -274,6 +291,10 @@ export const makePiAgentRuntime = (factory: PiSessionFactory): Effect.Effect<Age
     return {
       run: (spec, context) => runSession(factory, sessions, spec, context),
       steer: (id, text) => withSession(id, (session) => session.steer(text)),
-      interrupt: (id) => withSession(id, (session) => session.interrupt())
+      interrupt: (id) => withSession(id, (session) => session.interrupt()),
+      controlSubagent: (request) => withSession(
+        request.parentPiSessionId,
+        (session) => session.controlSubagent(request)
+      )
     }
   })

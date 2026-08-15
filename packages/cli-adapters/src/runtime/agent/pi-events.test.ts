@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { normalizePiEvent, piProviderFailure } from "./pi-events.js"
+import {
+  normalizePiEvent,
+  piProviderFailure,
+  piSupervisorAttention
+} from "./pi-events.js"
 
 describe("pi event normalization", () => {
   it("normalizes streamed text and tool lifecycle", () => {
@@ -197,6 +201,34 @@ describe("pi file-change events", () => {
       diff: { added: 2, removed: 0 },
       preview: "+new",
       fileChanges
+    })
+  })
+
+  it("projects exact supervisor attention from native custom messages", () => {
+    expect(piSupervisorAttention({
+      type: "message_end",
+      message: {
+        role: "custom",
+        customType: "subagent_supervisor_request",
+        content: "Choose an API",
+        display: true,
+        details: {
+          id: "attention-1",
+          reason: "need_decision",
+          expectsReply: true,
+          runId: "run-1",
+          agent: "worker",
+          childIndex: 0
+        },
+        timestamp: 1
+      }
+    })).toEqual({
+      requestId: "attention-1",
+      reason: "need_decision",
+      message: "Choose an API",
+      runId: "run-1",
+      agent: "worker",
+      childIndex: 0
     })
   })
 

@@ -81,6 +81,8 @@ import type {
   SettledSessionStatus,
   Skill,
   StreamEvent,
+  SubagentFleetControlOutcome,
+  SubagentFleetControlRequest,
   TerminalChunk,
   ThemeCatalog,
   ThemeSummary,
@@ -876,6 +878,12 @@ export const rpc = {
     agentId: string
   ): Promise<void> =>
     run((c) => c.Agent.stopSubagent({ sessionId, chatId, agentId })),
+  agentControlSubagent: (
+    sessionId: string,
+    chatId: string,
+    request: SubagentFleetControlRequest
+  ): Promise<SubagentFleetControlOutcome> =>
+    run((c) => c.Agent.controlSubagent({ sessionId, chatId, request })),
   agentSteer: (
     sessionId: string,
     chatId: string,

@@ -40,7 +40,8 @@ describe("publish metadata", () => {
         })
       },
       steer: () => Effect.void,
-      interrupt: () => Effect.void
+      interrupt: () => Effect.void,
+      controlSubagent: () => Effect.die("unused")
     })
     const metadata = await Effect.runPromise(generator.generate({
       ...input,

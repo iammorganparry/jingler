@@ -1,6 +1,7 @@
 import {
   DefaultResourceLoader,
   SettingsManager,
+  type EventBus,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
 import { Data, Effect } from "effect"
@@ -15,6 +16,7 @@ export interface LockedPiResourceInput {
   readonly cwd: string
   readonly agentDir: string
   readonly systemPrompt: string
+  readonly eventBus?: EventBus
 }
 
 /** Build a pi loader whose only prompt/resource input is supplied by Jingler. */
@@ -26,6 +28,7 @@ export const createLockedPiResources = (
       const loader = new DefaultResourceLoader({
         cwd: input.cwd,
         agentDir: input.agentDir,
+        ...(input.eventBus ? { eventBus: input.eventBus } : {}),
         settingsManager: SettingsManager.inMemory({
           packages: [],
           extensions: [],

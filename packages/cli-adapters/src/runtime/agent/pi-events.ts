@@ -1,6 +1,7 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
 import { FileChangeSet, type StreamEvent } from "@jingler/core"
 import { Option, Schema } from "effect"
+import type { PiSubagentSupervisorAttentionInput } from "../subagents/pi-subagent-lifecycle-adapter.js"
 
 const TextResultPart = Schema.Struct({
   type: Schema.Literal("text"),
@@ -21,6 +22,20 @@ const decodeText = Schema.decodeUnknownOption(TextResultPart)
 const decodeContent = Schema.decodeUnknownOption(ToolContent)
 const decodeDetails = Schema.decodeUnknownOption(ToolDetails)
 const decodeTarget = Schema.decodeUnknownOption(ToolTarget)
+const SupervisorAttention = Schema.Struct({
+  role: Schema.Literal("custom"),
+  customType: Schema.Literal("subagent_supervisor_request"),
+  content: Schema.String,
+  details: Schema.Struct({
+    id: Schema.String,
+    reason: Schema.Literal("need_decision", "interview_request", "progress_update"),
+    expectsReply: Schema.Boolean,
+    runId: Schema.String,
+    agent: Schema.String,
+    childIndex: Schema.Number
+  })
+})
+const decodeSupervisorAttention = Schema.decodeUnknownOption(SupervisorAttention)
 
 type ToolResultEvent = Extract<
   AgentSessionEvent,
@@ -75,6 +90,24 @@ const normalizeMessageUpdate = (
     return { _tag: "Thinking", text: "", seconds: null, done: true }
   }
   return null
+}
+
+export const piSupervisorAttention = (
+  event: AgentSessionEvent
+): PiSubagentSupervisorAttentionInput | null => {
+  if (event.type !== "message_end") return null
+  const message = Option.getOrUndefined(decodeSupervisorAttention(event.message))
+  if (!message || !message.details.expectsReply || message.details.reason === "progress_update") {
+    return null
+  }
+  return {
+    requestId: message.details.id,
+    runId: message.details.runId,
+    childIndex: message.details.childIndex,
+    agent: message.details.agent,
+    reason: message.details.reason,
+    message: message.content
+  }
 }
 
 /** Provider errors are provisional until pi settles after its retry policy. */

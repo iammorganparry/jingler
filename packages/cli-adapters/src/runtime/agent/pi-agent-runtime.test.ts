@@ -35,6 +35,23 @@ const spec: PiRunSpec = {
   }
 }
 
+const fleetSeams: Pick<
+  PiSessionHandle,
+  "subscribeFleet" | "controlSubagent"
+> = {
+  subscribeFleet: () => () => undefined,
+  controlSubagent: async (request) => ({
+    version: 1,
+    requestId: request.requestId,
+    runId: request.runId,
+    action: request.action,
+    acknowledged: true,
+    status: "accepted",
+    message: "acknowledged",
+    acknowledgedAt: 1
+  })
+}
+
 const context: AgentRuntimeContext = {
   ...inactiveRuntimeActivity,
   canUseTool: () => Effect.succeed("allow"),
@@ -68,6 +85,7 @@ describe("PiAgentRuntime", () => {
       disposed = true
     })
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-1",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -106,6 +124,7 @@ describe("PiAgentRuntime", () => {
   it("delivers the terminal event before closing a slow consumer", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-slow-consumer",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -144,6 +163,7 @@ describe("PiAgentRuntime", () => {
   it("keeps a provider error provisional when pi retries successfully", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-retry",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -189,6 +209,7 @@ describe("PiAgentRuntime", () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const reconcile = vi.fn(async () => null)
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-provider-failure",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -245,6 +266,7 @@ describe("PiAgentRuntime", () => {
       ]
     } as never
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-plan-draft",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -297,6 +319,7 @@ describe("PiAgentRuntime", () => {
 
   it("surfaces prompt rejection when final reconciliation also rejects", async () => {
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-2",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
@@ -327,6 +350,7 @@ describe("PiAgentRuntime reconciliation", () => {
   it("emits final file reconciliation before the terminal event", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const handle: PiSessionHandle = {
+      ...fleetSeams,
       id: "pi-session-3",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,

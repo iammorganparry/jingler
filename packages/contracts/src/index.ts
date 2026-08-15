@@ -83,6 +83,8 @@ import {
   SettledSessionStatus,
   Skill,
   StreamEvent,
+  SubagentFleetControlOutcome,
+  SubagentFleetControlRequest,
   TerminalChunk,
   TerminalInfo,
   ThemeCatalog,
@@ -1183,6 +1185,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       chatId: Schema.String,
       agentId: Schema.String
+    }
+  }),
+
+  /** Control one exact pi-subagents run and return its reconciled acknowledgement. */
+  Rpc.make("Agent.controlSubagent", {
+    success: SubagentFleetControlOutcome,
+    error: GitError,
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      request: SubagentFleetControlRequest
     }
   }),
 

@@ -107,6 +107,7 @@ import {
   WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema,
   EnvironmentHandoffError,
   StreamEvent as StreamEventSchema,
+  SubagentFleetControlOutcome,
   Message as MessageSchema,
   Session as SessionSchema,
   PublishCheckpoint as PublishCheckpointSchema,
@@ -5144,6 +5145,31 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   // `BackgroundTaskStore` holds.
   "Agent.stopSubagent": ({ sessionId, chatId, agentId }) =>
     BackgroundTaskStore.stopHandled(sessionId, chatId, agentId),
+  "Agent.controlSubagent": ({ sessionId, chatId, request }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      const runtime = yield* AgentRuntime
+      const remote = yield* RemoteSessionService
+      return yield* routeSessionOperation(
+        session,
+        "Agent.controlSubagent",
+        { chatId, request },
+        { execute: () => runtime.controlSubagent(request) },
+        {
+          execute: () => remote.request(
+            session,
+            "Agent.controlSubagent",
+            { chatId, request }
+          ).pipe(
+            Effect.flatMap(Schema.decodeUnknown(SubagentFleetControlOutcome))
+          )
+        }
+      )
+    }).pipe(
+      Effect.mapError(
+        (cause) => new GitError({ message: "Could not control the subagent", cause })
+      )
+    ),
   "Agent.steer": ({ sessionId, chatId, text, images }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);

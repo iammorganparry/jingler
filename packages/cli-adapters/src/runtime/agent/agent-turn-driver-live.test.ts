@@ -85,7 +85,8 @@ describe("AgentRuntimeAdapter", () => {
         {
           run,
           steer: () => Effect.void,
-          interrupt: () => Effect.void
+          interrupt: () => Effect.void,
+          controlSubagent: () => Effect.die("unused")
         },
         Effect.flatMap(AgentTurnDriver, (adapter) => adapter.run("run-1", spec(), ctx))
       )
@@ -127,7 +128,8 @@ describe("AgentRuntimeAdapter", () => {
           Stream.fromEffect(Effect.promise(() => held)).pipe(Stream.drain)
         ),
       steer: () => Effect.void,
-      interrupt
+      interrupt,
+      controlSubagent: () => Effect.die("unused")
     }
     const layer = AgentTurnDriverLive.pipe(
       Layer.provide(Layer.succeed(AgentRuntime, AgentRuntime.of(runtime)))

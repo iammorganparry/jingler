@@ -1028,6 +1028,33 @@ describe("conversationMachine — queue while busy", () => {
  * consequences rather than leaving them to be discovered by a user.
  */
 describe("conversationMachine — talking to the main agent while sub-agents run", () => {
+  it("retains typed pi-subagents lifecycle events for the per-chat Fleet actor", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SEND", text: "fan out" })
+    await waitFor(actor, (snapshot) => snapshot.matches("running"))
+
+    emit({
+      _tag: "SubagentFleetChanged",
+      event: {
+        _tag: "ReconcileAbsent",
+        parentPiSessionId: "pi-parent-1",
+        activeRunIds: [],
+        observedAt: 42
+      }
+    })
+
+    expect(actor.getSnapshot().context.subagentFleetEvents).toEqual([{
+      _tag: "ReconcileAbsent",
+      parentPiSessionId: "pi-parent-1",
+      activeRunIds: [],
+      observedAt: 42
+    }])
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.stop()
+  })
+
   it("stays in running with its tabs live while no Done arrives", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
