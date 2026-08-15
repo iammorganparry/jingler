@@ -117,6 +117,13 @@ describe("runtime diagnostic observer", () => {
         { name: "jingler-browser", status: "healthy" },
         { name: "jingler-memory", status: "failed" }
       ],
+      memory: {
+        mutatingExecutions: 0,
+        advisories: 0,
+        proposals: 0,
+        workflowPolls: 0,
+        failureCandidates: 0
+      },
       terminalCause: "done",
       mutations: [{ callId: "call-1", toolId: "workspace_write", status: "settled", fileChangeSetIds: ["changes-1"] }]
     })

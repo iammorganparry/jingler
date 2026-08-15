@@ -128,6 +128,7 @@ export interface FakeAuthServerOptions {
   readonly unavailable?: boolean;
   readonly acceptedLearningOrganizationIds?: ReadonlyArray<string>;
   readonly reviewProposals?: boolean;
+  readonly toolMemoryPage?: boolean;
   /** Forward production `/api/devices` desktop routes to the hermetic device relay. */
   readonly deviceRelayUrl?: string;
   readonly listenHost?: string;
@@ -361,7 +362,10 @@ const fakeMemoryWorkflowStatus = (
   };
 };
 
-const basePages = (organizationId: string): ReadonlyArray<FakePage> => {
+const basePages = (
+  organizationId: string,
+  includeToolMemory: boolean
+): ReadonlyArray<FakePage> => {
   const other = organizationId !== "org-e2e";
   const prefix = other ? "other-" : "";
   const titlePrefix = other ? "Other organization " : "";
@@ -402,6 +406,24 @@ const basePages = (organizationId: string): ReadonlyArray<FakePage> => {
       authorId: "user:beta",
       sourceIds: [`source:${organizationId}:beta`],
     },
+    ...(includeToolMemory ? [{
+      id: `${prefix}command-printf`,
+      path: `${prefix}command-printf.md`,
+      title: `${titlePrefix}Tool command_execute printf`,
+      revision: 1,
+      body: `# ${titlePrefix}printf command gotcha\n\nTool: command_execute:printf. Quote percent signs in reusable printf templates. [^source-command]`,
+      aliases: ["command_execute:printf"],
+      tags: ["tool-memory"],
+      citations: [
+        {
+          id: "source-command",
+          sourceId: `source:${organizationId}:command-printf`,
+          locator: "L1-L4",
+        },
+      ],
+      authorId: "user:command",
+      sourceIds: [`source:${organizationId}:command-printf`],
+    }] : []),
   ];
 };
 
@@ -747,6 +769,7 @@ const normalizeOptions = (
         unavailable: false,
         acceptedLearningOrganizationIds: [],
         reviewProposals: true,
+        toolMemoryPage: false,
         managedRuntime: "current",
         offloadResult: "success",
         unavailableSocialProviders: [],
@@ -761,6 +784,7 @@ const normalizeOptions = (
         acceptedLearningOrganizationIds:
           value.acceptedLearningOrganizationIds ?? [],
         reviewProposals: value.reviewProposals ?? true,
+        toolMemoryPage: value.toolMemoryPage ?? false,
         managedRuntime: value.managedRuntime ?? "current",
         offloadResult: value.offloadResult ?? "success",
         unavailableSocialProviders: value.unavailableSocialProviders ?? [],
@@ -788,7 +812,9 @@ export const startFakeAuthServer = async (
     const existing = organizations.get(organizationId);
     if (existing !== undefined) return existing;
     const state: FakeOrganizationMemory = {
-      pages: new Map(basePages(organizationId).map((page) => [page.id, page])),
+      pages: new Map(
+        basePages(organizationId, options.toolMemoryPage).map((page) => [page.id, page])
+      ),
       proposals:
         organizationId === "org-e2e" && options.reviewProposals
           ? fixedProposals()
@@ -1378,14 +1404,13 @@ export const startFakeAuthServer = async (
               typeof args.query === "string"
                 ? args.query.trim().toLocaleLowerCase()
                 : "";
+            const queryTerms = query.match(/[a-z0-9_:-]{4,}/gu) ?? [];
             const results = [...state.pages.values()]
-              .filter(
-                (page) =>
-                  query.length > 0 &&
-                  `${page.title} ${page.body} ${page.aliases.join(" ")}`
-                    .toLocaleLowerCase()
-                    .includes(query),
-              )
+              .filter((page) => {
+                const searchable = `${page.title} ${page.body} ${page.aliases.join(" ")}`
+                  .toLocaleLowerCase();
+                return queryTerms.some((term) => searchable.includes(term));
+              })
               .map((page) => ({
                 pageId: page.id,
                 revisionId: `revision:${page.id}:${page.revision}`,

@@ -44,6 +44,8 @@ export interface ToolResultEnvelope {
   readonly preview: string | null
   readonly artifact: ToolArtifactReference | null
   readonly error: { readonly code: ToolErrorCode; readonly message: string; readonly retryable: boolean } | null
+  /** Cited accepted memory surfaced alongside, without changing the tool value. */
+  readonly advisory?: string
   readonly fileChanges?: FileChangeSet
 }
 
@@ -92,9 +94,29 @@ export interface ToolDefinition<Input, Encoded = Input> {
 
 type AnyToolDefinition = ToolDefinition<unknown, unknown>
 
+export interface ToolMemoryFailure {
+  readonly signature: string
+  readonly toolId: string
+  readonly message: string
+}
+
+export interface ToolMemoryHooks {
+  readonly recall: (
+    request: ToolExecutionRequest,
+    risk: ToolRisk
+  ) => Promise<string | null>
+  readonly recordFailure: (
+    request: ToolExecutionRequest,
+    risk: ToolRisk,
+    result: ToolResultEnvelope
+  ) => Promise<void>
+  readonly failures: () => ReadonlyArray<ToolMemoryFailure>
+}
+
 export interface ToolRegistryOptions {
   readonly writeArtifact?: (toolId: string, content: string) => Promise<ToolArtifactReference>
   readonly observer?: ToolExecutionObserver
+  readonly memory?: ToolMemoryHooks
 }
 
 export interface ToolExecutionRequest {
@@ -258,10 +280,54 @@ const executeDefinition = async (
   }
 }
 
+const recallToolMemory = async (
+  options: ToolRegistryOptions,
+  request: ToolExecutionRequest,
+  risk: ToolRisk
+): Promise<string | null> => {
+  if (!options.memory || !mutatingRisk(risk)) return null
+  try {
+    return await options.memory.recall(request, risk)
+  } catch {
+    return null
+  }
+}
+
+const toolMemoryPreflight = (advisory: string): ToolResultEnvelope => ({
+  status: "error",
+  value: null,
+  preview: "Execution paused so accepted tool memory can be reviewed.",
+  artifact: null,
+  error: {
+    code: "forbidden",
+    message: "Review the cited tool memory, then retry or revise this call.",
+    retryable: true
+  },
+  advisory
+})
+
+const recordToolMemoryFailure = async (
+  options: ToolRegistryOptions,
+  request: ToolExecutionRequest,
+  risk: ToolRisk,
+  result: ToolResultEnvelope
+): Promise<void> => {
+  if (!options.memory || result.status === "success") return
+  try {
+    await options.memory.recordFailure(request, risk, result)
+  } catch {
+    // Memory is advisory: recording may never alter the tool result.
+  }
+}
+
 export class ToolRegistry {
   readonly #tools = new Map<string, AnyToolDefinition>()
   readonly #options: ToolRegistryOptions
   #mcpHealth: ReadonlyArray<RuntimeDiagnosticMcpHealth> = []
+  #mutatingExecutions = 0
+  #memoryAdvisories = 0
+  #memoryProposals = 0
+  #memoryWorkflowPolls = 0
 
   constructor(options: ToolRegistryOptions = {}) {
     this.#options = options
@@ -288,6 +354,55 @@ export class ToolRegistry {
 
   mcpHealth(): ReadonlyArray<RuntimeDiagnosticMcpHealth> {
     return this.#mcpHealth
+  }
+
+  toolMemoryFailures(): ReadonlyArray<ToolMemoryFailure> {
+    return this.#options.memory?.failures() ?? []
+  }
+
+  memoryTelemetry(): {
+    readonly mutatingExecutions: number
+    readonly advisories: number
+    readonly proposals: number
+    readonly workflowPolls: number
+    readonly failureCandidates: number
+  } {
+    return {
+      mutatingExecutions: this.#mutatingExecutions,
+      advisories: this.#memoryAdvisories,
+      proposals: this.#memoryProposals,
+      workflowPolls: this.#memoryWorkflowPolls,
+      failureCandidates: this.toolMemoryFailures().length
+    }
+  }
+
+  memoryReflectionPrompt(role: AgentRole): string | null {
+    const memoryActive = [...this.#tools.keys()].some((id) =>
+      id.startsWith("mcp__jingler-memory__memory_propose")
+    )
+    if (
+      !memoryActive ||
+      role === "plan" ||
+      role === "review" ||
+      role === "context-digest" ||
+      this.#mutatingExecutions === 0 ||
+      this.#memoryProposals > 0
+    ) return null
+    const failures = this.toolMemoryFailures().slice(0, 3)
+    return [
+      "<memory-reflection>",
+      "The visible turn is complete. Silently perform the bounded team-memory reflection now.",
+      "Use only the attached memory tools. Emit no prose and do not modify the workspace.",
+      "Propose at most three durable, non-sensitive learnings; a valid result may be no proposal.",
+      "Search/read accepted pages before proposing, and poll every returned workflowId to a terminal state.",
+      ...(failures.length === 0
+        ? []
+        : [
+            "Tool failures worth considering (redacted, bounded evidence — not automatically durable):",
+            ...failures.map(({ signature, message }) => `- ${signature}: ${message}`)
+          ]),
+      "</memory-reflection>"
+    ].join("\n")
   }
 
   capabilitiesFor(role: AgentRole, mode: RuntimeMode): ReadonlyArray<PromptToolCapability> {
@@ -353,27 +468,44 @@ export class ToolRegistry {
       )
     }
 
+    const advisory = await recallToolMemory(this.#options, input, tool.risk)
+    if (advisory !== null) {
+      this.#memoryAdvisories += 1
+      return toolMemoryPreflight(advisory)
+    }
+    let result: ToolResultEnvelope
     try {
       const observation = await startObservation(this.#options, input, tool)
-      const result = await executeDefinition(
+      const executed = await executeDefinition(
         this.#options,
         tool,
         validated.value,
         input
       )
-      return await settleObservation({
+      result = await settleObservation({
         options: this.#options,
         request: input,
         tool,
         state: observation,
-        result
+        result: executed
       })
     } catch (error) {
-      return errorEnvelope(
+      result = errorEnvelope(
         error instanceof ToolError
           ? error
           : new ToolError("execution-failed", "Mutation tracking failed")
       )
     }
+    if (mutatingRisk(tool.risk)) this.#mutatingExecutions += 1
+    if (
+      input.id.startsWith("mcp__jingler-memory__memory_propose") &&
+      result.status === "success"
+    ) this.#memoryProposals += 1
+    if (
+      input.id.startsWith("mcp__jingler-memory__memory_workflow_status") &&
+      result.status === "success"
+    ) this.#memoryWorkflowPolls += 1
+    await recordToolMemoryFailure(this.#options, input, tool.risk, result)
+    return result
   }
 }

@@ -32,6 +32,7 @@ import {
   planDocumentToPlan,
   planStageSemanticFingerprint,
   planTaskProtocolTokens,
+  MEMORY_CONFIG_DEFAULT,
   PLAN_AUTO_RUN_DEFAULT,
   resumePlanPrompt,
   setQuestionAnswers,
@@ -84,6 +85,8 @@ import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
+import { memoryRecallQuery } from "./memory-recall.js"
+import { attachMemoryToSessionSpec } from "./memory-session.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -1059,19 +1062,29 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           ).acquire(sessionId, `${sessionId}:${chatId}`)
           // Jingler owns this pre-turn boundary, so recall is deterministic for
           // every harness (including Codex, which has no context-injecting hook).
-          // Pass only the raw operator text: injected policy/persona notes are not
-          // useful search terms and would dilute a narrow memory query.
+          // The pure query builder adds stable project identity without the
+          // machine-local checkout path; MemoryService redacts and bounds it at
+          // the network boundary.
+          const memoryConfig = workspaceConfig?.memory ?? MEMORY_CONFIG_DEFAULT
+          const memoryAttempted =
+            memoryConfig.enabled &&
+            memoryConfig.organizationId !== null &&
+            memoryConfig.organizationId.length > 0
           const memoryAttachment = yield* memoryService.attachment(
-            operatorText,
+            memoryRecallQuery({
+              operatorText,
+              repo: session.repo,
+              branch: session.branch
+            }),
             `${sessionId}:${chatId}`
           )
           const mcp = {
-            memory: memoryAttachment?.server ?? null,
+            memory: null,
             openConnector: remoteMcpServer(openConnectorServer),
             browser: browserAttachment
           }
 
-          const spec: AgentTurnSpec = {
+          const baseSpec: AgentTurnSpec = {
             sessionId,
             chatId,
             connectionId: chat.connectionId,
@@ -1108,7 +1121,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 primer,
                 planPointer,
                 adhd,
-                memory: memoryAttachment?.instructions ?? null,
                 tools: managedToolsNote(),
                 ask,
                 planProtocol
@@ -1118,8 +1130,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             images,
             mode,
             reasoning: reasoning ?? chat.reasoning ?? null,
-            mcp
+            mcp,
+            memoryAttachmentStatus: !memoryAttempted
+              ? "disabled"
+              : memoryAttachment === null
+                ? "failed"
+                : "available"
           }
+          const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
 
           // Clear the PERSISTED id too, so a crash between here and the harness
           // reporting its new id can't leave the session pointing at a thread

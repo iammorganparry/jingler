@@ -76,6 +76,7 @@ describe("AgentRuntimeAdapter", () => {
       { _tag: "Done", costUsd: 0, tokens: 2 }
     ]
     const run = vi.fn<AgentRuntimeShape["run"]>((_spec, _context) => Stream.fromIterable(events))
+    const turnSpec = { ...spec(), memoryAttachmentStatus: "failed" as const }
     const ctx = context()
     const emit = vi.mocked(ctx.emit)
     const registerTurnSteer = vi.mocked(ctx.registerTurnSteer!)
@@ -87,7 +88,7 @@ describe("AgentRuntimeAdapter", () => {
           steer: () => Effect.void,
           interrupt: () => Effect.void
         },
-        Effect.flatMap(AgentTurnDriver, (adapter) => adapter.run("run-1", spec(), ctx))
+        Effect.flatMap(AgentTurnDriver, (adapter) => adapter.run("run-1", turnSpec, ctx))
       )
     )
 
@@ -97,7 +98,9 @@ describe("AgentRuntimeAdapter", () => {
       modelId: "anthropic/claude-test",
       prompt: "Inspect the repository"
     })
+    expect(run.mock.calls[0]?.[0]).not.toHaveProperty("memoryAttachmentStatus")
     expect(run.mock.calls[0]?.[1].mcp?.browser?.name).toBe("jingler-browser")
+    expect(run.mock.calls[0]?.[1].memoryAttachmentStatus).toBe("failed")
     expect(run.mock.calls[0]?.[1].publishEvent).toBe(ctx.emit)
     expect(run.mock.calls[0]?.[1].registerBackgroundStop).toBe(ctx.registerBackgroundStop)
     expect(emit.mock.calls.map(([event]) => event._tag)).toEqual(["Started", "Assistant", "Done"])

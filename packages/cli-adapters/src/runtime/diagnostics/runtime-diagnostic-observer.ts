@@ -65,6 +65,7 @@ const initialSnapshot = (
   mutations: [],
   fileChangeStatuses: [],
   mcpHealth: mcpHealth(input.registry, input.manifest.activeTools),
+  memory: input.registry.memoryTelemetry(),
   terminalCause: null,
   updatedAt: now().toISOString()
 })
@@ -149,7 +150,11 @@ export const makeRuntimeDiagnosticObserver = (input: ObserverInput): RuntimeDiag
   return {
     initial: current,
     observe: (event) => {
-      current = { ...recordEvent(current, event, input.registry), updatedAt: now().toISOString() }
+      current = {
+        ...recordEvent(current, event, input.registry),
+        memory: input.registry.memoryTelemetry(),
+        updatedAt: now().toISOString()
+      }
       return current
     }
   }

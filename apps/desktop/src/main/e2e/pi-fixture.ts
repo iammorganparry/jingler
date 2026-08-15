@@ -76,6 +76,8 @@ const MODERN_CONFIG =
   "export const mode = 'modern'\nexport const retries = 2\nexport const timeout = 1_000\n"
 const MEMORY_MARKDOWN =
   "# Refund rate limiting\n\nRefund retries share one team limiter so bursts cannot multiply across workers."
+const PI_MEMORY_MARKDOWN =
+  "# Safe printf templates\n\nReusable printf templates quote percent signs before command execution."
 
 const MemoryToolResult = Schema.Struct({
   structuredContent: Schema.optional(
@@ -383,6 +385,56 @@ const memoryResponse = (
     }
   }
   return fauxAssistantMessage("Memory proposal workflow completed through pi.")
+}
+
+const memoryLifecycleResponse = (
+  context: PiContext
+): ReturnType<typeof fauxAssistantMessage> => {
+  const lastMessage = context.messages.at(-1)
+  if (lastMessage?.role !== "toolResult") {
+    return callTool(
+      COMMAND_TOOL,
+      { command: "printf -- 'memory lifecycle complete\\n'" },
+      "memory-lifecycle-command"
+    )
+  }
+  if (lastMessage.toolName === COMMAND_TOOL) {
+    if (toolResultText(lastMessage).includes("<tool-memory")) {
+      return callTool(
+        COMMAND_TOOL,
+        { command: "printf -- 'memory lifecycle complete\\n'" },
+        "memory-lifecycle-command-retry"
+      )
+    }
+    return callTool(
+      MEMORY_PROPOSE_TOOL,
+      {
+        pageId: "pi-command-learning",
+        baseRevisionId: "new",
+        markdown: PI_MEMORY_MARKDOWN
+      },
+      "memory-lifecycle-propose-advised"
+    )
+  }
+  const data = memoryToolData(context)
+  if (lastMessage.toolName === MEMORY_PROPOSE_TOOL && data?.workflowId !== undefined) {
+    return callTool(
+      MEMORY_WORKFLOW_TOOL,
+      { workflowId: data.workflowId },
+      "memory-lifecycle-workflow"
+    )
+  }
+  const advisoryObserved = context.messages.some(
+    (message) =>
+      message.role === "toolResult" &&
+      message.toolName === COMMAND_TOOL &&
+      toolResultText(message).includes("<tool-memory")
+  )
+  return fauxAssistantMessage(
+    advisoryObserved
+      ? "PI memory lifecycle completed with a cited tool advisory."
+      : "PI memory lifecycle completed without a tool advisory."
+  )
 }
 
 const fileBrowserResponse = (
@@ -697,6 +749,8 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
         }),
         fauxAssistantMessage("Managed skill loaded through pi.")
       ]
+    case "memory-lifecycle":
+      return Array.from({ length: 8 }, () => memoryLifecycleResponse)
     case "memory-recall":
       return [
         fauxAssistantMessage(

@@ -23,18 +23,33 @@ const CommandResult = Schema.Struct({
 const decodeCommandResult = Schema.decodeUnknownOption(CommandResult)
 
 const renderResult = (result: ToolResultEnvelope): string => {
-  if (result.error) return `${result.error.code}: ${result.error.message}`
-  if (result.preview !== null) return result.preview
-  if (result.value === null) return result.status
-  const command = Option.getOrNull(decodeCommandResult(result.value))
-  if (command !== null) {
-    const output = [command.stdout, command.stderr]
-      .filter((stream) => stream.trim().length > 0)
-      .join("\n")
-      .trimEnd()
-    return output.length > 0 ? output : `Command exited ${command.exitCode}`
+  let value: string
+  if (result.error) {
+    value = `${result.error.code}: ${result.error.message}`
+  } else if (result.preview !== null) {
+    value = result.preview
+  } else if (result.value === null) {
+    value = result.status
+  } else {
+    const command = Option.getOrNull(decodeCommandResult(result.value))
+    if (command === null) {
+      value = JSON.stringify(result.value)
+    } else {
+      const output = [command.stdout, command.stderr]
+        .filter((stream) => stream.trim().length > 0)
+        .join("\n")
+        .trimEnd()
+      value = output.length > 0 ? output : `Command exited ${command.exitCode}`
+    }
   }
-  return JSON.stringify(result.value)
+  return result.advisory === undefined ? value : `${result.advisory}\n\n${value}`
+}
+
+export const isMemoryReflectionTool = (toolId: string): boolean =>
+  /^mcp__jingler-memory__memory_(?:search|read|propose|workflow_status)$/u.test(toolId)
+
+export interface PiToolBridgeOptions {
+  readonly allowTool?: (toolId: string) => boolean
 }
 
 interface PiToolExecution {
@@ -45,6 +60,7 @@ interface PiToolExecution {
   readonly toolCallId: string
   readonly parameters: unknown
   readonly signal: AbortSignal | undefined
+  readonly allowed: boolean
   readonly onUpdate:
     | ((result: AgentToolResult<ToolResultEnvelope>) => void)
     | undefined
@@ -53,7 +69,7 @@ interface PiToolExecution {
 const executeTool = async (
   input: PiToolExecution
 ): Promise<AgentToolResult<ToolResultEnvelope>> => {
-  const { registry, spec, context, id, toolCallId, parameters, signal, onUpdate } =
+  const { registry, spec, context, id, toolCallId, parameters, signal, allowed, onUpdate } =
     input
   const risk = registry.riskFor(id)
   const request: ToolExecutionRequest = {
@@ -76,6 +92,10 @@ const executeTool = async (
         }
       })
   }
+  if (!allowed) {
+    const denied = await Effect.runPromise(registry.deny(request))
+    return { content: [{ type: "text", text: renderResult(denied) }], details: denied }
+  }
   const requiresPermission = risk !== null && risk !== "read"
   const permitted = requiresPermission
     ? await Effect.runPromise(
@@ -94,7 +114,8 @@ const executeTool = async (
 export const createPiTools = (
   registry: ToolRegistry,
   spec: Pick<PiRunSpec, "role" | "mode">,
-  context: AgentRuntimeContext
+  context: AgentRuntimeContext,
+  options: PiToolBridgeOptions = {}
 ): ReadonlyArray<PiToolDefinition> =>
   registry.capabilitiesFor(spec.role, spec.mode).map((capability) => {
     const input = registry.inputSchemaFor(capability.id)
@@ -117,6 +138,7 @@ export const createPiTools = (
           toolCallId,
           parameters,
           signal,
+          allowed: options.allowTool?.(capability.id) ?? true,
           onUpdate
         })
     })

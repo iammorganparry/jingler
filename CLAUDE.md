@@ -178,6 +178,24 @@ creates a session. A workspace references a stable project id and chooses direct
 isolated worktree. Legacy sessions are backfilled to projects without moving their worktree or
 changing transcript identity.
 
+### PI shared-memory boundary
+
+PI memory is Jingler-owned, not model-initiative-only. `AgentRunner` attaches the
+memory MCP server by role and performs bounded pre-turn recall; command-led turns
+skip recall. `ToolRegistry` performs a second bounded lookup for execute-risk
+tool signatures using only tool ID plus normalized binary/subcommand — never
+arguments, paths, or values. A matching tool memory pauses the first invocation
+with a retryable preflight result so PI can revise or retry before execution;
+lookup failures remain fail-open.
+
+Mutating PI turns with no proposal receive one hidden reflection nudge before
+settlement. Agents propose through `mcp__jingler-memory__memory_propose` and poll
+`memory_workflow_status`; raw settled transcripts are not uploaded. Review is
+recall-only, context-digest is excluded, and memory health/telemetry belongs in
+Runtime diagnostics. Keep these seams centralized; do not add per-provider or
+per-tool memory implementations. See `docs/shared-memory.md` for the complete
+runtime and operations contract.
+
 The composer supports Claude and Codex only. Its model, permission mode, and reasoning controls
 are derived from the selected harness capability catalogue. Enhanced Plan belongs to the selected
 agent: that same harness executes the approved plan, records progress, and submits complete

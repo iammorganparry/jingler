@@ -26,7 +26,7 @@ import { AgentRuntimeError } from "./agent-runtime.js"
 import { createJinglerControlTools } from "./pi-jingler-tools.js"
 import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-resources.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
-import { createPiTools } from "./pi-tool-bridge.js"
+import { createPiTools, isMemoryReflectionTool } from "./pi-tool-bridge.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 
 export class PiSessionFactoryError extends Data.TaggedError("PiSessionFactoryError")<{
@@ -166,6 +166,7 @@ interface EmbeddedSessionInput {
 interface EmbeddedSession {
   readonly result: CreateAgentSessionResult
   readonly contextWindow: number
+  readonly setMemoryReflectionActive: (active: boolean) => void
 }
 
 const createEmbeddedSession = (
@@ -187,7 +188,13 @@ const createEmbeddedSession = (
           message: `Certified model is unavailable: ${spec.modelId}`
         })
       }
-      const customTools = registry ? [...createPiTools(registry, spec, context)] : []
+      let memoryReflectionActive = false
+      const customTools = registry
+        ? [...createPiTools(registry, spec, context, {
+            allowTool: (toolId) =>
+              !memoryReflectionActive || isMemoryReflectionTool(toolId)
+          })]
+        : []
       const thinkingLevel = thinkingLevelFor(spec.reasoning)
       const result = await (options.createSession ?? createAgentSession)({
         cwd: spec.cwd,
@@ -208,7 +215,13 @@ const createEmbeddedSession = (
         tools: customTools.map((tool) => tool.name),
         customTools
       })
-      return { result, contextWindow: model.contextWindow }
+      return {
+        result,
+        contextWindow: model.contextWindow,
+        setMemoryReflectionActive: (active) => {
+          memoryReflectionActive = active
+        }
+      }
     },
     catch: (cause) =>
       new AgentRuntimeError({
@@ -226,11 +239,12 @@ interface SessionHandleInput {
   readonly spec: PiRunSpec
   readonly tracker: FileChangeTracker | undefined
   readonly snapshot: WorktreeSnapshot | null
+  readonly registry: ToolRegistry | undefined
   readonly observe?: (event: StreamEvent) => void
 }
 
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
-  const { embedded, spec, tracker, snapshot, observe } = input
+  const { embedded, spec, tracker, snapshot, registry, observe } = input
   const { session } = embedded.result
   return {
     id: session.sessionFile ?? session.sessionId,
@@ -252,6 +266,12 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       return { costUsd: stats.cost, tokens: stats.tokens.total }
     },
     ...(observe ? { observe } : {}),
+    ...(registry
+      ? {
+          memoryReflectionPrompt: () => registry.memoryReflectionPrompt(spec.role),
+          setMemoryReflectionActive: embedded.setMemoryReflectionActive
+        }
+      : {}),
     ...(tracker && snapshot
       ? {
           reconcile: () => Effect.runPromise(tracker.reconcile(snapshot, spec.cwd))
@@ -317,7 +337,7 @@ const createSessionHandle = (
           Effect.runFork(recordDiagnostic(diagnostic.observe(event)))
         }
       : undefined
-    return toHandle({ embedded, spec, tracker, snapshot, observe })
+    return toHandle({ embedded, spec, tracker, snapshot, registry, observe })
   })
 
 /** Construct the real embedded pi session from Jingler-owned contracts only. */

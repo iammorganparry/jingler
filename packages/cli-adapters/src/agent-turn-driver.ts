@@ -31,6 +31,8 @@ export interface AgentTurnSpec extends Omit<PiRunSpec, "runId"> {
   /** Secret-bearing, main-process-only capabilities; never persisted or sent over RPC. */
   /** Run-scoped Jingler MCP capabilities, kept distinct so source risk cannot drift. */
   readonly mcp?: JinglerMcpAttachments
+  /** Distinguishes disabled memory from an attempted attachment that failed open. */
+  readonly memoryAttachmentStatus?: "disabled" | "available" | "failed"
 }
 
 /** What the agent is asking permission to do, surfaced before it acts. */

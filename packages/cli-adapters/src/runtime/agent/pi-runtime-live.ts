@@ -4,6 +4,7 @@ import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
 import { EnvironmentService } from "../../environment.js"
 import { SecretStore } from "../../secret-store.js"
+import { MemoryAttachmentService } from "../../memory-session.js"
 import { makeOffloadCommandRouterWithOwnedDevice } from "../../offload-command-router.js"
 import { makeOwnedDeviceOffloadPort } from "../../owned-device-offload.js"
 import { RemoteSessionService } from "../../remote-session.js"
@@ -23,6 +24,7 @@ import { ImportedMcpService } from "../resources/imported-mcp-service.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
+import { makeToolMemory } from "../tools/tool-memory.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
 import {
   makeWorkspaceMutationPort,
@@ -61,6 +63,7 @@ export const makePiAgentRuntimeLive = (
     const importedMcp = yield* ImportedMcpService
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
+    const memory = yield* Effect.serviceOption(MemoryAttachmentService)
     const workspace = yield* makeWorkspaceInspectionPort
     const webSearch = yield* Effect.serviceOption(WebSearchService)
     const browserControl = yield* Effect.serviceOption(BrowserControlPort)
@@ -193,6 +196,9 @@ export const makePiAgentRuntimeLive = (
               )
             },
             registryOptions: {
+              ...(Option.isSome(memory)
+                ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }
+                : {}),
               observer: createMutationObserver({
                 cwd: spec.cwd,
                 runId: spec.runId,
