@@ -128,6 +128,7 @@ describe("pi session creation", () => {
     const handle = await Effect.runPromise(factory.create(makeSpec(root), {} as never))
     const received = captured[0]
     expect(handle.id).toBe("/tmp/pi-session.jsonl")
+    expect(handle.parentPiSessionId).toBe("pi-session")
     expect(handle.contextWindow).toBe(200_000)
     expect(received?.tools).toContain("jingler_ask_question")
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([

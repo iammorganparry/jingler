@@ -37,8 +37,9 @@ const spec: PiRunSpec = {
 
 const fleetSeams: Pick<
   PiSessionHandle,
-  "subscribeFleet" | "controlSubagent" | "subagentFleetSnapshot" | "subagentTranscript"
+  "parentPiSessionId" | "subscribeFleet" | "controlSubagent" | "subagentFleetSnapshot" | "subagentTranscript"
 > = {
+  parentPiSessionId: "pi-session-internal",
   subscribeFleet: () => () => undefined,
   subagentFleetSnapshot: async () => ({
     version: 1,
@@ -325,6 +326,92 @@ describe("PiAgentRuntime", () => {
     expect(
       events.flatMap((event) => (event._tag === "PlanDraft" ? [event.draft.phase] : []))
     ).toEqual(["composing", "complete"])
+  })
+
+  it("retains a detached Fleet across parent settlement and persisted continuation", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    let childActive = true
+    const dispose = vi.fn()
+    const prompt = vi.fn(async () => {
+      listener?.({ type: "agent_settled" })
+    })
+    const controlSubagent = vi.fn(fleetSeams.controlSubagent)
+    const handle: PiSessionHandle = {
+      ...fleetSeams,
+      id: "/sessions/parent.jsonl",
+      parentPiSessionId: "pi-parent-internal",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt,
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose,
+      subagentFleetSnapshot: async () => ({
+        version: 1,
+        parentPiSessionId: "pi-parent-internal",
+        generatedAt: Date.now(),
+        totalActive: childActive ? 1 : 0,
+        omitted: 0,
+        activeCapacity: { used: childActive ? 1 : 0, limit: 4 },
+        nodes: []
+      }),
+      subagentTranscript: async () => [{
+        id: "message-1",
+        role: "assistant",
+        parts: [{ _tag: "Text", text: "still working" }],
+        streaming: false,
+        createdAt: "2026-08-10T00:00:00.000Z"
+      }],
+      controlSubagent,
+      usage: () => ({ costUsd: 0, tokens: 1 })
+    }
+    const create = vi.fn(() => Effect.succeed(handle))
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
+    )
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
+    expect(dispose).not.toHaveBeenCalled()
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("/sessions/parent.jsonl")))
+      .resolves.toMatchObject({ totalActive: 1 })
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("pi-parent-internal")))
+      .resolves.toMatchObject({ totalActive: 1 })
+    await expect(Effect.runPromise(
+      runtime.subagentTranscript("pi-parent-internal", "child-1")
+    )).resolves.toHaveLength(1)
+    await Effect.runPromise(runtime.controlSubagent({
+      version: 1,
+      requestId: "control-1",
+      parentPiSessionId: "pi-parent-internal",
+      runId: "child-1",
+      action: "stop",
+      message: null,
+      replyTo: null
+    }))
+    expect(controlSubagent).toHaveBeenCalledOnce()
+
+    await Effect.runPromise(Stream.runCollect(runtime.run({
+      ...spec,
+      runId: "run-2",
+      prompt: "continue",
+      piSessionId: "/sessions/parent.jsonl"
+    }, context)))
+    expect(create).toHaveBeenCalledOnce()
+    expect(prompt).toHaveBeenCalledTimes(2)
+    expect(dispose).not.toHaveBeenCalled()
+
+    childActive = false
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
+    const missing = await Effect.runPromise(
+      Effect.either(runtime.subagentFleetSnapshot("pi-parent-internal"))
+    )
+    expect(missing._tag).toBe("Left")
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("/sessions/parent.jsonl")))
+      .rejects.toMatchObject({ message: "pi session is not active: /sessions/parent.jsonl" })
   })
 
   it("surfaces prompt rejection when final reconciliation also rejects", async () => {

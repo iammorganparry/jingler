@@ -9,14 +9,17 @@ import {
   type SubagentFleetControlRequest,
   type SubagentFleetSnapshot
 } from "@jingler/core"
-import { Effect, Option, Queue, Ref, Schema, Stream } from "effect"
+import { Effect, Option, Queue, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { normalizePiEvent, piProviderFailure } from "./pi-events.js"
 
 export interface PiSessionHandle {
+  /** Resumable Pi session file/id persisted by Jingler. */
   readonly id: string
+  /** Internal Pi session identity used by pi-subagents lifecycle events. */
+  readonly parentPiSessionId: string
   readonly modelId: string
   readonly contextWindow: number | null
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
@@ -207,17 +210,117 @@ const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): 
   )
 }
 
+interface RetainedPiSession {
+  readonly handle: PiSessionHandle
+  readonly aliases: ReadonlySet<string>
+  activeTurns: number
+  reapTimer: ReturnType<typeof setTimeout> | null
+  disposing: boolean
+}
+
+class PiSessionRegistry {
+  readonly #aliases = new Map<string, RetainedPiSession>()
+
+  constructor(
+    readonly factory: PiSessionFactory,
+    readonly reapIntervalMs: number
+  ) {}
+
+  acquire(
+    spec: PiRunSpec,
+    context: AgentRuntimeContext
+  ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
+    const retained = spec.piSessionId === null
+      ? undefined
+      : this.#aliases.get(spec.piSessionId)
+    if (retained) {
+      if (retained.disposing || retained.activeTurns !== 0) {
+        return Effect.fail(new AgentRuntimeError({
+          reason: "runtime",
+          message: `pi session is already active: ${spec.piSessionId}`
+        }))
+      }
+      if (retained.handle.modelId !== String(spec.modelId)) {
+        return Effect.fail(new AgentRuntimeError({
+          reason: "runtime",
+          message: "Cannot resume a retained Pi session with a different model"
+        }))
+      }
+      if (retained.reapTimer !== null) clearTimeout(retained.reapTimer)
+      retained.reapTimer = null
+      retained.activeTurns = 1
+      return Effect.succeed(retained)
+    }
+    return this.factory.create(spec, context).pipe(
+      Effect.map((handle) => {
+        const aliases = new Set([handle.id, handle.parentPiSessionId])
+        const record: RetainedPiSession = {
+          handle,
+          aliases,
+          activeTurns: 1,
+          reapTimer: null,
+          disposing: false
+        }
+        for (const alias of aliases) this.#aliases.set(alias, record)
+        return record
+      })
+    )
+  }
+
+  lookup(id: string): PiSessionHandle | undefined {
+    return this.#aliases.get(id)?.handle
+  }
+
+  async release(record: RetainedPiSession): Promise<void> {
+    record.activeTurns = Math.max(0, record.activeTurns - 1)
+    if (record.activeTurns > 0 || record.disposing) return
+    await this.#reconcileLifetime(record)
+  }
+
+  async #reconcileLifetime(record: RetainedPiSession): Promise<void> {
+    if (record.activeTurns > 0 || record.disposing) return
+    try {
+      const snapshot = await record.handle.subagentFleetSnapshot()
+      if (snapshot.totalActive === 0) {
+        await this.#dispose(record)
+        return
+      }
+    } catch {
+      // A failed status read is not evidence that detached children are gone.
+    }
+    if (record.reapTimer !== null) clearTimeout(record.reapTimer)
+    record.reapTimer = setTimeout(() => {
+      record.reapTimer = null
+      void this.#reconcileLifetime(record)
+    }, this.reapIntervalMs)
+    record.reapTimer.unref?.()
+  }
+
+  async #dispose(record: RetainedPiSession): Promise<void> {
+    if (record.disposing) return
+    record.disposing = true
+    if (record.reapTimer !== null) clearTimeout(record.reapTimer)
+    record.reapTimer = null
+    try {
+      await record.handle.dispose()
+    } finally {
+      for (const alias of record.aliases) {
+        if (this.#aliases.get(alias) === record) this.#aliases.delete(alias)
+      }
+    }
+  }
+}
+
 const runSession = (
-  factory: PiSessionFactory,
-  sessions: Ref.Ref<Map<string, PiSessionHandle>>,
+  sessions: PiSessionRegistry,
   spec: PiRunSpec,
   context: AgentRuntimeContext
 ): Stream.Stream<StreamEvent, AgentRuntimeError> =>
   Stream.unwrap(
     Effect.gen(function* () {
       const queue = yield* Queue.unbounded<StreamEvent>()
-      const handle = yield* factory.create(spec, context)
-      yield* Ref.update(sessions, (current) => new Map(current).set(handle.id, handle))
+      const record = yield* sessions.acquire(spec, context)
+      const handle = record.handle
       const sink = makeEventSink(queue, handle.observe)
       const planDraft = createPlanToolDraftStream(() => `plan-draft:${spec.runId}`)
       sink.emit({
@@ -231,22 +334,10 @@ const runSession = (
         Stream.takeUntil((event) => event._tag === "Done" || event._tag === "Failed"),
         Stream.ensuring(
           Queue.shutdown(queue).pipe(
-            Effect.zipRight(
-              Effect.promise(async () => {
-                try {
-                  unsubscribe()
-                } finally {
-                  await handle.dispose()
-                }
-              })
-            ),
-            Effect.zipRight(
-              Ref.update(sessions, (current) => {
-                const next = new Map(current)
-                next.delete(handle.id)
-                return next
-              })
-            )
+            Effect.zipRight(Effect.promise(async () => {
+              unsubscribe()
+              await sessions.release(record)
+            }))
           )
         )
       )
@@ -262,38 +353,46 @@ const runSession = (
     )
   )
 
-export const makePiAgentRuntime = (factory: PiSessionFactory): Effect.Effect<AgentRuntimeShape> =>
-  Effect.gen(function* () {
-    const sessions = yield* Ref.make(new Map<string, PiSessionHandle>())
+export interface PiAgentRuntimeOptions {
+  /** Internal deterministic-test seam; production uses conservative polling. */
+  readonly retainedSessionPollMs?: number
+}
+
+export const makePiAgentRuntime = (
+  factory: PiSessionFactory,
+  options: PiAgentRuntimeOptions = {}
+): Effect.Effect<AgentRuntimeShape> =>
+  Effect.sync(() => {
+    const sessions = new PiSessionRegistry(
+      factory,
+      options.retainedSessionPollMs ?? 1_000
+    )
 
     const withSession = <Value>(
       id: string,
       action: (session: PiSessionHandle) => Promise<Value>
-    ): Effect.Effect<Value, AgentRuntimeError> =>
-      Ref.get(sessions).pipe(
-        Effect.flatMap((active) => {
-          const session = active.get(id)
-          return session
-            ? Effect.tryPromise({
-                try: () => action(session),
-                catch: (cause) =>
-                  new AgentRuntimeError({
-                    reason: "runtime",
-                    message: "pi session operation failed",
-                    cause
-                  })
+    ): Effect.Effect<Value, AgentRuntimeError> => {
+      const session = sessions.lookup(id)
+      return session
+        ? Effect.tryPromise({
+            try: () => action(session),
+            catch: (cause) =>
+              new AgentRuntimeError({
+                reason: "runtime",
+                message: "pi session operation failed",
+                cause
               })
-            : Effect.fail(
-                new AgentRuntimeError({
-                  reason: "runtime",
-                  message: `pi session is not active: ${id}`
-                })
-              )
-        })
-      )
+          })
+        : Effect.fail(
+            new AgentRuntimeError({
+              reason: "runtime",
+              message: `pi session is not active: ${id}`
+            })
+          )
+    }
 
     return {
-      run: (spec, context) => runSession(factory, sessions, spec, context),
+      run: (spec, context) => runSession(sessions, spec, context),
       steer: (id, text) => withSession(id, (session) => session.steer(text)),
       interrupt: (id) => withSession(id, (session) => session.interrupt()),
       controlSubagent: (request) => withSession(

@@ -271,6 +271,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
   const { session } = embedded.result
   return {
     id: session.sessionFile ?? session.sessionId,
+    parentPiSessionId: session.sessionId,
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
     subscribe: (listener) => session.subscribe((event) => {
