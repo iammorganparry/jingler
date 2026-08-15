@@ -39,7 +39,8 @@ import {
   getConversationActor,
   rehomeSharedPlan
 } from "./conversation-registry.js"
-import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
+import { clearDraft, getDraft, markDraftSeeded, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
+import { diffCounts, setSessionDiff, useSessionDiffs } from "./diff-presence.js"
 import { takeFirstMessage } from "./first-message-store.js"
 import {
   codeReferenceDisplayLabel,
@@ -426,9 +427,26 @@ export function ConversationPane({
   //
   // `sendPrompt` (below) itself consumes `initialPrompt` and clears the draft, so
   // the auto-send path never also leaves a stray seeded draft behind.
+  const liveDiffs = useSessionDiffs()
+
+  // Catch changes made outside agent turns (editor saves, manual commits): the
+  // per-ToolEnd refresh can't see them, so re-read the worktree diff whenever
+  // this session's pane becomes active.
+  useEffect(() => {
+    if (!session.worktreePath) return
+    void rpc
+      .sessionsDiff(session.id)
+      .then((patch) => setSessionDiff(session.id, diffCounts(patch)))
+      .catch(() => {})
+  }, [session.id, session.worktreePath])
+
   useEffect(() => {
     const firstTurnImages = takeFirstMessage(session.id)
     if (firstTurnImages !== undefined) {
+      // The prompt goes straight to the agent — latch the seed key so a re-run
+      // of this effect (a SESSION_UPDATED can land before `initialPrompt`'s
+      // async clear) cannot resurrect the sent text into the composer.
+      markDraftSeeded(session.id)
       const text = session.initialPrompt ?? ""
       if (text.trim() || firstTurnImages.length > 0) {
         sendPrompt(text, firstTurnImages.length > 0 ? firstTurnImages : undefined)
@@ -931,6 +949,7 @@ export function ConversationPane({
           branch={session.branch}
           branchPending={session.semanticBranchPending === true}
           repo={session.repo}
+          diff={liveDiffs[session.id] ?? null}
           environments={environments}
           environmentId={session.environmentId}
           environmentPending={environmentMutation.isPending}

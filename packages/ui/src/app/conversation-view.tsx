@@ -89,6 +89,8 @@ export interface ConversationViewProps {
   branchPending?: boolean
   /** Repository backing the session, shown at the composer's bottom-left. */
   repo?: string
+  /** Live uncommitted worktree state for the composer's dirty badge. */
+  diff?: { files: number; added: number; removed: number } | null
   environments?: ReadonlyArray<import("@jingler/core").Environment>
   environmentId?: string
   environmentPending?: boolean
@@ -242,6 +244,7 @@ export function ConversationView({
   branch,
   branchPending = false,
   repo,
+  diff = null,
   environments,
   environmentId,
   environmentPending,
@@ -644,6 +647,7 @@ export function ConversationView({
                 branch={branch}
                 branchPending={branchPending}
                 repo={repo}
+                diff={diff}
                 environments={environments}
                 environmentId={environmentId}
                 environmentPending={environmentPending}

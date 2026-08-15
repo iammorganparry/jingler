@@ -8,6 +8,7 @@ import {
   clearDraft,
   EMPTY_DRAFT,
   getDraft,
+  markDraftSeeded,
   seedDraftOnce,
   setDraft
 } from "./draft-store.js"
@@ -190,6 +191,15 @@ describe("draft-store", () => {
 
       seedDraftOnce("s1", "Fix issue #42")
       expect(getDraft("s1")).toBe(EMPTY_DRAFT)
+    })
+
+    it("never seeds after the auto-send path latched the key", () => {
+      // A new session's first turn auto-sends `initialPrompt` without seeding.
+      // A SESSION_UPDATED can re-run the mount effect BEFORE the prompt's async
+      // clear lands — the latch keeps the sent text out of the composer.
+      markDraftSeeded("s1")
+      seedDraftOnce("c1", "Fix issue #42", "s1")
+      expect(getDraft("c1")).toBe(EMPTY_DRAFT)
     })
 
     it("offers a linked-issue prompt to only one chat in the session", () => {
