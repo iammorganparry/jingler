@@ -293,6 +293,19 @@ const recallToolMemory = async (
   }
 }
 
+const toolMemoryPreflight = (advisory: string): ToolResultEnvelope => ({
+  status: "error",
+  value: null,
+  preview: "Execution paused so accepted tool memory can be reviewed.",
+  artifact: null,
+  error: {
+    code: "forbidden",
+    message: "Review the cited tool memory, then retry or revise this call.",
+    retryable: true
+  },
+  advisory
+})
+
 const recordToolMemoryFailure = async (
   options: ToolRegistryOptions,
   request: ToolExecutionRequest,
@@ -456,6 +469,10 @@ export class ToolRegistry {
     }
 
     const advisory = await recallToolMemory(this.#options, input, tool.risk)
+    if (advisory !== null) {
+      this.#memoryAdvisories += 1
+      return toolMemoryPreflight(advisory)
+    }
     let result: ToolResultEnvelope
     try {
       const observation = await startObservation(this.#options, input, tool)
@@ -480,7 +497,6 @@ export class ToolRegistry {
       )
     }
     if (mutatingRisk(tool.risk)) this.#mutatingExecutions += 1
-    if (advisory !== null) this.#memoryAdvisories += 1
     if (
       input.id.startsWith("mcp__jingler-memory__memory_propose") &&
       result.status === "success"
@@ -490,6 +506,6 @@ export class ToolRegistry {
       result.status === "success"
     ) this.#memoryWorkflowPolls += 1
     await recordToolMemoryFailure(this.#options, input, tool.risk, result)
-    return advisory === null ? result : { ...result, advisory }
+    return result
   }
 }

@@ -184,7 +184,9 @@ PI memory is Jingler-owned, not model-initiative-only. `AgentRunner` attaches th
 memory MCP server by role and performs bounded pre-turn recall; command-led turns
 skip recall. `ToolRegistry` performs a second bounded lookup for execute-risk
 tool signatures using only tool ID plus normalized binary/subcommand — never
-arguments, paths, or values. Both paths are cited and fail open.
+arguments, paths, or values. A matching tool memory pauses the first invocation
+with a retryable preflight result so PI can revise or retry before execution;
+lookup failures remain fail-open.
 
 Mutating PI turns with no proposal receive one hidden reflection nudge before
 settlement. Agents propose through `mcp__jingler-memory__memory_propose` and poll

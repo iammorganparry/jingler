@@ -85,13 +85,42 @@ describe("pi tool bridge", () => {
     expect(result?.details).toMatchObject({ status: "success" })
   })
 
-  it("renders cited tool memory before the unchanged tool result", async () => {
+  it("structurally blocks non-memory tools during hidden reflection", async () => {
+    const execute = vi.fn(async () => ({ changed: true }))
+    const canUseTool = vi.fn(() => Effect.succeed("allow" as const))
+    const registry = mutationRegistry(execute)
+    const [tool] = createPiTools(registry, spec, {
+      ...inactiveRuntimeActivity,
+      canUseTool,
+      askQuestion: () => Effect.succeed([]),
+      saveDraftPlan: () => Effect.void,
+      proposePlan: () => Effect.succeed({ _tag: "Reject" })
+    }, { allowTool: () => false })
+
+    const result = await tool?.execute(
+      "hidden-workspace-edit",
+      { path: "src/hidden.ts" },
+      undefined,
+      undefined,
+      {} as never
+    )
+
+    expect((result!.details as ToolResultEnvelope)).toMatchObject({
+      status: "error",
+      error: { code: "forbidden" }
+    })
+    expect(canUseTool).not.toHaveBeenCalled()
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("returns cited tool memory before allowing risky execution", async () => {
     const memory: ToolMemoryHooks = {
       recall: async () => "<tool-memory>revision:accepted-1</tool-memory>",
       recordFailure: async () => undefined,
       failures: () => []
     }
-    const registry = mutationRegistry(async () => ({ changed: true }), () => Effect.void, memory)
+    const execute = vi.fn(async () => ({ changed: true }))
+    const registry = mutationRegistry(execute, () => Effect.void, memory)
     const [tool] = createPiTools(registry, spec, {
       ...inactiveRuntimeActivity,
       canUseTool: () => Effect.succeed("allow"),
@@ -110,9 +139,14 @@ describe("pi tool bridge", () => {
 
     expect(result?.content[0]).toMatchObject({
       type: "text",
-      text: expect.stringMatching(/^<tool-memory>[\s\S]*\{"changed":true\}$/u)
+      text: expect.stringMatching(/^<tool-memory>[\s\S]*Review the cited tool memory/u)
     })
-    expect((result!.details as ToolResultEnvelope).value).toEqual({ changed: true })
+    expect((result!.details as ToolResultEnvelope)).toMatchObject({
+      status: "error",
+      value: null,
+      error: { retryable: true }
+    })
+    expect(execute).not.toHaveBeenCalled()
   })
 
   it("advertises no-argument tools as strict object schemas", () => {

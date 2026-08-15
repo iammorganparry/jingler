@@ -11,11 +11,23 @@ import type {
 
 const MAX_ADVISORY_CHARACTERS = 4_000
 const MAX_FAILURE_MESSAGE_CHARACTERS = 1_000
+export const MAX_TOOL_MEMORY_FAILURES = 3
 const RECALL_TIMEOUT_MS = 1_750
 const COMMAND_TOOL_IDS = new Set(["command_execute", "Bash", "bash"])
 const SHELL_OPERATOR = /(?:&&|\|\||[;|\n])/u
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u
 const SAFE_TOKEN = /^[A-Za-z][A-Za-z0-9_-]*$/u
+const SUBCOMMAND_BINARIES = new Set([
+  "bun",
+  "cargo",
+  "docker",
+  "git",
+  "go",
+  "kubectl",
+  "npm",
+  "pnpm",
+  "yarn"
+])
 const MEMORY_BLOCK = /<recalled-memories>[\s\S]*?<\/recalled-memories>/u
 
 const unquote = (value: string): string =>
@@ -37,9 +49,12 @@ export const shellCommandHead = (command: string): string | null => {
   const executable = executableName(tokens[index] ?? "")
   if (!SAFE_TOKEN.test(executable)) return null
   const candidate = unquote(tokens[index + 1] ?? "")
-  const subcommand = SAFE_TOKEN.test(candidate) && !candidate.startsWith("-")
-    ? candidate
-    : null
+  const subcommand =
+    SUBCOMMAND_BINARIES.has(executable) &&
+    SAFE_TOKEN.test(candidate) &&
+    !candidate.startsWith("-")
+      ? candidate
+      : null
   return subcommand === null ? executable : `${executable} ${subcommand}`
 }
 
@@ -130,6 +145,7 @@ export const makeToolMemory = (options: ToolMemoryOptions): ToolMemoryHooks => {
       toolId: request.id,
       message: failureMessage(result)
     })
+    if (failures.length > MAX_TOOL_MEMORY_FAILURES) failures.shift()
   }
 
   return {

@@ -6,6 +6,8 @@ import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { normalizePiEvent, piProviderFailure } from "./pi-events.js"
 
+export const MEMORY_REFLECTION_TIMEOUT_MS = 15_000
+
 export interface PiSessionHandle {
   readonly id: string
   readonly modelId: string
@@ -20,6 +22,8 @@ export interface PiSessionHandle {
   readonly reconcile?: () => Promise<FileChangeSet | null>
   /** One hidden post-turn reflection prompt, or null when the run does not qualify. */
   readonly memoryReflectionPrompt?: () => string | null
+  /** Structurally restrict tools while the hidden reflection phase is active. */
+  readonly setMemoryReflectionActive?: (active: boolean) => void
 }
 
 export interface PiSessionFactory {
@@ -155,18 +159,26 @@ const subscribeToSession = (
 ): (() => void) => {
   let reflectionStarted = false
   let reflectionActive = false
-  return handle.subscribe((event) => {
-    const providerFailure = piProviderFailure(event)
-    if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
-    if (
-      (event.type === "auto_retry_end" && event.success) ||
-      (event.type === "message_end" &&
-        event.message.role === "assistant" &&
-        event.message.stopReason !== "error")
-    ) {
-      sink.noteProviderRecovery()
-    }
+  let reflectionTimeout: ReturnType<typeof setTimeout> | null = null
+  const finishReflection = () => {
+    const wasActive = reflectionActive
+    reflectionActive = false
+    if (wasActive) handle.setMemoryReflectionActive?.(false)
+    if (reflectionTimeout !== null) clearTimeout(reflectionTimeout)
+    reflectionTimeout = null
+  }
+  const unsubscribe = handle.subscribe((event) => {
     if (!reflectionActive) {
+      const providerFailure = piProviderFailure(event)
+      if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
+      if (
+        (event.type === "auto_retry_end" && event.success) ||
+        (event.type === "message_end" &&
+          event.message.role === "assistant" &&
+          event.message.stopReason !== "error")
+      ) {
+        sink.noteProviderRecovery()
+      }
       const draft = projectPlanDraft(event, planDraft)
       if (draft) sink.emit(draft)
       const normalized = normalizePiEvent(event, handle.contextWindow ?? undefined)
@@ -179,6 +191,17 @@ const subscribeToSession = (
       if (prompt !== null) {
         reflectionStarted = true
         reflectionActive = true
+        handle.setMemoryReflectionActive?.(true)
+        reflectionTimeout = setTimeout(() => {
+          reflectionTimeout = null
+          Effect.runFork(
+            Effect.tryPromise({
+              try: () => handle.interrupt(),
+              catch: () => null
+            }).pipe(Effect.catchAll(() => Effect.void))
+          )
+          Effect.runFork(settleSession(handle, sink))
+        }, MEMORY_REFLECTION_TIMEOUT_MS)
         Effect.runFork(
           Effect.tryPromise({
             try: () => handle.prompt(prompt),
@@ -189,16 +212,23 @@ const subscribeToSession = (
                 cause
               })
           }).pipe(
-            Effect.catchAll(() => settleSession(handle, sink))
+            Effect.catchAll(() => {
+              finishReflection()
+              return settleSession(handle, sink)
+            })
           )
         )
         return
       }
     }
 
-    reflectionActive = false
+    finishReflection()
     Effect.runFork(settleSession(handle, sink))
   })
+  return () => {
+    finishReflection()
+    unsubscribe()
+  }
 }
 
 const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): void => {

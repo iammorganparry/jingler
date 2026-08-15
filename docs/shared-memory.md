@@ -65,10 +65,11 @@ Local checkout paths are never part of the query.
 
 Execute-risk tool calls have a second, run-scoped recall boundary. Shell calls
 use only the tool ID and normalized binary/subcommand; arguments, paths, and
-values are discarded. A matching accepted page produces one bounded cited
-`<tool-memory>` advisory per signature per run. Lookup timeout or failure never
-changes the tool's typed result. Failed tool calls contribute only a redacted,
-bounded candidate to end-of-turn reflection.
+values are discarded. A matching accepted page pauses the first invocation and
+returns one bounded cited `<tool-memory>` advisory with a retryable result; the
+model must review, revise, or retry before the tool can execute. Lookup timeout
+or failure remains fail-open. Failed tool calls contribute only the newest three
+redacted, bounded candidates to end-of-turn reflection.
 
 A mutating turn with memory enabled and no proposal receives one hidden
 reflection nudge before PI settles. The agent may call `memory_propose` and poll

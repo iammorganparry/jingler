@@ -399,7 +399,13 @@ const memoryLifecycleResponse = (
     )
   }
   if (lastMessage.toolName === COMMAND_TOOL) {
-    const advisoryObserved = toolResultText(lastMessage).includes("<tool-memory")
+    if (toolResultText(lastMessage).includes("<tool-memory")) {
+      return callTool(
+        COMMAND_TOOL,
+        { command: "printf -- 'memory lifecycle complete\\n'" },
+        "memory-lifecycle-command-retry"
+      )
+    }
     return callTool(
       MEMORY_PROPOSE_TOOL,
       {
@@ -407,7 +413,7 @@ const memoryLifecycleResponse = (
         baseRevisionId: "new",
         markdown: PI_MEMORY_MARKDOWN
       },
-      advisoryObserved ? "memory-lifecycle-propose-advised" : "memory-lifecycle-propose-missing"
+      "memory-lifecycle-propose-advised"
     )
   }
   const data = memoryToolData(context)
@@ -418,12 +424,12 @@ const memoryLifecycleResponse = (
       "memory-lifecycle-workflow"
     )
   }
-  const commandResult = [...context.messages].reverse().find(
-    (message) => message.role === "toolResult" && message.toolName === COMMAND_TOOL
+  const advisoryObserved = context.messages.some(
+    (message) =>
+      message.role === "toolResult" &&
+      message.toolName === COMMAND_TOOL &&
+      toolResultText(message).includes("<tool-memory")
   )
-  const advisoryObserved = commandResult === undefined
-    ? false
-    : toolResultText(commandResult).includes("<tool-memory")
   return fauxAssistantMessage(
     advisoryObserved
       ? "PI memory lifecycle completed with a cited tool advisory."

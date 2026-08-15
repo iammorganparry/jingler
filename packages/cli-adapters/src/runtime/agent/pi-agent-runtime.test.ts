@@ -12,7 +12,11 @@ import {
   inactiveRuntimeActivity,
   type AgentRuntimeContext
 } from "./agent-runtime.js"
-import { makePiAgentRuntime, type PiSessionHandle } from "./pi-agent-runtime.js"
+import {
+  makePiAgentRuntime,
+  MEMORY_REFLECTION_TIMEOUT_MS,
+  type PiSessionHandle
+} from "./pi-agent-runtime.js"
 
 const spec: PiRunSpec = {
   runId: "run-1",
@@ -107,6 +111,7 @@ describe("PiAgentRuntime", () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const prompts: string[] = []
     const reflectionPrompt = vi.fn(() => "<memory-reflection>Reflect silently.</memory-reflection>")
+    const setMemoryReflectionActive = vi.fn()
     const handle: PiSessionHandle = {
       id: "pi-session-memory-reflection",
       modelId: "anthropic/claude-sonnet",
@@ -131,7 +136,8 @@ describe("PiAgentRuntime", () => {
       interrupt: async () => undefined,
       dispose: vi.fn(),
       usage: () => ({ costUsd: 0, tokens: 5 }),
-      memoryReflectionPrompt: reflectionPrompt
+      memoryReflectionPrompt: reflectionPrompt,
+      setMemoryReflectionActive
     }
     const runtime = await Effect.runPromise(
       makePiAgentRuntime({ create: () => Effect.succeed(handle) })
@@ -144,9 +150,100 @@ describe("PiAgentRuntime", () => {
       "<memory-reflection>Reflect silently.</memory-reflection>"
     ])
     expect(reflectionPrompt).toHaveBeenCalledOnce()
+    expect(setMemoryReflectionActive.mock.calls).toEqual([[true], [false]])
     expect(events.map((event) => event._tag)).toEqual(["Started", "Assistant", "Done"])
     expect(events.flatMap((event) => event._tag === "Assistant" ? [event.text] : []))
       .toEqual(["visible answer"])
+  })
+
+  it("ignores provider failures from the optional hidden reflection", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    let promptCount = 0
+    const handle: PiSessionHandle = {
+      id: "pi-session-reflection-provider-failure",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt: async () => {
+        promptCount += 1
+        if (promptCount === 2) {
+          listener?.({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "error",
+              errorMessage: "reflection provider unavailable"
+            } as never
+          })
+        }
+        listener?.({ type: "agent_settled" })
+      },
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      usage: () => ({ costUsd: 0, tokens: 3 }),
+      memoryReflectionPrompt: () => "<memory-reflection>Reflect.</memory-reflection>"
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
+
+    expect(events.at(-1)).toMatchObject({ _tag: "Done" })
+    expect(events.some((event) => event._tag === "Failed")).toBe(false)
+  })
+
+  it("interrupts and settles a hidden reflection at its hard deadline", async () => {
+    vi.useFakeTimers()
+    try {
+      let listener: ((event: AgentSessionEvent) => void) | null = null
+      let promptCount = 0
+      const interrupt = vi.fn(async () => {
+        listener?.({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "reflection interrupted at deadline"
+          } as never
+        })
+        listener?.({ type: "agent_settled" })
+      })
+      const handle: PiSessionHandle = {
+        id: "pi-session-reflection-timeout",
+        modelId: "anthropic/claude-sonnet",
+        contextWindow: 200_000,
+        subscribe: (next) => {
+          listener = next
+          return vi.fn()
+        },
+        prompt: async () => {
+          promptCount += 1
+          if (promptCount === 1) listener?.({ type: "agent_settled" })
+          else await new Promise<void>(() => undefined)
+        },
+        steer: async () => undefined,
+        interrupt,
+        dispose: vi.fn(),
+        usage: () => ({ costUsd: 0, tokens: 3 }),
+        memoryReflectionPrompt: () => "<memory-reflection>Reflect.</memory-reflection>"
+      }
+      const runtime = await Effect.runPromise(
+        makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+      )
+      const eventsPromise = Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
+      await vi.advanceTimersByTimeAsync(MEMORY_REFLECTION_TIMEOUT_MS)
+
+      const events = [...(await eventsPromise)]
+      expect(interrupt).toHaveBeenCalledOnce()
+      expect(events.at(-1)).toMatchObject({ _tag: "Done" })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("delivers the terminal event before closing a slow consumer", async () => {

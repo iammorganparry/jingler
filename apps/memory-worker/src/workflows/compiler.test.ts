@@ -294,8 +294,12 @@ describe("durable memory compiler workflow", () => {
       "RECENT WORK:",
       "- Ran pnpm test successfully.",
       "PLAN_TASK stage=one task=test status=completed",
+      "Running migrations must hold the deployment lock.",
+      "Completed orders must remain immutable.",
       "Refund retries must preserve one idempotency key across every network attempt."
     ].join("\n"))).toEqual([
+      "Running migrations must hold the deployment lock.",
+      "Completed orders must remain immutable.",
       "Refund retries must preserve one idempotency key across every network attempt."
     ])
   })
@@ -334,6 +338,34 @@ describe("durable memory compiler workflow", () => {
       ["The baseline remains accepted after rollout."]
     )
     expect(candidates.map(({ page: candidate }) => candidate.id)).toEqual(["alpha"])
+  })
+
+  it("requires meaningful weighted relevance instead of common body words", () => {
+    const relevant: MemoryPage = {
+      ...page("alpha"),
+      id: "operations",
+      path: "operations.md",
+      title: "Operations",
+      tags: [],
+      body: "Refund retry idempotency protects network safety."
+    }
+    const unrelated: MemoryPage = {
+      ...page("beta"),
+      id: "archive",
+      path: "archive.md",
+      title: "Archive",
+      tags: [],
+      body: "Accepted records remain available after processing."
+    }
+    const candidates = selectCompilerCandidates(
+      [
+        { page: unrelated, revisionId: "revision-archive-1" },
+        { page: relevant, revisionId: "revision-operations-1" }
+      ],
+      ["Every refund retry needs idempotency for network safety after acceptance."]
+    )
+
+    expect(candidates.map(({ page: candidate }) => candidate.id)).toEqual(["operations"])
   })
 
   it("compiles a stored source with the bounded deterministic model", async () => {
