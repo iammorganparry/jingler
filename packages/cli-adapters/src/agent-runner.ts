@@ -83,6 +83,7 @@ import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
+import { memoryRecallQuery } from "./memory-recall.js"
 import { attachMemoryToSessionSpec } from "./memory-session.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
@@ -1047,10 +1048,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           ).acquire(sessionId, `${sessionId}:${chatId}`)
           // Jingler owns this pre-turn boundary, so recall is deterministic for
           // every harness (including Codex, which has no context-injecting hook).
-          // Pass only the raw operator text: injected policy/persona notes are not
-          // useful search terms and would dilute a narrow memory query.
+          // The pure query builder adds stable project identity without the
+          // machine-local checkout path; MemoryService redacts and bounds it at
+          // the network boundary.
           const memoryAttachment = yield* memoryService.attachment(
-            operatorText,
+            memoryRecallQuery({
+              operatorText,
+              repo: session.repo,
+              branch: session.branch
+            }),
             `${sessionId}:${chatId}`
           )
           const mcp = {

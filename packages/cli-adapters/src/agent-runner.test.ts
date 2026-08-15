@@ -623,6 +623,14 @@ describe("AgentRunner team memory", () => {
     expect(captured[0]?.prompt).toContain("at most three standalone decisions")
     expect(captured[0]?.prompt).toContain("Exclude progress narration")
     expect(captured[0]?.prompt).toContain("Initial recall completed with no accepted matches")
+    const searchRequest = requests.find(
+      (request) => request.headers.get("mcp-name") === "memory_search"
+    )
+    const searchBody = await searchRequest?.clone().json() as {
+      params?: { arguments?: { query?: string } }
+    } | undefined
+    expect(searchBody?.params?.arguments?.query).toContain("Project: widget")
+    expect(searchBody?.params?.arguments?.query).toContain("Branch: chore/test")
     expect(requests.some((request) => request.url.endsWith("/api/memory/sources"))).toBe(false)
     expect(JSON.stringify(transcript)).not.toContain("memory-grant-value")
     expect(JSON.stringify(transcript)).not.toContain("jingler-user-token")
