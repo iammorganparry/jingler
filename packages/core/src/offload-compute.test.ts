@@ -94,7 +94,7 @@ describe("Offload Compute command classification", () => {
     ["lint", "pnpm", ["lint"]],
     ["typecheck", "npm", ["run", "typecheck"]],
     ["test", "yarn", ["test"]],
-    ["build", "bun", ["run", "build"]]
+    ["build", "pnpm", ["run", "build"]]
   ] as const)("classifies the %s preset", (preset, executable, args) => {
     expect(classifyOffloadCommand(enabled, command({ executable, args }))).toEqual({
       target: "offload",
@@ -105,6 +105,13 @@ describe("Offload Compute command classification", () => {
         cwd: "."
       }
     })
+  })
+
+  it("keeps Bun presets local because the runtime does not hydrate Bun dependencies", () => {
+    expect(classifyOffloadCommand(enabled, command({
+      executable: "bun",
+      args: ["run", "build"]
+    }))).toEqual({ target: "local", reason: "unknown-command" })
   })
 
   it("keeps commands local while disabled", () => {

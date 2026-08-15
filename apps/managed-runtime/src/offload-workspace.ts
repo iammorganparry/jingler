@@ -82,7 +82,8 @@ export const primeOffloadWorkspace = (
 export const restoreOffloadSnapshot = (
   sandbox: OffloadSandbox,
   jobId: string,
-  snapshot: Uint8Array
+  snapshot: Uint8Array,
+  admittedBytes: number
 ): Effect.Effect<{
   readonly sourceDigest: string
   readonly hydrationMs: number
@@ -103,7 +104,7 @@ export const restoreOffloadSnapshot = (
     })
     yield* run(
       sandbox,
-      `node ${EXECUTOR} restore ${quote(snapshotPath)}`,
+      `node ${EXECUTOR} restore ${quote(snapshotPath)} ${admittedBytes}`,
       { cwd: WORKSPACE, timeout: 120_000, origin: "internal" },
       "hydration-failed",
       "Workspace snapshot could not be restored"

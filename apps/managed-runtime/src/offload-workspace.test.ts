@@ -120,7 +120,7 @@ describe("offload workspace result policy", () => {
       readFile: async () => ({ content: "" })
     }
     const restored = await Effect.runPromise(
-      restoreOffloadSnapshot(value, "job_aaaaaaaaaaaaaaaa", new Uint8Array([1, 2, 3]))
+      restoreOffloadSnapshot(value, "job_aaaaaaaaaaaaaaaa", new Uint8Array([1, 2, 3]), 128)
     )
     expect(restored.sourceDigest).toBe("digest")
     expect(commands.some((command) => command.includes("rm -rf node_modules"))).toBe(true)

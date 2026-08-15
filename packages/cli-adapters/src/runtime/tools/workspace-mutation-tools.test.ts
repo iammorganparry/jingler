@@ -157,7 +157,7 @@ describe("workspace mutation tools", () => {
   it("does not silently fall back when remote execution fails", async () => {
     const registry = makeRegistry({
       executeIfEligible: () => Effect.fail(
-        new ToolError("execution-failed", "Remote command failed; use runLocally after approval")
+        new ToolError("execution-failed", "Remote command failed; operator must disable Offload Compute")
       ),
       primeSession: () => Effect.succeed("accepted"),
       destroySession: () => Effect.void
@@ -195,12 +195,15 @@ describe("workspace mutation tools", () => {
     await expect(readFile(join(workspace, "marker.txt"), "utf8")).rejects.toThrow()
     expect(executeIfEligible).toHaveBeenCalledOnce()
 
-    const local = await execute(registry, "command_execute", {
+    const attemptedBypass = await execute(registry, "command_execute", {
       command: "printf local > marker.txt",
       runLocally: true
     })
-    expect(local).toMatchObject({ status: "success", value: { stdout: "", exitCode: 0 } })
-    expect(await readFile(join(workspace, "marker.txt"), "utf8")).toBe("local")
-    expect(executeIfEligible).toHaveBeenCalledOnce()
+    expect(attemptedBypass).toMatchObject({
+      status: "success",
+      value: { offloaded: true, stdout: "remote" }
+    })
+    await expect(readFile(join(workspace, "marker.txt"), "utf8")).rejects.toThrow()
+    expect(executeIfEligible).toHaveBeenCalledTimes(2)
   })
 })

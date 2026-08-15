@@ -30,33 +30,67 @@ const insideWorkspace = (path) => {
 
 const spawnResult = (executable, args, options = {}) =>
   new Promise((resolvePromise, reject) => {
+    const detached = process.platform !== "win32"
     const child = spawn(executable, args, {
       cwd: options.cwd ?? WORKSPACE,
       env: options.env ?? process.env,
+      detached,
       shell: false,
       stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
     })
+    const outputLimit = options.outputBytes ?? 4 * 1024 * 1024
     const stdout = []
     const stderr = []
-    child.stdout.on("data", (chunk) => stdout.push(chunk))
-    child.stderr.on("data", (chunk) => stderr.push(chunk))
+    let retainedBytes = 0
+    let outputTruncated = false
+    const retain = (chunks, chunk, bytes) => {
+      const remaining = Math.max(0, outputLimit - bytes)
+      if (remaining > 0) chunks.push(chunk.subarray(0, remaining))
+      if (chunk.byteLength > remaining) outputTruncated = true
+      return bytes + Math.min(chunk.byteLength, remaining)
+    }
+    child.stdout.on("data", (chunk) => { retainedBytes = retain(stdout, chunk, retainedBytes) })
+    child.stderr.on("data", (chunk) => { retainedBytes = retain(stderr, chunk, retainedBytes) })
     child.once("error", reject)
+    const killGroup = (signal) => {
+      if (child.pid === undefined) return
+      try {
+        if (detached) process.kill(-child.pid, signal)
+        else child.kill(signal)
+      } catch (cause) {
+        if (cause?.code !== "ESRCH") throw cause
+      }
+    }
     let timedOut = false
+    let graceElapsed = false
+    let closeCode = null
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolvePromise({
+        exitCode: closeCode ?? 1,
+        stdout: Buffer.concat(stdout),
+        stderr: Buffer.concat(stderr),
+        outputTruncated,
+        timedOut
+      })
+    }
     const timer = options.timeout
       ? setTimeout(() => {
           timedOut = true
-          child.kill("SIGTERM")
-          setTimeout(() => child.kill("SIGKILL"), 2_000).unref()
+          killGroup("SIGTERM")
+          const forceTimer = setTimeout(() => {
+            graceElapsed = true
+            killGroup("SIGKILL")
+            if (closeCode !== null) finish()
+          }, 2_000)
         }, options.timeout)
       : null
     child.once("close", (code) => {
+      closeCode = code ?? 1
       if (timer) clearTimeout(timer)
-      resolvePromise({
-        exitCode: code ?? 1,
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr),
-        timedOut
-      })
+      if (!timedOut || graceElapsed) finish()
     })
     if (options.input !== undefined) child.stdin.end(options.input)
   })
@@ -71,8 +105,14 @@ const gitStatusDigest = async () => {
   return sha256(status.stdout)
 }
 
-const restore = async (snapshotPath) => {
-  const payload = JSON.parse(gunzipSync(await readFile(snapshotPath)).toString("utf8"))
+const restore = async (snapshotPath, admittedBytes) => {
+  if (!Number.isSafeInteger(admittedBytes) || admittedBytes < 1 || admittedBytes > 64 * 1024 * 1024) {
+    throw new Error("Snapshot size admission is invalid")
+  }
+  const compressed = await readFile(snapshotPath)
+  const decoded = gunzipSync(compressed, { maxOutputLength: admittedBytes })
+  if (decoded.byteLength !== admittedBytes) throw new Error("Snapshot size does not match admission")
+  const payload = JSON.parse(decoded.toString("utf8"))
   if (
     payload.version !== 1 ||
     typeof payload.headSha !== "string" ||
@@ -213,22 +253,23 @@ const run = async (commandPath, resultPath) => {
     ? await spawnResult(launcher, [input.executable, ...input.args], {
         cwd,
         env: safeEnvironment(),
-        timeout: input.timeoutMs
+        timeout: input.timeoutMs,
+        outputBytes: input.outputBytes
       })
     : await spawnResult(input.executable, input.args, {
         cwd,
         env: safeEnvironment(),
-        timeout: input.timeoutMs
+        timeout: input.timeoutMs,
+        outputBytes: input.outputBytes
       })
   const sourceDigest = await gitStatusDigest()
-  const stdout = result.stdout.subarray(0, input.outputBytes).toString("utf8")
-  const stderr = result.stderr.subarray(0, input.outputBytes).toString("utf8")
+  const stdout = result.stdout.toString("utf8")
+  const stderr = result.stderr.toString("utf8")
   await writeFile(resultPath, JSON.stringify({
     exitCode: result.exitCode,
     stdout,
     stderr,
-    outputTruncated:
-      result.stdout.byteLength > input.outputBytes || result.stderr.byteLength > input.outputBytes,
+    outputTruncated: result.outputTruncated,
     timedOut: result.timedOut,
     sourceMutated: sourceDigest !== input.sourceDigest,
     commandMs: Date.now() - startedAt
@@ -236,7 +277,7 @@ const run = async (commandPath, resultPath) => {
 }
 
 const [mode, first, second] = process.argv.slice(2)
-if (mode === "restore" && first) await restore(first)
+if (mode === "restore" && first && second) await restore(first, Number(second))
 else if (mode === "manifest") process.stdout.write(await gitStatusDigest())
 else if (mode === "run" && first && second) await run(first, second)
 else throw new Error("Invalid offload executor invocation")

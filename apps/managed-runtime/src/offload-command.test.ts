@@ -59,6 +59,7 @@ const runCommand = (
     stderr: string
     timedOut: boolean
     sourceMutated: boolean
+    outputTruncated: boolean
   }
 }
 
@@ -128,6 +129,35 @@ describe("offload argv executor", () => {
     rmSync(marker, { force: true })
   })
 
+  it("bounds buffered output while preserving truncation metadata", () => {
+    const root = repository()
+    const result = runCommand(root, {
+      executable: "node",
+      args: ["-e", "process.stdout.write('x'.repeat(1024 * 1024))"]
+    })
+    expect(Buffer.byteLength(result.stdout)).toBe(64 * 1024)
+    expect(result.outputTruncated).toBe(true)
+  })
+
+  it("kills the entire command process group on timeout", () => {
+    const root = repository()
+    const marker = `${root}.descendant`
+    const script = [
+      "const {spawn}=require('node:child_process')",
+      `spawn(process.execPath,['-e',${JSON.stringify(`setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'alive'),200)`) }],{stdio:'ignore'})`,
+      "setTimeout(()=>{},10000)"
+    ].join(";")
+    const result = runCommand(root, {
+      executable: "node",
+      args: ["-e", script],
+      timeoutMs: 20
+    })
+    expect(result.timedOut).toBe(true)
+    execFileSync("sleep", ["0.4"])
+    expect(() => readFileSync(marker)).toThrow()
+    rmSync(marker, { force: true })
+  })
+
   it("detects source mutation and timeout as structured outcomes", () => {
     const mutationRoot = repository()
     const mutated = runCommand(mutationRoot, {
@@ -148,6 +178,15 @@ describe("offload argv executor", () => {
     expect(timedOut.timedOut).toBe(true)
   })
 
+  it("rejects a snapshot whose decompressed bytes exceed admission", () => {
+    const root = repository()
+    const snapshotPath = `${root}.bomb.gz`
+    writeFileSync(snapshotPath, gzipSync(Buffer.alloc(1024 * 1024, 65)))
+    const restored = runner(root, ["restore", snapshotPath, "128"])
+    expect(restored.status).not.toBe(0)
+    rmSync(snapshotPath, { force: true })
+  })
+
   it("restores a self-contained local-only HEAD and staged patch", () => {
     const root = repository()
     writeFileSync(join(root, "local-head.txt"), "only in the local commit\n")
@@ -166,7 +205,7 @@ describe("offload argv executor", () => {
       { cwd: root, encoding: "utf8" }
     )
     const snapshotPath = `${root}.snapshot.gz`
-    writeFileSync(snapshotPath, gzipSync(JSON.stringify({
+    const encoded = Buffer.from(JSON.stringify({
       version: 1,
       headSha,
       headArchiveBase64: archive.toString("base64"),
@@ -175,8 +214,9 @@ describe("offload argv executor", () => {
       headFileCount: 2,
       stagedPatch,
       unstagedPatch: ""
-    })))
-    const restored = runner(root, ["restore", snapshotPath])
+    }))
+    writeFileSync(snapshotPath, gzipSync(encoded))
+    const restored = runner(root, ["restore", snapshotPath, String(encoded.byteLength)])
     expect(restored.status).toBe(0)
     expect(readFileSync(join(root, "local-head.txt"), "utf8")).toBe("only in the local commit\n")
     expect(readFileSync(join(root, "staged.txt"), "utf8")).toBe("staged file\n")

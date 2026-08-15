@@ -612,7 +612,7 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
     return recentToolResultCount(context, COMMAND_TOOL) === 0
       ? callTool(
           COMMAND_TOOL,
-          { command: "pnpm typecheck", runLocally: true },
+          { command: "pnpm typecheck" },
           "offload-local-retry-1"
         )
       : fauxAssistantMessage("Explicit local retry completed.")

@@ -38,19 +38,30 @@ vi.mock("cloudflare:workers", () => ({ WorkflowEntrypoint: class {} }))
 const { runOffloadWorkflow } = await import("./offload-workflow.js")
 
 class MemoryBucket {
-  readonly objects = new Map<string, Uint8Array>()
+  readonly objects = new Map<string, { bytes: Uint8Array; etag: string }>()
+  #version = 0
   async get(key: string) {
-    const bytes = this.objects.get(key)
-    return bytes === undefined ? null : {
-      json: async () => JSON.parse(new TextDecoder().decode(bytes)),
-      arrayBuffer: async () => bytes.slice().buffer
+    const object = this.objects.get(key)
+    return object === undefined ? null : {
+      etag: object.etag,
+      json: async () => JSON.parse(new TextDecoder().decode(object.bytes)),
+      arrayBuffer: async () => object.bytes.slice().buffer
     }
   }
-  async put(key: string, value: string | Uint8Array) {
-    this.objects.set(
-      key,
-      typeof value === "string" ? new TextEncoder().encode(value) : value
-    )
+  async put(
+    key: string,
+    value: string | Uint8Array,
+    options?: { onlyIf?: { etagMatches?: string; etagDoesNotMatch?: string } }
+  ) {
+    const existing = this.objects.get(key)
+    if (options?.onlyIf?.etagMatches !== undefined && existing?.etag !== options.onlyIf.etagMatches) return null
+    if (options?.onlyIf?.etagDoesNotMatch === "*" && existing !== undefined) return null
+    const stored = {
+      bytes: typeof value === "string" ? new TextEncoder().encode(value) : value,
+      etag: `etag-${++this.#version}`
+    }
+    this.objects.set(key, stored)
+    return stored
   }
   async delete(keys: string | string[]) {
     for (const key of Array.isArray(keys) ? keys : [keys]) this.objects.delete(key)

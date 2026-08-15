@@ -81,6 +81,18 @@ describe("OffloadSnapshotService capture", () => {
 })
 
 describe("Offload snapshot safeguards", () => {
+  it("rejects secret-prone files already committed in HEAD", async () => {
+    const root = repository()
+    writeFileSync(join(root, "credentials.json"), "tracked-secret\n")
+    execFileSync("git", ["add", "credentials.json"], { cwd: root })
+    execFileSync("git", ["commit", "--quiet", "-m", "unsafe secret"], { cwd: root })
+    const exit = await Effect.runPromiseExit(captureOffloadSnapshot(root))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Option.getOrThrow(Cause.failureOption(exit.cause)).reason).toBe("secret-path")
+    }
+  })
+
   it("excludes ignored and untracked files unless the operator stages them", async () => {
     const root = repository()
     writeFileSync(join(root, "arbitrary-private-fixture.json"), "super-secret-local-value\n")

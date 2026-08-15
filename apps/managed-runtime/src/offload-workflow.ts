@@ -7,6 +7,7 @@ import {
 } from "cloudflare:workers"
 import { Effect } from "effect"
 import { INTERNAL_ROUTES } from "./internal-routes.js"
+import { cleanupOffloadJob } from "./offload-cleanup.js"
 import { redactedOffloadTelemetry } from "./offload-telemetry.js"
 import {
   OffloadJobStore,
@@ -91,50 +92,6 @@ const appendOutput = (
     )
   })
 
-const releaseOffloadSlot = async (
-  env: ManagedRuntimeEnv,
-  jobId: string
-): Promise<void> => {
-  const layer = makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)
-  const record = await Effect.runPromise(
-    Effect.gen(function* () {
-      const store = yield* OffloadJobStore
-      return yield* store.get(jobId)
-    }).pipe(Effect.provide(layer))
-  ).catch(() => null)
-  if (record === null) return
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const store = yield* OffloadJobStore
-      yield* store.removeSnapshot(jobId)
-    }).pipe(
-      Effect.provide(layer),
-      Effect.catchAll(() => Effect.void)
-    )
-  )
-  await Promise.all([
-    env.MANAGED_ACCOUNT.getByName(record.subject).fetch(
-      INTERNAL_ROUTES.managedAccount.offloadUnregister,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ subject: record.subject, jobId })
-      }
-    ),
-    env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(record.request.sessionId).fetch(
-      INTERNAL_ROUTES.offloadLifecycle.touch,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          subject: record.subject,
-          sessionId: record.request.sessionId
-        })
-      }
-    )
-  ]).catch(() => undefined)
-}
-
 export const runOffloadWorkflow = async (
   env: ManagedRuntimeEnv,
   input: OffloadWorkflowInput,
@@ -193,7 +150,7 @@ export const runOffloadWorkflow = async (
       )
     )
     if (prepared.cancelled) {
-      await releaseOffloadSlot(env, input.jobId)
+      await cleanupOffloadJob(env, input.jobId)
       console.log(JSON.stringify(redactedOffloadTelemetry(prepared.result, false)))
       return prepared.result
     }
@@ -218,7 +175,8 @@ export const runOffloadWorkflow = async (
           return yield* restoreOffloadSnapshot(
             sandbox,
             record.jobId,
-            snapshot
+            snapshot,
+            record.request.snapshot.bytes
           )
         }).pipe(Effect.provide(storeLayer))
       )
@@ -277,7 +235,7 @@ export const runOffloadWorkflow = async (
         }).pipe(Effect.provide(storeLayer))
       )
     )
-    await releaseOffloadSlot(env, input.jobId)
+    await cleanupOffloadJob(env, input.jobId)
     console.log(JSON.stringify(redactedOffloadTelemetry(result, warmSandbox)))
     return result
   } catch (cause) {
@@ -301,7 +259,7 @@ export const runOffloadWorkflow = async (
         Effect.catchAll(() => Effect.void)
       )
     )
-    await releaseOffloadSlot(env, input.jobId)
+    await cleanupOffloadJob(env, input.jobId)
     console.log(JSON.stringify(redactedOffloadTelemetry(result, warmSandbox)))
     return result
   }

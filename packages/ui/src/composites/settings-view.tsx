@@ -988,15 +988,15 @@ function GeneralSection({
           />
           {offloadStatus === "priming" ? (
             <p className="px-1 py-2 text-[11px] text-muted-foreground" role="status">
-              Priming cloud compute for active sessions…
+              Saving Offload Compute settings…
             </p>
           ) : offloadStatus === "ready" ? (
             <p className="px-1 py-2 text-[11px] text-success" role="status">
-              Cloud compute is ready and will route eligible commands automatically.
+              Cloud compute is enabled; eligible sessions prime in the background.
             </p>
           ) : offloadStatus === "failed" ? (
             <p className="px-1 py-2 text-[11px] text-danger" role="alert">
-              Cloud compute could not be primed. Commands will not silently retry locally.
+              Offload Compute settings could not be saved.
             </p>
           ) : null}
         </div>

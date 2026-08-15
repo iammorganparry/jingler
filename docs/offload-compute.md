@@ -35,7 +35,9 @@ snapshots and result chunks that are too large for Workflow parameters.
   remain local. Eligible repository tooling is still arbitrary code and is
   contained by the Sandbox filesystem, identity, and network boundaries below.
 - Once a remote job is admitted, a failure is returned to the agent and operator.
-  Jingler never retries it locally without an explicit operator action.
+  Jingler never retries it locally without an explicit operator action. The model
+  has no local-override argument; the operator must disable Offload Compute before
+  retrying locally.
 - Tracked source is owned by root and made read-only before the admitted command
   runs as uid 65532. Only designated cache/build-output directories and a private
   temporary home are writable. Any remaining source mutation fails and all
@@ -65,10 +67,12 @@ bash text into a supposedly safe argument vector.
    and perform a fresh dependency installation with lifecycle scripts disabled.
    Mutable `node_modules` state is never reused between jobs.
 6. Make source and dependencies read-only, create only designated writable output
-   directories, then launch the literal executable/arguments through a static
-   seccomp wrapper as uid 65532. The wrapper denies Internet, packet, and netlink
-   sockets for the command and descendants. Compare source manifests afterwards
-   as defense in depth and discard all remote job state.
+   directories, then launch the literal executable/arguments in a dedicated
+   process group through a static seccomp wrapper as uid 65532. The wrapper denies
+   Internet, packet, and netlink sockets for the command and descendants. Output
+   is retained only up to the admitted combined byte bound, and timeout terminates
+   the complete process group before settlement. Compare source manifests
+   afterwards as defense in depth and discard all remote job state.
 
 The existing `WorkspaceTransferCheckpoint` remains the continuation format. Its
 4 MiB JSON limit is appropriate for interactive continuation but not dependency-
@@ -117,13 +121,20 @@ before durable storage.
 
 Each desktop request carries an idempotency key namespaced by authenticated
 subject. Admission persists the complete immutable session/repository/snapshot/
-command/limit request and rejects reuse if any field differs. The Workflow
+command/limit request and rejects reuse if any field differs. R2 job mutations
+use ETag compare-and-swap retries, preserving cancellation, event sequencing,
+execution ownership, and terminal settlement under concurrent callers. Snapshot
+upload validates bounded compressed and decompressed sizes and the digest before
+publication; the upload action is consumed only after the R2 object and Workflow
+event are durable, and exact retries are idempotent. The Workflow
 instance id is stable for that authenticated scope. Before spawn, the executor
 atomically creates a job-specific marker in the session Sandbox. A retry may
 recover a durable terminal result or wait on an existing marker, but it may not
 start when durable ownership is already `running`; loss of the Sandbox therefore
 fails indeterminately instead of executing twice. Event sequence numbers provide
-resumable, deduplicated logs after a desktop disconnect. Short-lived scoped
+resumable, deduplicated logs after a desktop disconnect. Desktop polling uses
+bounded exponential backoff and stops at the admitted lifecycle deadline.
+Short-lived scoped
 capabilities are standard HS256 JWTs issued and verified by `jose`; Jingler does
 not implement JWT encoding, parsing, or signature verification itself.
 
@@ -133,13 +144,15 @@ Initial limits are 64 MiB of snapshot input, 4 MiB of returned output, 30 minute
 per command, one outstanding job per account (including upload and execution),
 and the managed runtime's global Sandbox cap. Admission claims that slot before
 returning an upload capability, so additional jobs are rejected rather than
-queued. An abandoned slot expires after 35 minutes; job/snapshot objects expire
+queued. An abandoned slot expires after two hours, above the complete worst-case Workflow lifecycle; job/snapshot objects expire
 after one day. Production values remain server-controlled and may be lower by
 account tier. A warm Sandbox reuses only container startup state and package-
 manager download caches; each job deletes and freshly installs `node_modules`
 from its own manifests and lockfile before making dependencies read-only.
-Enabling offload primes the active
-session asynchronously, and resuming it refreshes that primer. Archiving or
+Enabling offload persists the routing choice first, then primes sessions through
+a best-effort background queue capped at three concurrent requests; stale-session
+failures do not make the saved toggle lie. Resuming a session refreshes its primer.
+Archiving or
 deleting the session destroys its Sandbox immediately. A Durable Object activity
 lease destroys any remaining Sandbox after three inactive hours; a later resume
 creates and primes a fresh one.

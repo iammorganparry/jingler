@@ -418,7 +418,7 @@ const commandEquals = (
 const packageScript = (command: ObservedAgentCommand): string | undefined => {
   const [first, second, ...rest] = command.args
   if (rest.length > 0) return
-  if (command.executable === "npm" || command.executable === "bun") {
+  if (command.executable === "npm") {
     return first === "run" ? second : undefined
   }
   if (command.executable === "pnpm" || command.executable === "yarn") {

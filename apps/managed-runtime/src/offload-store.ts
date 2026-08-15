@@ -131,7 +131,10 @@ const decodeRecord = (value: unknown): OffloadJobRecord => {
 }
 
 export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJobStore> => {
-  const read = (jobId: string): Effect.Effect<OffloadJobRecord, OffloadStoreError> =>
+  const readVersioned = (jobId: string): Effect.Effect<
+    { readonly record: OffloadJobRecord; readonly etag: string },
+    OffloadStoreError
+  > =>
     Effect.tryPromise({
       try: async () => {
         const object = await bucket.get(jobKey(jobId))
@@ -141,7 +144,7 @@ export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJ
             message: "Offload job was not found"
           })
         }
-        return decodeRecord(await object.json())
+        return { record: decodeRecord(await object.json()), etag: object.etag }
       },
       catch: (cause) =>
         cause instanceof OffloadStoreError
@@ -149,17 +152,24 @@ export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJ
           : storageFailure("Offload job could not be read", cause)
     })
 
-  const write = (record: OffloadJobRecord): Effect.Effect<OffloadJobRecord, OffloadStoreError> =>
+  const read = (jobId: string): Effect.Effect<OffloadJobRecord, OffloadStoreError> =>
+    readVersioned(jobId).pipe(Effect.map(({ record }) => record))
+
+  const conditionalWrite = (
+    record: OffloadJobRecord,
+    onlyIf: R2Conditional
+  ): Effect.Effect<OffloadJobRecord | null, OffloadStoreError> =>
     Effect.tryPromise({
       try: async () => {
-        await bucket.put(jobKey(record.jobId), JSON.stringify(record), {
+        const written = await bucket.put(jobKey(record.jobId), JSON.stringify(record), {
+          onlyIf,
           httpMetadata: { contentType: "application/json" },
           customMetadata: {
             expiresAt: String(record.expiresAt),
             state: record.state
           }
         })
-        return record
+        return written === null ? null : record
       },
       catch: (cause) => storageFailure("Offload job could not be persisted", cause)
     })
@@ -169,8 +179,18 @@ export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJ
     change: (current: OffloadJobRecord) => OffloadJobRecord
   ): Effect.Effect<OffloadJobRecord, OffloadStoreError> =>
     Effect.gen(function* () {
-      const current = yield* read(jobId)
-      return yield* write(change(current))
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const current = yield* readVersioned(jobId)
+        const written = yield* conditionalWrite(change(current.record), {
+          etagMatches: current.etag
+        })
+        if (written !== null) return written
+        yield* Effect.sleep((attempt + 1) * 2)
+      }
+      return yield* Effect.fail(new OffloadStoreError({
+        reason: "conflict",
+        message: "Offload job update contention exceeded its retry budget"
+      }))
     })
 
   const service: OffloadJobStoreShape = {
@@ -198,7 +218,7 @@ export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJ
           kind: "state",
           state: "uploading"
         }
-        return yield* write({
+        const created: OffloadJobRecord = {
           version: 1,
           jobId: input.jobId,
           subject: input.subject,
@@ -213,7 +233,18 @@ export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJ
           createdAt: input.nowSeconds,
           updatedAt: input.nowSeconds,
           expiresAt: input.nowSeconds + JOB_RETENTION_SECONDS
-        })
+        }
+        const written = yield* conditionalWrite(created, { etagDoesNotMatch: "*" })
+        if (written !== null) return written
+        const raced = yield* read(input.jobId)
+        if (
+          raced.subject === input.subject &&
+          JSON.stringify(raced.request) === JSON.stringify(input.request)
+        ) return raced
+        return yield* Effect.fail(new OffloadStoreError({
+          reason: "conflict",
+          message: "Offload job idempotency scope changed"
+        }))
       }),
     get: read,
     putSnapshot: (jobId, bytes, digest) =>
@@ -249,6 +280,12 @@ export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJ
       Effect.gen(function* () {
         let appended: OffloadJobEventValue | null = null
         yield* update(jobId, (current) => {
+          if (value.kind === "state" && current.state === value.state) {
+            appended = [...current.events].reverse().find((event) =>
+              event.kind === "state" && event.state === value.state
+            ) ?? null
+            return current
+          }
           const event = Schema.decodeUnknownSync(OffloadJobEvent)({
             ...value,
             version: 1,

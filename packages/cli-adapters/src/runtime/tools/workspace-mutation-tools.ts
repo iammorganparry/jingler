@@ -333,10 +333,9 @@ export const registerWorkspaceMutationTools = (
   registry.register({
     id: "command_execute",
     version: "1",
-    description: "Run a shell command in the workspace and stream its output. Eligible commands offload automatically; set runLocally only after explicit operator approval following a remote failure.",
+    description: "Run a shell command in the workspace and stream its output. Eligible commands offload automatically; only the operator can force local execution by disabling Offload Compute.",
     input: Schema.Struct({
-      command: Schema.String.pipe(Schema.minLength(1)),
-      runLocally: Schema.optionalWith(Schema.Boolean, { default: () => false })
+      command: Schema.String.pipe(Schema.minLength(1))
     }),
     risk: "execute",
     roles,
@@ -345,9 +344,9 @@ export const registerWorkspaceMutationTools = (
     outputBudget: 32_000,
     cancellable: true,
     idempotency: "unsafe",
-    execute: ({ command, runLocally }, context) =>
+    execute: ({ command }, context) =>
       Effect.runPromise(
-        (routing && !runLocally
+        (routing
           ? routing.offload.executeIfEligible(
               cwd,
               routing.sessionId,

@@ -14,6 +14,7 @@ import { ConfigService } from "./config.js"
 import { GitService } from "./git.js"
 import {
   makeOffloadCommandRouter,
+  pollResult,
   type OffloadCommandRouterPort
 } from "./offload-command-router.js"
 import {
@@ -137,18 +138,33 @@ describe("automatic Offload Compute routing", () => {
     expect(body.headSha).toMatch(/^[a-f0-9]{40}$/u)
   })
 
-  it("captures, admits, uploads, and returns an eligible remote result", async () => {
+  it("fails and cancels polling after its lifecycle deadline", async () => {
+    fetchMock.mockResolvedValue(Response.json({ cancelled: true }))
+    await expect(pollResult({
+      admission,
+      refresh: async () => admission,
+      context: context(),
+      deadlineAt: Date.now() - 1
+    })).rejects.toThrow("deadline expired")
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/cancel")
+  })
+
+  it("refreshes an indeterminate upload and returns the eligible remote result", async () => {
     await writeFile(paths().configFile, JSON.stringify({
       reposDir: null,
       createdAt: new Date().toISOString(),
       offloadCompute: { enabled: true, explicitCommands: [] }
     }))
+    let uploadAttempts = 0
     fetchMock.mockImplementation(async (input, init) => {
       const url = input instanceof Request ? input.url : String(input)
       const method = input instanceof Request ? input.method : init?.method
       if (url.endsWith("/api/offload/jobs")) return Response.json(admission)
       if (url.endsWith("/snapshot") && method === "PUT") {
-        return Response.json({ accepted: true }, { status: 202 })
+        uploadAttempts += 1
+        return uploadAttempts === 1
+          ? Response.json({ error: "transient R2 failure" }, { status: 503 })
+          : Response.json({ accepted: true }, { status: 202 })
       }
       if (url.includes("/events?cursor=0")) {
         return Response.json({
@@ -229,5 +245,9 @@ describe("automatic Offload Compute routing", () => {
       executable: "pnpm",
       args: ["typecheck"]
     }))
+    expect(uploadAttempts).toBe(2)
+    expect(fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith("/api/offload/jobs")
+    )).toHaveLength(2)
   })
 })

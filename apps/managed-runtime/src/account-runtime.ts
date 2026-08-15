@@ -13,6 +13,7 @@ const USER_KEY = "user-id"
 const SUBSCRIPTION_RENEWAL_SKEW_SECONDS = 30
 const OFFLOAD_JOBS_KEY = "offload-jobs"
 const OFFLOAD_USES_KEY = "offload-grant-uses"
+const OFFLOAD_SLOT_SECONDS = 2 * 60 * 60
 
 interface ActiveOffloadJob {
   readonly jobId: string
@@ -110,7 +111,7 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       const auth = current.authorize("managed.session.execute", now)
       const githubCapabilityHandle = current.credentialHandle("github", now)
       return connected && auth.admitted && githubCapabilityHandle !== null
-        ? json({ authStateVersion: auth.authStateVersion, githubCapabilityHandle })
+        ? json({ authStateVersion: auth.authStateVersion, githubCapabilityHandle, claimed: false })
         : json({ error: "Managed offload is not authorized" }, 403)
     }
 
@@ -141,12 +142,13 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
         return json({ error: "Offload concurrency exceeded" }, 429)
       }
       if (existing === undefined) {
-        active.push({ jobId, idempotencyKey, expiresAt: now + 35 * 60 })
+        active.push({ jobId, idempotencyKey, expiresAt: now + OFFLOAD_SLOT_SECONDS })
         await this.ctx.storage.put(OFFLOAD_JOBS_KEY, active)
       }
       return json({
         authStateVersion: auth.authStateVersion,
-        githubCapabilityHandle
+        githubCapabilityHandle,
+        claimed: existing === undefined
       })
     }
 

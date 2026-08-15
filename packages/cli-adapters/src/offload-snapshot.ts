@@ -179,6 +179,11 @@ const validateHeadTree = (
           failure("unsafe-path", `Offload snapshot rejected unsafe tracked path: ${entry.path}`)
         )
       }
+      if (isSecretPath(entry.path)) {
+        return yield* Effect.fail(
+          failure("secret-path", `Offload snapshot rejected secret-prone tracked path: ${entry.path}`)
+        )
+      }
       if (entry.mode === "120000" || entry.mode === "160000") {
         return yield* Effect.fail(
           failure("unsupported-file", `Offload snapshot rejects links and submodules: ${entry.path}`)
@@ -192,18 +197,18 @@ const capturePayload = (
   maxBytes: number
 ): Effect.Effect<SnapshotPayload, OffloadSnapshotError> =>
   Effect.gen(function* () {
-    const [headSha, headArchive, headTree, stagedPatch, unstagedPatch, paths] =
+    const [headSha, headTree, stagedPatch, unstagedPatch, paths] =
       yield* Effect.all([
         git(cwd, ["rev-parse", "--verify", "HEAD"]),
-        gitBytes(cwd, ["archive", "--format=tar", "HEAD"]),
         git(cwd, ["ls-tree", "-rz", "HEAD"], false),
         git(cwd, ["diff", "--binary", "--cached", "--no-ext-diff"], false),
         git(cwd, ["diff", "--binary", "--no-ext-diff"], false),
         changedPaths(cwd)
-      ], { concurrency: 6 })
+      ], { concurrency: 5 })
     const entries = treeEntries(headTree)
     yield* validateHeadTree(entries)
     yield* validatePaths(cwd, paths)
+    const headArchive = yield* gitBytes(cwd, ["archive", "--format=tar", "HEAD"])
     const uncompressedBytes =
       headArchive.byteLength +
       Buffer.byteLength(stagedPatch) +

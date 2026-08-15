@@ -193,6 +193,7 @@ import { showNotification, shouldNotify } from "./notifications.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
 import { createZipArchive } from "./zip.js";
+import { primeOffloadSessions } from "./offload-session-primer.js";
 import {
   dialGitHubRelay,
   GitHubRelayConnection,
@@ -5200,17 +5201,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       if (!offloadCompute.enabled) return updated
       const router = yield* makeOffloadCommandRouter
       const sessions = yield* SessionStore.list()
-      yield* Effect.forEach(
-        sessions,
-        (session) => session.worktreePath
-          ? router.primeSession(session.worktreePath, session.id)
-          : Effect.succeed("disabled" as const),
-        { concurrency: "unbounded", discard: true }
-      ).pipe(
-        Effect.mapError((cause) => new ConfigError({
-          message: cause.message,
-          cause
-        }))
+      yield* Effect.forkDaemon(
+        primeOffloadSessions(sessions, (cwd, sessionId) =>
+          router.primeSession(cwd, sessionId)
+        )
       )
       return updated
     }),

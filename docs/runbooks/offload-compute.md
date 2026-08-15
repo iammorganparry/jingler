@@ -53,7 +53,7 @@ Create Cloudflare dashboard charts split by `warmSandbox`, `outcome`, and
    failure reason.
 3. `runtime-failed`, `hydration-failed`, or `dependency-failed` above 2% for 10
    minutes, and any authenticated offload smoke failure.
-4. A Workflow still active after 35 minutes, or lifecycle cleanup errors for 15
+4. A Workflow still active after 80 minutes, or lifecycle cleanup errors for 15
    minutes.
 
 ## Incident response

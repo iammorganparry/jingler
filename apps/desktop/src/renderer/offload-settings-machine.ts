@@ -63,17 +63,36 @@ export const createOffloadSettingsMachine = (api: OffloadSettingsApi) =>
         }
       },
       saving: {
+        on: {
+          SET: {
+            actions: assign({
+              pending: ({ event }) => event.settings,
+              settings: ({ event }) => event.settings,
+              error: null
+            })
+          }
+        },
         invoke: {
           src: "save",
           input: ({ context }) => context.pending ?? context.settings,
-          onDone: {
-            target: "idle",
-            actions: assign({
-              settings: ({ event }) => event.output,
-              pending: null,
-              error: null
-            })
-          },
+          onDone: [
+            {
+              guard: ({ context, event }) =>
+                context.pending !== null &&
+                JSON.stringify(context.pending) !== JSON.stringify(event.output),
+              target: "saving",
+              reenter: true,
+              actions: assign({ error: null })
+            },
+            {
+              target: "idle",
+              actions: assign({
+                settings: ({ event }) => event.output,
+                pending: null,
+                error: null
+              })
+            }
+          ],
           onError: {
             target: "failed",
             actions: assign({

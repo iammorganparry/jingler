@@ -55,7 +55,9 @@ import {
   OffloadStoreError,
   makeOffloadJobStoreLayer
 } from "./offload-store.js";
+import { cleanupOffloadJob } from "./offload-cleanup.js";
 import { primeOffloadWorkspace } from "./offload-workspace.js";
+import { OffloadRuntimePrimeRequest, OffloadRuntimeSandboxDestroyRequest } from "./offload-runtime-request.js";
 
 export { Sandbox } from "@cloudflare/sandbox";
 export { ManagedAccountObject } from "./account-runtime.js";
@@ -257,19 +259,10 @@ const OffloadRuntimeGrantRequest = Schema.Struct({
   subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   ...OffloadAdmissionRequest.fields
 });
-const OffloadPrimeRequest = Schema.Struct({
-  subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  sessionId: OffloadAdmissionRequest.fields.sessionId,
-  repositorySlug: OffloadAdmissionRequest.fields.repositorySlug,
-  headSha: OffloadAdmissionRequest.fields.snapshot.fields.headSha
-});
-const OffloadSandboxDestroyRequest = Schema.Struct({
-  subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  sessionId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))
-});
 const OffloadAccountRegistration = Schema.Struct({
   authStateVersion: Schema.Int.pipe(Schema.positive()),
-  githubCapabilityHandle: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))
+  githubCapabilityHandle: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  claimed: Schema.Boolean
 });
 
 const offloadJobId = async (subject: string, idempotencyKey: string): Promise<string> =>
@@ -307,6 +300,20 @@ const registerOffloadJob = async (
   });
 };
 
+const unregisterOffloadJob = (
+  env: ManagedRuntimeEnv,
+  subject: string,
+  jobId: string
+): Promise<Response> =>
+  env.MANAGED_ACCOUNT.getByName(subject).fetch(
+    INTERNAL_ROUTES.managedAccount.offloadUnregister,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, jobId })
+    }
+  );
+
 const authorizeOffloadPrimer = async (
   env: ManagedRuntimeEnv,
   subject: string
@@ -327,7 +334,7 @@ const authorizeOffloadPrimer = async (
 
 const primeOffloadSession = async (
   env: ManagedRuntimeEnv,
-  body: Schema.Schema.Type<typeof OffloadPrimeRequest>
+  body: Schema.Schema.Type<typeof OffloadRuntimePrimeRequest>
 ): Promise<void> => {
   await authorizeOffloadPrimer(env, body.subject);
   await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(body.sessionId).fetch(
@@ -349,6 +356,22 @@ const primeOffloadSession = async (
     }
   );
   await Effect.runPromise(primeOffloadWorkspace(sandbox));
+};
+
+const consumeOffloadGrantUse = async (
+  env: ManagedRuntimeEnv,
+  subject: string,
+  use: string
+): Promise<boolean> => {
+  const response = await env.MANAGED_ACCOUNT.getByName(subject).fetch(
+    INTERNAL_ROUTES.managedAccount.offloadConsumeGrant,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, use })
+    }
+  );
+  return response.ok || response.status === 409;
 };
 
 const authorizeOffloadRequest = (
@@ -376,19 +399,13 @@ const authorizeOffloadRequest = (
     if (!verified.ok) return null;
     if (consume) {
       const consumed = yield* Effect.tryPromise(() =>
-        env.MANAGED_ACCOUNT.getByName(record.subject).fetch(
-          INTERNAL_ROUTES.managedAccount.offloadConsumeGrant,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              subject: record.subject,
-              use: `${verified.claims.grantId}:${action}`
-            })
-          }
+        consumeOffloadGrantUse(
+          env,
+          record.subject,
+          `${verified.claims.grantId}:${action}`
         )
       );
-      if (!consumed.ok) return null;
+      if (!consumed) return null;
     }
     return { record, claims: verified.claims };
   }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)));
@@ -432,7 +449,7 @@ export default {
       if (!hasBearerServiceAuthorization(request, env)) {
         return json({ error: "Unauthorized" }, 401);
       }
-      const body = decodeOrNull(OffloadPrimeRequest, await request.json());
+      const body = decodeOrNull(OffloadRuntimePrimeRequest, await request.json());
       if (body === null) return json({ error: "Invalid offload prime request" }, 400);
       ctx.waitUntil(
         primeOffloadSession(env, body).catch((cause) =>
@@ -448,7 +465,7 @@ export default {
       if (!hasBearerServiceAuthorization(request, env)) {
         return json({ error: "Unauthorized" }, 401);
       }
-      const body = decodeOrNull(OffloadSandboxDestroyRequest, await request.json());
+      const body = decodeOrNull(OffloadRuntimeSandboxDestroyRequest, await request.json());
       if (body === null) return json({ error: "Invalid sandbox cleanup request" }, 400);
       const response = await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(
         body.sessionId
@@ -525,6 +542,21 @@ export default {
           expiresAt: issued.claims.expiresAt
         });
       } catch (cause) {
+        if (registration.claimed) {
+          if (!(cause instanceof OffloadStoreError && cause.reason === "conflict")) {
+            await env.OFFLOAD_WORKFLOW.get(jobId).then(
+              (instance) => instance.terminate(),
+              () => undefined
+            ).catch(() => undefined);
+            await Effect.runPromise(
+              Effect.flatMap(OffloadJobStore, (store) => store.remove(jobId)).pipe(
+                Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)),
+                Effect.catchAll(() => Effect.void)
+              )
+            );
+          }
+          await unregisterOffloadJob(env, body.subject, jobId).catch(() => undefined);
+        }
         return cause instanceof OffloadStoreError && cause.reason === "conflict"
           ? json({ error: cause.message }, 409)
           : json({ error: "Offload grant could not be issued" }, 503);
@@ -928,7 +960,7 @@ export default {
     if (offloadSnapshotMatch !== null && request.method === "PUT") {
       const jobId = decodeURIComponent(offloadSnapshotMatch[1] ?? "");
       const authorized = await Effect.runPromise(
-        authorizeOffloadRequest(request, env, "snapshot.upload", jobId, true).pipe(
+        authorizeOffloadRequest(request, env, "snapshot.upload", jobId, false).pipe(
           Effect.catchAll(() => Effect.succeed(null))
         )
       );
@@ -945,6 +977,26 @@ export default {
       if (digest !== authorized.record.request.snapshot.digest) {
         return json({ error: "Offload snapshot digest mismatch" }, 409);
       }
+      if (authorized.record.state !== "uploading") {
+        if (authorized.record.state === "queued") {
+          const published = await env.OFFLOAD_WORKFLOW.get(jobId).then(
+            (instance) => instance.sendEvent({
+              type: "snapshot-ready",
+              payload: { jobId }
+            }).then(() => true),
+            () => false
+          ).catch(() => false);
+          if (!published) return json({ error: "Offload workflow event unavailable" }, 503);
+        }
+        const consumed = await consumeOffloadGrantUse(
+          env,
+          authorized.record.subject,
+          `${authorized.claims.grantId}:snapshot.upload`
+        ).catch(() => false);
+        return consumed
+          ? json({ accepted: true, jobId }, 202)
+          : json({ error: "Offload upload could not be confirmed" }, 503);
+      }
       try {
         await Effect.runPromise(
           Effect.gen(function* () {
@@ -957,6 +1009,12 @@ export default {
           type: "snapshot-ready",
           payload: { jobId }
         });
+        const consumed = await consumeOffloadGrantUse(
+          env,
+          authorized.record.subject,
+          `${authorized.claims.grantId}:snapshot.upload`
+        );
+        if (!consumed) throw new Error("Offload upload grant could not be committed");
         return json({ accepted: true, jobId }, 202);
       } catch {
         return json({ error: "Offload workflow could not be started" }, 503);
@@ -1041,6 +1099,7 @@ export default {
           yield* store.finish(jobId, result);
         }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
       );
+      await cleanupOffloadJob(env, jobId);
       return json({ cancelled: true, jobId });
     }
     const offloadGitMatch = url.pathname.match(

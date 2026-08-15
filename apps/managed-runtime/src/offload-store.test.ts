@@ -8,13 +8,15 @@ import {
 } from "./offload-store.js"
 
 class MemoryBucket {
-  readonly objects = new Map<string, { bytes: Uint8Array; customMetadata?: Record<string, string> }>()
+  readonly objects = new Map<string, { bytes: Uint8Array; customMetadata?: Record<string, string>; etag: string }>()
+  #version = 0
 
   async get(key: string) {
     const object = this.objects.get(key)
     if (!object) return null
     return {
       customMetadata: object.customMetadata,
+      etag: object.etag,
       json: async () => JSON.parse(new TextDecoder().decode(object.bytes)),
       arrayBuffer: async () => object.bytes.slice().buffer
     }
@@ -23,12 +25,27 @@ class MemoryBucket {
   async put(
     key: string,
     value: string | Uint8Array,
-    options?: { customMetadata?: Record<string, string> }
+    options?: {
+      customMetadata?: Record<string, string>
+      onlyIf?: { etagMatches?: string; etagDoesNotMatch?: string }
+    }
   ) {
-    this.objects.set(key, {
+    const existing = this.objects.get(key)
+    if (
+      options?.onlyIf?.etagMatches !== undefined &&
+      existing?.etag !== options.onlyIf.etagMatches
+    ) return null
+    if (
+      options?.onlyIf?.etagDoesNotMatch === "*" &&
+      existing !== undefined
+    ) return null
+    const stored = {
       bytes: typeof value === "string" ? new TextEncoder().encode(value) : value,
-      customMetadata: options?.customMetadata
-    })
+      customMetadata: options?.customMetadata,
+      etag: `etag-${++this.#version}`
+    }
+    this.objects.set(key, stored)
+    return stored
   }
 
   async delete(keys: string | string[]) {
@@ -149,6 +166,28 @@ describe("offload job store", () => {
       const record = yield* store.get(result.jobId)
       expect(record.events.map((event) => event.sequence)).toEqual([1, 2, 3])
     }))
+  })
+
+  it("serializes concurrent leases and preserves concurrent cancellation", async () => {
+    const bucket = new MemoryBucket()
+    await program(bucket, Effect.gen(function* () {
+      const store = yield* OffloadJobStore
+      yield* create(store)
+    }))
+    const leases = await Promise.all([
+      program(bucket, Effect.flatMap(OffloadJobStore, (store) => store.acquireExecution(result.jobId))),
+      program(bucket, Effect.flatMap(OffloadJobStore, (store) => store.acquireExecution(result.jobId)))
+    ])
+    expect(leases.sort()).toEqual(["acquired", "running"])
+    await Promise.all([
+      program(bucket, Effect.flatMap(OffloadJobStore, (store) => store.requestCancel(result.jobId))),
+      program(bucket, Effect.flatMap(OffloadJobStore, (store) =>
+        store.append(result.jobId, { kind: "output", stream: "stdout", text: "kept" })
+      ))
+    ])
+    const record = await program(bucket, Effect.flatMap(OffloadJobStore, (store) => store.get(result.jobId)))
+    expect(record.cancelRequested).toBe(true)
+    expect(record.events.some((event) => event.kind === "output" && event.text === "kept")).toBe(true)
   })
 
   it("leases execution once and settles the result idempotently", async () => {

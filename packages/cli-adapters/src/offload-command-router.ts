@@ -104,7 +104,7 @@ const terminal = (result: OffloadJobResult): OffloadedCommandResult => {
     const reason = result.failureReason ?? result.state
     throw failure(
       `Remote command failed (${reason})${detail ? `: ${detail}` : ""}. ` +
-      "It was not retried locally; after explicit operator approval, retry command_execute with runLocally: true."
+      "It was not retried locally; only the operator can force a local retry by disabling Offload Compute first."
     )
   }
   return {
@@ -147,6 +147,7 @@ interface PollInput {
   readonly admission: OffloadAdmissionResponse
   readonly refresh: () => Promise<OffloadAdmissionResponse>
   readonly context: ToolExecutionContext
+  readonly deadlineAt: number
 }
 
 const cancelRemote = async (
@@ -161,10 +162,15 @@ const cancelRemote = async (
   ).catch(() => undefined)
 }
 
-const pollResult = async (input: PollInput): Promise<OffloadedCommandResult> => {
+export const pollResult = async (input: PollInput): Promise<OffloadedCommandResult> => {
   let admission = input.admission
   let cursor = 0
+  let consecutiveFailures = 0
   while (true) {
+    if (Date.now() >= input.deadlineAt) {
+      await cancelRemote(admission)
+      throw failure("Remote job status deadline expired; it was not retried locally", true)
+    }
     if (input.context.signal.aborted) {
       await cancelRemote(admission)
       throw new ToolError("cancelled", "Remote command cancelled", true)
@@ -174,9 +180,14 @@ const pollResult = async (input: PollInput): Promise<OffloadedCommandResult> => 
       { headers: { authorization: `Bearer ${admission.grant}` } }
     ).catch(() => null)
     if (response === null) {
-      await delay(500, input.context.signal)
+      consecutiveFailures += 1
+      await delay(
+        Math.min(10_000, 500 * (2 ** Math.min(consecutiveFailures - 1, 5))),
+        input.context.signal
+      )
       continue
     }
+    consecutiveFailures = 0
     if (response.status === 401 || response.status === 403) {
       admission = await input.refresh()
       continue
@@ -338,18 +349,34 @@ export const makeOffloadCommandRouter = Effect.gen(function* () {
       catch: (cause) => cause instanceof ToolError ? cause : failure("Offload Compute admission failed")
     })
     context.progress({ message: "Offload Compute: uploading", completed: 0, total: snapshot.compressedBytes.byteLength })
-    yield* uploadOffloadSnapshot({
-      url: admission.uploadUrl,
-      grant: admission.grant,
+    const upload = (target: OffloadAdmissionResponse) => uploadOffloadSnapshot({
+      url: target.uploadUrl,
+      grant: target.grant,
       snapshot,
       onProgress: (completed, total) => context.progress({
         message: "Offload Compute: uploading",
         completed,
         total
       })
-    }).pipe(Effect.mapError((cause) => failure(cause.message, true)))
+    }).pipe(Effect.as(target))
+    const uploadedAdmission = yield* upload(admission).pipe(
+      Effect.catchAll(() =>
+        Effect.tryPromise({
+          try: admit,
+          catch: (cause) => cause instanceof ToolError
+            ? cause
+            : failure("Offload Compute upload grant refresh failed", true)
+        }).pipe(Effect.flatMap(upload))
+      ),
+      Effect.mapError((cause) => failure(cause.message, true))
+    )
     return yield* Effect.tryPromise({
-      try: () => pollResult({ admission, refresh: admit, context }),
+      try: () => pollResult({
+        admission: uploadedAdmission,
+        refresh: admit,
+        context,
+        deadlineAt: Date.now() + (request.limits.timeoutSeconds + 35 * 60) * 1_000
+      }),
       catch: (cause) => cause instanceof ToolError ? cause : failure("Remote command failed", true)
     }).pipe(
       Effect.map((result) => ({ ...result, command: source })),
