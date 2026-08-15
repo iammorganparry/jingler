@@ -148,7 +148,20 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
         latestPlan(snapshot.context.messages) !== null
     )
   )
-  const diffSnapshot = preferred ?? sessionSnapshots[sessionSnapshots.length - 1]
+  // The diff describes the WORKTREE, which every chat in the session shares —
+  // follow the freshest READ, not the most recent publisher. Chats hold their
+  // own snapshots of the same diff taken at different times, and last-writer-
+  // wins made the session's diff chip flash between two stale readings as the
+  // chats took turns publishing.
+  let diffSnapshot = preferred
+  for (const snapshot of sessionSnapshots) {
+    if (
+      diffSnapshot === undefined ||
+      snapshot.context.patchAt > diffSnapshot.context.patchAt
+    ) {
+      diffSnapshot = snapshot
+    }
+  }
   if (diffSnapshot === undefined) clearSessionDiff(sessionId)
   else setSessionDiff(sessionId, diffCounts(diffSnapshot.context.patch))
 }

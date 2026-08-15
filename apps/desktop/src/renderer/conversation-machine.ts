@@ -155,6 +155,14 @@ export interface ConversationContext {
   readonly modelId: ProviderModelId | null
   /** The worktree's current unified diff, for the Changes rail. */
   readonly patch: string
+  /**
+   * When `patch` was last read (epoch ms; 0 = never). Chats in one session
+   * each hold their own snapshot of the SAME worktree's diff, taken at
+   * different times — the session-level diff chip must follow the freshest
+   * one, not whichever chat happened to publish last (that alternated the
+   * chip between two stale readings).
+   */
+  readonly patchAt: number
   /** Operator-visible text for the running turn. */
   readonly pendingText: string
   /** Hidden structured context appended only when the harness is dispatched. */
@@ -1616,7 +1624,9 @@ export const conversationMachine = setup({
       }
     },
     applyLivePatch: assign(({ event }) =>
-      event.type === "PATCH_UPDATED" ? { patch: event.patch } : {}
+      event.type === "PATCH_UPDATED"
+        ? { patch: event.patch, patchAt: Date.now() }
+        : {}
     ),
     applyLiveFiles: assign(({ event }) =>
       event.type === "FILES_UPDATED" ? { files: event.files } : {}
@@ -1888,7 +1898,9 @@ export const conversationMachine = setup({
       // refreshed the diff with something newer — don't clobber it.
       return {
         files: event.files,
-        patch: context.patch.length > 0 ? context.patch : event.patch
+        ...(context.patch.length > 0
+          ? {}
+          : { patch: event.patch, patchAt: Date.now() })
       }
     }),
     /** Fold one reviewer event into its tab + the PR button's phase/timer. */
@@ -2058,6 +2070,7 @@ export const conversationMachine = setup({
       providerId,
       modelId: chat.modelId ?? input.session.modelId ?? null,
       patch: "",
+      patchAt: 0,
       pendingText: "",
       pendingAgentContext: "",
       pendingImages: [],
@@ -2397,9 +2410,15 @@ export const conversationMachine = setup({
           {
             guard: "hasSettledQueue",
             target: "running",
-            actions: [assign(({ event }) => ({ patch: event.output })), "dequeueTurn"]
+            actions: [
+              assign(({ event }) => ({ patch: event.output, patchAt: Date.now() })),
+              "dequeueTurn"
+            ]
           },
-          { target: "awaitingInput", actions: assign(({ event }) => ({ patch: event.output })) }
+          {
+            target: "awaitingInput",
+            actions: assign(({ event }) => ({ patch: event.output, patchAt: Date.now() }))
+          }
         ],
         onError: [
           { guard: "hasSettledQueue", target: "running", actions: "dequeueTurn" },

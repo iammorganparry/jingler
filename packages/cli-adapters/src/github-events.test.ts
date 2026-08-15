@@ -150,4 +150,12 @@ describe("GitHub feedback routing primitives", () => {
     expect(instruction).toContain("Do NOT post any comment, reply, or acknowledgement")
     expect(instruction).toContain("MAY mark its review thread resolved")
   })
+
+  it("tells a plan-executing session to fix the code, not amend the plan", () => {
+    // Plan-execution profiles fold new work into an amended plan; without this
+    // override every review comment became a plan revision, churning the plan
+    // card proposed → stale in a loop while the actual fix waited.
+    const instruction = githubFeedbackInstruction(event())
+    expect(instruction).toContain("do NOT submit a plan revision or amendment")
+  })
 })

@@ -41,7 +41,7 @@ import {
   rehomeSharedPlan
 } from "./conversation-registry.js"
 import { clearDraft, getDraft, markDraftSeeded, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
-import { diffCounts, setSessionDiff, useSessionDiffs } from "./diff-presence.js"
+import { useSessionDiffs } from "./diff-presence.js"
 import { takeFirstMessage } from "./first-message-store.js"
 import {
   codeReferenceDisplayLabel,
@@ -478,14 +478,17 @@ export function ConversationPane({
 
   // Catch changes made outside agent turns (editor saves, manual commits): the
   // per-ToolEnd refresh can't see them, so re-read the worktree diff whenever
-  // this session's pane becomes active.
+  // this session's pane becomes active. Routed through the MACHINE rather than
+  // written straight to the diff store: a direct store write raced the
+  // registry's own publishes (each chat re-asserting its snapshot), and the
+  // composer's diff chip flashed between the two readings. The machine stamps
+  // the read's freshness, and the registry follows the freshest. Dropped while
+  // a turn is running — the per-ToolEnd refresh owns that window.
+  const refreshDiffStable = convo.refreshDiff
   useEffect(() => {
     if (!session.worktreePath) return
-    void rpc
-      .sessionsDiff(session.id)
-      .then((patch) => setSessionDiff(session.id, diffCounts(patch)))
-      .catch(() => {})
-  }, [session.id, session.worktreePath])
+    refreshDiffStable()
+  }, [session.id, session.worktreePath, refreshDiffStable])
 
   useEffect(() => {
     const firstTurnImages = takeFirstMessage(session.id)
