@@ -17,6 +17,7 @@ import {
   ManagedEnvironmentLifecycleRequest,
   RenameManagedEnvironmentRequest,
   WorkspaceProvisioningPlan,
+  WebSearchProvider,
 } from "@jingler/core";
 import crypto from "node:crypto";
 import { Either, Schema } from "effect";
@@ -42,6 +43,13 @@ import { decodeBoundedJson } from "./request-decoding.js";
 import { runtime } from "./runtime.js";
 
 const noStoreHeaders = { "cache-control": "no-store" } as const;
+const WebSearchCredentialSyncRequest = Schema.Struct({
+  provider: WebSearchProvider,
+  apiKey: Schema.String.pipe(Schema.minLength(8), Schema.maxLength(16_384)),
+});
+const WebSearchCredentialDeleteRequest = Schema.Struct({
+  provider: WebSearchProvider,
+});
 const MANAGED_CLOUD_IDEMPOTENCY_KEY = "account_cloud_v1";
 
 const json = (body: unknown, status = 200): Response =>
@@ -124,6 +132,11 @@ export interface EnvironmentRoutesDependencies {
   readonly listOwned: (
     userId: string,
   ) => Promise<ReadonlyArray<OwnedInventoryEntry>>;
+  readonly syncWebSearchCapability?: (input: {
+    readonly userId: string;
+    readonly provider: "exa" | "firecrawl";
+    readonly apiKey: string | null;
+  }) => Promise<void>;
   readonly syncCapabilities?: (input: {
     readonly userId: string;
     readonly providerCredential: SyncedProviderCredential | null;
@@ -215,6 +228,25 @@ const defaultDependencies = (): EnvironmentRoutesDependencies => ({
         lastSeenAt: device.presence.lastSeenAt,
       },
     }));
+  },
+  syncWebSearchCapability: async ({ userId, provider, apiKey }) => {
+    const config = {
+      enabled: env.managedEnvironmentsEnabled,
+      url: env.authStateUrl,
+      serviceSecret: env.authStateServiceSecret,
+    };
+    if (apiKey === null) {
+      await deleteAuthStateCapability(config, { userId, provider });
+      return;
+    }
+    await upsertAuthStateCapability(config, {
+      userId,
+      provider,
+      upstream: provider === "exa" ? "exa-api" : "firecrawl-api",
+      authorizationHeader:
+        provider === "exa" ? `X-Api-Key ${apiKey}` : `Bearer ${apiKey}`,
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1_000),
+    });
   },
   syncCapabilities: async ({ userId, providerCredential, includeGitHub }) => {
     const config = {
@@ -613,6 +645,50 @@ export const createEnvironmentRoutes = (
       );
     } catch {
       return json({ error: "Environment inventory unavailable" }, 503);
+    }
+  });
+
+  routes.put("/web-search-credential", async (context) => {
+    const dependencies = dependenciesFactory();
+    if (!dependencies.enabled)
+      return json({ error: "Managed environments disabled" }, 404);
+    const userId = await authenticate(context.req.raw, dependencies);
+    if (!userId) return json({ error: "Authentication required" }, 401);
+    const input = await decodeBoundedJson(
+      context.req.raw,
+      WebSearchCredentialSyncRequest,
+    );
+    if (input === null || dependencies.syncWebSearchCapability === undefined)
+      return json({ error: "Invalid WebSearch credential request" }, 400);
+    try {
+      await dependencies.syncWebSearchCapability({ userId, ...input });
+      return json({ synced: true });
+    } catch {
+      return json({ error: "WebSearch credential sync unavailable" }, 503);
+    }
+  });
+
+  routes.delete("/web-search-credential", async (context) => {
+    const dependencies = dependenciesFactory();
+    if (!dependencies.enabled)
+      return json({ error: "Managed environments disabled" }, 404);
+    const userId = await authenticate(context.req.raw, dependencies);
+    if (!userId) return json({ error: "Authentication required" }, 401);
+    const input = await decodeBoundedJson(
+      context.req.raw,
+      WebSearchCredentialDeleteRequest,
+    );
+    if (input === null || dependencies.syncWebSearchCapability === undefined)
+      return json({ error: "Invalid WebSearch credential request" }, 400);
+    try {
+      await dependencies.syncWebSearchCapability({
+        userId,
+        provider: input.provider,
+        apiKey: null,
+      });
+      return json({ synced: false });
+    } catch {
+      return json({ error: "WebSearch credential revocation unavailable" }, 503);
     }
   });
 

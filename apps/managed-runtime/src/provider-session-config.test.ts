@@ -49,6 +49,21 @@ describe("managed provider session environment", () => {
     expect(environment).not.toHaveProperty("OPENAI_API_KEY");
   });
 
+  it("provides only a scoped search proxy route when configured", () => {
+    const environment = managedProviderEnvironment({
+      capability: capability(),
+      origin: "https://runtime.example/",
+      sessionId: "session/one",
+      nonce: "nonce",
+      webSearchProvider: "exa"
+    })
+    expect(environment.JINGLER_WEB_SEARCH_PROVIDER).toBe("exa")
+    expect(environment.JINGLER_WEB_SEARCH_URL).toBe(
+      "https://runtime.example/v1/web-search/exa/session%2Fone"
+    )
+    expect(JSON.stringify(environment)).not.toContain("capability_search")
+  })
+
   it("gives Claude setup-token auth the token shape pi requires", () => {
     const environment = managedProviderEnvironment({
       capability: capability({

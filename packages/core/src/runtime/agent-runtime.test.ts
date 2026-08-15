@@ -14,6 +14,13 @@ describe("agent runtime contract", () => {
     expect(runtimeCapabilitiesMatch(local, local)).toBe(true)
   })
 
+  it("matches optional host-contributed tools separately from daemon tools", () => {
+    const interactive = { ...local, hostToolIds: ["jingler-browser.navigate"] }
+    expect(runtimeCapabilitiesMatch(interactive, interactive)).toBe(true)
+    expect(runtimeCapabilitiesMatch(interactive, local)).toBe(false)
+    expect(runtimeCapabilitiesMatch(local, interactive)).toBe(true)
+  })
+
   it("rejects remote contract drift or missing tools", () => {
     expect(runtimeCapabilitiesMatch(local, {
       ...local,

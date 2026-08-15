@@ -41,6 +41,9 @@ import {
   BackgroundTaskStore,
   UsageService,
   WorkspaceService,
+  WebSearchCredentialService,
+  WebSearchService,
+  makeWebSearchService,
   RuntimeDiagnostics,
   RuntimeRecoveryService
 } from "@jingler/cli-adapters"
@@ -122,8 +125,18 @@ const RemoteSessionsLive = RemoteSessionService.Default.pipe(
   )
 )
 
+const WebSearchLive = Layer.effect(
+  WebSearchService,
+  makeWebSearchService()
+).pipe(
+  Layer.provide(WebSearchCredentialService.Default),
+  Layer.provide(SecretStoreLayer),
+  Layer.provide(ConfigService.Default)
+)
+
 const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(RemoteSessionsLive),
+  Layer.provide(WebSearchLive),
   Layer.provide(ConfigService.Default),
   Layer.provide(GitService.Default),
   Layer.provide(AssetLayer),
@@ -145,6 +158,7 @@ const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provide(RemoteSessionsLive),
   // AuthService requires SecretStore, satisfied by SecretStoreLive (merged below).
   Layer.provide(AuthService.Default),
+  Layer.provideMerge(WebSearchCredentialService.Default),
   // Merged into one stage to stay inside `pipe`'s 20-argument limit. AssetService
   // captures the command executor used by its NUL-safe repository listing, so its
   // platform dependencies are provided at construction. Reusing NodeContext.layer

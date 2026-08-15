@@ -107,7 +107,9 @@ import type {
   ManagedResourceSelector,
   ManagedResourceScope,
   ResourceDetectionResult,
-  ResourceImportResult
+  ResourceImportResult,
+  WebSearchProvider,
+  WebSearchSettingsStatus
 } from "@jingler/core"
 import {
   AssetListRpcs,
@@ -914,6 +916,21 @@ export const rpc = {
     run((c) => c.Config.setDefaultProviderModel({ connectionId, providerId, modelId })),
   configCompleteProviderSetup: (): Promise<WorkspaceConfig> =>
     run((c) => c.Config.completeProviderSetup()),
+  configSetWebSearch: (webSearch: import("@jingler/core").WebSearchConfig) =>
+    run((c) => c.Config.setWebSearch(webSearch)),
+  webSearchGet: (): Promise<WebSearchSettingsStatus> =>
+    run((c) => c.WebSearch.get()),
+  webSearchSetCredential: (
+    provider: WebSearchProvider,
+    apiKey: string
+  ): Promise<WebSearchSettingsStatus> =>
+    run((c) => c.WebSearch.setCredential({ provider, apiKey })),
+  webSearchClearCredential: (
+    provider: WebSearchProvider
+  ): Promise<WebSearchSettingsStatus> =>
+    run((c) => c.WebSearch.clearCredential({ provider })),
+  webSearchSkip: (): Promise<WebSearchSettingsStatus> =>
+    run((c) => c.WebSearch.skip()),
   /**
    * Ask main to raise an OS notification. Main decides whether it actually
    * surfaces — it owns window focus and the stored prefs.

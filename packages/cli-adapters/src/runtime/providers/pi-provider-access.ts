@@ -237,7 +237,10 @@ export const discoverPiModels = (
           capabilities: {
             contextWindow: model.contextWindow,
             ...modelReasoningCapabilities(model),
-            vision: model.input.includes("image")
+            vision: model.input.includes("image"),
+            // pi-ai 0.84 exposes function tools only; provider-native server
+            // tools cannot be certified or installed through this adapter yet.
+            nativeWebSearch: false
           }
         })
       )

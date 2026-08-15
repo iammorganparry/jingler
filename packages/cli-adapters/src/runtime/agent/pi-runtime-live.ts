@@ -10,6 +10,12 @@ import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
+import { BrowserControlPort } from "../../browser-control-port.js"
+import {
+  browserWebSearchPort,
+  WebSearchService,
+  withWebSearchFallback
+} from "../../web-search.js"
 import { ProviderConnections } from "../providers/provider-connections.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { ImportedMcpService } from "../resources/imported-mcp-service.js"
@@ -55,6 +61,8 @@ export const makePiAgentRuntimeLive = (
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
     const workspace = yield* makeWorkspaceInspectionPort
+    const webSearch = yield* Effect.serviceOption(WebSearchService)
+    const browserControl = yield* Effect.serviceOption(BrowserControlPort)
     const mutations = yield* makeWorkspaceMutationPort
     const remoteSessions = yield* Effect.serviceOption(RemoteSessionService)
     const offload = yield* makeOffloadCommandRouterWithOwnedDevice(
@@ -128,6 +136,14 @@ export const makePiAgentRuntimeLive = (
         Effect.runFork(
           offload.primeSession(spec.cwd, spec.sessionId).pipe(Effect.ignore)
         )
+        const runWebSearch = Option.isSome(webSearch)
+          ? Option.isSome(browserControl) && context.mcp?.browser != null
+            ? withWebSearchFallback(
+                webSearch.value,
+                browserWebSearchPort(browserControl.value.forSession(spec.sessionId))
+              )
+            : webSearch.value
+          : undefined
         if (!tracker) {
           return Effect.fail(
             new AgentRuntimeError({
@@ -151,6 +167,7 @@ export const makePiAgentRuntimeLive = (
             context,
             cwd: spec.cwd,
             workspace,
+            ...(runWebSearch === undefined ? {} : { webSearch: runWebSearch }),
             mcp: {
               ...context.mcp,
               imported: managedMcp.map((server) =>

@@ -186,12 +186,14 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       const current = connected ? await this.#ledger(subject) : ledger
       const auth = current.authorize("managed.session.execute", now)
       const providerConnections = current.providerConnections(now)
+      const webSearchCapabilities = current.webSearchCapabilities(now)
       const githubCapabilityHandle = current.credentialHandle("github", now)
       if (!(connected && auth.admitted && providerConnections.length > 0)) {
         return json({
           connected,
           auth,
           providerConnections,
+          webSearchCapabilities,
           githubCapabilityHandle
         })
       }
@@ -207,6 +209,7 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
         connected,
         auth,
         providerConnections,
+        webSearchCapabilities,
         githubCapabilityHandle
       })
     }
@@ -233,7 +236,8 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       const admitted = current.authorize("managed.session.execute", now).admitted
       return json({
         version: 1,
-        providerConnections: admitted ? current.providerConnections(now) : []
+        providerConnections: admitted ? current.providerConnections(now) : [],
+        webSearchCapabilities: admitted ? current.webSearchCapabilities(now) : []
       })
     }
 

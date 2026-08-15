@@ -957,6 +957,18 @@ export const startFakeAuthServer = async (
       return;
     }
 
+    if (
+      url.pathname === "/api/environments/web-search-credential" &&
+      (req.method === "PUT" || req.method === "DELETE")
+    ) {
+      if (req.headers.authorization !== `Bearer ${options.token}`)
+        return json(401, {});
+      void readJson().then(() =>
+        json(200, { synced: req.method === "PUT" })
+      );
+      return;
+    }
+
     if (url.pathname === "/api/environments" && req.method === "GET") {
       if (req.headers.authorization !== `Bearer ${options.token}`)
         return json(401, {});

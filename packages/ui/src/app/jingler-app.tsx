@@ -205,6 +205,8 @@ export interface JinglerAppProps {
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => Promise<void> | void
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
+  /** Redacted WebSearch settings plus write-only credential actions. */
+  webSearch?: SettingsViewProps["webSearch"]
   /** Whether plan mode runs its read-only commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => Promise<void> | void
@@ -458,6 +460,7 @@ export function JinglerApp({
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
+  webSearch,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -1281,6 +1284,7 @@ export function JinglerApp({
               offloadCompute={offloadCompute}
               onSaveOffloadCompute={onSaveOffloadCompute}
               offloadStatus={offloadStatus}
+              webSearch={webSearch}
               planAutoRun={planAutoRun}
               onSavePlanAutoRun={onSavePlanAutoRun}
               adhdMode={adhdMode}

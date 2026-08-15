@@ -149,6 +149,37 @@ describe("environment routes", () => {
     ).toEqual(["device_one", managed.id]);
   });
 
+  it("syncs and revokes WebSearch keys without echoing them", async () => {
+    const syncWebSearchCapability = vi.fn(async () => undefined)
+    const { app } = harness({ syncWebSearchCapability })
+    const apiKey = "exa-test-secret"
+
+    const saved = await app.request("/api/environments/web-search-credential", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "exa", apiKey })
+    })
+    expect(saved.status).toBe(200)
+    expect(await saved.text()).not.toContain(apiKey)
+    expect(syncWebSearchCapability).toHaveBeenCalledWith({
+      userId: "user_one",
+      provider: "exa",
+      apiKey
+    })
+
+    const cleared = await app.request("/api/environments/web-search-credential", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "exa" })
+    })
+    expect(cleared.status).toBe(200)
+    expect(syncWebSearchCapability).toHaveBeenLastCalledWith({
+      userId: "user_one",
+      provider: "exa",
+      apiKey: null
+    })
+  })
+
   it("never returns runtime grants or provider credentials", async () => {
     const { app } = harness();
     const response = await app.request("/api/environments");

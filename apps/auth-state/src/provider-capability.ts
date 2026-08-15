@@ -20,12 +20,16 @@ export const CapabilityProviderSchema = Schema.Literal(
   "github",
   "codex",
   "claude",
+  "exa",
+  "firecrawl",
 );
 const CapabilityUpstreamSchema = Schema.Literal(
   "github-api",
   "openai-api",
   "chatgpt-codex",
   "anthropic-api",
+  "exa-api",
+  "firecrawl-api",
 );
 const CapabilityInput = Schema.Struct({
   subject: Identifier,
@@ -92,6 +96,10 @@ const upstreamOf = (
 ): CapabilityUpstream | null => {
   if (provider === "github")
     return value === undefined || value === "github-api" ? "github-api" : null;
+  if (provider === "exa")
+    return value === "exa-api" ? "exa-api" : null;
+  if (provider === "firecrawl")
+    return value === "firecrawl-api" ? "firecrawl-api" : null;
   if (provider === "codex") {
     return value === undefined || value === "openai-api"
       ? "openai-api"
@@ -105,7 +113,7 @@ const upstreamOf = (
 };
 
 const matchesProviderRoute = (
-  provider: Exclude<CapabilityProvider, "github">,
+  provider: "codex" | "claude",
   connection: ProviderConnectionCapabilityInput,
   upstream: CapabilityUpstream,
 ): boolean => {
@@ -175,21 +183,22 @@ export const validateCapability = (
   }
   const upstream = upstreamOf(input.provider, input.upstream);
   if (upstream === null) return { ok: false, error: "Invalid capability" };
+  const modelProvider = input.provider === "codex" || input.provider === "claude";
   const providerConnection =
-    input.provider === "github"
-      ? undefined
-      : decodeStrict(ProviderConnectionCapabilityInput, {
+    modelProvider
+      ? decodeStrict(ProviderConnectionCapabilityInput, {
           proxy: input.proxy,
           connectionId: input.connectionId,
           providerId: input.providerId,
           authKind: input.authKind,
           billingRoute: input.billingRoute,
-        });
+        })
+      : undefined;
   if (
-    input.provider !== "github" &&
+    modelProvider &&
     (providerConnection === null ||
       providerConnection === undefined ||
-      !matchesProviderRoute(input.provider, providerConnection, upstream))
+      !matchesProviderRoute(input.provider as "codex" | "claude", providerConnection, upstream))
   ) {
     return { ok: false, error: "Invalid provider connection capability" };
   }

@@ -9,7 +9,9 @@ export const ProviderModelCapabilities = Schema.Struct({
   reasoningCanDisable: Schema.optional(Schema.Boolean),
   /** Pi's resolved default after clamping its `medium` default to this model. */
   reasoningDefault: Schema.optional(ReasoningEffort),
-  vision: Schema.Boolean
+  vision: Schema.Boolean,
+  /** Verified support for the provider's server-side web-search tool. */
+  nativeWebSearch: Schema.optional(Schema.Boolean)
 })
 export type ProviderModelCapabilities = Schema.Schema.Type<typeof ProviderModelCapabilities>
 

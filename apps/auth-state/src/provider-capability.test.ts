@@ -25,6 +25,32 @@ describe("provider capability validation", () => {
     });
   });
 
+  it.each([
+    ["exa", "exa-api", "X-Api-Key exa-secret"],
+    ["firecrawl", "firecrawl-api", "Bearer firecrawl-secret"],
+  ])("accepts a scoped %s search capability", (provider, upstream, authorizationHeader) => {
+    expect(validateCapability({
+      subject: "user_1",
+      provider,
+      upstream,
+      authorizationHeader,
+      expiresAt: 2_000,
+    }, 1_000)).toMatchObject({
+      ok: true,
+      value: { provider, upstream, accountId: null }
+    })
+  })
+
+  it("rejects a search provider paired with another upstream", () => {
+    expect(validateCapability({
+      subject: "user_1",
+      provider: "exa",
+      upstream: "firecrawl-api",
+      authorizationHeader: "X-Api-Key exa-secret",
+      expiresAt: 2_000,
+    }, 1_000)).toEqual({ ok: false, error: "Invalid capability" })
+  })
+
   it.each(["", "x".repeat(257)])(
     "rejects an invalid ChatGPT account identifier",
     (accountId) => {
