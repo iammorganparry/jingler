@@ -14,9 +14,14 @@ import type {
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 
 const renderResult = (result: ToolResultEnvelope): string => {
-  if (result.error) return `${result.error.code}: ${result.error.message}`
-  if (result.preview !== null) return result.preview
-  return result.value === null ? result.status : JSON.stringify(result.value)
+  const value = result.error
+    ? `${result.error.code}: ${result.error.message}`
+    : result.preview !== null
+      ? result.preview
+      : result.value === null
+        ? result.status
+        : JSON.stringify(result.value)
+  return result.advisory === undefined ? value : `${result.advisory}\n\n${value}`
 }
 
 interface PiToolExecution {

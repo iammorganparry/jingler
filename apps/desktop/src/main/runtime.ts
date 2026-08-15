@@ -135,6 +135,10 @@ const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(AssetLayer),
   Layer.provide(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
+  Layer.provide(
+    MemoryAttachmentServiceLive.pipe(Layer.provide(MemoryServiceLive))
+  ),
+  Layer.provide(ConfigService.Default),
   Layer.provide(SecretStoreLayer)
 )
 
