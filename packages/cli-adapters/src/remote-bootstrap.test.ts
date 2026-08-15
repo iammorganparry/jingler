@@ -1,4 +1,15 @@
 import { spawnSync } from "node:child_process"
+import {
+  mkdirSync,
+  mkdtempSync,
+  readlinkSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Effect, Exit } from "effect"
 import { describe, expect, it } from "vitest"
 import {
@@ -160,6 +171,62 @@ describe("remote agent installation", () => {
     expect(remoteCommand).toContain("managed-runtime/current")
     expect(remoteCommand).toContain("node_modules/pi-subagents/index.ts")
     expect(spawnSync("sh", ["-n", "-c", remoteCommand ?? ""]).status).toBe(0)
+  })
+
+  it("recovers from an interrupted switch and prunes superseded releases", async () => {
+    const calls: Array<unknown> = []
+    await Effect.runPromise(
+      installAndBootstrapRemoteDevice(
+        {
+          host: "buildbox",
+          relayUrl: "https://relay.example.test",
+          agentBundlePath: "/Applications/Jingler/device-agent/jingler-device-runtime.tgz"
+        },
+        runner({ exitCode: 0, stdout: `${JSON.stringify(pairing)}\n`, stderr: "" }, calls)
+      )
+    )
+    const remoteCommand = (calls[1] as { args: ReadonlyArray<string> }).args.at(-1) ?? ""
+    const loginShellMarker = ` && "\${SHELL:-/bin/sh}" -lic`
+    const loginShellIndex = remoteCommand.indexOf(loginShellMarker)
+    expect(loginShellIndex).toBeGreaterThan(0)
+    const installCommand = remoteCommand.slice(0, loginShellIndex)
+    const home = mkdtempSync(join(tmpdir(), "jingler-remote-install-"))
+    const managedRoot = join(home, ".local/share/jingler/managed-runtime")
+    const releases = join(managedRoot, "releases")
+
+    const createUpload = (): void => {
+      const bundle = join(home, "bundle")
+      rmSync(bundle, { recursive: true, force: true })
+      mkdirSync(join(bundle, "node_modules/pi-subagents"), { recursive: true })
+      mkdirSync(join(bundle, "runtime-assets"), { recursive: true })
+      writeFileSync(join(bundle, "jingler-device.mjs"), "export {}\n")
+      writeFileSync(join(bundle, "node_modules/pi-subagents/index.ts"), "export {}\n")
+      writeFileSync(join(bundle, "runtime-assets/pi-subagent-wrapper.mjs"), "export {}\n")
+      expect(
+        spawnSync("tar", ["-czf", ".jingler-device-runtime-upload.tgz", "-C", bundle, "."], {
+          cwd: home
+        }).status
+      ).toBe(0)
+    }
+
+    try {
+      mkdirSync(join(releases, "runtime-old"), { recursive: true })
+      symlinkSync(join(releases, "runtime-old"), join(managedRoot, "current.next"))
+      createUpload()
+      expect(spawnSync("sh", ["-c", installCommand], { cwd: home, env: { ...process.env, HOME: home } }).status).toBe(0)
+
+      const firstRelease = readlinkSync(join(managedRoot, "current"))
+      expect(readdirSync(releases)).toStrictEqual([firstRelease.split("/").at(-1)])
+
+      createUpload()
+      expect(spawnSync("sh", ["-c", installCommand], { cwd: home, env: { ...process.env, HOME: home } }).status).toBe(0)
+
+      const secondRelease = readlinkSync(join(managedRoot, "current"))
+      expect(secondRelease).not.toBe(firstRelease)
+      expect(readdirSync(releases)).toStrictEqual([secondRelease.split("/").at(-1)])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 
   it("activates the claimed daemon through the remote login shell", async () => {

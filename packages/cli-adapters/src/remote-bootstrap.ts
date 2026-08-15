@@ -434,15 +434,17 @@ const INSTALLED_AGENT =
 const INSTALLED_NODE = '"$HOME/.local/share/jingler/runtime/bin/node"'
 const INSTALL_AGENT = [
   'managed_root="$HOME/.local/share/jingler/managed-runtime"',
-  'release="$managed_root/releases/runtime-$(date +%s)-$"',
-  'next="$managed_root/.next-$"',
-  'rm -rf "$next" && mkdir -p "$next" "$managed_root/releases"',
+  'mkdir -p "$managed_root/releases"',
+  'next="$(mktemp -d "$managed_root/releases/staging-XXXXXX")"',
   'tar -xzf .jingler-device-runtime-upload.tgz -C "$next"',
   'test -f "$next/jingler-device.mjs" && test -f "$next/node_modules/pi-subagents/index.ts"',
   'chmod 700 "$next/jingler-device.mjs" "$next/runtime-assets/pi-subagent-wrapper.mjs"',
-  'mv "$next" "$release"',
+  'release="$(mktemp -d "$managed_root/releases/runtime-XXXXXX")"',
+  'rmdir "$release" && mv "$next" "$release"',
+  'rm -f "$managed_root/current.next"',
   'ln -s "$release" "$managed_root/current.next"',
-  'mv -f "$managed_root/current.next" "$managed_root/current"',
+  'if [ "$(uname -s)" = Darwin ]; then mv -fh "$managed_root/current.next" "$managed_root/current"; else mv -Tf "$managed_root/current.next" "$managed_root/current"; fi',
+  'for old_release in "$managed_root/releases"/*; do if [ "$old_release" != "$release" ]; then rm -rf "$old_release"; fi; done',
   'rm -f .jingler-device-runtime-upload.tgz'
 ].join(" && ")
 const INSTALL_RUNTIME = [
