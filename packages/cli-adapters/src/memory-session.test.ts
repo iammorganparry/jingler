@@ -29,21 +29,43 @@ const spec: AgentTurnSpec = {
   mode: "auto"
 }
 
+const attachment = {
+  server: {
+    name: "jingler-memory",
+    url: "http://127.0.0.1:9000/mcp",
+    headers: { authorization: "Bearer scoped" }
+  },
+  instructions: "<team-memory>Recall first.</team-memory>"
+}
+
 describe("attachMemoryToSessionSpec", () => {
   it("loads memory instructions and the MCP server into an independent worker", () => {
-    const enriched = attachMemoryToSessionSpec(spec, {
-      server: {
-        name: "jingler-memory",
-        url: "http://127.0.0.1:9000/mcp",
-        headers: { authorization: "Bearer scoped" }
-      },
-      instructions: "<team-memory>Recall first.</team-memory>"
-    })
+    const enriched = attachMemoryToSessionSpec(spec, attachment)
 
     expect(enriched.prompt).toBe(
       "<team-memory>Recall first.</team-memory>\n\nImplement the assigned stage."
     )
     expect(enriched.mcp?.memory?.name).toBe("jingler-memory")
+  })
+
+  it.each(["conversation", "plan", "plan-execution", "review", "background"] as const)(
+    "attaches memory for the %s PI role",
+    (role) => {
+      const enriched = attachMemoryToSessionSpec({ ...spec, role }, attachment)
+      expect(enriched.mcp?.memory?.name).toBe("jingler-memory")
+      expect(enriched.prompt).toContain("<team-memory>")
+    }
+  )
+
+  it("keeps command-led prompts first while attaching memory", () => {
+    const enriched = attachMemoryToSessionSpec({ ...spec, prompt: "/review now" }, attachment)
+    expect(enriched.prompt.startsWith("/review now")).toBe(true)
+    expect(enriched.prompt).toContain("<team-memory>")
+  })
+
+  it("excludes context-digest runs from team memory", () => {
+    const digest = { ...spec, role: "context-digest" as const }
+    expect(attachMemoryToSessionSpec(digest, attachment)).toBe(digest)
   })
 
   it("preserves the original spec when memory is unavailable", () => {

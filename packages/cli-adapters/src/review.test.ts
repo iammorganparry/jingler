@@ -13,6 +13,10 @@ import { adversarialPrompt, fenceFor } from "./review-prompt.js"
 import type { ReviewEnv, ReviewInput } from "./review.js"
 import { ReviewStore } from "./review-store.js"
 import { SessionStore } from "./sessions.js"
+import {
+  MemoryAttachmentService,
+  type MemoryAttachmentServiceShape
+} from "./memory-session.js"
 import { fakeCommandExecutor, withTempRoot } from "./test-support.js"
 
 /**
@@ -78,13 +82,24 @@ afterEach(() => {
   temp.cleanup()
 })
 
+const memoryLayer = (
+  attachment: MemoryAttachmentServiceShape["attachment"]
+): Layer.Layer<MemoryAttachmentService> =>
+  Layer.succeed(
+    MemoryAttachmentService,
+    MemoryAttachmentService.of({ attachment })
+  )
+
 const env = (
   adapter: Layer.Layer<AgentTurnDriver>,
   executor: Layer.Layer<CommandExecutor.CommandExecutor> = installedHarnesses,
-  store: Layer.Layer<ReviewStore> = ReviewStore.Default
+  store: Layer.Layer<ReviewStore> = ReviewStore.Default,
+  memory?: Layer.Layer<MemoryAttachmentService>
 ) =>
   Layer.mergeAll(
-    ReviewService.Default,
+    memory === undefined
+      ? ReviewService.Default
+      : ReviewService.Default.pipe(Layer.provide(memory)),
     adapter,
     store,
     // A review is owned by the session's active chat, so the service reads it
@@ -231,6 +246,41 @@ describe("ReviewService — spec", () => {
       role: "review",
       targetCapabilities: { targetId: "desktop" }
     })
+  })
+
+  it("attaches bounded team-memory recall to the independent review run", async () => {
+    let spec: AgentTurnSpec | undefined
+    let recallInput: { query?: string; scope?: string } = {}
+    const adapter = stubAdapter((_id, captured, ctx) =>
+      Effect.gen(function* () {
+        spec = captured
+        yield* emitJson(ctx, '{"findings":[]}')
+      })
+    )
+    const memory = memoryLayer((query, scope) => {
+      recallInput = { query, scope }
+      return Effect.succeed({
+        server: {
+          name: "jingler-memory",
+          url: "http://127.0.0.1:9000/mcp",
+          headers: { authorization: "Bearer scoped" }
+        },
+        instructions: "<team-memory><recalled-memories /></team-memory>"
+      })
+    })
+
+    await Effect.runPromise(
+      ReviewService.run(INPUT).pipe(
+        Effect.provide(env(adapter, noHarnesses, ReviewStore.Default, memory))
+      )
+    )
+
+    expect(recallInput).toEqual({
+      query: "acme/widget feature review main",
+      scope: "review:s1:abc123"
+    })
+    expect(spec?.mcp?.memory?.name).toBe("jingler-memory")
+    expect(spec?.prompt).toContain("<recalled-memories")
   })
 
   it("runs on the configured review model, not the session's", async () => {

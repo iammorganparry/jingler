@@ -83,6 +83,7 @@ import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
+import { attachMemoryToSessionSpec } from "./memory-session.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -1053,12 +1054,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             `${sessionId}:${chatId}`
           )
           const mcp = {
-            memory: memoryAttachment?.server ?? null,
+            memory: null,
             openConnector: remoteMcpServer(openConnectorServer),
             browser: browserAttachment
           }
 
-          const spec: AgentTurnSpec = {
+          const baseSpec: AgentTurnSpec = {
             sessionId,
             chatId,
             connectionId: chat.connectionId,
@@ -1095,7 +1096,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 primer,
                 planPointer,
                 adhd,
-                memory: memoryAttachment?.instructions ?? null,
                 tools: managedToolsNote(),
                 ask,
                 planProtocol
@@ -1107,6 +1107,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             reasoning: reasoning ?? chat.reasoning ?? null,
             mcp
           }
+          const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
 
           // Clear the PERSISTED id too, so a crash between here and the harness
           // reporting its new id can't leave the session pointing at a thread

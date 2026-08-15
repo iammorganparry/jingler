@@ -9,13 +9,17 @@ import type {
 } from "@jingler/core"
 import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
 import type { FileSystem, Path } from "@effect/platform"
-import { Effect, PubSub, Ref, Schema, Stream } from "effect"
+import { Effect, Option, PubSub, Ref, Schema, Stream } from "effect"
 import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
 import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
 import type { AppPaths } from "./app-paths.js"
 import { ReviewStore } from "./review-store.js"
 import { SessionStore } from "./sessions.js"
 import { adversarialPrompt } from "./review-prompt.js"
+import {
+  MemoryAttachmentService,
+  attachMemoryToSessionSpec
+} from "./memory-session.js"
 
 /**
  * Runs the adversarial reviewer against a PR diff and returns structured findings.
@@ -190,6 +194,8 @@ const REPLAY_CAP = 2000
 export class ReviewService extends Effect.Service<ReviewService>()("@jingler/ReviewService", {
   accessors: true,
   effect: Effect.gen(function* () {
+    const memoryService = yield* Effect.serviceOption(MemoryAttachmentService)
+
     /**
      * Per-session broadcast of the running reviewer's events, so the UI can watch
      * an agent it did not start.
@@ -378,7 +384,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
         const collected = yield* Ref.make<ReadonlyArray<string>>([])
         const reviewChatId = yield* ownerFor(input.sessionId)
 
-        const spec: AgentTurnSpec = {
+        const baseSpec: AgentTurnSpec = {
           sessionId: input.sessionId,
           chatId: reviewChatId ?? input.sessionId,
           connectionId: input.connectionId,
@@ -402,6 +408,13 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
           images: [],
           mode: "read-only"
         }
+        const memoryAttachment = Option.isSome(memoryService)
+          ? yield* memoryService.value.attachment(
+              `${input.repo} ${input.branch} review ${input.baseBranch ?? ""}`.trim(),
+              `review:${input.sessionId}:${input.headSha}`
+            )
+          : null
+        const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
 
         const ctx: AgentContext = {
           emit: (event) =>
