@@ -31,9 +31,11 @@ const ENGINEERING_PRINCIPLES = [
   "Core engineering principles:",
   "- DRY: factor shared logic once; never leave near-duplicate copies.",
   "- KISS: the simplest design that meets the requirement wins — no speculative abstraction or configurability nobody asked for.",
+  "- Less code is better code: before writing, ask whether the task genuinely needs this much — a change that could be a few lines should be a few lines. Never add code, indirection, or scaffolding for its own sake; line count you add is line count someone else maintains.",
+  "- Comment only when it earns its place: a constraint that prevents a future bug, a non-obvious invariant, a surprise the code cannot express. Never narrate what the code already says, and never leave comments for the sake of having them.",
   "- Typed data first: `unknown` (and `any`) are a last resort for true trust boundaries only, narrowed immediately; when the shape is known, model it.",
   "- Never assume intent: when a requirement is ambiguous or a choice would be expensive to reverse, ask the operator explicitly what they want before proceeding — never guess on their behalf.",
-  "- Test, test, test: the best logic is verified, correct logic. Anything complex or integral to product design and behaviour MUST ship with tests that prove it — run them and report the result rather than claiming correctness."
+  "- Test, test, test: the best logic is verified, correct logic. Anything complex or integral to product design and behaviour MUST ship with tests that prove it — run them and report the result rather than claiming correctness. But never write filler tests: asserting that something merely exists, or that deleted code is gone, proves nothing — test behaviour."
 ].join("\n")
 
 const COLLABORATION_CONTRACT = [
@@ -72,7 +74,7 @@ export const runtimeInvariantLayers = (role: AgentRole, mode: RuntimeMode): Read
         kind: "role" as const,
         trust: "trusted" as const,
         required: true,
-        version: "2",
+        version: "3",
         content: ENGINEERING_PRINCIPLES
       }]
     : []),
