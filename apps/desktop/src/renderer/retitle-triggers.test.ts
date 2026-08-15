@@ -1,6 +1,10 @@
-import type { Session } from "@jingler/core"
+import type { Session, SessionActivity } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { needsSessionRetitle, newlyPlannedSessionIds } from "./retitle-triggers.js"
+import {
+  needsSessionRetitle,
+  newlyPlannedSessionIds,
+  newlyStartedSessionIds
+} from "./retitle-triggers.js"
 
 /**
  * `newlyPlannedSessionIds` is the pure trigger for retitling a session right
@@ -47,5 +51,35 @@ describe("newlyPlannedSessionIds", () => {
     const pinnedPending = [session("p", false, true)]
     expect(newlyPlannedSessionIds(new Set(), new Set(["p"]), pinnedPending)).toStrictEqual(["p"])
     expect(needsSessionRetitle(pinnedPending[0])).toBe(true)
+  })
+})
+
+describe("newlyStartedSessionIds", () => {
+  const activity: SessionActivity = { kind: "thinking", verb: "Thinking", target: "" }
+  const sessions = [
+    session("fresh", true, true),
+    session("named", true, false),
+    session("pinnedFresh", false, true)
+  ]
+
+  it("fires when a branch-pending session's run just started", () => {
+    expect(newlyStartedSessionIds({}, { fresh: activity }, sessions)).toStrictEqual(["fresh"])
+  })
+
+  it("also fires for a pinned title whose fresh worktree still needs its branch", () => {
+    expect(
+      newlyStartedSessionIds({}, { pinnedFresh: activity }, sessions)
+    ).toStrictEqual(["pinnedFresh"])
+  })
+
+  it("stays quiet once the semantic branch exists — later turns only retitle on completion", () => {
+    expect(newlyStartedSessionIds({}, { named: activity }, sessions)).toStrictEqual([])
+  })
+
+  it("does NOT re-fire while the run stays live, nor on the completion edge", () => {
+    expect(
+      newlyStartedSessionIds({ fresh: activity }, { fresh: activity }, sessions)
+    ).toStrictEqual([])
+    expect(newlyStartedSessionIds({ fresh: activity }, {}, sessions)).toStrictEqual([])
   })
 })

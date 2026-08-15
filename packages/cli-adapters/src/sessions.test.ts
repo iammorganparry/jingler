@@ -767,9 +767,14 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.title).toBe("Untitled session")
+    // The provisional title mirrors the creative worktree slug ("Hopeful
+    // Einstein"), never a literal "Untitled session" in the sidebar.
+    expect(exit.value.title).toMatch(/^[A-Z][a-z]+ [A-Z][a-z]+$/)
     expect(exit.value.autoTitle).toBe(true)
     expect(basename(exit.value.worktreePath ?? "")).toMatch(/^[a-z]+-[a-z]+$/)
+    expect(exit.value.title.toLowerCase().replace(" ", "-")).toBe(
+      basename(exit.value.worktreePath ?? "")
+    )
     const live = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: exit.value.worktreePath,
       encoding: "utf-8"

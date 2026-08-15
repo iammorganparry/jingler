@@ -109,7 +109,11 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
       Effect.orElseSucceed(() => [])
     )
     const proposal = yield* gen.generate(messages, session)
-    const title = session.autoTitle === true ? proposal.title : session.title
+    // An empty transcript (a run-start trigger can beat the first write) yields
+    // only the "Untitled session" heuristic — never let that displace the
+    // session's provisional creative title.
+    const title =
+      session.autoTitle === true && messages.length > 0 ? proposal.title : session.title
     // A direct session never owns a task branch. Retitling still updates its
     // display name, but branch creation belongs exclusively to linked worktrees.
     if (workspaceModeOf(session) === "direct") {
@@ -149,6 +153,12 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
         semanticBranchPending: false
       }
     }
+
+    // An auto-named session with no transcript yet has nothing meaningful to
+    // seed a branch from — keep the pending marker so the next trigger (plan,
+    // completion) names it from real content instead of the creative
+    // placeholder.
+    if (messages.length === 0 && session.autoTitle === true) return { ...session, title }
 
     // A completion signal can beat transcript persistence by a few milliseconds.
     // For a pinned task, its operator-supplied title is still a meaningful,

@@ -34,7 +34,7 @@ import { FileSystem, type Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Effect, Either, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
-import { freeCreativeName } from "./creative-name.js"
+import { displayNameFromCreativeSlug, freeCreativeName } from "./creative-name.js"
 import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
 import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime-identity.js"
@@ -558,7 +558,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           // Title is optional now: blank → the agent auto-names it (provisional
           // "Untitled session"); an explicit title is pinned (autoTitle false).
           const explicit = input.title?.trim() ?? ""
-          const title = explicit || UNTITLED_SESSION
+          let title = explicit || UNTITLED_SESSION
           const existing = yield* readAll()
           // A titled session slugs from its title (+ a stamp so identical titles
           // never collide). An UNTITLED session gets a Docker-style friendly name
@@ -586,7 +586,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             // `rm -rf` the first's worktree. Mixing in a per-process counter
             // makes the seed differ even when the clock does not.
             const seed = yield* Effect.sync(() => Date.now() + nextOpId() * 7919)
-            slug = freeCreativeName(usedSlugs, seed, `${taskSlug(title)}-${stamp}`)
+            const stampedFallback = `${taskSlug(title)}-${stamp}`
+            slug = freeCreativeName(usedSlugs, seed, stampedFallback)
+            // The provisional sidebar name IS the creative slug ("hopeful-einstein"
+            // → "Hopeful Einstein") — never a literal "Untitled session" while the
+            // task-understanding pass is still naming the work. `autoTitle` stays
+            // true, so the first retitle replaces it like any provisional title.
+            if (slug !== stampedFallback) title = displayNameFromCreativeSlug(slug)
           }
           const id = input.requestedSessionId ?? `s_${slug}`
           yield* ensureSessionIdAvailable(existing, id)

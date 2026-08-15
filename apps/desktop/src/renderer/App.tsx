@@ -66,7 +66,7 @@ import { useTerminalDock } from "./use-terminal-dock.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
-import { useSessionDiffs } from "./diff-presence.js";
+import { diffCounts, setSessionDiff, useSessionDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
   disposeConversationActor,
@@ -93,6 +93,7 @@ import { reviewQueryKey } from "./review-routing.js";
 import {
   needsSessionRetitle,
   newlyPlannedSessionIds,
+  newlyStartedSessionIds,
 } from "./retitle-triggers.js";
 import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
@@ -1105,10 +1106,26 @@ function AuthedApp({
   useEffect(() => {
     const prev = prevLiveRef.current;
     prevLiveRef.current = liveActivity;
+    // Name a fresh task the moment its FIRST run starts — the title pass runs
+    // concurrently on its own runtime session, so the agent never waits on it
+    // and the branch stops sitting on "Naming branch…" through the whole turn.
+    for (const id of newlyStartedSessionIds(prev, liveActivity, sessions)) {
+      void rpc
+        .sessionsRetitle(id)
+        .then((session) => send({ type: "SESSION_UPDATED", session }))
+        .catch(() => {});
+    }
     const completed = completedSessionIds(prev, liveActivity, sessions);
     for (const id of completed) {
       const current = sessions.find((session) => session.id === id);
       if (!current) continue;
+      // Settle the composer's dirty badge: the per-ToolEnd refresh misses an
+      // agent committing via the shell (a Bash ToolEnd carries no file diff),
+      // so re-read the worktree diff once the run is over.
+      void rpc
+        .sessionsDiff(id)
+        .then((patch) => setSessionDiff(id, diffCounts(patch)))
+        .catch(() => {});
       // Only auto-named sessions retitle; skip pinned/legacy ones (autoTitle not
       // explicitly true) to avoid a needless RPC. The handler guards too.
       const ready = needsSessionRetitle(current)
