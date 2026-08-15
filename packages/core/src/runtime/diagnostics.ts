@@ -39,6 +39,13 @@ export const RuntimeDiagnosticSnapshot = Schema.Struct({
   mutations: Schema.Array(RuntimeDiagnosticMutation),
   fileChangeStatuses: Schema.Array(Schema.Literal("A", "M", "D", "R")),
   mcpHealth: Schema.Array(RuntimeDiagnosticMcpHealth),
+  memory: Schema.optional(Schema.Struct({
+    mutatingExecutions: Schema.Number,
+    advisories: Schema.Number,
+    proposals: Schema.Number,
+    workflowPolls: Schema.Number,
+    failureCandidates: Schema.Number
+  })),
   terminalCause: Schema.NullOr(Schema.String),
   updatedAt: Schema.String
 })

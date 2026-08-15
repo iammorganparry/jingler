@@ -112,7 +112,7 @@ describe("pi tool bridge", () => {
       type: "text",
       text: expect.stringMatching(/^<tool-memory>[\s\S]*\{"changed":true\}$/u)
     })
-    expect((result?.details as ToolResultEnvelope).value).toEqual({ changed: true })
+    expect((result!.details as ToolResultEnvelope).value).toEqual({ changed: true })
   })
 
   it("advertises no-argument tools as strict object schemas", () => {

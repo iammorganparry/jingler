@@ -226,11 +226,12 @@ interface SessionHandleInput {
   readonly spec: PiRunSpec
   readonly tracker: FileChangeTracker | undefined
   readonly snapshot: WorktreeSnapshot | null
+  readonly registry: ToolRegistry | undefined
   readonly observe?: (event: StreamEvent) => void
 }
 
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
-  const { embedded, spec, tracker, snapshot, observe } = input
+  const { embedded, spec, tracker, snapshot, registry, observe } = input
   const { session } = embedded.result
   return {
     id: session.sessionFile ?? session.sessionId,
@@ -252,6 +253,9 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       return { costUsd: stats.cost, tokens: stats.tokens.total }
     },
     ...(observe ? { observe } : {}),
+    ...(registry
+      ? { memoryReflectionPrompt: () => registry.memoryReflectionPrompt(spec.role) }
+      : {}),
     ...(tracker && snapshot
       ? {
           reconcile: () => Effect.runPromise(tracker.reconcile(snapshot, spec.cwd))
@@ -317,7 +321,7 @@ const createSessionHandle = (
           Effect.runFork(recordDiagnostic(diagnostic.observe(event)))
         }
       : undefined
-    return toHandle({ embedded, spec, tracker, snapshot, observe })
+    return toHandle({ embedded, spec, tracker, snapshot, registry, observe })
   })
 
 /** Construct the real embedded pi session from Jingler-owned contracts only. */

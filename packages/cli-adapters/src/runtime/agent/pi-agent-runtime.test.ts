@@ -103,6 +103,52 @@ describe("PiAgentRuntime", () => {
     expect(disposed).toBe(true)
   })
 
+  it("runs one hidden memory reflection before emitting Done", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    const prompts: string[] = []
+    const reflectionPrompt = vi.fn(() => "<memory-reflection>Reflect silently.</memory-reflection>")
+    const handle: PiSessionHandle = {
+      id: "pi-session-memory-reflection",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt: async (prompt) => {
+        prompts.push(prompt)
+        listener?.({
+          type: "message_update",
+          message: {} as never,
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: prompts.length === 1 ? "visible answer" : "hidden reflection prose"
+          } as never
+        })
+        listener?.({ type: "agent_settled" })
+      },
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      usage: () => ({ costUsd: 0, tokens: 5 }),
+      memoryReflectionPrompt: reflectionPrompt
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+
+    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
+
+    expect(prompts).toEqual([
+      "hello",
+      "<memory-reflection>Reflect silently.</memory-reflection>"
+    ])
+    expect(reflectionPrompt).toHaveBeenCalledOnce()
+    expect(events.map((event) => event._tag)).toEqual(["Started", "Assistant", "Done"])
+    expect(events.flatMap((event) => event._tag === "Assistant" ? [event.text] : []))
+      .toEqual(["visible answer"])
+  })
+
   it("delivers the terminal event before closing a slow consumer", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     const handle: PiSessionHandle = {
