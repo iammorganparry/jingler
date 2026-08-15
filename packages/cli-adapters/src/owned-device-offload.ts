@@ -11,6 +11,10 @@ interface RemoteOwnedDeviceSession {
   ) => Effect.Effect<unknown, { readonly message: string }>
 }
 
+export type OwnedDeviceAvailability = (
+  deviceId: string
+) => Effect.Effect<boolean, { readonly message: string }>
+
 const chunkBytes = (bytes: Uint8Array, size = 384 * 1024): ReadonlyArray<Uint8Array> => {
   const chunks: Uint8Array[] = []
   for (let offset = 0; offset < bytes.byteLength; offset += size) {
@@ -34,10 +38,25 @@ const request = (
   )
 
 export const makeOwnedDeviceOffloadPort = (
-  remote: RemoteOwnedDeviceSession
+  remote: RemoteOwnedDeviceSession,
+  available: OwnedDeviceAvailability
 ): OwnedDeviceOffloadPort => ({
   execute: ({ deviceId, jobId, snapshot, command, limits, context }) => {
     const work = Effect.gen(function* () {
+      const online = yield* available(deviceId).pipe(
+        Effect.mapError((cause) => new ToolError(
+          "execution-failed",
+          `${cause.message} Offload Compute did not fall back to cloud or local execution.`,
+          true
+        ))
+      )
+      if (!online) {
+        return yield* Effect.fail(new ToolError(
+          "execution-failed",
+          "The selected owned device is not online; Offload Compute did not fall back to cloud or local execution.",
+          true
+        ))
+      }
       const chunks = chunkBytes(snapshot.compressedBytes)
       context.progress({
         message: "Offload Compute: handing off to owned device",

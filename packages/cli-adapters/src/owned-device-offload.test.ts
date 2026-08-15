@@ -27,7 +27,7 @@ describe("owned-device offload transport", () => {
         } : undefined)
       }
     }
-    const port = makeOwnedDeviceOffloadPort(remote)
+    const port = makeOwnedDeviceOffloadPort(remote, () => Effect.succeed(true))
     const result = await Effect.runPromise(port.execute({
       deviceId: "device_selected",
       jobId: "job_abcdefghijklmnop",
@@ -51,6 +51,34 @@ describe("owned-device offload transport", () => {
     expect(result).toMatchObject({ stdout: "verified", offloaded: true })
   })
 
+  it("rejects an offline selected device before opening a request tunnel", async () => {
+    const requestOnEnvironment = vi.fn(() => Effect.succeed(undefined))
+    const port = makeOwnedDeviceOffloadPort(
+      { requestOnEnvironment },
+      () => Effect.succeed(false)
+    )
+
+    await expect(Effect.runPromise(port.execute({
+      deviceId: "device_offline",
+      jobId: "job_cdefghijklmnopqr",
+      snapshot: {
+        identity: { version: 1, headSha: "a".repeat(40), digest: "b".repeat(64), bytes: 1 },
+        compressedBytes: new Uint8Array([1]),
+        fileCount: 1,
+        uncompressedBytes: 1
+      },
+      command: {
+        source: { kind: "preset", preset: "test" },
+        executable: "npm",
+        args: ["test"],
+        cwd: "."
+      },
+      limits: { timeoutSeconds: 60, snapshotBytes: 1, outputBytes: 1024 },
+      context: context()
+    }))).rejects.toThrow("did not fall back")
+    expect(requestOnEnvironment).not.toHaveBeenCalled()
+  })
+
   it("rejects a source-mutating result instead of syncing it locally", async () => {
     const remote = {
       requestOnEnvironment: vi.fn((_environmentId: string, operation: string) =>
@@ -64,7 +92,7 @@ describe("owned-device offload transport", () => {
           commandMs: 1
         } : undefined))
     }
-    const port = makeOwnedDeviceOffloadPort(remote)
+    const port = makeOwnedDeviceOffloadPort(remote, () => Effect.succeed(true))
     await expect(Effect.runPromise(port.execute({
       deviceId: "device_selected",
       jobId: "job_bcdefghijklmnopq",

@@ -123,14 +123,24 @@ test("selects, persists, and executes on a specific fail-closed owned device", a
     config: {
       offloadCompute: {
         enabled: false,
-        explicitCommands: [{
-          id: "owned-device-probe",
-          command: {
-            executable: "node",
-            args: ["-e", "process.stdout.write('owned device test clean\\n')"],
-            cwd: "."
+        explicitCommands: [
+          {
+            id: "owned-device-probe",
+            command: {
+              executable: "node",
+              args: ["-e", "process.stdout.write('owned device test clean\\n')"],
+              cwd: "."
+            }
+          },
+          {
+            id: "owned-device-offline-probe",
+            command: {
+              executable: "node",
+              args: ["-e", "process.stdout.write('offline command must not run\\n')"],
+              cwd: "."
+            }
           }
-        }]
+        ]
       }
     },
     sessions: ({ repoPath }) => prepareRepository(repoPath)
@@ -182,6 +192,17 @@ test("selects, persists, and executes on a specific fail-closed owned device", a
     .toBeVisible({ timeout: 30_000 })
   await expect(app.window.getByText("Tests completed on the selected owned device."))
     .toBeVisible()
+
+  app.deviceRelay?.setDeviceState("offline")
+  await composer.fill("[[offload-owned-device-offline]] Try the selected device again.")
+  await composer.press("Enter")
+  const tools = app.window.getByRole("button", { name: /command_execute/ })
+  await expect(tools).toHaveCount(2)
+  await tools.nth(1).click()
+  await expect(app.window.getByText("did not fall back", { exact: false }))
+    .toBeVisible({ timeout: 20_000 })
+  await expect(app.window.getByText("offline command must not run", { exact: false }))
+    .toHaveCount(0)
   expect(app.authServer.offloadRequests).toHaveLength(0)
 })
 
@@ -205,6 +226,29 @@ test("keeps eligible commands local while Offload Compute is disabled", async ({
   await expect(app.window.getByText("pnpm: command not found", { exact: false }))
     .toBeVisible()
   expect(app.authServer.offloadRequests).toHaveLength(0)
+})
+
+test("keeps eligible commands local while an enabled host has resource headroom", async ({
+  launchApp
+}) => {
+  const app = await launchApp({
+    configured: true,
+    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "0" },
+    withRepo: true,
+    config: {
+      offloadCompute: { enabled: true, explicitCommands: [] }
+    },
+    sessions: ({ repoPath }) => prepareRepository(repoPath)
+  })
+  await expect(appShell(app.window)).toBeVisible()
+  await sendOffloadPrompt(app.window)
+  const localTool = app.window.getByRole("button", { name: /command_execute/ })
+  await expect(localTool).toBeVisible()
+  await localTool.click()
+  await expect(app.window.getByText("pnpm: command not found", { exact: false }))
+    .toBeVisible()
+  await expect.poll(() => app.authServer.offloadRequests.map(({ kind }) => kind))
+    .toEqual(["prime"])
 })
 
 test("cancels the active remote command through the existing Stop control", async ({

@@ -617,6 +617,15 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
         )
       : fauxAssistantMessage("Explicit local retry completed.")
   }
+  if (latestOperatorText(context).includes("[[offload-owned-device-offline]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+          COMMAND_TOOL,
+          { command: "node -e \"process.stdout.write('offline command must not run\\\\n')\"" },
+          "offload-owned-device-offline-1"
+        )
+      : fauxAssistantMessage("Offline owned-device attempt completed.")
+  }
   if (latestOperatorText(context).includes("[[offload-owned-device]]")) {
     return recentToolResultCount(context, COMMAND_TOOL) === 0
       ? callTool(

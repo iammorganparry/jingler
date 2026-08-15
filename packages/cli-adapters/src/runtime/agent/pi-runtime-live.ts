@@ -2,6 +2,7 @@ import { join } from "node:path"
 import type { PiRunSpec } from "@jingler/core"
 import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
+import { EnvironmentService } from "../../environment.js"
 import { SecretStore } from "../../secret-store.js"
 import { makeOffloadCommandRouterWithOwnedDevice } from "../../offload-command-router.js"
 import { makeOwnedDeviceOffloadPort } from "../../owned-device-offload.js"
@@ -65,9 +66,19 @@ export const makePiAgentRuntimeLive = (
     const browserControl = yield* Effect.serviceOption(BrowserControlPort)
     const mutations = yield* makeWorkspaceMutationPort
     const remoteSessions = yield* Effect.serviceOption(RemoteSessionService)
+    const environments = yield* Effect.serviceOption(EnvironmentService)
     const offload = yield* makeOffloadCommandRouterWithOwnedDevice(
-      Option.isSome(remoteSessions)
-        ? makeOwnedDeviceOffloadPort(remoteSessions.value)
+      Option.isSome(remoteSessions) && Option.isSome(environments)
+        ? makeOwnedDeviceOffloadPort(
+            remoteSessions.value,
+            (deviceId) => environments.value.list.pipe(
+              Effect.map((inventory) => inventory.some((environment) =>
+                environment.id === deviceId &&
+                environment.kind === "owned" &&
+                environment.state === "online"
+              ))
+            )
+          )
         : undefined
     )
     const credentials = new AgentSecretStore(secretStore)

@@ -58,7 +58,10 @@ export const makeResourcePressureMonitor = (): ResourcePressurePort => {
       const timer = setInterval(sample, 1_000)
       timer.unref()
     },
-    isSqueezed: () => process.env.JINGLER_E2E_RESOURCE_PRESSURE === "1" ||
-      isResourcePressure(samples, freemem(), totalmem())
+    isSqueezed: () => {
+      if (process.env.JINGLER_E2E_RESOURCE_PRESSURE === "1") return true
+      if (process.env.JINGLER_E2E_RESOURCE_PRESSURE === "0") return false
+      return isResourcePressure(samples, freemem(), totalmem())
+    }
   }
 }
