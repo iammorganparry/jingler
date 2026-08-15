@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   CURRENT_RUNTIME_CONTRACTS,
   ProviderConnection,
@@ -11,6 +13,11 @@ import { runPiScenario } from "../src/runtime/certification/pi-scenario-runner.j
 import {
   FakePiProvider
 } from "./fixtures/fake-pi-provider.js"
+
+const DETERMINISTIC_AGENT_DIR = join(
+  tmpdir(),
+  `jingler-pi-deterministic-${process.pid}`
+)
 
 const authKindFor = (scenarioId: string): AuthKind =>
   scenarioId === "auth.route-pinned" ? "openai-codex-oauth" : "api-key"
@@ -67,6 +74,7 @@ export const runDeterministicScenario = async (scenarioId: string) => {
     scenarioId,
     connection,
     credentials,
+    agentDir: DETERMINISTIC_AGENT_DIR,
     target: {
       providerId: fake.providerId,
       modelId: fake.modelId,

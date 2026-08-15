@@ -327,6 +327,7 @@ interface ScenarioExecution {
   readonly scenarioId: string
   readonly startedAt: number
   readonly root: string
+  readonly agentDir: string
   readonly observations: Array<EvalObservation>
   readonly connection: ProviderConnectionType
   readonly credentials: ProviderCredentialStore
@@ -339,7 +340,7 @@ interface ScenarioExecution {
 }
 
 const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => {
-  const { scenarioId, startedAt, root, observations, connection } = input
+  const { scenarioId, startedAt, root, agentDir, observations, connection } = input
   const { credentials, registry, tracker, spec, context } = input
   recordPreflight(
     scenarioId,
@@ -349,7 +350,7 @@ const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => 
     observations
   )
   const factory = makePiSessionFactory({
-    agentDir: join(root, ".jingler/agent"),
+    agentDir,
     sessionsDir: join(root, ".jingler/sessions"),
     credentials,
     resolveConnection: () => Effect.succeed(connection),
@@ -382,6 +383,8 @@ export interface RunPiScenarioInput {
   readonly connection: ProviderConnectionType
   readonly credentials: ProviderCredentialStore
   readonly target: PiScenarioTarget
+  /** Shared process-owned Pi root for concurrent deterministic scenarios. */
+  readonly agentDir?: string
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
 }
 
@@ -389,6 +392,9 @@ export const runPiScenario = async (input: RunPiScenarioInput): Promise<EvalTrac
   const { scenarioId, connection, credentials, target } = input
   const startedAt = performance.now()
   const root = await createWorkspace()
+  const agentDir = input.agentDir ??
+    process.env.PI_CODING_AGENT_DIR ??
+    join(root, ".jingler/agent")
   const observations: Array<EvalObservation> = []
   const tracker = scenarioMutatesWorkspace(scenarioId)
     ? new FileChangeTracker({
@@ -406,6 +412,7 @@ export const runPiScenario = async (input: RunPiScenarioInput): Promise<EvalTrac
       scenarioId,
       startedAt,
       root,
+      agentDir,
       observations,
       connection,
       credentials,
