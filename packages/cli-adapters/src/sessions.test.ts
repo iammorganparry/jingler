@@ -767,9 +767,14 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.title).toBe("Untitled session")
+    // The provisional title mirrors the creative worktree slug ("Hopeful
+    // Einstein"), never a literal "Untitled session" in the sidebar.
+    expect(exit.value.title).toMatch(/^[A-Z][a-z]+ [A-Z][a-z]+$/)
     expect(exit.value.autoTitle).toBe(true)
     expect(basename(exit.value.worktreePath ?? "")).toMatch(/^[a-z]+-[a-z]+$/)
+    expect(exit.value.title.toLowerCase().replace(" ", "-")).toBe(
+      basename(exit.value.worktreePath ?? "")
+    )
     const live = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: exit.value.worktreePath,
       encoding: "utf-8"
@@ -1147,7 +1152,7 @@ describe("SessionStore", () => {
   })
 
   describe("setProviderModel", () => {
-    it("switches identity atomically and clears incompatible continuation state", async () => {
+    it("switches identity atomically, keeps the pi session, and resets reasoning", async () => {
       const nextConnection = Schema.decodeUnknownSync(ProviderConnectionId)("codex-pro")
       const nextProvider = Schema.decodeUnknownSync(ProviderId)("openai-codex")
       const nextModel = Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5")
@@ -1185,13 +1190,15 @@ describe("SessionStore", () => {
         connectionSelectionRequired: false,
         modelSelectionRequired: false
       })
-      expect(exit.value.piSessionId).toBeUndefined()
+      // The pi session is provider-neutral: it survives the switch so the
+      // conversation continues seamlessly on the new model.
+      expect(exit.value.piSessionId).toBe("pi-session.jsonl")
       expect(activeChat(exit.value)).toMatchObject({
         connectionId: nextConnection,
         providerId: nextProvider,
         modelId: nextModel
       })
-      expect(activeChat(exit.value).piSessionId).toBeUndefined()
+      expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
       expect(activeChat(exit.value).reasoning).toBeUndefined()
     })
 

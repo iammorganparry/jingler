@@ -8,7 +8,7 @@ import {
   type ProviderModelId
 } from "@jingler/core"
 import { useMachine } from "@xstate/react"
-import { Check, LogOut, Plus, RefreshCw, ShieldCheck } from "lucide-react"
+import { Check, LogOut, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react"
 import { useEffect, useMemo } from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
@@ -95,6 +95,8 @@ export interface ProviderConnectionsSettingsProps {
     modelId: ProviderModelId
   }) => void
   onLogout: (connectionId: ProviderConnectionId) => void
+  /** Irreversibly removes a connection row (credential + persisted record). */
+  onRemove?: (connectionId: ProviderConnectionId) => void
   onConnectClaude: (connectionId: ProviderConnectionId, token: string) => void
   onStartCodex: (
     connectionId: ProviderConnectionId,
@@ -115,9 +117,9 @@ export function ProviderConnectionsSettings({
   pendingAuthKind = null,
   error = null,
   onRefresh,
-  onVerify,
   onMakeDefault,
   onLogout,
+  onRemove,
   onConnectClaude,
   onStartCodex,
   onSetApiKey
@@ -163,27 +165,46 @@ export function ProviderConnectionsSettings({
         </div>
         <div className="flex flex-1 flex-col gap-1.5 overflow-auto p-3 pt-1">
           {connections.map(({ connection, models }) => (
-            <button
+            <div
               key={connection.id}
-              type="button"
-              onClick={() =>
-                sendSelection({ type: "SELECT", connectionId: connection.id })
-              }
               className={cn(
-                "flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-left",
+                "group flex items-center rounded-lg border",
                 selected?.connection.id === connection.id
                   ? "border-blue/50 bg-blue/10"
                   : "border-line bg-sunken hover:bg-hover"
               )}
             >
-              <span className="flex items-center gap-2 text-[12px] font-medium text-text-bright">
-                <ProviderIcon providerId={connection.providerId} size={13} />
-                {providerAuthRouteLabel(connection.authKind)}
-              </span>
-              <span className="font-mono text-[10px] text-dim">
-                {connection.targetId} · {models.filter(({ selectable }) => selectable).length} certified
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() =>
+                  sendSelection({ type: "SELECT", connectionId: connection.id })
+                }
+                className="flex min-w-0 flex-1 flex-col gap-1 px-3 py-2.5 text-left"
+              >
+                <span className="flex items-center gap-2 text-[12px] font-medium text-text-bright">
+                  <ProviderIcon providerId={connection.providerId} size={13} />
+                  {providerAuthRouteLabel(connection.authKind)}
+                </span>
+                <span className="font-mono text-[10px] text-dim">
+                  {connection.targetId} · {models.filter(({ selectable }) => selectable).length} certified
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${providerAuthRouteLabel(connection.authKind)} connection`}
+                title="Remove connection"
+                disabled={busy}
+                onClick={() => (onRemove ?? onLogout)(connection.id)}
+                className={cn(
+                  "mr-2 flex size-6 flex-none items-center justify-center rounded-md",
+                  "text-dim opacity-0 transition-opacity hover:bg-red/10 hover:text-red",
+                  "focus-visible:opacity-100 group-hover:opacity-100",
+                  busy && "cursor-not-allowed"
+                )}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
           ))}
           {connections.length === 0 && (
             <div className="rounded-lg border border-line bg-sunken p-3 text-[11.5px] text-muted-foreground">
@@ -253,24 +274,19 @@ export function ProviderConnectionsSettings({
                   {selected.models.map((model) => {
                     const isDefault =
                       selected.connection.id === defaultConnectionId && model.id === defaultModelId
-                      && model.verification === "certified"
                     return (
                       <ModelChip
                         key={model.id}
                         model={model}
                         isDefault={isDefault}
                         disabled={busy || selected.connection.status !== "authenticated"}
-                        onSelect={() => {
-                          if (model.verification !== "certified") {
-                            onVerify(selected.connection.id, model.id)
-                            return
-                          }
+                        onSelect={() =>
                           onMakeDefault({
                             connectionId: selected.connection.id,
                             providerId: model.providerId,
                             modelId: model.id
                           })
-                        }}
+                        }
                       />
                     )
                   })}

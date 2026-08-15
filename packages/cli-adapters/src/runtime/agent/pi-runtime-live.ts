@@ -141,7 +141,7 @@ export const makePiAgentRuntimeLive = (
             return yield* Effect.fail(
               new AgentRuntimeError({
                 reason: "certification",
-                message: "The selected model is not certified for this connection"
+                message: "The selected model is not available on this connection"
               })
             )
           }

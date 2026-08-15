@@ -34,6 +34,10 @@ export function useProviderCatalog() {
     mutationFn: rpc.providerLogout,
     onSuccess: refreshCatalog
   })
+  const remove = useMutation({
+    mutationFn: rpc.providerRemoveConnection,
+    onSuccess: refreshCatalog
+  })
   const connectClaude = useMutation({
     mutationFn: ({ connectionId, token }: {
       connectionId: ProviderConnectionId
@@ -83,6 +87,7 @@ export function useProviderCatalog() {
     refresh,
     verify,
     logout,
+    remove,
     connectClaude,
     startCodex,
     setApiKey,
@@ -105,6 +110,7 @@ export function useProviderCatalog() {
       refresh.isPending ||
       verify.isPending ||
       logout.isPending ||
+      remove.isPending ||
       connectClaude.isPending ||
       startCodex.isPending ||
       setApiKey.isPending ||
@@ -120,6 +126,7 @@ export function useProviderCatalog() {
     verify: (connectionId: ProviderConnectionId, modelId: ProviderModelId) =>
       verify.mutate({ connectionId, modelId }),
     logout: logout.mutate,
+    remove: remove.mutate,
     connectClaude: (
       connectionId: ProviderConnectionId,
       token: string

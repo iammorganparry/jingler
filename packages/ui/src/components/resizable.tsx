@@ -19,37 +19,75 @@ const readStored = (key: string): number | null => {
  * localStorage so the size survives reloads. Callers may provide a smaller
  * effective maximum when the surrounding layout needs to preserve space for
  * another pane.
+ *
+ * With `applyLive`, a drag stops going through React at all: each delta is
+ * painted by the callback (a direct DOM style write) and the state + storage
+ * commit ONCE via `commit()`, wired to the handle's drag-end. A setState per
+ * pointermove re-rendered the whole subtree the size governs, sixty times a
+ * second — which over a heavy pane (a sidebar of sessions, a terminal dock)
+ * is measurable, and over a mounted diff was a memory spike. Without
+ * `applyLive` the old per-move state behavior is preserved.
  */
 export function useResizableWidth({
   storageKey,
   initial,
   min,
-  max
+  max,
+  applyLive
 }: {
   storageKey: string
   initial: number
   min: number
   max: number
+  /** Paint an in-drag value directly (e.g. `el.style.width = px`). */
+  applyLive?: (value: number) => void
 }) {
   const [width, setWidth] = React.useState(() => clamp(readStored(storageKey) ?? initial, min, max))
   const ref = React.useRef(width)
   ref.current = width
+  const dragValue = React.useRef<number | null>(null)
+  const applyLiveRef = React.useRef(applyLive)
+  applyLiveRef.current = applyLive
 
-  const adjust = React.useCallback(
-    (dx: number, effectiveMax: number = max) => {
-      const next = clamp(ref.current + dx, min, Math.max(min, Math.min(max, effectiveMax)))
-      ref.current = next
-      setWidth(next)
+  const persist = React.useCallback(
+    (next: number) => {
       try {
         localStorage.setItem(storageKey, String(next))
       } catch {
         /* ignore quota / privacy-mode failures */
       }
     },
-    [storageKey, min, max]
+    [storageKey]
   )
 
-  return { width, adjust }
+  const adjust = React.useCallback(
+    (dx: number, effectiveMax: number = max) => {
+      const base = dragValue.current ?? ref.current
+      const next = clamp(base + dx, min, Math.max(min, Math.min(max, effectiveMax)))
+      const live = applyLiveRef.current
+      if (live) {
+        dragValue.current = next
+        live(next)
+        return
+      }
+      ref.current = next
+      setWidth(next)
+      persist(next)
+    },
+    [persist, min, max]
+  )
+
+  /** Land the drag's final value in state + storage. No-op outside a drag. */
+  const commit = React.useCallback(() => {
+    const next = dragValue.current
+    dragValue.current = null
+    if (next === null) return
+    ref.current = next
+    setWidth(next)
+    persist(next)
+  }, [persist])
+
+  return { width, adjust, commit }
 }
 
 /**

@@ -531,6 +531,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: ProviderConnectionInput
   }),
 
+  /** Irreversibly removes a connection and its credential from every store. */
+  Rpc.make("Provider.removeConnection", {
+    success: Schema.Void,
+    error: ProviderConnectionError,
+    payload: ProviderConnectionInput
+  }),
+
   Rpc.make("Provider.verifyModel", {
     success: ModelCertification,
     error: ProviderConnectionError,

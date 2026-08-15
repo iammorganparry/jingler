@@ -92,7 +92,14 @@ const primaryAction = (input: {
     case "executing":
       return { label: "Implementation running", icon: LoaderCircle, disabled: true }
     case "needs-verification":
-      return { label: "Ready for verification", icon: CheckCircle2, disabled: true }
+      // Unverified criteria are a call to action, not a terminal state: re-drive
+      // execution (which verifies the remaining criteria) or revise the plan.
+      return {
+        label: "Approve & implement",
+        icon: Play,
+        disabled: !input.canApprove,
+        onRun: input.onResume
+      }
     case "done":
       return { label: "Plan completed", icon: CheckCircle2, disabled: true }
     case "rejected":
@@ -151,7 +158,7 @@ export function PlanFloatingActions({
           { label: "Revise with agent", icon: Send, onRun: onRevise }
         ]
       : []),
-    ...(status === "stale"
+    ...(status === "stale" || status === "needs-verification"
       ? [{ label: "Revise with agent", icon: Send, onRun: onRevise }]
       : []),
     ...(status === "draft"

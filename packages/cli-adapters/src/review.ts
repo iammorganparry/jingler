@@ -9,7 +9,7 @@ import type {
 } from "@jingler/core"
 import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
 import type { FileSystem, Path } from "@effect/platform"
-import { Effect, Option, PubSub, Ref, Schema, Stream } from "effect"
+import { Effect, Option, PubSub, RcMap, Ref, Schema, Stream } from "effect"
 import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
 import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
 import type { AppPaths } from "./app-paths.js"
@@ -193,7 +193,7 @@ const REPLAY_CAP = 2000
 
 export class ReviewService extends Effect.Service<ReviewService>()("@jingler/ReviewService", {
   accessors: true,
-  effect: Effect.gen(function* () {
+  scoped: Effect.gen(function* () {
     const memoryService = yield* Effect.serviceOption(MemoryAttachmentService)
 
     /**
@@ -207,20 +207,33 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
      * "snapshot the buffer, then subscribe" atomic against a concurrent publish —
      * without it a watcher would either miss an event or replay one twice, and a
      * duplicated Assistant chunk shows up as doubled text in its transcript.
+     *
+     * An `RcMap`, not `Effect.cachedFunction`: the cache had no eviction, so
+     * every session ever reviewed kept its hub + replay buffer resident for the
+     * app's whole life. Refcounting keeps an entry alive exactly while someone
+     * holds it — a `watch` subscriber pins it for as long as the tab is open —
+     * and the idle TTL covers the gaps between publishes of a running review
+     * with a wide margin before reclaiming a session nobody is looking at.
      */
-    const liveFor = yield* Effect.cachedFunction((_sessionId: string) =>
-      Effect.gen(function* () {
-        const hub = yield* PubSub.unbounded<StreamEvent>()
-        const buffer = yield* Ref.make<ReadonlyArray<StreamEvent>>([])
-        // The chat that owns the CURRENT in-process run — the session's
-        // `activeChatId` when it started (see `resetLive`). `watch` emits a run's
-        // events only to this chat; `null` means no run has started this process,
-        // in which case `watch` falls back to the owner stored on disk.
-        const owner = yield* Ref.make<string | null>(null)
-        const gate = yield* Effect.makeSemaphore(1)
-        return { hub, buffer, owner, gate }
-      })
-    )
+    const liveMap = yield* RcMap.make({
+      lookup: (_sessionId: string) =>
+        Effect.gen(function* () {
+          const hub = yield* Effect.acquireRelease(
+            PubSub.unbounded<StreamEvent>(),
+            PubSub.shutdown
+          )
+          const buffer = yield* Ref.make<ReadonlyArray<StreamEvent>>([])
+          // The chat that owns the CURRENT in-process run — the session's
+          // `activeChatId` when it started (see `resetLive`). `watch` emits a run's
+          // events only to this chat; `null` means no run has started this process,
+          // in which case `watch` falls back to the owner stored on disk.
+          const owner = yield* Ref.make<string | null>(null)
+          const gate = yield* Effect.makeSemaphore(1)
+          return { hub, buffer, owner, gate }
+        }),
+      idleTimeToLive: "30 minutes"
+    })
+    const liveFor = (sessionId: string) => RcMap.get(liveMap, sessionId)
 
     /**
      * The chat that owns a review started right now: the session's `activeChatId`.
@@ -235,17 +248,19 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
       )
 
     const publish = (sessionId: string, event: StreamEvent): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const live = yield* liveFor(sessionId)
-        yield* live.gate.withPermits(1)(
-          Effect.gen(function* () {
-            yield* Ref.update(live.buffer, (acc) =>
-              acc.length >= REPLAY_CAP ? [...acc.slice(1), event] : [...acc, event]
-            )
-            yield* PubSub.publish(live.hub, event)
-          })
-        )
-      })
+      Effect.scoped(
+        Effect.gen(function* () {
+          const live = yield* liveFor(sessionId)
+          yield* live.gate.withPermits(1)(
+            Effect.gen(function* () {
+              yield* Ref.update(live.buffer, (acc) =>
+                acc.length >= REPLAY_CAP ? [...acc.slice(1), event] : [...acc, event]
+              )
+              yield* PubSub.publish(live.hub, event)
+            })
+          )
+        })
+      )
 
     /**
      * Drop the previous run's events — a watcher must never see two runs merged —
@@ -258,7 +273,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
      * the one now starting.
      */
     const resetLive = (sessionId: string): Effect.Effect<void, never, ReviewEnv> =>
-      Effect.gen(function* () {
+      Effect.scoped(Effect.gen(function* () {
         const live = yield* liveFor(sessionId)
         // Read the owner OUTSIDE the permit — it reads sessions.json, and `watch`
         // waits on this permit, so it must never be held across file IO.
@@ -274,7 +289,7 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
             Effect.zipRight(ReviewStore.clearTranscript(sessionId))
           )
         )
-      })
+      }))
 
     /**
      * Persist the finished run's events so its tab survives a restart.
@@ -285,17 +300,19 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
      * for a reviewer that died with the process.
      */
     const persistLive = (sessionId: string): Effect.Effect<void, never, ReviewEnv> =>
-      Effect.gen(function* () {
-        const live = yield* liveFor(sessionId)
-        // Snapshot events and owner together under the permit — the owner is part
-        // of this run's identity, and it rides to disk so a restart restores the
-        // tab to the chat that started the review rather than to all of them.
-        const { events, owner } = yield* live.gate.withPermits(1)(
-          Effect.all({ events: Ref.get(live.buffer), owner: Ref.get(live.owner) })
-        )
-        if (events.length === 0) return
-        yield* ReviewStore.setTranscript(sessionId, owner, events)
-      })
+      Effect.scoped(
+        Effect.gen(function* () {
+          const live = yield* liveFor(sessionId)
+          // Snapshot events and owner together under the permit — the owner is part
+          // of this run's identity, and it rides to disk so a restart restores the
+          // tab to the chat that started the review rather than to all of them.
+          const { events, owner } = yield* live.gate.withPermits(1)(
+            Effect.all({ events: Ref.get(live.buffer), owner: Ref.get(live.owner) })
+          )
+          if (events.length === 0) return
+          yield* ReviewStore.setTranscript(sessionId, owner, events)
+        })
+      )
 
     /**
      * The running reviewer's events for a session — as seen by `chatId`, the chat
@@ -357,11 +374,14 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
     // with no lock, and the manual run (a mutation) and the auto run (a polled
     // query) live in different react-query caches — so clicking "Review again"
     // while an auto-review is in flight would otherwise spawn two agents on the
-    // same diff, both racing the store. `cachedFunction` memoises per sessionId,
-    // so each session gets exactly one semaphore.
-    const lockFor = yield* Effect.cachedFunction((_sessionId: string) =>
-      Effect.makeSemaphore(1)
-    )
+    // same diff, both racing the store. The `RcMap` memoises per sessionId — two
+    // racing runs get the SAME semaphore because both hold a live reference —
+    // and, unlike the `cachedFunction` it replaces, reclaims the entry once no
+    // run has touched the session for a while.
+    const lockMap = yield* RcMap.make({
+      lookup: (_sessionId: string) => Effect.makeSemaphore(1),
+      idleTimeToLive: "30 minutes"
+    })
 
     const runExclusive = (
       input: ReviewInput
@@ -505,10 +525,15 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
       })
 
     const run = (input: ReviewInput): Effect.Effect<AdversarialReview, ReviewError, ReviewEnv> =>
-      Effect.gen(function* () {
-        const lock = yield* lockFor(input.sessionId)
-        return yield* lock.withPermits(1)(runExclusive(input))
-      })
+      // Scoped around the WHOLE run: the RcMap reference is held until the run
+      // finishes, so the semaphore entry cannot be reclaimed out from under a
+      // race between a manual and an auto review.
+      Effect.scoped(
+        Effect.gen(function* () {
+          const lock = yield* RcMap.get(lockMap, input.sessionId)
+          return yield* lock.withPermits(1)(runExclusive(input))
+        })
+      )
 
     return { run, watch }
   })

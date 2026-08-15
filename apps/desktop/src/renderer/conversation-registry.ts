@@ -148,7 +148,20 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
         latestPlan(snapshot.context.messages) !== null
     )
   )
-  const diffSnapshot = preferred ?? sessionSnapshots[sessionSnapshots.length - 1]
+  // The diff describes the WORKTREE, which every chat in the session shares —
+  // follow the freshest READ, not the most recent publisher. Chats hold their
+  // own snapshots of the same diff taken at different times, and last-writer-
+  // wins made the session's diff chip flash between two stale readings as the
+  // chats took turns publishing.
+  let diffSnapshot = preferred
+  for (const snapshot of sessionSnapshots) {
+    if (
+      diffSnapshot === undefined ||
+      snapshot.context.patchAt > diffSnapshot.context.patchAt
+    ) {
+      diffSnapshot = snapshot
+    }
+  }
   if (diffSnapshot === undefined) clearSessionDiff(sessionId)
   else setSessionDiff(sessionId, diffCounts(diffSnapshot.context.patch))
 }
@@ -246,7 +259,14 @@ const publishes = createCoalescer<ConversationSnapshot>((batch) => {
   }
 }, PUBLISH_MS)
 
-/** Stop + forget one actor, leaving the stores it published alone. */
+/**
+ * Stop + forget one actor, leaving the SESSION-level stores it published alone
+ * (see `evictIdleActors` for why) but clearing its CHAT-scoped entries. Those
+ * used to be dropped only on explicit chat/session deletion, so every chat
+ * ever opened kept its last activity + file-activity object resident for the
+ * app's lifetime; like the transcript, they are recomputed when the chat is
+ * next opened.
+ */
 const forget = (key: string): void => {
   registry.get(key)?.stop()
   registry.delete(key)
@@ -254,6 +274,12 @@ const forget = (key: string): void => {
   notifyBaselines.delete(key)
   pendingFileActivities.delete(key)
   publishes.cancel(key)
+  const separator = key.indexOf(":")
+  if (separator === -1) return
+  const sessionId = key.slice(0, separator)
+  const chatId = key.slice(separator + 1)
+  publishChatActivity(sessionId, chatId, null)
+  clearAgentFileActivityChat(sessionId, chatId)
 }
 
 /**

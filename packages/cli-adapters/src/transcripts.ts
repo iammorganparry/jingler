@@ -8,6 +8,18 @@ import { AppPaths } from "./app-paths.js"
 const MessageArray = Schema.Array(MessageSchema)
 const PAGE_CURSOR = /^v1:(\d+)$/
 
+/**
+ * A page stops growing once it carries this many serialized bytes, whatever
+ * the caller's message-count limit said. The count limit was calibrated for
+ * chat-sized messages; agentic mega-turns reach 5MB apiece (one real session:
+ * 18 messages, 7.3MB), and "200 messages" of those is not a page — it is the
+ * whole file shipped through schema-encode, structured clone, and
+ * schema-decode on the renderer's main thread. The newest message is always
+ * included, however large: a page must never be empty, and its render cost is
+ * bounded separately (mega-turns collapse to their tail in `message-turn`).
+ */
+const PAGE_BYTE_BUDGET = 1_500_000
+
 interface TranscriptIndex {
   readonly version: 2
   readonly byteLength: number
@@ -278,7 +290,19 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
             return { messages: [], hasMore: false }
           }
           const limit = Math.max(1, Math.min(500, Math.floor(options.limit)))
-          const start = Math.max(0, requestedEnd - limit)
+          // Walk back from the newest requested message until either the
+          // count limit or the byte budget trips (see PAGE_BYTE_BUDGET).
+          let start = requestedEnd
+          let pageBytes = 0
+          while (start > 0 && requestedEnd - start < limit) {
+            const span = index.offsets[start - 1]
+            if (span === undefined) break
+            const size = span[1] - span[0]
+            if (requestedEnd - start > 0 && pageBytes + size > PAGE_BYTE_BUDGET)
+              break
+            pageBytes += size
+            start--
+          }
           if (start === requestedEnd) return { messages: [], hasMore: false }
           const first = index.offsets[start]
           const last = index.offsets[requestedEnd - 1]

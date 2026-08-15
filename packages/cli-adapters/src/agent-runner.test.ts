@@ -1360,6 +1360,42 @@ describe("AgentRunner plan mode", () => {
     expect(ranTool(events, "plan-edit-1")).toBe(true)
   })
 
+  it("steers a corrective for an unknown-stage checkpoint and replays it once the plan is amended", async () => {
+    const program = Effect.gen(function* () {
+      const runner = yield* AgentRunner
+      yield* runner.setMode(SESSION, "plan")
+      yield* runner.prompt(SESSION, SESSION, "[[plan]] [[plan-unknown-stage]] refactor auth").pipe(
+        Stream.tap((event) =>
+          event._tag === "PlanProposed"
+            ? runner.approvePlan(SESSION, event.plan.id).pipe(Effect.asVoid)
+            : Effect.void
+        ),
+        Stream.runDrain
+      )
+      return {
+        transcript: yield* TranscriptStore.list(SESSION),
+        document: yield* PlanStore.readDocument(temp.root)
+      }
+    })
+    const result = await Effect.runPromise(program.pipe(Effect.provide(base())))
+
+    // The runner told the agent its checkpoint was dropped and how to recover.
+    const assistantText = result.transcript
+      .flatMap((message) => message.parts)
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("\n")
+    expect(assistantText).toContain("Corrective received:")
+    expect(assistantText).toContain("[plan-sync]")
+    expect(assistantText).toContain("jingler_submit_plan")
+    // The amendment landed as a new canonical stage, and the checkpoint that
+    // was dropped against the old revision applied on replay — the driver
+    // never re-emits the marker after amending.
+    const ghost = result.document?.plan.stages.find((stage) => stage.id === "s_99")
+    expect(ghost).toBeDefined()
+    expect((ghost?.tasks ?? []).map((task) => task.status)).toEqual(["completed"])
+  })
+
   it("approves the exact edited canonical revision and completes only from criterion evidence", async () => {
     const observed: {
       staleApprovalStatus: string | null

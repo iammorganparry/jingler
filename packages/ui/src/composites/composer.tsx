@@ -13,6 +13,7 @@ import type {
 import {
   ArrowUp,
   Cloud,
+  FileDiff,
   FolderGit2,
   GitBranch,
   ImagePlus,
@@ -145,6 +146,7 @@ export function Composer({
   branch,
   branchPending = false,
   repo,
+  diff = null,
   environments = [],
   environmentId,
   environmentPending = false,
@@ -188,6 +190,12 @@ export function Composer({
   branchPending?: boolean;
   /** Repository name backing this session — shown at the composer's bottom-left. */
   repo?: string;
+  /**
+   * Live uncommitted worktree state — changed files plus ±line totals vs HEAD.
+   * Rendered as a quiet badge beside the repo name; null/absent or all-zero
+   * hides it (a clean tree says nothing).
+   */
+  diff?: { files: number; added: number; removed: number } | null;
   environments?: ReadonlyArray<Environment>;
   environmentId?: string;
   environmentPending?: boolean;
@@ -897,12 +905,27 @@ export function Composer({
         {(repo || branch || branchPending) && (
           <div className="flex items-center justify-between gap-2 px-1.5 pt-1 font-mono text-[10.5px] text-dim">
             {repo ? (
-              <span
-                title={`Repository: ${repo}`}
-                className="flex min-w-0 items-center gap-1"
-              >
-                <FolderGit2 size={12} className="flex-none" />
-                <span className="truncate">{repo}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  title={`Repository: ${repo}`}
+                  className="flex min-w-0 items-center gap-1"
+                >
+                  <FolderGit2 size={12} className="flex-none" />
+                  <span className="truncate">{repo}</span>
+                </span>
+                {/* Dirty-tree badge: a clean tree says nothing. */}
+                {diff !== null && (diff.files > 0 || diff.added > 0 || diff.removed > 0) && (
+                  <span
+                    title={`Uncommitted changes: ${diff.files} file${diff.files === 1 ? "" : "s"}, +${diff.added} −${diff.removed}`}
+                    className="flex flex-none items-center gap-1"
+                    data-testid="composer-dirty"
+                  >
+                    <FileDiff size={12} className="flex-none" />
+                    <span>{diff.files}</span>
+                    <span className="text-green">+{diff.added}</span>
+                    <span className="text-red">−{diff.removed}</span>
+                  </span>
+                )}
               </span>
             ) : (
               <span />

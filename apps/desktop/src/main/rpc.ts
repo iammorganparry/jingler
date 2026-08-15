@@ -67,6 +67,10 @@ import {
   isSessionPublishBranchReady,
   runPublishMachineExclusive,
   UsageService,
+  fetchPiProviderUsage,
+  readLocalClaudeCliAccessToken,
+  adoptableChatIdentities,
+  sessionNeedsRuntimeIdentity,
   WorkspaceService,
   RuntimeDiagnostics,
   RuntimeRecoveryService,
@@ -198,6 +202,10 @@ import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
 import { createZipArchive } from "./zip.js";
 import { primeOffloadSessions } from "./offload-session-primer.js";
+import {
+  firePageGone,
+  interruptOnPageGone,
+} from "./web-contents-lifecycle.js";
 import {
   dialGitHubRelay,
   GitHubRelayConnection,
@@ -1644,7 +1652,7 @@ export const continueOnEnvironment = (
               new EnvironmentHandoffError({
                 reason: "unavailable",
                 message:
-                  "Choose a certified provider connection before continuing this session.",
+                  "Choose a provider connection before continuing this session.",
                 sessionId: source.id,
                 ...(target === undefined ? {} : { environmentId: target }),
               }),
@@ -2417,7 +2425,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       return yield* Effect.fail(
         new ReviewError({
           message:
-            "Choose a certified provider connection before running a review.",
+            "Choose a provider connection before running a review.",
         }),
       );
     }
@@ -4215,6 +4223,39 @@ const agentResourceError = (
   cause: { readonly message: string },
 ) => new AgentResourceRpcError({ operation, message: cause.message });
 
+/**
+ * Resolve migrated sessions still gated on "choose a runtime connection" the
+ * moment an authenticated connection can satisfy them. Best-effort by design:
+ * a failure leaves the gate up (the manual path still works) rather than
+ * failing the listing that carries every other session.
+ */
+const healMigratedRuntimeIdentities = Effect.gen(function* () {
+  const sessions = yield* SessionStore.list();
+  const gated = sessions.filter(sessionNeedsRuntimeIdentity);
+  if (gated.length === 0) return;
+  const catalog = yield* ProviderConnections.pipe(
+    Effect.flatMap((service) => service.list),
+  );
+  const config = yield* ConfigService.get().pipe(
+    Effect.orElseSucceed(() => null),
+  );
+  const defaults = {
+    connectionId: config?.defaultConnectionId ?? null,
+    modelId: config?.defaultModelId ?? null,
+  };
+  for (const session of gated) {
+    for (const adopted of adoptableChatIdentities(session, catalog, defaults)) {
+      yield* SessionStore.setProviderModel(
+        session.id,
+        adopted.chatId,
+        adopted.connectionId,
+        adopted.providerId,
+        adopted.modelId,
+      );
+    }
+  }
+}).pipe(Effect.catchAll(() => Effect.void));
+
 const resourceWorktree = (sessionId: string | null) =>
   sessionId === null
     ? Effect.succeed(null)
@@ -4301,8 +4342,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Provider.list": () => providerOperation((service) => service.list),
   "Provider.status": () => providerOperation((service) => service.status),
   "Provider.loginEvents": () =>
-    Stream.unwrap(
-      ProviderConnections.pipe(Effect.map((service) => service.loginEvents)),
+    interruptOnPageGone(
+      Stream.unwrap(
+        ProviderConnections.pipe(Effect.map((service) => service.loginEvents)),
+      ),
     ),
   "Provider.connectClaudeToken": (input) =>
     providerOperation((service) => service.connectClaudeToken(input)),
@@ -4316,6 +4359,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     providerOperation((service) => service.refresh(connectionId)),
   "Provider.logout": ({ connectionId }) =>
     providerOperation((service) => service.logout(connectionId)),
+  "Provider.removeConnection": ({ connectionId }) =>
+    providerOperation((service) => service.remove(connectionId)),
   "Provider.verifyModel": (input) =>
     providerOperation((service) => service.verifyModel(input)),
   "AgentResources.list": () => resourceList,
@@ -4380,29 +4425,51 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "AgentResources.enabledForTarget": ({ targetId }) =>
     resourceEnabledForTarget(targetId),
   "AgentResources.watch": () =>
-    Stream.merge(
-      Stream.unwrap(
-        Effect.map(AgentResourceService, (service) => service.watch()),
+    interruptOnPageGone(
+      Stream.merge(
+        Stream.unwrap(
+          Effect.map(AgentResourceService, (service) => service.watch()),
+        ),
+        Stream.unwrap(
+          Effect.map(ImportedMcpService, (service) => service.watch()),
+        ),
+      ).pipe(
+        Stream.mapEffect(() => resourceList),
+        Stream.catchAll(() => Stream.empty),
       ),
-      Stream.unwrap(
-        Effect.map(ImportedMcpService, (service) => service.watch()),
-      ),
-    ).pipe(
-      Stream.mapEffect(() => resourceList),
-      Stream.catchAll(() => Stream.empty),
     ),
   "Environment.list": () => EnvironmentService.list,
   "Environment.refresh": () => EnvironmentService.refresh,
   "Environment.discovery": ({ deviceId }) =>
     EnvironmentService.discovery(deviceId),
+  // Presence polling is long-lived. A token refresh or brief relay outage
+  // pauses updates rather than permanently terminating the subscription: a
+  // failed poll is skipped (not retried in place — the old uncapped
+  // exponential retry backed off past hours and effectively killed the
+  // subscription) and the next tick simply comes later. A dev box with no
+  // device auth settles into one cheap 401 per minute instead of a retry
+  // storm, and `changesWith` keeps unchanged lists off the IPC channel
+  // entirely — with zero devices the steady-state cost is zero frames.
   "Environment.watch": () =>
-    Stream.repeatEffectWithSchedule(
-      EnvironmentService.list.pipe(
-        // Presence polling is long-lived. A token refresh or brief relay outage
-        // pauses updates rather than permanently terminating the subscription.
-        Effect.retry(Schedule.exponential("1 second")),
+    interruptOnPageGone(
+      Stream.repeatEffectWithSchedule(
+        EnvironmentService.list.pipe(Effect.option),
+        Schedule.identity<
+          Option.Option<Effect.Effect.Success<typeof EnvironmentService.list>>
+        >().pipe(
+          Schedule.addDelay((result) =>
+            Option.isNone(result) ? "60 seconds" : "10 seconds",
+          ),
+        ),
+      ).pipe(
+        Stream.filterMap((result) => result),
+        // Schema-decoded values serialize with stable key order, so JSON text
+        // is a sound structural equality for these small presence lists.
+        Stream.changesWith(
+          (previous, next) =>
+            JSON.stringify(previous) === JSON.stringify(next),
+        ),
       ),
-      Schedule.spaced("10 seconds"),
     ),
   "Environment.suggestHosts": () =>
     EnvironmentService.suggestHosts().pipe(
@@ -4652,7 +4719,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       : WorkspaceService.files(repoPath),
   "Workspace.revertFile": (input) => workspaceRevertFile(input),
   "Workspace.revertLines": (input) => workspaceRevertLines(input),
-  "Sessions.list": () => SessionStore.list(),
+  // Migrated sessions whose runtime identity could not be resolved at
+  // migration time adopt one here, the moment an authenticated connection can
+  // satisfy them — so a pre-PI conversation continues without the operator
+  // re-choosing what they already had. No-op for healthy sessions.
+  "Sessions.list": () => healMigratedRuntimeIdentities.pipe(
+    Effect.andThen(SessionStore.list()),
+  ),
   "Sessions.get": ({ id }) => SessionStore.get(id),
   "Sessions.create": ({ requestedSessionId: _internalSessionId, ...input }) =>
     createSessionRouted(input),
@@ -4764,6 +4837,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       for (const chat of chats) {
         yield* TranscriptStore.remove(chat.id);
         yield* ContextManager.forget(chat.id);
+        // Same per-chat reclaim `Chats.delete` does — without it, a session
+        // deleted whole left every chat's mode/approval entries in the
+        // runner's maps for the app's lifetime.
+        yield* runner.forgetChat(chat.id);
       }
       if (session?.worktreePath)
         yield* PlanStore.removeAll(session.worktreePath);
@@ -5226,8 +5303,37 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   // the absolute path discovery found.
   "Usage.get": () =>
     ProviderConnections.pipe(
-      Effect.flatMap((service) => service.list),
-      Effect.flatMap(UsageService.fromProviderCatalog),
+      Effect.flatMap((service) =>
+        service.list.pipe(
+          Effect.flatMap((catalog) =>
+            UsageService.liveFromProviderCatalog(catalog, (entry) =>
+              entry.connection.status !== "authenticated"
+                ? Effect.succeed(null)
+                : service.resolveCredential(entry.connection.id).pipe(
+                    Effect.flatMap((credential) =>
+                      Effect.tryPromise((signal) =>
+                        fetchPiProviderUsage({
+                          authKind: entry.connection.authKind,
+                          access: credential.access,
+                          accountId: credential.accountId,
+                          // Only the desktop target can borrow the local
+                          // Claude CLI login; a remote device's keychain is
+                          // not reachable from here.
+                          fallbackAccess:
+                            entry.connection.targetId === "desktop"
+                              ? () => readLocalClaudeCliAccessToken()
+                              : null,
+                          signal,
+                        }),
+                      ),
+                    ),
+                    Effect.timeout("8 seconds"),
+                    Effect.catchAll(() => Effect.succeed(null)),
+                  ),
+            ),
+          ),
+        ),
+      ),
       Effect.catchAll(() => Effect.succeed({ providers: [], fetchedAt: null })),
     ),
   "Context.state": ({ sessionId, chatId }) =>
@@ -5339,7 +5445,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setLastRepoPath": ({ path }) => ConfigService.setLastRepoPath(path),
   "Config.setPlanTemplate": ({ template }) =>
     ConfigService.setPlanTemplate(template),
-  "Github.events": () => githubEvents(),
+  "Github.events": () => interruptOnPageGone(githubEvents()),
   "Github.claimFeedback": (input) => {
     if (input.operation === "claim") {
       return SessionStore.claimGitHubFeedback(input.sessionId, input);
@@ -5421,7 +5527,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
             ),
       ),
     ),
-  "Plan.watch": ({ sessionId }) => planWatch(sessionId),
+  "Plan.watch": ({ sessionId }) => interruptOnPageGone(planWatch(sessionId)),
   "Plan.updateDocument": ({ sessionId, planId, baseRevision, plan, author }) =>
     SessionStore.get(sessionId).pipe(
       Effect.map((session) => session.worktreePath),
@@ -5459,7 +5565,11 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   // Unwrapped from the service like `Terminal.attach` — the reviewer outlives any
   // one watcher, so the stream attaches to it rather than starting it.
   "Review.watch": ({ sessionId, chatId }) =>
-    Stream.unwrap(Effect.map(ReviewService, (r) => r.watch(sessionId, chatId))),
+    interruptOnPageGone(
+      Stream.unwrap(
+        Effect.map(ReviewService, (r) => r.watch(sessionId, chatId)),
+      ),
+    ),
   "Review.get": ({ sessionId }) => reviewGet(sessionId),
   "Review.markRouted": ({ sessionId }) => reviewMarkRouted(sessionId),
   "Review.reconcile": ({ sessionId }) => reviewReconcile(sessionId),
@@ -5477,7 +5587,9 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   // unwrapped from the service like `Agent.run`.
   "Terminal.create": (input) => createTerminal(input),
   "Terminal.attach": ({ terminalId }) =>
-    Stream.unwrap(Effect.map(TerminalService, (t) => t.attach(terminalId))),
+    interruptOnPageGone(
+      Stream.unwrap(Effect.map(TerminalService, (t) => t.attach(terminalId))),
+    ),
   "Terminal.write": ({ terminalId, data }) =>
     Effect.flatMap(TerminalService, (t) => t.write(terminalId, data)),
   "Terminal.resize": ({ terminalId, cols, rows }) =>
@@ -5579,7 +5691,9 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
    * same reason.
    */
   "Theme.watch": () =>
-    Stream.unwrap(Effect.map(ThemeService, (t) => t.watch())),
+    interruptOnPageGone(
+      Stream.unwrap(Effect.map(ThemeService, (t) => t.watch())),
+    ),
 
   /**
    * Confined to `~/jingler/themes` on purpose.
@@ -5609,11 +5723,15 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   // yields a stream OF a stream and the renderer receives nothing. Same shape
   // as `Theme.watch` above, and for the same reason.
   "Plugins.watch": () =>
-    Stream.unwrap(
-      Effect.map(PluginRegistry, (p) =>
-        // Every emission means the directory changed, so the resolution cache
-        // used by plugin resolution is stale by definition.
-        p.watch().pipe(Stream.tap(() => Effect.sync(invalidatePluginCatalog))),
+    interruptOnPageGone(
+      Stream.unwrap(
+        Effect.map(PluginRegistry, (p) =>
+          // Every emission means the directory changed, so the resolution cache
+          // used by plugin resolution is stale by definition.
+          p
+            .watch()
+            .pipe(Stream.tap(() => Effect.sync(invalidatePluginCatalog))),
+        ),
       ),
     ),
 
@@ -5831,7 +5949,20 @@ const ServerProtocolLive = Layer.effect(
       const watch = (contents: WebContents) => {
         if (webContentsWatched.has(contents.id)) return;
         webContentsWatched.add(contents.id);
-        const gone = () => disconnects.unsafeOffer(contents.id);
+        // Two teardown signals, on purpose. `disconnects` asks the RpcServer
+        // to sweep the dead client's fibers — load-bearing for unary handlers
+        // and the AgentRunner run reservation, but racy across a reload
+        // because the reloaded page KEEPS this `WebContents.id`, so the sweep
+        // and the new page's re-subscriptions contend on the same client id.
+        // `firePageGone` closes that hole for the long-lived subscription
+        // streams: it trips their interruption latch synchronously, before
+        // the new document can boot, so their finalizers (fs.watch handles,
+        // PubSub subscriptions, PTY consumers) always run exactly once per
+        // page. Leaked instances of those were the dev-mode memory leak.
+        const gone = () => {
+          firePageGone();
+          disconnects.unsafeOffer(contents.id);
+        };
         contents.on("destroyed", () => {
           webContentsWatched.delete(contents.id);
           gone();
@@ -5870,10 +6001,26 @@ const ServerProtocolLive = Layer.effect(
        * one — the renderer still gets the frame, acks the cursor, and the loop
        * ends instead of spinning.
        */
+      /**
+       * A dead client is NOT a serialization failure. A reload/quit destroys
+       * the WebContents while the server is still flushing that page's frames
+       * — most of them the `Exit` acks of its own just-interrupted fibers —
+       * and `send` then throws "Object has been destroyed" / "Render frame
+       * was disposed". Treating those like broken payloads meant JSON-round-
+       * tripping every (potentially multi-MB) frame, failing again, and
+       * spamming the console once per interrupted stream on every reload.
+       * There is no one to deliver to: drop them.
+       */
+      const clientGone = (error: unknown): boolean =>
+        error instanceof Error && /destroyed|disposed/i.test(error.message);
+
       const sendServerFrame = (response: FromServerEncoded): void => {
+        const target = sender;
+        if (target === null || target.isDestroyed()) return;
         try {
-          sender?.send(RPC_CHANNEL, response);
+          target.send(RPC_CHANNEL, response);
         } catch (error) {
+          if (clientGone(error)) return;
           const frame = response as {
             readonly _tag?: string;
             readonly requestId?: unknown;
@@ -5901,15 +6048,19 @@ const ServerProtocolLive = Layer.effect(
             // diagnostics must never throw
           }
           try {
-            sender?.send(
-              RPC_CHANNEL,
-              JSON.parse(JSON.stringify(response)) as FromServerEncoded,
-            );
+            if (!target.isDestroyed()) {
+              target.send(
+                RPC_CHANNEL,
+                JSON.parse(JSON.stringify(response)) as FromServerEncoded,
+              );
+            }
           } catch (fallbackError) {
-            console.error(
-              "[rpc] server frame is unrecoverable; dropping it to keep the transport alive",
-              fallbackError,
-            );
+            if (!clientGone(fallbackError)) {
+              console.error(
+                "[rpc] server frame is unrecoverable; dropping it to keep the transport alive",
+                fallbackError,
+              );
+            }
           }
         }
       };

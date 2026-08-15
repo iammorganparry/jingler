@@ -16,8 +16,10 @@ describe("PromptCompiler", () => {
       tools: [tool],
       tokenBudget: 2_000
     })
+    // Three role-kind sections: the role policy, the engineering principles,
+    // and the conversation-only collaboration contract.
     expect(result.manifest.sections.map((section) => section.kind)).toEqual([
-      "safety", "role", "tools", "workspace", "preferences", "turn"
+      "safety", "role", "role", "role", "tools", "workspace", "preferences", "turn"
     ])
   })
 
@@ -69,12 +71,34 @@ describe("PromptCompiler", () => {
     expect(result.text).toContain("Never mark a stage complete")
   })
 
+  it("holds conversation agents to the collaboration contract, but not approved-plan executors", () => {
+    const conversation = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("conversation", "ask"),
+      tools: [tool],
+      tokenBudget: 2_000
+    })
+    expect(conversation.text).toContain("Collaboration contract")
+    expect(conversation.text).toContain("get the operator's confirmation")
+    expect(conversation.text).toContain("no operator is in the loop")
+
+    // Plan already ends in an approval gate and plan-execution runs signed-off
+    // work — a second check-in would re-ask about what the operator confirmed.
+    for (const role of ["plan", "plan-execution"] as const) {
+      const result = new PromptCompiler().compile({
+        layers: runtimeInvariantLayers(role, "read-only"),
+        tools: [tool],
+        tokenBudget: 2_000
+      })
+      expect(result.text).not.toContain("Collaboration contract")
+    }
+  })
+
   it("trims lower-priority optional context without removing required layers", () => {
     const optional = promptLayer("turn", "turn.large", "x".repeat(4_000))
     const result = new PromptCompiler().compile({
       layers: [...runtimeInvariantLayers("conversation", "ask"), optional],
       tools: [tool],
-      tokenBudget: 500
+      tokenBudget: 700
     })
     expect(result.manifest.sections.find((section) => section.id === "turn.large")?.truncated).toBe(true)
     expect(result.manifest.sections.map((section) => section.kind)).toEqual(expect.arrayContaining(["safety", "role", "tools"]))

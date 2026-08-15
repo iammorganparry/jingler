@@ -4,6 +4,7 @@ export type PersistedPlanTaskStatus = Exclude<PlanTaskStatus, "pending">
 
 export interface PlanTaskProgressRecord {
   readonly stageId: string
+  /** Empty when the agent omitted the fingerprint; consumers match by id. */
   readonly stageFingerprint: string
   readonly taskId: string
   readonly status: PersistedPlanTaskStatus
@@ -13,14 +14,17 @@ export type PlanTaskProtocolToken =
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "progress"; readonly progress: PlanTaskProgressRecord }
 
+// The fingerprint is optional on parse: a checkpoint a model emits without it
+// is still a legible status change, and dropping it silently is worse than
+// matching the stage by id alone.
 const TASK_MARKER_SOURCE =
-  "PLAN_TASK stage=([^\\s]+) fingerprint=([^\\s]+) task=([^\\s]+) status=(in-progress|completed|blocked)"
+  "PLAN_TASK stage=([^\\s]+) (?:fingerprint=([^\\s]+) )?task=([^\\s]+) status=(in-progress|completed|blocked)"
 
 const markerPattern = (): RegExp => new RegExp(TASK_MARKER_SOURCE, "g")
 
 const recordOf = (match: RegExpExecArray): PlanTaskProgressRecord => ({
   stageId: match[1]!,
-  stageFingerprint: match[2]!,
+  stageFingerprint: match[2] ?? "",
   taskId: match[3]!,
   status: match[4]! as PersistedPlanTaskStatus
 })

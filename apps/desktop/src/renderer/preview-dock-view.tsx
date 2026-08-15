@@ -1,7 +1,7 @@
 /** Browser-only Preview dock binding. Repository files live in the Files tab. */
 import { useEffect, useMemo, useRef } from "react"
 import type { Session } from "@jingler/core"
-import { PreviewDock } from "@jingler/ui"
+import { PreviewDock, useHasNativeEclipsingOverlay } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import type { PreviewDockPrefs, PreviewDockSessionPrefs } from "./use-preview-dock.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
@@ -55,6 +55,11 @@ function BrowserBody({
   useEffect(() => {
     urlRef.current = url
   }, [url])
+  // The native WebContentsView composites ABOVE all renderer DOM, so an open
+  // dialog would otherwise render underneath the page it's asking about. Hide
+  // the native view while any registered overlay is open; it restores on close.
+  const overlayOpen = useHasNativeEclipsingOverlay()
+  const nativeVisible = nativeWanted && !overlayOpen
 
   const boundsRef = useNativeViewBounds({
     active: nativeWanted,
@@ -77,8 +82,8 @@ function BrowserBody({
   }, [sessionId])
 
   useEffect(() => {
-    if (sessionId !== null) void rpc.browserPreviewSetVisible(sessionId, nativeWanted)
-  }, [nativeWanted, sessionId])
+    if (sessionId !== null) void rpc.browserPreviewSetVisible(sessionId, nativeVisible)
+  }, [nativeVisible, sessionId])
 
   useEffect(() => {
     if (

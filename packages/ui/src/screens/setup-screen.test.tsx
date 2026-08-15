@@ -50,6 +50,39 @@ const authenticatedCatalog = Schema.decodeSync(ProviderCatalog)({
   stale: false,
 });
 
+const unconfirmedConnection = (id: string) => ({
+  connection: {
+    id,
+    providerId: "anthropic",
+    authKind: "claude-setup-token" as const,
+    account: { fingerprint: "02061a04ef6f", displayLabel: null },
+    targetId: "desktop",
+    status: "entitlement-unconfirmed" as const,
+    subscription: {
+      entitlement: "requires-api-credits" as const,
+      planLabel: null,
+      expiresAt: null,
+      quotaLabel: null,
+      rateLimitLabel: null,
+      confirmedBillingRoute: "api" as const,
+      observedRoute:
+        "anthropic:anthropic-messages:https://api.anthropic.com:http-200",
+    },
+    createdAt: "2026-08-14T09:29:46.674Z",
+    updatedAt: "2026-08-14T09:29:46.674Z",
+  },
+  models: [],
+});
+
+const unconfirmedCatalog = Schema.decodeSync(ProviderCatalog)({
+  connections: [
+    unconfirmedConnection("connection-1"),
+    unconfirmedConnection("connection-2"),
+  ],
+  refreshedAt: "2026-08-14T09:30:00.000Z",
+  stale: false,
+});
+
 const detectedResources = Schema.decodeSync(ResourceDetectionResult)({
   candidates: [
     {
@@ -196,6 +229,24 @@ describe("SetupScreen", () => {
     ).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
     expect(onSkipProvider).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces unconfirmed entitlement once per account instead of hiding it", () => {
+    render(
+      <SetupScreen
+        {...props({ step: "provider", providerCatalog: unconfirmedCatalog })}
+      />,
+    );
+
+    expect(
+      screen.getAllByText("Claude Pro / Max setup-token needs attention"),
+    ).toHaveLength(1);
+    expect(screen.getByText(/billed as API credits/u)).toBeTruthy();
+    expect(screen.getByPlaceholderText("Claude setup-token")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
   });
 
   it("presents a device code without exposing OAuth credentials", () => {

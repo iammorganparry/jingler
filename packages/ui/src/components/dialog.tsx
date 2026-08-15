@@ -2,6 +2,7 @@ import * as React from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { useNativeEclipsingOverlay } from "../lib/native-overlay.js"
 
 /**
  * shadcn Dialog (Radix) restyled to the One Dark modal: a dimmed window behind a
@@ -16,13 +17,18 @@ export const DialogClose = DialogPrimitive.Close
 export const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn("fixed inset-0 z-50 bg-overlay", className)}
-    {...props}
-  />
-))
+>(({ className, ...props }, ref) => {
+  // A dialog cannot out-z-index an Electron WebContentsView; registering here
+  // lets the native browser preview hide itself while any dialog is open.
+  useNativeEclipsingOverlay()
+  return (
+    <DialogPrimitive.Overlay
+      ref={ref}
+      className={cn("fixed inset-0 z-50 bg-overlay", className)}
+      {...props}
+    />
+  )
+})
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 export const DialogContent = React.forwardRef<

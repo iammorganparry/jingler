@@ -4,6 +4,13 @@ import { rpc } from "./rpc-client.js"
 
 /** How often the dock re-reads the registry. An in-memory map read over IPC. */
 const POLL_MS = 2000
+/**
+ * The cadence while the dock is EMPTY. This hook mounts for every open pane
+ * and most sessions never start a background task — polling those at the live
+ * 2s cadence was constant idle IPC for nothing. A task's first appearance can
+ * lag by up to this much; every update after that rides the 2s cadence.
+ */
+const IDLE_POLL_MS = 10_000
 
 /**
  * A session's background tasks, kept live for the dock.
@@ -36,19 +43,30 @@ export const useBackgroundTasks = (sessionId: string) => {
     void rpc
       .backgroundTasksList(forSession)
       .then((next) => {
-        if (activeSession.current === forSession) setTasks(next)
+        if (activeSession.current !== forSession) return
+        // Keep the previous array's identity when nothing changed, so the
+        // poll doesn't re-render the dock every tick for an unchanged list.
+        setTasks((prev) =>
+          prev.length === next.length &&
+          JSON.stringify(prev) === JSON.stringify(next)
+            ? prev
+            : next
+        )
       })
       // Best-effort: a failed read must never take down the pane the operator is
       // using. The next tick re-reads anyway.
       .catch(() => {})
   }, [sessionId])
 
+  const hasTasks = tasks.length > 0
+  useEffect(() => {
+    refresh()
+    const timer = setInterval(refresh, hasTasks ? POLL_MS : IDLE_POLL_MS)
+    return () => clearInterval(timer)
+  }, [refresh, hasTasks])
   useEffect(() => {
     setTasks([])
-    refresh()
-    const timer = setInterval(refresh, POLL_MS)
-    return () => clearInterval(timer)
-  }, [sessionId, refresh])
+  }, [sessionId])
 
   const stop = useCallback(
     (taskId: string) => {

@@ -155,6 +155,14 @@ export interface ConversationContext {
   readonly modelId: ProviderModelId | null
   /** The worktree's current unified diff, for the Changes rail. */
   readonly patch: string
+  /**
+   * When `patch` was last read (epoch ms; 0 = never). Chats in one session
+   * each hold their own snapshot of the SAME worktree's diff, taken at
+   * different times — the session-level diff chip must follow the freshest
+   * one, not whichever chat happened to publish last (that alternated the
+   * chip between two stale readings).
+   */
+  readonly patchAt: number
   /** Operator-visible text for the running turn. */
   readonly pendingText: string
   /** Hidden structured context appended only when the harness is dispatched. */
@@ -330,6 +338,11 @@ type ConversationEvent =
     }
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
   | { type: "SESSION_UPDATED"; session: Session }
+  | {
+      type: "WORKSPACE_META_LOADED"
+      files: ReadonlyArray<string>
+      patch: string
+    }
   | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
   | { type: "REVIEW_EVENT"; event: StreamEvent }
@@ -462,8 +475,6 @@ const historyPage = fromCallback<
 
 interface LoadedData {
   readonly transcript: ReadonlyArray<Message>
-  readonly files: ReadonlyArray<string>
-  readonly patch: string
   readonly sharedPlanChatId: string | null
   readonly sharedPlan: Plan | null
   /** Whether older turns remain on disk before the loaded tail. */
@@ -506,19 +517,16 @@ const loadConversation = fromPromise<
   LoadedData,
   { session: Session; chatId: string }
 >(async ({ input }) => {
-  const [page, artifact, files, patch] = await withLoadDeadline(Promise.all([
+  // ONLY what the transcript's first paint needs: the tail page, and the plan
+  // artifact its graft depends on. The worktree file list and diff used to sit
+  // in this same join, which gated first paint on a repo walk + a git diff —
+  // the two tail-latency drivers on a big repo. They now load out of band
+  // (`loadWorkspaceMeta`) and land whenever they land.
+  const [page, artifact] = await withLoadDeadline(Promise.all([
     // Only the tail — older turns page in via LOAD_OLDER. A whole 46MB
     // transcript held as one parsed array was the renderer's high-water mark.
     rpc.sessionsTranscriptPage(input.session.id, input.chatId, undefined, HISTORY_PAGE_SIZE),
-    rpc.planCurrent(input.session.id),
-    input.session.worktreePath
-      ? rpc.workspaceFiles(
-          input.session.worktreePath,
-          input.session.environmentId,
-          input.session.id
-        )
-      : Promise.resolve([] as ReadonlyArray<string>),
-    rpc.sessionsDiff(input.session.id)
+    rpc.planCurrent(input.session.id)
   ]))
   const rawTranscript = page.messages
   // A loaded transcript has no live run — settle any turn left mid-stream (the
@@ -568,8 +576,6 @@ const loadConversation = fromPromise<
         ]
   return {
     transcript,
-    files,
-    patch,
     sharedPlanChatId: artifact?.producingChatId ?? null,
     sharedPlan: projectedPlan,
     hasMore: page.hasMore,
@@ -838,6 +844,24 @@ export const conversationMachine = setup({
     stopAgent
   },
   guards: {
+    /**
+     * Whether a SESSION_UPDATED carries anything new. XState's `assign`
+     * allocates a fresh context object even when the update is an empty
+     * partial, and a fresh context defeats the renderer's context-identity
+     * comparator — so a no-op echo (the registry's attach-time double-send, a
+     * sync returning identical state) must be dropped BEFORE the action runs,
+     * not inside it. Sessions are small schema-decoded records, so JSON text
+     * is a sound and cheap structural equality.
+     */
+    sessionChanged: ({ context, event }) =>
+      event.type === "SESSION_UPDATED" &&
+      context.session !== event.session &&
+      JSON.stringify(context.session) !== JSON.stringify(event.session),
+    /** Same no-op filter for cross-chat plan broadcasts. */
+    sharedPlanChanged: ({ context, event }) =>
+      event.type === "SHARED_PLAN_UPDATED" &&
+      (context.sharedPlanChatId !== event.producingChatId ||
+        JSON.stringify(context.sharedPlan) !== JSON.stringify(event.plan)),
     isTerminal: ({ event }) =>
       event.type === "STREAM_EVENT" &&
       (event.event._tag === "Done" || event.event._tag === "Failed"),
@@ -1600,7 +1624,9 @@ export const conversationMachine = setup({
       }
     },
     applyLivePatch: assign(({ event }) =>
-      event.type === "PATCH_UPDATED" ? { patch: event.patch } : {}
+      event.type === "PATCH_UPDATED"
+        ? { patch: event.patch, patchAt: Date.now() }
+        : {}
     ),
     applyLiveFiles: assign(({ event }) =>
       event.type === "FILES_UPDATED" ? { files: event.files } : {}
@@ -1683,15 +1709,25 @@ export const conversationMachine = setup({
           (part) => part._tag === "Plan" && part.plan.id === event.plan.id
         )
       )
+      // Replace ONLY the messages that hold this plan. Rebuilding every
+      // message gave the whole transcript fresh identities per broadcast,
+      // which un-memoed every rendered turn — on a plan-heavy session that
+      // was a full-transcript re-render for each progress update.
       const messages = hasPlan
-        ? context.messages.map((message) => ({
-            ...message,
-            parts: message.parts.map((part) =>
-              part._tag === "Plan" && part.plan.id === event.plan.id
-                ? { _tag: "Plan" as const, plan: event.plan }
-                : part
+        ? context.messages.map((message) =>
+            message.parts.some(
+              (part) => part._tag === "Plan" && part.plan.id === event.plan.id
             )
-          }))
+              ? {
+                  ...message,
+                  parts: message.parts.map((part) =>
+                    part._tag === "Plan" && part.plan.id === event.plan.id
+                      ? { _tag: "Plan" as const, plan: event.plan }
+                      : part
+                  )
+                }
+              : message
+          )
         : [
             ...context.messages,
             {
@@ -1833,6 +1869,40 @@ export const conversationMachine = setup({
         .then((skills) => self.send({ type: "SKILLS_LOADED", skills }))
         .catch(() => {})
     },
+    /**
+     * Fetch the worktree file list + diff out of band, like `loadSkills` — a
+     * repo walk and a git diff feed the @-mention menu and the Changes rail,
+     * neither of which the transcript's first paint needs, and both of which
+     * used to sit in `loadConversation`'s join and gate it.
+     */
+    loadWorkspaceMeta: ({ context, self }) => {
+      const { session } = context
+      void Promise.all([
+        session.worktreePath
+          ? rpc.workspaceFiles(
+              session.worktreePath,
+              session.environmentId,
+              session.id
+            )
+          : Promise.resolve([] as ReadonlyArray<string>),
+        rpc.sessionsDiff(session.id)
+      ])
+        .then(([files, patch]) =>
+          self.send({ type: "WORKSPACE_META_LOADED", files, patch })
+        )
+        .catch(() => {})
+    },
+    applyWorkspaceMeta: assign(({ context, event }) => {
+      if (event.type !== "WORKSPACE_META_LOADED") return {}
+      // A turn that completed before this initial read landed has already
+      // refreshed the diff with something newer — don't clobber it.
+      return {
+        files: event.files,
+        ...(context.patch.length > 0
+          ? {}
+          : { patch: event.patch, patchAt: Date.now() })
+      }
+    }),
     /** Fold one reviewer event into its tab + the PR button's phase/timer. */
     applyReview: assign(({ context, event }) => {
       if (event.type !== "REVIEW_EVENT") return {}
@@ -1915,7 +1985,7 @@ export const conversationMachine = setup({
   initial: "loading",
   // Kick the (slow, out-of-band) model catalogue + `/` menu fetches off once, at
   // start. Both probe a CLI, so neither may gate the transcript — see below.
-  entry: ["loadSkills"],
+  entry: ["loadSkills", "loadWorkspaceMeta"],
   // Watch the reviewer for the machine's whole life — a review is not part of a
   // turn, so it can start, run and finish in any state.
   invoke: {
@@ -1932,11 +2002,15 @@ export const conversationMachine = setup({
       actions: "applySessionEnvelope"
     },
     SKILLS_LOADED: { actions: "applySkills" },
+    // The worktree file list + diff arrive out of band so the transcript's
+    // first paint never waits on a repo walk or a git diff (see
+    // `loadWorkspaceMeta`).
+    WORKSPACE_META_LOADED: { actions: "applyWorkspaceMeta" },
     REVIEW_EVENT: { actions: "applyReview" },
     SET_REASONING: { actions: "persistReasoning" },
     SET_MODEL: { actions: "persistProviderModel" },
-    SESSION_UPDATED: { actions: "reconcileSession" },
-    SHARED_PLAN_UPDATED: { actions: "applySharedPlan" },
+    SESSION_UPDATED: { guard: "sessionChanged", actions: "reconcileSession" },
+    SHARED_PLAN_UPDATED: { guard: "sharedPlanChanged", actions: "applySharedPlan" },
     // Root-level for the same reason: a sub-agent's tab outlives the turn that
     // spawned it, so closing one has to work in `idle` — and a stop request
     // races nothing, since the harness answers it on the ordinary stream.
@@ -1996,6 +2070,7 @@ export const conversationMachine = setup({
       providerId,
       modelId: chat.modelId ?? input.session.modelId ?? null,
       patch: "",
+      patchAt: 0,
       pendingText: "",
       pendingAgentContext: "",
       pendingImages: [],
@@ -2076,8 +2151,6 @@ export const conversationMachine = setup({
             actions: [
               assign(({ event }) => ({
                 messages: event.output.transcript,
-                files: event.output.files,
-                patch: event.output.patch,
                 sharedPlanChatId: event.output.sharedPlanChatId,
                 sharedPlan: event.output.sharedPlan,
                 hasMoreHistory: event.output.hasMore,
@@ -2091,8 +2164,6 @@ export const conversationMachine = setup({
             target: "awaitingInput",
             actions: assign(({ event }) => ({
               messages: event.output.transcript,
-              files: event.output.files,
-              patch: event.output.patch,
               sharedPlanChatId: event.output.sharedPlanChatId,
               sharedPlan: event.output.sharedPlan,
               hasMoreHistory: event.output.hasMore,
@@ -2339,9 +2410,15 @@ export const conversationMachine = setup({
           {
             guard: "hasSettledQueue",
             target: "running",
-            actions: [assign(({ event }) => ({ patch: event.output })), "dequeueTurn"]
+            actions: [
+              assign(({ event }) => ({ patch: event.output, patchAt: Date.now() })),
+              "dequeueTurn"
+            ]
           },
-          { target: "awaitingInput", actions: assign(({ event }) => ({ patch: event.output })) }
+          {
+            target: "awaitingInput",
+            actions: assign(({ event }) => ({ patch: event.output, patchAt: Date.now() }))
+          }
         ],
         onError: [
           { guard: "hasSettledQueue", target: "running", actions: "dequeueTurn" },

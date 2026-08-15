@@ -4,7 +4,7 @@ import { Effect, Option, Queue, Ref, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
-import { normalizePiEvent, piProviderFailure } from "./pi-events.js"
+import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
 
 export const MEMORY_REFLECTION_TIMEOUT_MS = 15_000
 
@@ -157,6 +157,7 @@ const subscribeToSession = (
   sink: EventSink,
   planDraft: PlanToolDraftStream
 ): (() => void) => {
+  const normalize = createPiEventNormalizer()
   let reflectionStarted = false
   let reflectionActive = false
   let reflectionTimeout: ReturnType<typeof setTimeout> | null = null
@@ -181,7 +182,7 @@ const subscribeToSession = (
       }
       const draft = projectPlanDraft(event, planDraft)
       if (draft) sink.emit(draft)
-      const normalized = normalizePiEvent(event, handle.contextWindow ?? undefined)
+      const normalized = normalize(event, handle.contextWindow ?? undefined)
       if (normalized) sink.emit(normalized)
     }
     if (event.type !== "agent_settled") return
