@@ -98,7 +98,7 @@ describe("PromptCompiler", () => {
     const result = new PromptCompiler().compile({
       layers: [...runtimeInvariantLayers("conversation", "ask"), optional],
       tools: [tool],
-      tokenBudget: 700
+      tokenBudget: 900
     })
     expect(result.manifest.sections.find((section) => section.id === "turn.large")?.truncated).toBe(true)
     expect(result.manifest.sections.map((section) => section.kind)).toEqual(expect.arrayContaining(["safety", "role", "tools"]))
