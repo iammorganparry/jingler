@@ -333,14 +333,16 @@ export const registerWorkspaceMutationTools = (
   registry.register({
     id: "command_execute",
     version: "1",
-    description: "Run a shell command in the workspace and stream its output. Eligible commands offload automatically; only the operator can force local execution by disabling Offload Compute.",
+    description: "Run a shell command in the workspace and stream its output. Commands are killed after 10 minutes — run servers/watchers detached and split longer work into smaller commands. Eligible commands offload automatically; only the operator can force local execution by disabling Offload Compute.",
     input: Schema.Struct({
       command: Schema.String.pipe(Schema.minLength(1))
     }),
     risk: "execute",
     roles,
     modes,
-    timeoutMs: 24 * 60 * 60 * 1_000,
+    // 24h before: a command blocked on stdin or a foreground dev server hung
+    // the whole turn for the rest of the day.
+    timeoutMs: 10 * 60 * 1_000,
     outputBudget: 32_000,
     cancellable: true,
     idempotency: "unsafe",
