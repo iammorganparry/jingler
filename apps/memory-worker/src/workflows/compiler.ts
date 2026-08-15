@@ -11,7 +11,6 @@ import {
 import { Schema } from "effect"
 import { WorkflowEntrypoint } from "cloudflare:workers"
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers"
-import { buildCompilerPrompt } from "../compiler-prompt.js"
 import type { DurableObjectNamespaceLike } from "../env.js"
 import {
   NEW_PAGE_BASE_REVISION_ID,
@@ -55,7 +54,6 @@ export interface CompilerContext {
   readonly schemaPages: ReadonlyArray<MemoryPage>
   readonly candidates: ReadonlyArray<CompilerAcceptedPage>
   readonly indexMarkdown: string
-  readonly prompt: string
 }
 
 export interface CompilerGeneratedProposal {
@@ -100,6 +98,12 @@ export interface WorkflowEventLike<Payload> {
 export type CompilerWorkflowResult =
   | {
       readonly workflowId: string
+      readonly status: "no_durable_learning"
+      readonly proposalId: null
+      readonly proposalIds: ReadonlyArray<string>
+    }
+  | {
+      readonly workflowId: string
       readonly status: "pending_review"
       readonly proposalId: string
       readonly proposalIds: ReadonlyArray<string>
@@ -135,6 +139,8 @@ const WORD_PATTERN = /[\p{L}\p{N}][\p{L}\p{N}_-]*/gu
 const SENTENCE_BOUNDARY_PATTERN = /(?<=[.!?])\s+|\n+/u
 const MARKDOWN_HEADING_PATTERN = /^#{1,6}\s+.*$/gm
 const LIST_MARKER_PATTERN = /^[-*]\s+/
+const STRUCTURAL_LABEL_PATTERN = /^(?:goal|recent work|what i just did|next step|the immediate next action|decisions|decisions already made|files touched|open threads|other open threads|preferences|standing user preferences|midflow|midflow reason)\s*:?[\s-]*$/iu
+const PROGRESS_NARRATION_PATTERN = /^(?:plan_task|plan_result|step\s+\d+|ran\s+|running\s+|working\s+on\s+|starting\s+|completed\s+|next\s+action\s*:|recent\s+work\s*:|what\s+i\s+just\s+did\s*:)/iu
 
 export interface CompilerPageIdentity {
   readonly pageId: string
@@ -176,13 +182,19 @@ export const extractCompilerClaims = (content: string): ReadonlyArray<string> =>
     .replace(MARKDOWN_HEADING_PATTERN, "")
     .split(SENTENCE_BOUNDARY_PATTERN)
     .map((claim) => claim.replace(LIST_MARKER_PATTERN, "").trim())
-    .filter((claim) => claim.length >= 12 && claim.length <= 600)
+    .filter(
+      (claim) =>
+        claim.length >= 12 &&
+        claim.length <= 600 &&
+        !STRUCTURAL_LABEL_PATTERN.test(claim) &&
+        !PROGRESS_NARRATION_PATTERN.test(claim)
+    )
   return [...new Set(claims)].slice(0, MAX_COMPILER_CLAIMS)
 }
 
 const candidateScore = (page: MemoryPage, claims: ReadonlyArray<string>): number => {
   const identityWords = normalizedWords(
-    [page.id, page.path, page.title, ...page.aliases, ...page.tags].join(" ")
+    [page.id, page.path, page.title, ...page.aliases, ...page.tags, page.body].join(" ")
   )
   const claimWords = normalizedWords(claims.join(" "))
   let score = 0
@@ -206,7 +218,7 @@ export const selectCompilerCandidates = (
 const scoreClaimForPage = (claim: string, page: MemoryPage): number => {
   const claimWords = normalizedWords(claim)
   const pageWords = normalizedWords(
-    [page.id, page.path, page.title, ...page.aliases, ...page.tags].join(" ")
+    [page.id, page.path, page.title, ...page.aliases, ...page.tags, page.body].join(" ")
   )
   let score = 0
   for (const word of claimWords) if (pageWords.has(word)) score += 1
@@ -373,21 +385,14 @@ const readCompilerContext = async (
     claims,
     schemaPages,
     candidates,
-    indexMarkdown: navigation.indexMarkdown,
-    prompt: buildCompilerPrompt({
-      source: source.source,
-      claims,
-      schemaPages,
-      candidatePages: candidates.map(({ page }) => page),
-      indexMarkdown: navigation.indexMarkdown
-    })
+    indexMarkdown: navigation.indexMarkdown
   }
 }
 
 const compilerResult = (
   input: CompilerWorkflowInput,
   proposalSet: VaultProposalSet,
-  status: CompilerWorkflowResult["status"]
+  status: Exclude<CompilerWorkflowResult["status"], "no_durable_learning">
 ): CompilerWorkflowResult => ({
   workflowId: input.workflowId,
   status,
@@ -412,11 +417,15 @@ const validatedCompilerSource = async (
   return stored
 }
 
-const claimsForSource = (source: CompilerSource): ReadonlyArray<string> => {
-  const claims = extractCompilerClaims(source.content)
-  if (claims.length === 0) throw new CompilerWorkflowError("source contains no bounded claims")
-  return claims
-}
+const claimsForSource = (source: CompilerSource): ReadonlyArray<string> =>
+  extractCompilerClaims(source.content)
+
+const noDurableLearning = (input: CompilerWorkflowInput): CompilerWorkflowResult => ({
+  workflowId: input.workflowId,
+  status: "no_durable_learning",
+  proposalId: null,
+  proposalIds: []
+})
 
 export const runCompilerWorkflow = async (
   input: CompilerWorkflowInput,
@@ -426,10 +435,14 @@ export const runCompilerWorkflow = async (
 ): Promise<CompilerWorkflowResult> => {
   const source = await step.do("01-validate-source", () => validatedCompilerSource(repository, input))
   const claims = await step.do("02-extract-claims", () => claimsForSource(source))
+  if (claims.length === 0) return noDurableLearning(input)
   const context = await step.do("03-read-schema-index-and-candidates", () =>
     readCompilerContext(repository, input, source, claims)
   )
   const generated = await step.do("04-generate-bounded-proposal", () => model.generate(context))
+  if (generated.selection === "no_op" || generated.drafts.length === 0) {
+    return noDurableLearning(input)
+  }
   const proposalSetId = `proposal:${input.workflowId}`
   const proposalSet = await step.do("05-lint-and-persist-proposal", () =>
     repository.createProposalSet({

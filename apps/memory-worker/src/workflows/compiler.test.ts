@@ -22,6 +22,8 @@ import { InMemoryVaultState, TeamVault } from "../team-vault.js"
 import {
   runCompilerWorkflow,
   compilerPageIdentity,
+  extractCompilerClaims,
+  selectCompilerCandidates,
   type CompilerContext,
   type CompilerGeneratedProposal,
   type CompilerModel,
@@ -287,6 +289,53 @@ const serviceRequest = (path: string, method = "GET", body?: unknown): Request =
   })
 
 describe("durable memory compiler workflow", () => {
+  it("filters transcript structure and progress narration while retaining durable claims", () => {
+    expect(extractCompilerClaims([
+      "RECENT WORK:",
+      "- Ran pnpm test successfully.",
+      "PLAN_TASK stage=one task=test status=completed",
+      "Refund retries must preserve one idempotency key across every network attempt."
+    ].join("\n"))).toEqual([
+      "Refund retries must preserve one idempotency key across every network attempt."
+    ])
+  })
+
+  it("returns no_durable_learning without creating a proposal for narration-only sources", async () => {
+    const vault = await run(TeamVault.create(
+      "org-compiler",
+      new InMemoryVaultState(),
+      new InMemoryR2Bucket()
+    ))
+    await run(vault.ingestSource(
+      compilerSource,
+      "RECENT WORK:\n- Ran pnpm test successfully.\nPLAN_TASK stage=one task=test status=completed"
+    ))
+
+    const result = await runCompilerWorkflow(
+      { ...workflowInput, workflowId: "compiler-no-learning", requireReview: false },
+      new VaultCompilerRepository(vault),
+      new ImmediateStep()
+    )
+
+    expect(result).toEqual({
+      workflowId: "compiler-no-learning",
+      status: "no_durable_learning",
+      proposalId: null,
+      proposalIds: []
+    })
+    expect((await run(vault.snapshot())).proposals).toEqual([])
+    expect(await run(vault.listPages())).toEqual([])
+  })
+
+  it("matches candidates by accepted page body as well as identity", () => {
+    const accepted = page("alpha")
+    const candidates = selectCompilerCandidates(
+      [{ page: accepted, revisionId: "revision-alpha-1" }],
+      ["The baseline remains accepted after rollout."]
+    )
+    expect(candidates.map(({ page: candidate }) => candidate.id)).toEqual(["alpha"])
+  })
+
   it("compiles a stored source with the bounded deterministic model", async () => {
     const vault = await seedVault()
     const result = await runCompilerWorkflow(
@@ -331,6 +380,7 @@ describe("durable memory compiler workflow", () => {
       new ImmediateStep()
     )
     expect(result.status).toBe("pending_review")
+    if (result.status !== "pending_review") throw new Error("expected pending review")
     const [proposal] = (await run(vault.snapshot())).proposals
     expect(proposal).toMatchObject({ baseRevisionId: "new", path: expect.stringMatching(/^learnings\//) })
     const approval = await run(vault.approveProposalSet(
