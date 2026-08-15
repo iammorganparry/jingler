@@ -410,6 +410,7 @@ const createSessionHandle = (
       const capability = yield* Effect.tryPromise({
         try: () => options.subagentBroker!.register({
           parentPiSessionId,
+          agents: JINGLER_SUBAGENT_AGENT_NAMES,
           spec,
           registry,
           context
@@ -431,7 +432,7 @@ const createSessionHandle = (
         source: "jingler-runtime",
         ceiling: {
           allowedTools: [
-            ...capability.tools.map(({ id }) => id),
+            ...new Set(capability.flatMap(({ tools }) => tools.map(({ id }) => id))),
             "contact_supervisor",
             "subagent"
           ],

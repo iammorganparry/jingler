@@ -10,6 +10,7 @@ const capability = {
   endpoint: "http://127.0.0.1:43123/v1/subagent-tool",
   token: "capability-token",
   parentPiSessionId: "parent-session",
+  agent: "worker",
   targetId: "desktop",
   role: "conversation",
   mode: "ask",
@@ -34,7 +35,6 @@ describe("subagent capability contracts", () => {
         version: 2,
         token: "token",
         parentPiSessionId: "parent",
-        childAgent: "worker",
         callId: "call",
         toolId: "workspace_read_file",
         arguments: {}

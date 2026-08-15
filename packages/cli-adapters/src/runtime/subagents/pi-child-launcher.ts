@@ -12,6 +12,7 @@ export const JINGLER_SUBAGENT_PI_CLI = "JINGLER_SUBAGENT_PI_CLI"
 export const JINGLER_SUBAGENT_NODE = "JINGLER_SUBAGENT_NODE"
 export const JINGLER_SUBAGENT_CHILD_TOOLS = "JINGLER_SUBAGENT_CHILD_TOOLS"
 export const PI_SUBAGENT_PI_BINARY = "PI_SUBAGENT_PI_BINARY"
+export const PI_SUBAGENT_PI_BINARY_ARGS = "PI_SUBAGENT_PI_BINARY_ARGS"
 
 export interface PiChildLauncherConfig {
   readonly wrapperPath: string
@@ -68,6 +69,14 @@ const pinEnvironment = (name: string, value: string): void => {
   process.env[name] = expected
 }
 
+const pinValue = (name: string, value: string): void => {
+  const current = process.env[name]
+  if (current !== undefined && current !== value) {
+    throw new Error(`${name} already has a different managed value`)
+  }
+  process.env[name] = value
+}
+
 export const preparePiChildLauncher = (
   config: PiChildLauncherConfig
 ): Effect.Effect<void, PiChildLauncherError> =>
@@ -76,10 +85,12 @@ export const preparePiChildLauncher = (
       await Promise.all([
         access(config.wrapperPath),
         access(config.piCliPath),
-        access(config.childToolsPath)
+        access(config.childToolsPath),
+        access(config.nodePath)
       ])
-      if (process.platform !== "win32") await chmod(config.wrapperPath, 0o755)
-      pinEnvironment(PI_SUBAGENT_PI_BINARY, config.wrapperPath)
+      if (process.platform !== "win32") await chmod(config.wrapperPath, 0o700)
+      pinEnvironment(PI_SUBAGENT_PI_BINARY, config.nodePath)
+      pinValue(PI_SUBAGENT_PI_BINARY_ARGS, JSON.stringify([resolve(config.wrapperPath)]))
       pinEnvironment(JINGLER_SUBAGENT_PI_CLI, config.piCliPath)
       pinEnvironment(JINGLER_SUBAGENT_CREDENTIAL_ROOT, config.credentialRoot)
       pinEnvironment(JINGLER_SUBAGENT_NODE, config.nodePath)

@@ -51,6 +51,7 @@ export const SubagentCapability = Schema.Struct({
   endpoint: Schema.String,
   token: Schema.String,
   parentPiSessionId: Schema.String,
+  agent: Schema.String,
   targetId: Schema.String,
   role: AgentRole,
   mode: RuntimeMode,
@@ -62,7 +63,6 @@ export const SubagentToolRequest = Schema.Struct({
   version: Schema.Literal(SUBAGENT_CAPABILITY_VERSION),
   token: Schema.String,
   parentPiSessionId: Schema.String,
-  childAgent: Schema.String,
   callId: Schema.String,
   toolId: Schema.String,
   arguments: SubagentJsonValue

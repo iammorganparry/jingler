@@ -61,4 +61,32 @@ describe("Jingler pi-subagents RPC patch", () => {
       }
     })
   }, 15_000)
+
+  it("prepends managed wrapper arguments to the pinned Pi executable", async () => {
+    const spawnUrl = pathToFileURL(
+      resolve("node_modules/pi-subagents/src/runs/shared/pi-spawn.ts")
+    ).href
+    const script = `
+      import { createJiti } from "jiti";
+      const jiti = createJiti(import.meta.url);
+      const { getPiSpawnCommand } = await jiti.import(${JSON.stringify(spawnUrl)});
+      process.stdout.write(JSON.stringify(getPiSpawnCommand(["--model", "test"], {
+        env: {
+          PI_SUBAGENT_PI_BINARY: "/managed/node",
+          PI_SUBAGENT_PI_BINARY_ARGS: JSON.stringify(["/managed/wrapper.mjs"])
+        }
+      })));
+    `
+
+    const { stdout } = await execute(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      script
+    ])
+
+    expect(JSON.parse(stdout)).toEqual({
+      command: "/managed/node",
+      args: ["/managed/wrapper.mjs", "--model", "test"]
+    })
+  }, 15_000)
 })

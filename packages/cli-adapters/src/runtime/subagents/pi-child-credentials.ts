@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type {
@@ -9,6 +9,8 @@ import { Data, Effect } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import { toPiCredential } from "../auth/pi-credential-store.js"
 
+const SAFE_AGENT_NAME = /^[a-z][a-z0-9-]*$/u
+
 export class PiChildCredentialError extends Data.TaggedError(
   "PiChildCredentialError"
 )<{
@@ -18,6 +20,11 @@ export class PiChildCredentialError extends Data.TaggedError(
 
 export const childCredentialKey = (parentPiSessionId: string): string =>
   createHash("sha256").update(parentPiSessionId).digest("hex")
+
+export const childCapabilityFileName = (agent: string): string => {
+  if (!SAFE_AGENT_NAME.test(agent)) throw new Error("Unsafe child agent name")
+  return `capability-${agent}.json`
+}
 
 export class PiChildCredentials {
   constructor(
@@ -32,7 +39,7 @@ export class PiChildCredentials {
   materialize(
     parentPiSessionId: string,
     connection: ProviderConnection,
-    capability: SubagentCapability
+    capabilities: ReadonlyArray<SubagentCapability>
   ): Effect.Effect<string, PiChildCredentialError> {
     return this.credentials.read(connection.id).pipe(
       Effect.mapError(
@@ -51,37 +58,55 @@ export class PiChildCredentials {
             )
           : Effect.tryPromise({
               try: async () => {
+                if (
+                  capabilities.length === 0 ||
+                  capabilities.some(
+                    (capability) => capability.parentPiSessionId !== parentPiSessionId
+                  )
+                ) {
+                  throw new Error("Child capabilities do not match their parent session")
+                }
                 const directory = this.directory(parentPiSessionId)
                 const authPath = join(directory, "auth.json")
-                const capabilityPath = join(directory, "capability.json")
-                const authTemporary = `${authPath}.${process.pid}.next`
-                const capabilityTemporary = `${capabilityPath}.${process.pid}.next`
+                const capabilityPaths = capabilities.map((capability) => ({
+                  capability,
+                  path: join(directory, childCapabilityFileName(capability.agent))
+                }))
+                const nonce = `${process.pid}.${randomUUID()}.next`
+                const temporary = [
+                  {
+                    path: `${authPath}.${nonce}`,
+                    content: `${JSON.stringify({
+                      [connection.providerId]: toPiCredential(stored)
+                    })}\n`
+                  },
+                  ...capabilityPaths.map(({ capability, path }) => ({
+                    path: `${path}.${nonce}`,
+                    content: `${JSON.stringify(capability)}\n`
+                  }))
+                ]
                 await mkdir(directory, { recursive: true, mode: 0o700 })
                 await chmod(directory, 0o700)
                 try {
-                  await writeFile(
-                    authTemporary,
-                    `${JSON.stringify({
-                      [connection.providerId]: toPiCredential(stored)
-                    })}\n`,
-                    { encoding: "utf8", flag: "wx", mode: 0o600 }
-                  )
-                  await writeFile(
-                    capabilityTemporary,
-                    `${JSON.stringify(capability)}\n`,
-                    { encoding: "utf8", flag: "wx", mode: 0o600 }
-                  )
-                  await rename(authTemporary, authPath)
-                  await rename(capabilityTemporary, capabilityPath)
+                  await Promise.all(temporary.map(({ path, content }) =>
+                    writeFile(path, content, {
+                      encoding: "utf8",
+                      flag: "wx",
+                      mode: 0o600
+                    })
+                  ))
+                  await rename(temporary[0]!.path, authPath)
+                  await Promise.all(capabilityPaths.map(({ path }, index) =>
+                    rename(temporary[index + 1]!.path, path)
+                  ))
                   await Promise.all([
                     chmod(authPath, 0o600),
-                    chmod(capabilityPath, 0o600)
+                    ...capabilityPaths.map(({ path }) => chmod(path, 0o600))
                   ])
                 } catch (error) {
-                  await Promise.all([
-                    rm(authTemporary, { force: true }),
-                    rm(capabilityTemporary, { force: true })
-                  ])
+                  await Promise.all(
+                    temporary.map(({ path }) => rm(path, { force: true }))
+                  )
                   throw error
                 }
                 return directory

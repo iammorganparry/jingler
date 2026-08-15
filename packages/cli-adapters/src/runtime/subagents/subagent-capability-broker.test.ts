@@ -31,21 +31,49 @@ const context = (
   } satisfies RuntimePlanDecision))
 })
 
+type Capabilities = Awaited<ReturnType<SubagentCapabilityBroker["register"]>>
+
+const capabilityFor = (capabilities: Capabilities, agent: string) => {
+  const capability = capabilities.find((candidate) => candidate.agent === agent)
+  if (!capability) throw new Error(`Missing ${agent} capability`)
+  return capability
+}
+
 const call = (
-  capability: Awaited<ReturnType<SubagentCapabilityBroker["register"]>>,
-  input: { readonly token?: string; readonly childAgent?: string; readonly toolId?: string }
-): Promise<Response> => fetch(capability.endpoint, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({
-    version: 1,
-    token: input.token ?? capability.token,
-    parentPiSessionId: capability.parentPiSessionId,
-    childAgent: input.childAgent ?? "worker",
-    callId: "child-call",
-    toolId: input.toolId ?? "inspect",
-    arguments: { value: "ok" }
+  capabilities: Capabilities,
+  input: {
+    readonly agent?: string
+    readonly token?: string
+    readonly toolId?: string
+    readonly claimedAgent?: string
+  }
+): Promise<Response> => {
+  const capability = capabilityFor(capabilities, input.agent ?? "worker")
+  return fetch(capability.endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      version: 1,
+      token: input.token ?? capability.token,
+      parentPiSessionId: capability.parentPiSessionId,
+      ...(input.claimedAgent ? { childAgent: input.claimedAgent } : {}),
+      callId: "child-call",
+      toolId: input.toolId ?? "inspect",
+      arguments: { value: "ok" }
+    })
   })
+}
+
+const register = (
+  broker: SubagentCapabilityBroker,
+  registry: ToolRegistry,
+  runtimeContext = context()
+) => broker.register({
+  parentPiSessionId: "parent",
+  agents: ["worker", "reviewer"],
+  spec,
+  registry,
+  context: runtimeContext
 })
 
 describe("SubagentCapabilityBroker", () => {
@@ -54,7 +82,7 @@ describe("SubagentCapabilityBroker", () => {
     await Promise.all(brokers.map((broker) => broker.close()))
   })
 
-  it("exposes the exact active tool catalog and forwards execution", async () => {
+  it("exposes the exact profile-specific tool catalog and forwards execution", async () => {
     const registry = new ToolRegistry()
     registry.register({
       id: "inspect",
@@ -86,15 +114,13 @@ describe("SubagentCapabilityBroker", () => {
     })
     const broker = new SubagentCapabilityBroker()
     brokers.push(broker)
-    const capability = await broker.register({
-      parentPiSessionId: "parent",
-      spec,
-      registry,
-      context: context()
-    })
+    const capabilities = await register(broker, registry)
 
-    expect(capability.tools.map(({ id }) => id)).toEqual(["inspect"])
-    const response = await call(capability, {})
+    expect(capabilities).toHaveLength(2)
+    expect(new Set(capabilities.map(({ token }) => token)).size).toBe(2)
+    expect(capabilityFor(capabilities, "worker").tools.map(({ id }) => id))
+      .toEqual(["inspect"])
+    const response = await call(capabilities, {})
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({
       status: "success",
@@ -102,7 +128,7 @@ describe("SubagentCapabilityBroker", () => {
     })
   })
 
-  it("routes child mutations through permission checks and receipts", async () => {
+  it("binds read-only authorization to the token instead of caller fields", async () => {
     const execute = vi.fn(() => Promise.resolve({ changed: true }))
     const settled = vi.fn(() => Effect.succeed({
       id: "set-1",
@@ -135,14 +161,9 @@ describe("SubagentCapabilityBroker", () => {
     const runtimeContext = context()
     const broker = new SubagentCapabilityBroker()
     brokers.push(broker)
-    const capability = await broker.register({
-      parentPiSessionId: "parent",
-      spec,
-      registry,
-      context: runtimeContext
-    })
+    const capabilities = await register(broker, registry, runtimeContext)
 
-    const worker = await call(capability, { childAgent: "worker", toolId: "change" })
+    const worker = await call(capabilities, { toolId: "change" })
     expect(worker.status).toBe(200)
     expect(execute).toHaveBeenCalledOnce()
     expect(settled).toHaveBeenCalledOnce()
@@ -151,18 +172,25 @@ describe("SubagentCapabilityBroker", () => {
       risk: "mutate"
     })
 
-    const reviewer = await call(capability, {
-      childAgent: "reviewer",
+    expect(capabilityFor(capabilities, "reviewer").tools).toEqual([])
+    const reviewer = await call(capabilities, {
+      agent: "reviewer",
       toolId: "change"
     })
     await expect(reviewer.json()).resolves.toMatchObject({
       status: "error",
       error: { code: "forbidden" }
     })
+    const impersonation = await call(capabilities, {
+      agent: "reviewer",
+      toolId: "change",
+      claimedAgent: "worker"
+    })
+    expect(impersonation.status).toBe(422)
     expect(execute).toHaveBeenCalledOnce()
   })
 
-  it("rejects forged and expired capabilities", async () => {
+  it("rejects forged, cross-parent, and expired capabilities", async () => {
     const registry = new ToolRegistry()
     registry.register({
       id: "inspect",
@@ -170,8 +198,8 @@ describe("SubagentCapabilityBroker", () => {
       description: "Inspect",
       input: Schema.Struct({ value: Schema.String }),
       risk: "read",
-      roles: ["conversation"],
-      modes: ["auto"],
+      roles: ["conversation", "review"],
+      modes: ["auto", "read-only"],
       timeoutMs: 1_000,
       outputBudget: 1_000,
       cancellable: true,
@@ -180,15 +208,24 @@ describe("SubagentCapabilityBroker", () => {
     })
     const broker = new SubagentCapabilityBroker()
     brokers.push(broker)
-    const capability = await broker.register({
-      parentPiSessionId: "parent",
-      spec,
-      registry,
-      context: context()
-    })
+    const capabilities = await register(broker, registry)
 
-    expect((await call(capability, { token: "forged" })).status).toBe(403)
+    expect((await call(capabilities, { token: "forged" })).status).toBe(403)
+    const worker = capabilityFor(capabilities, "worker")
+    const crossParent = await fetch(worker.endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        version: 1,
+        token: worker.token,
+        parentPiSessionId: "another-parent",
+        callId: "child-call",
+        toolId: "inspect",
+        arguments: { value: "ok" }
+      })
+    })
+    expect(crossParent.status).toBe(403)
     broker.unregister("parent")
-    expect((await call(capability, {})).status).toBe(403)
+    expect((await call(capabilities, {})).status).toBe(403)
   })
 })

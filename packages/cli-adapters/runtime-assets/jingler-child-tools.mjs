@@ -30,7 +30,6 @@ export default function jinglerChildTools(pi) {
             version: 1,
             token: capability.token,
             parentPiSessionId: capability.parentPiSessionId,
-            childAgent: process.env.PI_SUBAGENT_CHILD_AGENT ?? "delegate",
             callId,
             toolId: tool.id,
             arguments: parameters

@@ -81,3 +81,35 @@ index 3e30e8b49e774d82fd62f07acba1266e44e7197a..92aacfc4e4cb6df1e4cdd2850565cf15
  		pending,
  	};
  }
+diff --git a/src/runs/shared/pi-spawn.ts b/src/runs/shared/pi-spawn.ts
+index 26081e0..a297f12 100644
+--- a/src/runs/shared/pi-spawn.ts
++++ b/src/runs/shared/pi-spawn.ts
+@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
+ 
+ export const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
+ export const PI_SUBAGENT_PI_BINARY_ENV = "PI_SUBAGENT_PI_BINARY";
++export const PI_SUBAGENT_PI_BINARY_ARGS_ENV = "PI_SUBAGENT_PI_BINARY_ARGS";
+ 
+ export function findPiPackageRootFromEntry(
+ 	entryPoint: string,
+@@ -143,7 +144,18 @@ export function getPiSpawnCommand(
+ 	const env = deps.env ?? process.env;
+ 	const piBinary = env[PI_SUBAGENT_PI_BINARY_ENV]?.trim();
+ 	if (piBinary) {
+-		return { command: piBinary, args };
++		const prefixValue = env[PI_SUBAGENT_PI_BINARY_ARGS_ENV]?.trim();
++		if (!prefixValue) return { command: piBinary, args };
++		let prefixArgs: unknown;
++		try {
++			prefixArgs = JSON.parse(prefixValue);
++		} catch {
++			throw new Error(`${PI_SUBAGENT_PI_BINARY_ARGS_ENV} must be a JSON string array.`);
++		}
++		if (!Array.isArray(prefixArgs) || !prefixArgs.every((value): value is string => typeof value === "string")) {
++			throw new Error(`${PI_SUBAGENT_PI_BINARY_ARGS_ENV} must be a JSON string array.`);
++		}
++		return { command: piBinary, args: [...prefixArgs, ...args] };
+ 	}
+ 
+ 	const execPath = deps.execPath ?? process.execPath;

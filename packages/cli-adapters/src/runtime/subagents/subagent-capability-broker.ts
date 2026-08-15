@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto"
+import { randomBytes } from "node:crypto"
 import { createServer, type IncomingMessage, type Server } from "node:http"
 import {
   SUBAGENT_CAPABILITY_VERSION,
@@ -8,6 +8,7 @@ import {
   type AgentRole,
   type RuntimeMode,
   type SubagentCapability,
+  type SubagentCapabilityTool,
   type SubagentToolResponse
 } from "@jingler/core"
 import { Effect, JSONSchema, Schema } from "effect"
@@ -25,6 +26,7 @@ const PARENT_ONLY_TOOLS = new Set([
   "jingler_submit_plan"
 ])
 const READ_ONLY_AGENTS = new Set(["advisor", "oracle", "reviewer"])
+const SAFE_AGENT_NAME = /^[a-z][a-z0-9-]*$/u
 
 export interface SubagentParentSpec {
   readonly role: AgentRole
@@ -32,16 +34,18 @@ export interface SubagentParentSpec {
   readonly targetCapabilities: { readonly targetId: string }
 }
 
-interface RegisteredParent {
+interface RegisteredChild {
   readonly parentPiSessionId: string
-  readonly token: string
-  readonly spec: SubagentParentSpec
+  readonly agent: string
+  readonly role: AgentRole
+  readonly mode: RuntimeMode
   readonly registry: ToolRegistry
   readonly context: AgentRuntimeContext
 }
 
 export interface RegisterSubagentParentInput {
   readonly parentPiSessionId: string
+  readonly agents: ReadonlyArray<string>
   readonly spec: SubagentParentSpec
   readonly registry: ToolRegistry
   readonly context: AgentRuntimeContext
@@ -72,19 +76,36 @@ const responseFrom = (result: ToolResultEnvelope): SubagentToolResponse => ({
 })
 
 const childExecutionProfile = (
-  parent: RegisteredParent,
-  childAgent: string
+  spec: SubagentParentSpec,
+  agent: string
 ): { readonly role: AgentRole; readonly mode: RuntimeMode } =>
-  READ_ONLY_AGENTS.has(childAgent)
+  READ_ONLY_AGENTS.has(agent)
     ? { role: "review", mode: "read-only" }
-    : { role: parent.spec.role, mode: parent.spec.mode }
+    : { role: spec.role, mode: spec.mode }
 
-const safeTokenMatch = (left: string, right: string): boolean => {
-  const leftBytes = Buffer.from(left)
-  const rightBytes = Buffer.from(right)
-  return leftBytes.length === rightBytes.length &&
-    timingSafeEqual(leftBytes, rightBytes)
-}
+const childTools = (
+  registry: ToolRegistry,
+  role: AgentRole,
+  mode: RuntimeMode
+): ReadonlyArray<SubagentCapabilityTool> =>
+  registry
+    .capabilitiesFor(role, mode)
+    .filter((tool) => !PARENT_ONLY_TOOLS.has(tool.id))
+    .map((tool) => {
+      const schema = registry.inputSchemaFor(tool.id)
+      if (schema === null) {
+        throw new Error(`Active child tool has no input schema: ${tool.id}`)
+      }
+      const inputSchema = Schema.decodeUnknownSync(SubagentToolInputSchema)(
+        registry.providerInputSchemaFor(tool.id) ?? JSONSchema.make(schema)
+      )
+      return {
+        id: tool.id,
+        description: tool.description,
+        inputSchema,
+        risk: registry.riskFor(tool.id) ?? "read"
+      }
+    })
 
 const readBody = async (request: IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = []
@@ -99,7 +120,8 @@ const readBody = async (request: IncomingMessage): Promise<string> => {
 }
 
 export class SubagentCapabilityBroker {
-  readonly #parents = new Map<string, RegisteredParent>()
+  readonly #children = new Map<string, RegisteredChild>()
+  readonly #parentTokens = new Map<string, Set<string>>()
   #server: Server | null = null
   #endpoint: string | null = null
 
@@ -123,45 +145,53 @@ export class SubagentCapabilityBroker {
 
   async register(
     input: RegisterSubagentParentInput
-  ): Promise<SubagentCapability> {
+  ): Promise<ReadonlyArray<SubagentCapability>> {
     const endpoint = await this.start()
-    const token = randomBytes(32).toString("base64url")
-    this.#parents.set(input.parentPiSessionId, { ...input, token })
-    return {
-      version: SUBAGENT_CAPABILITY_VERSION,
-      endpoint,
-      token,
-      parentPiSessionId: input.parentPiSessionId,
-      targetId: input.spec.targetCapabilities.targetId,
-      role: input.spec.role,
-      mode: input.spec.mode,
-      tools: input.registry
-        .capabilitiesFor(input.spec.role, input.spec.mode)
-        .filter((tool) => !PARENT_ONLY_TOOLS.has(tool.id))
-        .map((tool) => {
-          const schema = input.registry.inputSchemaFor(tool.id)
-          if (schema === null) {
-            throw new Error(`Active child tool has no input schema: ${tool.id}`)
-          }
-          const inputSchema = Schema.decodeUnknownSync(SubagentToolInputSchema)(
-            input.registry.providerInputSchemaFor(tool.id) ?? JSONSchema.make(schema)
-          )
-          return {
-            id: tool.id,
-            description: tool.description,
-            inputSchema,
-            risk: input.registry.riskFor(tool.id) ?? "read"
-          }
-        })
+    const agents = [...new Set(input.agents)]
+    if (agents.length === 0 || agents.some((agent) => !SAFE_AGENT_NAME.test(agent))) {
+      throw new Error("Subagent capability registration requires safe agent names")
     }
+    this.unregister(input.parentPiSessionId)
+    const tokens = new Set<string>()
+    const capabilities = agents.map((agent) => {
+      const token = randomBytes(32).toString("base64url")
+      const profile = childExecutionProfile(input.spec, agent)
+      this.#children.set(token, {
+        parentPiSessionId: input.parentPiSessionId,
+        agent,
+        role: profile.role,
+        mode: profile.mode,
+        registry: input.registry,
+        context: input.context
+      })
+      tokens.add(token)
+      return {
+        version: SUBAGENT_CAPABILITY_VERSION,
+        endpoint,
+        token,
+        parentPiSessionId: input.parentPiSessionId,
+        agent,
+        targetId: input.spec.targetCapabilities.targetId,
+        role: profile.role,
+        mode: profile.mode,
+        tools: childTools(input.registry, profile.role, profile.mode)
+      } satisfies SubagentCapability
+    })
+    this.#parentTokens.set(input.parentPiSessionId, tokens)
+    return capabilities
   }
 
   unregister(parentPiSessionId: string): void {
-    this.#parents.delete(parentPiSessionId)
+    const tokens = this.#parentTokens.get(parentPiSessionId)
+    if (tokens) {
+      for (const token of tokens) this.#children.delete(token)
+    }
+    this.#parentTokens.delete(parentPiSessionId)
   }
 
   async close(): Promise<void> {
-    this.#parents.clear()
+    this.#children.clear()
+    this.#parentTokens.clear()
     this.#endpoint = null
     const server = this.#server
     this.#server = null
@@ -181,13 +211,12 @@ export class SubagentCapabilityBroker {
       const decoded = Schema.decodeUnknownSync(
         Schema.parseJson(SubagentToolRequest)
       )(await readBody(request), { onExcessProperty: "error" })
-      const parent = this.#parents.get(decoded.parentPiSessionId)
-      if (!parent || !safeTokenMatch(parent.token, decoded.token)) {
+      const child = this.#children.get(decoded.token)
+      if (!child || child.parentPiSessionId !== decoded.parentPiSessionId) {
         json(response, 403, { error: "forbidden" })
         return
       }
-      const profile = childExecutionProfile(parent, decoded.childAgent)
-      const risk: ToolRisk | null = parent.registry.riskFor(decoded.toolId)
+      const risk: ToolRisk | null = child.registry.riskFor(decoded.toolId)
       if (risk === null) {
         json(response, 403, { error: "unknown-tool" })
         return
@@ -195,20 +224,20 @@ export class SubagentCapabilityBroker {
       const execution = {
         id: decoded.toolId,
         arguments: decoded.arguments,
-        role: profile.role,
-        mode: profile.mode,
+        role: child.role,
+        mode: child.mode,
         callId: decoded.callId,
         idempotencyKey: decoded.callId
       } as const
       const permitted = risk === "read"
         ? "allow"
         : await Effect.runPromise(
-            parent.context.canUseTool({ toolId: decoded.toolId, risk })
+            child.context.canUseTool({ toolId: decoded.toolId, risk })
           )
       const result = await Effect.runPromise(
         permitted === "allow"
-          ? parent.registry.execute(execution)
-          : parent.registry.deny(execution)
+          ? child.registry.execute(execution)
+          : child.registry.deny(execution)
       )
       json(response, 200, responseFrom(result))
     } catch (error) {
