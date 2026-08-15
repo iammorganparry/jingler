@@ -1,10 +1,18 @@
 import { useState } from "react"
+import { Brain, ChevronRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
 
+const secondsLabel = (seconds: number): string =>
+  seconds === 1 ? "Thought for 1 second" : `Thought for ${seconds} seconds`
+
 /**
- * Collapsible "thinking" summary (dim, purple sparkle). While the agent is still
- * reasoning (`streaming`), it reads "Thinking…" with a pulsing sparkle; once done
- * it shows "Thought for Ns". `seconds` is null until the duration is known.
+ * The transcript record of the agent's reasoning: a quiet left-aligned line —
+ * brain glyph, "Thought for N seconds", chevron — expanding to the full
+ * reasoning text beneath it.
+ *
+ * Collapsed by default on purpose: reasoning is provenance, not content. While
+ * the agent is still reasoning (`streaming`) the pill reads "Thinking…" with a
+ * pulsing glyph; `seconds` is null until the duration is known.
  */
 export function ThoughtBlock({
   seconds,
@@ -21,21 +29,46 @@ export function ThoughtBlock({
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const collapsible = children != null
-  const label = streaming || seconds === null ? "Thinking…" : `Thought for ${seconds}s`
+  // Historical transcripts settled before durations were recorded keep a
+  // timeless past-tense label rather than a forever-"Thinking…".
+  const label = streaming
+    ? "Thinking…"
+    : seconds === null
+      ? "Thought for a moment"
+      : secondsLabel(seconds)
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-line bg-sunken", className)}>
+    <div className={cn("my-1", className)}>
+      {/* A plain left-aligned molecule — no pill, no rules. The reasoning
+          record reads as a quiet line in the transcript's flow, not as a
+          boundary marker. */}
       <button
         type="button"
         disabled={!collapsible}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 border-b border-hairline px-[11px] py-[7px] text-left"
+        aria-expanded={open}
+        className="group flex items-center gap-1.5 text-left"
       >
-        <span className={cn("text-[11px] text-purple", streaming && "animate-pulse-dot")}>✦</span>
-        <span className="flex-1 text-[11.5px] text-text">{label}</span>
-        {collapsible && <span className="text-dim">{open ? "▾" : "▸"}</span>}
+        <Brain
+          className={cn("size-3.5 flex-none text-dim", streaming && "animate-pulse-dot")}
+        />
+        <span className="font-mono text-[10.5px] text-muted-foreground transition-colors group-hover:text-text">
+          {label}
+        </span>
+        {collapsible && (
+          <ChevronRight
+            className={cn(
+              "size-3 flex-none text-dim transition-transform",
+              open && "rotate-90"
+            )}
+          />
+        )}
       </button>
+
       {collapsible && open && (
-        <div className="px-[11px] py-2 text-[calc(11.5px*var(--sb-font-scale,1))] leading-[1.55] text-muted-foreground">
+        // Deliberately frameless: the reasoning reads as marginalia — small,
+        // dim, italic — not as a card competing with the answer. Indented to
+        // align under the label, clear of the brain glyph.
+        <div className="mt-1.5 pl-5 italic text-[calc(11px*var(--sb-font-scale,1))] leading-[1.6] text-dim">
           {children}
         </div>
       )}

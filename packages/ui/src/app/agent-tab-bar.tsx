@@ -1,3 +1,4 @@
+import * as ContextMenu from "@radix-ui/react-context-menu"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { useState, type ReactNode } from "react"
 import { ChevronRight, FileStack, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
@@ -55,6 +56,45 @@ export interface ChatTabBarProps {
   fileSlot?: ReactNode
   /** Whether the file group owns the currently visible session surface. */
   filesActive?: boolean
+  /** Close every open chat (the group label's right-click menu). */
+  onCloseAllChats?: () => void
+  /** Close every open file tab (the group label's right-click menu). */
+  onCloseAllFiles?: () => void
+}
+
+/**
+ * Right-click menu for a tab-group label. Rendered only when the group has a
+ * bulk action to offer — a context menu with nothing in it is a dead end.
+ */
+function GroupContextMenu({
+  label,
+  onSelect,
+  children
+}: {
+  label: string
+  onSelect: () => void
+  children: ReactNode
+}) {
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content
+          collisionPadding={8}
+          className="z-50 flex min-w-[180px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
+        >
+          <ContextMenu.Item
+            aria-label={label}
+            onSelect={onSelect}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[7px] text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+          >
+            <X className="size-3.5 flex-none text-dim" />
+            {label}
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  )
 }
 
 export interface AgentTabBarProps {
@@ -273,7 +313,9 @@ export function ChatTabBar({
   onCloseChat,
   onReopenChat,
   fileSlot,
-  filesActive = false
+  filesActive = false,
+  onCloseAllChats,
+  onCloseAllFiles
 }: ChatTabBarProps) {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
@@ -287,24 +329,34 @@ export function ChatTabBar({
     setEditing(null)
   }
 
+  const chatsGroupLabel = (
+    <button
+      type="button"
+      aria-label={`${chatsExpanded ? "Collapse" : "Expand"} chats group`}
+      aria-expanded={chatsExpanded}
+      title={`${chats.length} open ${chats.length === 1 ? "chat" : "chats"}`}
+      onClick={() => setChatsExpanded((expanded) => !expanded)}
+      className={cn(
+        "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
+        !filesActive ? "bg-panel text-text-bright" : "text-muted-foreground"
+      )}
+    >
+      <ChevronRight className={cn("size-3 transition-transform", chatsExpanded && "rotate-90")} />
+      <MessagesSquare className="size-3 text-blue" />
+      <span>Chats</span>
+      <span className="text-dim">{chats.length}</span>
+    </button>
+  )
+
   return (
     <>
-      <button
-        type="button"
-        aria-label={`${chatsExpanded ? "Collapse" : "Expand"} chats group`}
-        aria-expanded={chatsExpanded}
-        title={`${chats.length} open ${chats.length === 1 ? "chat" : "chats"}`}
-        onClick={() => setChatsExpanded((expanded) => !expanded)}
-        className={cn(
-          "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
-          !filesActive ? "bg-panel text-text-bright" : "text-muted-foreground"
-        )}
-      >
-        <ChevronRight className={cn("size-3 transition-transform", chatsExpanded && "rotate-90")} />
-        <MessagesSquare className="size-3 text-blue" />
-        <span>Chats</span>
-        <span className="text-dim">{chats.length}</span>
-      </button>
+      {onCloseAllChats ? (
+        <GroupContextMenu label="Close all chats" onSelect={onCloseAllChats}>
+          {chatsGroupLabel}
+        </GroupContextMenu>
+      ) : (
+        chatsGroupLabel
+      )}
       {chatsExpanded && chats.map((chat, index) => {
         const active = chat.id === activeChatId
         // The active chat keeps its name at every width. Losing it would leave a
@@ -421,24 +473,33 @@ export function ChatTabBar({
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       )}
-      {fileCount > 0 && (
-        <button
-          type="button"
-          aria-label={`${filesExpanded ? "Collapse" : "Expand"} files group`}
-          aria-expanded={filesExpanded}
-          title={`${fileCount} open ${fileCount === 1 ? "file" : "files"}`}
-          onClick={() => setFilesExpanded((expanded) => !expanded)}
-          className={cn(
-            "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
-            filesActive ? "bg-panel text-text-bright" : "text-muted-foreground"
-          )}
-        >
-          <ChevronRight className={cn("size-3 transition-transform", filesExpanded && "rotate-90")} />
-          <FileStack className="size-3 text-purple" />
-          <span>Files</span>
-          <span className="text-dim">{fileCount}</span>
-        </button>
-      )}
+      {fileCount > 0 && (() => {
+        const filesGroupLabel = (
+          <button
+            type="button"
+            aria-label={`${filesExpanded ? "Collapse" : "Expand"} files group`}
+            aria-expanded={filesExpanded}
+            title={`${fileCount} open ${fileCount === 1 ? "file" : "files"}`}
+            onClick={() => setFilesExpanded((expanded) => !expanded)}
+            className={cn(
+              "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
+              filesActive ? "bg-panel text-text-bright" : "text-muted-foreground"
+            )}
+          >
+            <ChevronRight className={cn("size-3 transition-transform", filesExpanded && "rotate-90")} />
+            <FileStack className="size-3 text-purple" />
+            <span>Files</span>
+            <span className="text-dim">{fileCount}</span>
+          </button>
+        )
+        return onCloseAllFiles ? (
+          <GroupContextMenu label="Close all files" onSelect={onCloseAllFiles}>
+            {filesGroupLabel}
+          </GroupContextMenu>
+        ) : (
+          filesGroupLabel
+        )
+      })()}
       {filesExpanded ? fileSlot : null}
     </>
   )

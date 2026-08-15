@@ -9,6 +9,7 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   Environment,
+  ExecutionMode,
   ProviderCatalog,
   Session
 } from "@jingler/core"
@@ -39,7 +40,8 @@ import {
   getConversationActor,
   rehomeSharedPlan
 } from "./conversation-registry.js"
-import { clearDraft, getDraft, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
+import { clearDraft, getDraft, markDraftSeeded, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
+import { useSessionDiffs } from "./diff-presence.js"
 import { takeFirstMessage } from "./first-message-store.js"
 import {
   codeReferenceDisplayLabel,
@@ -217,6 +219,26 @@ export function ConversationPane({
   const canApprovePlan =
     canonicalPlan.canApprove &&
     matchesCanonicalPlan(canonicalPlan.document, convo.plan)
+  // Stable identities for the handlers that reach `MessageTurn` (its memo is
+  // what keeps settled turns from re-rendering per streamed token). These
+  // change only when approval eligibility or the plan revision actually moves.
+  const planRevision = canonicalPlan.document?.revision
+  const approvePlanForRevision = canApprovePlan && canonicalPlan.document !== null
+  const onApprovePlanStable = useMemo(
+    () =>
+      approvePlanForRevision
+        ? (id: string, executionMode?: ExecutionMode) =>
+            convo.approvePlan(id, executionMode, planRevision)
+        : undefined,
+    [approvePlanForRevision, convo.approvePlan, planRevision]
+  )
+  const onResumePlanStable = useMemo(
+    () =>
+      approvePlanForRevision
+        ? (id: string) => convo.resumePlan(id, planRevision)
+        : undefined,
+    [approvePlanForRevision, convo.resumePlan, planRevision]
+  )
   const initialThreadDispatches = useRef(new Set<string>())
   // A direct reply RPC persists its pending message before it finishes routing.
   // Plan.watch can publish that intermediate revision, so tell the recovery
@@ -268,7 +290,11 @@ export function ConversationPane({
           })
           .catch(() => {})
       })
-  }, [canonicalPlan.document, session.id])
+    // Keyed on id+revision, not the document object: `Plan.watch` republishes
+    // a fresh document object per emission, and this effect scans every
+    // annotation's messages — running it per emission instead of per revision
+    // was measurable during plan editing.
+  }, [canonicalPlan.document?.id, canonicalPlan.document?.revision, session.id])
 
   // Everything the transcript needs to turn a path into a link. `convo.files` is
   // the worktree's tracked-file list, already fetched for the composer's `@`
@@ -289,23 +315,45 @@ export function ConversationPane({
     planSplitRatio,
     planSplitRowWidth
   )
-  const adjustPlanSplit = useCallback(
-    (deltaX: number) => {
-      if (planSplitRowWidth <= 0) return
-      const next = resizedPlanSplitRatio(
-        effectivePlanSplitRatio,
-        planSplitRowWidth,
-        deltaX
-      )
-      setPlanSplitRatio(next)
-      try {
-        localStorage.setItem(PLAN_SPLIT_RATIO_KEY, String(next))
-      } catch {
-        /* A private/quota-limited renderer still keeps the in-memory ratio. */
-      }
-    },
-    [effectivePlanSplitRatio, planSplitRowWidth]
-  )
+  // Same live-drag discipline as the session auxiliary split: a drag's
+  // per-pointermove deltas write the column width to the DOM directly, and
+  // React state commits ONCE on release — a setState per move re-rendered the
+  // conversation AND the whole Plan Review per mouse movement.
+  const planSplitColumnRef = useRef<HTMLDivElement | null>(null)
+  const dragPlanSplitRatio = useRef<number | null>(null)
+  const livePlanSplitState = useRef({
+    ratio: effectivePlanSplitRatio,
+    rowWidth: planSplitRowWidth,
+  })
+  livePlanSplitState.current = {
+    ratio: effectivePlanSplitRatio,
+    rowWidth: planSplitRowWidth,
+  }
+  const planSplitColumnWidth = (ratio: number): string =>
+    `calc(${ratio * 100}% - ${ratio * PLAN_SPLIT_HANDLE_WIDTH}px)`
+  const adjustPlanSplit = useCallback((deltaX: number) => {
+    const { ratio, rowWidth } = livePlanSplitState.current
+    if (rowWidth <= 0) return
+    const next = resizedPlanSplitRatio(
+      dragPlanSplitRatio.current ?? ratio,
+      rowWidth,
+      deltaX
+    )
+    dragPlanSplitRatio.current = next
+    const column = planSplitColumnRef.current
+    if (column) column.style.width = planSplitColumnWidth(next)
+  }, [])
+  const commitPlanSplit = useCallback(() => {
+    const next = dragPlanSplitRatio.current
+    dragPlanSplitRatio.current = null
+    if (next === null) return
+    setPlanSplitRatio(next)
+    try {
+      localStorage.setItem(PLAN_SPLIT_RATIO_KEY, String(next))
+    } catch {
+      /* A private/quota-limited renderer still keeps the in-memory ratio. */
+    }
+  }, [])
 
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
   // The chips describe the values that will actually be sent. Discovery may
@@ -426,9 +474,29 @@ export function ConversationPane({
   //
   // `sendPrompt` (below) itself consumes `initialPrompt` and clears the draft, so
   // the auto-send path never also leaves a stray seeded draft behind.
+  const liveDiffs = useSessionDiffs()
+
+  // Catch changes made outside agent turns (editor saves, manual commits): the
+  // per-ToolEnd refresh can't see them, so re-read the worktree diff whenever
+  // this session's pane becomes active. Routed through the MACHINE rather than
+  // written straight to the diff store: a direct store write raced the
+  // registry's own publishes (each chat re-asserting its snapshot), and the
+  // composer's diff chip flashed between the two readings. The machine stamps
+  // the read's freshness, and the registry follows the freshest. Dropped while
+  // a turn is running — the per-ToolEnd refresh owns that window.
+  const refreshDiffStable = convo.refreshDiff
+  useEffect(() => {
+    if (!session.worktreePath) return
+    refreshDiffStable()
+  }, [session.id, session.worktreePath, refreshDiffStable])
+
   useEffect(() => {
     const firstTurnImages = takeFirstMessage(session.id)
     if (firstTurnImages !== undefined) {
+      // The prompt goes straight to the agent — latch the seed key so a re-run
+      // of this effect (a SESSION_UPDATED can land before `initialPrompt`'s
+      // async clear) cannot resurrect the sent text into the composer.
+      markDraftSeeded(session.id)
       const text = session.initialPrompt ?? ""
       if (text.trim() || firstTurnImages.length > 0) {
         sendPrompt(text, firstTurnImages.length > 0 ? firstTurnImages : undefined)
@@ -904,6 +972,27 @@ export function ConversationPane({
           onAction={() => onOpenProviderSettings?.()}
         />
       )}
+      {mutationRecovery.error !== null && (
+        <div
+          role="alert"
+          className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
+        >
+          <span className="min-w-0 flex-1">
+            {rpcFailureMessage(
+              mutationRecovery.error,
+              "Could not mark the mutation inspected."
+            )}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss mutation recovery error"
+            onClick={() => mutationRecovery.reset()}
+            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {session.runtimeRecovery?.uncertainMutations.map((mutation) => (
         <RuntimeRecoveryCard
           key={`${mutation.runId}:${mutation.callId}`}
@@ -931,6 +1020,7 @@ export function ConversationPane({
           branch={session.branch}
           branchPending={session.semanticBranchPending === true}
           repo={session.repo}
+          diff={liveDiffs[session.id] ?? null}
           environments={environments}
           environmentId={session.environmentId}
           environmentPending={environmentMutation.isPending}
@@ -989,17 +1079,8 @@ export function ConversationPane({
           onSetReasoning={convo.setReasoning}
           question={convo.question}
           onAnswerQuestion={convo.answerQuestion}
-          onApprovePlan={
-            canApprovePlan && canonicalPlan.document !== null
-              ? (id, executionMode) =>
-                  convo.approvePlan(id, executionMode, canonicalPlan.document?.revision)
-              : undefined
-          }
-          onResumePlan={
-            canApprovePlan && canonicalPlan.document !== null
-              ? (id) => convo.resumePlan(id, canonicalPlan.document?.revision)
-              : undefined
-          }
+          onApprovePlan={onApprovePlanStable}
+          onResumePlan={onResumePlanStable}
           onOpenPlanReview={onOpenPlanReview}
           plan={convo.plan}
           planDocument={canonicalPlan.document}
@@ -1078,11 +1159,16 @@ export function ConversationPane({
       */}
       {view === "split" && (
         <>
-          <ResizeHandle aria-label="Resize plan" onResize={adjustPlanSplit} />
+          <ResizeHandle
+            aria-label="Resize plan"
+            onResize={adjustPlanSplit}
+            onResizeEnd={commitPlanSplit}
+          />
           <div
+            ref={planSplitColumnRef}
             data-testid="plan-split-column"
             style={{
-              width: `calc(${effectivePlanSplitRatio * 100}% - ${effectivePlanSplitRatio * PLAN_SPLIT_HANDLE_WIDTH}px)`
+              width: planSplitColumnWidth(effectivePlanSplitRatio)
             }}
             className="flex min-h-0 flex-none flex-col overflow-hidden border-l border-hairline"
           >

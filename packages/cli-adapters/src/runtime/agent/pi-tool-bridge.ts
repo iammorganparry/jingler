@@ -5,7 +5,7 @@ import {
   type ToolDefinition as PiToolDefinition
 } from "@earendil-works/pi-coding-agent"
 import type { PiRunSpec } from "@jingler/core"
-import { Effect, JSONSchema } from "effect"
+import { Effect, JSONSchema, Option, Schema } from "effect"
 import type {
   ToolExecutionRequest,
   ToolRegistry,
@@ -13,10 +13,28 @@ import type {
 } from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 
+/** `command_execute`'s result value; its output reads as text, not JSON. */
+const CommandResult = Schema.Struct({
+  command: Schema.String,
+  exitCode: Schema.Number,
+  stdout: Schema.String,
+  stderr: Schema.String
+})
+const decodeCommandResult = Schema.decodeUnknownOption(CommandResult)
+
 const renderResult = (result: ToolResultEnvelope): string => {
   if (result.error) return `${result.error.code}: ${result.error.message}`
   if (result.preview !== null) return result.preview
-  return result.value === null ? result.status : JSON.stringify(result.value)
+  if (result.value === null) return result.status
+  const command = Option.getOrNull(decodeCommandResult(result.value))
+  if (command !== null) {
+    const output = [command.stdout, command.stderr]
+      .filter((stream) => stream.trim().length > 0)
+      .join("\n")
+      .trimEnd()
+    return output.length > 0 ? output : `Command exited ${command.exitCode}`
+  }
+  return JSON.stringify(result.value)
 }
 
 interface PiToolExecution {

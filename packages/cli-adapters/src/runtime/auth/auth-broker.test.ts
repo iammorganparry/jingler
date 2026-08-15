@@ -1,7 +1,7 @@
 import { ProviderConnectionId } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import { type CodexOAuthFlow, makeAuthBroker } from "./auth-broker.js"
+import { type CodexOAuthFlow, describeCause, makeAuthBroker } from "./auth-broker.js"
 import { InMemoryProviderCredentialStore } from "./credential-store.js"
 
 const id = (value: string) => Schema.decodeUnknownSync(ProviderConnectionId)(value)
@@ -127,5 +127,45 @@ describe("AuthBroker API connections", () => {
     expect(connection.authKind).toBe("api-key")
     expect(connection.subscription.confirmedBillingRoute).toBe("api")
     expect(JSON.stringify(connection)).not.toContain("api-secret")
+  })
+
+  it("carries the sanitized probe failure into the connection error message", async () => {
+    const broker = await Effect.runPromise(makeAuthBroker({
+      credentials: new InMemoryProviderCredentialStore(),
+      codexOAuth: oauth(Date.now() + 60_000),
+      probe: vi.fn(async () => {
+        throw new Error('401 {"type":"error","error":{"message":"OAuth access token is invalid."}}')
+      })
+    }))
+    const exit = await Effect.runPromiseExit(broker.connectClaudeToken({
+      id: "claude-cause",
+      token: "sk-ant-oat01-super-secret-token-value",
+      targetId: "desktop"
+    }))
+    expect(exit._tag).toBe("Failure")
+    const rendered = JSON.stringify(exit)
+    expect(rendered).toContain("Failed to verify provider entitlement")
+    expect(rendered).toContain("OAuth access token is invalid")
+  })
+})
+
+describe("describeCause", () => {
+  it("redacts token-shaped values and bearer headers", () => {
+    expect(
+      describeCause(new Error("rejected sk-ant-oat01-abcdefghijklmnop by policy"))
+    ).toBe("rejected [redacted] by policy")
+    expect(describeCause(new Error("sent Authorization: Bearer abc123def456")))
+      .toBe("sent Authorization: Bearer [redacted]")
+    expect(
+      describeCause(new Error(
+        `jwt ${"a".repeat(24)}.${"b".repeat(24)}.${"c".repeat(16)} rejected`
+      ))
+    ).toBe("jwt [redacted] rejected")
+  })
+
+  it("collapses whitespace and bounds the length", () => {
+    expect(describeCause(new Error("line one\n  line two"))).toBe("line one line two")
+    expect(describeCause(new Error("x".repeat(400)))?.length).toBe(301)
+    expect(describeCause(new Error(""))).toBeNull()
   })
 })

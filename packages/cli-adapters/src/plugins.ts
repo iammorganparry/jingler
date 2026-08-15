@@ -54,6 +54,20 @@ type PluginEnv = FileSystem.FileSystem | Path.Path | AppPaths | ConfigService
  */
 const WATCH_DEBOUNCE_MS = 200
 
+/**
+ * Watch events to DROP before they reach the debounce → catalog re-read.
+ *
+ * The recursive dev watch below covers the repo's own `plugins/` root, and a
+ * plugin build churns thousands of paths under `node_modules` (and `.git`
+ * when the root is a checkout). None of those can change the catalog — the
+ * files live reload actually cares about are `jingler.plugin.json` and each
+ * plugin's `dist/`, neither of which sits under either tree — but every event
+ * that survives costs a full directory re-scan, and the burst keeps the
+ * debounce window open. Exported for the unit test.
+ */
+export const isIgnoredPluginWatchPath = (eventPath: string): boolean =>
+  /(^|[\\/])(node_modules|\.git)([\\/]|$)/.test(eventPath)
+
 /** A manifest that decoded, paired with the absolute directory it came from. */
 interface DecodedPlugin {
   readonly dir: string
@@ -500,6 +514,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@jingler/P
           ]
 
           return Stream.mergeAll(sources, { concurrency: sources.length }).pipe(
+            Stream.filter((event) => !isIgnoredPluginWatchPath(event.path)),
             Stream.debounce(WATCH_DEBOUNCE_MS),
             Stream.mapEffect(() => list()),
             // A dead watcher takes live reload with it; ending the stream leaves

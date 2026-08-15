@@ -131,7 +131,11 @@ const string = (value: unknown): string | null =>
 const number = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null
 
-const errorForStatus = (status: number, retryAt?: string): GitHubApiError => {
+const errorForStatus = (
+  status: number,
+  retryAt?: string,
+  serverError?: string
+): GitHubApiError => {
   if (status === 401) {
     return new GitHubApiError({
       reason: "token-expired",
@@ -142,7 +146,14 @@ const errorForStatus = (status: number, retryAt?: string): GitHubApiError => {
   if (status === 403) {
     return new GitHubApiError({
       reason: "repository-access",
-      message: "The GitHub App installation does not grant access to this repository.",
+      // The connection service 403s for several distinct reasons (missing
+      // authorization, missing/suspended installation, repository outside the
+      // installation) — collapsing them all into one guess sent operators to
+      // GitHub's installation page when GitHub was fine and the server's own
+      // view was what needed repair. Surface the server's words.
+      message: serverError
+        ? `GitHub connection service refused the request: ${serverError}`
+        : "The GitHub App installation does not grant access to this repository.",
       status
     })
   }
@@ -327,7 +338,9 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
         resetSeconds !== null && Number.isFinite(resetSeconds)
           ? new Date(resetSeconds * 1_000).toISOString()
           : undefined
-      throw errorForStatus(response.status, retryAt)
+      const body = record(await response.json().catch(() => null))
+      const serverError = string(body?.error) ?? undefined
+      throw errorForStatus(response.status, retryAt, serverError)
     }
     return response
   }

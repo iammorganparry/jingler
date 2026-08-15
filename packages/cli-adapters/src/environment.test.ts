@@ -108,6 +108,7 @@ const ProviderConnectionsTest = Layer.succeed(ProviderConnections, {
   setApiKey: () => Effect.dieMessage("Provider login is not used by environment tests"),
   refresh: () => Effect.dieMessage("Provider refresh is not used by environment tests"),
   logout: () => Effect.dieMessage("Provider logout is not used by environment tests"),
+  remove: () => Effect.dieMessage("Provider removal is not used by environment tests"),
   verifyModel: () => Effect.dieMessage("Provider verification is not used by environment tests")
 })
 

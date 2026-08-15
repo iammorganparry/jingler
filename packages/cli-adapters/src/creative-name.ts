@@ -41,6 +41,17 @@ export const creativeName = (seed: number): string => {
 }
 
 /**
+ * The sidebar-facing form of a creative slug — "hopeful-einstein" → "Hopeful
+ * Einstein". A session shows this instead of "Untitled session" until the
+ * task-understanding pass lands its real name.
+ */
+export const displayNameFromCreativeSlug = (slug: string): string =>
+  slug
+    .split("-")
+    .map((word) => (word.length === 0 ? word : `${word[0]!.toUpperCase()}${word.slice(1)}`))
+    .join(" ")
+
+/**
  * The first friendly name (starting from `seed`) not already taken by `used`,
  * falling back to a stamped name only if every attempt in a generous window
  * collides — so the common case is a clean, unstamped `hopeful-einstein` directory.

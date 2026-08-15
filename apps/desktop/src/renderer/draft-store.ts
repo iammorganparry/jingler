@@ -196,6 +196,17 @@ export const addDraftCodeReference = (draftId: string, reference: CodeReference)
  * would resurrect the prompt the user just sent. And without the empty check, a
  * real draft could be clobbered by the seed.
  */
+/**
+ * Latch a seed key without writing a draft — for flows that already consumed
+ * the prompt another way. The auto-send first turn dispatches the text straight
+ * to the agent; without this latch, a SESSION_UPDATED re-running the mount
+ * effect before `initialPrompt`'s async clear would resurrect the just-sent
+ * text into the composer.
+ */
+export const markDraftSeeded = (seedKey: string): void => {
+  seeded.add(seedKey)
+}
+
 export const seedDraftOnce = (
   draftId: string,
   text: string,

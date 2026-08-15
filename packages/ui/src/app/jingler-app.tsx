@@ -1312,6 +1312,8 @@ export function JinglerApp({
         renderCode={renderCode}
         renderTerminalDock={renderTerminalDock}
         terminalDockSide={terminalDockSide}
+        terminalActive={terminalActive}
+        onToggleTerminal={onToggleTerminal}
         selectTabRequest={tabRequest}
         onTabRequestHandled={clearTabRequest}
         version={version}

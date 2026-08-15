@@ -87,6 +87,14 @@ test("renders canonical create, modify, delete, and rename evidence across chat 
   if (await terminalClose.isVisible()) {
     await terminalClose.click()
   }
+  // The composer's dirty badge reads the REAL worktree diff on activation:
+  // new.ts (untracked, +1), edit.ts (+1 −1), gone.ts (−1), before→after (rename,
+  // no content change) — 4 files, +2 −2.
+  const dirty = window.getByTestId("composer-dirty")
+  await expect(dirty).toBeVisible({ timeout: 15_000 })
+  await expect(dirty).toContainText("4")
+  await expect(dirty).toContainText("+2")
+  await expect(dirty).toContainText("−2")
   await expect(window.locator('[data-file-change="A"]')).toContainText("src/new.ts")
   await expect(window.locator('[data-file-change="M"]')).toContainText("src/edit.ts")
   await expect(window.locator('[data-file-change="D"]')).toContainText("src/gone.ts")

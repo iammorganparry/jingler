@@ -355,6 +355,10 @@ export const makeDeviceProviderLayers = (
           unsupported(
             "Remove target-device credentials from the target environment",
           ),
+        remove: () =>
+          unsupported(
+            "Remove target-device connections from the target environment",
+          ),
         verifyModel: () =>
           unsupported("Run model certification on the target device"),
       });

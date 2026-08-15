@@ -83,6 +83,9 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
       ) : (
         <div className="text-[12px] text-muted-foreground">
           Usage data isn&apos;t available for this connection yet.
+          {p.unavailableReason && (
+            <div className="mt-1 text-[11px] text-dim">{p.unavailableReason}</div>
+          )}
         </div>
       )}
     </div>

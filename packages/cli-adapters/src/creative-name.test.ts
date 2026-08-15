@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { creativeName, freeCreativeName } from "./creative-name.js"
+import {
+  creativeName,
+  displayNameFromCreativeSlug,
+  freeCreativeName
+} from "./creative-name.js"
 
 /**
  * Friendly names slug a session's worktree/branch, so what matters is: the result
@@ -44,5 +48,12 @@ describe("freeCreativeName", () => {
     const seed = 100
     const taken = new Set(Array.from({ length: 50 }, (_, i) => creativeName(seed + i * 7919)))
     expect(freeCreativeName(taken, seed, "hopeful-einstein-abc123")).toBe("hopeful-einstein-abc123")
+  })
+})
+
+describe("displayNameFromCreativeSlug", () => {
+  it("title-cases the slug into a sidebar-facing name", () => {
+    expect(displayNameFromCreativeSlug("hopeful-einstein")).toBe("Hopeful Einstein")
+    expect(displayNameFromCreativeSlug(creativeName(7))).toMatch(/^[A-Z][a-z]+ [A-Z][a-z]+$/)
   })
 })

@@ -233,6 +233,10 @@ describe("retitleSession", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const s = yield* SessionStore.create(input())
+        yield* TranscriptStore.append(
+          s.activeChatId,
+          userMessage("u1", "Set up the initial branch", "2026-07-13T00:00:00.000Z")
+        )
         yield* retitleSession(s.id, fixed("Initial branch"))
         yield* SessionStore.renameTitle(s.id, "Pinned name") // sets autoTitle false
         return yield* retitleSession(s.id, spyGen)
@@ -350,6 +354,29 @@ describe("retitleSession", () => {
       title: "Ignore the request",
       branch: { type: "chore", slug: "fix-callback-state" }
     })
+  })
+
+  it("keeps the creative title and pending branch when the transcript is still empty", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.create(input({ title: undefined }))
+        // A run-start trigger firing before the first transcript write.
+        const updated = yield* retitleSession(session.id, fixed("SHOULD NOT APPEAR"))
+        return { session, updated, persisted: yield* SessionStore.get(session.id) }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.updated.title).toBe(exit.value.session.title)
+    expect(exit.value.updated.title).not.toBe("Untitled session")
+    expect(exit.value.persisted.semanticBranchPending).toBe(true)
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: exit.value.persisted.worktreePath,
+        encoding: "utf-8"
+      }).trim()
+    ).toBe("HEAD")
   })
 
   it("fails with GitError for an unknown session id", async () => {

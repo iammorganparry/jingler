@@ -29,14 +29,11 @@ export const planTaskProgressFromText = (
 /** Hide task checkpoint markers from the user-facing assistant response. */
 export { stripPlanTaskProgressProtocol }
 
-/**
- * Add exact durable checkpoints to the compatibility plan handed to a direct
- * execution turn. Completed work is explicit, so a fresh harness can continue
- * a partially-finished plan without repeating it after restart.
- */
-export const planWithExecutionProgress = (document: PlanDocument): Plan => {
-  const projected = planDocumentToPlan(document)
-  const checkpoints = document.plan.stages.flatMap((stage) => [
+/** The durable checkpoint lines for a plan: stage fingerprints, task and criterion states. */
+export const planExecutionCheckpoints = (
+  document: PlanDocument
+): ReadonlyArray<string> =>
+  document.plan.stages.flatMap((stage) => [
     `Stage ${stage.id} fingerprint=${planTaskProgressFingerprint(stage)}`,
     ...(stage.tasks ?? []).map(
       (task, index) => `${index + 1}. [${task.status}] ${task.id} — ${task.text}`
@@ -46,9 +43,21 @@ export const planWithExecutionProgress = (document: PlanDocument): Plan => {
         `Criterion ${criterion.id} [${criterion.status}] — ${criterion.text}`
     )
   ])
+
+/**
+ * Add exact durable checkpoints to the compatibility plan handed to a direct
+ * execution turn. Completed work is explicit, so a fresh harness can continue
+ * a partially-finished plan without repeating it after restart.
+ */
+export const planWithExecutionProgress = (document: PlanDocument): Plan => {
+  const projected = planDocumentToPlan(document)
   return {
     ...projected,
-    raw: [projected.raw, "Execution checkpoints:", ...checkpoints].join("\n\n")
+    raw: [
+      projected.raw,
+      "Execution checkpoints:",
+      ...planExecutionCheckpoints(document)
+    ].join("\n\n")
   }
 }
 

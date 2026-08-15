@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react"
+import { memo, type ReactNode, useState } from "react"
 import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
 import type { ContentPart, ExecutionMode, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
@@ -15,6 +15,7 @@ import { PlanCard } from "./plan-card.js"
 import { QuestionSummary } from "./question-summary.js"
 import { ThoughtBlock } from "./thought-block.js"
 import { ToolCall } from "./tool-call.js"
+import { toolDisplayName } from "../lib/tool-names.js"
 
 // Parts fill the transcript's centered content column (width is owned by
 // ConversationView), so nothing here caps its own width.
@@ -25,6 +26,7 @@ const COLLAPSE_MIN = 3
 
 type ToolPart = Extract<ContentPart, { _tag: "Tool" }>
 type ImagePart = Extract<ContentPart, { _tag: "Image" }>
+type ThinkingPart = Extract<ContentPart, { _tag: "Thinking" }>
 type PlanTaskProgressPart = Extract<ContentPart, { _tag: "PlanTaskProgress" }>
 
 /** An attached image on a user turn — a read-only transcript thumbnail. */
@@ -32,12 +34,16 @@ const IMAGE_THUMB = "h-[80px] w-[132px]"
 
 const toolMeta = (tool: ToolCallModel): string | undefined => {
   if (tool.meta !== null) return tool.meta
-  if (tool.fileChanges !== undefined) {
+  // A run that touched nothing has no change story to tell — "0 files · +0 −0"
+  // on every Bash call is noise, not information.
+  if (tool.fileChanges !== undefined && tool.fileChanges.changes.length > 0) {
     const count = tool.fileChanges.changes.length
     const { added, removed } = tool.fileChanges.totals
     return `${count} ${count === 1 ? "file" : "files"} · +${added} −${removed}`
   }
-  return tool.diff ? `+${tool.diff.added} −${tool.diff.removed}` : undefined
+  return tool.diff && tool.diff.added + tool.diff.removed > 0
+    ? `+${tool.diff.added} −${tool.diff.removed}`
+    : undefined
 }
 
 /**
@@ -52,13 +58,15 @@ const PATH_TOOLS: ReadonlySet<string> = new Set([
   "Edit",
   "Update",
   "MultiEdit",
-  "NotebookEdit"
+  "NotebookEdit",
+  "Delete",
+  "Rename"
 ])
 
-const pathOf = (tool: ToolCallModel): string | null => {
+const pathOf = (tool: ToolCallModel, displayName: string): string | null => {
   const changes = tool.fileChanges?.changes
   if (changes?.length === 1) return changes[0]!.path
-  return tool.target && PATH_TOOLS.has(tool.name) ? tool.target : null
+  return tool.target && PATH_TOOLS.has(displayName) ? tool.target : null
 }
 
 /** Lines of a diff hunk shown before the "Show all" affordance kicks in. */
@@ -134,11 +142,12 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
   // else — a command and what it printed — only fits once opened.
   const openable = canonicalChanges.length === 0 && !legacyPreview &&
     (tool.output !== undefined || (tool.target?.length ?? 0) > 0)
-  const path = pathOf(tool)
+  const displayName = toolDisplayName(tool.name)
+  const path = pathOf(tool, displayName)
   return (
     <ToolCall
       status={tool.status}
-      name={tool.name}
+      name={displayName}
       target={tool.target ?? undefined}
       filePath={path}
       meta={toolMeta(tool)}
@@ -214,6 +223,33 @@ function ToolGroup({ tools }: { tools: ReadonlyArray<ToolCallModel> }) {
   )
 }
 
+/**
+ * One or more consecutive reasoning parts compiled into a single thought pill.
+ * Chained provider reasoning (summary bursts with nothing between them) reads
+ * as one thought, so it renders as one: durations sum, and the body joins the
+ * texts in order.
+ */
+function MergedThoughts({ parts }: { parts: ReadonlyArray<ThinkingPart> }) {
+  const known = parts
+    .map((part) => part.seconds)
+    .filter((seconds): seconds is number => seconds !== null)
+  const seconds = known.length > 0 ? known.reduce((a, b) => a + b, 0) : null
+  const streaming = parts.some((part) => part.streaming)
+  const text = parts
+    .map((part) => part.text.trim())
+    .filter((chunk) => chunk.length > 0)
+    .join("\n\n")
+  return (
+    <ThoughtBlock seconds={seconds} streaming={streaming} className={WIDTH}>
+      {text.length > 0 ? (
+        <Markdown className="text-[calc(11px*var(--sb-font-scale,1))] leading-[1.6] text-dim">
+          {text}
+        </Markdown>
+      ) : null}
+    </ThoughtBlock>
+  )
+}
+
 function PartView({
   part,
   markdown,
@@ -240,11 +276,8 @@ function PartView({
       // lone image part rendered directly.
       return <AttachmentThumb attachment={part.attachment} className={IMAGE_THUMB} />
     case "Thinking":
-      return (
-        <ThoughtBlock seconds={part.seconds} streaming={part.streaming} defaultOpen className={WIDTH}>
-          {part.text}
-        </ThoughtBlock>
-      )
+      return <MergedThoughts parts={[part]} />
+
     case "Tool":
       return <ToolCardView tool={part.tool} />
     case "Gate":
@@ -303,7 +336,10 @@ function renderParts(
     onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
     onResumePlan?: (planId: string) => void
     onOpenPlanReview?: () => void
-  }
+  },
+  // When a mega-turn's prefix is collapsed, `parts` is a suffix of the real
+  // array — keys must stay ABSOLUTE so expanding doesn't remount the tail.
+  keyOffset = 0
 ): ReactNode[] {
   const out: ReactNode[] = []
   let run: ToolPart[] = []
@@ -333,30 +369,81 @@ function renderParts(
     )
     imgs = []
   }
-  parts.forEach((part, i) => {
+  // Chained reasoning (consecutive Thinking parts) compiles into one thought.
+  let thoughts: ThinkingPart[] = []
+  let thoughtStart = 0
+  const flushThoughts = () => {
+    if (thoughts.length === 0) return
+    out.push(<MergedThoughts key={`t${thoughtStart}`} parts={thoughts} />)
+    thoughts = []
+  }
+  parts.forEach((part, localIndex) => {
+    const i = localIndex + keyOffset
     if (part._tag === "Tool") {
       flushImgs()
+      flushThoughts()
       if (run.length === 0) runStart = i
       run.push(part)
       return
     }
     if (part._tag === "Image") {
       flush()
+      flushThoughts()
       if (imgs.length === 0) imgStart = i
       imgs.push(part)
       return
     }
+    if (part._tag === "Thinking") {
+      flush()
+      flushImgs()
+      if (thoughts.length === 0) thoughtStart = i
+      thoughts.push(part)
+      return
+    }
     flush()
     flushImgs()
+    flushThoughts()
     out.push(<PartView key={i} part={part} markdown={markdown} {...handlers} />)
   })
   flush()
   flushImgs()
+  flushThoughts()
   return out
 }
 
-/** One transcript turn: a You / provider eyebrow followed by its ordered parts. */
-export function MessageTurn({
+/**
+ * A turn with more parts than this renders only its tail until asked for the
+ * rest. Agentic mega-turns are real: benchmarking the app against a live
+ * transcript found single assistant messages with 512 and 669 parts (5.4MB of
+ * JSON), and rendering one mounted tens of thousands of DOM nodes in a single
+ * 3.4s main-thread task — the transcript is virtualized per TURN, so nothing
+ * above this component can split the row up.
+ */
+const MEGA_TURN_MIN_PARTS = 160
+/** How much of a collapsed mega-turn stays visible (the newest steps + reply). */
+const MEGA_TURN_TAIL = 80
+
+/**
+ * The hidden-prefix boundary, quantized so it only moves once another
+ * `MEGA_TURN_TAIL` parts accumulate — a live mega-turn appends parts while it
+ * streams, and a boundary that tracked `length` exactly would shift every
+ * render and re-key (remount) the whole visible tail each time.
+ */
+const hiddenPrefixLength = (partCount: number): number =>
+  partCount > MEGA_TURN_MIN_PARTS
+    ? Math.floor((partCount - MEGA_TURN_TAIL) / MEGA_TURN_TAIL) * MEGA_TURN_TAIL
+    : 0
+
+/**
+ * One transcript turn: a You / provider eyebrow followed by its ordered parts.
+ *
+ * Memoised (see the export below): streaming replaces only the LAST message
+ * object per token, so every settled turn keeps its `message` identity and can
+ * skip re-rendering — without this, each token re-rendered every visible turn's
+ * markdown and tool cards. The handler props must stay referentially stable for
+ * that to hold; `useConversation` memoises them per actor for exactly this.
+ */
+function MessageTurnImpl({
   message,
   providerId,
   onDecideGate,
@@ -376,6 +463,10 @@ export function MessageTurn({
   onOpenPlanReview?: () => void
 }) {
   const isAssistant = message.role === "assistant"
+  const [showAllParts, setShowAllParts] = useState(false)
+  const hiddenParts = showAllParts ? 0 : hiddenPrefixLength(message.parts.length)
+  const visibleParts =
+    hiddenParts > 0 ? message.parts.slice(hiddenParts) : message.parts
   return (
     <div className="flex flex-col gap-3">
       {isAssistant ? (
@@ -389,7 +480,24 @@ export function MessageTurn({
       ) : (
         <Eyebrow>You</Eyebrow>
       )}
-      {renderParts(message.parts, isAssistant, { onDecideGate, onApprovePlan, onResumePlan, onOpenPlanReview })}
+      {hiddenParts > 0 && (
+        <button
+          type="button"
+          data-testid="show-earlier-steps"
+          onClick={() => setShowAllParts(true)}
+          className="flex w-fit items-center gap-1.5 rounded-full border border-line bg-sunken px-3 py-1 text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground"
+        >
+          Show {hiddenParts} earlier steps
+        </button>
+      )}
+      {renderParts(
+        visibleParts,
+        isAssistant,
+        { onDecideGate, onApprovePlan, onResumePlan, onOpenPlanReview },
+        hiddenParts
+      )}
     </div>
   )
 }
+
+export const MessageTurn = memo(MessageTurnImpl)

@@ -119,13 +119,14 @@ export const classifyObservedBillingRoute = (
     endpoint.hostname === "chatgpt.com" &&
     endpoint.pathname.startsWith("/backend-api")
   ) return "subscription"
-  // pi warns this route uses paid per-token extra usage, not Claude plan limits.
+  // pi declares this OAuth route subscription-billed (`isSubscription: true`);
+  // it is the only route a Claude Pro/Max setup token can ever observe.
   if (
     authKind === "claude-setup-token" &&
     model.provider === "anthropic" &&
     model.api === "anthropic-messages" &&
     endpoint.hostname === "api.anthropic.com"
-  ) return "api"
+  ) return "subscription"
   return null
 }
 
@@ -167,6 +168,10 @@ export const probePiEntitlement = async (input: {
     },
     {
       signal: input.signal,
+      // The probe exists to observe the HTTP route. Codex defaults to a
+      // WebSocket transport whose responses never reach onResponse, which
+      // would fail a fully entitled account with "no observable HTTP route".
+      transport: "sse",
       onResponse: (observed, responseModel) => {
         if (
           responseModel.provider === model.provider &&
