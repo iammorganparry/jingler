@@ -134,6 +134,7 @@ export interface FakeAuthServerOptions {
   readonly publicHost?: string;
   readonly unavailableSocialProviders?: ReadonlyArray<"github" | "google">;
   readonly managedRuntime?: "current" | "missing" | "stale";
+  readonly offloadResult?: "success" | "failed" | "hold";
 }
 
 /**
@@ -143,12 +144,18 @@ export interface FakeAuthServerOptions {
  * share this server. That makes publication and tenant-isolation assertions
  * full-loop without a real Postgres, Vercel deployment, or Cloudflare account.
  */
+export interface FakeOffloadRequest {
+  readonly kind: "prime" | "admit" | "upload" | "events" | "cancel" | "destroy"
+  readonly path: string
+}
+
 export interface FakeAuthServer {
   readonly url: string;
   readonly token: string;
   readonly sentEmails: ReadonlyArray<string>;
   readonly memoryRequests: ReadonlyArray<FakeMemoryRequest>;
   readonly managedRequests: ReadonlyArray<FakeManagedRequest>;
+  readonly offloadRequests: ReadonlyArray<FakeOffloadRequest>;
   readonly memorySnapshot: (organizationId: string) => FakeMemorySnapshot;
   readonly setMemoryAvailable: (available: boolean) => void;
   readonly close: () => Promise<void>;
@@ -741,6 +748,7 @@ const normalizeOptions = (
         acceptedLearningOrganizationIds: [],
         reviewProposals: true,
         managedRuntime: "current",
+        offloadResult: "success",
         unavailableSocialProviders: [],
         listenHost: "127.0.0.1",
         publicHost: "127.0.0.1",
@@ -754,6 +762,7 @@ const normalizeOptions = (
           value.acceptedLearningOrganizationIds ?? [],
         reviewProposals: value.reviewProposals ?? true,
         managedRuntime: value.managedRuntime ?? "current",
+        offloadResult: value.offloadResult ?? "success",
         unavailableSocialProviders: value.unavailableSocialProviders ?? [],
         listenHost: value.listenHost ?? "127.0.0.1",
         publicHost: value.publicHost ?? "127.0.0.1",
@@ -769,6 +778,8 @@ export const startFakeAuthServer = async (
   const sentEmails: Array<string> = [];
   const requests: Array<FakeMemoryRequest> = [];
   const managedRequests: Array<FakeManagedRequest> = [];
+  const offloadRequests: Array<FakeOffloadRequest> = [];
+  let offloadEventReads = 0;
   const organizations = new Map<string, FakeOrganizationMemory>();
   let memoryAvailable = !options.unavailable;
   let requestSequence = 0;
@@ -831,6 +842,94 @@ export const startFakeAuthServer = async (
           }
         });
       });
+
+    if (url.pathname === "/api/offload/prime" && req.method === "POST") {
+      offloadRequests.push({ kind: "prime", path: url.pathname });
+      return json(202, { accepted: true });
+    }
+    if (url.pathname === "/api/offload/sandboxes/destroy" && req.method === "POST") {
+      offloadRequests.push({ kind: "destroy", path: url.pathname });
+      return json(200, { destroyed: true });
+    }
+    if (url.pathname === "/api/offload/jobs" && req.method === "POST") {
+      offloadRequests.push({ kind: "admit", path: url.pathname });
+      const runtimeUrl = `http://${host}`;
+      return json(200, {
+        version: 1,
+        jobId: "job_e2e_aaaaaaaaaaaaaaaa",
+        runtimeUrl,
+        uploadUrl: `${runtimeUrl}/v1/offload/jobs/job_e2e_aaaaaaaaaaaaaaaa/snapshot`,
+        grant: "grant_e2e_aaaaaaaaaaaaaaaa",
+        expiresAt: Math.floor(Date.now() / 1_000) + 300,
+      });
+    }
+    if (/^\/v1\/offload\/jobs\/[^/]+\/snapshot$/u.test(url.pathname) && req.method === "PUT") {
+      offloadRequests.push({ kind: "upload", path: url.pathname });
+      req.resume();
+      req.on("end", () => json(202, { accepted: true }));
+      return;
+    }
+    if (/^\/v1\/offload\/jobs\/[^/]+\/events$/u.test(url.pathname) && req.method === "GET") {
+      offloadRequests.push({ kind: "events", path: url.pathname });
+      offloadEventReads += 1;
+      const jobId = "job_e2e_aaaaaaaaaaaaaaaa";
+      if (offloadEventReads === 1 || options.offloadResult === "hold") {
+        return json(200, {
+          version: 1,
+          jobId,
+          state: "preparing",
+          cursor: 1,
+          events: [{
+            version: 1,
+            jobId,
+            sequence: 1,
+            kind: "state",
+            state: "preparing",
+          }],
+          result: null,
+        });
+      }
+      const failed = options.offloadResult === "failed";
+      const result = {
+        version: 1,
+        jobId,
+        state: failed ? "failed" : "succeeded",
+        exitCode: failed ? 2 : 0,
+        failureReason: failed ? "command-failed" : null,
+        stdout: failed ? "" : "remote typecheck clean",
+        stderr: failed ? "remote typecheck failed" : "",
+        outputTruncated: false,
+        timings: {
+          queuedMs: 1,
+          snapshotMs: 2,
+          hydrationMs: 3,
+          dependencyMs: 4,
+          commandMs: 5,
+        },
+      };
+      return json(200, {
+        version: 1,
+        jobId,
+        state: result.state,
+        cursor: 3,
+        events: [
+          {
+            version: 1,
+            jobId,
+            sequence: 2,
+            kind: "output",
+            stream: failed ? "stderr" : "stdout",
+            text: failed ? "remote typecheck failed" : "remote typecheck clean",
+          },
+          { version: 1, jobId, sequence: 3, kind: "result", result },
+        ],
+        result,
+      });
+    }
+    if (/^\/v1\/offload\/jobs\/[^/]+\/cancel$/u.test(url.pathname) && req.method === "POST") {
+      offloadRequests.push({ kind: "cancel", path: url.pathname });
+      return json(202, { cancelled: true });
+    }
 
     if (options.deviceRelayUrl && url.pathname.startsWith("/api/devices")) {
       void (async () => {
@@ -1524,6 +1623,9 @@ export const startFakeAuthServer = async (
     },
     get managedRequests() {
       return managedRequests;
+    },
+    get offloadRequests() {
+      return offloadRequests;
     },
     memorySnapshot: (organizationId) => {
       const state = stateFor(organizationId);

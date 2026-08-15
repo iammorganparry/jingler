@@ -61,6 +61,7 @@ import {
   MemoryPrivilege,
   OpenConnectorConfig,
   OpenConnectorDefaults,
+  OffloadComputeSettings,
   ConnectorProvider,
   ConnectorProviderDetail,
   ConnectorConnection,
@@ -1390,6 +1391,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: MemoryConfig
+  }),
+
+  /** Persist automatic Cloudflare compute routing and explicit argv allowlists. */
+  Rpc.make("Config.setOffloadCompute", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: OffloadComputeSettings
   }),
 
   /**

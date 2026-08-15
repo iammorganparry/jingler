@@ -5,6 +5,7 @@ import type {
   MemoryConfig,
   NotificationsConfig,
   OpenConnectorConfig,
+  OffloadComputeSettings,
   PlanTemplateConfig,
   ProviderConnectionId,
   ProviderId,
@@ -155,6 +156,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
             ...(existing?.webSearch ? { webSearch: existing.webSearch } : {}),
             ...(existing?.memory ? { memory: existing.memory } : {}),
+            ...(existing?.offloadCompute ? { offloadCompute: existing.offloadCompute } : {}),
             ...(existing?.disabledPlugins ? { disabledPlugins: existing.disabledPlugins } : {}),
             // MANDATORY: omit a section here and every unrelated save silently
             // drops it, because `patch` is a whole-object read-modify-write.
@@ -258,6 +260,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Save only renderer-safe memory enablement and organization selection. */
       const setMemory = (memory: MemoryConfig) => patch({ memory })
 
+      /** Persist automatic compute routing and its shell-free project allowlist. */
+      const setOffloadCompute = (offloadCompute: OffloadComputeSettings) =>
+        patch({ offloadCompute })
+
       /** Replace the override layer wholesale, keeping the active theme id. */
       const setThemeCustomizations = (colorCustomizations: Record<string, string>) =>
         Effect.gen(function* () {
@@ -308,6 +314,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setOpenConnector,
         setWebSearch,
         setMemory,
+        setOffloadCompute,
         setDisabledPlugins
       }
     }

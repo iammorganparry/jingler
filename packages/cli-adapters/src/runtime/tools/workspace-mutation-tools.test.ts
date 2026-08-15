@@ -4,12 +4,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AssetService } from "../../asset.js"
+import type { OffloadCommandRouterPort } from "../../offload-command-router.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
 import { createMutationObserver } from "./mutation-observer.js"
-import { ToolRegistry } from "./tool-registry.js"
+import { ToolError, ToolRegistry } from "./tool-registry.js"
 import {
   makeWorkspaceMutationPort,
   registerWorkspaceMutationTools,
@@ -51,7 +52,7 @@ const execute = (
   idempotencyKey
 }))
 
-const makeRegistry = (): ToolRegistry => {
+const makeRegistry = (offload?: OffloadCommandRouterPort): ToolRegistry => {
   const registry = new ToolRegistry({
     observer: createMutationObserver({
       cwd: workspace,
@@ -66,7 +67,12 @@ const makeRegistry = (): ToolRegistry => {
       journal: new RunJournal({ file: join(outside, "journal.json") })
     })
   })
-  registerWorkspaceMutationTools(registry, workspace, port)
+  registerWorkspaceMutationTools(
+    registry,
+    workspace,
+    port,
+    offload ? { sessionId: "session-one", offload } : undefined
+  )
   return registry
 }
 
@@ -146,5 +152,58 @@ describe("workspace mutation tools", () => {
     expect(progress.join("")).toBe("hello")
     expect(registry.capabilitiesFor("plan", "read-only")).toEqual([])
     expect(registry.capabilitiesFor("review", "read-only")).toEqual([])
+  })
+
+  it("does not silently fall back when remote execution fails", async () => {
+    const registry = makeRegistry({
+      executeIfEligible: () => Effect.fail(
+        new ToolError("execution-failed", "Remote command failed; operator must disable Offload Compute")
+      ),
+      primeSession: () => Effect.succeed("accepted"),
+      destroySession: () => Effect.void
+    })
+    const result = await execute(registry, "command_execute", {
+      command: "printf forbidden-fallback > marker.txt"
+    })
+    expect(result).toMatchObject({ status: "error", error: { code: "execution-failed" } })
+    await expect(readFile(join(workspace, "marker.txt"), "utf8")).rejects.toThrow()
+  })
+
+  it("routes through offload before the unchanged local executor", async () => {
+    const executeIfEligible = vi.fn<OffloadCommandRouterPort["executeIfEligible"]>(
+      () => Effect.succeed({
+        command: "pnpm typecheck",
+        exitCode: 0,
+        stdout: "remote",
+        stderr: "",
+        offloaded: true,
+        jobId: "job_aaaaaaaaaaaaaaaa"
+      })
+    )
+    const registry = makeRegistry({
+      executeIfEligible,
+      primeSession: () => Effect.succeed("accepted"),
+      destroySession: () => Effect.void
+    })
+    const remote = await execute(registry, "command_execute", {
+      command: "printf local-side-effect > marker.txt"
+    })
+    expect(remote).toMatchObject({
+      status: "success",
+      value: { offloaded: true, stdout: "remote" }
+    })
+    await expect(readFile(join(workspace, "marker.txt"), "utf8")).rejects.toThrow()
+    expect(executeIfEligible).toHaveBeenCalledOnce()
+
+    const attemptedBypass = await execute(registry, "command_execute", {
+      command: "printf local > marker.txt",
+      runLocally: true
+    })
+    expect(attemptedBypass).toMatchObject({
+      status: "success",
+      value: { offloaded: true, stdout: "remote" }
+    })
+    await expect(readFile(join(workspace, "marker.txt"), "utf8")).rejects.toThrow()
+    expect(executeIfEligible).toHaveBeenCalledTimes(2)
   })
 })

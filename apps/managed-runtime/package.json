@@ -16,12 +16,14 @@
     "image:prepare": "pnpm --filter @jingler/device-agent build && mkdir -p dist && cp ../device-agent/dist/jingler-device.mjs dist/jingler-device.mjs",
     "deploy": "pnpm image:prepare && wrangler deploy",
     "deploy:dry": "pnpm image:prepare && wrangler deploy --dry-run",
+    "benchmark:offload": "node ./scripts/benchmark-offload.mjs",
     "clean": "rimraf dist .wrangler .turbo *.tsbuildinfo"
   },
   "dependencies": {
     "@cloudflare/sandbox": "0.10.3",
     "@jingler/core": "workspace:*",
-    "effect": "^3.21.4"
+    "effect": "^3.21.4",
+    "jose": "6.2.3"
   },
   "devDependencies": {
     "@jingler/tsconfig": "workspace:*",

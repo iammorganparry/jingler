@@ -1,0 +1,38 @@
+name: Offload Compute Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: Number of cold/warm samples
+        required: false
+        default: "20"
+  schedule:
+    - cron: "17 7 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offload-compute-production-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Measure production cold and warm p95
+        env:
+          MANAGED_RUNTIME_ORIGIN: https://managed-runtime.jingler.dev
+          MANAGED_RUNTIME_SERVICE_SECRET: ${{ secrets.MANAGED_RUNTIME_SERVICE_SECRET }}
+          OFFLOAD_BENCHMARK_SAMPLES: ${{ inputs.samples || '20' }}
+        run: pnpm --filter @jingler/managed-runtime benchmark:offload

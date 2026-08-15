@@ -1,12 +1,18 @@
 import { getSandbox } from "@cloudflare/sandbox";
-import type { ManagedProviderCapability as ManagedProviderCapabilityValue } from "@jingler/core";
+import type {
+  ManagedProviderCapability as ManagedProviderCapabilityValue,
+  OffloadAdmissionRequest as OffloadAdmissionRequestValue,
+  OffloadGrantAction
+} from "@jingler/core";
 import {
+  OFFLOAD_SNAPSHOT_MAX_BYTES,
+  OffloadAdmissionRequest,
   ManagedProviderCapability,
   ManagedWebSearchCapability,
   ManagedRuntimeProviderSelection,
   WorkspaceProvisioningPlan,
 } from "@jingler/core";
-import { Either, Schema } from "effect";
+import { Effect, Either, Schema } from "effect";
 import {
   claimsManagedSessionSlot,
   decodeManagedGrantRequest,
@@ -31,6 +37,7 @@ import {
 } from "./runtime-env.js";
 import { r2CheckpointStore } from "./r2-checkpoint-store.js";
 import { json } from "./worker-http.js";
+import { INTERNAL_ROUTES } from "./internal-routes.js";
 import {
   destroyRuntimeSession,
   unregisterRuntimeSession,
@@ -39,11 +46,26 @@ import {
   runtimeConfigurationForRegistration,
   type RuntimeRegistrationInput,
 } from "./runtime-configuration.js";
-import { sandboxIdForSession } from "./runtime-identity.js";
+import { sandboxIdForSession, sha256Hex } from "./runtime-identity.js";
+import {
+  bearerOffloadGrant,
+  issueOffloadGrant,
+  verifyOffloadGrant
+} from "./offload-grant.js";
+import {
+  OffloadJobStore,
+  OffloadStoreError,
+  makeOffloadJobStoreLayer
+} from "./offload-store.js";
+import { cleanupOffloadJob } from "./offload-cleanup.js";
+import { primeOffloadWorkspace } from "./offload-workspace.js";
+import { OffloadRuntimePrimeRequest, OffloadRuntimeSandboxDestroyRequest } from "./offload-runtime-request.js";
 
 export { Sandbox } from "@cloudflare/sandbox";
 export { ManagedAccountObject } from "./account-runtime.js";
 export { ManagedSessionObject } from "./session-runtime.js";
+export { OffloadComputeWorkflow } from "./offload-workflow.js";
+export { OffloadSandboxLifecycleObject } from "./offload-sandbox-lifecycle.js";
 
 const hasServiceAuthorization = (
   request: Request,
@@ -144,7 +166,7 @@ const runtimeRegistration = async (
 ): Promise<RuntimeRegistration> => {
   const accountResponse = await env.MANAGED_ACCOUNT.getByName(
     input.subject,
-  ).fetch("https://managed-account.internal/v1/sessions/register", {
+  ).fetch(INTERNAL_ROUTES.managedAccount.sessionRegister, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -244,8 +266,186 @@ const runtimeRegistration = async (
   };
 };
 
+const OffloadRuntimeGrantRequest = Schema.Struct({
+  subject: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  ...OffloadAdmissionRequest.fields
+});
+const OffloadAccountRegistration = Schema.Struct({
+  authStateVersion: Schema.Int.pipe(Schema.positive()),
+  githubCapabilityHandle: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  claimed: Schema.Boolean
+});
+
+const offloadJobId = async (subject: string, idempotencyKey: string): Promise<string> =>
+  `job_${(await sha256Hex(`${subject}:${idempotencyKey}`)).slice(0, 40)}`;
+
+const bytesDigest = async (bytes: Uint8Array): Promise<string> => {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+const registerOffloadJob = async (
+  env: ManagedRuntimeEnv,
+  subject: string,
+  jobId: string,
+  idempotencyKey: string
+): Promise<Schema.Schema.Type<typeof OffloadAccountRegistration>> => {
+  const response = await env.MANAGED_ACCOUNT.getByName(subject).fetch(
+    INTERNAL_ROUTES.managedAccount.offloadRegister,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, jobId, idempotencyKey })
+    }
+  );
+  if (!response.ok) {
+    throw new RuntimeRegistrationError(
+      response.status,
+      response.status === 429
+        ? "Offload concurrency exceeded"
+        : "Offload execution is not authorized"
+    );
+  }
+  return Schema.decodeUnknownSync(OffloadAccountRegistration)(await response.json(), {
+    onExcessProperty: "error"
+  });
+};
+
+const unregisterOffloadJob = (
+  env: ManagedRuntimeEnv,
+  subject: string,
+  jobId: string
+): Promise<Response> =>
+  env.MANAGED_ACCOUNT.getByName(subject).fetch(
+    INTERNAL_ROUTES.managedAccount.offloadUnregister,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, jobId })
+    }
+  );
+
+const authorizeOffloadPrimer = async (
+  env: ManagedRuntimeEnv,
+  subject: string
+): Promise<Schema.Schema.Type<typeof OffloadAccountRegistration>> => {
+  const response = await env.MANAGED_ACCOUNT.getByName(subject).fetch(
+    INTERNAL_ROUTES.managedAccount.offloadAuthorize,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject })
+    }
+  );
+  if (!response.ok) throw new Error("Offload primer is not authorized");
+  return Schema.decodeUnknownSync(OffloadAccountRegistration)(await response.json(), {
+    onExcessProperty: "error"
+  });
+};
+
+const primeOffloadSession = async (
+  env: ManagedRuntimeEnv,
+  body: Schema.Schema.Type<typeof OffloadRuntimePrimeRequest>
+): Promise<void> => {
+  await authorizeOffloadPrimer(env, body.subject);
+  await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(body.sessionId).fetch(
+    INTERNAL_ROUTES.offloadLifecycle.touch,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject: body.subject, sessionId: body.sessionId })
+    }
+  );
+  const sandbox = getSandbox(
+    env.Sandbox,
+    await sandboxIdForSession(`offload_${body.sessionId}`),
+    {
+      transport: "rpc",
+      normalizeId: true,
+      enableDefaultSession: false,
+      sleepAfter: "10m"
+    }
+  );
+  await Effect.runPromise(primeOffloadWorkspace(sandbox));
+};
+
+const consumeOffloadGrantUse = async (
+  env: ManagedRuntimeEnv,
+  subject: string,
+  use: string
+): Promise<boolean> => {
+  const response = await env.MANAGED_ACCOUNT.getByName(subject).fetch(
+    INTERNAL_ROUTES.managedAccount.offloadConsumeGrant,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, use })
+    }
+  );
+  return response.ok;
+};
+
+const authorizeOffloadRequest = (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  action: OffloadGrantAction,
+  jobId: string,
+  consume: boolean
+) =>
+  Effect.gen(function* () {
+    const store = yield* OffloadJobStore;
+    const record = yield* store.get(jobId);
+    const verified = yield* verifyOffloadGrant(
+      bearerOffloadGrant(request),
+      env.MANAGED_RUNTIME_GRANT_SECRET,
+      {
+        action,
+        subject: record.subject,
+        sessionId: record.request.sessionId,
+        jobId: record.jobId,
+        repositorySlug: record.request.repositorySlug,
+        snapshotDigest: record.request.snapshot.digest
+      }
+    );
+    if (!verified.ok) return null;
+    if (consume) {
+      const consumed = yield* Effect.tryPromise(() =>
+        consumeOffloadGrantUse(
+          env,
+          record.subject,
+          `${verified.claims.grantId}:${action}`
+        )
+      );
+      if (!consumed) return null;
+    }
+    return { record, claims: verified.claims };
+  }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)));
+
+const createOffloadWorkflowOnce = async (
+  workflow: ManagedRuntimeEnv["OFFLOAD_WORKFLOW"],
+  jobId: string
+): Promise<void> => {
+  try {
+    await workflow.create({
+      id: jobId,
+      params: { jobId },
+      retention: { successRetention: "1 day", errorRetention: "1 day" }
+    });
+  } catch (creationError) {
+    try {
+      await workflow.get(jobId);
+    } catch {
+      throw creationError;
+    }
+  }
+};
+
 export default {
-  async fetch(request: Request, env: ManagedRuntimeEnv): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: ManagedRuntimeEnv,
+    ctx: ExecutionContext
+  ): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       return json({
@@ -255,6 +455,123 @@ export default {
           typeof env.MANAGED_RUNTIME_SERVICE_SECRET === "string" &&
           env.MANAGED_RUNTIME_SERVICE_SECRET.length >= 32,
       });
+    }
+    if (url.pathname === "/v1/offload/prime" && request.method === "POST") {
+      if (!hasBearerServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const body = decodeOrNull(OffloadRuntimePrimeRequest, await request.json());
+      if (body === null) return json({ error: "Invalid offload prime request" }, 400);
+      ctx.waitUntil(
+        primeOffloadSession(env, body).catch((cause) =>
+          console.error("Offload primer failed", cause)
+        )
+      );
+      return json({ accepted: true }, 202);
+    }
+    if (
+      url.pathname === "/v1/offload/sandboxes/destroy" &&
+      request.method === "POST"
+    ) {
+      if (!hasBearerServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const body = decodeOrNull(OffloadRuntimeSandboxDestroyRequest, await request.json());
+      if (body === null) return json({ error: "Invalid sandbox cleanup request" }, 400);
+      const response = await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(
+        body.sessionId
+      ).fetch(INTERNAL_ROUTES.offloadLifecycle.destroy, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      return response.ok
+        ? json({ destroyed: true })
+        : json({ error: "Sandbox cleanup failed" }, 503);
+    }
+    if (url.pathname === "/v1/offload/grants" && request.method === "POST") {
+      if (!hasBearerServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const body = decodeOrNull(OffloadRuntimeGrantRequest, await request.json());
+      if (body === null) return json({ error: "Invalid offload grant request" }, 400);
+      const jobId = await offloadJobId(body.subject, body.idempotencyKey);
+      let registration: Schema.Schema.Type<typeof OffloadAccountRegistration>;
+      try {
+        registration = await registerOffloadJob(
+          env,
+          body.subject,
+          jobId,
+          body.idempotencyKey
+        );
+      } catch (cause) {
+        return cause instanceof RuntimeRegistrationError
+          ? json({ error: cause.message }, cause.status)
+          : json({ error: "Offload registration failed" }, 503);
+      }
+      const requestFields: OffloadAdmissionRequestValue = {
+        version: body.version,
+        sessionId: body.sessionId,
+        idempotencyKey: body.idempotencyKey,
+        repositorySlug: body.repositorySlug,
+        snapshot: body.snapshot,
+        command: body.command,
+        limits: body.limits
+      };
+      try {
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const store = yield* OffloadJobStore;
+            yield* store.create({
+              jobId,
+              subject: body.subject,
+              request: requestFields,
+              githubCapabilityHandle: registration.githubCapabilityHandle,
+              nowSeconds: Math.floor(Date.now() / 1_000)
+            });
+          }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
+        );
+        await createOffloadWorkflowOnce(env.OFFLOAD_WORKFLOW, jobId);
+        const issued = await Effect.runPromise(issueOffloadGrant(
+          {
+            subject: body.subject,
+            sessionId: body.sessionId,
+            jobId,
+            idempotencyKey: body.idempotencyKey,
+            repositorySlug: body.repositorySlug,
+            snapshotDigest: body.snapshot.digest,
+            actions: ["snapshot.upload", "job.read", "job.cancel"]
+          },
+          env.MANAGED_RUNTIME_GRANT_SECRET
+        ));
+        return json({
+          version: 1,
+          jobId,
+          runtimeUrl: env.MANAGED_RUNTIME_ORIGIN,
+          uploadUrl: `${env.MANAGED_RUNTIME_ORIGIN}/v1/offload/jobs/${encodeURIComponent(jobId)}/snapshot`,
+          grant: issued.grant,
+          expiresAt: issued.claims.expiresAt
+        });
+      } catch (cause) {
+        if (registration.claimed) {
+          if (!(cause instanceof OffloadStoreError && cause.reason === "conflict")) {
+            await env.OFFLOAD_WORKFLOW.get(jobId).then(
+              (instance) => instance.terminate(),
+              () => undefined
+            ).catch(() => undefined);
+            await Effect.runPromise(
+              Effect.flatMap(OffloadJobStore, (store) => store.remove(jobId)).pipe(
+                Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)),
+                Effect.catchAll(() => Effect.void)
+              )
+            );
+          }
+          await unregisterOffloadJob(env, body.subject, jobId).catch(() => undefined);
+        }
+        return cause instanceof OffloadStoreError && cause.reason === "conflict"
+          ? json({ error: cause.message }, 409)
+          : json({ error: "Offload grant could not be issued" }, 503);
+      }
     }
     if (url.pathname === "/v1/grants" && request.method === "POST") {
       if (!hasBearerServiceAuthorization(request, env)) {
@@ -288,6 +605,96 @@ export default {
         grant: issued.grant,
         expiresAt: issued.claims.expiresAt,
       });
+    }
+    if (url.pathname === "/v1/offload-benchmark" && request.method === "POST") {
+      if (!hasServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const suffix = crypto.randomUUID().replaceAll("-", "");
+      const sandbox = getSandbox(env.Sandbox, `offload-benchmark-${suffix}`, {
+        transport: "rpc",
+        normalizeId: true,
+        enableDefaultSession: false,
+        sleepAfter: "2m"
+      });
+      try {
+        const coldStarted = Date.now();
+        const cold = await sandbox.exec("printf cold-ready", {
+          cwd: "/workspace",
+          timeout: 30_000,
+          origin: "internal"
+        });
+        const coldMs = Date.now() - coldStarted;
+        const warmStarted = Date.now();
+        const warm = await sandbox.exec("printf warm-ready", {
+          cwd: "/workspace",
+          timeout: 30_000,
+          origin: "internal"
+        });
+        const warmMs = Date.now() - warmStarted;
+        return json({
+          success: cold.success && warm.success,
+          coldMs,
+          warmMs
+        }, cold.success && warm.success ? 200 : 500);
+      } finally {
+        await sandbox.destroy().catch(() => undefined);
+      }
+    }
+    if (url.pathname === "/v1/offload-probe" && request.method === "POST") {
+      if (!hasServiceAuthorization(request, env)) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+      const suffix = crypto.randomUUID().replaceAll("-", "");
+      const sessionId = `offload_probe_${suffix}`;
+      const subject = "offload-probe";
+      const key = `offload/probes/${suffix}.txt`;
+      const lifecycle = env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(sessionId);
+      const sandbox = getSandbox(
+        env.Sandbox,
+        await sandboxIdForSession(`offload_${sessionId}`),
+        {
+          transport: "rpc",
+          normalizeId: true,
+          enableDefaultSession: false,
+          sleepAfter: "2m"
+        }
+      );
+      try {
+        await env.OFFLOAD_JOBS.put(key, "offload-r2-ready");
+        const stored = await env.OFFLOAD_JOBS.get(key);
+        const image = await sandbox.exec(
+          "test -x /opt/jingler/offload-exec.mjs -a -x /opt/jingler/offload-launch && node --version",
+          { cwd: "/workspace", timeout: 30_000, origin: "internal" }
+        );
+        const isolation = await sandbox.exec(
+          "printf locked > /workspace/offload-probe-source && chmod 0444 /workspace/offload-probe-source && /opt/jingler/offload-launch node -e \"const fs=require('node:fs'),net=require('node:net');let denied=0;try{fs.writeFileSync('/workspace/offload-probe-source','changed')}catch(e){if(e.code==='EACCES')denied++}const s=net.connect(443,'1.1.1.1');s.on('error',e=>{if(e.code==='EPERM')denied++;process.exit(denied===2?0:1)});setTimeout(()=>process.exit(2),2000)\"",
+          { cwd: "/workspace", timeout: 30_000, origin: "internal" }
+        );
+        const touched = await lifecycle.fetch(INTERNAL_ROUTES.offloadLifecycle.touch, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ subject, sessionId })
+        });
+        const success = stored !== null && await stored.text() === "offload-r2-ready" &&
+          image.success && isolation.success && touched.ok;
+        return json({
+          success,
+          checks: {
+            r2: stored !== null,
+            sandboxImage: image.success,
+            commandIsolation: isolation.success,
+            lifecycle: touched.ok
+          }
+        }, success ? 200 : 500);
+      } finally {
+        await env.OFFLOAD_JOBS.delete(key).catch(() => undefined);
+        await lifecycle.fetch(INTERNAL_ROUTES.offloadLifecycle.destroy, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ subject, sessionId })
+        }).catch(() => undefined);
+      }
     }
     if (url.pathname === "/v1/sandbox-probe" && request.method === "POST") {
       if (!hasServiceAuthorization(request, env)) {
@@ -394,7 +801,7 @@ export default {
         return json({ error: "Invalid environment cleanup request" }, 400);
       const account = env.MANAGED_ACCOUNT.getByName(body.subject);
       const listed = await account.fetch(
-        "https://managed-account.internal/v1/sessions/list",
+        INTERNAL_ROUTES.managedAccount.sessionList,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -557,6 +964,194 @@ export default {
           );
         }
       }
+    }
+    const offloadSnapshotMatch = url.pathname.match(
+      /^\/v1\/offload\/jobs\/([^/]+)\/snapshot$/u
+    );
+    if (offloadSnapshotMatch !== null && request.method === "PUT") {
+      const jobId = decodeURIComponent(offloadSnapshotMatch[1] ?? "");
+      const authorized = await Effect.runPromise(
+        authorizeOffloadRequest(request, env, "snapshot.upload", jobId, false).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        )
+      );
+      if (authorized === null) return json({ error: "Offload upload denied" }, 403);
+      const declared = Number(request.headers.get("x-jingler-snapshot-bytes") ?? 0);
+      if (!request.body || !Number.isSafeInteger(declared) || declared < 1 || declared > OFFLOAD_SNAPSHOT_MAX_BYTES) {
+        return json({ error: "Invalid offload snapshot length" }, 413);
+      }
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.byteLength !== declared || bytes.byteLength > OFFLOAD_SNAPSHOT_MAX_BYTES) {
+        return json({ error: "Offload snapshot length changed" }, 413);
+      }
+      const digest = await bytesDigest(bytes);
+      if (digest !== authorized.record.request.snapshot.digest) {
+        return json({ error: "Offload snapshot digest mismatch" }, 409);
+      }
+      if (authorized.record.state !== "uploading") {
+        if (authorized.record.state === "queued") {
+          const published = await env.OFFLOAD_WORKFLOW.get(jobId).then(
+            (instance) => instance.sendEvent({
+              type: "snapshot-ready",
+              payload: { jobId }
+            }).then(() => true),
+            () => false
+          ).catch(() => false);
+          if (!published) return json({ error: "Offload workflow event unavailable" }, 503);
+        }
+        const consumed = await consumeOffloadGrantUse(
+          env,
+          authorized.record.subject,
+          `${authorized.claims.grantId}:snapshot.upload`
+        ).catch(() => false);
+        return consumed
+          ? json({ accepted: true, jobId }, 202)
+          : json({ error: "Offload upload could not be confirmed" }, 503);
+      }
+      try {
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const store = yield* OffloadJobStore;
+            yield* store.putSnapshot(jobId, bytes, digest);
+            yield* store.append(jobId, { kind: "state", state: "queued" });
+          }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
+        );
+        await (await env.OFFLOAD_WORKFLOW.get(jobId)).sendEvent({
+          type: "snapshot-ready",
+          payload: { jobId }
+        });
+        const consumed = await consumeOffloadGrantUse(
+          env,
+          authorized.record.subject,
+          `${authorized.claims.grantId}:snapshot.upload`
+        );
+        if (!consumed) throw new Error("Offload upload grant could not be committed");
+        return json({ accepted: true, jobId }, 202);
+      } catch {
+        return json({ error: "Offload workflow could not be started" }, 503);
+      }
+    }
+    const offloadEventsMatch = url.pathname.match(
+      /^\/v1\/offload\/jobs\/([^/]+)\/events$/u
+    );
+    if (offloadEventsMatch !== null && request.method === "GET") {
+      const jobId = decodeURIComponent(offloadEventsMatch[1] ?? "");
+      const authorized = await Effect.runPromise(
+        authorizeOffloadRequest(request, env, "job.read", jobId, false).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        )
+      );
+      if (authorized === null) return json({ error: "Offload read denied" }, 403);
+      const cursor = Number(url.searchParams.get("cursor") ?? 0);
+      if (!Number.isSafeInteger(cursor) || cursor < 0) {
+        return json({ error: "Invalid event cursor" }, 400);
+      }
+      return json({
+        version: 1,
+        jobId,
+        state: authorized.record.state,
+        cursor: authorized.record.sequence,
+        events: authorized.record.events.filter((event) => event.sequence > cursor),
+        result: authorized.record.result
+      });
+    }
+    const offloadCancelMatch = url.pathname.match(
+      /^\/v1\/offload\/jobs\/([^/]+)\/cancel$/u
+    );
+    if (offloadCancelMatch !== null && request.method === "POST") {
+      const jobId = decodeURIComponent(offloadCancelMatch[1] ?? "");
+      const authorized = await Effect.runPromise(
+        authorizeOffloadRequest(request, env, "job.cancel", jobId, true).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        )
+      );
+      if (authorized === null) return json({ error: "Offload cancellation denied" }, 403);
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const store = yield* OffloadJobStore;
+          yield* store.requestCancel(jobId);
+        }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
+      );
+      const sandbox = getSandbox(
+        env.Sandbox,
+        await sandboxIdForSession(`offload_${authorized.record.request.sessionId}`),
+        {
+          transport: "rpc",
+          normalizeId: true,
+          enableDefaultSession: false,
+          sleepAfter: "10m"
+        }
+      );
+      await sandbox.killAllProcesses().catch(() => undefined);
+      await env.OFFLOAD_WORKFLOW.get(jobId).then(
+        (instance) => instance.terminate(),
+        () => undefined
+      ).catch(() => undefined);
+      const result = {
+        version: 1 as const,
+        jobId,
+        state: "cancelled" as const,
+        exitCode: null,
+        failureReason: null,
+        stdout: "",
+        stderr: "",
+        outputTruncated: false,
+        timings: {
+          queuedMs: 0,
+          snapshotMs: 0,
+          hydrationMs: 0,
+          dependencyMs: 0,
+          commandMs: 0
+        }
+      };
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const store = yield* OffloadJobStore;
+          yield* store.finish(jobId, result);
+        }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
+      );
+      await cleanupOffloadJob(env, jobId);
+      return json({ cancelled: true, jobId });
+    }
+    const offloadGitMatch = url.pathname.match(
+      /^\/v1\/offload\/git\/([^/]+)\/([^/]+)\/([^/]+\.git)(\/.*)?$/u
+    );
+    if (
+      offloadGitMatch !== null &&
+      (request.method === "GET" || request.method === "POST")
+    ) {
+      const jobId = decodeURIComponent(offloadGitMatch[1] ?? "");
+      const authorized = await Effect.runPromise(
+        authorizeOffloadRequest(request, env, "git.read", jobId, false).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        )
+      );
+      if (authorized === null) return json({ error: "Offload Git denied" }, 403);
+      const owner = offloadGitMatch[2] ?? "";
+      const repository = offloadGitMatch[3] ?? "";
+      const suffix = offloadGitMatch[4] ?? "";
+      if (!matchesGitRepositoryScope(owner, repository, authorized.record.request.repositorySlug)) {
+        return json({ error: "Git repository scope denied" }, 403);
+      }
+      return proxyProviderRequest(
+        {
+          provider: "github",
+          gitSmartHttp: true,
+          subject: authorized.record.subject,
+          capabilityHandle: authorized.record.githubCapabilityHandle,
+          upstreamUrl: `https://github.com/${owner}/${repository}${suffix}${url.search}`,
+          method: request.method,
+          body: request.body,
+          contentType: request.headers.get("content-type"),
+          accept: request.headers.get("accept"),
+          contentLength: Number(request.headers.get("content-length") ?? 0)
+        },
+        {
+          resolve: (subject, handle) => resolveProviderCredential(env, subject, handle, "github"),
+          fetch,
+          maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES)
+        }
+      );
     }
     const webSearchProxyMatch = url.pathname.match(
       /^\/v1\/web-search\/(exa|firecrawl)\/([^/]+)$/u,
@@ -755,7 +1350,7 @@ export default {
       }
       const body: unknown = await request.json();
       return env.MANAGED_ACCOUNT.getByName(subject).fetch(
-        "https://managed-account.internal/v1/auth-state",
+        INTERNAL_ROUTES.managedAccount.authState,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -778,7 +1373,7 @@ export default {
         return json({ error: "Malformed subject identifier" }, 400);
       }
       return env.MANAGED_ACCOUNT.getByName(subject).fetch(
-        "https://managed-account.internal/v1/capabilities",
+        INTERNAL_ROUTES.managedAccount.capabilities,
         {
           method: "POST",
           headers: { "content-type": "application/json" },

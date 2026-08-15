@@ -608,6 +608,38 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
         )
       : fauxAssistantMessage("Inspected the GitHub feedback through pi.")
   }
+  if (latestOperatorText(context).includes("[[offload-local-retry]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+          COMMAND_TOOL,
+          { command: "pnpm typecheck" },
+          "offload-local-retry-1"
+        )
+      : fauxAssistantMessage("Explicit local retry completed.")
+  }
+  if (latestOperatorText(context).includes("[[offload-owned-device-offline]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+          COMMAND_TOOL,
+          { command: "node -e \"process.stdout.write('offline command must not run\\\\n')\"" },
+          "offload-owned-device-offline-1"
+        )
+      : fauxAssistantMessage("Offline owned-device attempt completed.")
+  }
+  if (latestOperatorText(context).includes("[[offload-owned-device]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+          COMMAND_TOOL,
+          { command: "node -e \"process.stdout.write('owned device test clean\\\\n')\"" },
+          "offload-owned-device-1"
+        )
+      : fauxAssistantMessage("Tests completed on the selected owned device.")
+  }
+  if (latestOperatorText(context).includes("[[offload-typecheck]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(COMMAND_TOOL, { command: "pnpm typecheck" }, "offload-typecheck-1")
+      : fauxAssistantMessage("Typecheck completed on Offload Compute.")
+  }
   if (latestOperatorText(context).includes("Add rate limiting")) {
     return mutationResponse(context)
   }
