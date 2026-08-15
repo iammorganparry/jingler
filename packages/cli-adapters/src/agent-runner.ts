@@ -1246,6 +1246,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
           const persistedTaskMarkers = yield* Ref.make(new Set<string>())
+          // Marker keys already reported as dropped — the accumulated text
+          // re-parses on every delta, so without this one bad marker would warn
+          // hundreds of times per turn. Gates the warning only, never the
+          // apply: once the plan is amended the marker persists normally.
+          const droppedTaskMarkers = yield* Ref.make(new Set<string>())
+          // Unknown ids already steered back to the agent this run.
+          const steeredUnknownPlanIds = yield* Ref.make(new Set<string>())
 
           // toolUseId → the file an edit tool is writing, remembered at ToolStart so
           // its ToolEnd can mark the matching plan step done (see markPlanProgress).
@@ -1396,6 +1403,42 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * arbitrary deltas, so parsing individual events would lose progress
            * if the app stopped before the terminal response.
            */
+          /**
+           * A dropped marker is invisible progress: warn once per unique marker
+           * (not per stream delta), and close the loop with the agent — steer a
+           * one-time corrective so it amends the canonical plan via
+           * jingler_submit_plan instead of silently losing the checkpoint.
+           */
+          const reportDroppedTaskMarker = (
+            key: string,
+            warning: string,
+            unknownId: string
+          ): Effect.Effect<void> =>
+            Effect.gen(function* () {
+              const dropped = yield* Ref.get(droppedTaskMarkers)
+              if (dropped.has(key)) return
+              yield* Ref.update(droppedTaskMarkers, (s) => new Set(s).add(key))
+              yield* Effect.logWarning(warning)
+              const steered = yield* Ref.get(steeredUnknownPlanIds)
+              if (steered.has(unknownId)) return
+              yield* Ref.update(steeredUnknownPlanIds, (s) => new Set(s).add(unknownId))
+              const handler = yield* Ref.get(turnSteer)
+              if (handler === null) return
+              // Forked: this runs on the event-processing path, and a slow
+              // steer channel must never stall the stream behind its timeout.
+              yield* invokeSteer(
+                handler,
+                [
+                  // Deliberately avoids the literal marker token: display
+                  // stripping scrubs protocol text from transcripts, and this
+                  // notice may be echoed into one.
+                  `[plan-sync] Your plan checkpoint marker referenced "${unknownId}", which is not in the canonical plan — the marker was dropped and the operator cannot see that progress.`,
+                  "Call jingler_submit_plan with the COMPLETE updated plan (mid-execution amendments apply immediately, no re-approval), then re-emit the checkpoint using the updated plan's ids."
+                ].join("\n"),
+                []
+              ).pipe(Effect.asVoid, Effect.forkDaemon, Effect.asVoid)
+            })
+
           const recordPlanTaskProgress = (text: string): Effect.Effect<void> =>
             Effect.gen(function* () {
               if (worktreePath.length === 0) return
@@ -1416,14 +1459,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   (candidate) => candidate.id === marker.stageId
                 )
                 if (stage === undefined) {
-                  yield* Effect.logWarning(
-                    `Plan task marker names unknown stage ${marker.stageId}; dropped.`
+                  yield* reportDroppedTaskMarker(
+                    key,
+                    `Plan task marker names unknown stage ${marker.stageId}; dropped.`,
+                    `stage ${marker.stageId}`
                   )
                   continue
                 }
                 if ((stage.tasks ?? []).every((task) => task.id !== marker.taskId)) {
-                  yield* Effect.logWarning(
-                    `Plan task marker names unknown task ${marker.taskId} in stage ${marker.stageId}; dropped.`
+                  yield* reportDroppedTaskMarker(
+                    key,
+                    `Plan task marker names unknown task ${marker.taskId} in stage ${marker.stageId}; dropped.`,
+                    `task ${marker.taskId} in stage ${marker.stageId}`
                   )
                   continue
                 }
@@ -1791,6 +1838,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   )
                 }
                 yield* emit({ _tag: "PlanUpdated", plan: canonicalPlan })
+                // Replay checkpoints against the amended plan: a marker emitted
+                // BEFORE the amendment landed was dropped against the old
+                // revision, and if no further assistant delta arrives it would
+                // stay lost. The dedup sets gate warnings only, never applies.
+                const amendedText = (yield* Ref.get(acc)).parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* recordPlanTaskProgress(amendedText)
                 return PlanDecision.Approve({
                   mode: modeOnApproval({
                     prior: mode === "plan" ? undefined : mode,

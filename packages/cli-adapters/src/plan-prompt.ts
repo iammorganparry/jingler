@@ -19,9 +19,10 @@ export const planExecutionNote = (
   checkpoints: ReadonlyArray<string> = []
 ): string => [
   "PLAN EXECUTION — an approved plan is in progress in this session.",
-  "Fold this message into the plan: attach it to the stage it belongs to (or treat it as an addition), say where it landed, and keep driving the plan to completion.",
+  "Fold this message into the plan: FIRST call jingler_submit_plan with the complete updated plan (it applies immediately mid-execution, no re-approval), say where the addition landed, and keep driving the plan to completion.",
   "The plan's task list is the operator's live progress view — treat it as your scratchpad. Emit a PLAN_TASK checkpoint the moment any task starts (in-progress), completes, or blocks, and PLAN_RESULT evidence lines for acceptance criteria you verify:",
   "PLAN_TASK stage=<stage-id> fingerprint=<fingerprint> task=<task-id> status=<in-progress|completed|blocked>",
+  "Markers must use ids from the current plan — a marker naming an unknown stage or task is dropped and the operator never sees that progress. Submit the amended plan before marking new work.",
   ...(checkpoints.length === 0
     ? []
     : ["", "Current execution checkpoints:", ...checkpoints])
