@@ -282,9 +282,22 @@ describe("device session command executor", () => {
       "session_1",
       { chatId: "chat_1", requestId: "question_1", answers: [] }
     )
-    expect(dependencies.controlSubagent).toHaveBeenCalledWith(control)
-    expect(dependencies.subagentFleetSnapshot).toHaveBeenCalledWith("parent-pi")
-    expect(dependencies.subagentTranscript).toHaveBeenCalledWith("parent-pi", "child-run")
+    expect(dependencies.controlSubagent).toHaveBeenCalledWith(
+      "session_1",
+      "chat_1",
+      control
+    )
+    expect(dependencies.subagentFleetSnapshot).toHaveBeenCalledWith(
+      "session_1",
+      "chat_1",
+      "parent-pi"
+    )
+    expect(dependencies.subagentTranscript).toHaveBeenCalledWith(
+      "session_1",
+      "chat_1",
+      "parent-pi",
+      "child-run"
+    )
     expect(dependencies.stop).toHaveBeenCalledWith("session_1", "chat_1")
   })
 

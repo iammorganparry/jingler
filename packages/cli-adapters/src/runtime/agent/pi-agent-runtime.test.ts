@@ -376,14 +376,28 @@ describe("PiAgentRuntime", () => {
 
     await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
     expect(dispose).not.toHaveBeenCalled()
-    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("/sessions/parent.jsonl")))
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "/sessions/parent.jsonl")))
       .resolves.toMatchObject({ totalActive: 1 })
-    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("pi-parent-internal")))
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "pi-parent-internal")))
       .resolves.toMatchObject({ totalActive: 1 })
     await expect(Effect.runPromise(
-      runtime.subagentTranscript("pi-parent-internal", "child-1")
+      runtime.subagentTranscript(
+        "session-1",
+        "chat-1",
+        "pi-parent-internal",
+        "child-1"
+      )
     )).resolves.toHaveLength(1)
-    await Effect.runPromise(runtime.controlSubagent({
+    const foreignChat = await Effect.runPromise(Effect.either(
+      runtime.subagentTranscript(
+        "session-1",
+        "another-chat",
+        "pi-parent-internal",
+        "child-1"
+      )
+    ))
+    expect(foreignChat._tag).toBe("Left")
+    await Effect.runPromise(runtime.controlSubagent("session-1", "chat-1", {
       version: 1,
       requestId: "control-1",
       parentPiSessionId: "pi-parent-internal",
@@ -407,10 +421,10 @@ describe("PiAgentRuntime", () => {
     childActive = false
     await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
     const missing = await Effect.runPromise(
-      Effect.either(runtime.subagentFleetSnapshot("pi-parent-internal"))
+      Effect.either(runtime.subagentFleetSnapshot("session-1", "chat-1", "pi-parent-internal"))
     )
     expect(missing._tag).toBe("Left")
-    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("/sessions/parent.jsonl")))
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "/sessions/parent.jsonl")))
       .rejects.toMatchObject({ message: "pi session is not active: /sessions/parent.jsonl" })
   })
 

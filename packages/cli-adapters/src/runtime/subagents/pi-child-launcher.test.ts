@@ -13,6 +13,7 @@ import {
   JINGLER_SUBAGENT_PI_CLI,
   PI_SUBAGENT_PI_BINARY,
   PI_SUBAGENT_PI_BINARY_ARGS,
+  PI_SUBAGENT_ELECTRON_RUN_AS_NODE,
   preparePiChildLauncher
 } from "./pi-child-launcher.js"
 
@@ -21,6 +22,7 @@ const roots: string[] = []
 const names = [
   PI_SUBAGENT_PI_BINARY,
   PI_SUBAGENT_PI_BINARY_ARGS,
+  PI_SUBAGENT_ELECTRON_RUN_AS_NODE,
   JINGLER_SUBAGENT_PI_CLI,
   JINGLER_SUBAGENT_CREDENTIAL_ROOT,
   JINGLER_SUBAGENT_NODE,
@@ -83,6 +85,7 @@ describe("preparePiChildLauncher", () => {
     expect(process.env.PI_SUBAGENT_PI_BINARY).toBe(process.execPath)
     expect(JSON.parse(process.env.PI_SUBAGENT_PI_BINARY_ARGS ?? "null"))
       .toEqual([wrapper])
+    expect(process.env.PI_SUBAGENT_ELECTRON_RUN_AS_NODE).toBe("1")
     expect(process.env.JINGLER_SUBAGENT_PI_CLI).toBe(piCliPath)
     expect(process.env.JINGLER_SUBAGENT_CREDENTIAL_ROOT).toBe(
       join(root, "credentials")

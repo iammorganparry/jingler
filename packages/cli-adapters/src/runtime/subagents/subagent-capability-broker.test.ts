@@ -99,6 +99,20 @@ describe("SubagentCapabilityBroker", () => {
       execute: ({ value }) => Promise.resolve({ inspected: value })
     })
     registry.register({
+      id: "empty",
+      version: "1",
+      description: "Use an empty object input",
+      input: Schema.Struct({}),
+      risk: "read",
+      roles: ["conversation", "review"],
+      modes: ["auto", "read-only"],
+      timeoutMs: 1_000,
+      outputBudget: 1_000,
+      cancellable: true,
+      idempotency: "safe",
+      execute: () => Promise.resolve("ok")
+    })
+    registry.register({
       id: "jingler_submit_plan",
       version: "1",
       description: "Parent-only control",
@@ -119,7 +133,7 @@ describe("SubagentCapabilityBroker", () => {
     expect(capabilities).toHaveLength(2)
     expect(new Set(capabilities.map(({ token }) => token)).size).toBe(2)
     expect(capabilityFor(capabilities, "worker").tools.map(({ id }) => id))
-      .toEqual(["inspect"])
+      .toEqual(["inspect", "empty"])
     const response = await call(capabilities, {})
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({

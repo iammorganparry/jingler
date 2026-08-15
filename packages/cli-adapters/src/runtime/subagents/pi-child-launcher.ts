@@ -13,6 +13,8 @@ export const JINGLER_SUBAGENT_NODE = "JINGLER_SUBAGENT_NODE"
 export const JINGLER_SUBAGENT_CHILD_TOOLS = "JINGLER_SUBAGENT_CHILD_TOOLS"
 export const PI_SUBAGENT_PI_BINARY = "PI_SUBAGENT_PI_BINARY"
 export const PI_SUBAGENT_PI_BINARY_ARGS = "PI_SUBAGENT_PI_BINARY_ARGS"
+export const PI_SUBAGENT_ELECTRON_RUN_AS_NODE =
+  "PI_SUBAGENT_ELECTRON_RUN_AS_NODE"
 
 export interface PiChildLauncherConfig {
   readonly wrapperPath: string
@@ -91,6 +93,7 @@ export const preparePiChildLauncher = (
       if (process.platform !== "win32") await chmod(config.wrapperPath, 0o700)
       pinEnvironment(PI_SUBAGENT_PI_BINARY, config.nodePath)
       pinValue(PI_SUBAGENT_PI_BINARY_ARGS, JSON.stringify([resolve(config.wrapperPath)]))
+      pinValue(PI_SUBAGENT_ELECTRON_RUN_AS_NODE, "1")
       pinEnvironment(JINGLER_SUBAGENT_PI_CLI, config.piCliPath)
       pinEnvironment(JINGLER_SUBAGENT_CREDENTIAL_ROOT, config.credentialRoot)
       pinEnvironment(JINGLER_SUBAGENT_NODE, config.nodePath)

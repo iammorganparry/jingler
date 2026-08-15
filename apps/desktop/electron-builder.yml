@@ -53,9 +53,9 @@ extraResources:
     to: icon.png
   - from: ../../THIRD-PARTY-LICENSES
     to: THIRD-PARTY-LICENSES
-  # Executed by the host Node installation and delegates into Electron's
-  # ELECTRON_RUN_AS_NODE mode, so detached pi-subagents children use the exact
-  # Pi runtime packaged with Jingler instead of an ambient `pi` from PATH.
+  # Executed by Jingler's packaged Electron binary in Node mode, so detached
+  # pi-subagents children use the exact Pi runtime packaged with Jingler instead
+  # of an ambient Node or `pi` from PATH.
   - from: ../../packages/cli-adapters/runtime-assets/pi-subagent-wrapper.mjs
     to: subagent-runtime/pi-subagent-wrapper.mjs
   - from: ../../packages/cli-adapters/runtime-assets/jingler-child-tools.mjs

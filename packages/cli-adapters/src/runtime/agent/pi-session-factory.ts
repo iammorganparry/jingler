@@ -10,9 +10,10 @@ import {
   type EventBus,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
-import {
-  registerSubagentCapabilityCeiling,
-  type SubagentCapabilityCeilingHandle
+import { createJiti } from "jiti"
+import type {
+  RegisterSubagentCapabilityCeilingOptions,
+  SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
 import type {
   Message,
@@ -49,6 +50,21 @@ export class PiSessionFactoryError extends Data.TaggedError("PiSessionFactoryErr
   readonly message: string
   readonly cause?: unknown
 }> {}
+
+interface CapabilityCeilingModule {
+  readonly registerSubagentCapabilityCeiling: (
+    options: RegisterSubagentCapabilityCeilingOptions
+  ) => SubagentCapabilityCeilingHandle
+}
+
+const jiti = createJiti(import.meta.url)
+let capabilityCeilingModule: Promise<CapabilityCeilingModule> | null = null
+const loadCapabilityCeiling = (): Promise<CapabilityCeilingModule> => {
+  capabilityCeilingModule ??= jiti.import<CapabilityCeilingModule>(
+    "pi-subagents/capability-ceiling"
+  )
+  return capabilityCeilingModule
+}
 
 export interface PiSessionFactoryOptions {
   readonly agentDir: string
@@ -419,7 +435,9 @@ const createSessionHandle = (
         catch: (cause) =>
           new AgentRuntimeError({
             reason: "runtime",
-            message: "Could not register the child capability broker",
+            message: cause instanceof Error
+              ? `Could not register the child capability broker: ${cause.message}`
+              : "Could not register the child capability broker",
             cause
           })
       }).pipe(
@@ -428,7 +446,21 @@ const createSessionHandle = (
           embedded.result.session.dispose()
         }))
       )
-      subagentCeiling = registerSubagentCapabilityCeiling({
+      const capabilityCeiling = yield* Effect.tryPromise({
+        try: loadCapabilityCeiling,
+        catch: (cause) => new AgentRuntimeError({
+          reason: "runtime",
+          message: "Could not load the pi-subagents capability ceiling",
+          cause
+        })
+      }).pipe(
+        Effect.onError(() => Effect.sync(() => {
+          options.subagentBroker!.unregister(parentPiSessionId)
+          lifecycle.stop()
+          embedded.result.session.dispose()
+        }))
+      )
+      subagentCeiling = capabilityCeiling.registerSubagentCapabilityCeiling({
         sessionId: parentPiSessionId,
         source: "jingler-runtime",
         ceiling: {

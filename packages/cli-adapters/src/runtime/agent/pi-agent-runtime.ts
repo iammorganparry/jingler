@@ -212,6 +212,8 @@ const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): 
 
 interface RetainedPiSession {
   readonly handle: PiSessionHandle
+  readonly sessionId: string
+  readonly chatId: string
   readonly aliases: ReadonlySet<string>
   activeTurns: number
   reapTimer: ReturnType<typeof setTimeout> | null
@@ -234,6 +236,12 @@ class PiSessionRegistry {
       ? undefined
       : this.#aliases.get(spec.piSessionId)
     if (retained) {
+      if (retained.sessionId !== spec.sessionId || retained.chatId !== spec.chatId) {
+        return Effect.fail(new AgentRuntimeError({
+          reason: "runtime",
+          message: "Retained Pi session does not belong to this chat"
+        }))
+      }
       if (retained.disposing || retained.activeTurns !== 0) {
         return Effect.fail(new AgentRuntimeError({
           reason: "runtime",
@@ -256,6 +264,8 @@ class PiSessionRegistry {
         const aliases = new Set([handle.id, handle.parentPiSessionId])
         const record: RetainedPiSession = {
           handle,
+          sessionId: spec.sessionId,
+          chatId: spec.chatId,
           aliases,
           activeTurns: 1,
           reapTimer: null,
@@ -269,6 +279,17 @@ class PiSessionRegistry {
 
   lookup(id: string): PiSessionHandle | undefined {
     return this.#aliases.get(id)?.handle
+  }
+
+  lookupOwned(
+    sessionId: string,
+    chatId: string,
+    id: string
+  ): PiSessionHandle | undefined {
+    const record = this.#aliases.get(id)
+    return record?.sessionId === sessionId && record.chatId === chatId
+      ? record.handle
+      : undefined
   }
 
   async release(record: RetainedPiSession): Promise<void> {
@@ -368,11 +389,11 @@ export const makePiAgentRuntime = (
       options.retainedSessionPollMs ?? 1_000
     )
 
-    const withSession = <Value>(
+    const sessionOperation = <Value>(
+      session: PiSessionHandle | undefined,
       id: string,
       action: (session: PiSessionHandle) => Promise<Value>
     ): Effect.Effect<Value, AgentRuntimeError> => {
-      const session = sessions.lookup(id)
       return session
         ? Effect.tryPromise({
             try: () => action(session),
@@ -393,17 +414,34 @@ export const makePiAgentRuntime = (
 
     return {
       run: (spec, context) => runSession(sessions, spec, context),
-      steer: (id, text) => withSession(id, (session) => session.steer(text)),
-      interrupt: (id) => withSession(id, (session) => session.interrupt()),
-      controlSubagent: (request) => withSession(
+      steer: (id, text) => sessionOperation(
+        sessions.lookup(id),
+        id,
+        (session) => session.steer(text)
+      ),
+      interrupt: (id) => sessionOperation(
+        sessions.lookup(id),
+        id,
+        (session) => session.interrupt()
+      ),
+      controlSubagent: (sessionId, chatId, request) => sessionOperation(
+        sessions.lookupOwned(sessionId, chatId, request.parentPiSessionId),
         request.parentPiSessionId,
         (session) => session.controlSubagent(request)
       ),
-      subagentFleetSnapshot: (parentPiSessionId) => withSession(
+      subagentFleetSnapshot: (sessionId, chatId, parentPiSessionId) =>
+        sessionOperation(
+          sessions.lookupOwned(sessionId, chatId, parentPiSessionId),
+          parentPiSessionId,
+          (session) => session.subagentFleetSnapshot()
+        ),
+      subagentTranscript: (
+        sessionId,
+        chatId,
         parentPiSessionId,
-        (session) => session.subagentFleetSnapshot()
-      ),
-      subagentTranscript: (parentPiSessionId, runId) => withSession(
+        runId
+      ) => sessionOperation(
+        sessions.lookupOwned(sessionId, chatId, parentPiSessionId),
         parentPiSessionId,
         (session) => session.subagentTranscript(runId)
       )

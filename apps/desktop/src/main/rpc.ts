@@ -5159,7 +5159,13 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Agent.subagentFleetSnapshot",
         { chatId, parentPiSessionId },
-        { execute: () => runtime.subagentFleetSnapshot(parentPiSessionId) },
+        {
+          execute: () => runtime.subagentFleetSnapshot(
+            sessionId,
+            chatId,
+            parentPiSessionId
+          )
+        },
         {
           execute: () => remote.request(
             session,
@@ -5187,7 +5193,14 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Agent.subagentTranscript",
         { chatId, parentPiSessionId, runId },
-        { execute: () => runtime.subagentTranscript(parentPiSessionId, runId) },
+        {
+          execute: () => runtime.subagentTranscript(
+            sessionId,
+            chatId,
+            parentPiSessionId,
+            runId
+          )
+        },
         {
           execute: () => remote.request(
             session,
@@ -5210,7 +5223,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Agent.controlSubagent",
         { chatId, request },
-        { execute: () => runtime.controlSubagent(request) },
+        {
+          execute: () => runtime.controlSubagent(sessionId, chatId, request)
+        },
         {
           execute: () => remote.request(
             session,

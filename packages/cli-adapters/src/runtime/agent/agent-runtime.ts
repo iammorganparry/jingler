@@ -73,12 +73,18 @@ export interface AgentRuntimeShape {
   readonly steer: (piSessionId: string, text: string) => Effect.Effect<void, AgentRuntimeError>
   readonly interrupt: (piSessionId: string) => Effect.Effect<void, AgentRuntimeError>
   readonly controlSubagent: (
+    sessionId: string,
+    chatId: string,
     request: SubagentFleetControlRequest
   ) => Effect.Effect<SubagentFleetControlOutcome, AgentRuntimeError>
   readonly subagentFleetSnapshot: (
+    sessionId: string,
+    chatId: string,
     parentPiSessionId: string
   ) => Effect.Effect<SubagentFleetSnapshot, AgentRuntimeError>
   readonly subagentTranscript: (
+    sessionId: string,
+    chatId: string,
     parentPiSessionId: string,
     runId: string
   ) => Effect.Effect<ReadonlyArray<Message>, AgentRuntimeError>

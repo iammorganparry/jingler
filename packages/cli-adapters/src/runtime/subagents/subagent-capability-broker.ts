@@ -96,9 +96,22 @@ const childTools = (
       if (schema === null) {
         throw new Error(`Active child tool has no input schema: ${tool.id}`)
       }
-      const inputSchema = Schema.decodeUnknownSync(SubagentToolInputSchema)(
-        registry.providerInputSchemaFor(tool.id) ?? JSONSchema.make(schema)
-      )
+      let inputSchema: SubagentToolInputSchema
+      try {
+        const providerSchema =
+          registry.providerInputSchemaFor(tool.id) ?? JSONSchema.make(schema)
+        inputSchema = Schema.decodeUnknownSync(SubagentToolInputSchema)(
+          typeof providerSchema === "object" &&
+            providerSchema !== null &&
+            !Array.isArray(providerSchema)
+            ? { ...providerSchema, type: "object" }
+            : providerSchema
+        )
+      } catch (cause) {
+        throw new Error(`Active child tool has an unsupported input schema: ${tool.id}`, {
+          cause
+        })
+      }
       return {
         id: tool.id,
         description: tool.description,

@@ -85,15 +85,29 @@ diff --git a/src/runs/shared/pi-spawn.ts b/src/runs/shared/pi-spawn.ts
 index 26081e0..a297f12 100644
 --- a/src/runs/shared/pi-spawn.ts
 +++ b/src/runs/shared/pi-spawn.ts
-@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
+@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
  
  export const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
  export const PI_SUBAGENT_PI_BINARY_ENV = "PI_SUBAGENT_PI_BINARY";
 +export const PI_SUBAGENT_PI_BINARY_ARGS_ENV = "PI_SUBAGENT_PI_BINARY_ARGS";
++export const PI_SUBAGENT_ELECTRON_RUN_AS_NODE_ENV = "PI_SUBAGENT_ELECTRON_RUN_AS_NODE";
  
  export function findPiPackageRootFromEntry(
  	entryPoint: string,
-@@ -143,7 +144,18 @@ export function getPiSpawnCommand(
+@@ -59,6 +61,12 @@ interface PiSpawnCommand {
+ 	args: string[];
+ }
+ 
++export function getPiSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
++	return env[PI_SUBAGENT_ELECTRON_RUN_AS_NODE_ENV] === "1"
++		? { ...env, ELECTRON_RUN_AS_NODE: "1" }
++		: env;
++}
++
+ function isRunnableNodeScript(
+ 	filePath: string,
+ 	existsSync: (filePath: string) => boolean,
+@@ -143,7 +151,18 @@ export function getPiSpawnCommand(
  	const env = deps.env ?? process.env;
  	const piBinary = env[PI_SUBAGENT_PI_BINARY_ENV]?.trim();
  	if (piBinary) {
@@ -113,3 +127,45 @@ index 26081e0..a297f12 100644
  	}
  
  	const execPath = deps.execPath ?? process.execPath;
+diff --git a/src/runs/foreground/execution.ts b/src/runs/foreground/execution.ts
+index b9aa998..9d123b1 100644
+--- a/src/runs/foreground/execution.ts
++++ b/src/runs/foreground/execution.ts
+@@ -55,7 +55,7 @@ import { buildSkillInjection, resolveSkillsWithFallback } from "../../agents/skills.ts";
+ import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
+ import { evaluateCompletionMutationGuard } from "../shared/completion-guard.ts";
+ import { arbitrateCompletionGuardRescue } from "../shared/llm-intent-arbiter.ts";
+-import { getPiSpawnCommand } from "../shared/pi-spawn.ts";
++import { getPiSpawnCommand, getPiSpawnEnv } from "../shared/pi-spawn.ts";
+ import { createJsonlWriter } from "../../shared/jsonl-writer.ts";
+ import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
+ import { resolvePermissionRules } from "../shared/permissions.ts";
+@@ -483,6 +483,6 @@ export async function executeSingleAgent(
+ 		const proc = spawn(spawnSpec.command, spawnSpec.args, {
+ 			cwd: options.cwd ?? runtimeCwd,
+-			env: spawnEnv,
++			env: getPiSpawnEnv(spawnEnv),
+ 			stdio: ["ignore", "pipe", "pipe"],
+ 			windowsHide: true,
+ 		});
+diff --git a/src/runs/background/subagent-runner.ts b/src/runs/background/subagent-runner.ts
+index 14093e4..249f293 100644
+--- a/src/runs/background/subagent-runner.ts
++++ b/src/runs/background/subagent-runner.ts
+@@ -10,6 +10,6 @@ import { createChildTranscriptWriter, type ChildTranscriptWriter } from "../../shared/child-transcript.ts";
+ import { closeSteerInbox, consumeInterruptRequest, consumeSteerRequests, deliverInterruptRequest, deliverStopRequest, deliverTimeoutRequest, enqueueStepSteer, steerAcksDir, steerCapabilityPath, stepSteerInboxDir, watchAsyncControlInbox, type SteerAck, type SteerCapability, type SteerRequest } from "./control-channel.ts";
+ import { appendJsonl as appendRawJsonl, formatOutputArtifactContent, getArtifactPaths, writeArtifact, writeMetadata } from "../../shared/artifacts.ts";
+-import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
++import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, getPiSpawnEnv, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
+ import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
+ import {
+ 	type ActivityState,
+@@ -554,7 +554,7 @@ export async function runPiStreaming(
+ 		const child = spawn(spawnSpec.command, spawnSpec.args, {
+ 			cwd,
+ 			stdio: ["ignore", "pipe", "pipe"],
+-			env: spawnEnv,
++			env: getPiSpawnEnv(spawnEnv),
+ 			windowsHide: true,
+ 			detached: process.platform !== "win32",
+ 		});
