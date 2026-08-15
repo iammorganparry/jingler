@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react"
+import { memo, type ReactNode, useState } from "react"
 import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
 import type { ContentPart, ExecutionMode, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
@@ -336,7 +336,10 @@ function renderParts(
     onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
     onResumePlan?: (planId: string) => void
     onOpenPlanReview?: () => void
-  }
+  },
+  // When a mega-turn's prefix is collapsed, `parts` is a suffix of the real
+  // array — keys must stay ABSOLUTE so expanding doesn't remount the tail.
+  keyOffset = 0
 ): ReactNode[] {
   const out: ReactNode[] = []
   let run: ToolPart[] = []
@@ -374,7 +377,8 @@ function renderParts(
     out.push(<MergedThoughts key={`t${thoughtStart}`} parts={thoughts} />)
     thoughts = []
   }
-  parts.forEach((part, i) => {
+  parts.forEach((part, localIndex) => {
+    const i = localIndex + keyOffset
     if (part._tag === "Tool") {
       flushImgs()
       flushThoughts()
@@ -407,8 +411,39 @@ function renderParts(
   return out
 }
 
-/** One transcript turn: a You / provider eyebrow followed by its ordered parts. */
-export function MessageTurn({
+/**
+ * A turn with more parts than this renders only its tail until asked for the
+ * rest. Agentic mega-turns are real: benchmarking the app against a live
+ * transcript found single assistant messages with 512 and 669 parts (5.4MB of
+ * JSON), and rendering one mounted tens of thousands of DOM nodes in a single
+ * 3.4s main-thread task — the transcript is virtualized per TURN, so nothing
+ * above this component can split the row up.
+ */
+const MEGA_TURN_MIN_PARTS = 160
+/** How much of a collapsed mega-turn stays visible (the newest steps + reply). */
+const MEGA_TURN_TAIL = 80
+
+/**
+ * The hidden-prefix boundary, quantized so it only moves once another
+ * `MEGA_TURN_TAIL` parts accumulate — a live mega-turn appends parts while it
+ * streams, and a boundary that tracked `length` exactly would shift every
+ * render and re-key (remount) the whole visible tail each time.
+ */
+const hiddenPrefixLength = (partCount: number): number =>
+  partCount > MEGA_TURN_MIN_PARTS
+    ? Math.floor((partCount - MEGA_TURN_TAIL) / MEGA_TURN_TAIL) * MEGA_TURN_TAIL
+    : 0
+
+/**
+ * One transcript turn: a You / provider eyebrow followed by its ordered parts.
+ *
+ * Memoised (see the export below): streaming replaces only the LAST message
+ * object per token, so every settled turn keeps its `message` identity and can
+ * skip re-rendering — without this, each token re-rendered every visible turn's
+ * markdown and tool cards. The handler props must stay referentially stable for
+ * that to hold; `useConversation` memoises them per actor for exactly this.
+ */
+function MessageTurnImpl({
   message,
   providerId,
   onDecideGate,
@@ -428,6 +463,10 @@ export function MessageTurn({
   onOpenPlanReview?: () => void
 }) {
   const isAssistant = message.role === "assistant"
+  const [showAllParts, setShowAllParts] = useState(false)
+  const hiddenParts = showAllParts ? 0 : hiddenPrefixLength(message.parts.length)
+  const visibleParts =
+    hiddenParts > 0 ? message.parts.slice(hiddenParts) : message.parts
   return (
     <div className="flex flex-col gap-3">
       {isAssistant ? (
@@ -441,7 +480,24 @@ export function MessageTurn({
       ) : (
         <Eyebrow>You</Eyebrow>
       )}
-      {renderParts(message.parts, isAssistant, { onDecideGate, onApprovePlan, onResumePlan, onOpenPlanReview })}
+      {hiddenParts > 0 && (
+        <button
+          type="button"
+          data-testid="show-earlier-steps"
+          onClick={() => setShowAllParts(true)}
+          className="flex w-fit items-center gap-1.5 rounded-full border border-line bg-sunken px-3 py-1 text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground"
+        >
+          Show {hiddenParts} earlier steps
+        </button>
+      )}
+      {renderParts(
+        visibleParts,
+        isAssistant,
+        { onDecideGate, onApprovePlan, onResumePlan, onOpenPlanReview },
+        hiddenParts
+      )}
     </div>
   )
 }
+
+export const MessageTurn = memo(MessageTurnImpl)

@@ -9,6 +9,7 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   Environment,
+  ExecutionMode,
   ProviderCatalog,
   Session
 } from "@jingler/core"
@@ -218,6 +219,26 @@ export function ConversationPane({
   const canApprovePlan =
     canonicalPlan.canApprove &&
     matchesCanonicalPlan(canonicalPlan.document, convo.plan)
+  // Stable identities for the handlers that reach `MessageTurn` (its memo is
+  // what keeps settled turns from re-rendering per streamed token). These
+  // change only when approval eligibility or the plan revision actually moves.
+  const planRevision = canonicalPlan.document?.revision
+  const approvePlanForRevision = canApprovePlan && canonicalPlan.document !== null
+  const onApprovePlanStable = useMemo(
+    () =>
+      approvePlanForRevision
+        ? (id: string, executionMode?: ExecutionMode) =>
+            convo.approvePlan(id, executionMode, planRevision)
+        : undefined,
+    [approvePlanForRevision, convo.approvePlan, planRevision]
+  )
+  const onResumePlanStable = useMemo(
+    () =>
+      approvePlanForRevision
+        ? (id: string) => convo.resumePlan(id, planRevision)
+        : undefined,
+    [approvePlanForRevision, convo.resumePlan, planRevision]
+  )
   const initialThreadDispatches = useRef(new Set<string>())
   // A direct reply RPC persists its pending message before it finishes routing.
   // Plan.watch can publish that intermediate revision, so tell the recovery
@@ -269,7 +290,11 @@ export function ConversationPane({
           })
           .catch(() => {})
       })
-  }, [canonicalPlan.document, session.id])
+    // Keyed on id+revision, not the document object: `Plan.watch` republishes
+    // a fresh document object per emission, and this effect scans every
+    // annotation's messages — running it per emission instead of per revision
+    // was measurable during plan editing.
+  }, [canonicalPlan.document?.id, canonicalPlan.document?.revision, session.id])
 
   // Everything the transcript needs to turn a path into a link. `convo.files` is
   // the worktree's tracked-file list, already fetched for the composer's `@`
@@ -290,23 +315,45 @@ export function ConversationPane({
     planSplitRatio,
     planSplitRowWidth
   )
-  const adjustPlanSplit = useCallback(
-    (deltaX: number) => {
-      if (planSplitRowWidth <= 0) return
-      const next = resizedPlanSplitRatio(
-        effectivePlanSplitRatio,
-        planSplitRowWidth,
-        deltaX
-      )
-      setPlanSplitRatio(next)
-      try {
-        localStorage.setItem(PLAN_SPLIT_RATIO_KEY, String(next))
-      } catch {
-        /* A private/quota-limited renderer still keeps the in-memory ratio. */
-      }
-    },
-    [effectivePlanSplitRatio, planSplitRowWidth]
-  )
+  // Same live-drag discipline as the session auxiliary split: a drag's
+  // per-pointermove deltas write the column width to the DOM directly, and
+  // React state commits ONCE on release — a setState per move re-rendered the
+  // conversation AND the whole Plan Review per mouse movement.
+  const planSplitColumnRef = useRef<HTMLDivElement | null>(null)
+  const dragPlanSplitRatio = useRef<number | null>(null)
+  const livePlanSplitState = useRef({
+    ratio: effectivePlanSplitRatio,
+    rowWidth: planSplitRowWidth,
+  })
+  livePlanSplitState.current = {
+    ratio: effectivePlanSplitRatio,
+    rowWidth: planSplitRowWidth,
+  }
+  const planSplitColumnWidth = (ratio: number): string =>
+    `calc(${ratio * 100}% - ${ratio * PLAN_SPLIT_HANDLE_WIDTH}px)`
+  const adjustPlanSplit = useCallback((deltaX: number) => {
+    const { ratio, rowWidth } = livePlanSplitState.current
+    if (rowWidth <= 0) return
+    const next = resizedPlanSplitRatio(
+      dragPlanSplitRatio.current ?? ratio,
+      rowWidth,
+      deltaX
+    )
+    dragPlanSplitRatio.current = next
+    const column = planSplitColumnRef.current
+    if (column) column.style.width = planSplitColumnWidth(next)
+  }, [])
+  const commitPlanSplit = useCallback(() => {
+    const next = dragPlanSplitRatio.current
+    dragPlanSplitRatio.current = null
+    if (next === null) return
+    setPlanSplitRatio(next)
+    try {
+      localStorage.setItem(PLAN_SPLIT_RATIO_KEY, String(next))
+    } catch {
+      /* A private/quota-limited renderer still keeps the in-memory ratio. */
+    }
+  }, [])
 
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
   // The chips describe the values that will actually be sent. Discovery may
@@ -1008,17 +1055,8 @@ export function ConversationPane({
           onSetReasoning={convo.setReasoning}
           question={convo.question}
           onAnswerQuestion={convo.answerQuestion}
-          onApprovePlan={
-            canApprovePlan && canonicalPlan.document !== null
-              ? (id, executionMode) =>
-                  convo.approvePlan(id, executionMode, canonicalPlan.document?.revision)
-              : undefined
-          }
-          onResumePlan={
-            canApprovePlan && canonicalPlan.document !== null
-              ? (id) => convo.resumePlan(id, canonicalPlan.document?.revision)
-              : undefined
-          }
+          onApprovePlan={onApprovePlanStable}
+          onResumePlan={onResumePlanStable}
           onOpenPlanReview={onOpenPlanReview}
           plan={convo.plan}
           planDocument={canonicalPlan.document}
@@ -1097,11 +1135,16 @@ export function ConversationPane({
       */}
       {view === "split" && (
         <>
-          <ResizeHandle aria-label="Resize plan" onResize={adjustPlanSplit} />
+          <ResizeHandle
+            aria-label="Resize plan"
+            onResize={adjustPlanSplit}
+            onResizeEnd={commitPlanSplit}
+          />
           <div
+            ref={planSplitColumnRef}
             data-testid="plan-split-column"
             style={{
-              width: `calc(${effectivePlanSplitRatio * 100}% - ${effectivePlanSplitRatio * PLAN_SPLIT_HANDLE_WIDTH}px)`
+              width: planSplitColumnWidth(effectivePlanSplitRatio)
             }}
             className="flex min-h-0 flex-none flex-col overflow-hidden border-l border-hairline"
           >

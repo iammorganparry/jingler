@@ -436,10 +436,31 @@ export function ConversationView({
 
   // Track whether we're parked at the bottom (within a small threshold), so
   // scrolling up to read pauses the auto-follow and scrolling back resumes it.
+  //
+  // Unsticking is a USER decision, never a layout artifact. Virtual rows
+  // measure in after the initial bottom-pin, and each correction fires scroll
+  // events whose distance-to-bottom is momentarily huge (a heavy transcript's
+  // estimates can be off by hundreds of thousands of px) — treating those as
+  // "the reader scrolled up" stranded a freshly opened session mid-transcript
+  // instead of at its newest message. So a scroll event may only turn the
+  // follow OFF when a real gesture (wheel, touch, pointer on the scrollbar,
+  // scrolling keys) marked the movement as the operator's.
+  const userScrollIntent = useRef(false)
+  const markUserScroll = useCallback(() => {
+    userScrollIntent.current = true
+  }, [])
   const onScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (nearBottom) {
+      stick.current = true
+      // Back at the bottom: the gesture is spent. Later measurement churn
+      // must not inherit it and silently pause the follow again.
+      userScrollIntent.current = false
+      return
+    }
+    if (userScrollIntent.current) stick.current = false
   }, [])
 
   return (
@@ -458,6 +479,10 @@ export function ConversationView({
           ref={scrollRef}
           data-testid="conversation-scroll"
           onScroll={onScroll}
+          onWheel={markUserScroll}
+          onTouchMove={markUserScroll}
+          onPointerDown={markUserScroll}
+          onKeyDown={markUserScroll}
           className={cn(
             // `both-edges` reserves the scrollbar gutter symmetrically so the
             // centered content stays on the window's centre axis — matching the

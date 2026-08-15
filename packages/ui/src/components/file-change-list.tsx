@@ -1,10 +1,22 @@
 import type { FileChange } from "@jingler/core"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, ChevronRight } from "lucide-react"
+import { useState } from "react"
 import { useOpenPath } from "../asset/open-asset-context.js"
 import { cn } from "../lib/cn.js"
 import { DiffPeek } from "./diff-peek.js"
 import { DiffStat } from "./diff-stat.js"
 import { FileIcon } from "./file-icon.js"
+
+/**
+ * Above this many changed files, per-file diffs render on demand instead of
+ * eagerly. Every `DiffPeek` is a full Pierre diff instance (parse + provider
+ * + highlighted rows), and tool calls that touch whole trees are real: one
+ * benchmarked `pnpm patch-commit` card carried 226 files / 79k deleted lines,
+ * and a second card re-adding them sat beside it — mounting ~450 diff
+ * renderers in one commit was a multi-GB renderer spike. The rows themselves
+ * (path, status, ±stat) stay: they are the information; the diff is detail.
+ */
+const EAGER_PREVIEW_MAX = 8
 
 const STATUS = {
   A: { label: "Created", tone: "border-green/30 bg-green/10 text-green" },
@@ -41,8 +53,17 @@ function ChangePath({ change }: { readonly change: FileChange }) {
   )
 }
 
-function FileChangeRow({ change }: { readonly change: FileChange }) {
+function FileChangeRow({
+  change,
+  eagerPreview
+}: {
+  readonly change: FileChange
+  /** Mount the diff with the row; false defers it behind a per-row toggle. */
+  readonly eagerPreview: boolean
+}) {
   const status = STATUS[change.status]
+  const [previewRequested, setPreviewRequested] = useState(false)
+  const showPreview = change.preview !== null && (eagerPreview || previewRequested)
   return (
     <div data-file-change={change.status} data-file-path={change.path}>
       <div className="flex min-w-0 items-center gap-2 px-3 py-2 font-mono text-[11px]">
@@ -64,8 +85,21 @@ function FileChangeRow({ change }: { readonly change: FileChange }) {
         {change.noNewlineAtEnd && (
           <span className="shrink-0 text-dim" title="No newline at end of file">No newline</span>
         )}
+        {change.preview !== null && !eagerPreview && (
+          <button
+            type="button"
+            data-testid="show-file-diff"
+            onClick={() => setPreviewRequested((v) => !v)}
+            className="flex shrink-0 items-center gap-0.5 text-dim outline-none transition-colors hover:text-muted-foreground"
+          >
+            <ChevronRight
+              className={cn("size-3 transition-transform", previewRequested && "rotate-90")}
+            />
+            Diff
+          </button>
+        )}
       </div>
-      {change.preview !== null && <DiffPeek preview={change.preview} />}
+      {showPreview && change.preview !== null && <DiffPeek preview={change.preview} />}
     </div>
   )
 }
@@ -88,12 +122,14 @@ export function FileChangeList({ changes }: { readonly changes: ReadonlyArray<Fi
       </div>
     )
   }
+  const eagerPreview = changes.length <= EAGER_PREVIEW_MAX
   return (
     <div className="divide-y divide-line/60 border-t border-line/60 bg-editor">
       {changes.map((change) => (
         <FileChangeRow
           key={`${change.status}:${change.oldPath ?? ""}:${change.path}`}
           change={change}
+          eagerPreview={eagerPreview}
         />
       ))}
     </div>

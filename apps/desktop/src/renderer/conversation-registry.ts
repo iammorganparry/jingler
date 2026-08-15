@@ -246,7 +246,14 @@ const publishes = createCoalescer<ConversationSnapshot>((batch) => {
   }
 }, PUBLISH_MS)
 
-/** Stop + forget one actor, leaving the stores it published alone. */
+/**
+ * Stop + forget one actor, leaving the SESSION-level stores it published alone
+ * (see `evictIdleActors` for why) but clearing its CHAT-scoped entries. Those
+ * used to be dropped only on explicit chat/session deletion, so every chat
+ * ever opened kept its last activity + file-activity object resident for the
+ * app's lifetime; like the transcript, they are recomputed when the chat is
+ * next opened.
+ */
 const forget = (key: string): void => {
   registry.get(key)?.stop()
   registry.delete(key)
@@ -254,6 +261,12 @@ const forget = (key: string): void => {
   notifyBaselines.delete(key)
   pendingFileActivities.delete(key)
   publishes.cancel(key)
+  const separator = key.indexOf(":")
+  if (separator === -1) return
+  const sessionId = key.slice(0, separator)
+  const chatId = key.slice(separator + 1)
+  publishChatActivity(sessionId, chatId, null)
+  clearAgentFileActivityChat(sessionId, chatId)
 }
 
 /**
