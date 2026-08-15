@@ -1,0 +1,2 @@
+# Patch payloads preserve upstream indentation and blank lines literally.
+patches/*.patch -whitespace

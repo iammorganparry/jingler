@@ -74,4 +74,3 @@ describe("ChatTabBar closed chats", () => {
     expect(screen.getByRole("button", { name: "Expand files group" })).toBeTruthy()
   })
 })
-

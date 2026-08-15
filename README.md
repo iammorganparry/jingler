@@ -12,6 +12,7 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - Run Claude Code or Codex CLI workspaces from one desktop app.
 - Work on several tasks in parallel, each in an isolated git worktree.
 - Review plans, diffs, agent activity, and pull requests without leaving the session.
+- Inspect and control delegated Pi agents from the composer-integrated [Fleet](docs/subagent-fleet.md).
 - Start work from a project checkout or a new isolated worktree.
 - Use built-in terminals, browser previews, themes, MCP servers, and agent skills.
 - Give paid teams a cited, agent-managed shared Memory wiki with private lexical search, analytics, and an explicit-evidence mind map.
