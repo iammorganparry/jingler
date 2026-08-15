@@ -14,7 +14,7 @@ import { Hono } from "hono"
 import { getAuth } from "./auth.js"
 import { upsertAuthStateCapability } from "./auth-state-client.js"
 import { env } from "./env.js"
-import { managedGitHubCapabilityForUser } from "./github-routes.js"
+import { managedGitHubCapabilityForRepository } from "./github-routes.js"
 import { decodeBoundedJson } from "./request-decoding.js"
 
 interface RuntimeGrantInput {
@@ -178,10 +178,10 @@ export const ManagedOffloadPortsLive = Layer.succeed(ManagedOffloadPorts, {
       try: () => getAuth().api.getSession({ headers }),
       catch: () => admissionFailure("unavailable", "Authentication service unavailable")
     }).pipe(Effect.map((session) => session?.user?.id ?? null)),
-  authorizeRepository: (subject, _repositorySlug) =>
+  authorizeRepository: (subject, repositorySlug) =>
     Effect.tryPromise({
       try: async () => {
-        const capability = await managedGitHubCapabilityForUser(subject)
+        const capability = await managedGitHubCapabilityForRepository(subject, repositorySlug)
         if (capability === null) throw admissionFailure(
           "authorization",
           "Connect GitHub before using Offload Compute"

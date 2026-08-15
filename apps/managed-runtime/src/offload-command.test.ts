@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { gzipSync } from "node:zlib"
@@ -18,15 +18,32 @@ const repository = () => {
   writeFileSync(join(root, "tracked.txt"), "base\n")
   execFileSync("git", ["add", "."], { cwd: root })
   execFileSync("git", ["commit", "--quiet", "-m", "base"], { cwd: root })
+  const launcher = `${root}.launcher.mjs`
+  writeFileSync(launcher, [
+    "#!/usr/bin/env node",
+    "const { spawnSync } = await import('node:child_process')",
+    "const result = spawnSync(process.argv[2], process.argv.slice(3), { stdio: 'inherit' })",
+    "process.exit(result.status ?? 1)"
+  ].join("\n"))
+  chmodSync(launcher, 0o700)
   return root
 }
 
-const runner = (root: string, args: string[]) => spawnSync(
+const runner = (
+  root: string,
+  args: string[],
+  env: Record<string, string | undefined> = {}
+) => spawnSync(
   process.execPath,
   [RUNNER, ...args],
   {
     cwd: root,
-    env: { ...process.env, JINGLER_OFFLOAD_WORKSPACE: root },
+    env: {
+      ...process.env,
+      JINGLER_OFFLOAD_WORKSPACE: root,
+      JINGLER_OFFLOAD_LAUNCHER: `${root}.launcher.mjs`,
+      ...env
+    },
     encoding: "utf8"
   }
 )
@@ -69,10 +86,33 @@ afterEach(() => {
     rmSync(`${root}.command.json`, { force: true })
     rmSync(`${root}.result.json`, { force: true })
     rmSync(`${root}.result.json.lock`, { force: true })
+    rmSync(`${root}.launcher.mjs`, { force: true })
   }
 })
 
 describe("offload argv executor", () => {
+  it("refuses execution when the security launcher is unavailable", () => {
+    const root = repository()
+    const marker = `${root}.must-not-run-without-launcher`
+    const commandPath = `${root}.command.json`
+    const resultPath = `${root}.result.json`
+    writeFileSync(commandPath, JSON.stringify({
+      executable: "node",
+      args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`],
+      cwd: ".",
+      timeoutMs: 5_000,
+      outputBytes: 1024,
+      sourceDigest: manifest(root),
+      startAllowed: true
+    }))
+    const executed = runner(root, ["run", commandPath, resultPath], {
+      JINGLER_OFFLOAD_LAUNCHER: `${root}.missing-launcher`
+    })
+    expect(executed.status).not.toBe(0)
+    expect(executed.stderr).toContain("refusing unisolated execution")
+    expect(() => readFileSync(marker)).toThrow()
+  })
+
   it("passes metacharacters literally without invoking a shell", () => {
     const root = repository()
     const marker = join(root, "shell-was-invoked")

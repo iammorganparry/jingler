@@ -170,21 +170,46 @@ const restore = async (snapshotPath, admittedBytes) => {
 const COMMAND_UID = 65_532
 const WRITABLE_OUTPUTS = [".cache", ".turbo", "build", "coverage", "dist", "out"]
 
-const prepareWritableOutputs = async (directory = WORKSPACE) => {
-  const entries = await readdir(directory, { withFileTypes: true })
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === ".git" || entry.name === "node_modules" || WRITABLE_OUTPUTS.includes(entry.name)) continue
-    // biome-ignore lint/performance/noAwaitInLoops: bounded source tree traversal is ordered for hardening.
-    await prepareWritableOutputs(resolve(directory, entry.name))
+const MAX_PROJECT_ROOTS = 512
+const MAX_SCANNED_DIRECTORIES = 10_000
+
+const discoverProjectRoots = async () => {
+  const roots = []
+  const pending = [WORKSPACE]
+  let scanned = 0
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    scanned += 1
+    if (scanned > MAX_SCANNED_DIRECTORIES) {
+      throw new Error("Repository has too many directories to harden safely")
+    }
+    // biome-ignore lint/performance/noAwaitInLoops: traversal is deliberately bounded.
+    const entries = await readdir(directory, { withFileTypes: true })
+    if (entries.some((entry) => entry.isFile() && entry.name === "package.json")) {
+      roots.push(directory)
+      if (roots.length > MAX_PROJECT_ROOTS) {
+        throw new Error("Repository has too many package roots to harden safely")
+      }
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === ".git" || entry.name === "node_modules" || WRITABLE_OUTPUTS.includes(entry.name)) continue
+      pending.push(resolve(directory, entry.name))
+    }
   }
-  for (const output of WRITABLE_OUTPUTS) {
-    const path = resolve(directory, output)
-    // biome-ignore lint/performance/noAwaitInLoops: each output directory is an independent writable mount substitute.
-    await mkdir(path, { recursive: true })
-    // biome-ignore lint/performance/noAwaitInLoops: ownership must be set before command execution.
-    await chown(path, COMMAND_UID, COMMAND_UID)
-    // biome-ignore lint/performance/noAwaitInLoops: outputs are private to the unprivileged command user.
-    await chmod(path, 0o700)
+  return roots.length === 0 ? [WORKSPACE] : roots
+}
+
+const prepareWritableOutputs = async () => {
+  for (const directory of await discoverProjectRoots()) {
+    for (const output of WRITABLE_OUTPUTS) {
+      const path = resolve(directory, output)
+      // biome-ignore lint/performance/noAwaitInLoops: bounded package output roots are hardened in order.
+      await mkdir(path, { recursive: true })
+      // biome-ignore lint/performance/noAwaitInLoops: ownership must be set before command execution.
+      await chown(path, COMMAND_UID, COMMAND_UID)
+      // biome-ignore lint/performance/noAwaitInLoops: outputs are private to the unprivileged command user.
+      await chmod(path, 0o700)
+    }
   }
 }
 
@@ -249,19 +274,15 @@ const run = async (commandPath, resultPath) => {
   const cwd = input.cwd === "." ? WORKSPACE : insideWorkspace(input.cwd)
   const startedAt = Date.now()
   const launcher = process.env.JINGLER_OFFLOAD_LAUNCHER ?? "/opt/jingler/offload-launch"
-  const result = existsSync(launcher)
-    ? await spawnResult(launcher, [input.executable, ...input.args], {
-        cwd,
-        env: safeEnvironment(),
-        timeout: input.timeoutMs,
-        outputBytes: input.outputBytes
-      })
-    : await spawnResult(input.executable, input.args, {
-        cwd,
-        env: safeEnvironment(),
-        timeout: input.timeoutMs,
-        outputBytes: input.outputBytes
-      })
+  if (!existsSync(launcher)) {
+    throw new Error("Offload security launcher is unavailable; refusing unisolated execution")
+  }
+  const result = await spawnResult(launcher, [input.executable, ...input.args], {
+    cwd,
+    env: safeEnvironment(),
+    timeout: input.timeoutMs,
+    outputBytes: input.outputBytes
+  })
   const sourceDigest = await gitStatusDigest()
   const stdout = result.stdout.toString("utf8")
   const stderr = result.stderr.toString("utf8")

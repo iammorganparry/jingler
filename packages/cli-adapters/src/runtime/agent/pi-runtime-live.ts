@@ -71,13 +71,18 @@ export const makePiAgentRuntimeLive = (
       Option.isSome(remoteSessions) && Option.isSome(environments)
         ? makeOwnedDeviceOffloadPort(
             remoteSessions.value,
-            (deviceId) => environments.value.list.pipe(
-              Effect.map((inventory) => inventory.some((environment) =>
-                environment.id === deviceId &&
-                environment.kind === "owned" &&
-                environment.state === "online"
-              ))
-            )
+            (deviceId) => Effect.gen(function* () {
+              for (let attempt = 0; attempt < 3; attempt += 1) {
+                const inventory = yield* environments.value.list
+                if (inventory.some((environment) =>
+                  environment.id === deviceId &&
+                  environment.kind === "owned" &&
+                  environment.state === "online"
+                )) return true
+                if (attempt < 2) yield* Effect.sleep(250)
+              }
+              return false
+            })
           )
         : undefined
     )

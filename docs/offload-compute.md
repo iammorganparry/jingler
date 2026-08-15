@@ -27,7 +27,7 @@ snapshots and result chunks that are too large for Workflow parameters.
 - Enabling Offload Compute authorizes automatic routing; it does not make every
   shell command remotely eligible.
 - Built-in presets resolve to shell-free executable/argument vectors. Projects
-  may add explicit executable/argument vectors to an allowlist. This classifier
+  may add explicit executable/argument vectors scoped to the repository slug in an allowlist. This classifier
   prevents accidental shell interpretation; it does not treat a package script,
   test runner, compiler plugin, or build tool as trusted code.
 - Pipelines, redirects, command substitution, interactive processes, stateful

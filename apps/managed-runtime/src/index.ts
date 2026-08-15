@@ -382,7 +382,7 @@ const consumeOffloadGrantUse = async (
       body: JSON.stringify({ subject, use })
     }
   );
-  return response.ok || response.status === 409;
+  return response.ok;
 };
 
 const authorizeOffloadRequest = (

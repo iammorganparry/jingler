@@ -56,12 +56,20 @@ export const OffloadExplicitCommand = Schema.Struct({
 })
 export type OffloadExplicitCommand = Schema.Schema.Type<typeof OffloadExplicitCommand>
 
+export const OffloadRepositorySlug = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u, {
+    identifier: "OffloadRepositorySlug"
+  })
+)
+export type OffloadRepositorySlug = Schema.Schema.Type<typeof OffloadRepositorySlug>
+
 export const OffloadAllowedCommand = Schema.Struct({
   id: Schema.String.pipe(
     Schema.minLength(1),
     Schema.maxLength(64),
     Schema.pattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, { identifier: "OffloadCommandId" })
   ),
+  repositorySlug: Schema.optional(OffloadRepositorySlug),
   command: OffloadExplicitCommand
 })
 export type OffloadAllowedCommand = Schema.Schema.Type<typeof OffloadAllowedCommand>
@@ -162,13 +170,6 @@ export const OwnedDeviceOffloadResult = Schema.Struct({
   commandMs: Schema.Int.pipe(Schema.nonNegative())
 })
 export type OwnedDeviceOffloadResult = Schema.Schema.Type<typeof OwnedDeviceOffloadResult>
-
-export const OffloadRepositorySlug = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u, {
-    identifier: "OffloadRepositorySlug"
-  })
-)
-export type OffloadRepositorySlug = Schema.Schema.Type<typeof OffloadRepositorySlug>
 
 export const OffloadSnapshotIdentity = Schema.Struct({
   version: Schema.Literal(OFFLOAD_COMPUTE_PROTOCOL_VERSION),
@@ -496,7 +497,8 @@ const validCommandShape = (command: ObservedAgentCommand): boolean => {
 /** Pure, fail-closed routing policy used before the local command executor. */
 export const classifyOffloadCommand = (
   settings: OffloadComputeSettings,
-  command: ObservedAgentCommand
+  command: ObservedAgentCommand,
+  repositorySlug?: string
 ): OffloadRoutingDecision => {
   if (!settings.enabled) return { target: "local", reason: "disabled" }
   if (command.interactive) return { target: "local", reason: "interactive" }
@@ -521,6 +523,9 @@ export const classifyOffloadCommand = (
     }
   }
   const explicit = settings.explicitCommands.find((candidate) =>
+    candidate.repositorySlug !== undefined &&
+    repositorySlug !== undefined &&
+    candidate.repositorySlug.toLowerCase() === repositorySlug.toLowerCase() &&
     commandEquals(command, candidate.command)
   )
   return explicit === undefined

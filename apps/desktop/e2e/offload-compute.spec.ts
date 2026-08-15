@@ -126,6 +126,7 @@ test("selects, persists, and executes on a specific fail-closed owned device", a
         explicitCommands: [
           {
             id: "owned-device-probe",
+            repositorySlug: "jingler/example",
             command: {
               executable: "node",
               args: ["-e", "process.stdout.write('owned device test clean\\n')"],
@@ -134,6 +135,7 @@ test("selects, persists, and executes on a specific fail-closed owned device", a
           },
           {
             id: "owned-device-offline-probe",
+            repositorySlug: "jingler/example",
             command: {
               executable: "node",
               args: ["-e", "process.stdout.write('offline command must not run\\n')"],

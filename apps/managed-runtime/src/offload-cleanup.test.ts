@@ -78,4 +78,29 @@ describe("offload terminal cleanup", () => {
     expect(accountFetch).toHaveBeenCalledTimes(2)
     expect(String(accountFetch.mock.calls[0]?.[0])).toContain("/v1/offload/unregister")
   })
+
+  it("retries failed cleanup responses and surfaces persistent failure", async () => {
+    const bucket = new MemoryBucket()
+    const layer = makeOffloadJobStoreLayer(bucket as unknown as R2Bucket)
+    await Effect.runPromise(Effect.gen(function* () {
+      const store = yield* OffloadJobStore
+      yield* store.create({
+        jobId: "job_bbbbbbbbbbbbbbbb",
+        subject: "user_one",
+        request: { ...request, idempotencyKey: "request_bbbbbbbbbbbbbbbb" },
+        githubCapabilityHandle: "github_aaaaaaaaaaaaaaaa",
+        nowSeconds: 1
+      })
+    }).pipe(Effect.provide(layer)))
+    const accountFetch = vi.fn(async () => new Response(null, { status: 500 }))
+    const lifecycleFetch = vi.fn(async () => Response.json({ ok: true }))
+    const environment = {
+      OFFLOAD_JOBS: bucket as unknown as R2Bucket,
+      MANAGED_ACCOUNT: { getByName: () => ({ fetch: accountFetch }) },
+      OFFLOAD_SANDBOX_LIFECYCLE: { getByName: () => ({ fetch: lifecycleFetch }) }
+    }
+    await expect(cleanupOffloadJob(environment as never, "job_bbbbbbbbbbbbbbbb"))
+      .rejects.toThrow("account-slot cleanup")
+    expect(accountFetch).toHaveBeenCalledTimes(3)
+  })
 })

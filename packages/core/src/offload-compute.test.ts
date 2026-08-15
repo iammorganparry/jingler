@@ -145,6 +145,7 @@ describe("Offload Compute explicit command classification", () => {
       explicitCommands: [
         {
           id: "verify-generated",
+          repositorySlug: "jingler/example",
           command: {
             executable: "node",
             args: ["scripts/verify-generated.mjs"],
@@ -156,7 +157,8 @@ describe("Offload Compute explicit command classification", () => {
     expect(
       classifyOffloadCommand(
         settings,
-        command({ executable: "node", args: ["scripts/verify-generated.mjs"] })
+        command({ executable: "node", args: ["scripts/verify-generated.mjs"] }),
+        "jingler/example"
       )
     ).toEqual({
       target: "offload",
@@ -170,7 +172,8 @@ describe("Offload Compute explicit command classification", () => {
     expect(
       classifyOffloadCommand(
         settings,
-        command({ executable: "node", args: ["scripts/other.mjs"] })
+        command({ executable: "node", args: ["scripts/verify-generated.mjs"] }),
+        "other/project"
       )
     ).toEqual({ target: "local", reason: "unknown-command" })
   })

@@ -13,7 +13,10 @@ const USER_KEY = "user-id"
 const SUBSCRIPTION_RENEWAL_SKEW_SECONDS = 30
 const OFFLOAD_JOBS_KEY = "offload-jobs"
 const OFFLOAD_USES_KEY = "offload-grant-uses"
-const OFFLOAD_SLOT_SECONDS = 2 * 60 * 60
+// Four retrying 15-minute phases, a retrying 35-minute execution phase, and
+// queue/event waits can exceed two hours. Cleanup releases this early; six
+// hours is the conservative crash-only lease for the complete Workflow bound.
+const OFFLOAD_SLOT_SECONDS = 6 * 60 * 60
 
 interface ActiveOffloadJob {
   readonly jobId: string

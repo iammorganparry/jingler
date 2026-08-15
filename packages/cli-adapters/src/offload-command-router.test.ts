@@ -203,6 +203,64 @@ describe("automatic Offload Compute routing", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/cancel")
   })
 
+  it("cancels with the latest refreshed grant", async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const refreshed = { ...admission, grant: "grant_bbbbbbbbbbbbbbbb" }
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ cancelled: true }))
+    const polling = pollResult({
+      admission,
+      refresh: async () => refreshed,
+      onAdmission: () => controller.abort(),
+      context: { ...context(), signal: controller.signal },
+      deadlineAt: Date.now() + 60_000
+    })
+    const outcome = expect(polling).rejects.toMatchObject({ code: "cancelled" })
+    await vi.runAllTimersAsync()
+    await outcome
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toEqual({
+      authorization: `Bearer ${refreshed.grant}`
+    })
+    vi.useRealTimers()
+  })
+
+  it("bounds repeated authorization refreshes with backoff", async () => {
+    vi.useFakeTimers()
+    fetchMock.mockResolvedValue(new Response(null, { status: 403 }))
+    const refresh = vi.fn(async () => admission)
+    const polling = pollResult({
+      admission,
+      refresh,
+      context: context(),
+      deadlineAt: Date.now() + 60_000
+    })
+    const outcome = expect(polling).rejects.toThrow("three grant refreshes")
+    await vi.runAllTimersAsync()
+    await outcome
+    expect(refresh).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    vi.useRealTimers()
+  })
+
+  it("rejects offload without a stable per-invocation identity", async () => {
+    await writeFile(paths().configFile, JSON.stringify({
+      reposDir: null,
+      createdAt: new Date().toISOString(),
+      offloadCompute: { enabled: true, explicitCommands: [] }
+    }))
+    await expect(Effect.runPromise(
+      (await router()).executeIfEligible(
+        workspace,
+        "session-one",
+        "pnpm typecheck",
+        { ...context(), idempotencyKey: null }
+      )
+    )).rejects.toThrow("stable tool invocation identity")
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("routes a pressured eligible command only to the selected owned device", async () => {
     await writeFile(paths().configFile, JSON.stringify({
       reposDir: null,

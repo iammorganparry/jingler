@@ -113,6 +113,15 @@ export const makeOwnedDeviceOffloadPort = (
           true
         ))
       }
+      if (result.exitCode !== 0) {
+        const detail = result.stderr.trim() || result.stdout.trim()
+        return yield* Effect.fail(new ToolError(
+          "execution-failed",
+          `Owned-device command failed (exit ${result.exitCode})${detail ? `: ${detail}` : ""}. ` +
+            "It was not retried locally; only the operator can force a local retry by disabling Offload Compute first.",
+          true
+        ))
+      }
       return {
         command: `${command.executable} ${command.args.join(" ")}`,
         exitCode: result.exitCode,

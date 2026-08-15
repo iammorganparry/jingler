@@ -173,33 +173,44 @@ export const interruptibleDelay = (
 interface PollInput {
   readonly admission: OffloadAdmissionResponse
   readonly refresh: () => Promise<OffloadAdmissionResponse>
+  readonly onAdmission?: (admission: OffloadAdmissionResponse) => void
   readonly context: ToolExecutionContext
   readonly deadlineAt: number
 }
 
 const cancelRemote = async (
-  admission: OffloadAdmissionResponse
+  admission: OffloadAdmissionResponse,
+  refresh?: () => Promise<OffloadAdmissionResponse>
 ): Promise<void> => {
-  await fetch(
+  const response = await fetch(
     `${admission.runtimeUrl}/v1/offload/jobs/${encodeURIComponent(admission.jobId)}/cancel`,
     {
       method: "POST",
       headers: { authorization: `Bearer ${admission.grant}` }
     }
-  ).catch(() => undefined)
+  ).catch(() => null)
+  if ((response?.status === 401 || response?.status === 403) && refresh !== undefined) {
+    await cancelRemote(await refresh())
+  }
 }
 
 export const pollResult = async (input: PollInput): Promise<OffloadedCommandResult> => {
   let admission = input.admission
   let cursor = 0
   let consecutiveFailures = 0
+  let consecutiveAuthorizationFailures = 0
+  const cancel = () => cancelRemote(admission, async () => {
+    admission = await input.refresh()
+    input.onAdmission?.(admission)
+    return admission
+  })
   while (true) {
     if (Date.now() >= input.deadlineAt) {
-      await cancelRemote(admission)
+      await cancel()
       throw failure("Remote job status deadline expired; it was not retried locally", true)
     }
     if (input.context.signal.aborted) {
-      await cancelRemote(admission)
+      await cancel()
       throw new ToolError("cancelled", "Remote command cancelled", true)
     }
     const response = await fetch(
@@ -216,10 +227,20 @@ export const pollResult = async (input: PollInput): Promise<OffloadedCommandResu
     }
     consecutiveFailures = 0
     if (response.status === 401 || response.status === 403) {
+      consecutiveAuthorizationFailures += 1
+      if (consecutiveAuthorizationFailures > 3) {
+        throw failure("Remote authorization remained invalid after three grant refreshes; it was not retried locally", true)
+      }
+      await interruptibleDelay(
+        500 * (2 ** (consecutiveAuthorizationFailures - 1)),
+        input.context.signal
+      )
       admission = await input.refresh()
+      input.onAdmission?.(admission)
       continue
     }
     if (!response.ok) throw await responseError(response, "Remote job status unavailable")
+    consecutiveAuthorizationFailures = 0
     const page = decodeResponse(
       OffloadEventPage,
       await response.json(),
@@ -326,10 +347,23 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
       Effect.mapError(() => failure("Could not read Offload Compute settings"))
     ))?.offloadCompute ?? DEFAULT_OFFLOAD_COMPUTE_SETTINGS
     const observed = parseObservedAgentShellCommand(source)
-    const routing = classifyOffloadCommand(settings, observed.command)
+    const remote = yield* closeGit(git.remoteUrl(cwd)).pipe(
+      Effect.match({ onFailure: () => null, onSuccess: (value) => value })
+    )
+    const repository = remote ? parseGitHubRemote(remote) : null
+    const repositorySlug = repository === null
+      ? undefined
+      : `${repository.owner}/${repository.repo}`
+    const routing = classifyOffloadCommand(settings, observed.command, repositorySlug)
     if (routing.target === "local") return null
     resourcePressure.start()
     if (!resourcePressure.isSqueezed()) return null
+    const invocationKey = context.idempotencyKey
+    if (!invocationKey) {
+      return yield* Effect.fail(failure(
+        "Offload Compute requires a stable tool invocation identity; nothing ran remotely or locally"
+      ))
+    }
 
     context.progress({ message: "Offload Compute: capturing", completed: null, total: null })
     const snapshotStarted = Date.now()
@@ -349,17 +383,13 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
       }
       return yield* ownedDevice.execute({
         deviceId: settings.target.deviceId,
-        jobId: opaqueId("request", context.idempotencyKey ?? source).replace(/^request_/u, "job_"),
+        jobId: opaqueId("request", `${sessionId}:${invocationKey}`).replace(/^request_/u, "job_"),
         snapshot,
         command: routing.command,
         limits,
         context
       }).pipe(Effect.map((result) => ({ ...result, command: source })))
     }
-    const remote = yield* closeGit(git.remoteUrl(cwd)).pipe(
-      Effect.mapError(() => failure("Offload Compute requires a GitHub origin"))
-    )
-    const repository = remote ? parseGitHubRemote(remote) : null
     if (repository === null) {
       return yield* Effect.fail(failure("Offload Compute requires a GitHub origin"))
     }
@@ -370,7 +400,7 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
     const request: OffloadAdmissionRequest = {
       version: OFFLOAD_COMPUTE_PROTOCOL_VERSION,
       sessionId: opaqueId("session", sessionId),
-      idempotencyKey: opaqueId("request", context.idempotencyKey ?? source),
+      idempotencyKey: opaqueId("request", `${sessionId}:${invocationKey}`),
       repositorySlug: `${repository.owner}/${repository.repo}`,
       snapshot: snapshot.identity,
       command: routing.command,
@@ -420,17 +450,24 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
       ),
       Effect.mapError((cause) => failure(cause.message, true))
     )
+    let currentAdmission = uploadedAdmission
     return yield* Effect.tryPromise({
       try: () => pollResult({
         admission: uploadedAdmission,
         refresh: admit,
+        onAdmission: (refreshed) => {
+          currentAdmission = refreshed
+        },
         context,
         deadlineAt: Date.now() + (request.limits.timeoutSeconds + 35 * 60) * 1_000
       }),
       catch: (cause) => cause instanceof ToolError ? cause : failure("Remote command failed", true)
     }).pipe(
       Effect.map((result) => ({ ...result, command: source })),
-      Effect.onInterrupt(() => Effect.promise(() => cancelRemote(admission)))
+      Effect.onInterrupt(() => Effect.promise(() => cancelRemote(currentAdmission, async () => {
+        currentAdmission = await admit()
+        return currentAdmission
+      })))
     )
   })
 

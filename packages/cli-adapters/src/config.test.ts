@@ -241,6 +241,7 @@ describe("ConfigService", () => {
       explicitCommands: [
         {
           id: "verify-generated",
+          repositorySlug: "jingler/example",
           command: {
             executable: "node",
             args: ["scripts/verify-generated.mjs"],

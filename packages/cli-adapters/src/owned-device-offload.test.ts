@@ -79,6 +79,40 @@ describe("owned-device offload transport", () => {
     expect(requestOnEnvironment).not.toHaveBeenCalled()
   })
 
+  it("reports a nonzero owned-device exit as remote failure without local retry", async () => {
+    const remote = {
+      requestOnEnvironment: vi.fn((_environmentId: string, operation: string) =>
+        Effect.succeed(operation === "Offload.execute" ? {
+          exitCode: 2,
+          stdout: "",
+          stderr: "tests failed",
+          outputTruncated: false,
+          timedOut: false,
+          sourceMutated: false,
+          commandMs: 1
+        } : undefined))
+    }
+    const port = makeOwnedDeviceOffloadPort(remote, () => Effect.succeed(true))
+    await expect(Effect.runPromise(port.execute({
+      deviceId: "device_selected",
+      jobId: "job_nonzeroabcdefgh",
+      snapshot: {
+        identity: { version: 1, headSha: "a".repeat(40), digest: "b".repeat(64), bytes: 1 },
+        compressedBytes: new Uint8Array([1]),
+        fileCount: 1,
+        uncompressedBytes: 1
+      },
+      command: {
+        source: { kind: "preset", preset: "test" },
+        executable: "npm",
+        args: ["test"],
+        cwd: "."
+      },
+      limits: { timeoutSeconds: 60, snapshotBytes: 1, outputBytes: 1024 },
+      context: context()
+    }))).rejects.toThrow("only the operator can force a local retry")
+  })
+
   it("rejects a source-mutating result instead of syncing it locally", async () => {
     const remote = {
       requestOnEnvironment: vi.fn((_environmentId: string, operation: string) =>
