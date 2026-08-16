@@ -35,6 +35,7 @@ const SupervisorAttention = Schema.Struct({
   role: Schema.Literal("custom"),
   customType: Schema.Literal("subagent_supervisor_request"),
   content: Schema.String,
+  timestamp: Schema.Number,
   details: Schema.Struct({
     id: Schema.String,
     reason: Schema.Literal("need_decision", "interview_request", "progress_update"),
@@ -163,7 +164,9 @@ export const piSupervisorAttention = (
     childIndex: message.details.childIndex,
     agent: message.details.agent,
     reason: message.details.reason,
-    message: message.content
+    message: message.content,
+    requestedAt: message.timestamp,
+    deadlineAt: null
   }
 }
 

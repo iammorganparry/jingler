@@ -306,7 +306,9 @@ describe("pi file-change events", () => {
       message: "Choose an API",
       runId: "run-1",
       agent: "worker",
-      childIndex: 0
+      childIndex: 0,
+      requestedAt: 1,
+      deadlineAt: null
     })
   })
 

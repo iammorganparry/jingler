@@ -286,6 +286,8 @@ export interface PiSubagentSupervisorAttentionInput {
   readonly agent: string
   readonly reason: "need_decision" | "interview_request"
   readonly message: string
+  readonly requestedAt: number
+  readonly deadlineAt: number | null
 }
 
 export interface PiSubagentLifecycleAdapterOptions {
@@ -495,8 +497,8 @@ export class PiSubagentLifecycleAdapter {
           requestId: input.requestId,
           reason: input.reason,
           message: input.message,
-          requestedAt: now,
-          deadlineAt: null
+          requestedAt: input.requestedAt,
+          deadlineAt: input.deadlineAt
         }
       }
     })
@@ -540,6 +542,17 @@ export class PiSubagentLifecycleAdapter {
       ))
     }
     const replyTo = request.replyTo ?? ""
+    if (request.action === "reply" && !this.#attentionNode(request.runId, replyTo)) {
+      return Effect.succeed(this.#outcome(
+        request,
+        sequence,
+        false,
+        "not-found",
+        "rejected",
+        null,
+        "Supervisor request does not belong to this child run"
+      ))
+    }
     const rpc = controlRpcFor(request, message)
     return this.#request(rpc.method, rpc.params, request.requestId).pipe(
       Effect.map((reply) => {
@@ -573,10 +586,15 @@ export class PiSubagentLifecycleAdapter {
     )
   }
 
-  #clearAttention(request: SubagentFleetControlRequest, replyTo: string): void {
-    const node = this.#state().tree.nodes.find(
-      (candidate) => candidate.attention?.requestId === replyTo
+  #attentionNode(runId: string, replyTo: string): SubagentFleetNode | undefined {
+    return this.#state().tree.nodes.find((candidate) =>
+      candidate.attention?.requestId === replyTo &&
+      (candidate.runId === runId || candidate.orchestrationRunId === runId)
     )
+  }
+
+  #clearAttention(request: SubagentFleetControlRequest, replyTo: string): void {
+    const node = this.#attentionNode(request.runId, replyTo)
     if (!node) return
     const now = this.#now()
     this.#publish({

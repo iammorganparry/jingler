@@ -277,7 +277,9 @@ describe("PiSubagentLifecycleAdapter", () => {
       childIndex: 0,
       agent: "worker",
       reason: "need_decision",
-      message: "Choose an API"
+      message: "Choose an API",
+      requestedAt: 25,
+      deadlineAt: null
     })
     expect(adapter.snapshot().nodes[0]?.status).toBe("needs-attention")
     const steerRequest = {
@@ -295,6 +297,18 @@ describe("PiSubagentLifecycleAdapter", () => {
       nativeRequestId: "native-steer-1"
     })
     await expect(adapter.control(steerRequest)).resolves.toEqual(steer)
+    await expect(adapter.control({
+      ...base,
+      requestId: "wrong-reply",
+      runId: "other-run",
+      action: "reply",
+      message: "Wrong child",
+      replyTo: "attention-1"
+    })).resolves.toMatchObject({
+      acknowledged: false,
+      status: "not-found",
+      deliveryStatus: "rejected"
+    })
     await expect(adapter.control({
       ...base,
       requestId: "reply-1",
