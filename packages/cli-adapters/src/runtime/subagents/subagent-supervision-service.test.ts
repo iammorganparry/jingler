@@ -1,7 +1,8 @@
 import { SUBAGENT_FLEET_PROTOCOL_VERSION } from "@jingler/core"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
+  makeSubagentSupervisionService,
   SubagentSupervisionService,
   SubagentSupervisionServiceLive
 } from "./subagent-supervision-service.js"
@@ -51,5 +52,54 @@ describe("SubagentSupervisionService", () => {
       expect(yield* service.replay(0)).toHaveLength(1)
     }).pipe(Effect.provide(SubagentSupervisionServiceLive("parent")))))
     expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
+  it("serializes controls and returns one outcome for duplicate request ids", async () => {
+    const service = Effect.runSync(makeSubagentSupervisionService("parent"))
+    const started = Effect.runSync(Deferred.make<void>())
+    const release = Effect.runSync(Deferred.make<void>())
+    const executionOrder: string[] = []
+    const request = (requestId: string) => ({
+      version: 2 as const,
+      requestId,
+      parentPiSessionId: "parent",
+      runId: "run-1",
+      action: "steer" as const,
+      message: "Continue",
+      replyTo: null
+    })
+    const execute = (requestId: string) => (sequence: number) => Effect.gen(function* () {
+      executionOrder.push(requestId)
+      if (requestId === "one") {
+        yield* Deferred.succeed(started, undefined)
+        yield* Deferred.await(release)
+      }
+      return {
+        version: 2 as const,
+        requestId,
+        runId: "run-1",
+        action: "steer" as const,
+        acknowledged: true,
+        status: "accepted" as const,
+        deliveryStatus: "delivered" as const,
+        sequence,
+        nativeRequestId: `native-${requestId}`,
+        message: "delivered",
+        acknowledgedAt: sequence
+      }
+    })
+
+    const first = Effect.runPromise(service.submitControl(request("one"), execute("one")))
+    await Effect.runPromise(Deferred.await(started))
+    const second = Effect.runPromise(service.submitControl(request("two"), execute("two")))
+    const duplicate = Effect.runPromise(service.submitControl(request("two"), execute("duplicate")))
+    Effect.runSync(Deferred.succeed(release, undefined))
+    const [one, two, sameTwo] = await Promise.all([first, second, duplicate])
+
+    expect(executionOrder).toEqual(["one", "two"])
+    expect([one.sequence, two.sequence]).toEqual([1, 2])
+    expect(sameTwo).toEqual(two)
+    expect(Effect.runSync(service.controlReceipts).map(({ status }) => status))
+      .toEqual(["queued", "queued", "delivered", "delivered"])
   })
 })

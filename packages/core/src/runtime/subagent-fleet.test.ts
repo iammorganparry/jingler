@@ -99,6 +99,9 @@ describe("subagent fleet contracts", () => {
       action: "stop",
       acknowledged: true,
       status: "accepted",
+      deliveryStatus: "delivered",
+      sequence: 1,
+      nativeRequestId: "native-1",
       message: "Stop request delivered",
       acknowledgedAt: 3
     }).acknowledged).toBe(true)

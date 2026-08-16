@@ -213,6 +213,9 @@ describe("subagentFleetMachine", () => {
         action: "stop",
         acknowledged: true,
         status: "accepted",
+        deliveryStatus: "delivered",
+        sequence: 1,
+        nativeRequestId: "native-1",
         message: "stopped",
         acknowledgedAt: 30
       }

@@ -175,6 +175,20 @@ export type SubagentFleetControlRequest = Schema.Schema.Type<
   typeof SubagentFleetControlRequest
 >
 
+export const SubagentControlDeliveryStatus = Schema.Literal(
+  "queued",
+  "accepted",
+  "delivered",
+  "observed",
+  "applied",
+  "rejected",
+  "cancelled",
+  "expired"
+)
+export type SubagentControlDeliveryStatus = Schema.Schema.Type<
+  typeof SubagentControlDeliveryStatus
+>
+
 export const SubagentFleetControlOutcome = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
   requestId: SubagentFleetMessageId,
@@ -182,6 +196,9 @@ export const SubagentFleetControlOutcome = Schema.Struct({
   action: SubagentFleetControlAction,
   acknowledged: Schema.Boolean,
   status: Schema.Literal("accepted", "rejected", "not-found", "invalid-state"),
+  deliveryStatus: SubagentControlDeliveryStatus,
+  sequence: Schema.Number,
+  nativeRequestId: Schema.NullOr(Schema.String),
   message: Schema.String,
   acknowledgedAt: Schema.Number
 })
@@ -235,20 +252,6 @@ export const SubagentChildStateEvent = Schema.Struct({
   terminal: Schema.NullOr(SubagentFleetTerminal)
 })
 export type SubagentChildStateEvent = Schema.Schema.Type<typeof SubagentChildStateEvent>
-
-export const SubagentControlDeliveryStatus = Schema.Literal(
-  "queued",
-  "accepted",
-  "delivered",
-  "observed",
-  "applied",
-  "rejected",
-  "cancelled",
-  "expired"
-)
-export type SubagentControlDeliveryStatus = Schema.Schema.Type<
-  typeof SubagentControlDeliveryStatus
->
 
 export const SubagentControlEnvelope = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),

@@ -226,6 +226,7 @@ describe("PiSubagentLifecycleAdapter", () => {
   it("returns factual acknowledgements for exact lifecycle controls", async () => {
     const events = createEventBus()
     const methods: string[] = []
+    const requestIds: string[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
@@ -237,6 +238,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       if (!request || typeof request !== "object" || !("requestId" in request) || !("method" in request)) return
       if (typeof request.requestId !== "string" || typeof request.method !== "string") return
       methods.push(request.method)
+      requestIds.push(request.requestId)
       events.emit(`subagents:rpc:v1:reply:${request.requestId}`, request.method === "stop"
         ? {
             version: 1,
@@ -250,7 +252,16 @@ describe("PiSubagentLifecycleAdapter", () => {
             requestId: request.requestId,
             method: request.method,
             success: true,
-            data: { delivered: true }
+            data: request.method === "steer"
+              ? {
+                  details: {
+                    steering: {
+                      requestId: "native-steer-1",
+                      deliveryStatus: "queued"
+                    }
+                  }
+                }
+              : { delivered: true }
           })
     })
     const base = {
@@ -269,12 +280,21 @@ describe("PiSubagentLifecycleAdapter", () => {
       message: "Choose an API"
     })
     expect(adapter.snapshot().nodes[0]?.status).toBe("needs-attention")
-    await expect(adapter.control({
+    const steerRequest = {
       ...base,
       requestId: "steer-1",
-      action: "steer",
+      action: "steer" as const,
       message: "Check tests"
-    })).resolves.toMatchObject({ acknowledged: true, status: "accepted" })
+    }
+    const steer = await adapter.control(steerRequest)
+    expect(steer).toMatchObject({
+      acknowledged: true,
+      status: "accepted",
+      deliveryStatus: "queued",
+      sequence: 1,
+      nativeRequestId: "native-steer-1"
+    })
+    await expect(adapter.control(steerRequest)).resolves.toEqual(steer)
     await expect(adapter.control({
       ...base,
       requestId: "reply-1",
@@ -293,6 +313,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       message: null
     })).resolves.toMatchObject({ acknowledged: false, status: "invalid-state" })
     expect(methods).toEqual(["steer", "reply", "stop"])
+    expect(requestIds).toEqual(["steer-1", "reply-1", "stop-1"])
     unsubscribe()
     adapter.stop()
   })

@@ -179,6 +179,9 @@ export function useSubagentFleet(input: {
           action,
           acknowledged: false,
           status: "rejected",
+          deliveryStatus: "rejected",
+          sequence: 0,
+          nativeRequestId: null,
           message: cause instanceof Error ? cause.message : "Subagent control failed",
           acknowledgedAt: Date.now()
         }

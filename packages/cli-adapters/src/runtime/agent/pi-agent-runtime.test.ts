@@ -63,6 +63,9 @@ const fleetSeams: Pick<
     action: request.action,
     acknowledged: true,
     status: "accepted",
+    deliveryStatus: "delivered",
+    sequence: 1,
+    nativeRequestId: "native-1",
     message: "acknowledged",
     acknowledgedAt: 1
   })

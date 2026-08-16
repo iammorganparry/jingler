@@ -69,7 +69,16 @@ const RpcSuccessReply = Schema.Struct({
   version: Schema.Literal(1),
   requestId: Schema.String,
   method: Schema.optional(Schema.String),
-  success: Schema.Literal(true)
+  success: Schema.Literal(true),
+  data: Schema.optional(Schema.Unknown)
+})
+const NativeSteeringReply = Schema.Struct({
+  details: Schema.Struct({
+    steering: Schema.Struct({
+      requestId: Schema.String,
+      deliveryStatus: Schema.Literal("queued", "delivered")
+    })
+  })
 })
 const RpcErrorReply = Schema.Struct({
   version: Schema.Literal(1),
@@ -311,7 +320,7 @@ export class PiSubagentLifecycleAdapter {
     this.#now = options.now ?? Date.now
     this.#trustedSessionRoots = new Set(options.trustedSessionRoots ?? [])
     this.#supervision = Effect.runSync(
-      makeSubagentSupervisionService(options.parentPiSessionId)
+      makeSubagentSupervisionService(options.parentPiSessionId, this.#now)
     )
   }
 
@@ -493,32 +502,75 @@ export class PiSubagentLifecycleAdapter {
     })
   }
 
-  async control(
+  control(
     request: SubagentFleetControlRequest
   ): Promise<SubagentFleetControlOutcome> {
+    return Effect.runPromise(this.#supervision.submitControl(
+      request,
+      (sequence) => this.#executeControl(request, sequence)
+    ))
+  }
+
+  #executeControl(
+    request: SubagentFleetControlRequest,
+    sequence: number
+  ): Effect.Effect<SubagentFleetControlOutcome> {
     if (request.parentPiSessionId !== this.#parentPiSessionId) {
-      return this.#outcome(request, false, "not-found", "Parent session does not match")
+      return Effect.succeed(this.#outcome(
+        request,
+        sequence,
+        false,
+        "not-found",
+        "rejected",
+        null,
+        "Parent session does not match"
+      ))
     }
     const message = request.message?.trim() ?? ""
     const validationError = controlValidationError(request, message)
-    if (validationError) return this.#outcome(request, false, "rejected", validationError)
+    if (validationError) {
+      return Effect.succeed(this.#outcome(
+        request,
+        sequence,
+        false,
+        "rejected",
+        "rejected",
+        null,
+        validationError
+      ))
+    }
     const replyTo = request.replyTo ?? ""
     const rpc = controlRpcFor(request, message)
-    try {
-      await Effect.runPromise(this.#request(rpc.method, rpc.params))
-      if (request.action === "reply") this.#clearAttention(request, replyTo)
-      return this.#outcome(
-        request,
-        true,
-        "accepted",
-        `${request.action} request acknowledged by pi-subagents`
-      )
-    } catch (error) {
-      const failure = controlFailure(
-        error instanceof Error ? error : new Error("Control request failed")
-      )
-      return this.#outcome(request, false, failure.status, failure.message)
-    }
+    return this.#request(rpc.method, rpc.params, request.requestId).pipe(
+      Effect.map((reply) => {
+        if (request.action === "reply") this.#clearAttention(request, replyTo)
+        const steering = Option.getOrUndefined(
+          Schema.decodeUnknownOption(NativeSteeringReply)(reply.data)
+        )?.details.steering
+        const deliveryStatus = steering?.deliveryStatus ?? "delivered"
+        return this.#outcome(
+          request,
+          sequence,
+          true,
+          "accepted",
+          deliveryStatus,
+          steering?.requestId ?? reply.requestId,
+          `${request.action} request ${deliveryStatus} by pi-subagents`
+        )
+      }),
+      Effect.catchAll((error) => {
+        const failure = controlFailure(error)
+        return Effect.succeed(this.#outcome(
+          request,
+          sequence,
+          false,
+          failure.status,
+          "rejected",
+          null,
+          failure.message
+        ))
+      })
+    )
   }
 
   #clearAttention(request: SubagentFleetControlRequest, replyTo: string): void {
@@ -708,9 +760,9 @@ export class PiSubagentLifecycleAdapter {
 
   #request(
     method: string,
-    params: SubagentJsonValue
-  ): Effect.Effect<void, Error> {
-    const requestId = randomUUID()
+    params: SubagentJsonValue,
+    requestId: string = randomUUID()
+  ): Effect.Effect<typeof RpcSuccessReply.Type, Error> {
     return Effect.async((resume) => {
       const replyEvent = `${RPC_REPLY_PREFIX}${requestId}`
       const timeout = setTimeout(() => {
@@ -731,7 +783,7 @@ export class PiSubagentLifecycleAdapter {
           Schema.decodeUnknownOption(RpcSuccessReply)(payload)
         )
         resume(success
-          ? Effect.void
+          ? Effect.succeed(success)
           : Effect.fail(new Error(`pi-subagents returned an invalid ${method} RPC reply`)))
       })
       this.#events.emit(RPC_REQUEST_EVENT, {
@@ -754,8 +806,11 @@ export class PiSubagentLifecycleAdapter {
 
   #outcome(
     request: SubagentFleetControlRequest,
+    sequence: number,
     acknowledged: boolean,
     status: SubagentFleetControlOutcome["status"],
+    deliveryStatus: SubagentFleetControlOutcome["deliveryStatus"],
+    nativeRequestId: string | null,
     message: string
   ): SubagentFleetControlOutcome {
     return {
@@ -765,6 +820,9 @@ export class PiSubagentLifecycleAdapter {
       action: request.action,
       acknowledged,
       status,
+      deliveryStatus,
+      sequence,
+      nativeRequestId,
       message,
       acknowledgedAt: this.#now()
     }
