@@ -21,7 +21,7 @@ test("durable native status appears in the integrated Fleet drawer", async ({
   const piSessionFile = join(home, "jingler/pi-sessions/fleet-parent.jsonl")
   const childSessionFile = join(
     home,
-    "jingler/pi-sessions/fleet-parent/child/run-0/session.jsonl"
+    "jingler/pi-sessions/fleet-child.jsonl"
   )
   const auth = await startBetterAuthTestServer()
   mkdirSync(join(asyncRoot, ".active-runs"), { recursive: true })

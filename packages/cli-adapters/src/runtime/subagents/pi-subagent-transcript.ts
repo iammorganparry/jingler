@@ -1,8 +1,18 @@
 import { realpath } from "node:fs/promises"
-import { dirname, isAbsolute, relative, resolve } from "node:path"
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path"
 import type { Message as PiMessage } from "@earendil-works/pi-ai"
 import { SessionManager } from "@earendil-works/pi-coding-agent"
 import type { ContentPart, Message, ToolCall } from "@jingler/core"
+
+export const piSubagentTrustedSessionRoots = (
+  parentSessionFile: string
+): ReadonlyArray<string> => {
+  const sessionDirectory = dirname(resolve(parentSessionFile))
+  return [
+    sessionDirectory,
+    resolve(sessionDirectory, basename(parentSessionFile, ".jsonl"))
+  ]
+}
 
 const containedBy = (file: string, root: string): boolean => {
   const path = relative(root, file)
@@ -172,9 +182,9 @@ export const readPiSubagentTranscript = async (input: {
   readonly trustedRoots: ReadonlyArray<string>
 }): Promise<ReadonlyArray<Message>> => {
   const file = await realpath(resolve(input.sessionFile))
-  const roots = await Promise.all(
-    input.trustedRoots.map((root) => realpath(resolve(root)))
-  )
+  const roots = (await Promise.all(
+    input.trustedRoots.map((root) => realpath(resolve(root)).catch(() => null))
+  )).filter((root): root is string => root !== null)
   if (!roots.some((root) => containedBy(file, root))) {
     throw new Error("Child session file is outside the trusted pi-subagents roots")
   }
