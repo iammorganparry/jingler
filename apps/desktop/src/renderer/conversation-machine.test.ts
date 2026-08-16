@@ -1676,6 +1676,54 @@ describe("conversationMachine — volatile plan drafts", () => {
     actor.stop()
   })
 
+  it("routes an image-bearing composer message into the parked plan, marking the dropped attachment", async () => {
+    // Plan feedback is text-only, but excluding attachment-bearing sends parked
+    // them until the whole review resolved — steering a parked plan IS revising.
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (snapshot) => snapshot.matches("running"))
+    emit({ _tag: "PlanProposed", plan: proposedPlan })
+
+    const image = { id: "i1", name: "shot.png", mediaType: "image/png", data: "aGk=" }
+    actor.send({ type: "SEND", text: "The drawer never appears.", images: [image] })
+
+    expect(actor.getSnapshot().context.queued).toStrictEqual([])
+    await vi.waitFor(() => {
+      expect(h.planCommentCalls).toStrictEqual([{
+        planId: proposedPlan.id,
+        stepId: "",
+        body: "The drawer never appears.\n\n[1 attached image not delivered — plan feedback is text-only]"
+      }])
+      expect(h.planReviseCalls).toStrictEqual([proposedPlan.id])
+    })
+    expect(h.steerCalls).toStrictEqual([])
+    actor.stop()
+  })
+
+  it("makes Send now on an image-bearing queued message revise the parked plan instead of stopping the run", async () => {
+    // The steer fallback for `unsupported` stops the turn — during a parked plan
+    // that would kill the plan gate itself. Revision is the only safe "now".
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (snapshot) => snapshot.matches("running"))
+
+    const image = { id: "i1", name: "shot.png", mediaType: "image/png", data: "aGk=" }
+    actor.send({ type: "SEND", text: "Composer must stay docked.", images: [image] })
+    const id = queuedId(actor, 0)
+    emit({ _tag: "PlanProposed", plan: proposedPlan })
+    actor.send({ type: "SEND_NOW", id })
+
+    expect(actor.getSnapshot().context.queued).toStrictEqual([])
+    await vi.waitFor(() => {
+      expect(h.planReviseCalls).toStrictEqual([proposedPlan.id])
+    })
+    expect(h.steerCalls).toStrictEqual([])
+    expect(h.stopCalls).toStrictEqual([])
+    actor.stop()
+  })
+
   it("tracks cumulative source without touching the transcript and promotes atomically", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))

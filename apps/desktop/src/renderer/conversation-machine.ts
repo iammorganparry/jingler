@@ -712,6 +712,22 @@ type PlanFeedback = {
  * comment followed by `revisePlan` — so use that instead of pretending the held
  * run is an ordinary streaming turn.
  */
+/**
+ * Plan annotations are text-only, but a parked plan has no OTHER live channel:
+ * excluding attachment-bearing sends "to preserve their images" really parked
+ * them until the whole review resolved — and Send now on one fell through to
+ * the steer path, whose `unsupported` fallback stops the run and kills the
+ * plan gate. Steering a parked plan means revising it, images or not; the
+ * marker keeps the dropped screenshots visible to the operator AND the agent
+ * instead of pretending they travelled.
+ */
+const planFeedbackText = (text: string, imageCount: number): string =>
+  imageCount === 0
+    ? text
+    : `${text}\n\n[${imageCount} attached image${
+        imageCount === 1 ? "" : "s"
+      } not delivered — plan feedback is text-only]`
+
 const planFeedbackFor = (
   context: ConversationContext,
   event: ConversationEvent
@@ -722,10 +738,12 @@ const planFeedbackFor = (
   if (event.type === "SEND") {
     if (event.externalInstruction !== undefined || (event.agentContext ?? "") !== "") return null
     const text = event.text.trim()
-    // Plan annotations cannot carry images. Preserve attachment-bearing sends in
-    // the ordinary queue instead of silently discarding their visual context.
-    if (text.length === 0 || (event.images?.length ?? 0) > 0) return null
-    return { plan, text, queuedId: null }
+    if (text.length === 0) return null
+    return {
+      plan,
+      text: planFeedbackText(text, event.images?.length ?? 0),
+      queuedId: null
+    }
   }
 
   if (event.type !== "SEND_NOW" || context.steeringId !== null) return null
@@ -733,12 +751,15 @@ const planFeedbackFor = (
   if (
     queued === undefined ||
     requiresFreshTurn(queued) ||
-    queued.text.trim().length === 0 ||
-    queued.images.length > 0
+    queued.text.trim().length === 0
   ) {
     return null
   }
-  return { plan, text: queued.text.trim(), queuedId: queued.id }
+  return {
+    plan,
+    text: planFeedbackText(queued.text.trim(), queued.images.length),
+    queuedId: queued.id
+  }
 }
 
 /**
