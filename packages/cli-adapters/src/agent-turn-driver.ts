@@ -112,7 +112,14 @@ export type SaveDraftPlan = (plan: PlanPrd, block?: string) => Effect.Effect<voi
  */
 export type StopBackgroundTask = (taskId: string) => Promise<void>
 
-export type TurnSteerResult = "accepted" | "deferred"
+/**
+ * `deferred` is a phase — the channel exists but cannot take the message right
+ * now, so the queue retries at the next boundary. `unsupported` will not clear
+ * within this run (e.g. the runtime cannot take images mid-turn), which is what
+ * licenses the renderer's "Send now" to stop the turn and replay the message as
+ * a fresh one — the only delivery that can still honour "now".
+ */
+export type TurnSteerResult = "accepted" | "deferred" | "unsupported"
 export type SteerTurn = (
   text: string,
   images: ReadonlyArray<Attachment>

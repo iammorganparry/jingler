@@ -110,6 +110,50 @@ describe("AgentRuntimeAdapter", () => {
     expect(registerTurnSteer).toHaveBeenCalled()
   })
 
+  it("steers text through the runtime but reports image-bearing messages unsupported", async () => {
+    // `deferred` for images meant "retry at the next boundary" — a retry that
+    // could never succeed, so "Send now" on an image message died silently.
+    // `unsupported` licenses the renderer to stop and replay as a fresh turn.
+    const events: ReadonlyArray<StreamEvent> = [
+      { _tag: "Started", sessionId: "pi-session", model: "anthropic/claude-test" },
+      { _tag: "Done", costUsd: 0, tokens: 2 }
+    ]
+    const steer = vi.fn(() => Effect.void)
+    const ctx = context()
+    let handle: SteerTurn | null = null
+    vi.mocked(ctx.registerTurnSteer!).mockImplementation((next) =>
+      Effect.sync(() => {
+        handle = handle ?? next
+      })
+    )
+
+    await Effect.runPromise(
+      withRuntime(
+        {
+          run: () => Stream.fromIterable(events),
+          steer,
+          interrupt: () => Effect.void,
+          controlSubagent: () => Effect.die("unused"),
+          subagentFleetSnapshot: () => Effect.die("unused"),
+          subagentTranscript: () => Effect.die("unused")
+        },
+        Effect.flatMap(AgentTurnDriver, (adapter) => adapter.run("run-1", spec(), ctx))
+      )
+    )
+
+    const image = {
+      id: "att-1",
+      name: "shot.png",
+      mediaType: "image/png",
+      data: "iVBORw0KGgo="
+    }
+    await expect(handle!("look at this", [image])).resolves.toBe("unsupported")
+    expect(steer).not.toHaveBeenCalled()
+
+    await expect(handle!("plain text", [])).resolves.toBe("accepted")
+    expect(steer).toHaveBeenCalledWith("pi-session", "plain text")
+  })
+
   it("interrupts the active pi session when the run fiber is interrupted", async () => {
     const interrupt = vi.fn(() => Effect.void)
     let markStarted!: () => void

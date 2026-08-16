@@ -88,9 +88,13 @@ export const AgentTurnDriverLive = Layer.effect(
             Effect.gen(function* () {
               if (event._tag === "Started") {
                 yield* Ref.update(active, (current) => new Map(current).set(runId, event.sessionId))
+                // Pi's steer channel is text-only, and that will not change
+                // mid-run: `deferred` here left an image-bearing "Send now"
+                // silently retrying forever. `unsupported` hands it to the
+                // stop-and-replay fallback, whose fresh turn carries images.
                 yield* context.registerTurnSteer?.((text, images) =>
                   images.length > 0
-                    ? Promise.resolve("deferred")
+                    ? Promise.resolve("unsupported")
                     : Effect.runPromise(runtime.steer(event.sessionId, text)).then(
                         () => "accepted" as const,
                         () => "deferred" as const
