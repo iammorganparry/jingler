@@ -5265,7 +5265,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       )
     }).pipe(
       Effect.mapError(
-        (cause) => new GitError({ message: "Could not reconcile the subagent Fleet", cause })
+        () => new GitError({ message: "Could not reconcile the subagent Fleet" })
       )
     ),
   "Agent.subagentTranscript": ({

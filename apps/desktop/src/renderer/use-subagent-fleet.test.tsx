@@ -67,6 +67,33 @@ afterEach(() => {
 })
 
 describe("useSubagentFleet polling", () => {
+  it("retries after the Pi runtime is not active yet", async () => {
+    let poll: (() => void) | null = null
+    vi.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler) => {
+      if (typeof handler === "function") poll = () => handler()
+      return 1
+    }) as typeof window.setInterval)
+    mocks.snapshot
+      .mockRejectedValueOnce(new Error("Pi session is not active"))
+      .mockResolvedValue(snapshot)
+
+    const events: ReadonlyArray<SubagentFleetEvent> = []
+    renderHook(() => useSubagentFleet({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      piSessionId: "parent",
+      events
+    }))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      poll?.()
+      await Promise.resolve()
+    })
+    expect(mocks.snapshot).toHaveBeenCalledTimes(2)
+  })
+
   it("does not restart or overlap polling when events change", async () => {
     let poll: (() => void) | null = null
     const fakeSetInterval = ((handler: TimerHandler) => {
