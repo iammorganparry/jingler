@@ -1,5 +1,5 @@
 import { startBetterAuthTestServer } from "@jingler/server/test-support/better-auth-account"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "./fixtures.js"
@@ -163,6 +163,41 @@ test("durable native status appears in the integrated Fleet drawer", async ({
               isError: false,
               timestamp: 1_786_877_804_000
             }
+          },
+          {
+            type: "message",
+            id: "child-final",
+            parentId: "child-result",
+            timestamp: "2026-08-16T10:30:05.000Z",
+            message: {
+              role: "assistant",
+              content: [{
+                type: "text",
+                text: Array.from(
+                  { length: 120 },
+                  (_, index) => `Scout output line ${index + 1}`
+                ).join("\n")
+              }],
+              api: "openai-codex-responses",
+              provider: "openai-codex",
+              model: "gpt-5.6-sol",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  total: 0
+                }
+              },
+              stopReason: "stop",
+              timestamp: 1_786_877_805_000
+            }
           }
         ]
         writeFileSync(
@@ -201,6 +236,22 @@ test("durable native status appears in the integrated Fleet drawer", async ({
     await expect(childView.getByText(/Tool result \(command_execute\)/)).toHaveCount(0)
     await childView.getByRole("button", { expanded: false }).click()
     await expect(childView.getByText("18 tests passed")).toBeVisible()
+    const transcriptScroll = childView.getByTestId("fleet-agent-transcript-scroll")
+    const bottom = await transcriptScroll.evaluate((element) => {
+      element.scrollTop = element.scrollHeight
+      return element.scrollTop
+    })
+    expect(bottom).toBeGreaterThan(0)
+    const statusFile = join(asyncRoot, runId, "status.json")
+    const durableStatus = JSON.parse(readFileSync(statusFile, "utf8")) as {
+      lastUpdate: number
+    }
+    durableStatus.lastUpdate += 1_000
+    writeFileSync(statusFile, JSON.stringify(durableStatus))
+    await window.evaluate(() => window.dispatchEvent(new Event("focus")))
+    await expect.poll(
+      () => transcriptScroll.evaluate((element) => element.scrollTop)
+    ).toBeGreaterThan(0)
 
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     await window.evaluate(() => window.dispatchEvent(new Event("focus")))

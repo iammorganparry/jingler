@@ -35,7 +35,7 @@ export function FleetAgentView({
         <strong className="text-text-bright">{node?.agent ?? "Agent"}</strong>
         {node && <span> · {node.task}</span>}
       </div>
-      <div className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
+      <div data-testid="fleet-agent-transcript-scroll" className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-[760px] space-y-6">
           {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
           {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
