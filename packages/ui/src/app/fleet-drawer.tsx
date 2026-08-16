@@ -40,6 +40,7 @@ export interface FleetDrawerProps {
   readonly height: number
   readonly pending?: boolean
   readonly outcomeMessage?: string | null
+  readonly embedded?: boolean
   readonly onSelect: (id: string) => void
   readonly onToggle: () => void
   readonly onResize: (height: number) => void
@@ -193,7 +194,15 @@ export function FleetDrawer(props: FleetDrawerProps) {
   }
   if (props.nodes.length === 0) return null
   return (
-    <section data-testid="fleet-drawer" aria-label="Subagent Fleet" className="overflow-hidden rounded-xl border border-line bg-sunken/80">
+    <section
+      data-testid="fleet-drawer"
+      aria-label="Subagent Fleet"
+      data-embedded={props.embedded ? "true" : undefined}
+      className={cn(
+        "overflow-hidden",
+        !props.embedded && "rounded-xl border border-line bg-sunken/80"
+      )}
+    >
       <FleetHeader nodes={props.nodes} expanded={props.expanded} onToggle={props.onToggle} />
       {props.expanded && <><button type="button" aria-label="Resize Fleet drawer" onPointerDown={startResize} className="block h-1 w-full cursor-row-resize border-y border-line/50 outline-none hover:bg-blue/20" /><div className="grid min-h-0 grid-cols-[minmax(180px,0.8fr)_minmax(220px,1.2fr)]" style={{ height: props.height }}><FleetTree nodes={props.nodes} selectedId={props.selectedId} onSelect={props.onSelect} /><FleetDetails selected={selected} pending={props.pending} outcomeMessage={props.outcomeMessage} onControl={props.onControl} canControl={props.canControl} canDismiss={props.canDismiss} onDismiss={props.onDismiss} onOpenArtifact={props.onOpenArtifact} /></div></>}
     </section>

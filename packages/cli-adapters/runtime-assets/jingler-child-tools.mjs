@@ -16,6 +16,7 @@ const render = (result) => {
 }
 
 export default function jinglerChildTools(pi) {
+  const brokeredTools = capability.tools.map((tool) => tool.id)
   for (const tool of capability.tools) {
     pi.registerTool({
       name: tool.id,
@@ -47,4 +48,7 @@ export default function jinglerChildTools(pi) {
       }
     })
   }
+  pi.on("session_start", () => {
+    pi.setActiveTools([...new Set([...pi.getActiveTools(), ...brokeredTools])])
+  })
 }

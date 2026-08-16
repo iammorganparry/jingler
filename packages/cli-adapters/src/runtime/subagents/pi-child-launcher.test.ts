@@ -53,7 +53,10 @@ const prepareChildFiles = async (
   await mkdir(agentDir, { recursive: true })
   await Promise.all([
     writeFile(join(agentDir, "auth.json"), "{}\n", { mode: 0o600 }),
-    writeFile(join(agentDir, `capability-${agent}.json`), "{}\n", { mode: 0o600 })
+    writeFile(join(agentDir, `capability-${agent}.json`), JSON.stringify({
+      version: 1,
+      tools: [{ id: "workspace_read_file" }]
+    }), { mode: 0o600 })
   ])
   return { credentialRoot, agentDir }
 }
@@ -106,21 +109,30 @@ describe("preparePiChildLauncher", () => {
       `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(output)}, JSON.stringify({ agentDir: process.env.PI_CODING_AGENT_DIR, capability: process.env.JINGLER_SUBAGENT_CAPABILITY, args: process.argv.slice(2) }))`
     )
 
-    await runFile(process.execPath, [wrapperPath, "--model", "anthropic/test"], {
-      env: {
-        PATH: "",
-        PI_SUBAGENT_PARENT_SESSION: parent,
-        PI_SUBAGENT_CHILD_AGENT: "reviewer",
-        JINGLER_SUBAGENT_CREDENTIAL_ROOT: credentialRoot,
-        JINGLER_SUBAGENT_PI_CLI: fakeCli,
-        JINGLER_SUBAGENT_NODE: process.execPath
+    await runFile(
+      process.execPath,
+      [wrapperPath, "--model", "anthropic/test", "--tools", "contact_supervisor"],
+      {
+        env: {
+          PATH: "",
+          PI_SUBAGENT_PARENT_SESSION: parent,
+          PI_SUBAGENT_CHILD_AGENT: "reviewer",
+          JINGLER_SUBAGENT_CREDENTIAL_ROOT: credentialRoot,
+          JINGLER_SUBAGENT_PI_CLI: fakeCli,
+          JINGLER_SUBAGENT_NODE: process.execPath
+        }
       }
-    })
+    )
 
     expect(JSON.parse(await readFile(output, "utf8"))).toEqual({
       agentDir,
       capability: join(agentDir, "capability-reviewer.json"),
-      args: ["--model", "anthropic/test"]
+      args: [
+        "--model",
+        "anthropic/test",
+        "--tools",
+        "contact_supervisor,workspace_read_file"
+      ]
     })
   })
 

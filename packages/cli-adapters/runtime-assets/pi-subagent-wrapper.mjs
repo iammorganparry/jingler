@@ -1,10 +1,20 @@
 import { createHash } from "node:crypto"
 import { spawn } from "node:child_process"
-import { access, stat } from "node:fs/promises"
+import { access, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 
 const SAFE_AGENT_NAME = /^[a-z][a-z0-9-]*$/u
 const FORCE_KILL_AFTER_MS = 1_500
+
+const withCapabilityTools = (args, tools) => {
+  const index = args.findIndex((arg) => arg === "--tools" || arg === "-t")
+  const current = index === -1 ? [] : (args[index + 1]?.split(",") ?? [])
+  const combined = [...new Set([...current, ...tools])]
+  if (index === -1) return [...args, "--tools", combined.join(",")]
+  const next = [...args]
+  next[index + 1] = combined.join(",")
+  return next
+}
 
 const required = (name) => {
   const value = process.env[name]?.trim()
@@ -25,6 +35,20 @@ const agentDir = join(credentialRoot, key)
 const authPath = join(agentDir, "auth.json")
 const capabilityPath = join(agentDir, `capability-${childAgent}.json`)
 await Promise.all([access(authPath), access(capabilityPath), access(piCli), access(nodePath)])
+const capability = JSON.parse(await readFile(capabilityPath, "utf8"))
+if (
+  capability.version !== 1 ||
+  !Array.isArray(capability.tools) ||
+  capability.tools.some((tool) =>
+    typeof tool?.id !== "string" || tool.id.length === 0 || tool.id.includes(",")
+  )
+) {
+  throw new Error("Unsupported Jingler child capability contract")
+}
+const childArgs = withCapabilityTools(
+  process.argv.slice(2),
+  capability.tools.map((tool) => tool.id)
+)
 if (process.platform !== "win32") {
   const modes = await Promise.all([authPath, capabilityPath].map(async (path) =>
     (await stat(path)).mode & 0o777
@@ -42,7 +66,7 @@ const env = {
 }
 delete env.JINGLER_SUBAGENT_CREDENTIAL_ROOT
 
-const child = spawn(nodePath, [piCli, ...process.argv.slice(2)], {
+const child = spawn(nodePath, [piCli, ...childArgs], {
   env,
   stdio: "inherit",
   windowsHide: true

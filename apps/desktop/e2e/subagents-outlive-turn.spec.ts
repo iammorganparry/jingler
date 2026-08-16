@@ -31,6 +31,9 @@ test("Fleet stays composer-adjacent while subagents run and the operator steers 
 
   const fleet = window.getByTestId("fleet-drawer")
   await expect(fleet).toBeVisible({ timeout: 15_000 })
+  await expect(
+    window.getByTestId("composer").getByTestId("fleet-drawer")
+  ).toBeVisible()
   await expect(fleet.getByRole("button", { name: FIRST_AGENT })).toBeVisible()
   await expect(fleet.getByRole("button", { name: SECOND_AGENT })).toBeVisible()
   await expect(fleet).toContainText("2 active · 2 total")

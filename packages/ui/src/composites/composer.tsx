@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   Attachment,
   Environment,
@@ -177,6 +177,7 @@ export function Composer({
   codeReferences = [],
   onCodeReferenceRemove,
   onCodeReferencesClear,
+  topSlot,
   className,
 }: {
   skills?: ReadonlyArray<Skill>;
@@ -219,6 +220,8 @@ export function Composer({
   onCodeReferenceRemove?: (index: number) => void;
   /** Clear every captured range after a composer send. */
   onCodeReferencesClear?: () => void;
+  /** Content integrated into the top of the composer's shared chrome. */
+  topSlot?: ReactNode;
   /** Canonical certified model surface. */
   providerCatalog?: ProviderCatalog | null;
   connectionId?: ProviderConnectionId | null;
@@ -564,6 +567,11 @@ export function Composer({
           dragging && "border-cyan/60 bg-cyan/5 shadow-none",
         )}
       >
+        {topSlot && (
+          <div className="-mx-4 -mt-3.5 overflow-hidden border-b border-line">
+            {topSlot}
+          </div>
+        )}
         {(codeReferences.length > 0 || mentions.length > 0) && (
           <div className="flex flex-wrap gap-1.5">
             {codeReferences.map((reference, index) => (

@@ -49,7 +49,9 @@ export function FleetAgentView({
       </div>
       {fleetSlot && (
         <div className="flex-none px-[30px] pb-[18px] pt-[11px]">
-          <div className="mx-auto w-full max-w-[760px]">{fleetSlot}</div>
+          <div className="mx-auto w-full max-w-[760px] overflow-hidden rounded-2xl border border-line bg-sunken">
+            {fleetSlot}
+          </div>
         </div>
       )}
     </div>
