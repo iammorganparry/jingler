@@ -648,8 +648,7 @@ export function ConversationPane({
       session.id,
       activeChat.id,
       fleet.selectedNode?.parentPiSessionId,
-      fleet.selectedNode?.runId,
-      fleet.selectedNode?.updatedAt
+      fleet.selectedNode?.runId
     ],
     queryFn: () => rpc.agentSubagentTranscript(
       session.id,
