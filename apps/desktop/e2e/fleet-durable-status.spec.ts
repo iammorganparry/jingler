@@ -97,6 +97,7 @@ test("durable native status appears in the integrated Fleet drawer", async ({
       window.getByTestId("composer").getByTestId("fleet-drawer")
     ).toBeVisible()
     await expect(fleet).toContainText("scout")
+    await expect(fleet).toContainText("1 active · 1 total")
     const resize = fleet.getByRole("button", { name: "Resize Fleet drawer" })
     await expect(resize).toBeVisible()
     expect(await resize.evaluate((element) => {
