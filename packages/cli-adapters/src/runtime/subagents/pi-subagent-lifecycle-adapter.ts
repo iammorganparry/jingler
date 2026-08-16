@@ -14,6 +14,7 @@ import {
   type SubagentJsonValue
 } from "@jingler/core"
 import { Option, Schema } from "effect"
+import { readDurablePiSubagentNodes } from "./pi-subagent-durable-status.js"
 import { readPiSubagentTranscript } from "./pi-subagent-transcript.js"
 import { createSubagentRunTreeActor } from "./subagent-run-tree-machine.js"
 
@@ -255,6 +256,7 @@ export interface PiSubagentLifecycleAdapterOptions {
   readonly events: EventBus
   readonly parentPiSessionId: string
   readonly parentPiSessionAliases?: ReadonlyArray<string>
+  readonly asyncRunsDir?: string
   readonly emit: (event: SubagentFleetEvent) => void
   readonly trustedSessionRoots?: ReadonlyArray<string>
   readonly now?: () => number
@@ -264,6 +266,7 @@ export class PiSubagentLifecycleAdapter {
   readonly #events: EventBus
   readonly #parentPiSessionId: string
   readonly #parentPiSessionIds: ReadonlySet<string>
+  readonly #asyncRunsDir: string | undefined
   readonly #emitExternal: (event: SubagentFleetEvent) => void
   readonly #now: () => number
   readonly #actor
@@ -281,6 +284,7 @@ export class PiSubagentLifecycleAdapter {
       options.parentPiSessionId,
       ...(options.parentPiSessionAliases ?? [])
     ])
+    this.#asyncRunsDir = options.asyncRunsDir
     this.#emitExternal = options.emit
     this.#now = options.now ?? Date.now
     for (const root of options.trustedSessionRoots ?? []) this.#trustedSessionRoots.add(root)
@@ -440,9 +444,36 @@ export class PiSubagentLifecycleAdapter {
   }
 
   async refresh(): Promise<SubagentFleetSnapshot> {
+    const generatedAt = this.#now()
+    const durableNodes = await readDurablePiSubagentNodes({
+      ...(this.#asyncRunsDir ? { asyncDir: this.#asyncRunsDir } : {}),
+      parentPiSessionId: this.#parentPiSessionId,
+      parentPiSessionAliases: this.#parentPiSessionIds,
+      now: generatedAt
+    })
+    if (durableNodes.length > 0) {
+      this.#publish({
+        _tag: "Snapshot",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `durable:${generatedAt}`,
+        occurredAt: generatedAt,
+        snapshot: {
+          version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+          parentPiSessionId: this.#parentPiSessionId,
+          generatedAt,
+          totalActive: durableNodes.filter(({ parentId }) => parentId === null).length,
+          omitted: 0,
+          activeCapacity: {
+            used: durableNodes.filter(({ parentId }) => parentId === null).length,
+            limit: 4
+          },
+          nodes: durableNodes
+        }
+      })
+      return this.snapshot()
+    }
     const requestId = randomUUID()
     const reply = await this.#requestStatus(requestId)
-    const generatedAt = this.#now()
     const activeNodes = this.#activeNodes(reply, generatedAt)
     const activeNodeIds = new Set(activeNodes.map((node) => node.id))
     const lifecycleNodes = this.#actor.getSnapshot().context.nodes.filter(
