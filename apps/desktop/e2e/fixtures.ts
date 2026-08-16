@@ -720,10 +720,24 @@ export const test = base.extend<{
         );
       }
 
+      const inheritedEnv = { ...process.env };
+      for (const name of [
+        "PI_CODING_AGENT_DIR",
+        "PI_SUBAGENT_PI_BINARY",
+        "PI_SUBAGENT_PI_BINARY_ARGS",
+        "PI_SUBAGENT_ELECTRON_RUN_AS_NODE",
+        "JINGLER_SUBAGENT_CREDENTIAL_ROOT",
+        "JINGLER_SUBAGENT_PI_CLI",
+        "JINGLER_SUBAGENT_PI_CLI_PATH",
+        "JINGLER_SUBAGENT_NODE",
+        "JINGLER_SUBAGENT_CHILD_TOOLS",
+        "JINGLER_SUBAGENT_CHILD_TOOLS_PATH",
+        "JINGLER_SUBAGENT_WRAPPER_PATH",
+      ]) delete inheritedEnv[name];
       const app = await electron.launch({
         args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
         env: {
-          ...process.env,
+          ...inheritedEnv,
           // Run every built-app scenario against the same clean-machine
           // boundary: embedded pi, Electron/Node, and system git. Never inherit
           // the developer's PATH. In particular, a locally installed
@@ -731,6 +745,7 @@ export const test = base.extend<{
           PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
           ...(options.isolateSystemHome ? { HOME: home } : {}),
           JINGLER_HOME: home,
+          PI_CODING_AGENT_DIR: join(home, "jingler", "agent-resources"),
           ELECTRON_RENDERER_URL: "",
           // Auth: talk to the offline fake backend, and store the token as a plain
           // file (no OS keychain prompts under headless Playwright).
