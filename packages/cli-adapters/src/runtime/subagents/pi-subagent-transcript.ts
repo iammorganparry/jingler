@@ -1,9 +1,14 @@
-import { realpath } from "node:fs/promises"
+import { open, realpath, stat } from "node:fs/promises"
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path"
 import type { Message as PiMessage } from "@earendil-works/pi-ai"
 import { SessionManager } from "@earendil-works/pi-coding-agent"
 import type { ContentPart, Message, ToolCall } from "@jingler/core"
-import { Effect } from "effect"
+import {
+  Context,
+  Effect,
+  Layer,
+  SynchronizedRef
+} from "effect"
 
 export const piSubagentTrustedSessionRoots = (
   parentSessionFile: string
@@ -146,16 +151,19 @@ const settleToolResult = (
   return false
 }
 
-export const piMessagesToJingler = (
-  messages: ReadonlyArray<PiMessage>
+export const appendPiMessagesToJingler = (
+  previous: ReadonlyArray<Message>,
+  messages: ReadonlyArray<PiMessage>,
+  indexOffset = 0
 ): ReadonlyArray<Message> => {
-  const projected: Array<Message> = []
+  const projected: Array<Message> = [...previous]
   for (const [index, message] of messages.entries()) {
+    const messageIndex = indexOffset + index
     if (message.role === "toolResult") {
       if (!settleToolResult(projected, message)) {
         const text = textOf(message)
         projected.push({
-          id: `child-${message.timestamp}-${index}`,
+          id: `child-${message.timestamp}-${messageIndex}`,
           role: "assistant",
           parts: [{
             _tag: "Text",
@@ -168,7 +176,7 @@ export const piMessagesToJingler = (
       continue
     }
     projected.push({
-      id: `child-${message.timestamp}-${index}`,
+      id: `child-${message.timestamp}-${messageIndex}`,
       role: message.role === "user" ? "user" : "assistant",
       parts: partsOf(message),
       streaming: false,
@@ -178,11 +186,100 @@ export const piMessagesToJingler = (
   return projected
 }
 
-export const readPiSubagentTranscript = (input: {
+export const piMessagesToJingler = (
+  messages: ReadonlyArray<PiMessage>
+): ReadonlyArray<Message> => appendPiMessagesToJingler([], messages)
+
+export interface PiSubagentTranscriptInput {
   readonly sessionFile: string
   readonly trustedRoots: ReadonlyArray<string>
-}): Effect.Effect<ReadonlyArray<Message>, Error> => Effect.tryPromise({
-  try: async () => {
+}
+
+interface TranscriptCursor {
+  readonly file: string
+  readonly inode: number
+  readonly offset: number
+  readonly modifiedAt: number
+  readonly messageCount: number
+  readonly messages: ReadonlyArray<Message>
+}
+
+export interface PiSubagentTranscriptReaderShape {
+  readonly read: (
+    input: PiSubagentTranscriptInput
+  ) => Effect.Effect<ReadonlyArray<Message>, Error>
+  readonly clear: Effect.Effect<void>
+}
+
+export class PiSubagentTranscriptReader extends Context.Tag(
+  "@jingler/PiSubagentTranscriptReader"
+)<PiSubagentTranscriptReader, PiSubagentTranscriptReaderShape>() {}
+
+const isPiMessage = (value: unknown): value is PiMessage => {
+  const record = recordOf(value)
+  if (!record || typeof record.timestamp !== "number") return false
+  if (record.role === "user") {
+    return typeof record.content === "string" || Array.isArray(record.content)
+  }
+  if (record.role === "assistant") return Array.isArray(record.content)
+  return record.role === "toolResult" &&
+    Array.isArray(record.content) &&
+    typeof record.toolCallId === "string" &&
+    typeof record.toolName === "string" &&
+    typeof record.isError === "boolean"
+}
+
+const contextMessages = (file: string): ReadonlyArray<PiMessage> =>
+  SessionManager.open(file, dirname(file))
+    .buildSessionContext()
+    .messages
+    .filter(isPiMessage)
+
+const fullCursor = async (file: string): Promise<TranscriptCursor> => {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const before = await stat(file)
+    const messages = contextMessages(file)
+    const after = await stat(file)
+    if (before.size === after.size && before.ino === after.ino) {
+      return {
+        file,
+        inode: after.ino,
+        offset: after.size,
+        modifiedAt: after.mtimeMs,
+        messageCount: messages.length,
+        messages: piMessagesToJingler(messages)
+      }
+    }
+  }
+  throw new Error("Child session changed while its transcript cursor was initialized")
+}
+
+const appendedMessages = async (
+  cursor: TranscriptCursor,
+  size: number
+): Promise<{ readonly messages: ReadonlyArray<PiMessage>; readonly consumed: number }> => {
+  const handle = await open(cursor.file, "r")
+  try {
+    const bytes = Buffer.alloc(size - cursor.offset)
+    const { bytesRead } = await handle.read(bytes, 0, bytes.length, cursor.offset)
+    const read = bytes.subarray(0, bytesRead)
+    const lastNewline = read.lastIndexOf(0x0a)
+    if (lastNewline < 0) return { messages: [], consumed: 0 }
+    const messages: PiMessage[] = []
+    for (const line of read.subarray(0, lastNewline).toString("utf8").split("\n")) {
+      if (!line.trim()) continue
+      const entry = recordOf(JSON.parse(line))
+      if (entry?.type === "message" && isPiMessage(entry.message)) {
+        messages.push(entry.message)
+      }
+    }
+    return { messages, consumed: lastNewline + 1 }
+  } finally {
+    await handle.close()
+  }
+}
+
+const trustedFile = async (input: PiSubagentTranscriptInput): Promise<string> => {
   const file = await realpath(resolve(input.sessionFile))
   const roots = (await Promise.all(
     input.trustedRoots.map((root) => realpath(resolve(root)).catch(() => null))
@@ -190,16 +287,74 @@ export const readPiSubagentTranscript = (input: {
   if (!roots.some((root) => containedBy(file, root))) {
     throw new Error("Child session file is outside the trusted pi-subagents roots")
   }
-  const session = SessionManager.open(file, dirname(file))
-  const messages = session.buildSessionContext().messages.filter(
-    (message): message is PiMessage =>
-      message.role === "user" ||
-      message.role === "assistant" ||
-      message.role === "toolResult"
+  return file
+}
+
+export const makePiSubagentTranscriptReader = (): Effect.Effect<
+  PiSubagentTranscriptReaderShape
+> => Effect.gen(function* () {
+  const cursors = yield* SynchronizedRef.make<ReadonlyMap<string, TranscriptCursor>>(
+    new Map()
   )
-  return piMessagesToJingler(messages)
-  },
-  catch: (cause) => cause instanceof Error
-    ? cause
-    : new Error("Could not read pi-subagents transcript")
+  return {
+    read: (input) => Effect.tryPromise({
+      try: () => trustedFile(input),
+      catch: (cause) => cause instanceof Error
+        ? cause
+        : new Error("Could not resolve pi-subagents transcript")
+    }).pipe(
+      Effect.flatMap((file) => SynchronizedRef.modifyEffect(cursors, (current) =>
+        Effect.tryPromise({
+          try: async () => {
+            const cached = current.get(file)
+            const metadata = await stat(file)
+            let next: TranscriptCursor
+            if (
+              !cached ||
+              cached.inode !== metadata.ino ||
+              metadata.size < cached.offset ||
+              (metadata.size === cached.offset && metadata.mtimeMs !== cached.modifiedAt)
+            ) {
+              next = await fullCursor(file)
+            } else if (metadata.size === cached.offset) {
+              next = cached
+            } else {
+              const appended = await appendedMessages(cached, metadata.size)
+              const projected = appendPiMessagesToJingler(
+                cached.messages,
+                appended.messages,
+                cached.messageCount
+              )
+              next = {
+                ...cached,
+                offset: cached.offset + appended.consumed,
+                modifiedAt: metadata.mtimeMs,
+                messageCount: cached.messageCount + appended.messages.length,
+                messages: projected
+              }
+            }
+            const updated = new Map(current)
+            updated.set(file, next)
+            return [next.messages, updated] as const
+          },
+          catch: (cause) => cause instanceof Error
+            ? cause
+            : new Error("Could not read pi-subagents transcript")
+        })
+      ))
+    ),
+    clear: SynchronizedRef.set(cursors, new Map())
+  }
 })
+
+export const PiSubagentTranscriptReaderLive = Layer.effect(
+  PiSubagentTranscriptReader,
+  makePiSubagentTranscriptReader()
+)
+
+export const readPiSubagentTranscript = (
+  input: PiSubagentTranscriptInput
+): Effect.Effect<ReadonlyArray<Message>, Error> => Effect.flatMap(
+  makePiSubagentTranscriptReader(),
+  (reader) => reader.read(input)
+)

@@ -17,7 +17,10 @@ import {
 } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
 import { readDurablePiSubagentNodes } from "./pi-subagent-durable-status.js"
-import { readPiSubagentTranscript } from "./pi-subagent-transcript.js"
+import {
+  makePiSubagentTranscriptReader,
+  type PiSubagentTranscriptReaderShape
+} from "./pi-subagent-transcript.js"
 import {
   makeSubagentSupervisionService,
   type SubagentStartRecord,
@@ -308,6 +311,7 @@ export class PiSubagentLifecycleAdapter {
   readonly #emitExternal: (event: SubagentFleetEvent) => void
   readonly #now: () => number
   readonly #supervision: SubagentSupervisionServiceShape
+  readonly #transcripts: PiSubagentTranscriptReaderShape
   readonly #trustedSessionRoots: ReadonlySet<string>
 
   constructor(options: PiSubagentLifecycleAdapterOptions) {
@@ -324,6 +328,7 @@ export class PiSubagentLifecycleAdapter {
     this.#supervision = Effect.runSync(
       makeSubagentSupervisionService(options.parentPiSessionId, this.#now)
     )
+    this.#transcripts = Effect.runSync(makePiSubagentTranscriptReader())
   }
 
   start(): void {
@@ -337,6 +342,7 @@ export class PiSubagentLifecycleAdapter {
 
   stop(): void {
     Effect.runSync(this.#supervision.stop)
+    Effect.runSync(this.#transcripts.clear)
   }
 
   snapshot(): SubagentFleetSnapshot {
@@ -358,7 +364,7 @@ export class PiSubagentLifecycleAdapter {
       (candidate) => candidate.runId === runId
     )
     if (!node?.sessionFile) return []
-    return Effect.runPromise(readPiSubagentTranscript({
+    return Effect.runPromise(this.#transcripts.read({
       sessionFile: node.sessionFile,
       trustedRoots: [...this.#trustedSessionRoots]
     }))

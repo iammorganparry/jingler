@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
+import { mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises"
 import { join } from "node:path"
 import { SessionManager } from "@earendil-works/pi-coding-agent"
 import { Effect } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  makePiSubagentTranscriptReader,
   piSubagentTrustedSessionRoots,
   readPiSubagentTranscript
 } from "./pi-subagent-transcript.js"
@@ -89,7 +90,7 @@ const createChildSession = async () => {
   })
   const sessionFile = manager.getSessionFile()
   if (!sessionFile) throw new Error("Expected a persisted child session")
-  return { root, sessionFile }
+  return { root, sessionFile, manager }
 }
 
 describe("readPiSubagentTranscript", () => {
@@ -129,6 +130,109 @@ describe("readPiSubagentTranscript", () => {
           }
         }
       ]
+    })
+  })
+
+  it("reads only appended JSONL entries and preserves existing identities", async () => {
+    const { root, sessionFile, manager } = await createChildSession()
+    const reader = Effect.runSync(makePiSubagentTranscriptReader())
+    const openSession = vi.spyOn(SessionManager, "open")
+    const input = {
+      sessionFile,
+      trustedRoots: piSubagentTrustedSessionRoots(join(root, "parent.jsonl"))
+    }
+    const first = await Effect.runPromise(reader.read(input))
+    manager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Appended progress" }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "claude-test",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: "stop",
+      timestamp: 50
+    })
+
+    const second = await Effect.runPromise(reader.read(input))
+
+    expect(second.slice(0, first.length).map(({ id }) => id))
+      .toEqual(first.map(({ id }) => id))
+    expect(openSession).toHaveBeenCalledOnce()
+    expect(second.at(-1)).toMatchObject({
+      role: "assistant",
+      parts: [{ _tag: "Text", text: "Appended progress" }]
+    })
+
+    manager.appendMessage({
+      role: "assistant",
+      content: [{
+        type: "toolCall",
+        id: "tool-late",
+        name: "workspace_read_file",
+        arguments: { path: "src/late.ts" }
+      }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "claude-test",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: "toolUse",
+      timestamp: 60
+    })
+    await Effect.runPromise(reader.read(input))
+    manager.appendMessage({
+      role: "toolResult",
+      toolCallId: "tool-late",
+      toolName: "workspace_read_file",
+      content: [{ type: "text", text: "late output" }],
+      isError: false,
+      timestamp: 70
+    })
+    const settled = await Effect.runPromise(reader.read(input))
+    expect(settled.flatMap(({ parts }) => parts)).toContainEqual(expect.objectContaining({
+      _tag: "Tool",
+      tool: expect.objectContaining({
+        id: "tool-late",
+        status: "success",
+        output: "late output"
+      })
+    }))
+  })
+
+  it("resets the cursor when the session file is atomically replaced", async () => {
+    const original = await createChildSession()
+    const replacement = await createChildSession()
+    replacement.manager.appendMessage({
+      role: "user",
+      content: "Replacement session",
+      timestamp: 60
+    })
+    const reader = Effect.runSync(makePiSubagentTranscriptReader())
+    const input = {
+      sessionFile: original.sessionFile,
+      trustedRoots: piSubagentTrustedSessionRoots(join(original.root, "parent.jsonl"))
+    }
+    await Effect.runPromise(reader.read(input))
+    await rename(replacement.sessionFile, original.sessionFile)
+
+    const messages = await Effect.runPromise(reader.read(input))
+
+    expect(messages.at(-1)).toMatchObject({
+      role: "user",
+      parts: [{ _tag: "Text", text: "Replacement session" }]
     })
   })
 
