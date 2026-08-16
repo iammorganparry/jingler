@@ -92,7 +92,7 @@ export function useSubagentFleet(input: {
           .map((node): SubagentFleetEvent => ({
             _tag: "Remove",
             version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-            eventId: `renderer-poll:remove:${snapshot.generatedAt}:${node.id}`,
+            eventId: `renderer-recovery:remove:${snapshot.generatedAt}:${node.id}`,
             occurredAt: snapshot.generatedAt,
             registryRevision: snapshot.registryRevision,
             id: node.id
@@ -105,7 +105,7 @@ export function useSubagentFleet(input: {
             {
               _tag: "Snapshot",
               version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-              eventId: `renderer-poll:${snapshot.generatedAt}`,
+              eventId: `renderer-recovery:${snapshot.generatedAt}`,
               occurredAt: snapshot.generatedAt,
               snapshot
             }
