@@ -201,6 +201,10 @@ test("durable native status appears in the integrated Fleet drawer", async ({
     await expect(childView.getByText(/Tool result \(command_execute\)/)).toHaveCount(0)
     await childView.getByRole("button", { expanded: false }).click()
     await expect(childView.getByText("18 tests passed")).toBeVisible()
+
+    rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
+    await window.evaluate(() => window.dispatchEvent(new Event("focus")))
+    await expect(fleet).toHaveCount(0, { timeout: 15_000 })
   } finally {
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     rmSync(join(asyncRoot, runId), { recursive: true, force: true })

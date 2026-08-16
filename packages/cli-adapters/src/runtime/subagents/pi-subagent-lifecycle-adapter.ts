@@ -472,8 +472,59 @@ export class PiSubagentLifecycleAdapter {
       })
       return this.snapshot()
     }
+    const durablePrefix = `${this.#parentPiSessionId}/active/`
+    const current = this.#actor.getSnapshot().context
+    const staleDurableNodes = current.nodes.filter(
+      (node) => node.id.startsWith(durablePrefix)
+    )
+    if (staleDurableNodes.length > 0) {
+      for (const node of staleDurableNodes) {
+        this.#publish({
+          _tag: "Remove",
+          version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+          eventId: `durable-removed:${node.id}:${generatedAt}`,
+          occurredAt: generatedAt,
+          id: node.id
+        })
+      }
+      const retained = current.nodes.filter(
+        (node) => !node.id.startsWith(durablePrefix)
+      )
+      const active = retained.filter(
+        (node) =>
+          node.parentId === null &&
+          (node.status === "queued" ||
+            node.status === "running" ||
+            node.status === "paused" ||
+            node.status === "needs-attention")
+      ).length
+      this.#publish({
+        _tag: "Snapshot",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `durable-cleared:${generatedAt}`,
+        occurredAt: generatedAt,
+        snapshot: {
+          version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+          parentPiSessionId: this.#parentPiSessionId,
+          generatedAt,
+          totalActive: active,
+          omitted: 0,
+          activeCapacity: {
+            used: active,
+            limit: current.activeCapacity.limit
+          },
+          nodes: retained
+        }
+      })
+    }
     const requestId = randomUUID()
-    const reply = await this.#requestStatus(requestId)
+    let reply: typeof FleetStatusReply.Type
+    try {
+      reply = await this.#requestStatus(requestId)
+    } catch (error) {
+      if (staleDurableNodes.length > 0) return this.snapshot()
+      throw error
+    }
     const activeNodes = this.#activeNodes(reply, generatedAt)
     const activeNodeIds = new Set(activeNodes.map((node) => node.id))
     const lifecycleNodes = this.#actor.getSnapshot().context.nodes.filter(

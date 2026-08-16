@@ -94,6 +94,45 @@ describe("useSubagentFleet polling", () => {
     expect(mocks.snapshot).toHaveBeenCalledTimes(2)
   })
 
+  it("removes a completed canonical durable node when polling through a session-file alias", async () => {
+    let poll: (() => void) | null = null
+    vi.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler) => {
+      if (typeof handler === "function") poll = () => handler()
+      return 1
+    }) as typeof window.setInterval)
+    const durableNode: SubagentFleetNode = {
+      ...node,
+      id: "parent/active/run-1"
+    }
+    mocks.snapshot
+      .mockResolvedValueOnce({
+        ...snapshot,
+        totalActive: 1,
+        activeCapacity: { used: 1, limit: 8 },
+        nodes: [durableNode]
+      })
+      .mockResolvedValue(snapshot)
+    const events: ReadonlyArray<SubagentFleetEvent> = []
+    const { result } = renderHook(() => useSubagentFleet({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      piSessionId: "/sessions/parent.jsonl",
+      events
+    }))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.nodes.map(({ id }) => id)).toStrictEqual([durableNode.id])
+    await act(async () => {
+      poll?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.nodes).toStrictEqual([])
+  })
+
   it("does not restart or overlap polling when events change", async () => {
     let poll: (() => void) | null = null
     const fakeSetInterval = ((handler: TimerHandler) => {
