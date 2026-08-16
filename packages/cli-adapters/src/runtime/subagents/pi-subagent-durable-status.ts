@@ -111,30 +111,28 @@ export const readDurablePiSubagentNodes = async (input: {
       artifacts: [],
       attention: null
     }
-    return [
-      root,
-      ...steps.map((step, index): SubagentFleetNode => {
-        const startedAt = step.startedAt ?? status.startedAt!
-        return {
-          id: `${rootId}/${encodeURIComponent(step.workflowKey ?? String(index))}`,
-          runId: step.runId ?? `${status.runId}:step:${index}`,
-          parentId: rootId,
-          parentPiSessionId: input.parentPiSessionId,
-          agent: step.agent ?? step.label ?? `step-${index + 1}`,
-          task: step.label ?? "Delegated work",
-          model: step.model ?? null,
-          status: nodeStatus(step.status),
-          background: true,
-          sessionFile: step.sessionFile ?? null,
-          currentTool: null,
-          startedAt,
-          updatedAt,
-          completedAt: null,
-          usage: usage(startedAt, updatedAt, step.toolCount ?? 0),
-          artifacts: [],
-          attention: null
-        }
-      })
-    ]
+    if (steps.length === 0) return [root]
+    return steps.map((step, index): SubagentFleetNode => {
+      const startedAt = step.startedAt ?? status.startedAt!
+      return {
+        id: `${rootId}/${encodeURIComponent(step.workflowKey ?? String(index))}`,
+        runId: step.runId ?? `${status.runId}:step:${index}`,
+        parentId: null,
+        parentPiSessionId: input.parentPiSessionId,
+        agent: step.agent ?? step.label ?? `step-${index + 1}`,
+        task: step.label ?? "Delegated work",
+        model: step.model ?? null,
+        status: nodeStatus(step.status),
+        background: true,
+        sessionFile: step.sessionFile ?? null,
+        currentTool: null,
+        startedAt,
+        updatedAt,
+        completedAt: null,
+        usage: usage(startedAt, updatedAt, step.toolCount ?? 0),
+        artifacts: [],
+        attention: null
+      }
+    })
   })
 }

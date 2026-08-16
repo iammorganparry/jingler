@@ -18,10 +18,12 @@ describe("readDurablePiSubagentNodes", () => {
     await Promise.all([
       mkdir(join(root, ".active-runs"), { recursive: true }),
       mkdir(join(root, "run-1"), { recursive: true }),
+      mkdir(join(root, "starting"), { recursive: true }),
       mkdir(join(root, "foreign"), { recursive: true })
     ])
     await Promise.all([
       writeFile(join(root, ".active-runs", "run-1"), ""),
+      writeFile(join(root, ".active-runs", "starting"), ""),
       writeFile(join(root, ".active-runs", "foreign"), ""),
       writeFile(join(root, "run-1", "status.json"), JSON.stringify({
         runId: "run-1",
@@ -37,6 +39,14 @@ describe("readDurablePiSubagentNodes", () => {
           startedAt: 12,
           model: "test/model"
         }]
+      })),
+      writeFile(join(root, "starting", "status.json"), JSON.stringify({
+        runId: "starting",
+        sessionId: "/sessions/parent.jsonl",
+        state: "queued",
+        mode: "workflow",
+        startedAt: 15,
+        lastUpdate: 20
       })),
       writeFile(join(root, "foreign", "status.json"), JSON.stringify({
         runId: "foreign",
@@ -56,16 +66,16 @@ describe("readDurablePiSubagentNodes", () => {
     expect(nodes).toHaveLength(2)
     expect(nodes).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: "parent/active/run-1",
-        runId: "run-1",
-        agent: "scout",
-        status: "running"
-      }),
-      expect.objectContaining({
         id: "parent/active/run-1/main",
-        parentId: "parent/active/run-1",
+        parentId: null,
         agent: "scout",
         model: "test/model"
+      }),
+      expect.objectContaining({
+        id: "parent/active/starting",
+        parentId: null,
+        agent: "workflow",
+        status: "queued"
       })
     ]))
   })
