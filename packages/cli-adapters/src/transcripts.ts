@@ -7,6 +7,8 @@ import { AppPaths } from "./app-paths.js"
 
 const MessageArray = Schema.Array(MessageSchema)
 const PAGE_CURSOR = /^v1:(\d+)$/
+let writeSequence = 0
+const nextWriteId = (): number => ++writeSequence
 
 /**
  * A page stops growing once it carries this many serialized bytes, whatever
@@ -99,10 +101,13 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           // file on nearly every stream event) leaves a 0-byte transcript and the
           // session's entire history is gone. `rename` is atomic within a
           // filesystem: readers see either the old file or the new one, never a
-          // half-written one.
-          const tmp = `${file}.tmp`
+          // half-written one. Each write needs its own scratch path because
+          // independent store instances can persist the same chat concurrently;
+          // a shared `.tmp` lets the first rename consume the second writer's file.
+          const writeId = nextWriteId()
+          const tmp = `${file}.${process.pid}.${writeId}.tmp`
           const indexFile = yield* indexFileFor(chatId)
-          const indexTmp = `${indexFile}.tmp`
+          const indexTmp = `${indexFile}.${process.pid}.${writeId}.tmp`
           const transcriptWritten = yield* fs
             .writeFileString(tmp, serialized)
             .pipe(
@@ -353,19 +358,23 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
         )
 
       const remove = (chatId: string) =>
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem
-          const file = yield* fileFor(chatId)
-          yield* fs.remove(file).pipe(Effect.ignore)
-          yield* fs.remove(yield* indexFileFor(chatId)).pipe(Effect.ignore)
-        })
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem
+            const file = yield* fileFor(chatId)
+            yield* fs.remove(file).pipe(Effect.ignore)
+            yield* fs.remove(yield* indexFileFor(chatId)).pipe(Effect.ignore)
+          })
+        )
 
       /** Append a message to the end of the transcript. */
       const append = (chatId: string, message: Message) =>
-        Effect.gen(function* () {
-          const existing = yield* readAll(chatId)
-          yield* writeAll(chatId, [...existing, message])
-        })
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const existing = yield* readAll(chatId)
+            yield* writeAll(chatId, [...existing, message])
+          })
+        )
 
       const sameExternalInstruction = (
         message: Message,
@@ -413,12 +422,14 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
 
       /** Replace the last message via `fn` (a no-op when the transcript is empty). */
       const patchLast = (chatId: string, fn: (last: Message) => Message) =>
-        Effect.gen(function* () {
-          const existing = yield* readAll(chatId)
-          if (existing.length === 0) return
-          const next = [...existing.slice(0, -1), fn(existing[existing.length - 1]!)]
-          yield* writeAll(chatId, next)
-        })
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const existing = yield* readAll(chatId)
+            if (existing.length === 0) return
+            const next = [...existing.slice(0, -1), fn(existing[existing.length - 1]!)]
+            yield* writeAll(chatId, next)
+          })
+        )
 
       /**
        * Replace the message with `messageId` via `fn`. A no-op when no message
@@ -434,13 +445,15 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
         messageId: string,
         fn: (msg: Message) => Message
       ) =>
-        Effect.gen(function* () {
-          const existing = yield* readAll(chatId)
-          const idx = existing.findIndex((m) => m.id === messageId)
-          if (idx === -1) return
-          const next = existing.map((m, i) => (i === idx ? fn(m) : m))
-          yield* writeAll(chatId, next)
-        })
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const existing = yield* readAll(chatId)
+            const idx = existing.findIndex((m) => m.id === messageId)
+            if (idx === -1) return
+            const next = existing.map((m, i) => (i === idx ? fn(m) : m))
+            yield* writeAll(chatId, next)
+          })
+        )
 
       return {
         list,
