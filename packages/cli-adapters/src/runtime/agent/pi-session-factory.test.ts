@@ -18,9 +18,12 @@ import { Effect, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
+import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
+import { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
 
 const roots: string[] = []
+const brokers: SubagentCapabilityBroker[] = []
 const originalEnvironment = {
   PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
   PI_SUBAGENT_PI_BINARY: process.env.PI_SUBAGENT_PI_BINARY,
@@ -33,7 +36,10 @@ afterEach(async () => {
     if (value === undefined) delete process.env[name]
     else process.env[name] = value
   }
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  await Promise.all([
+    ...brokers.splice(0).map((broker) => broker.close()),
+    ...roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
+  ])
 })
 
 const connection = Schema.decodeUnknownSync(ProviderConnection)({
@@ -117,10 +123,14 @@ describe("pi session creation", () => {
       captured.push(options)
       return { session: fakeSession(), extensionsResult: {} as never }
     }
+    const broker = new SubagentCapabilityBroker()
+    brokers.push(broker)
     const factory = makePiSessionFactory({
       agentDir: join(root, "agent"),
       sessionsDir: join(root, "sessions"),
       credentials,
+      childCredentials: new PiChildCredentials(join(root, "child-credentials"), credentials),
+      subagentBroker: broker,
       resolveConnection: () => Effect.succeed(connection),
       createSession
     })
@@ -130,7 +140,11 @@ describe("pi session creation", () => {
     expect(handle.id).toBe("/tmp/pi-session.jsonl")
     expect(handle.parentPiSessionId).toBe("pi-session")
     expect(handle.contextWindow).toBe(200_000)
-    expect(received?.tools).toContain("jingler_ask_question")
+    expect(received?.tools).toEqual(expect.arrayContaining([
+      "jingler_ask_question",
+      "subagent",
+      "subagent_wait"
+    ]))
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([
       "jingler_ask_question",
       "jingler_submit_plan"
@@ -142,12 +156,17 @@ describe("pi session creation", () => {
       "Jingler's embedded engineering agent"
     )
     expect(received?.resourceLoader?.getSystemPrompt()).toContain("jingler_ask_question")
+    expect(received?.resourceLoader?.getSystemPrompt()).toContain("subagent")
+    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
+      "Never launch coding CLIs through command_execute"
+    )
     expect(received?.sessionManager?.getEntries()).toEqual([
       expect.objectContaining({
         type: "custom_message",
         customType: "jingler.normalized-transcript-seed"
       })
     ])
+    await handle.dispose()
   })
 
   it("forwards the operator's model-native reasoning choice into pi", async () => {

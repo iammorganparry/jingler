@@ -96,6 +96,11 @@ const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray
       ? [
           "Use jingler_submit_plan for a structured plan that needs operator review — and, while an approved plan is executing, to submit the complete amended plan (mid-execution amendments apply immediately). Do not substitute prose for the control action."
         ]
+      : []),
+    ...(ids.has("subagent")
+      ? [
+          "For delegated agent work, use the native subagent tool so runs remain contained and visible in Fleet. Never launch coding CLIs through command_execute as a substitute."
+        ]
       : [])
   ]
 }
