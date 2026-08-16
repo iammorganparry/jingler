@@ -97,6 +97,15 @@ test("durable native status appears in the integrated Fleet drawer", async ({
       window.getByTestId("composer").getByTestId("fleet-drawer")
     ).toBeVisible()
     await expect(fleet).toContainText("scout")
+    const resize = fleet.getByRole("button", { name: "Resize Fleet drawer" })
+    await expect(resize).toBeVisible()
+    expect(await resize.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        top: style.borderTopWidth,
+        bottom: style.borderBottomWidth
+      }
+    })).toEqual({ top: "1px", bottom: "0px" })
   } finally {
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     rmSync(join(asyncRoot, runId), { recursive: true, force: true })
