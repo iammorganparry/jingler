@@ -26,7 +26,18 @@ const createChildSession = async () => {
     content: [
       { type: "thinking", thinking: "I should inspect the public API" },
       { type: "text", text: "The boundary is contained." },
-      { type: "toolCall", id: "tool-1", name: "workspace_read_file", arguments: {} }
+      {
+        type: "toolCall",
+        id: "tool-1",
+        name: "workspace_read_file",
+        arguments: { path: "src/public-api.ts" }
+      },
+      {
+        type: "toolCall",
+        id: "tool-2",
+        name: "command_execute",
+        arguments: { command: "pnpm test" }
+      }
     ],
     api: "anthropic-messages",
     provider: "anthropic",
@@ -41,6 +52,36 @@ const createChildSession = async () => {
     },
     stopReason: "toolUse",
     timestamp: 20
+  })
+  manager.appendMessage({
+    role: "toolResult",
+    toolCallId: "tool-1",
+    toolName: "workspace_read_file",
+    content: [{
+      type: "text",
+      text: JSON.stringify({
+        path: "src/public-api.ts",
+        text: "export const publicApi = true"
+      })
+    }],
+    isError: false,
+    timestamp: 30
+  })
+  manager.appendMessage({
+    role: "toolResult",
+    toolCallId: "tool-2",
+    toolName: "command_execute",
+    content: [{
+      type: "text",
+      text: JSON.stringify({
+        command: "pnpm test",
+        exitCode: 1,
+        stdout: "1 passed",
+        stderr: "1 failed"
+      })
+    }],
+    isError: true,
+    timestamp: 40
   })
   const sessionFile = manager.getSessionFile()
   if (!sessionFile) throw new Error("Expected a persisted child session")
@@ -62,7 +103,27 @@ describe("readPiSubagentTranscript", () => {
       parts: [
         { _tag: "Thinking" },
         { _tag: "Text", text: "The boundary is contained." },
-        { _tag: "Tool", tool: { id: "tool-1", name: "workspace_read_file" } }
+        {
+          _tag: "Tool",
+          tool: {
+            id: "tool-1",
+            name: "workspace_read_file",
+            target: "src/public-api.ts",
+            status: "success",
+            output: "export const publicApi = true"
+          }
+        },
+        {
+          _tag: "Tool",
+          tool: {
+            id: "tool-2",
+            name: "command_execute",
+            target: "pnpm test",
+            status: "error",
+            meta: "exit 1",
+            output: "1 passed\n1 failed"
+          }
+        }
       ]
     })
   })
