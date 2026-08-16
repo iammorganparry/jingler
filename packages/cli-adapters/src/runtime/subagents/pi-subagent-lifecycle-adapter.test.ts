@@ -3,7 +3,7 @@ import type { SubagentFleetEvent } from "@jingler/core"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { PiSubagentLifecycleAdapter } from "./pi-subagent-lifecycle-adapter.js"
 
 const parent = "parent-session"
@@ -332,6 +332,67 @@ describe("PiSubagentLifecycleAdapter", () => {
     })).resolves.toMatchObject({ acknowledged: false, status: "invalid-state" })
     expect(methods).toEqual(["steer", "reply", "stop"])
     expect(requestIds).toEqual(["steer-1", "reply-1", "stop-1"])
+    unsubscribe()
+    adapter.stop()
+  })
+
+  it("settles a delivered control deterministically across child completion", async () => {
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      controlJournal: null,
+      emit: () => undefined,
+      now: () => 40
+    })
+    adapter.start()
+    events.emit("subagent:async-started", {
+      id: "race-run",
+      sessionId: parent,
+      agent: "worker"
+    })
+    let rpcRequestId = ""
+    const unsubscribe = events.on("subagents:rpc:v1:request", (request) => {
+      if (request && typeof request === "object" && "requestId" in request &&
+        typeof request.requestId === "string") rpcRequestId = request.requestId
+    })
+    const control = adapter.control({
+      version: 2,
+      requestId: "race-control",
+      parentPiSessionId: parent,
+      runId: "race-run",
+      action: "steer",
+      message: "Finish safely",
+      replyTo: null
+    })
+    await vi.waitFor(() => expect(rpcRequestId).toBe("race-control"))
+    events.emit("subagent:async-complete", {
+      runId: "race-run",
+      sessionId: parent,
+      state: "complete",
+      success: true
+    })
+    events.emit(`subagents:rpc:v1:reply:${rpcRequestId}`, {
+      version: 1,
+      requestId: rpcRequestId,
+      method: "steer",
+      success: true,
+      data: {
+        details: {
+          steering: {
+            requestId: "native-race",
+            deliveryStatus: "delivered"
+          }
+        }
+      }
+    })
+
+    await expect(control).resolves.toMatchObject({
+      acknowledged: true,
+      deliveryStatus: "delivered",
+      nativeRequestId: "native-race"
+    })
+    expect(adapter.snapshot().nodes).toEqual([])
     unsubscribe()
     adapter.stop()
   })

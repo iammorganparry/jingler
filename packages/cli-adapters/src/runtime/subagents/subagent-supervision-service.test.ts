@@ -115,6 +115,35 @@ describe("SubagentSupervisionService", () => {
       .toEqual(["queued", "queued", "delivered", "delivered"])
   })
 
+  it("fails closed without native execution when durable receipts are unavailable", async () => {
+    const execute = vi.fn(() => Effect.die("must not execute"))
+    const service = Effect.runSync(makeSubagentSupervisionService(
+      "parent",
+      () => 5,
+      {
+        load: Effect.fail(new Error("journal unavailable")),
+        save: () => Effect.void
+      }
+    ))
+    const outcome = await Effect.runPromise(service.submitControl({
+      version: 2,
+      requestId: "closed-request",
+      parentPiSessionId: "parent",
+      runId: "run-1",
+      action: "stop",
+      message: null,
+      replyTo: null
+    }, execute))
+
+    expect(outcome).toMatchObject({
+      acknowledged: false,
+      status: "rejected",
+      deliveryStatus: "rejected",
+      message: "journal unavailable"
+    })
+    expect(execute).not.toHaveBeenCalled()
+  })
+
   it("restores accepted outcomes without reapplying native controls", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-control-journal-"))
     roots.push(root)

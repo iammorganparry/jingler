@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises"
+import { appendFile, mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises"
 import { join } from "node:path"
 import { SessionManager } from "@earendil-works/pi-coding-agent"
 import { Effect } from "effect"
@@ -210,6 +210,38 @@ describe("readPiSubagentTranscript", () => {
         output: "late output"
       })
     }))
+  })
+
+  it("waits for a complete JSONL record before advancing its cursor", async () => {
+    const { root, sessionFile } = await createChildSession()
+    const reader = Effect.runSync(makePiSubagentTranscriptReader())
+    const input = {
+      sessionFile,
+      trustedRoots: piSubagentTrustedSessionRoots(join(root, "parent.jsonl"))
+    }
+    const before = await Effect.runPromise(reader.read(input))
+    const line = JSON.stringify({
+      type: "message",
+      id: "partial-message",
+      parentId: null,
+      timestamp: "2026-08-16T00:00:00.000Z",
+      message: {
+        role: "user",
+        content: "Complete after two writes",
+        timestamp: 80
+      }
+    })
+    const split = Math.floor(line.length / 2)
+    await appendFile(sessionFile, line.slice(0, split))
+    expect(await Effect.runPromise(reader.read(input))).toEqual(before)
+    await appendFile(sessionFile, `${line.slice(split)}\n`)
+
+    const after = await Effect.runPromise(reader.read(input))
+
+    expect(after.at(-1)).toMatchObject({
+      role: "user",
+      parts: [{ _tag: "Text", text: "Complete after two writes" }]
+    })
   })
 
   it("resets the cursor when the session file is atomically replaced", async () => {
