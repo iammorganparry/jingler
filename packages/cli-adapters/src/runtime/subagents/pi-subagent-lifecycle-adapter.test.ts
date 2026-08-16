@@ -67,35 +67,26 @@ describe("PiSubagentLifecycleAdapter", () => {
       }]
     })
 
-    expect(adapter.snapshot().nodes).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: `${parent}/run-1`,
-        runId: "run-1",
-        agent: "fanout",
-        status: "completed"
-      }),
-      expect.objectContaining({
-        id: `${parent}/run-1%3Astep%3A0`,
-        parentId: `${parent}/run-1`,
-        agent: "reviewer",
-        sessionFile: "/sessions/reviewer.jsonl",
-        artifacts: [expect.objectContaining({ path: "/artifacts/review.md" })]
-      }),
-      expect.objectContaining({
-        id: `${parent}/run-1%3Astep%3A1`,
-        parentId: `${parent}/run-1`,
-        agent: "worker",
-        sessionFile: "/sessions/worker.jsonl"
-      }),
+    expect(adapter.snapshot().nodes).toEqual([
       expect.objectContaining({
         id: `${parent}/run-2`,
-        parentId: `${parent}/run-1`,
+        parentId: null,
         agent: "scout",
         status: "running"
       })
+    ])
+    const upserts = emitted.filter((event) => event._tag === "Upsert")
+    expect(upserts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        node: expect.objectContaining({
+          subagentId: "run-1:step:0",
+          sessionFile: "/sessions/reviewer.jsonl",
+          artifacts: [expect.objectContaining({ path: "/artifacts/review.md" })]
+        })
+      })
     ]))
-    expect(adapter.snapshot().nodes).toHaveLength(4)
-    expect(emitted.filter(({ _tag }) => _tag === "Upsert")).toHaveLength(5)
+    expect(upserts).toHaveLength(6)
+    expect(emitted.filter(({ _tag }) => _tag === "Remove")).toHaveLength(3)
     adapter.stop()
   })
 
@@ -153,6 +144,82 @@ describe("PiSubagentLifecycleAdapter", () => {
     }])
     expect(emitted).toHaveLength(1)
     unsubscribe()
+    adapter.stop()
+  })
+
+  it("publishes live child progress and bounded supervisor state without polling", () => {
+    const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      emit: (event) => emitted.push(event),
+      now: () => 50
+    })
+    adapter.start()
+    events.emit("subagent:async-started", {
+      id: "run-1",
+      sessionId: parent,
+      mode: "single",
+      agent: "worker"
+    })
+
+    adapter.progress({
+      runId: "run-1",
+      mode: "single",
+      children: [{
+        index: 0,
+        agent: "worker",
+        status: "running",
+        task: "Inspect",
+        currentTool: "workspace_read_file",
+        model: "test/model",
+        inputTokens: 3,
+        outputTokens: 2,
+        tokens: 5,
+        toolCount: 1,
+        durationMs: 20,
+        sessionFile: "/sessions/child.jsonl"
+      }]
+    })
+
+    expect(adapter.snapshot().nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        subagentId: "run-1:step:0",
+        currentTool: "workspace_read_file",
+        sessionFile: "/sessions/child.jsonl",
+        usage: expect.objectContaining({ totalTokens: 5, toolCalls: 1 })
+      })
+    ]))
+    expect(adapter.supervisorSnapshot()).toMatchObject({
+      status: "running",
+      siblings: [expect.objectContaining({
+        subagentId: "run-1:step:0",
+        outputAvailable: true
+      })]
+    })
+    for (let toolCount = 2; toolCount <= 260; toolCount++) {
+      adapter.progress({
+        runId: "run-1",
+        mode: "single",
+        children: [{
+          index: 0,
+          agent: "worker",
+          status: "running",
+          task: "Inspect",
+          tokens: toolCount,
+          toolCount,
+          durationMs: toolCount,
+          sessionFile: "/sessions/child.jsonl"
+        }]
+      })
+    }
+    const replay = adapter.replay(0)
+    expect(replay).toHaveLength(256)
+    expect(new Set(replay.map(({ eventId }) => eventId)).size).toBe(256)
+    expect(emitted.some((event) =>
+      event._tag === "Upsert" && event.node.currentTool === "workspace_read_file"
+    )).toBe(true)
     adapter.stop()
   })
 
@@ -300,10 +367,11 @@ describe("PiSubagentLifecycleAdapter", () => {
 
   it("rejects unowned missing-session events but accepts correlated completion", () => {
     const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
-      emit: () => undefined,
+      emit: (event) => emitted.push(event),
       now: () => 20
     })
     adapter.start()
@@ -325,17 +393,18 @@ describe("PiSubagentLifecycleAdapter", () => {
       state: "complete",
       success: true
     })
-    expect(adapter.snapshot().nodes).toHaveLength(1)
-    expect(adapter.snapshot().nodes[0]).toMatchObject({
-      id: `${parent}/owned`,
-      subagentId: "owned",
-      status: "completed"
-    })
+    expect(adapter.snapshot().nodes).toEqual([])
+    expect(emitted.some((event) =>
+      event._tag === "Upsert" &&
+      event.node.subagentId === "owned" &&
+      event.node.status === "completed"
+    )).toBe(true)
     adapter.stop()
   })
 
   it("keeps one canonical child identity across durable and completion state", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-canonical-fleet-"))
+    const emitted: SubagentFleetEvent[] = []
     const marker = join(root, ".active-runs", "run-1")
     await mkdir(join(root, ".active-runs"), { recursive: true })
     await mkdir(join(root, "run-1"), { recursive: true })
@@ -359,7 +428,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       parentPiSessionId: parent,
       parentPiSessionAliases: [parentSessionFile],
       asyncRunsDir: root,
-      emit: () => undefined,
+      emit: (event) => emitted.push(event),
       now: () => 30
     })
     adapter.start()
@@ -380,15 +449,13 @@ describe("PiSubagentLifecycleAdapter", () => {
           sessionPath: "/sessions/child.jsonl"
         }]
       })
-      const children = adapter.snapshot().nodes.filter(
-        (node) => node.subagentId === "child-run"
-      )
-      expect(children).toHaveLength(1)
-      expect(children[0]).toMatchObject({
-        id: durableId,
-        status: "completed",
-        sessionFile: "/sessions/child.jsonl"
-      })
+      expect(adapter.snapshot().nodes).toEqual([])
+      expect(emitted.some((event) =>
+        event._tag === "Upsert" &&
+        event.node.id === durableId &&
+        event.node.status === "completed" &&
+        event.node.sessionFile === "/sessions/child.jsonl"
+      )).toBe(true)
     } finally {
       adapter.stop()
       await rm(root, { recursive: true, force: true })

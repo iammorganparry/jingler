@@ -9,6 +9,7 @@ import {
   type RuntimeMode,
   type SubagentCapability,
   type SubagentCapabilityTool,
+  type SubagentSupervisorSnapshot,
   type SubagentToolResponse
 } from "@jingler/core"
 import { Effect, JSONSchema, Schema } from "effect"
@@ -27,6 +28,16 @@ const PARENT_ONLY_TOOLS = new Set([
 ])
 const READ_ONLY_AGENTS = new Set(["advisor", "oracle", "reviewer"])
 const SAFE_AGENT_NAME = /^[a-z][a-z0-9-]*$/u
+const SUPERVISOR_STATE_TOOL: SubagentCapabilityTool = {
+  id: "supervisor_state",
+  description: "Read the current parent and sibling supervision state for this run.",
+  inputSchema: {
+    type: "object",
+    properties: {},
+    additionalProperties: false
+  },
+  risk: "read"
+}
 
 export interface SubagentParentSpec {
   readonly role: AgentRole
@@ -41,6 +52,7 @@ interface RegisteredChild {
   readonly mode: RuntimeMode
   readonly registry: ToolRegistry
   readonly context: AgentRuntimeContext
+  readonly supervisorState: () => SubagentSupervisorSnapshot
 }
 
 export interface RegisterSubagentParentInput {
@@ -49,6 +61,7 @@ export interface RegisterSubagentParentInput {
   readonly spec: SubagentParentSpec
   readonly registry: ToolRegistry
   readonly context: AgentRuntimeContext
+  readonly supervisorState: () => SubagentSupervisorSnapshot
 }
 
 const json = <Value>(
@@ -87,10 +100,10 @@ const childTools = (
   registry: ToolRegistry,
   role: AgentRole,
   mode: RuntimeMode
-): ReadonlyArray<SubagentCapabilityTool> =>
-  registry
+): ReadonlyArray<SubagentCapabilityTool> => [
+  ...registry
     .capabilitiesFor(role, mode)
-    .filter((tool) => !PARENT_ONLY_TOOLS.has(tool.id))
+    .filter((tool) => !PARENT_ONLY_TOOLS.has(tool.id) && tool.id !== SUPERVISOR_STATE_TOOL.id)
     .map((tool) => {
       const schema = registry.inputSchemaFor(tool.id)
       if (schema === null) {
@@ -118,7 +131,9 @@ const childTools = (
         inputSchema,
         risk: registry.riskFor(tool.id) ?? "read"
       }
-    })
+    }),
+  SUPERVISOR_STATE_TOOL
+]
 
 const readBody = async (request: IncomingMessage): Promise<string> => {
   const chunks: Buffer[] = []
@@ -175,7 +190,8 @@ export class SubagentCapabilityBroker {
         role: profile.role,
         mode: profile.mode,
         registry: input.registry,
-        context: input.context
+        context: input.context,
+        supervisorState: input.supervisorState
       })
       tokens.add(token)
       return {
@@ -227,6 +243,18 @@ export class SubagentCapabilityBroker {
       const child = this.#children.get(decoded.token)
       if (!child || child.parentPiSessionId !== decoded.parentPiSessionId) {
         json(response, 403, { error: "forbidden" })
+        return
+      }
+      if (decoded.toolId === SUPERVISOR_STATE_TOOL.id) {
+        json(response, 200, {
+          version: SUBAGENT_CAPABILITY_VERSION,
+          status: "success",
+          value: Schema.decodeUnknownSync(SubagentJsonValue)(
+            JSON.parse(JSON.stringify(child.supervisorState()))
+          ),
+          preview: null,
+          error: null
+        } satisfies SubagentToolResponse)
         return
       }
       const risk: ToolRisk | null = child.registry.riskFor(decoded.toolId)

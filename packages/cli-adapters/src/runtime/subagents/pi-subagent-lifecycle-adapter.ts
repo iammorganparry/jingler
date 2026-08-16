@@ -12,7 +12,8 @@ import {
   type SubagentFleetSnapshot,
   type SubagentFleetStatus,
   type SubagentFleetUsage,
-  type SubagentJsonValue
+  type SubagentJsonValue,
+  type SubagentSupervisorSnapshot
 } from "@jingler/core"
 import { Option, Schema } from "effect"
 import { readDurablePiSubagentNodes } from "./pi-subagent-durable-status.js"
@@ -245,6 +246,26 @@ const usageFor = (
     }
   : emptyUsage()
 
+export interface PiSubagentProgressInput {
+  readonly runId: string
+  readonly mode: string
+  readonly children: ReadonlyArray<{
+    readonly index: number
+    readonly agent: string
+    readonly status: "pending" | "running" | "completed" | "failed" | "detached"
+    readonly task: string
+    readonly currentTool?: string
+    readonly model?: string
+    readonly inputTokens?: number
+    readonly outputTokens?: number
+    readonly tokens: number
+    readonly toolCount: number
+    readonly durationMs: number
+    readonly error?: string
+    readonly sessionFile: string | null
+  }>
+}
+
 export interface PiSubagentSupervisorAttentionInput {
   readonly requestId: string
   readonly runId: string
@@ -277,6 +298,7 @@ export class PiSubagentLifecycleAdapter {
   readonly #trustedSessionRoots = new Set<string>()
   readonly #childSequences = new Map<string, number>()
   readonly #durableNodeIds = new Set<string>()
+  readonly #eventLog: SubagentFleetEvent[] = []
   #registryRevision = 0
   #started = false
   #refreshTimer: NodeJS.Timeout | null = null
@@ -331,6 +353,7 @@ export class PiSubagentLifecycleAdapter {
     this.#asyncStarts.clear()
     this.#childSequences.clear()
     this.#durableNodeIds.clear()
+    this.#eventLog.splice(0)
     this.#actor.stop()
   }
 
@@ -357,6 +380,109 @@ export class PiSubagentLifecycleAdapter {
       sessionFile: node.sessionFile,
       trustedRoots: [...this.#trustedSessionRoots]
     })
+  }
+
+  replay(afterRevision = 0): ReadonlyArray<SubagentFleetEvent> {
+    return [...new Map(
+      this.#eventLog
+        .filter((event) => this.#eventRevision(event) > afterRevision)
+        .map((event) => [event.eventId, event] as const)
+    ).values()]
+  }
+
+  supervisorSnapshot(): SubagentSupervisorSnapshot {
+    const snapshot = this.snapshot()
+    const active = snapshot.nodes.filter((node) =>
+      node.status === "queued" || node.status === "running" ||
+      node.status === "paused" || node.status === "needs-attention"
+    )
+    return {
+      version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+      parentPiSessionId: this.#parentPiSessionId,
+      registryRevision: snapshot.registryRevision,
+      status: active.length > 0 ? "running" : "completed",
+      goalRevision: 0,
+      phase: null,
+      siblings: active
+        .filter((node) => node.nodeKind === "agent")
+        .map((node) => ({
+          subagentId: node.subagentId,
+          agent: node.agent,
+          task: node.task,
+          status: node.status,
+          phase: node.phase,
+          outputAvailable: node.sessionFile !== null || node.artifacts.length > 0
+        })),
+      generatedAt: snapshot.generatedAt
+    }
+  }
+
+  progress(input: PiSubagentProgressInput): void {
+    const now = this.#now()
+    const context = this.#actor.getSnapshot().context
+    const rootId = subagentFleetNodeId(this.#parentPiSessionId, input.runId)
+    if (input.children.length > 0 && context.nodes.some((node) => node.id === rootId)) {
+      this.#publish({
+        _tag: "Remove",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `progress-root:${input.runId}:${now}`,
+        occurredAt: now,
+        registryRevision: ++this.#registryRevision,
+        id: rootId
+      })
+    }
+    for (const child of input.children) {
+      const subagentId = `${input.runId}:step:${child.index}`
+      const existing = context.nodes.find((node) => node.subagentId === subagentId)
+      const status: SubagentFleetStatus = child.status === "pending"
+        ? "queued"
+        : child.status === "completed"
+          ? "completed"
+          : child.status === "failed"
+            ? "failed"
+            : "running"
+      this.#publish({
+        _tag: "Upsert",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `progress:${input.runId}:${child.index}:${now}:${child.toolCount}`,
+        occurredAt: now,
+        node: {
+          ...(existing ?? {}),
+          ...this.#identity(subagentId, input.runId),
+          runId: subagentId,
+          parentId: null,
+          parentPiSessionId: this.#parentPiSessionId,
+          agent: child.agent,
+          task: child.task,
+          model: child.model ?? existing?.model ?? null,
+          status,
+          terminal: status === "completed" || status === "failed"
+            ? {
+                reason: status,
+                summary: child.error ?? `Subagent child ${status}`,
+                at: now,
+                retryable: false
+              }
+            : null,
+          background: existing?.background ?? false,
+          sessionFile: child.sessionFile ?? existing?.sessionFile ?? null,
+          currentTool: child.currentTool ?? null,
+          startedAt: existing?.startedAt ?? Math.max(0, now - child.durationMs),
+          updatedAt: now,
+          completedAt: status === "completed" || status === "failed" ? now : null,
+          usage: {
+            inputTokens: child.inputTokens ?? existing?.usage.inputTokens ?? 0,
+            outputTokens: child.outputTokens ?? existing?.usage.outputTokens ?? 0,
+            totalTokens: child.tokens,
+            costUsd: existing?.usage.costUsd ?? 0,
+            durationMs: child.durationMs,
+            toolCalls: child.toolCount
+          },
+          artifacts: existing?.artifacts ?? [],
+          attention: existing?.attention ?? null
+        }
+      })
+    }
   }
 
   attention(input: PiSubagentSupervisorAttentionInput): void {
@@ -660,7 +786,15 @@ export class PiSubagentLifecycleAdapter {
 
   #publish(event: SubagentFleetEvent): void {
     this.#actor.send({ type: "INGEST", event })
+    this.#eventLog.push(event)
+    if (this.#eventLog.length > 256) this.#eventLog.splice(0, this.#eventLog.length - 256)
     this.#emitExternal(event)
+  }
+
+  #eventRevision(event: SubagentFleetEvent): number {
+    if (event._tag === "Snapshot") return event.snapshot.registryRevision
+    if (event._tag === "Upsert") return event.node.registryRevision
+    return event.registryRevision
   }
 
   #belongsToParent(sessionId: string | undefined, runId: string): boolean {
@@ -793,6 +927,41 @@ export class PiSubagentLifecycleAdapter {
         now
       })
     })
+    const completedIds = new Set([
+      rootId,
+      ...(completion.results ?? []).map((child, position) => subagentFleetNodeId(
+        this.#parentPiSessionId,
+        child.runId ?? `${completion.runId}:step:${child.index ?? position}`
+      ))
+    ])
+    for (const node of this.#actor.getSnapshot().context.nodes.filter(
+      (candidate) => candidate.parentId === rootId && !completedIds.has(candidate.id)
+    )) {
+      this.#publish({
+        _tag: "Upsert",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `complete-reparent:${completion.runId}:${node.subagentId}:${now}`,
+        occurredAt: now,
+        node: {
+          ...node,
+          ...this.#identity(node.subagentId, node.orchestrationRunId, node.nodeKind),
+          parentId: null,
+          updatedAt: now
+        }
+      })
+    }
+    for (const node of this.#actor.getSnapshot().context.nodes.filter(
+      (candidate) => completedIds.has(candidate.id)
+    )) {
+      this.#publish({
+        _tag: "Remove",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `complete-remove:${completion.runId}:${node.subagentId}:${now}`,
+        occurredAt: now,
+        registryRevision: ++this.#registryRevision,
+        id: node.id
+      })
+    }
     this.#asyncStarts.delete(completion.runId)
   }
 

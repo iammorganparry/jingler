@@ -76,13 +76,8 @@ afterEach(() => {
   mocks.snapshot.mockReset()
 })
 
-describe("useSubagentFleet polling", () => {
-  it("retries after the Pi runtime is not active yet", async () => {
-    let poll: (() => void) | null = null
-    vi.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler) => {
-      if (typeof handler === "function") poll = () => handler()
-      return 1
-    }) as typeof window.setInterval)
+describe("useSubagentFleet reconciliation", () => {
+  it("retries on focus after the Pi runtime is not active yet", async () => {
     mocks.snapshot
       .mockRejectedValueOnce(new Error("Pi session is not active"))
       .mockResolvedValue(snapshot)
@@ -98,18 +93,13 @@ describe("useSubagentFleet polling", () => {
     await act(async () => {
       await Promise.resolve()
       await Promise.resolve()
-      poll?.()
+      window.dispatchEvent(new Event("focus"))
       await Promise.resolve()
     })
     expect(mocks.snapshot).toHaveBeenCalledTimes(2)
   })
 
-  it("removes a completed canonical durable node when polling through a session-file alias", async () => {
-    let poll: (() => void) | null = null
-    vi.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler) => {
-      if (typeof handler === "function") poll = () => handler()
-      return 1
-    }) as typeof window.setInterval)
+  it("removes a completed canonical durable node on focus through a session-file alias", async () => {
     const durableNode: SubagentFleetNode = {
       ...node,
       id: "parent/run-1",
@@ -137,24 +127,14 @@ describe("useSubagentFleet polling", () => {
     })
     expect(result.current.nodes.map(({ id }) => id)).toStrictEqual([durableNode.id])
     await act(async () => {
-      poll?.()
+      window.dispatchEvent(new Event("focus"))
       await Promise.resolve()
       await Promise.resolve()
     })
     expect(result.current.nodes).toStrictEqual([])
   })
 
-  it("does not restart or overlap polling when events change", async () => {
-    let poll: (() => void) | null = null
-    const fakeSetInterval = ((handler: TimerHandler) => {
-      if (typeof handler === "function") {
-        poll = () => {
-          handler()
-        }
-      }
-      return 1
-    }) as typeof window.setInterval
-    vi.spyOn(window, "setInterval").mockImplementation(fakeSetInterval)
+  it("does not restart or overlap reconciliation when events change", async () => {
     const pending = deferred<SubagentFleetSnapshot>()
     const nextPending = deferred<SubagentFleetSnapshot>()
     mocks.snapshot
@@ -167,38 +147,26 @@ describe("useSubagentFleet polling", () => {
         piSessionId: "parent",
         events
       }),
-      {
-        initialProps: {
-          events: [] as ReadonlyArray<SubagentFleetEvent>
-        }
-      }
+      { initialProps: { events: [] as ReadonlyArray<SubagentFleetEvent> } }
     )
 
     expect(mocks.snapshot).toHaveBeenCalledTimes(1)
-    const upsert: SubagentFleetEvent = {
+    rerender({ events: [{
       _tag: "Upsert",
       version: 2,
       eventId: "upsert-1",
       occurredAt: 10,
       node
-    }
-    rerender({ events: [upsert] })
-    expect(mocks.snapshot).toHaveBeenCalledTimes(1)
-
-    expect(poll).not.toBeNull()
-    await act(async () => {
-      poll?.()
-      poll?.()
-      poll?.()
-      await Promise.resolve()
-    })
+    }] })
+    window.dispatchEvent(new Event("focus"))
+    window.dispatchEvent(new Event("focus"))
     expect(mocks.snapshot).toHaveBeenCalledTimes(1)
 
     await act(async () => pending.resolve(snapshot))
     expect(result.current.nodes.map(({ id }) => id)).toEqual([node.id])
 
     await act(async () => {
-      poll?.()
+      window.dispatchEvent(new Event("focus"))
       await Promise.resolve()
     })
     expect(mocks.snapshot).toHaveBeenCalledTimes(2)

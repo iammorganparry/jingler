@@ -119,12 +119,10 @@ export function useSubagentFleet(input: {
     }
     const refreshOnFocus = () => void refresh()
     void refresh()
-    const timer = window.setInterval(refreshOnFocus, 1_500)
     window.addEventListener("focus", refreshOnFocus)
     document.addEventListener("visibilitychange", refreshOnFocus)
     return () => {
       active = false
-      window.clearInterval(timer)
       window.removeEventListener("focus", refreshOnFocus)
       document.removeEventListener("visibilitychange", refreshOnFocus)
     }

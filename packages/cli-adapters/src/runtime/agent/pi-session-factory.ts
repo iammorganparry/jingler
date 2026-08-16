@@ -39,7 +39,7 @@ import { createJinglerControlTools } from "./pi-jingler-tools.js"
 import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-resources.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools, isMemoryReflectionTool } from "./pi-tool-bridge.js"
-import { piSupervisorAttention } from "./pi-events.js"
+import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 import {
   JINGLER_SUBAGENT_AGENT_NAMES,
@@ -341,6 +341,8 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
     subscribe: (listener) => session.subscribe((event) => {
+      const progress = piSubagentProgress(event)
+      if (progress) lifecycle.progress(progress)
       const attention = piSupervisorAttention(event)
       if (attention) lifecycle.attention(attention)
       listener(event)
@@ -474,7 +476,6 @@ const createSessionHandle = (
         : []
     })
     lifecycle.start()
-    lifecycle.beginPolling()
     if ((options.childCredentials === undefined) !== (options.subagentBroker === undefined)) {
       lifecycle.stop()
       embedded.result.session.dispose()
@@ -494,7 +495,8 @@ const createSessionHandle = (
           agents: JINGLER_SUBAGENT_AGENT_NAMES,
           spec,
           registry,
-          context
+          context,
+          supervisorState: () => lifecycle.supervisorSnapshot()
         }),
         catch: (cause) =>
           new AgentRuntimeError({

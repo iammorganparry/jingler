@@ -1,7 +1,10 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
 import { FileChangeSet, type StreamEvent } from "@jingler/core"
 import { Option, Schema } from "effect"
-import type { PiSubagentSupervisorAttentionInput } from "../subagents/pi-subagent-lifecycle-adapter.js"
+import type {
+  PiSubagentProgressInput,
+  PiSubagentSupervisorAttentionInput
+} from "../subagents/pi-subagent-lifecycle-adapter.js"
 
 const TextResultPart = Schema.Struct({
   type: Schema.Literal("text"),
@@ -42,6 +45,29 @@ const SupervisorAttention = Schema.Struct({
   })
 })
 const decodeSupervisorAttention = Schema.decodeUnknownOption(SupervisorAttention)
+const SubagentProgress = Schema.Struct({
+  mode: Schema.String,
+  runId: Schema.String,
+  progress: Schema.Array(Schema.Struct({
+    index: Schema.Number,
+    agent: Schema.String,
+    status: Schema.Literal("pending", "running", "completed", "failed", "detached"),
+    task: Schema.String,
+    currentTool: Schema.optional(Schema.String),
+    model: Schema.optional(Schema.String),
+    inputTokens: Schema.optional(Schema.Number),
+    outputTokens: Schema.optional(Schema.Number),
+    tokens: Schema.Number,
+    toolCount: Schema.Number,
+    durationMs: Schema.Number,
+    error: Schema.optional(Schema.String)
+  })),
+  results: Schema.Array(Schema.Struct({
+    index: Schema.Number,
+    sessionFile: Schema.optional(Schema.String)
+  }))
+})
+const decodeSubagentProgress = Schema.decodeUnknownOption(SubagentProgress)
 
 type ToolResultEvent = Extract<
   AgentSessionEvent,
@@ -100,6 +126,27 @@ const normalizeMessageUpdate = (
     return { _tag: "Thinking", text: "", seconds: null, done: true }
   }
   return null
+}
+
+export const piSubagentProgress = (
+  event: AgentSessionEvent
+): PiSubagentProgressInput | null => {
+  if (
+    (event.type !== "tool_execution_update" && event.type !== "tool_execution_end") ||
+    event.toolName !== "subagent"
+  ) return null
+  const result = event.type === "tool_execution_update" ? event.partialResult : event.result
+  const decoded = Option.getOrUndefined(decodeSubagentProgress(result?.details))
+  if (!decoded) return null
+  const sessions = new Map(decoded.results.map((child) => [child.index, child.sessionFile ?? null]))
+  return {
+    runId: decoded.runId,
+    mode: decoded.mode,
+    children: decoded.progress.map((child) => ({
+      ...child,
+      sessionFile: sessions.get(child.index) ?? null
+    }))
+  }
 }
 
 export const piSupervisorAttention = (

@@ -3,6 +3,7 @@ import {
   createPiEventNormalizer,
   normalizePiEvent,
   piProviderFailure,
+  piSubagentProgress,
   piSupervisorAttention
 } from "./pi-events.js"
 
@@ -240,6 +241,44 @@ describe("pi file-change events", () => {
       diff: { added: 2, removed: 0 },
       preview: "+new",
       fileChanges
+    })
+  })
+
+  it("projects live child progress from native subagent tool updates", () => {
+    expect(piSubagentProgress({
+      type: "tool_execution_update",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      args: { agent: "worker" },
+      partialResult: {
+        content: [],
+        details: {
+          mode: "single",
+          runId: "run-1",
+          results: [{ index: 0, sessionFile: "/sessions/child.jsonl" }],
+          progress: [{
+            index: 0,
+            agent: "worker",
+            status: "running",
+            task: "Inspect",
+            currentTool: "workspace_read_file",
+            model: "test/model",
+            inputTokens: 3,
+            outputTokens: 2,
+            tokens: 5,
+            toolCount: 1,
+            durationMs: 20
+          }]
+        }
+      }
+    })).toEqual({
+      runId: "run-1",
+      mode: "single",
+      children: [expect.objectContaining({
+        index: 0,
+        currentTool: "workspace_read_file",
+        sessionFile: "/sessions/child.jsonl"
+      })]
     })
   })
 

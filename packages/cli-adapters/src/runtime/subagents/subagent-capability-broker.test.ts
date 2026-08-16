@@ -73,7 +73,17 @@ const register = (
   agents: ["worker", "reviewer"],
   spec,
   registry,
-  context: runtimeContext
+  context: runtimeContext,
+  supervisorState: () => ({
+    version: 2,
+    parentPiSessionId: "parent",
+    registryRevision: 1,
+    status: "running",
+    goalRevision: 0,
+    phase: null,
+    siblings: [],
+    generatedAt: 1
+  })
 })
 
 describe("SubagentCapabilityBroker", () => {
@@ -133,12 +143,30 @@ describe("SubagentCapabilityBroker", () => {
     expect(capabilities).toHaveLength(2)
     expect(new Set(capabilities.map(({ token }) => token)).size).toBe(2)
     expect(capabilityFor(capabilities, "worker").tools.map(({ id }) => id))
-      .toEqual(["inspect", "empty"])
+      .toEqual(["inspect", "empty", "supervisor_state"])
     const response = await call(capabilities, {})
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({
       status: "success",
       value: { inspected: "ok" }
+    })
+  })
+
+  it("exposes only the scoped supervisor snapshot through the internal tool", async () => {
+    const broker = new SubagentCapabilityBroker()
+    brokers.push(broker)
+    const capabilities = await register(broker, new ToolRegistry())
+
+    const response = await call(capabilities, { toolId: "supervisor_state" })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      status: "success",
+      value: {
+        version: 2,
+        parentPiSessionId: "parent",
+        siblings: []
+      }
     })
   })
 
@@ -186,7 +214,8 @@ describe("SubagentCapabilityBroker", () => {
       risk: "mutate"
     })
 
-    expect(capabilityFor(capabilities, "reviewer").tools).toEqual([])
+    expect(capabilityFor(capabilities, "reviewer").tools.map(({ id }) => id))
+      .toEqual(["supervisor_state"])
     const reviewer = await call(capabilities, {
       agent: "reviewer",
       toolId: "change"
