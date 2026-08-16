@@ -1,5 +1,8 @@
 import { createEventBus } from "@earendil-works/pi-coding-agent"
 import type { SubagentFleetEvent } from "@jingler/core"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { PiSubagentLifecycleAdapter } from "./pi-subagent-lifecycle-adapter.js"
 
@@ -225,6 +228,47 @@ describe("PiSubagentLifecycleAdapter", () => {
     expect(methods).toEqual(["steer", "reply", "stop"])
     unsubscribe()
     adapter.stop()
+  })
+
+  it("clears completed durable nodes before a failed RPC fallback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-stale-fleet-"))
+    const marker = join(root, ".active-runs", "run-1")
+    await mkdir(join(root, ".active-runs"), { recursive: true })
+    await mkdir(join(root, "run-1"), { recursive: true })
+    await writeFile(marker, "")
+    await writeFile(join(root, "run-1", "status.json"), JSON.stringify({
+      runId: "run-1",
+      sessionId: parentSessionFile,
+      state: "running",
+      mode: "workflow",
+      startedAt: 10,
+      lastUpdate: 20
+    }))
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      parentPiSessionAliases: [parentSessionFile],
+      asyncRunsDir: root,
+      emit: () => undefined,
+      now: () => 30
+    })
+    adapter.start()
+    try {
+      await adapter.refresh()
+      expect(adapter.snapshot().nodes).toHaveLength(1)
+      await rm(marker)
+      const unsubscribe = events.on("subagents:rpc:v1:request", (request) => {
+        if (!request || typeof request !== "object" || !("requestId" in request)) return
+        events.emit(`subagents:rpc:v1:reply:${String(request.requestId)}`, {})
+      })
+      await expect(adapter.refresh()).resolves.toMatchObject({ nodes: [] })
+      expect(adapter.snapshot().nodes).toStrictEqual([])
+      unsubscribe()
+    } finally {
+      adapter.stop()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it("does not leave an observed process reported as running", () => {

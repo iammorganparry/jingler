@@ -83,10 +83,24 @@ export function useSubagentFleet(input: {
           parentPiSessionId
         )
         if (!active) return
+        const snapshotIds = new Set(snapshot.nodes.map((node) => node.id))
+        const durablePrefix = `${snapshot.parentPiSessionId}/active/`
+        const completedDurable = actor.getSnapshot().context.tree.nodes
+          .filter((node) =>
+            node.id.startsWith(durablePrefix) && !snapshotIds.has(node.id)
+          )
+          .map((node): SubagentFleetEvent => ({
+            _tag: "Remove",
+            version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+            eventId: `renderer-poll:remove:${snapshot.generatedAt}:${node.id}`,
+            occurredAt: snapshot.generatedAt,
+            id: node.id
+          }))
         actor.send({
           type: "SYNC",
           events: [
             ...eventsRef.current,
+            ...completedDurable,
             {
               _tag: "Snapshot",
               version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -103,11 +117,16 @@ export function useSubagentFleet(input: {
         refreshInFlightRef.current = false
       }
     }
+    const refreshOnFocus = () => void refresh()
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 1_500)
+    const timer = window.setInterval(refreshOnFocus, 1_500)
+    window.addEventListener("focus", refreshOnFocus)
+    document.addEventListener("visibilitychange", refreshOnFocus)
     return () => {
       active = false
       window.clearInterval(timer)
+      window.removeEventListener("focus", refreshOnFocus)
+      document.removeEventListener("visibilitychange", refreshOnFocus)
     }
   }, [actor, hasFleetSession, input.chatId, input.sessionId, parentPiSessionId])
   const context = useSelector(actor, (snapshot) => snapshot.context)
