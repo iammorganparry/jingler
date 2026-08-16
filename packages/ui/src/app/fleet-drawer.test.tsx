@@ -8,6 +8,11 @@ const FLEET_BUTTON = /Fleet/
 
 const node = (overrides: Partial<SubagentFleetNode> = {}): SubagentFleetNode => ({
   id: "parent/run-1",
+  subagentId: "run-1",
+  orchestrationRunId: "run-1",
+  nodeKind: "agent",
+  registryRevision: 1,
+  childSequence: 1,
   runId: "run-1",
   parentId: null,
   parentPiSessionId: "parent",
@@ -15,6 +20,10 @@ const node = (overrides: Partial<SubagentFleetNode> = {}): SubagentFleetNode => 
   task: "Review the capability boundary",
   model: "anthropic/claude-test:high",
   status: "running",
+  health: "connected",
+  phase: null,
+  blocking: null,
+  terminal: null,
   background: true,
   sessionFile: "/sessions/reviewer.jsonl",
   currentTool: "workspace_read_file",
@@ -49,7 +58,8 @@ describe("FleetDrawer", () => {
         requestId: "attention-1",
         reason: "need_decision",
         message: "Which public API should I use?",
-        requestedAt: 21
+        requestedAt: 21,
+        deadlineAt: null
       }
     })
     render(
@@ -106,6 +116,38 @@ describe("FleetDrawer", () => {
       .not.toBeNull()
     fireEvent.click(screen.getByLabelText("Close reviewer"))
     expect(onDismiss).toHaveBeenCalledWith(reviewer)
+  })
+
+  it("requires an explicit continuation message before resume", () => {
+    const onControl = vi.fn()
+    const paused = node({ status: "paused" })
+    render(
+      <FleetDrawer
+        nodes={[paused]}
+        selectedId={paused.id}
+        expanded
+        height={180}
+        onSelect={vi.fn()}
+        onToggle={vi.fn()}
+        onResize={vi.fn()}
+        onControl={onControl}
+      />
+    )
+
+    const resume = screen.getByLabelText("Resume agent")
+    expect(resume.getAttribute("disabled")).not.toBeNull()
+    expect(resume.getAttribute("title")).toBe("Enter a continuation message to resume")
+    fireEvent.change(screen.getByPlaceholderText("Steer agent…"), {
+      target: { value: "Continue from the persisted session" }
+    })
+    expect(resume.getAttribute("disabled")).toBeNull()
+    fireEvent.click(resume)
+    expect(onControl).toHaveBeenCalledWith(
+      paused,
+      "resume",
+      "Continue from the persisted session",
+      undefined
+    )
   })
 
   it("uses the composer's chrome instead of drawing a detached card", () => {

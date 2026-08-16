@@ -144,7 +144,7 @@ function FleetDetails(props: Pick<FleetDrawerProps, "pending" | "outcomeMessage"
     <div className="flex min-h-0 flex-col p-2.5">
       <FleetSummary node={selected} onOpenArtifact={onOpenArtifact} />
       <div className="mt-2 flex items-center gap-1.5">
-        <LifecycleButtons node={selected} pending={pending} canControl={canControl} onControl={onControl} onResume={() => send("resume")} />
+        <LifecycleButtons node={selected} pending={pending} canControl={canControl} onControl={onControl} onResume={() => send("resume")} hasResumeMessage={Boolean(draft.trim())} />
         <input value={draft} disabled={!controlEnabled} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && send(selected.attention ? "reply" : "steer")} placeholder={controlEnabled ? (selected.attention ? "Reply to agent…" : "Steer agent…") : "Read-only agent"} aria-label={selected.attention ? "Reply to agent" : "Steer agent"} className="min-w-0 flex-1 rounded-md border border-line bg-editor px-2 py-1 text-[11px] outline-none focus:border-blue disabled:opacity-50" />
         <button type="button" aria-label="Steer agent" title="Steer" disabled={!controlEnabled || pending || !draft.trim()} onClick={() => send(selected.attention ? "reply" : "steer")} className="rounded p-1.5 text-blue hover:bg-panel disabled:opacity-40"><Send className="size-3.5" /></button>
         <button type="button" aria-label="Queue follow-up" title="Follow up after current work" disabled={!canControl(selected, "follow-up") || pending || !draft.trim()} onClick={() => send("follow-up")} className="rounded p-1.5 text-purple hover:bg-panel disabled:opacity-40"><FastForward className="size-3.5" /></button>
@@ -167,9 +167,9 @@ function FleetSummary({ node, onOpenArtifact }: { readonly node: SubagentFleetNo
   )
 }
 
-function LifecycleButtons({ node, pending, canControl, onControl, onResume }: { readonly node: SubagentFleetNode; readonly pending: boolean; readonly canControl: NonNullable<FleetDrawerProps["canControl"]>; readonly onControl: FleetDrawerProps["onControl"]; readonly onResume: () => void }) {
+function LifecycleButtons({ node, pending, canControl, onControl, onResume, hasResumeMessage }: { readonly node: SubagentFleetNode; readonly pending: boolean; readonly canControl: NonNullable<FleetDrawerProps["canControl"]>; readonly onControl: FleetDrawerProps["onControl"]; readonly onResume: () => void; readonly hasResumeMessage: boolean }) {
   return node.status === "paused" ? (
-    <button type="button" title="Resume" aria-label="Resume agent" disabled={pending || !canControl(node, "resume")} onClick={onResume} className="rounded p-1.5 text-green hover:bg-panel disabled:opacity-40"><Play className="size-3.5" /></button>
+    <button type="button" title={hasResumeMessage ? "Resume with continuation" : "Enter a continuation message to resume"} aria-label="Resume agent" disabled={pending || !hasResumeMessage || !canControl(node, "resume")} onClick={onResume} className="rounded p-1.5 text-green hover:bg-panel disabled:opacity-40"><Play className="size-3.5" /></button>
   ) : (
     <>
       <button type="button" title="Interrupt" aria-label="Interrupt agent" disabled={pending || !ACTIVE.has(node.status) || !canControl(node, "interrupt")} onClick={() => onControl(node, "interrupt")} className="rounded p-1.5 text-yellow hover:bg-panel disabled:opacity-40"><Pause className="size-3.5" /></button>
