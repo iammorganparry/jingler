@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { SubagentFleetNode } from "@jingler/core"
-import { FleetDrawer } from "./fleet-drawer.js"
+import { FleetDrawer, SubagentCompletionLinks } from "./fleet-drawer.js"
 
 afterEach(cleanup)
 const FLEET_BUTTON = /Fleet/
@@ -68,7 +68,19 @@ describe("FleetDrawer", () => {
         selectedId={child.id}
         expanded
         height={180}
-        outcomeMessage="reply acknowledged"
+        outcome={{
+          version: 2,
+          requestId: "reply-1",
+          runId: child.runId,
+          action: "reply",
+          acknowledged: true,
+          status: "accepted",
+          deliveryStatus: "delivered",
+          sequence: 1,
+          nativeRequestId: "native-reply-1",
+          message: "reply delivered",
+          acknowledgedAt: 22
+        }}
         onSelect={onSelect}
         onToggle={vi.fn()}
         onResize={vi.fn()}
@@ -79,6 +91,7 @@ describe("FleetDrawer", () => {
     expect(screen.getByText("2 active · 2 total")).toBeTruthy()
     expect(screen.getByText("Which public API should I use?")).toBeTruthy()
     expect(screen.getByText("Review")).toBeTruthy()
+    expect(screen.getByTestId("fleet-control-receipt").textContent).toBe("delivered")
     fireEvent.click(screen.getByTestId("fleet-agent-run-1"))
     expect(onSelect).toHaveBeenCalledWith(parent.id)
     fireEvent.change(screen.getByLabelText("Reply to agent"), {
@@ -148,6 +161,26 @@ describe("FleetDrawer", () => {
       "Continue from the persisted session",
       undefined
     )
+  })
+
+  it("keeps bounded completion transcript and artifact links outside Fleet chrome", () => {
+    const onSelect = vi.fn()
+    const onOpenArtifact = vi.fn()
+    const completed = node({ status: "completed", currentTool: null })
+    render(
+      <SubagentCompletionLinks
+        nodes={[completed]}
+        selectedId="main"
+        onSelect={onSelect}
+        onOpenArtifact={onOpenArtifact}
+      />
+    )
+
+    expect(screen.queryByTestId("fleet-drawer")).toBeNull()
+    fireEvent.click(screen.getByText("reviewer transcript"))
+    fireEvent.click(screen.getByText("Review"))
+    expect(onSelect).toHaveBeenCalledWith(completed.id)
+    expect(onOpenArtifact).toHaveBeenCalledWith("review.md")
   })
 
   it("uses the composer's chrome instead of drawing a detached card", () => {

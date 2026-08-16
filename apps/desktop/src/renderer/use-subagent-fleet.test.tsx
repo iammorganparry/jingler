@@ -134,6 +134,48 @@ describe("useSubagentFleet reconciliation", () => {
     expect(result.current.nodes).toStrictEqual([])
   })
 
+  it("keeps completed transcript links after active Fleet chrome disappears", async () => {
+    mocks.snapshot.mockResolvedValue(snapshot)
+    const completed = {
+      ...node,
+      status: "completed" as const,
+      sessionFile: "/sessions/child.jsonl",
+      completedAt: 30,
+      updatedAt: 30,
+      terminal: {
+        reason: "completed" as const,
+        summary: "Done",
+        at: 30,
+        retryable: false
+      }
+    }
+    const events: ReadonlyArray<SubagentFleetEvent> = [{
+      _tag: "Upsert",
+      version: 2,
+      eventId: "complete",
+      occurredAt: 30,
+      node: completed
+    }, {
+      _tag: "Remove",
+      version: 2,
+      eventId: "remove",
+      occurredAt: 31,
+      registryRevision: 31,
+      id: completed.id
+    }]
+    const { result } = renderHook(() => useSubagentFleet({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      piSessionId: "parent",
+      events
+    }))
+
+    expect(result.current.nodes).toEqual([])
+    expect(result.current.completedNodes).toEqual([completed])
+    act(() => result.current.select(completed.id))
+    expect(result.current.selectedNode).toEqual(completed)
+  })
+
   it("does not restart or overlap reconciliation when events change", async () => {
     const pending = deferred<SubagentFleetSnapshot>()
     const nextPending = deferred<SubagentFleetSnapshot>()

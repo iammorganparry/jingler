@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useActorRef, useSelector } from "@xstate/react"
 import type {
   Subagent,
@@ -23,6 +23,7 @@ export interface SubagentFleetController {
   readonly nodes: ReadonlyArray<SubagentFleetNode>
   readonly selectedId: string
   readonly selectedNode: SubagentFleetNode | null
+  readonly completedNodes: ReadonlyArray<SubagentFleetNode>
   readonly selectedLegacyAgent: Subagent | null
   readonly legacyAgentFor: (node: SubagentFleetNode) => Subagent | null
   readonly expanded: boolean
@@ -128,9 +129,33 @@ export function useSubagentFleet(input: {
     }
   }, [actor, hasFleetSession, input.chatId, input.sessionId, parentPiSessionId])
   const context = useSelector(actor, (snapshot) => snapshot.context)
+  const completedNodes = useMemo(() => {
+    const completed = new Map<string, SubagentFleetNode>()
+    for (const event of input.events) {
+      if (event._tag !== "Upsert") continue
+      const node = event.node
+      if (
+        ["completed", "failed", "stopped"].includes(node.status) &&
+        (node.sessionFile !== null || node.artifacts.length > 0)
+      ) {
+        completed.delete(node.id)
+        completed.set(node.id, node)
+      } else {
+        completed.delete(node.id)
+      }
+    }
+    return [...completed.values()].slice(-8).reverse()
+  }, [input.events])
+  const [completedSelection, setCompletedSelection] = useState<string | null>(null)
+  const completedById = useMemo(
+    () => new Map(completedNodes.map((node) => [node.id, node])),
+    [completedNodes]
+  )
+  const selectedId = completedSelection ?? context.selectedId
   const selectedNode = useMemo(
-    () => context.tree.nodes.find((node) => node.id === context.selectedId) ?? null,
-    [context.tree.nodes, context.selectedId]
+    () => context.tree.nodes.find((node) => node.id === selectedId) ??
+      completedById.get(selectedId) ?? null,
+    [completedById, context.tree.nodes, selectedId]
   )
   const legacyByNodeId = useMemo(
     () => new Map(legacyAgents.map((agent) => [
@@ -144,8 +169,9 @@ export function useSubagentFleet(input: {
 
   return {
     nodes: context.tree.nodes,
-    selectedId: context.selectedId,
+    selectedId,
     selectedNode,
+    completedNodes,
     selectedLegacyAgent:
       selectedNode === null ? null : legacyAgentFor(selectedNode),
     legacyAgentFor,
@@ -153,7 +179,14 @@ export function useSubagentFleet(input: {
     height: context.height,
     pending: context.pendingRequestId !== null,
     lastOutcome: context.lastOutcome,
-    select: (id) => actor.send({ type: "SELECT", id }),
+    select: (id) => {
+      if (completedById.has(id)) {
+        setCompletedSelection(id)
+        return
+      }
+      setCompletedSelection(null)
+      actor.send({ type: "SELECT", id })
+    },
     toggle: () => actor.send({ type: "TOGGLE" }),
     resize: (height) => actor.send({ type: "RESIZE", height }),
     control: async (node, action, message, replyTo) => {
