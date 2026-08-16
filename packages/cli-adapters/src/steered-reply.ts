@@ -17,6 +17,7 @@ export interface SteeredReplyWaiter {
 export type BoundedSteerResult =
   | "accepted"
   | "deferred"
+  | "unsupported"
   | "failed"
   | "timed-out"
 

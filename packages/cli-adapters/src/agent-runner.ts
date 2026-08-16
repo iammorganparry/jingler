@@ -1997,18 +1997,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             turnMutation.withPermits(1)(Effect.gen(function* () {
               const handler = yield* Ref.get(turnSteer)
               if (handler === null) {
-                // Codex publishes and RETRACTS its handle within a run (native
-                // compaction), so "no handle" there is a phase → `deferred`.
-                // Everywhere else it means this run has no channel at all —
-                // including runs that never go through a steering adapter, like a
-                // plan execution — and `unsupported` is what licenses the renderer
-                // to stop and replay, which is the only thing that would work.
-                //
-                // Claude stays on `unsupported` deliberately, even though it CAN
-                // steer: its handle is registered a beat into the run, and the only
-                // caller that can lose that race is the operator's own "Send now",
-                // whose fallback is exactly right. The queue's automatic flush is
-                // unaffected — it marks its steers `auto`, which forbids the stop.
+                // No handle is a PHASE, not a verdict: the driver registers it a
+                // beat into the run (on `Started`) and retracts it at teardown,
+                // and some runs — plan execution — never have a channel at all.
+                // `deferred` keeps the message queued for the next boundary or
+                // the turn's end; escalating here would let an early "Send now"
+                // stop a run that was about to become steerable.
                 return { status: "deferred" } as const
               }
               const replyWaiter: RunReplyWaiter | null = captureReply
@@ -2018,7 +2012,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 yield* Ref.set(steeredReply, replyWaiter)
               }
               const steered = yield* invokeSteer(handler, text, images)
-              const outcome = steered === "accepted" ? "accepted" : "deferred"
+              // `unsupported` passes through: the handler is saying this message
+              // can NEVER land on this run's channel (pi steering is text-only),
+              // and only that status licenses "Send now" to stop and replay.
+              // Timeouts and failures stay `deferred` — they may clear.
+              const outcome =
+                steered === "accepted" || steered === "unsupported"
+                  ? steered
+                  : "deferred"
               if (outcome !== "accepted") {
                 if (replyWaiter !== null) yield* Ref.set(steeredReply, null)
                 return { status: outcome } as const
