@@ -349,7 +349,16 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       if (attention) lifecycle.attention(attention)
       listener(event)
     }),
-    subscribeFleet: (listener) => Effect.runSync(fleetEvents.subscribe(listener)),
+    subscribeFleet: (listener) => {
+      const unsubscribe = Effect.runSync(fleetEvents.subscribe(listener))
+      for (const event of lifecycle.replay()) {
+        listener({ _tag: "SubagentFleetChanged", event })
+      }
+      void Effect.runPromise(
+        Effect.tryPromise(() => lifecycle.refresh()).pipe(Effect.ignore)
+      )
+      return unsubscribe
+    },
     controlSubagent: async (request) => {
       const outcome = await lifecycle.control(request)
       const projected: StreamEvent = {
