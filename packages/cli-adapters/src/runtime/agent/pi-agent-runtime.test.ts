@@ -46,8 +46,9 @@ const fleetSeams: Pick<
   parentPiSessionId: "pi-session-internal",
   subscribeFleet: () => () => undefined,
   subagentFleetSnapshot: async () => ({
-    version: 1,
+    version: 2,
     parentPiSessionId: "pi-session",
+    registryRevision: 0,
     generatedAt: 1,
     totalActive: 0,
     omitted: 0,
@@ -56,7 +57,7 @@ const fleetSeams: Pick<
   }),
   subagentTranscript: async () => [],
   controlSubagent: async (request) => ({
-    version: 1,
+    version: 2,
     requestId: request.requestId,
     runId: request.runId,
     action: request.action,
@@ -497,8 +498,9 @@ describe("PiAgentRuntime", () => {
       interrupt: async () => undefined,
       dispose,
       subagentFleetSnapshot: async () => ({
-        version: 1,
+        version: 2,
         parentPiSessionId: "pi-parent-internal",
+        registryRevision: 0,
         generatedAt: Date.now(),
         totalActive: childActive ? 1 : 0,
         omitted: 0,
@@ -544,7 +546,7 @@ describe("PiAgentRuntime", () => {
     ))
     expect(foreignChat._tag).toBe("Left")
     await Effect.runPromise(runtime.controlSubagent("session-1", "chat-1", {
-      version: 1,
+      version: 2,
       requestId: "control-1",
       parentPiSessionId: "pi-parent-internal",
       runId: "child-1",

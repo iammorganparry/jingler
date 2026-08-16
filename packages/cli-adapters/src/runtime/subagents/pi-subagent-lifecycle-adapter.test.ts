@@ -75,14 +75,14 @@ describe("PiSubagentLifecycleAdapter", () => {
         status: "completed"
       }),
       expect.objectContaining({
-        id: `${parent}/run-1/0`,
+        id: `${parent}/run-1%3Astep%3A0`,
         parentId: `${parent}/run-1`,
         agent: "reviewer",
         sessionFile: "/sessions/reviewer.jsonl",
         artifacts: [expect.objectContaining({ path: "/artifacts/review.md" })]
       }),
       expect.objectContaining({
-        id: `${parent}/run-1/1`,
+        id: `${parent}/run-1%3Astep%3A1`,
         parentId: `${parent}/run-1`,
         agent: "worker",
         sessionFile: "/sessions/worker.jsonl"
@@ -146,7 +146,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const snapshot = await adapter.refresh()
 
     expect(snapshot.nodes).toMatchObject([{
-      id: `${parent}/active/active-1`,
+      id: `${parent}/active-1`,
       agent: "scout",
       status: "running",
       usage: { totalTokens: 5 }
@@ -187,7 +187,7 @@ describe("PiSubagentLifecycleAdapter", () => {
           })
     })
     const base = {
-      version: 1 as const,
+      version: 2 as const,
       parentPiSessionId: parent,
       runId: "run-1",
       replyTo: null
@@ -297,4 +297,102 @@ describe("PiSubagentLifecycleAdapter", () => {
     })
     adapter.stop()
   })
+
+  it("rejects unowned missing-session events but accepts correlated completion", () => {
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      emit: () => undefined,
+      now: () => 20
+    })
+    adapter.start()
+    events.emit("subagent:async-started", { id: "unowned", agent: "scout" })
+    events.emit("subagent:async-complete", {
+      runId: "unowned",
+      state: "complete",
+      success: true
+    })
+    expect(adapter.snapshot().nodes).toEqual([])
+
+    events.emit("subagent:async-started", {
+      id: "owned",
+      sessionId: parent,
+      agent: "scout"
+    })
+    events.emit("subagent:async-complete", {
+      runId: "owned",
+      state: "complete",
+      success: true
+    })
+    expect(adapter.snapshot().nodes).toHaveLength(1)
+    expect(adapter.snapshot().nodes[0]).toMatchObject({
+      id: `${parent}/owned`,
+      subagentId: "owned",
+      status: "completed"
+    })
+    adapter.stop()
+  })
+
+  it("keeps one canonical child identity across durable and completion state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-canonical-fleet-"))
+    const marker = join(root, ".active-runs", "run-1")
+    await mkdir(join(root, ".active-runs"), { recursive: true })
+    await mkdir(join(root, "run-1"), { recursive: true })
+    await writeFile(marker, "")
+    await writeFile(join(root, "run-1", "status.json"), JSON.stringify({
+      runId: "run-1",
+      sessionId: parentSessionFile,
+      state: "running",
+      mode: "workflow",
+      startedAt: 10,
+      steps: [{
+        runId: "child-run",
+        agent: "scout",
+        status: "running",
+        startedAt: 11
+      }]
+    }))
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      parentPiSessionAliases: [parentSessionFile],
+      asyncRunsDir: root,
+      emit: () => undefined,
+      now: () => 30
+    })
+    adapter.start()
+    try {
+      await adapter.refresh()
+      const durableId = adapter.snapshot().nodes[0]?.id
+      expect(durableId).toBe(`${parent}/child-run`)
+      events.emit("subagent:async-complete", {
+        runId: "run-1",
+        sessionId: parentSessionFile,
+        state: "complete",
+        success: true,
+        results: [{
+          runId: "child-run",
+          index: 0,
+          agent: "scout",
+          success: true,
+          sessionPath: "/sessions/child.jsonl"
+        }]
+      })
+      const children = adapter.snapshot().nodes.filter(
+        (node) => node.subagentId === "child-run"
+      )
+      expect(children).toHaveLength(1)
+      expect(children[0]).toMatchObject({
+        id: durableId,
+        status: "completed",
+        sessionFile: "/sessions/child.jsonl"
+      })
+    } finally {
+      adapter.stop()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
 })

@@ -17,6 +17,11 @@ vi.mock("./rpc-client.js", () => ({
 
 const node: SubagentFleetNode = {
   id: "parent/run-1",
+  subagentId: "run-1",
+  orchestrationRunId: "run-1",
+  nodeKind: "agent",
+  registryRevision: 10,
+  childSequence: 1,
   runId: "run-1",
   parentId: null,
   parentPiSessionId: "parent",
@@ -24,6 +29,10 @@ const node: SubagentFleetNode = {
   task: "Review polling",
   model: null,
   status: "running",
+  health: "connected",
+  phase: null,
+  blocking: null,
+  terminal: null,
   background: true,
   sessionFile: null,
   currentTool: null,
@@ -43,8 +52,9 @@ const node: SubagentFleetNode = {
 }
 
 const snapshot: SubagentFleetSnapshot = {
-  version: 1,
+  version: 2,
   parentPiSessionId: "parent",
+  registryRevision: 20,
   generatedAt: 20,
   totalActive: 0,
   omitted: 0,
@@ -102,7 +112,8 @@ describe("useSubagentFleet polling", () => {
     }) as typeof window.setInterval)
     const durableNode: SubagentFleetNode = {
       ...node,
-      id: "parent/active/run-1"
+      id: "parent/run-1",
+      health: "unknown"
     }
     mocks.snapshot
       .mockResolvedValueOnce({
@@ -166,7 +177,7 @@ describe("useSubagentFleet polling", () => {
     expect(mocks.snapshot).toHaveBeenCalledTimes(1)
     const upsert: SubagentFleetEvent = {
       _tag: "Upsert",
-      version: 1,
+      version: 2,
       eventId: "upsert-1",
       occurredAt: 10,
       node

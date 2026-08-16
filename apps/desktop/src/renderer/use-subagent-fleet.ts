@@ -84,16 +84,16 @@ export function useSubagentFleet(input: {
         )
         if (!active) return
         const snapshotIds = new Set(snapshot.nodes.map((node) => node.id))
-        const durablePrefix = `${snapshot.parentPiSessionId}/active/`
         const completedDurable = actor.getSnapshot().context.tree.nodes
           .filter((node) =>
-            node.id.startsWith(durablePrefix) && !snapshotIds.has(node.id)
+            node.health === "unknown" && !snapshotIds.has(node.id)
           )
           .map((node): SubagentFleetEvent => ({
             _tag: "Remove",
             version: SUBAGENT_FLEET_PROTOCOL_VERSION,
             eventId: `renderer-poll:remove:${snapshot.generatedAt}:${node.id}`,
             occurredAt: snapshot.generatedAt,
+            registryRevision: snapshot.registryRevision,
             id: node.id
           }))
         actor.send({

@@ -1038,18 +1038,20 @@ describe("conversationMachine — talking to the main agent while sub-agents run
       _tag: "SubagentFleetChanged",
       event: {
         _tag: "Remove",
-        version: 1,
+        version: 2,
         eventId: "remove-stale-1",
         occurredAt: 42,
+        registryRevision: 42,
         id: "pi-parent-1/stale-run"
       }
     })
 
     expect(actor.getSnapshot().context.subagentFleetEvents).toEqual([{
       _tag: "Remove",
-      version: 1,
+      version: 2,
       eventId: "remove-stale-1",
       occurredAt: 42,
+      registryRevision: 42,
       id: "pi-parent-1/stale-run"
     }])
     emit({ _tag: "Done", costUsd: 0, tokens: 0 })

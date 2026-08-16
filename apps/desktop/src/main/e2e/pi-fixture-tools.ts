@@ -223,11 +223,16 @@ const heldSubagentEvents = (
     _tag: "SubagentFleetChanged",
     event: {
       _tag: "Upsert",
-      version: 1,
+      version: 2,
       eventId: `${phase}:${id}`,
       occurredAt: at,
       node: {
         id: `${parentPiSessionId}/${id}`,
+        subagentId: id,
+        orchestrationRunId: runId,
+        nodeKind: "agent",
+        registryRevision: at,
+        childSequence: phase === "start" ? 1 : 2,
         runId: id,
         parentId: null,
         parentPiSessionId,
@@ -235,6 +240,15 @@ const heldSubagentEvents = (
         task,
         model: "e2e/pi-fixture:high",
         status: phase === "start" ? "running" : "completed",
+        health: phase === "start" ? "connected" : "disconnected",
+        phase: null,
+        blocking: null,
+        terminal: phase === "start" ? null : {
+          reason: "completed",
+          summary: "Fixture child completed",
+          at,
+          retryable: false
+        },
         background: false,
         sessionFile: null,
         currentTool: phase === "start" ? "workspace_read_file" : null,

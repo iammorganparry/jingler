@@ -1,4 +1,4 @@
-import { basename, dirname, join } from "node:path"
+import { join } from "node:path"
 import {
   createAgentSession,
   createEventBus,
@@ -48,6 +48,7 @@ import {
 import type { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 import type { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import { PiSubagentLifecycleAdapter } from "../subagents/pi-subagent-lifecycle-adapter.js"
+import { piSubagentTrustedSessionRoots } from "../subagents/pi-subagent-transcript.js"
 
 export class PiSessionFactoryError extends Data.TaggedError("PiSessionFactoryError")<{
   readonly message: string
@@ -469,10 +470,7 @@ const createSessionHandle = (
         for (const listener of fleetListeners) listener(projected)
       },
       trustedSessionRoots: embedded.result.session.sessionFile
-        ? [join(
-            dirname(embedded.result.session.sessionFile),
-            basename(embedded.result.session.sessionFile, ".jsonl")
-          )]
+        ? piSubagentTrustedSessionRoots(embedded.result.session.sessionFile)
         : []
     })
     lifecycle.start()

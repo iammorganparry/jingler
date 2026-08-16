@@ -56,27 +56,95 @@ describe("readDurablePiSubagentNodes", () => {
       }))
     ])
 
-    const nodes = await readDurablePiSubagentNodes({
+    const projection = await readDurablePiSubagentNodes({
       asyncDir: root,
       parentPiSessionId: "parent",
       parentPiSessionAliases: new Set(["parent", "/sessions/parent.jsonl"]),
       now: 30
     })
 
-    expect(nodes).toHaveLength(2)
-    expect(nodes).toEqual(expect.arrayContaining([
+    expect(projection.nodes).toHaveLength(2)
+    expect(projection.nodes).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: "parent/active/run-1/main",
+        id: "parent/run-1%3Astep%3A0",
+        subagentId: "run-1:step:0",
+        orchestrationRunId: "run-1",
         parentId: null,
         agent: "scout",
         model: "test/model"
       }),
       expect.objectContaining({
-        id: "parent/active/starting",
+        id: "parent/starting",
+        subagentId: "starting",
         parentId: null,
         agent: "workflow",
         status: "queued"
       })
     ]))
   })
+
+  it("rejects malformed and marker-mismatched status records", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-durable-invalid-"))
+    roots.push(root)
+    await mkdir(join(root, ".active-runs"), { recursive: true })
+    for (const runId of ["malformed", "mismatch", "missing-session"]) {
+      await mkdir(join(root, runId), { recursive: true })
+      await writeFile(join(root, ".active-runs", runId), "")
+    }
+    await writeFile(join(root, "malformed", "status.json"), "{not-json")
+    await writeFile(join(root, "mismatch", "status.json"), JSON.stringify({
+      runId: "other",
+      sessionId: "parent",
+      state: "running",
+      mode: "single",
+      startedAt: 1
+    }))
+    await writeFile(join(root, "missing-session", "status.json"), JSON.stringify({
+      runId: "missing-session",
+      state: "running",
+      mode: "single",
+      startedAt: 1
+    }))
+
+    const projection = await readDurablePiSubagentNodes({
+      asyncDir: root,
+      parentPiSessionId: "parent",
+      parentPiSessionAliases: new Set(["parent"]),
+      registryRevision: 2
+    })
+    expect(projection).toMatchObject({ nodes: [], totalActive: 0, omitted: 0 })
+  })
+
+  it("sorts before bounding and reports exact omissions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-durable-bound-"))
+    roots.push(root)
+    await mkdir(join(root, ".active-runs"), { recursive: true })
+    await Promise.all(["late", "early", "middle"].map(async (runId, index) => {
+      await mkdir(join(root, runId), { recursive: true })
+      await writeFile(join(root, ".active-runs", runId), "")
+      await writeFile(join(root, runId, "status.json"), JSON.stringify({
+        runId,
+        sessionId: "parent",
+        state: "running",
+        mode: "single",
+        startedAt: [30, 10, 20][index]
+      }))
+    }))
+
+    const projection = await readDurablePiSubagentNodes({
+      asyncDir: root,
+      parentPiSessionId: "parent",
+      parentPiSessionAliases: new Set(["parent"]),
+      registryRevision: 7,
+      maxNodes: 2
+    })
+    expect(projection.nodes.map(({ subagentId }) => subagentId)).toEqual(["early", "middle"])
+    expect(projection).toMatchObject({
+      totalActive: 3,
+      omitted: 1,
+      activeCapacity: { used: 3, limit: 4 }
+    })
+    expect(projection.nodes.every(({ registryRevision }) => registryRevision === 7)).toBe(true)
+  })
+
 })
