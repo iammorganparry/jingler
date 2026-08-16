@@ -2,11 +2,33 @@ import { realpath } from "node:fs/promises"
 import { dirname, isAbsolute, relative, resolve } from "node:path"
 import type { Message as PiMessage } from "@earendil-works/pi-ai"
 import { SessionManager } from "@earendil-works/pi-coding-agent"
-import type { ContentPart, Message } from "@jingler/core"
+import type { ContentPart, Message, ToolCall } from "@jingler/core"
 
 const containedBy = (file: string, root: string): boolean => {
   const path = relative(root, file)
   return path === "" || (!path.startsWith("..") && !isAbsolute(path))
+}
+
+const recordOf = (value: unknown): Readonly<Record<string, unknown>> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null
+
+const stringField = (
+  value: Readonly<Record<string, unknown>>,
+  key: string
+): string | null => typeof value[key] === "string" ? value[key] : null
+
+const toolTarget = (argumentsValue: unknown): string | null => {
+  const args = recordOf(argumentsValue)
+  if (args === null) return null
+  for (const key of ["path", "command", "url", "selector", "expression", "query"]) {
+    const value = stringField(args, key)
+    if (value !== null) return value
+  }
+  const from = stringField(args, "from")
+  const to = stringField(args, "to")
+  return from !== null && to !== null ? `${from} → ${to}` : null
 }
 
 const textOf = (message: PiMessage): string => {
@@ -24,7 +46,34 @@ const textOf = (message: PiMessage): string => {
     .join("\n")
 }
 
-const partsOf = (message: PiMessage): ReadonlyArray<ContentPart> => {
+const toolResult = (
+  message: Extract<PiMessage, { readonly role: "toolResult" }>
+): Pick<ToolCall, "status" | "meta" | "output"> => {
+  const raw = textOf(message)
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(raw)
+  } catch {
+    decoded = null
+  }
+  const result = recordOf(decoded)
+  const stdout = result === null ? null : stringField(result, "stdout")
+  const stderr = result === null ? null : stringField(result, "stderr")
+  const text = result === null ? null : stringField(result, "text")
+  const output = stdout !== null || stderr !== null
+    ? [stdout, stderr].filter((value): value is string => Boolean(value)).join("\n")
+    : text ?? (result === null ? raw : JSON.stringify(result, null, 2))
+  const exitCode = result?.exitCode
+  return {
+    status: message.isError ? "error" : "success",
+    meta: typeof exitCode === "number" ? `exit ${exitCode}` : null,
+    output
+  }
+}
+
+const partsOf = (
+  message: Exclude<PiMessage, { readonly role: "toolResult" }>
+): ReadonlyArray<ContentPart> => {
   if (message.role === "user") {
     const content = typeof message.content === "string"
       ? [{ type: "text" as const, text: message.content }]
@@ -43,13 +92,6 @@ const partsOf = (message: PiMessage): ReadonlyArray<ContentPart> => {
           }
     )
   }
-  if (message.role === "toolResult") {
-    const text = textOf(message)
-    return [{
-      _tag: "Text",
-      text: `${message.isError ? "Tool error" : "Tool result"} (${message.toolName})${text ? `\n${text}` : ""}`
-    }]
-  }
   return message.content.map((part): ContentPart => {
     if (part.type === "text") return { _tag: "Text", text: part.text }
     if (part.type === "thinking") {
@@ -60,8 +102,8 @@ const partsOf = (message: PiMessage): ReadonlyArray<ContentPart> => {
       tool: {
         id: part.id,
         name: part.name,
-        target: null,
-        status: "success",
+        target: toolTarget(part.arguments),
+        status: "running",
         meta: null,
         diff: null,
         preview: null
@@ -70,16 +112,60 @@ const partsOf = (message: PiMessage): ReadonlyArray<ContentPart> => {
   })
 }
 
+const settleToolResult = (
+  messages: Array<Message>,
+  result: Extract<PiMessage, { readonly role: "toolResult" }>
+): boolean => {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!
+    if (!message.parts.some(
+      (part) => part._tag === "Tool" && part.tool.id === result.toolCallId
+    )) continue
+    const settled = toolResult(result)
+    messages[index] = {
+      ...message,
+      parts: message.parts.map((part): ContentPart =>
+        part._tag === "Tool" && part.tool.id === result.toolCallId
+          ? { _tag: "Tool", tool: { ...part.tool, ...settled } }
+          : part
+      )
+    }
+    return true
+  }
+  return false
+}
+
 export const piMessagesToJingler = (
   messages: ReadonlyArray<PiMessage>
-): ReadonlyArray<Message> =>
-  messages.map((message, index) => ({
-    id: `child-${message.timestamp}-${index}`,
-    role: message.role === "user" ? "user" : "assistant",
-    parts: partsOf(message),
-    streaming: false,
-    createdAt: new Date(message.timestamp).toISOString()
-  }))
+): ReadonlyArray<Message> => {
+  const projected: Array<Message> = []
+  for (const [index, message] of messages.entries()) {
+    if (message.role === "toolResult") {
+      if (!settleToolResult(projected, message)) {
+        const text = textOf(message)
+        projected.push({
+          id: `child-${message.timestamp}-${index}`,
+          role: "assistant",
+          parts: [{
+            _tag: "Text",
+            text: `${message.isError ? "Tool error" : "Tool result"} (${message.toolName})${text ? `\n${text}` : ""}`
+          }],
+          streaming: false,
+          createdAt: new Date(message.timestamp).toISOString()
+        })
+      }
+      continue
+    }
+    projected.push({
+      id: `child-${message.timestamp}-${index}`,
+      role: message.role === "user" ? "user" : "assistant",
+      parts: partsOf(message),
+      streaming: false,
+      createdAt: new Date(message.timestamp).toISOString()
+    })
+  }
+  return projected
+}
 
 export const readPiSubagentTranscript = async (input: {
   readonly sessionFile: string
