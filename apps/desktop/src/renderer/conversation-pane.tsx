@@ -671,6 +671,7 @@ export function ConversationPane({
       height={fleet.height}
       pending={fleet.pending}
       outcomeMessage={fleet.lastOutcome?.message ?? null}
+      embedded
       onSelect={fleet.select}
       onToggle={fleet.toggle}
       onResize={fleet.resize}

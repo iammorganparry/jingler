@@ -108,6 +108,26 @@ describe("FleetDrawer", () => {
     expect(onDismiss).toHaveBeenCalledWith(reviewer)
   })
 
+  it("uses the composer's chrome instead of drawing a detached card", () => {
+    render(
+      <FleetDrawer
+        nodes={[node()]}
+        selectedId="main"
+        expanded={false}
+        height={180}
+        embedded
+        onSelect={vi.fn()}
+        onToggle={vi.fn()}
+        onResize={vi.fn()}
+        onControl={vi.fn()}
+      />
+    )
+    const drawer = screen.getByTestId("fleet-drawer")
+    expect(drawer.getAttribute("data-embedded")).toBe("true")
+    expect(drawer.className).not.toContain("rounded-xl")
+    expect(drawer.className).not.toContain("border-line")
+  })
+
   it("collapses to one composer-adjacent summary row", () => {
     render(
       <FleetDrawer

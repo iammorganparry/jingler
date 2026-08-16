@@ -564,7 +564,6 @@ export function ConversationView({
         {/* Same gutter + centered max-width as the transcript column above. */}
         <div className={cn("flex-none pb-[18px] pt-[11px]", gutter)}>
           <div className="mx-auto w-full max-w-[760px]">
-            {!archived && fleetSlot && <div className="mb-2">{fleetSlot}</div>}
             {!archived && planDocument && (
               <PlanProgressDock
                 document={planDocument}
@@ -716,6 +715,7 @@ export function ConversationView({
                 codeReferences={draftCodeReferences}
                 onCodeReferenceRemove={onDraftCodeReferenceRemove}
                 onCodeReferencesClear={onDraftCodeReferencesClear}
+                topSlot={fleetSlot}
                 autoFocus={autoFocusComposer}
                 focusKey={focusKey}
               />
