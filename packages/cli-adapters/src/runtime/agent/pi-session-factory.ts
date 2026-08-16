@@ -461,6 +461,9 @@ const createSessionHandle = (
     const lifecycle = new PiSubagentLifecycleAdapter({
       events: prepared.eventBus,
       parentPiSessionId: embedded.result.session.sessionId,
+      parentPiSessionAliases: embedded.result.session.sessionFile
+        ? [embedded.result.session.sessionFile]
+        : [],
       emit: (event) => {
         const projected: StreamEvent = { _tag: "SubagentFleetChanged", event }
         for (const listener of fleetListeners) listener(projected)

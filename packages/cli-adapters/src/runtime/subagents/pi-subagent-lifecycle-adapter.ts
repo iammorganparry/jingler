@@ -254,6 +254,7 @@ export interface PiSubagentSupervisorAttentionInput {
 export interface PiSubagentLifecycleAdapterOptions {
   readonly events: EventBus
   readonly parentPiSessionId: string
+  readonly parentPiSessionAliases?: ReadonlyArray<string>
   readonly emit: (event: SubagentFleetEvent) => void
   readonly trustedSessionRoots?: ReadonlyArray<string>
   readonly now?: () => number
@@ -262,6 +263,7 @@ export interface PiSubagentLifecycleAdapterOptions {
 export class PiSubagentLifecycleAdapter {
   readonly #events: EventBus
   readonly #parentPiSessionId: string
+  readonly #parentPiSessionIds: ReadonlySet<string>
   readonly #emitExternal: (event: SubagentFleetEvent) => void
   readonly #now: () => number
   readonly #actor
@@ -275,6 +277,10 @@ export class PiSubagentLifecycleAdapter {
   constructor(options: PiSubagentLifecycleAdapterOptions) {
     this.#events = options.events
     this.#parentPiSessionId = options.parentPiSessionId
+    this.#parentPiSessionIds = new Set([
+      options.parentPiSessionId,
+      ...(options.parentPiSessionAliases ?? [])
+    ])
     this.#emitExternal = options.emit
     this.#now = options.now ?? Date.now
     for (const root of options.trustedSessionRoots ?? []) this.#trustedSessionRoots.add(root)
@@ -591,9 +597,13 @@ export class PiSubagentLifecycleAdapter {
     this.#emitExternal(event)
   }
 
+  #belongsToParent(sessionId: string | undefined): boolean {
+    return sessionId === undefined || this.#parentPiSessionIds.has(sessionId)
+  }
+
   #onAsyncStarted(payload: unknown): void {
     const started = Option.getOrUndefined(Schema.decodeUnknownOption(AsyncStarted)(payload))
-    if (!started || (started.sessionId && started.sessionId !== this.#parentPiSessionId)) return
+    if (!started || !this.#belongsToParent(started.sessionId)) return
     this.#asyncStarts.set(started.id, started)
     if (started.sessionRoot) this.#trustedSessionRoots.add(started.sessionRoot)
     const now = this.#now()
@@ -628,7 +638,7 @@ export class PiSubagentLifecycleAdapter {
 
   #onCompletion(payload: unknown, background: boolean): void {
     const completion = Option.getOrUndefined(Schema.decodeUnknownOption(Completion)(payload))
-    if (!completion || (completion.sessionId && completion.sessionId !== this.#parentPiSessionId)) return
+    if (!completion || !this.#belongsToParent(completion.sessionId)) return
     const now = completion.timestamp ?? this.#now()
     const start = this.#asyncStarts.get(completion.runId)
     const rootId = `${this.#parentPiSessionId}/${completion.runId}`
@@ -718,7 +728,7 @@ export class PiSubagentLifecycleAdapter {
     const completion = Option.getOrUndefined(
       Schema.decodeUnknownOption(ForegroundCompletion)(payload)
     )
-    if (!completion || completion.sessionId !== this.#parentPiSessionId) return
+    if (!completion || !this.#belongsToParent(completion.sessionId)) return
     this.#onCompletion({
       runId: completion.runId,
       sessionId: completion.sessionId,
