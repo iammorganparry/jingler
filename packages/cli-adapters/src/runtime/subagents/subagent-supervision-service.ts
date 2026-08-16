@@ -1,8 +1,11 @@
+import { createHash, randomUUID } from "node:crypto"
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import {
+  SubagentControlReceipt,
+  SubagentFleetControlOutcome,
+  SubagentFleetControlRequest,
   subagentFleetNodeId,
-  type SubagentControlReceipt,
-  type SubagentFleetControlOutcome,
-  type SubagentFleetControlRequest,
   type SubagentFleetEvent,
   type SubagentFleetNode
 } from "@jingler/core"
@@ -13,6 +16,7 @@ import {
   Effect,
   Layer,
   Ref,
+  Schema,
   SynchronizedRef
 } from "effect"
 import {
@@ -22,6 +26,71 @@ import {
 } from "./subagent-run-tree-reducer.js"
 
 const MAX_REPLAY_EVENTS = 256
+const ControlJournal = Schema.Struct({
+  version: Schema.Literal(2),
+  parentPiSessionId: Schema.String,
+  sequence: Schema.Number,
+  pending: Schema.Array(Schema.Struct({
+    request: SubagentFleetControlRequest,
+    sequence: Schema.Number
+  })),
+  outcomes: Schema.Array(SubagentFleetControlOutcome),
+  receipts: Schema.Array(SubagentControlReceipt)
+})
+
+export interface SubagentControlJournal {
+  readonly load: Effect.Effect<typeof ControlJournal.Type, Error>
+  readonly save: (journal: typeof ControlJournal.Type) => Effect.Effect<void, Error>
+}
+
+export const makeSubagentControlJournal = (input: {
+  readonly asyncDir: string
+  readonly parentPiSessionId: string
+}): SubagentControlJournal => {
+  const key = createHash("sha256").update(input.parentPiSessionId).digest("hex")
+  const directory = join(input.asyncDir, ".jingler-supervision")
+  const path = join(directory, `${key}.json`)
+  const empty = {
+    version: 2 as const,
+    parentPiSessionId: input.parentPiSessionId,
+    sequence: 0,
+    pending: [],
+    outcomes: [],
+    receipts: []
+  }
+  return {
+    load: Effect.tryPromise({
+      try: async () => {
+        try {
+          const decoded = await Schema.decodeUnknownPromise(
+            Schema.parseJson(ControlJournal)
+          )(await readFile(path, "utf8"), { onExcessProperty: "error" })
+          if (decoded.parentPiSessionId !== input.parentPiSessionId) {
+            throw new Error("Subagent control journal belongs to another parent session")
+          }
+          return decoded
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code === "ENOENT") return empty
+          throw cause
+        }
+      },
+      catch: (cause) => cause instanceof Error
+        ? cause
+        : new Error("Could not read the subagent control journal")
+    }),
+    save: (journal) => Effect.tryPromise({
+      try: async () => {
+        await mkdir(directory, { recursive: true, mode: 0o700 })
+        const temporary = `${path}.${randomUUID()}.tmp`
+        await writeFile(temporary, JSON.stringify(journal), { mode: 0o600 })
+        await rename(temporary, path)
+      },
+      catch: (cause) => cause instanceof Error
+        ? cause
+        : new Error("Could not persist the subagent control journal")
+    })
+  }
+}
 
 export interface SubagentStartRecord {
   readonly mode?: string
@@ -49,9 +118,14 @@ interface SupervisionState {
   readonly childSequences: ReadonlyMap<string, number>
   readonly asyncStarts: ReadonlyMap<string, SubagentStartRecord>
   readonly durableNodeIds: ReadonlySet<string>
+  readonly controlsLoaded: boolean
   readonly controlSequence: number
   readonly controlOutcomes: ReadonlyMap<string, SubagentFleetControlOutcome>
   readonly controlReceipts: ReadonlyArray<SubagentControlReceipt>
+  readonly pendingControlRequests: ReadonlyMap<string, {
+    readonly request: SubagentFleetControlRequest
+    readonly sequence: number
+  }>
   readonly pendingControls: ReadonlyMap<
     string,
     Deferred.Deferred<SubagentFleetControlOutcome>
@@ -98,7 +172,8 @@ const eventRevision = (event: SubagentFleetEvent): number => {
 
 export const makeSubagentSupervisionService = (
   parentPiSessionId: string,
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  journal?: SubagentControlJournal
 ): Effect.Effect<SubagentSupervisionServiceShape> => Effect.gen(function* () {
   const ref = yield* SynchronizedRef.make<SupervisionState>({
     tree: emptySubagentRunTree(parentPiSessionId),
@@ -107,17 +182,59 @@ export const makeSubagentSupervisionService = (
     childSequences: new Map(),
     asyncStarts: new Map(),
     durableNodeIds: new Set(),
+    controlsLoaded: journal === undefined,
     controlSequence: 0,
     controlOutcomes: new Map(),
     controlReceipts: [],
+    pendingControlRequests: new Map(),
     pendingControls: new Map(),
     started: false,
     unsubscribes: []
   })
   const controlGate = yield* Effect.makeSemaphore(1)
+  const loadGate = yield* Effect.makeSemaphore(1)
 
   const modify = <A>(f: (state: SupervisionState) => readonly [A, SupervisionState]) =>
     Ref.modify(ref, f)
+  const persistControls = (state: SupervisionState): Effect.Effect<void, Error> =>
+    journal?.save({
+      version: 2,
+      parentPiSessionId,
+      sequence: state.controlSequence,
+      pending: [...state.pendingControlRequests.values()].slice(-MAX_REPLAY_EVENTS),
+      outcomes: [...state.controlOutcomes.values()].slice(-MAX_REPLAY_EVENTS),
+      receipts: state.controlReceipts.slice(-MAX_REPLAY_EVENTS)
+    }) ?? Effect.void
+  const ensureControlsLoaded: Effect.Effect<void, Error> = journal
+    ? loadGate.withPermits(1)(Effect.gen(function* () {
+        if ((yield* Ref.get(ref)).controlsLoaded) return
+        const restored = yield* journal.load
+        const recoveredPending = restored.pending.map(({ request, sequence }) => ({
+          version: 2 as const,
+          requestId: request.requestId,
+          runId: request.runId,
+          action: request.action,
+          acknowledged: false,
+          status: "rejected" as const,
+          deliveryStatus: "queued" as const,
+          sequence,
+          nativeRequestId: null,
+          message: "Control delivery was pending when Jingler restarted; it was not resent",
+          acknowledgedAt: now()
+        }))
+        yield* Ref.update(ref, (state) => ({
+          ...state,
+          controlsLoaded: true,
+          controlSequence: restored.sequence,
+          controlOutcomes: new Map([
+            ...restored.outcomes,
+            ...recoveredPending
+          ].map((outcome) => [outcome.requestId, outcome])),
+          controlReceipts: restored.receipts.slice(-MAX_REPLAY_EVENTS),
+          pendingControlRequests: new Map()
+        }))
+      }))
+    : Effect.void
 
   return {
     state: Ref.get(ref),
@@ -172,6 +289,22 @@ export const makeSubagentSupervisionService = (
       durableNodeIds: new Set(durableNodeIds)
     })),
     submitControl: (request, execute) => Effect.gen(function* () {
+      const loaded = yield* Effect.either(ensureControlsLoaded)
+      if (loaded._tag === "Left") {
+        return {
+          version: 2,
+          requestId: request.requestId,
+          runId: request.runId,
+          action: request.action,
+          acknowledged: false,
+          status: "rejected",
+          deliveryStatus: "rejected",
+          sequence: 0,
+          nativeRequestId: null,
+          message: loaded.left.message,
+          acknowledgedAt: now()
+        }
+      }
       const candidate = yield* Deferred.make<SubagentFleetControlOutcome>()
       const registration = yield* SynchronizedRef.modifyEffect(
         ref,
@@ -189,6 +322,8 @@ export const makeSubagentSupervisionService = (
         const sequence = state.controlSequence + 1
         const pendingControls = new Map(state.pendingControls)
         pendingControls.set(request.requestId, candidate)
+        const pendingControlRequests = new Map(state.pendingControlRequests)
+        pendingControlRequests.set(request.requestId, { request, sequence })
         const queued: SubagentControlReceipt = {
           version: 2,
           messageId: request.requestId,
@@ -207,11 +342,46 @@ export const makeSubagentSupervisionService = (
           ...state,
           controlSequence: sequence,
           pendingControls,
+          pendingControlRequests,
           controlReceipts: [...state.controlReceipts, queued].slice(-MAX_REPLAY_EVENTS)
         }] as const)
       })
       if (registration._tag === "Cached") return registration.outcome
       if (registration._tag === "Pending") return yield* Deferred.await(registration.deferred)
+      const queuedPersisted = yield* Effect.either(
+        Ref.get(ref).pipe(Effect.flatMap(persistControls))
+      )
+      if (queuedPersisted._tag === "Left") {
+        const rejected: SubagentFleetControlOutcome = {
+          version: 2,
+          requestId: request.requestId,
+          runId: request.runId,
+          action: request.action,
+          acknowledged: false,
+          status: "rejected",
+          deliveryStatus: "rejected",
+          sequence: registration.sequence,
+          nativeRequestId: null,
+          message: queuedPersisted.left.message,
+          acknowledgedAt: now()
+        }
+        yield* Ref.update(ref, (state) => {
+          const pendingControls = new Map(state.pendingControls)
+          pendingControls.delete(request.requestId)
+          const pendingControlRequests = new Map(state.pendingControlRequests)
+          pendingControlRequests.delete(request.requestId)
+          const controlOutcomes = new Map(state.controlOutcomes)
+          controlOutcomes.set(request.requestId, rejected)
+          return {
+            ...state,
+            pendingControls,
+            pendingControlRequests,
+            controlOutcomes
+          }
+        })
+        yield* Deferred.succeed(registration.deferred, rejected)
+        return rejected
+      }
       const outcome = yield* controlGate.withPermits(1)(
         execute(registration.sequence).pipe(
           Effect.catchAllCause((cause) => Effect.succeed({
@@ -232,6 +402,8 @@ export const makeSubagentSupervisionService = (
       yield* Ref.update(ref, (state) => {
         const pendingControls = new Map(state.pendingControls)
         pendingControls.delete(request.requestId)
+        const pendingControlRequests = new Map(state.pendingControlRequests)
+        pendingControlRequests.delete(request.requestId)
         const controlOutcomes = new Map(state.controlOutcomes)
         controlOutcomes.set(request.requestId, outcome)
         const receipt: SubagentControlReceipt = {
@@ -247,12 +419,31 @@ export const makeSubagentSupervisionService = (
         return {
           ...state,
           pendingControls,
+          pendingControlRequests,
           controlOutcomes,
           controlReceipts: [...state.controlReceipts, receipt].slice(-MAX_REPLAY_EVENTS)
         }
       })
-      yield* Deferred.succeed(registration.deferred, outcome)
-      return outcome
+      const saved = yield* Effect.either(
+        Ref.get(ref).pipe(Effect.flatMap(persistControls))
+      )
+      const settled = saved._tag === "Right"
+        ? outcome
+        : {
+            ...outcome,
+            acknowledged: false,
+            status: "rejected" as const,
+            message: `${outcome.message}; audit persistence failed: ${saved.left.message}`
+          }
+      if (settled !== outcome) {
+        yield* Ref.update(ref, (state) => {
+          const controlOutcomes = new Map(state.controlOutcomes)
+          controlOutcomes.set(request.requestId, settled)
+          return { ...state, controlOutcomes }
+        })
+      }
+      yield* Deferred.succeed(registration.deferred, settled)
+      return settled
     }),
     controlReceipts: Ref.get(ref).pipe(Effect.map(({ controlReceipts }) => controlReceipts)),
     start: (subscribe) => SynchronizedRef.modifyEffect(ref, (state) => {
@@ -271,9 +462,11 @@ export const makeSubagentSupervisionService = (
       childSequences: new Map<string, number>(),
       asyncStarts: new Map<string, SubagentStartRecord>(),
       durableNodeIds: new Set<string>(),
+      controlsLoaded: journal === undefined,
       controlSequence: 0,
       controlOutcomes: new Map<string, SubagentFleetControlOutcome>(),
       controlReceipts: [],
+      pendingControlRequests: new Map(),
       pendingControls: new Map<
         string,
         Deferred.Deferred<SubagentFleetControlOutcome>
@@ -293,12 +486,13 @@ export const makeSubagentSupervisionService = (
 
 export const SubagentSupervisionServiceLive = (
   parentPiSessionId: string,
-  now: () => number = Date.now
+  now: () => number = Date.now,
+  journal?: SubagentControlJournal
 ) =>
   Layer.scoped(
     SubagentSupervisionService,
     Effect.acquireRelease(
-      makeSubagentSupervisionService(parentPiSessionId, now),
+      makeSubagentSupervisionService(parentPiSessionId, now, journal),
       (service) => service.stop
     )
   )

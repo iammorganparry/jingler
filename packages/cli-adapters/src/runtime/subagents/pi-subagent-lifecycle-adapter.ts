@@ -16,13 +16,18 @@ import {
   type SubagentSupervisorSnapshot
 } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
-import { readDurablePiSubagentNodes } from "./pi-subagent-durable-status.js"
+import {
+  defaultPiSubagentAsyncDir,
+  readDurablePiSubagentNodes
+} from "./pi-subagent-durable-status.js"
 import {
   makePiSubagentTranscriptReader,
   type PiSubagentTranscriptReaderShape
 } from "./pi-subagent-transcript.js"
 import {
+  makeSubagentControlJournal,
   makeSubagentSupervisionService,
+  type SubagentControlJournal,
   type SubagentStartRecord,
   type SubagentSupervisionServiceShape
 } from "./subagent-supervision-service.js"
@@ -300,6 +305,7 @@ export interface PiSubagentLifecycleAdapterOptions {
   readonly asyncRunsDir?: string
   readonly emit: (event: SubagentFleetEvent) => void
   readonly trustedSessionRoots?: ReadonlyArray<string>
+  readonly controlJournal?: SubagentControlJournal | null
   readonly now?: () => number
 }
 
@@ -326,7 +332,16 @@ export class PiSubagentLifecycleAdapter {
     this.#now = options.now ?? Date.now
     this.#trustedSessionRoots = new Set(options.trustedSessionRoots ?? [])
     this.#supervision = Effect.runSync(
-      makeSubagentSupervisionService(options.parentPiSessionId, this.#now)
+      makeSubagentSupervisionService(
+        options.parentPiSessionId,
+        this.#now,
+        options.controlJournal === null
+          ? undefined
+          : options.controlJournal ?? makeSubagentControlJournal({
+              asyncDir: options.asyncRunsDir ?? defaultPiSubagentAsyncDir(),
+              parentPiSessionId: options.parentPiSessionId
+            })
+      )
     )
     this.#transcripts = Effect.runSync(makePiSubagentTranscriptReader())
   }

@@ -18,6 +18,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       events,
       parentPiSessionId: parent,
       parentPiSessionAliases: [parentSessionFile],
+      controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => now
     })
@@ -96,6 +97,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
+      controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 50
     })
@@ -153,6 +155,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
+      controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 50
     })
@@ -230,6 +233,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
+      controlJournal: null,
       emit: () => undefined,
       now: () => 30
     })
@@ -352,6 +356,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       parentPiSessionId: parent,
       parentPiSessionAliases: [parentSessionFile],
       asyncRunsDir: root,
+      controlJournal: null,
       emit: () => undefined,
       now: () => 30
     })
@@ -378,6 +383,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
+      controlJournal: null,
       emit: () => undefined,
       now: () => 20
     })
@@ -406,6 +412,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
+      controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 20
     })
@@ -463,6 +470,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       parentPiSessionId: parent,
       parentPiSessionAliases: [parentSessionFile],
       asyncRunsDir: root,
+      controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 30
     })

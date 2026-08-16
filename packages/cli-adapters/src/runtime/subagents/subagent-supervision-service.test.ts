@@ -1,11 +1,23 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { SUBAGENT_FLEET_PROTOCOL_VERSION } from "@jingler/core"
 import { Deferred, Effect } from "effect"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  makeSubagentControlJournal,
   makeSubagentSupervisionService,
   SubagentSupervisionService,
   SubagentSupervisionServiceLive
 } from "./subagent-supervision-service.js"
+
+const roots: string[] = []
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, {
+    recursive: true,
+    force: true
+  })))
+})
 
 describe("SubagentSupervisionService", () => {
   it("owns registry state atomically and finalizes subscriptions with its layer scope", async () => {
@@ -101,5 +113,52 @@ describe("SubagentSupervisionService", () => {
     expect(sameTwo).toEqual(two)
     expect(Effect.runSync(service.controlReceipts).map(({ status }) => status))
       .toEqual(["queued", "queued", "delivered", "delivered"])
+  })
+
+  it("restores accepted outcomes without reapplying native controls", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-control-journal-"))
+    roots.push(root)
+    const journal = makeSubagentControlJournal({
+      asyncDir: root,
+      parentPiSessionId: "parent"
+    })
+    const request = {
+      version: 2 as const,
+      requestId: "durable-request",
+      parentPiSessionId: "parent",
+      runId: "run-1",
+      action: "steer" as const,
+      message: "Continue",
+      replyTo: null
+    }
+    const execute = vi.fn((sequence: number) => Effect.succeed({
+      version: 2 as const,
+      requestId: request.requestId,
+      runId: request.runId,
+      action: request.action,
+      acknowledged: true,
+      status: "accepted" as const,
+      deliveryStatus: "delivered" as const,
+      sequence,
+      nativeRequestId: "native-durable",
+      message: "delivered",
+      acknowledgedAt: 2
+    }))
+    const first = Effect.runSync(makeSubagentSupervisionService(
+      "parent",
+      () => 1,
+      journal
+    ))
+    const accepted = await Effect.runPromise(first.submitControl(request, execute))
+    const restarted = Effect.runSync(makeSubagentSupervisionService(
+      "parent",
+      () => 3,
+      journal
+    ))
+
+    const restored = await Effect.runPromise(restarted.submitControl(request, execute))
+
+    expect(restored).toEqual(accepted)
+    expect(execute).toHaveBeenCalledOnce()
   })
 })
