@@ -27,7 +27,10 @@ import { Data, Effect } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import type { FileChangeTracker, WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { makePiCredentialStore } from "../auth/pi-credential-store.js"
-import { PromptCompiler } from "../prompt/prompt-compiler.js"
+import {
+  PromptCompiler,
+  type PromptToolCapability
+} from "../prompt/prompt-compiler.js"
 import { runtimeInvariantLayers } from "../prompt/role-profiles.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
@@ -58,6 +61,18 @@ interface CapabilityCeilingModule {
 }
 
 const jiti = createJiti(import.meta.url)
+const NATIVE_SUBAGENT_TOOLS = [
+  {
+    id: "subagent",
+    version: "1",
+    description: "Delegate bounded work to native child agents shown in Fleet."
+  },
+  {
+    id: "subagent_wait",
+    version: "1",
+    description: "Wait for native child-agent work when this turn requires its result."
+  }
+] as const satisfies ReadonlyArray<PromptToolCapability>
 let capabilityCeilingModule: Promise<CapabilityCeilingModule> | null = null
 const loadCapabilityCeiling = (): Promise<CapabilityCeilingModule> => {
   capabilityCeilingModule ??= jiti.import<CapabilityCeilingModule>(
@@ -159,9 +174,13 @@ const validateConnection = (
 const createResources = (
   options: PiSessionFactoryOptions,
   spec: PiRunSpec,
-  registry: ToolRegistry | undefined
+  registry: ToolRegistry | undefined,
+  nativeSubagentsEnabled: boolean
 ) => {
-  const tools = registry?.capabilitiesFor(spec.role, spec.mode) ?? []
+  const tools = [
+    ...(registry?.capabilitiesFor(spec.role, spec.mode) ?? []),
+    ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
+  ]
   const eventBus = createEventBus()
   const compiled = (options.promptCompiler ?? new PromptCompiler()).compile({
     layers: runtimeInvariantLayers(spec.role, spec.mode),
@@ -197,6 +216,7 @@ interface EmbeddedSessionInput {
   readonly resources: ResourceLoader
   readonly context: AgentRuntimeContext
   readonly registry: ToolRegistry | undefined
+  readonly nativeSubagentsEnabled: boolean
 }
 
 interface EmbeddedSession {
@@ -211,7 +231,15 @@ const createEmbeddedSession = (
 ): Effect.Effect<EmbeddedSession, AgentRuntimeError> =>
   Effect.tryPromise({
     try: async () => {
-      const { options, spec, connection, resources, context, registry } = input
+      const {
+        options,
+        spec,
+        connection,
+        resources,
+        context,
+        registry,
+        nativeSubagentsEnabled
+      } = input
       const modelRuntime = await ModelRuntime.create({
         credentials: makePiCredentialStore(connection, options.credentials),
         modelsPath: null,
@@ -249,7 +277,12 @@ const createEmbeddedSession = (
           themes: []
         }),
         noTools: "all",
-        tools: customTools.map((tool) => tool.name),
+        tools: [
+          ...customTools.map((tool) => tool.name),
+          ...(nativeSubagentsEnabled
+            ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
+            : [])
+        ],
         customTools
       })
       return {
@@ -396,7 +429,14 @@ const createSessionHandle = (
           })
       )
     )
-    const prepared = yield* createResources(options, spec, registry)
+    const nativeSubagentsEnabled =
+      options.childCredentials !== undefined && options.subagentBroker !== undefined
+    const prepared = yield* createResources(
+      options,
+      spec,
+      registry,
+      nativeSubagentsEnabled
+    )
     const snapshot = tracker
       ? yield* tracker.capture(spec.cwd).pipe(
           Effect.mapError(
@@ -414,7 +454,8 @@ const createSessionHandle = (
       connection,
       resources: prepared.loader,
       context,
-      registry
+      registry,
+      nativeSubagentsEnabled
     })
     const fleetListeners = new Set<(event: StreamEvent) => void>()
     const lifecycle = new PiSubagentLifecycleAdapter({

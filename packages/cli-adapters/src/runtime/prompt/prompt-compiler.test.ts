@@ -60,6 +60,24 @@ describe("PromptCompiler", () => {
     expect(withoutMemory.text).not.toContain("Jingler memory is private working context")
   })
 
+  it("requires native Fleet delegation instead of shell-launched coding CLIs", () => {
+    const result = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("conversation", "accept-edits"),
+      tools: [
+        {
+          id: "subagent",
+          version: "1",
+          description: "Delegate bounded work to native child agents shown in Fleet."
+        }
+      ],
+      tokenBudget: 2_000
+    })
+
+    expect(result.manifest.activeTools).toContain("subagent")
+    expect(result.text).toContain("use the native subagent tool")
+    expect(result.text).toContain("Never launch coding CLIs through command_execute")
+  })
+
   it("requires a plan-execution stage to be tested and committed before advancing", () => {
     const result = new PromptCompiler().compile({
       layers: runtimeInvariantLayers("plan-execution", "accept-edits"),
