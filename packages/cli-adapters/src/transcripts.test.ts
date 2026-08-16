@@ -94,6 +94,30 @@ describe("TranscriptStore", () => {
     expect(result.messages[0]?.externalInstruction).toEqual(identity)
   })
 
+  it("serializes concurrent mutations to the same transcript", async () => {
+    const messages = Array.from({ length: 12 }, (_, index) =>
+      userMessage(
+        `u${index}`,
+        `turn ${index}`,
+        `2026-07-11T10:00:${String(index).padStart(2, "0")}.000Z`
+      )
+    )
+    const persisted = await run(
+      Effect.gen(function* () {
+        yield* Effect.forEach(
+          messages,
+          (message) => TranscriptStore.append("s1", message),
+          { concurrency: "unbounded", discard: true }
+        )
+        return yield* TranscriptStore.list("s1")
+      })
+    )
+
+    expect(persisted.map((message) => message.id).sort()).toStrictEqual(
+      messages.map((message) => message.id).sort()
+    )
+  })
+
   it("keeps sibling chat transcripts isolated", async () => {
     const first = userMessage("u1", "Implement parser", "2026-07-11T10:00:00.000Z")
     const second = userMessage("u2", "Review migrations", "2026-07-11T10:00:01.000Z")
@@ -231,7 +255,16 @@ describe("TranscriptStore", () => {
     ).pipe(Layer.provide(temp.layer))
 
     await Effect.runPromise(
-      TranscriptStore.append("s1", userMessage("u1", "hello", "2026-07-11T10:00:00.000Z")).pipe(
+      Effect.gen(function* () {
+        yield* TranscriptStore.append(
+          "s1",
+          userMessage("u1", "hello", "2026-07-11T10:00:00.000Z")
+        )
+        yield* TranscriptStore.append(
+          "s1",
+          assistantMessage("a1", "2026-07-11T10:00:01.000Z")
+        )
+      }).pipe(
         Effect.provide(
           Layer.mergeAll(TranscriptStore.Default, temp.layer, recording) as Layer.Layer<
             TranscriptStore | FileSystem.FileSystem | Path.Path | AppPaths
@@ -240,12 +273,21 @@ describe("TranscriptStore", () => {
       )
     )
 
-    expect(calls).toStrictEqual([
-      "write s1.json.tmp",
-      "rename s1.json.tmp -> s1.json",
-      "write s1.json.index.tmp",
-      "rename s1.json.index.tmp -> s1.json.index"
-    ])
+    expect(calls).toHaveLength(8)
+    for (const offset of [0, 4]) {
+      const transcriptScratch = calls[offset]!.slice("write ".length)
+      const indexScratch = calls[offset + 2]!.slice("write ".length)
+      expect(transcriptScratch).toMatch(/^s1\.json\.\d+\.\d+\.tmp$/)
+      expect(indexScratch).toMatch(/^s1\.json\.index\.\d+\.\d+\.tmp$/)
+      expect(calls.slice(offset, offset + 4)).toStrictEqual([
+        `write ${transcriptScratch}`,
+        `rename ${transcriptScratch} -> s1.json`,
+        `write ${indexScratch}`,
+        `rename ${indexScratch} -> s1.json.index`
+      ])
+    }
+    expect(calls[0]).not.toBe(calls[4])
+    expect(calls[2]).not.toBe(calls[6])
     // Stated as its own assertion because it is the whole invariant: the live
     // transcript is never the target of a truncating write.
     expect(calls).not.toContain("write s1.json")
