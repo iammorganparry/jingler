@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import { PiSubagentLifecycleAdapter } from "./pi-subagent-lifecycle-adapter.js"
 
 const parent = "parent-session"
+const parentSessionFile = "/sessions/parent.jsonl"
 
 describe("PiSubagentLifecycleAdapter", () => {
   it("projects async and nested completion events with stable transcript identities", () => {
@@ -13,6 +14,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
+      parentPiSessionAliases: [parentSessionFile],
       emit: (event) => emitted.push(event),
       now: () => now
     })
@@ -20,7 +22,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     events.emit("subagent:async-started", {
       lifecycleArtifactVersion: 3,
       id: "run-1",
-      sessionId: parent,
+      sessionId: parentSessionFile,
       agent: "fanout",
       goal: "Coordinate review"
     })
@@ -35,7 +37,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     now = 20
     events.emit("subagent:async-complete", {
       runId: "run-1",
-      sessionId: parent,
+      sessionId: parentSessionFile,
       state: "complete",
       success: true,
       results: [{
