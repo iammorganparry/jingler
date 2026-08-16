@@ -5,7 +5,7 @@ import {
   subagentFleetNodeId,
   type SubagentFleetNode
 } from "@jingler/core"
-import { Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 
 const DurableStep = Schema.Struct({
   agent: Schema.optional(Schema.String),
@@ -191,7 +191,7 @@ const projectStep = (
   }
 }
 
-export const readDurablePiSubagentNodes = async (input: {
+export const readDurablePiSubagentNodes = (input: {
   readonly asyncDir?: string
   readonly parentPiSessionId: string
   readonly parentPiSessionAliases: ReadonlySet<string>
@@ -199,7 +199,8 @@ export const readDurablePiSubagentNodes = async (input: {
   readonly maxNodes?: number
   readonly capacityLimit?: number
   readonly now?: number
-}): Promise<DurablePiSubagentProjection> => {
+}): Effect.Effect<DurablePiSubagentProjection, Error> => Effect.tryPromise({
+  try: async () => {
   const asyncDir = input.asyncDir ?? defaultPiSubagentAsyncDir()
   let runIds: ReadonlyArray<string>
   try {
@@ -258,4 +259,8 @@ export const readDurablePiSubagentNodes = async (input: {
       limit: reportedLimit ?? input.capacityLimit ?? DEFAULT_CAPACITY_LIMIT
     }
   }
-}
+  },
+  catch: (cause) => cause instanceof Error
+    ? cause
+    : new Error("Could not read durable pi-subagents state")
+})

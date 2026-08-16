@@ -3,7 +3,23 @@ import type {
   SubagentFleetNode
 } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { createSubagentRunTreeActor } from "./subagent-run-tree-machine.js"
+import {
+  emptySubagentRunTree,
+  reduceSubagentFleetEvent
+} from "./subagent-run-tree-reducer.js"
+
+const createSubagentRunTreeActor = (parentPiSessionId: string) => {
+  let context = emptySubagentRunTree(parentPiSessionId)
+  const actor = {
+    start: () => actor,
+    send: ({ event }: { readonly type: "INGEST"; readonly event: SubagentFleetEvent }) => {
+      context = reduceSubagentFleetEvent(context, event)
+    },
+    getSnapshot: () => ({ context }),
+    stop: () => undefined
+  }
+  return actor
+}
 
 const node = (
   id: string,
@@ -60,7 +76,7 @@ const upsert = (
   node: value
 })
 
-describe("subagent run tree machine", () => {
+describe("subagent run tree reducer", () => {
   it("deduplicates and ignores reordered stale updates", () => {
     const actor = createSubagentRunTreeActor("parent").start()
     actor.send({ type: "INGEST", event: upsert("new", node("parent/run", 5, "completed")) })

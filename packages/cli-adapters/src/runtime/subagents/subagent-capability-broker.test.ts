@@ -8,9 +8,13 @@ import { Effect, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import {
-  SubagentCapabilityBroker,
+  makeSubagentCapabilityBroker,
+  SubagentCapabilityBrokerLive,
+  SubagentCapabilityBrokerService,
+  type SubagentCapabilityBroker,
   type SubagentParentSpec
 } from "./subagent-capability-broker.js"
+import type { SubagentCapability } from "@jingler/core"
 
 const spec = {
   role: "conversation",
@@ -31,7 +35,7 @@ const context = (
   } satisfies RuntimePlanDecision))
 })
 
-type Capabilities = Awaited<ReturnType<SubagentCapabilityBroker["register"]>>
+type Capabilities = ReadonlyArray<SubagentCapability>
 
 const capabilityFor = (capabilities: Capabilities, agent: string) => {
   const capability = capabilities.find((candidate) => candidate.agent === agent)
@@ -68,7 +72,7 @@ const register = (
   broker: SubagentCapabilityBroker,
   registry: ToolRegistry,
   runtimeContext = context()
-) => broker.register({
+) => Effect.runPromise(broker.register({
   parentPiSessionId: "parent",
   agents: ["worker", "reviewer"],
   spec,
@@ -84,12 +88,39 @@ const register = (
     siblings: [],
     generatedAt: 1
   })
-})
+}))
 
 describe("SubagentCapabilityBroker", () => {
   const brokers: SubagentCapabilityBroker[] = []
   afterEach(async () => {
-    await Promise.all(brokers.map((broker) => broker.close()))
+    await Promise.all(brokers.map((broker) => Effect.runPromise(broker.close)))
+  })
+
+  it("closes the HTTP broker with its Effect layer scope", async () => {
+    let endpoint = ""
+    await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+      const broker = yield* SubagentCapabilityBrokerService
+      const capabilities = yield* broker.register({
+        parentPiSessionId: "parent",
+        agents: ["worker"],
+        spec,
+        registry: new ToolRegistry(),
+        context: context(),
+        supervisorState: () => ({
+          version: 2,
+          parentPiSessionId: "parent",
+          registryRevision: 0,
+          status: "running",
+          goalRevision: 0,
+          phase: null,
+          siblings: [],
+          generatedAt: 0
+        })
+      })
+      endpoint = capabilities[0]!.endpoint
+    }).pipe(Effect.provide(SubagentCapabilityBrokerLive))))
+
+    await expect(fetch(endpoint, { method: "POST" })).rejects.toThrow()
   })
 
   it("exposes the exact profile-specific tool catalog and forwards execution", async () => {
@@ -136,7 +167,7 @@ describe("SubagentCapabilityBroker", () => {
       idempotency: "safe",
       execute: () => Promise.resolve("not-for-children")
     })
-    const broker = new SubagentCapabilityBroker()
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)
     const capabilities = await register(broker, registry)
 
@@ -153,7 +184,7 @@ describe("SubagentCapabilityBroker", () => {
   })
 
   it("exposes only the scoped supervisor snapshot through the internal tool", async () => {
-    const broker = new SubagentCapabilityBroker()
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)
     const capabilities = await register(broker, new ToolRegistry())
 
@@ -201,7 +232,7 @@ describe("SubagentCapabilityBroker", () => {
       execute
     })
     const runtimeContext = context()
-    const broker = new SubagentCapabilityBroker()
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)
     const capabilities = await register(broker, registry, runtimeContext)
 
@@ -249,7 +280,7 @@ describe("SubagentCapabilityBroker", () => {
       idempotency: "safe",
       execute: () => Promise.resolve("ok")
     })
-    const broker = new SubagentCapabilityBroker()
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)
     const capabilities = await register(broker, registry)
 
@@ -268,7 +299,7 @@ describe("SubagentCapabilityBroker", () => {
       })
     })
     expect(crossParent.status).toBe(403)
-    broker.unregister("parent")
+    await Effect.runPromise(broker.unregister("parent"))
     expect((await call(capabilities, {})).status).toBe(403)
   })
 })

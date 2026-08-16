@@ -15,10 +15,14 @@ import {
   type SubagentJsonValue,
   type SubagentSupervisorSnapshot
 } from "@jingler/core"
-import { Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { readDurablePiSubagentNodes } from "./pi-subagent-durable-status.js"
 import { readPiSubagentTranscript } from "./pi-subagent-transcript.js"
-import { createSubagentRunTreeActor } from "./subagent-run-tree-machine.js"
+import {
+  makeSubagentSupervisionService,
+  type SubagentStartRecord,
+  type SubagentSupervisionServiceShape
+} from "./subagent-supervision-service.js"
 
 const RPC_REQUEST_EVENT = "subagents:rpc:v1:request"
 const RPC_REPLY_PREFIX = "subagents:rpc:v1:reply:"
@@ -292,17 +296,8 @@ export class PiSubagentLifecycleAdapter {
   readonly #asyncRunsDir: string | undefined
   readonly #emitExternal: (event: SubagentFleetEvent) => void
   readonly #now: () => number
-  readonly #actor
-  readonly #unsubscribes: Array<() => void> = []
-  readonly #asyncStarts = new Map<string, typeof AsyncStarted.Type>()
-  readonly #trustedSessionRoots = new Set<string>()
-  readonly #childSequences = new Map<string, number>()
-  readonly #durableNodeIds = new Set<string>()
-  readonly #eventLog: SubagentFleetEvent[] = []
-  #registryRevision = 0
-  #started = false
-  #refreshTimer: NodeJS.Timeout | null = null
-  #refreshInFlight = false
+  readonly #supervision: SubagentSupervisionServiceShape
+  readonly #trustedSessionRoots: ReadonlySet<string>
 
   constructor(options: PiSubagentLifecycleAdapterOptions) {
     this.#events = options.events
@@ -314,51 +309,27 @@ export class PiSubagentLifecycleAdapter {
     this.#asyncRunsDir = options.asyncRunsDir
     this.#emitExternal = options.emit
     this.#now = options.now ?? Date.now
-    for (const root of options.trustedSessionRoots ?? []) this.#trustedSessionRoots.add(root)
-    this.#actor = createSubagentRunTreeActor(options.parentPiSessionId)
+    this.#trustedSessionRoots = new Set(options.trustedSessionRoots ?? [])
+    this.#supervision = Effect.runSync(
+      makeSubagentSupervisionService(options.parentPiSessionId)
+    )
   }
 
   start(): void {
-    if (this.#started) return
-    this.#started = true
-    this.#actor.start()
-    this.#subscribe(ASYNC_STARTED_EVENT, (payload) => this.#onAsyncStarted(payload))
-    this.#subscribe(ASYNC_COMPLETE_EVENT, (payload) => this.#onCompletion(payload, true))
-    this.#subscribe(FOREGROUND_COMPLETE_EVENT, (payload) => this.#onForegroundComplete(payload))
-    this.#subscribe(PROCESS_TERMINAL_EVENT, (payload) => this.#onProcessTerminal(payload))
-  }
-
-  beginPolling(intervalMs = 1_000): void {
-    if (!this.#started || this.#refreshTimer) return
-    const poll = (): void => {
-      if (this.#refreshInFlight) return
-      this.#refreshInFlight = true
-      this.refresh()
-        .catch(() => undefined)
-        .finally(() => {
-          this.#refreshInFlight = false
-        })
-    }
-    this.#refreshTimer = setInterval(poll, intervalMs)
-    this.#refreshTimer.unref?.()
-    poll()
+    Effect.runSync(this.#supervision.start(() => [
+      this.#events.on(ASYNC_STARTED_EVENT, (payload) => this.#onAsyncStarted(payload)),
+      this.#events.on(ASYNC_COMPLETE_EVENT, (payload) => this.#onCompletion(payload, true)),
+      this.#events.on(FOREGROUND_COMPLETE_EVENT, (payload) => this.#onForegroundComplete(payload)),
+      this.#events.on(PROCESS_TERMINAL_EVENT, (payload) => this.#onProcessTerminal(payload))
+    ]))
   }
 
   stop(): void {
-    if (!this.#started) return
-    this.#started = false
-    if (this.#refreshTimer) clearInterval(this.#refreshTimer)
-    this.#refreshTimer = null
-    for (const unsubscribe of this.#unsubscribes.splice(0)) unsubscribe()
-    this.#asyncStarts.clear()
-    this.#childSequences.clear()
-    this.#durableNodeIds.clear()
-    this.#eventLog.splice(0)
-    this.#actor.stop()
+    Effect.runSync(this.#supervision.stop)
   }
 
   snapshot(): SubagentFleetSnapshot {
-    const context = this.#actor.getSnapshot().context
+    const context = this.#state().tree
     return {
       version: SUBAGENT_FLEET_PROTOCOL_VERSION,
       parentPiSessionId: this.#parentPiSessionId,
@@ -372,22 +343,18 @@ export class PiSubagentLifecycleAdapter {
   }
 
   async transcript(runId: string): Promise<ReadonlyArray<Message>> {
-    const node = this.#actor.getSnapshot().context.nodes.find(
+    const node = this.#state().tree.nodes.find(
       (candidate) => candidate.runId === runId
     )
     if (!node?.sessionFile) return []
-    return readPiSubagentTranscript({
+    return Effect.runPromise(readPiSubagentTranscript({
       sessionFile: node.sessionFile,
       trustedRoots: [...this.#trustedSessionRoots]
-    })
+    }))
   }
 
   replay(afterRevision = 0): ReadonlyArray<SubagentFleetEvent> {
-    return [...new Map(
-      this.#eventLog
-        .filter((event) => this.#eventRevision(event) > afterRevision)
-        .map((event) => [event.eventId, event] as const)
-    ).values()]
+    return Effect.runSync(this.#supervision.replay(afterRevision))
   }
 
   supervisorSnapshot(): SubagentSupervisorSnapshot {
@@ -419,7 +386,7 @@ export class PiSubagentLifecycleAdapter {
 
   progress(input: PiSubagentProgressInput): void {
     const now = this.#now()
-    const context = this.#actor.getSnapshot().context
+    const context = this.#state().tree
     const rootId = subagentFleetNodeId(this.#parentPiSessionId, input.runId)
     if (input.children.length > 0 && context.nodes.some((node) => node.id === rootId)) {
       this.#publish({
@@ -427,7 +394,7 @@ export class PiSubagentLifecycleAdapter {
         version: SUBAGENT_FLEET_PROTOCOL_VERSION,
         eventId: `progress-root:${input.runId}:${now}`,
         occurredAt: now,
-        registryRevision: ++this.#registryRevision,
+        registryRevision: this.#nextRevision(),
         id: rootId
       })
     }
@@ -488,7 +455,7 @@ export class PiSubagentLifecycleAdapter {
   attention(input: PiSubagentSupervisorAttentionInput): void {
     const now = this.#now()
     const subagentId = `${input.runId}:step:${input.childIndex}`
-    const context = this.#actor.getSnapshot().context
+    const context = this.#state().tree
     const existing = context.nodes.find((node) => node.subagentId === subagentId)
     const parentId = subagentFleetNodeId(this.#parentPiSessionId, input.runId)
     this.#publish({
@@ -538,7 +505,7 @@ export class PiSubagentLifecycleAdapter {
     const replyTo = request.replyTo ?? ""
     const rpc = controlRpcFor(request, message)
     try {
-      await this.#request(rpc.method, rpc.params)
+      await Effect.runPromise(this.#request(rpc.method, rpc.params))
       if (request.action === "reply") this.#clearAttention(request, replyTo)
       return this.#outcome(
         request,
@@ -555,7 +522,7 @@ export class PiSubagentLifecycleAdapter {
   }
 
   #clearAttention(request: SubagentFleetControlRequest, replyTo: string): void {
-    const node = this.#actor.getSnapshot().context.nodes.find(
+    const node = this.#state().tree.nodes.find(
       (candidate) => candidate.attention?.requestId === replyTo
     )
     if (!node) return
@@ -578,17 +545,18 @@ export class PiSubagentLifecycleAdapter {
 
   async refresh(): Promise<SubagentFleetSnapshot> {
     const generatedAt = this.#now()
-    const durableRevision = ++this.#registryRevision
-    const durable = await readDurablePiSubagentNodes({
+    const durableRevision = this.#nextRevision()
+    const durable = await Effect.runPromise(readDurablePiSubagentNodes({
       ...(this.#asyncRunsDir ? { asyncDir: this.#asyncRunsDir } : {}),
       parentPiSessionId: this.#parentPiSessionId,
       parentPiSessionAliases: this.#parentPiSessionIds,
       registryRevision: durableRevision,
       now: generatedAt
-    })
+    }))
     if (durable.nodes.length > 0) {
-      this.#durableNodeIds.clear()
-      for (const node of durable.nodes) this.#durableNodeIds.add(node.id)
+      Effect.runSync(this.#supervision.setDurableNodeIds(
+        new Set(durable.nodes.map(({ id }) => id))
+      ))
       this.#publish({
         _tag: "Snapshot",
         version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -608,8 +576,11 @@ export class PiSubagentLifecycleAdapter {
       return this.snapshot()
     }
 
-    const current = this.#actor.getSnapshot().context
-    const staleDurableNodes = current.nodes.filter((node) => this.#durableNodeIds.has(node.id))
+    const supervision = this.#state()
+    const current = supervision.tree
+    const staleDurableNodes = current.nodes.filter((node) =>
+      supervision.durableNodeIds.has(node.id)
+    )
     if (staleDurableNodes.length > 0) {
       for (const node of staleDurableNodes) {
         this.#publish({
@@ -617,26 +588,27 @@ export class PiSubagentLifecycleAdapter {
           version: SUBAGENT_FLEET_PROTOCOL_VERSION,
           eventId: `durable-removed:${node.id}:${generatedAt}`,
           occurredAt: generatedAt,
-          registryRevision: ++this.#registryRevision,
+          registryRevision: this.#nextRevision(),
           id: node.id
         })
       }
-      this.#durableNodeIds.clear()
+      Effect.runSync(this.#supervision.setDurableNodeIds(new Set()))
     }
 
     const requestId = randomUUID()
     let reply: typeof FleetStatusReply.Type
     try {
-      reply = await this.#requestStatus(requestId)
+      reply = await Effect.runPromise(this.#requestStatus(requestId))
     } catch (error) {
       if (staleDurableNodes.length > 0) return this.snapshot()
       throw error
     }
-    const registryRevision = ++this.#registryRevision
+    const registryRevision = this.#nextRevision()
     const activeNodes = this.#activeNodes(reply, generatedAt, registryRevision)
     const activeNodeIds = new Set(activeNodes.map((node) => node.id))
-    const nodes = this.#actor.getSnapshot().context.nodes.filter(
-      (node) => !activeNodeIds.has(node.id) && !this.#durableNodeIds.has(node.id)
+    const durableNodeIds = this.#state().durableNodeIds
+    const nodes = this.#state().tree.nodes.filter(
+      (node) => !activeNodeIds.has(node.id) && !durableNodeIds.has(node.id)
     ).concat(activeNodes)
     this.#publish({
       _tag: "Snapshot",
@@ -657,28 +629,37 @@ export class PiSubagentLifecycleAdapter {
     return this.snapshot()
   }
 
-  #requestStatus(requestId: string): Promise<typeof FleetStatusReply.Type> {
-    return new Promise((resolve, reject) => {
+  #requestStatus(
+    requestId: string
+  ): Effect.Effect<typeof FleetStatusReply.Type, Error> {
+    return Effect.async((resume) => {
       const replyEvent = `${RPC_REPLY_PREFIX}${requestId}`
       const timeout = setTimeout(() => {
         unsubscribe()
-        reject(new Error("pi-subagents status RPC timed out"))
+        resume(Effect.fail(new Error("pi-subagents status RPC timed out")))
       }, RPC_TIMEOUT_MS)
       const unsubscribe = this.#events.on(replyEvent, (payload) => {
         clearTimeout(timeout)
         unsubscribe()
         const error = Option.getOrUndefined(Schema.decodeUnknownOption(RpcErrorReply)(payload))
-        if (error) return reject(new Error(error.error.message))
+        if (error) {
+          resume(Effect.fail(new Error(error.error.message)))
+          return
+        }
         const decoded = Option.getOrUndefined(Schema.decodeUnknownOption(FleetStatusReply)(payload))
-        return decoded
-          ? resolve(decoded)
-          : reject(new Error("pi-subagents returned an invalid status RPC reply"))
+        resume(decoded
+          ? Effect.succeed(decoded)
+          : Effect.fail(new Error("pi-subagents returned an invalid status RPC reply")))
       })
       this.#events.emit(RPC_REQUEST_EVENT, {
         version: 1,
         requestId,
         method: "status",
         source: { extension: "jingler" }
+      })
+      return Effect.sync(() => {
+        clearTimeout(timeout)
+        unsubscribe()
       })
     })
   }
@@ -725,13 +706,16 @@ export class PiSubagentLifecycleAdapter {
     }))
   }
 
-  #request(method: string, params: SubagentJsonValue): Promise<void> {
+  #request(
+    method: string,
+    params: SubagentJsonValue
+  ): Effect.Effect<void, Error> {
     const requestId = randomUUID()
-    return new Promise<void>((resolve, reject) => {
+    return Effect.async((resume) => {
       const replyEvent = `${RPC_REPLY_PREFIX}${requestId}`
       const timeout = setTimeout(() => {
         unsubscribe()
-        reject(new Error(`pi-subagents ${method} RPC timed out`))
+        resume(Effect.fail(new Error(`pi-subagents ${method} RPC timed out`)))
       }, RPC_TIMEOUT_MS)
       const unsubscribe = this.#events.on(replyEvent, (payload) => {
         clearTimeout(timeout)
@@ -740,17 +724,15 @@ export class PiSubagentLifecycleAdapter {
           Schema.decodeUnknownOption(RpcErrorReply)(payload)
         )
         if (error) {
-          reject(new Error(`${error.error.code}: ${error.error.message}`))
+          resume(Effect.fail(new Error(`${error.error.code}: ${error.error.message}`)))
           return
         }
         const success = Option.getOrUndefined(
           Schema.decodeUnknownOption(RpcSuccessReply)(payload)
         )
-        if (!success) {
-          reject(new Error(`pi-subagents returned an invalid ${method} RPC reply`))
-          return
-        }
-        resolve()
+        resume(success
+          ? Effect.void
+          : Effect.fail(new Error(`pi-subagents returned an invalid ${method} RPC reply`)))
       })
       this.#events.emit(RPC_REQUEST_EVENT, {
         version: 1,
@@ -759,7 +741,15 @@ export class PiSubagentLifecycleAdapter {
         params,
         source: { extension: "jingler" }
       })
+      return Effect.sync(() => {
+        clearTimeout(timeout)
+        unsubscribe()
+      })
     })
+  }
+
+  #state() {
+    return Effect.runSync(this.#supervision.state)
   }
 
   #outcome(
@@ -780,26 +770,18 @@ export class PiSubagentLifecycleAdapter {
     }
   }
 
-  #subscribe(channel: string, handler: (payload: unknown) => void): void {
-    this.#unsubscribes.push(this.#events.on(channel, handler))
-  }
-
   #publish(event: SubagentFleetEvent): void {
-    this.#actor.send({ type: "INGEST", event })
-    this.#eventLog.push(event)
-    if (this.#eventLog.length > 256) this.#eventLog.splice(0, this.#eventLog.length - 256)
+    Effect.runSync(this.#supervision.publish(event))
     this.#emitExternal(event)
   }
 
-  #eventRevision(event: SubagentFleetEvent): number {
-    if (event._tag === "Snapshot") return event.snapshot.registryRevision
-    if (event._tag === "Upsert") return event.node.registryRevision
-    return event.registryRevision
+  #nextRevision(): number {
+    return Effect.runSync(this.#supervision.nextRevision)
   }
 
   #belongsToParent(sessionId: string | undefined, runId: string): boolean {
     if (sessionId !== undefined) return this.#parentPiSessionIds.has(sessionId)
-    return this.#asyncStarts.has(runId) || this.#actor.getSnapshot().context.nodes.some(
+    return this.#state().asyncStarts.has(runId) || this.#state().tree.nodes.some(
       (node) => node.subagentId === runId || node.orchestrationRunId === runId
     )
   }
@@ -813,26 +795,20 @@ export class PiSubagentLifecycleAdapter {
     "registryRevision" | "childSequence" | "health" | "phase" |
     "blocking" | "terminal"
   > {
-    const childSequence = (this.#childSequences.get(subagentId) ?? 0) + 1
-    this.#childSequences.set(subagentId, childSequence)
-    return {
-      id: subagentFleetNodeId(this.#parentPiSessionId, subagentId),
-      subagentId,
-      orchestrationRunId,
-      nodeKind,
-      registryRevision: ++this.#registryRevision,
-      childSequence,
-      health: "connected",
-      phase: null,
-      blocking: null,
-      terminal: null
-    }
+    return Effect.runSync(
+      this.#supervision.identity(subagentId, orchestrationRunId, nodeKind)
+    )
   }
 
   #onAsyncStarted(payload: unknown): void {
     const started = Option.getOrUndefined(Schema.decodeUnknownOption(AsyncStarted)(payload))
     if (!started || !this.#belongsToParent(started.sessionId, started.id)) return
-    this.#asyncStarts.set(started.id, started)
+    Effect.runSync(this.#supervision.putStart(started.id, {
+      mode: started.mode,
+      agent: started.agent,
+      goal: started.goal,
+      task: started.task
+    }))
     const now = this.#now()
     const orchestrationRunId = started.parentWorkflowRunId ?? started.id
     this.#publish({
@@ -872,9 +848,9 @@ export class PiSubagentLifecycleAdapter {
     const completion = Option.getOrUndefined(Schema.decodeUnknownOption(Completion)(payload))
     if (!completion || !this.#belongsToParent(completion.sessionId, completion.runId)) return
     const now = completion.timestamp ?? this.#now()
-    const start = this.#asyncStarts.get(completion.runId)
+    const start = this.#state().asyncStarts.get(completion.runId)
     const rootId = subagentFleetNodeId(this.#parentPiSessionId, completion.runId)
-    const existingRoot = this.#actor.getSnapshot().context.nodes.find(
+    const existingRoot = this.#state().tree.nodes.find(
       (node) => node.id === rootId
     )
     const rootStatus = statusFrom(completion)
@@ -934,7 +910,7 @@ export class PiSubagentLifecycleAdapter {
         child.runId ?? `${completion.runId}:step:${child.index ?? position}`
       ))
     ])
-    for (const node of this.#actor.getSnapshot().context.nodes.filter(
+    for (const node of this.#state().tree.nodes.filter(
       (candidate) => candidate.parentId === rootId && !completedIds.has(candidate.id)
     )) {
       this.#publish({
@@ -950,7 +926,7 @@ export class PiSubagentLifecycleAdapter {
         }
       })
     }
-    for (const node of this.#actor.getSnapshot().context.nodes.filter(
+    for (const node of this.#state().tree.nodes.filter(
       (candidate) => completedIds.has(candidate.id)
     )) {
       this.#publish({
@@ -958,11 +934,11 @@ export class PiSubagentLifecycleAdapter {
         version: SUBAGENT_FLEET_PROTOCOL_VERSION,
         eventId: `complete-remove:${completion.runId}:${node.subagentId}:${now}`,
         occurredAt: now,
-        registryRevision: ++this.#registryRevision,
+        registryRevision: this.#nextRevision(),
         id: node.id
       })
     }
-    this.#asyncStarts.delete(completion.runId)
+    Effect.runSync(this.#supervision.removeStart(completion.runId))
   }
 
   #publishCompletedChild(input: {
@@ -971,7 +947,7 @@ export class PiSubagentLifecycleAdapter {
     readonly completion: typeof Completion.Type
     readonly rootId: string
     readonly background: boolean
-    readonly start: typeof AsyncStarted.Type | undefined
+    readonly start: SubagentStartRecord | undefined
     readonly startedAt: number
     readonly now: number
   }): void {
@@ -1047,7 +1023,7 @@ export class PiSubagentLifecycleAdapter {
     )
     if (!terminal || terminal.state === "pending") return
     const id = subagentFleetNodeId(this.#parentPiSessionId, terminal.runId)
-    const existing = this.#actor.getSnapshot().context.nodes.find(
+    const existing = this.#state().tree.nodes.find(
       (node) => node.id === id
     )
     if (!existing) return

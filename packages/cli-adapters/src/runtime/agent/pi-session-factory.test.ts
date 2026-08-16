@@ -19,7 +19,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
-import { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
+import {
+  makeSubagentCapabilityBroker,
+  type SubagentCapabilityBroker
+} from "../subagents/subagent-capability-broker.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
 
 const roots: string[] = []
@@ -37,7 +40,7 @@ afterEach(async () => {
     else process.env[name] = value
   }
   await Promise.all([
-    ...brokers.splice(0).map((broker) => broker.close()),
+    ...brokers.splice(0).map((broker) => Effect.runPromise(broker.close)),
     ...roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   ])
 })
@@ -123,7 +126,7 @@ describe("pi session creation", () => {
       captured.push(options)
       return { session: fakeSession(), extensionsResult: {} as never }
     }
-    const broker = new SubagentCapabilityBroker()
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)
     const factory = makePiSessionFactory({
       agentDir: join(root, "agent"),

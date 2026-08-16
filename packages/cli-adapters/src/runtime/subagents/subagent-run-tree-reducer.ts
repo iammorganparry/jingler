@@ -4,7 +4,6 @@ import type {
   SubagentFleetSnapshot,
   SubagentFleetStatus
 } from "@jingler/core"
-import { assign, createActor, setup } from "xstate"
 
 const MAX_SEEN_EVENTS = 512
 const MAX_NODE_CLOCKS = 1_024
@@ -33,8 +32,6 @@ export interface SubagentRunTreeContext {
   readonly omitted: number
   readonly activeCapacity: { readonly used: number; readonly limit: number }
 }
-
-type RunTreeEvent = { readonly type: "INGEST"; readonly event: SubagentFleetEvent }
 
 const belongsToParent = (parentPiSessionId: string, id: string): boolean =>
   id.startsWith(`${parentPiSessionId}/`)
@@ -234,28 +231,3 @@ export const emptySubagentRunTree = (
   activeCapacity: { used: 0, limit: 0 }
 })
 
-export const subagentRunTreeMachine = setup({
-  types: {
-    context: {} as SubagentRunTreeContext,
-    events: {} as RunTreeEvent,
-    input: {} as { readonly parentPiSessionId: string }
-  }
-}).createMachine({
-  id: "subagent-run-tree",
-  initial: "active",
-  context: ({ input }) => emptySubagentRunTree(input.parentPiSessionId),
-  states: {
-    active: {
-      on: {
-        INGEST: {
-          actions: assign(({ context, event }) =>
-            reduceSubagentFleetEvent(context, event.event)
-          )
-        }
-      }
-    }
-  }
-})
-
-export const createSubagentRunTreeActor = (parentPiSessionId: string) =>
-  createActor(subagentRunTreeMachine, { input: { parentPiSessionId } })

@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
 import { join } from "node:path"
 import { SessionManager } from "@earendil-works/pi-coding-agent"
+import { Effect } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   piSubagentTrustedSessionRoots,
@@ -94,10 +95,10 @@ const createChildSession = async () => {
 describe("readPiSubagentTranscript", () => {
   it("maps a contained Pi child session into Jingler transcript messages", async () => {
     const { root, sessionFile } = await createChildSession()
-    const messages = await readPiSubagentTranscript({
+    const messages = await Effect.runPromise(readPiSubagentTranscript({
       sessionFile,
       trustedRoots: piSubagentTrustedSessionRoots(join(root, "parent.jsonl"))
-    })
+    }))
 
     expect(messages).toHaveLength(2)
     expect(messages[0]).toMatchObject({ role: "user", parts: [{ _tag: "Text" }] })
@@ -136,10 +137,10 @@ describe("readPiSubagentTranscript", () => {
     const otherRoot = await mkdtemp(join(process.cwd(), ".other-child-root-"))
     temporaryRoots.push(otherRoot)
 
-    await expect(readPiSubagentTranscript({
+    await expect(Effect.runPromise(readPiSubagentTranscript({
       sessionFile,
       trustedRoots: [otherRoot]
-    })).rejects.toThrow("outside the trusted pi-subagents roots")
+    }))).rejects.toThrow("outside the trusted pi-subagents roots")
   })
 
   it("rejects a symlink that escapes an allowed transcript root", async () => {
@@ -150,10 +151,10 @@ describe("readPiSubagentTranscript", () => {
     await mkdir(trustedRoot, { recursive: true })
     await symlink(sessionFile, link)
 
-    await expect(readPiSubagentTranscript({
+    await expect(Effect.runPromise(readPiSubagentTranscript({
       sessionFile: link,
       trustedRoots: [trustedRoot]
-    })).rejects.toThrow("outside the trusted pi-subagents roots")
+    }))).rejects.toThrow("outside the trusted pi-subagents roots")
   })
 
 })

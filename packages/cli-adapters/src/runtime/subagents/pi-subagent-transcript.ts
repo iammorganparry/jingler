@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path"
 import type { Message as PiMessage } from "@earendil-works/pi-ai"
 import { SessionManager } from "@earendil-works/pi-coding-agent"
 import type { ContentPart, Message, ToolCall } from "@jingler/core"
+import { Effect } from "effect"
 
 export const piSubagentTrustedSessionRoots = (
   parentSessionFile: string
@@ -177,10 +178,11 @@ export const piMessagesToJingler = (
   return projected
 }
 
-export const readPiSubagentTranscript = async (input: {
+export const readPiSubagentTranscript = (input: {
   readonly sessionFile: string
   readonly trustedRoots: ReadonlyArray<string>
-}): Promise<ReadonlyArray<Message>> => {
+}): Effect.Effect<ReadonlyArray<Message>, Error> => Effect.tryPromise({
+  try: async () => {
   const file = await realpath(resolve(input.sessionFile))
   const roots = (await Promise.all(
     input.trustedRoots.map((root) => realpath(resolve(root)).catch(() => null))
@@ -196,4 +198,8 @@ export const readPiSubagentTranscript = async (input: {
       message.role === "toolResult"
   )
   return piMessagesToJingler(messages)
-}
+  },
+  catch: (cause) => cause instanceof Error
+    ? cause
+    : new Error("Could not read pi-subagents transcript")
+})

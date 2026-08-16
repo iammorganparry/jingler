@@ -10,7 +10,7 @@ import {
   emptySubagentRunTree,
   reduceSubagentFleetEvent,
   type SubagentRunTreeContext
-} from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-machine"
+} from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-reducer"
 import { assign, setup } from "xstate"
 
 export const MAIN_FLEET_AGENT = "main"

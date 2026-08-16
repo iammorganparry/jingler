@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Effect } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import { readDurablePiSubagentNodes } from "./pi-subagent-durable-status.js"
 
@@ -56,12 +57,12 @@ describe("readDurablePiSubagentNodes", () => {
       }))
     ])
 
-    const projection = await readDurablePiSubagentNodes({
+    const projection = await Effect.runPromise(readDurablePiSubagentNodes({
       asyncDir: root,
       parentPiSessionId: "parent",
       parentPiSessionAliases: new Set(["parent", "/sessions/parent.jsonl"]),
       now: 30
-    })
+    }))
 
     expect(projection.nodes).toHaveLength(2)
     expect(projection.nodes).toEqual(expect.arrayContaining([
@@ -106,12 +107,12 @@ describe("readDurablePiSubagentNodes", () => {
       startedAt: 1
     }))
 
-    const projection = await readDurablePiSubagentNodes({
+    const projection = await Effect.runPromise(readDurablePiSubagentNodes({
       asyncDir: root,
       parentPiSessionId: "parent",
       parentPiSessionAliases: new Set(["parent"]),
       registryRevision: 2
-    })
+    }))
     expect(projection).toMatchObject({ nodes: [], totalActive: 0, omitted: 0 })
   })
 
@@ -131,13 +132,13 @@ describe("readDurablePiSubagentNodes", () => {
       }))
     }))
 
-    const projection = await readDurablePiSubagentNodes({
+    const projection = await Effect.runPromise(readDurablePiSubagentNodes({
       asyncDir: root,
       parentPiSessionId: "parent",
       parentPiSessionAliases: new Set(["parent"]),
       registryRevision: 7,
       maxNodes: 2
-    })
+    }))
     expect(projection.nodes.map(({ subagentId }) => subagentId)).toEqual(["early", "middle"])
     expect(projection).toMatchObject({
       totalActive: 3,
