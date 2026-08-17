@@ -162,6 +162,12 @@ export interface JinglerToolRegistryInput {
   readonly workspace?: WorkspaceInspectionPort
   readonly webSearch?: WebSearchServiceShape
   readonly mcp?: JinglerMcpAttachments
+  /**
+   * The CURRENT turn's attachments, read at each tool call. Registration is
+   * once per pi session but per-run attachments (the browser lease) rotate
+   * every turn — see `McpToolSource.resolveServer`.
+   */
+  readonly liveMcp?: () => JinglerMcpAttachments | undefined
   readonly mcpClientFactory?: McpToolClientFactory
   readonly registryOptions?: ToolRegistryOptions
 }
@@ -186,7 +192,7 @@ export const createJinglerTools = (
         input.mcp?.browser != null
       )
     }
-    const mcpSources = input.mcp ? jinglerMcpSources(input.mcp) : []
+    const mcpSources = input.mcp ? jinglerMcpSources(input.mcp, input.liveMcp) : []
     if (mcpSources.length > 0) {
       const report = yield* (input.mcpClientFactory
         ? registerMcpTools(registry, mcpSources, input.mcpClientFactory)

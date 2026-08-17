@@ -216,6 +216,16 @@ export const makePiAgentRuntimeLive = (
                   : server
               )
             },
+            // Per-run attachments (the browser lease rotates every turn on a
+            // retained session) resolve from the LIVE context at call time.
+            // Imported managed servers keep their registration-time config —
+            // the cwd-adjusted mapping above — so they are excluded here.
+            liveMcp: () => {
+              const current = context.mcp
+              return current === undefined
+                ? undefined
+                : { ...current, imported: undefined }
+            },
             registryOptions: {
               ...(Option.isSome(memory)
                 ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }

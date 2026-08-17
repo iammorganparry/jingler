@@ -635,22 +635,30 @@ describe("PiAgentRuntime", () => {
 
     const firstAsk = vi.fn(() => Effect.succeed([]))
     const secondAsk = vi.fn(() => Effect.succeed([]))
+    const firstMcp = { browser: { name: "jingler-browser", url: "http://127.0.0.1:1111/mcp", headers: {} } }
+    const secondMcp = { browser: { name: "jingler-browser", url: "http://127.0.0.1:2222/mcp", headers: {} } }
     await Effect.runPromise(
-      Stream.runCollect(runtime.run(spec, { ...context, askQuestion: firstAsk }))
+      Stream.runCollect(
+        runtime.run(spec, { ...context, askQuestion: firstAsk, mcp: firstMcp })
+      )
     )
     expect(firstAsk).toHaveBeenCalledOnce()
+    expect(toolContext!.mcp).toBe(firstMcp)
 
     await Effect.runPromise(
       Stream.runCollect(
         runtime.run(
           { ...spec, runId: "run-2", prompt: "continue", piSessionId: "/sessions/parent.jsonl" },
-          { ...context, askQuestion: secondAsk }
+          { ...context, askQuestion: secondAsk, mcp: secondMcp }
         )
       )
     )
     expect(create).toHaveBeenCalledOnce()
     expect(firstAsk).toHaveBeenCalledOnce()
     expect(secondAsk).toHaveBeenCalledOnce()
+    // Per-run attachments (the browser lease) must read through to the
+    // CURRENT turn — a snapshot of turn 1's lease is a dead endpoint.
+    expect(toolContext!.mcp).toBe(secondMcp)
     childActive = false
   })
 

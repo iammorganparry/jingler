@@ -307,17 +307,21 @@ interface RetainedPiSession {
  *
  * So the factory gets this stable facade instead, and `acquire` repoints
  * `holder.current` at the incoming turn's context before every prompt. `mcp`
- * and `memoryAttachmentStatus` stay pinned to the creating turn on purpose:
- * they are only read while the factory builds the registry, which happens once.
+ * is a live getter for the same reason: the browser MCP attachment is a
+ * per-run lease (fresh loopback port + bearer, revoked when the run's scope
+ * closes), so a registry that snapshotted the first turn's attachment called
+ * a dead endpoint on every later turn — "Could not connect to MCP server
+ * jingler-browser" after the first turn, forever.
  */
 const rebindableContext = (
-  holder: { current: AgentRuntimeContext },
-  initial: AgentRuntimeContext
+  holder: { current: AgentRuntimeContext }
 ): AgentRuntimeContext => ({
-  ...(initial.mcp === undefined ? {} : { mcp: initial.mcp }),
-  ...(initial.memoryAttachmentStatus === undefined
-    ? {}
-    : { memoryAttachmentStatus: initial.memoryAttachmentStatus }),
+  get mcp() {
+    return holder.current.mcp
+  },
+  get memoryAttachmentStatus() {
+    return holder.current.memoryAttachmentStatus
+  },
   publishEvent: (event) => holder.current.publishEvent(event),
   registerBackgroundStop: (stop) => holder.current.registerBackgroundStop(stop),
   canUseTool: (request) => holder.current.canUseTool(request),
@@ -372,7 +376,7 @@ class PiSessionRegistry {
       return Effect.succeed(retained)
     }
     const contextHolder = { current: context }
-    return this.factory.create(spec, rebindableContext(contextHolder, context)).pipe(
+    return this.factory.create(spec, rebindableContext(contextHolder)).pipe(
       Effect.map((handle) => {
         const aliases = new Set([handle.id, handle.parentPiSessionId])
         const record: RetainedPiSession = {

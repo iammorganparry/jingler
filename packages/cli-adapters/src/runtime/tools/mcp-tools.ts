@@ -57,6 +57,16 @@ export interface McpToolSource {
   readonly server: RuntimeMcpServer
   /** Explicit source policy; untrusted MCP annotations never lower this risk. */
   readonly risk: ToolRisk
+  /**
+   * The CURRENT connection config for this server, resolved at each call.
+   *
+   * Registration happens once per pi session, but some attachments are
+   * per-RUN: the browser MCP lease is a fresh loopback port + bearer whose
+   * listener closes with the run's scope. A tool bound to the registration
+   * snapshot therefore dials a dead endpoint on every turn after the first.
+   * Absent (or returning null) falls back to the registration-time `server`.
+   */
+  readonly resolveServer?: () => RuntimeMcpServer | null
 }
 
 export interface McpToolRegistrationReport {
@@ -79,20 +89,40 @@ export interface JinglerMcpAttachments {
 
 /** Assign source risks centrally; remote annotations cannot weaken these policies. */
 export const jinglerMcpSources = (
-  attachments: JinglerMcpAttachments
+  attachments: JinglerMcpAttachments,
+  /** Live view of the CURRENT turn's attachments — see `McpToolSource.resolveServer`. */
+  live?: () => JinglerMcpAttachments | undefined
 ): ReadonlyArray<McpToolSource> => [
   ...(attachments.browser
-    ? [{ server: attachments.browser, risk: "execute" as const }]
+    ? [{
+        server: attachments.browser,
+        risk: "execute" as const,
+        ...(live ? { resolveServer: () => live()?.browser ?? null } : {})
+      }]
     : []),
   ...(attachments.memory
-    ? [{ server: attachments.memory, risk: "network" as const }]
+    ? [{
+        server: attachments.memory,
+        risk: "network" as const,
+        ...(live ? { resolveServer: () => live()?.memory ?? null } : {})
+      }]
     : []),
   ...(attachments.openConnector
-    ? [{ server: attachments.openConnector, risk: "execute" as const }]
+    ? [{
+        server: attachments.openConnector,
+        risk: "execute" as const,
+        ...(live ? { resolveServer: () => live()?.openConnector ?? null } : {})
+      }]
     : []),
   ...(attachments.imported ?? []).map((server) => ({
     server,
-    risk: "execute" as const
+    risk: "execute" as const,
+    ...(live
+      ? {
+          resolveServer: () =>
+            live()?.imported?.find((candidate) => candidate.name === server.name) ?? null
+        }
+      : {})
   }))
 ]
 
@@ -263,7 +293,7 @@ const registerTool = (
         )
       }
       return Effect.runPromise(
-        withClient(factory, source.server, (client) =>
+        withClient(factory, source.resolveServer?.() ?? source.server, (client) =>
           client.callTool(tool.name, checked.data, context.signal)
         ).pipe(
           Effect.map(callResult),
