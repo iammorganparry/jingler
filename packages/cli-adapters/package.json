@@ -35,7 +35,7 @@
     "./runtime/providers/provider-connections": "./src/runtime/providers/provider-connections.ts",
     "./runtime/providers/pi-provider-access": "./src/runtime/providers/pi-provider-access.ts",
     "./runtime/resources/resource-services-live": "./src/runtime/resources/resource-services-live.ts",
-    "./runtime/subagents/subagent-run-tree-machine": "./src/runtime/subagents/subagent-run-tree-machine.ts",
+    "./runtime/subagents/subagent-run-tree-reducer": "./src/runtime/subagents/subagent-run-tree-reducer.ts",
     "./secret-store": "./src/secret-store.ts",
     "./sessions": "./src/sessions.ts",
     "./workspace": "./src/workspace.ts",

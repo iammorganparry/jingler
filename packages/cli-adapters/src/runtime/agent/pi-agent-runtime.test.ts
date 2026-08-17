@@ -46,8 +46,9 @@ const fleetSeams: Pick<
   parentPiSessionId: "pi-session-internal",
   subscribeFleet: () => () => undefined,
   subagentFleetSnapshot: async () => ({
-    version: 1,
+    version: 2,
     parentPiSessionId: "pi-session",
+    registryRevision: 0,
     generatedAt: 1,
     totalActive: 0,
     omitted: 0,
@@ -56,12 +57,15 @@ const fleetSeams: Pick<
   }),
   subagentTranscript: async () => [],
   controlSubagent: async (request) => ({
-    version: 1,
+    version: 2,
     requestId: request.requestId,
     runId: request.runId,
     action: request.action,
     acknowledged: true,
     status: "accepted",
+    deliveryStatus: "delivered",
+    sequence: 1,
+    nativeRequestId: "native-1",
     message: "acknowledged",
     acknowledgedAt: 1
   })
@@ -497,8 +501,9 @@ describe("PiAgentRuntime", () => {
       interrupt: async () => undefined,
       dispose,
       subagentFleetSnapshot: async () => ({
-        version: 1,
+        version: 2,
         parentPiSessionId: "pi-parent-internal",
+        registryRevision: 0,
         generatedAt: Date.now(),
         totalActive: childActive ? 1 : 0,
         omitted: 0,
@@ -544,7 +549,7 @@ describe("PiAgentRuntime", () => {
     ))
     expect(foreignChat._tag).toBe("Left")
     await Effect.runPromise(runtime.controlSubagent("session-1", "chat-1", {
-      version: 1,
+      version: 2,
       requestId: "control-1",
       parentPiSessionId: "pi-parent-internal",
       runId: "child-1",
@@ -572,6 +577,12 @@ describe("PiAgentRuntime", () => {
     expect(missing._tag).toBe("Left")
     await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "/sessions/parent.jsonl")))
       .rejects.toMatchObject({ message: "pi session is not active: /sessions/parent.jsonl" })
+    await expect(Effect.runPromise(runtime.subagentTranscript(
+      "session-1",
+      "chat-1",
+      "pi-parent-internal",
+      "child-1"
+    ))).resolves.toHaveLength(1)
   })
 
   it("surfaces prompt rejection when final reconciliation also rejects", async () => {

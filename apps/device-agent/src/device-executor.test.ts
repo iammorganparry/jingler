@@ -53,8 +53,9 @@ const services = (): DeviceExecutorServices => ({
   steer: vi.fn(async () => ({ status: "accepted" })),
   stop: vi.fn(async () => undefined),
   subagentFleetSnapshot: vi.fn(async () => ({
-    version: 1 as const,
+    version: 2 as const,
     parentPiSessionId: "pi-session",
+    registryRevision: 0,
     generatedAt: 1,
     totalActive: 0,
     omitted: 0,
@@ -63,12 +64,15 @@ const services = (): DeviceExecutorServices => ({
   })),
   subagentTranscript: vi.fn(async () => []),
   controlSubagent: vi.fn(async (request) => ({
-    version: 1 as const,
+    version: 2 as const,
     requestId: request.requestId,
     runId: request.runId,
     action: request.action,
     acknowledged: true,
     status: "accepted" as const,
+    deliveryStatus: "delivered" as const,
+    sequence: 1,
+    nativeRequestId: "native-1",
     message: "acknowledged",
     acknowledgedAt: 1
   })),
@@ -259,7 +263,7 @@ describe("device session command executor", () => {
       async () => undefined
     )
     const control = {
-      version: 1 as const,
+      version: 2 as const,
       requestId: "control-1",
       parentPiSessionId: "parent-pi",
       runId: "child-run",

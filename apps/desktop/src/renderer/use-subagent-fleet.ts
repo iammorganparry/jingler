@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useActorRef, useSelector } from "@xstate/react"
 import type {
   Subagent,
@@ -23,6 +23,7 @@ export interface SubagentFleetController {
   readonly nodes: ReadonlyArray<SubagentFleetNode>
   readonly selectedId: string
   readonly selectedNode: SubagentFleetNode | null
+  readonly completedNodes: ReadonlyArray<SubagentFleetNode>
   readonly selectedLegacyAgent: Subagent | null
   readonly legacyAgentFor: (node: SubagentFleetNode) => Subagent | null
   readonly expanded: boolean
@@ -73,6 +74,8 @@ export function useSubagentFleet(input: {
   useEffect(() => {
     if (!hasFleetSession) return
     let active = true
+    let retryAttempt = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
     const refresh = async () => {
       if (refreshInFlightRef.current) return
       refreshInFlightRef.current = true
@@ -84,18 +87,23 @@ export function useSubagentFleet(input: {
         )
         if (!active) return
         const snapshotIds = new Set(snapshot.nodes.map((node) => node.id))
-        const durablePrefix = `${snapshot.parentPiSessionId}/active/`
         const completedDurable = actor.getSnapshot().context.tree.nodes
           .filter((node) =>
-            node.id.startsWith(durablePrefix) && !snapshotIds.has(node.id)
+            node.health === "unknown" && !snapshotIds.has(node.id)
           )
           .map((node): SubagentFleetEvent => ({
             _tag: "Remove",
             version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-            eventId: `renderer-poll:remove:${snapshot.generatedAt}:${node.id}`,
+            eventId: `renderer-recovery:remove:${snapshot.generatedAt}:${node.id}`,
             occurredAt: snapshot.generatedAt,
+            registryRevision: snapshot.registryRevision,
             id: node.id
           }))
+        retryAttempt = 0
+        if (retryTimer !== null) {
+          clearTimeout(retryTimer)
+          retryTimer = null
+        }
         actor.send({
           type: "SYNC",
           events: [
@@ -104,35 +112,66 @@ export function useSubagentFleet(input: {
             {
               _tag: "Snapshot",
               version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-              eventId: `renderer-poll:${snapshot.generatedAt}`,
+              eventId: `renderer-recovery:${snapshot.generatedAt}`,
               occurredAt: snapshot.generatedAt,
               snapshot
             }
           ]
         })
       } catch {
-        // The Pi session can legitimately be inactive before its first turn or
-        // after disposal; lifecycle events remain the last factual projection.
+        // Session startup and reconnect can race the first recovery read. Retry
+        // transiently without restoring steady-state polling.
+        if (active && retryAttempt < 3 && retryTimer === null) {
+          const delay = 250 * (4 ** retryAttempt)
+          retryAttempt += 1
+          retryTimer = setTimeout(() => {
+            retryTimer = null
+            void refresh()
+          }, delay)
+        }
       } finally {
         refreshInFlightRef.current = false
       }
     }
     const refreshOnFocus = () => void refresh()
     void refresh()
-    const timer = window.setInterval(refreshOnFocus, 1_500)
     window.addEventListener("focus", refreshOnFocus)
     document.addEventListener("visibilitychange", refreshOnFocus)
     return () => {
       active = false
-      window.clearInterval(timer)
+      if (retryTimer !== null) clearTimeout(retryTimer)
       window.removeEventListener("focus", refreshOnFocus)
       document.removeEventListener("visibilitychange", refreshOnFocus)
     }
   }, [actor, hasFleetSession, input.chatId, input.sessionId, parentPiSessionId])
   const context = useSelector(actor, (snapshot) => snapshot.context)
+  const completedNodes = useMemo(() => {
+    const completed = new Map<string, SubagentFleetNode>()
+    for (const event of input.events) {
+      if (event._tag !== "Upsert") continue
+      const node = event.node
+      if (
+        ["completed", "failed", "stopped"].includes(node.status) &&
+        (node.sessionFile !== null || node.artifacts.length > 0)
+      ) {
+        completed.delete(node.id)
+        completed.set(node.id, node)
+      } else {
+        completed.delete(node.id)
+      }
+    }
+    return [...completed.values()].slice(-8).reverse()
+  }, [input.events])
+  const [completedSelection, setCompletedSelection] = useState<string | null>(null)
+  const completedById = useMemo(
+    () => new Map(completedNodes.map((node) => [node.id, node])),
+    [completedNodes]
+  )
+  const selectedId = completedSelection ?? context.selectedId
   const selectedNode = useMemo(
-    () => context.tree.nodes.find((node) => node.id === context.selectedId) ?? null,
-    [context.tree.nodes, context.selectedId]
+    () => context.tree.nodes.find((node) => node.id === selectedId) ??
+      completedById.get(selectedId) ?? null,
+    [completedById, context.tree.nodes, selectedId]
   )
   const legacyByNodeId = useMemo(
     () => new Map(legacyAgents.map((agent) => [
@@ -146,8 +185,9 @@ export function useSubagentFleet(input: {
 
   return {
     nodes: context.tree.nodes,
-    selectedId: context.selectedId,
+    selectedId,
     selectedNode,
+    completedNodes,
     selectedLegacyAgent:
       selectedNode === null ? null : legacyAgentFor(selectedNode),
     legacyAgentFor,
@@ -155,7 +195,14 @@ export function useSubagentFleet(input: {
     height: context.height,
     pending: context.pendingRequestId !== null,
     lastOutcome: context.lastOutcome,
-    select: (id) => actor.send({ type: "SELECT", id }),
+    select: (id) => {
+      if (completedById.has(id)) {
+        setCompletedSelection(id)
+        return
+      }
+      setCompletedSelection(null)
+      actor.send({ type: "SELECT", id })
+    },
     toggle: () => actor.send({ type: "TOGGLE" }),
     resize: (height) => actor.send({ type: "RESIZE", height }),
     control: async (node, action, message, replyTo) => {
@@ -181,6 +228,9 @@ export function useSubagentFleet(input: {
           action,
           acknowledged: false,
           status: "rejected",
+          deliveryStatus: "rejected",
+          sequence: 0,
+          nativeRequestId: null,
           message: cause instanceof Error ? cause.message : "Subagent control failed",
           acknowledgedAt: Date.now()
         }

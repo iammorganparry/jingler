@@ -36,7 +36,7 @@ import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
-import { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
+import { makeSubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
 
 const connectionFailure = (message: string, cause?: unknown) =>
@@ -93,8 +93,8 @@ export const makePiAgentRuntimeLive = (
     )
     const credentials = new AgentSecretStore(secretStore)
     const subagentBroker = yield* Effect.acquireRelease(
-      Effect.sync(() => new SubagentCapabilityBroker()),
-      (broker) => Effect.promise(() => broker.close())
+      makeSubagentCapabilityBroker(),
+      (broker) => broker.close
     )
     const childCredentials = new PiChildCredentials(
       join(paths.managedResourcesDir, "subagent-credentials"),

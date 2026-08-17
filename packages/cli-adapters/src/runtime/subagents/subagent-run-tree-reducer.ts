@@ -4,7 +4,6 @@ import type {
   SubagentFleetSnapshot,
   SubagentFleetStatus
 } from "@jingler/core"
-import { assign, createActor, setup } from "xstate"
 
 const MAX_SEEN_EVENTS = 512
 const MAX_NODE_CLOCKS = 1_024
@@ -18,6 +17,7 @@ const ACTIVE_STATUSES: ReadonlySet<SubagentFleetStatus> = new Set([
 export interface SubagentNodeClock {
   readonly id: string
   readonly occurredAt: number
+  readonly registryRevision: number
   readonly present: boolean
 }
 
@@ -27,12 +27,11 @@ export interface SubagentRunTreeContext {
   readonly seenEventIds: ReadonlyArray<string>
   readonly nodeClocks: ReadonlyArray<SubagentNodeClock>
   readonly generatedAt: number
+  readonly registryRevision: number
   readonly totalActive: number
   readonly omitted: number
   readonly activeCapacity: { readonly used: number; readonly limit: number }
 }
-
-type RunTreeEvent = { readonly type: "INGEST"; readonly event: SubagentFleetEvent }
 
 const belongsToParent = (parentPiSessionId: string, id: string): boolean =>
   id.startsWith(`${parentPiSessionId}/`)
@@ -60,7 +59,12 @@ const upsert = (
 ): ReadonlyArray<SubagentFleetNode> => {
   if (createsCycle(nodes, candidate)) return nodes
   const existing = nodes.find((node) => node.id === candidate.id)
-  if (existing && existing.updatedAt > candidate.updatedAt) return nodes
+  if (existing && (
+    existing.registryRevision > candidate.registryRevision ||
+    (existing.registryRevision === candidate.registryRevision &&
+      (existing.childSequence > candidate.childSequence ||
+        (existing.childSequence === candidate.childSequence && existing.updatedAt > candidate.updatedAt)))
+  )) return nodes
   return [
     ...nodes.filter((node) => node.id !== candidate.id),
     candidate
@@ -95,6 +99,7 @@ const validNode = (
   node: SubagentFleetNode
 ): boolean =>
   node.parentPiSessionId === parentPiSessionId &&
+  node.id === `${parentPiSessionId}/${encodeURIComponent(node.subagentId)}` &&
   belongsToParent(parentPiSessionId, node.id) &&
   (node.parentId === null || belongsToParent(parentPiSessionId, node.parentId))
 
@@ -104,6 +109,7 @@ const reconcileSnapshot = (
 ): SubagentRunTreeContext => {
   if (
     snapshot.parentPiSessionId !== current.parentPiSessionId ||
+    snapshot.registryRevision < current.registryRevision ||
     snapshot.nodes.some((node) => !validNode(current.parentPiSessionId, node))
   ) return current
   const activeIds = new Set(snapshot.nodes.map(({ id }) => id))
@@ -114,11 +120,13 @@ const reconcileSnapshot = (
     if (
       ACTIVE_STATUSES.has(node.status) &&
       !activeIds.has(node.id) &&
-      (clock?.occurredAt ?? node.updatedAt) <= snapshot.generatedAt
+      (clock?.registryRevision ?? node.registryRevision) <= snapshot.registryRevision
     ) {
       nodes = upsert(nodes, {
         ...node,
         status: "unknown",
+        health: "disconnected",
+        registryRevision: snapshot.registryRevision,
         updatedAt: snapshot.generatedAt,
         completedAt: snapshot.generatedAt,
         currentTool: null
@@ -126,6 +134,7 @@ const reconcileSnapshot = (
       nodeClocks = setClock(nodeClocks, {
         id: node.id,
         occurredAt: snapshot.generatedAt,
+        registryRevision: snapshot.registryRevision,
         present: true
       })
     }
@@ -134,13 +143,14 @@ const reconcileSnapshot = (
     const clock = clockFor(nodeClocks, node.id)
     if (
       clock &&
-      (clock.occurredAt > snapshot.generatedAt ||
-        (clock.occurredAt === snapshot.generatedAt && !clock.present))
+      (clock.registryRevision > snapshot.registryRevision ||
+        (clock.registryRevision === snapshot.registryRevision && !clock.present))
     ) continue
     nodes = upsert(nodes, node)
     nodeClocks = setClock(nodeClocks, {
       id: node.id,
       occurredAt: snapshot.generatedAt,
+      registryRevision: snapshot.registryRevision,
       present: true
     })
   }
@@ -148,6 +158,7 @@ const reconcileSnapshot = (
     ...current,
     nodes,
     nodeClocks,
+    registryRevision: Math.max(current.registryRevision, snapshot.registryRevision),
     ...(snapshot.generatedAt >= current.generatedAt
       ? {
           generatedAt: snapshot.generatedAt,
@@ -171,24 +182,26 @@ export const reduceSubagentFleetEvent = (
   if (event._tag === "Remove") {
     if (!belongsToParent(context.parentPiSessionId, event.id)) return context
     const clock = clockFor(context.nodeClocks, event.id)
-    if (clock && clock.occurredAt > event.occurredAt) return withSeen(context, event)
+    if (clock && clock.registryRevision > event.registryRevision) return withSeen(context, event)
     return withSeen({
       ...context,
       nodes: context.nodes.filter((node) => node.id !== event.id),
       nodeClocks: setClock(context.nodeClocks, {
         id: event.id,
         occurredAt: event.occurredAt,
+        registryRevision: event.registryRevision,
         present: false
       }),
-      generatedAt: Math.max(context.generatedAt, event.occurredAt)
+      generatedAt: Math.max(context.generatedAt, event.occurredAt),
+      registryRevision: Math.max(context.registryRevision, event.registryRevision)
     }, event)
   }
   if (!validNode(context.parentPiSessionId, event.node)) return context
   const clock = clockFor(context.nodeClocks, event.node.id)
   if (
     clock &&
-    (clock.occurredAt > event.occurredAt ||
-      (clock.occurredAt === event.occurredAt && !clock.present))
+    (clock.registryRevision > event.node.registryRevision ||
+      (clock.registryRevision === event.node.registryRevision && !clock.present))
   ) return withSeen(context, event)
   return withSeen({
     ...context,
@@ -196,9 +209,11 @@ export const reduceSubagentFleetEvent = (
     nodeClocks: setClock(context.nodeClocks, {
       id: event.node.id,
       occurredAt: event.occurredAt,
+      registryRevision: event.node.registryRevision,
       present: true
     }),
-    generatedAt: Math.max(context.generatedAt, event.occurredAt)
+    generatedAt: Math.max(context.generatedAt, event.occurredAt),
+    registryRevision: Math.max(context.registryRevision, event.node.registryRevision)
   }, event)
 }
 
@@ -210,33 +225,9 @@ export const emptySubagentRunTree = (
   seenEventIds: [],
   nodeClocks: [],
   generatedAt: 0,
+  registryRevision: 0,
   totalActive: 0,
   omitted: 0,
   activeCapacity: { used: 0, limit: 0 }
 })
 
-export const subagentRunTreeMachine = setup({
-  types: {
-    context: {} as SubagentRunTreeContext,
-    events: {} as RunTreeEvent,
-    input: {} as { readonly parentPiSessionId: string }
-  }
-}).createMachine({
-  id: "subagent-run-tree",
-  initial: "active",
-  context: ({ input }) => emptySubagentRunTree(input.parentPiSessionId),
-  states: {
-    active: {
-      on: {
-        INGEST: {
-          actions: assign(({ context, event }) =>
-            reduceSubagentFleetEvent(context, event.event)
-          )
-        }
-      }
-    }
-  }
-})
-
-export const createSubagentRunTreeActor = (parentPiSessionId: string) =>
-  createActor(subagentRunTreeMachine, { input: { parentPiSessionId } })

@@ -3,22 +3,49 @@ import type {
   SubagentFleetNode
 } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { createSubagentRunTreeActor } from "./subagent-run-tree-machine.js"
+import {
+  emptySubagentRunTree,
+  reduceSubagentFleetEvent
+} from "./subagent-run-tree-reducer.js"
+
+const createSubagentRunTreeActor = (parentPiSessionId: string) => {
+  let context = emptySubagentRunTree(parentPiSessionId)
+  const actor = {
+    start: () => actor,
+    send: ({ event }: { readonly type: "INGEST"; readonly event: SubagentFleetEvent }) => {
+      context = reduceSubagentFleetEvent(context, event)
+    },
+    getSnapshot: () => ({ context }),
+    stop: () => undefined
+  }
+  return actor
+}
 
 const node = (
   id: string,
   updatedAt: number,
   status: SubagentFleetNode["status"] = "running",
   parentId: string | null = null
-): SubagentFleetNode => ({
+): SubagentFleetNode => {
+  const subagentId = id.slice("parent/".length)
+  return ({
   id,
-  runId: id,
+  subagentId,
+  orchestrationRunId: subagentId,
+  nodeKind: "agent",
+  registryRevision: updatedAt,
+  childSequence: 1,
+  runId: subagentId,
   parentId,
   parentPiSessionId: "parent",
   agent: "scout",
   task: "Inspect",
   model: "anthropic/claude-test:low",
   status,
+  health: "connected",
+  phase: null,
+  blocking: null,
+  terminal: null,
   background: true,
   sessionFile: null,
   currentTool: null,
@@ -35,20 +62,21 @@ const node = (
   },
   artifacts: [],
   attention: null
-})
+  })
+}
 
 const upsert = (
   eventId: string,
   value: SubagentFleetNode
 ): SubagentFleetEvent => ({
   _tag: "Upsert",
-  version: 1,
+  version: 2,
   eventId,
   occurredAt: value.updatedAt,
   node: value
 })
 
-describe("subagent run tree machine", () => {
+describe("subagent run tree reducer", () => {
   it("deduplicates and ignores reordered stale updates", () => {
     const actor = createSubagentRunTreeActor("parent").start()
     actor.send({ type: "INGEST", event: upsert("new", node("parent/run", 5, "completed")) })
@@ -66,12 +94,13 @@ describe("subagent run tree machine", () => {
       type: "INGEST",
       event: {
         _tag: "Snapshot",
-        version: 1,
+        version: 2,
         eventId: "snapshot",
         occurredAt: 4,
         snapshot: {
-          version: 1,
+          version: 2,
           parentPiSessionId: "parent",
+          registryRevision: 4,
           generatedAt: 4,
           totalActive: 0,
           omitted: 0,
@@ -98,12 +127,13 @@ describe("subagent run tree machine", () => {
       type: "INGEST",
       event: {
         _tag: "Snapshot",
-        version: 1,
+        version: 2,
         eventId: "foreign",
         occurredAt: 4,
         snapshot: {
-          version: 1,
+          version: 2,
           parentPiSessionId: "other",
+          registryRevision: 4,
           generatedAt: 4,
           totalActive: 2,
           omitted: 1,
@@ -133,9 +163,10 @@ describe("subagent run tree machine", () => {
       type: "INGEST",
       event: {
         _tag: "Remove",
-        version: 1,
+        version: 2,
         eventId: "stale-remove",
         occurredAt: 10,
+        registryRevision: 10,
         id: "parent/run"
       }
     })
@@ -150,9 +181,10 @@ describe("subagent run tree machine", () => {
       type: "INGEST",
       event: {
         _tag: "Remove",
-        version: 1,
+        version: 2,
         eventId: "foreign-remove",
         occurredAt: 30,
+        registryRevision: 30,
         id: "other/run"
       }
     })
@@ -163,9 +195,10 @@ describe("subagent run tree machine", () => {
       type: "INGEST",
       event: {
         _tag: "Remove",
-        version: 1,
+        version: 2,
         eventId: "current-remove",
         occurredAt: 40,
+        registryRevision: 40,
         id: "parent/run"
       }
     })

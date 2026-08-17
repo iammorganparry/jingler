@@ -1,5 +1,6 @@
 import {
   SUBAGENT_FLEET_PROTOCOL_VERSION,
+  subagentFleetNodeId,
   type Subagent,
   type SubagentFleetControlOutcome,
   type SubagentFleetEvent,
@@ -9,7 +10,7 @@ import {
   emptySubagentRunTree,
   reduceSubagentFleetEvent,
   type SubagentRunTreeContext
-} from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-machine"
+} from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-reducer"
 import { assign, setup } from "xstate"
 
 export const MAIN_FLEET_AGENT = "main"
@@ -53,7 +54,7 @@ const messageTime = (agent: Subagent): number => {
 export const legacySubagentNodeId = (
   parentPiSessionId: string,
   agentId: string
-): string => `${parentPiSessionId}/legacy/${encodeURIComponent(agentId)}`
+): string => subagentFleetNodeId(parentPiSessionId, `legacy:${agentId}`)
 
 export const projectLegacySubagents = (
   parentPiSessionId: string,
@@ -65,6 +66,11 @@ export const projectLegacySubagents = (
     const status = legacyStatus(agent.status)
     const node: SubagentFleetNode = {
       id: legacySubagentNodeId(parentPiSessionId, agent.id),
+      subagentId: `legacy:${agent.id}`,
+      orchestrationRunId: `legacy:${agent.parentId ?? agent.id}`,
+      nodeKind: "agent",
+      registryRevision: occurredAt,
+      childSequence: 1,
       runId: `legacy:${agent.id}`,
       parentId:
         agent.parentId !== null && ids.has(agent.parentId)
@@ -75,6 +81,15 @@ export const projectLegacySubagents = (
       task: agent.description,
       model: null,
       status,
+      health: "unknown",
+      phase: null,
+      blocking: null,
+      terminal: status === "running" ? null : {
+        reason: status === "completed" ? "completed" : status === "stopped" ? "stopped" : "failed",
+        summary: agent.description,
+        at: occurredAt,
+        retryable: false
+      },
       background: false,
       sessionFile: null,
       currentTool: null,
@@ -170,6 +185,10 @@ export const settleStoppedFleet = (
       node: {
         ...node,
         status: "stopped" as const,
+        health: "disconnected" as const,
+        registryRevision: node.registryRevision + 1,
+        childSequence: node.childSequence + 1,
+        terminal: { reason: "stopped" as const, summary: "Parent stopped", at: occurredAt, retryable: false },
         currentTool: null,
         updatedAt: occurredAt,
         completedAt: occurredAt,

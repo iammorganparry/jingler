@@ -22,6 +22,7 @@ import {
   ConversationView,
   FleetAgentView,
   FleetDrawer,
+  SubagentCompletionLinks,
   PlanReview,
   ResizeHandle,
   RuntimeRecoveryCard,
@@ -659,17 +660,29 @@ export function ConversationPane({
     enabled:
       fleet.selectedNode !== null &&
       fleet.selectedLegacyAgent === null &&
-      fleet.selectedNode.sessionFile !== null,
-    refetchInterval: fleet.selectedNode?.status === "running" ? 1_500 : false
+      fleet.selectedNode.sessionFile !== null
   })
+  useEffect(() => {
+    if (
+      fleet.selectedNode?.status === "running" &&
+      fleet.selectedNode.sessionFile !== null
+    ) void childTranscriptQuery.refetch()
+  }, [
+    childTranscriptQuery.refetch,
+    fleet.selectedNode?.id,
+    fleet.selectedNode?.sessionFile,
+    fleet.selectedNode?.status,
+    fleet.selectedNode?.updatedAt
+  ])
   const fleetDrawer = (
+    <>
     <FleetDrawer
       nodes={fleet.nodes}
       selectedId={fleet.selectedId}
       expanded={fleet.expanded}
       height={fleet.height}
       pending={fleet.pending}
-      outcomeMessage={fleet.lastOutcome?.message ?? null}
+      outcome={fleet.lastOutcome}
       embedded
       onSelect={fleet.select}
       onToggle={fleet.toggle}
@@ -703,6 +716,13 @@ export function ConversationPane({
       }}
       onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
     />
+    <SubagentCompletionLinks
+      nodes={fleet.completedNodes}
+      selectedId={fleet.selectedId}
+      onSelect={fleet.select}
+      onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
+    />
+    </>
   )
 
   // Live agent status + Plan-tab presence are published by the conversation

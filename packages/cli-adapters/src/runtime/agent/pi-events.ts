@@ -1,7 +1,10 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
 import { FileChangeSet, type StreamEvent } from "@jingler/core"
 import { Option, Schema } from "effect"
-import type { PiSubagentSupervisorAttentionInput } from "../subagents/pi-subagent-lifecycle-adapter.js"
+import type {
+  PiSubagentProgressInput,
+  PiSubagentSupervisorAttentionInput
+} from "../subagents/pi-subagent-lifecycle-adapter.js"
 
 const TextResultPart = Schema.Struct({
   type: Schema.Literal("text"),
@@ -32,6 +35,7 @@ const SupervisorAttention = Schema.Struct({
   role: Schema.Literal("custom"),
   customType: Schema.Literal("subagent_supervisor_request"),
   content: Schema.String,
+  timestamp: Schema.Number,
   details: Schema.Struct({
     id: Schema.String,
     reason: Schema.Literal("need_decision", "interview_request", "progress_update"),
@@ -42,6 +46,30 @@ const SupervisorAttention = Schema.Struct({
   })
 })
 const decodeSupervisorAttention = Schema.decodeUnknownOption(SupervisorAttention)
+const SubagentProgress = Schema.Struct({
+  mode: Schema.String,
+  runId: Schema.String,
+  progress: Schema.Array(Schema.Struct({
+    index: Schema.Number,
+    agent: Schema.String,
+    status: Schema.Literal("pending", "running", "completed", "failed", "detached"),
+    task: Schema.String,
+    currentTool: Schema.optional(Schema.String),
+    model: Schema.optional(Schema.String),
+    inputTokens: Schema.optional(Schema.Number),
+    outputTokens: Schema.optional(Schema.Number),
+    tokens: Schema.Number,
+    toolCount: Schema.Number,
+    durationMs: Schema.Number,
+    error: Schema.optional(Schema.String)
+  })),
+  results: Schema.Array(Schema.Struct({
+    index: Schema.Number,
+    runId: Schema.optional(Schema.String),
+    sessionFile: Schema.optional(Schema.String)
+  }))
+})
+const decodeSubagentProgress = Schema.decodeUnknownOption(SubagentProgress)
 
 type ToolResultEvent = Extract<
   AgentSessionEvent,
@@ -102,6 +130,28 @@ const normalizeMessageUpdate = (
   return null
 }
 
+export const piSubagentProgress = (
+  event: AgentSessionEvent
+): PiSubagentProgressInput | null => {
+  if (
+    (event.type !== "tool_execution_update" && event.type !== "tool_execution_end") ||
+    event.toolName !== "subagent"
+  ) return null
+  const result = event.type === "tool_execution_update" ? event.partialResult : event.result
+  const decoded = Option.getOrUndefined(decodeSubagentProgress(result?.details))
+  if (!decoded) return null
+  const results = new Map(decoded.results.map((child) => [child.index, child]))
+  return {
+    runId: decoded.runId,
+    mode: decoded.mode,
+    children: decoded.progress.map((child) => ({
+      ...child,
+      runId: results.get(child.index)?.runId ?? null,
+      sessionFile: results.get(child.index)?.sessionFile ?? null
+    }))
+  }
+}
+
 export const piSupervisorAttention = (
   event: AgentSessionEvent
 ): PiSubagentSupervisorAttentionInput | null => {
@@ -116,7 +166,9 @@ export const piSupervisorAttention = (
     childIndex: message.details.childIndex,
     agent: message.details.agent,
     reason: message.details.reason,
-    message: message.content
+    message: message.content,
+    requestedAt: message.timestamp,
+    deadlineAt: null
   }
 }
 

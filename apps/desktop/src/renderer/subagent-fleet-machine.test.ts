@@ -9,6 +9,11 @@ import {
 
 const node: SubagentFleetNode = {
   id: "parent/run-1",
+  subagentId: "run-1",
+  orchestrationRunId: "run-1",
+  nodeKind: "agent",
+  registryRevision: 10,
+  childSequence: 1,
   runId: "run-1",
   parentId: null,
   parentPiSessionId: "parent",
@@ -16,6 +21,10 @@ const node: SubagentFleetNode = {
   task: "Implement the drawer",
   model: null,
   status: "running",
+  health: "connected",
+  phase: null,
+  blocking: null,
+  terminal: null,
   background: true,
   sessionFile: null,
   currentTool: null,
@@ -38,7 +47,7 @@ describe("subagentFleetMachine", () => {
   it("settles every active child after the parent stop is acknowledged", () => {
     const events = settleStoppedFleet([{
       _tag: "Upsert",
-      version: 1,
+      version: 2,
       eventId: "start-1",
       occurredAt: 10,
       node
@@ -64,7 +73,7 @@ describe("subagentFleetMachine", () => {
       type: "SYNC",
       events: [{
         _tag: "Upsert",
-        version: 1,
+        version: 2,
         eventId: "start-1",
         occurredAt: 10,
         node
@@ -78,9 +87,10 @@ describe("subagentFleetMachine", () => {
       type: "SYNC",
       events: [{
         _tag: "Remove",
-        version: 1,
+        version: 2,
         eventId: "remove-1",
         occurredAt: 20,
+        registryRevision: 20,
         id: node.id
       }]
     })
@@ -95,6 +105,9 @@ describe("subagentFleetMachine", () => {
     const newer = {
       ...node,
       id: "new-parent/run-2",
+      subagentId: "run-2",
+      orchestrationRunId: "run-2",
+      registryRevision: 30,
       runId: "run-2",
       parentPiSessionId: "new-parent",
       updatedAt: 30
@@ -104,23 +117,24 @@ describe("subagentFleetMachine", () => {
       events: [
         {
           _tag: "Upsert",
-          version: 1,
+          version: 2,
           eventId: "old-parent",
           occurredAt: 10,
           node
         },
         {
           _tag: "Upsert",
-          version: 1,
+          version: 2,
           eventId: "new-parent",
           occurredAt: 30,
           node: newer
         },
         {
           _tag: "Remove",
-          version: 1,
+          version: 2,
           eventId: "late-old-remove",
           occurredAt: 40,
+          registryRevision: 40,
           id: node.id
         }
       ]
@@ -176,7 +190,7 @@ describe("subagentFleetMachine", () => {
         runId: "legacy:reviewer",
         agent: "Reviewer",
         status: "completed",
-        parentId: "parent/legacy/legacy-parent"
+        parentId: "parent/legacy%3Alegacy-parent"
       })
     ])
     actor.stop()
@@ -193,12 +207,15 @@ describe("subagentFleetMachine", () => {
     actor.send({
       type: "CONTROL_SETTLED",
       outcome: {
-        version: 1,
+        version: 2,
         requestId: "request-1",
         runId: "run-1",
         action: "stop",
         acknowledged: true,
         status: "accepted",
+        deliveryStatus: "delivered",
+        sequence: 1,
+        nativeRequestId: "native-1",
         message: "stopped",
         acknowledgedAt: 30
       }

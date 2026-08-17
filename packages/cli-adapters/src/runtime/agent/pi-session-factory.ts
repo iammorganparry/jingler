@@ -1,4 +1,3 @@
-import { join } from "node:path"
 import {
   createAgentSession,
   createEventBus,
@@ -7,7 +6,6 @@ import {
   SettingsManager,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
-  type EventBus,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
 import { createJiti } from "jiti"
@@ -39,7 +37,7 @@ import { createJinglerControlTools } from "./pi-jingler-tools.js"
 import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-resources.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools, isMemoryReflectionTool } from "./pi-tool-bridge.js"
-import { piSupervisorAttention } from "./pi-events.js"
+import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 import {
   JINGLER_SUBAGENT_AGENT_NAMES,
@@ -48,6 +46,10 @@ import {
 import type { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 import type { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import { PiSubagentLifecycleAdapter } from "../subagents/pi-subagent-lifecycle-adapter.js"
+import {
+  makeSubagentFleetEventHub,
+  type SubagentFleetEventHubShape
+} from "../subagents/subagent-fleet-event-hub.js"
 import { piSubagentTrustedSessionRoots } from "../subagents/pi-subagent-transcript.js"
 
 export class PiSessionFactoryError extends Data.TaggedError("PiSessionFactoryError")<{
@@ -317,7 +319,7 @@ interface SessionHandleInput {
   readonly subagentBroker?: SubagentCapabilityBroker
   readonly subagentCeiling?: SubagentCapabilityCeilingHandle
   readonly lifecycle: PiSubagentLifecycleAdapter
-  readonly fleetListeners: Set<(event: StreamEvent) => void>
+  readonly fleetEvents: SubagentFleetEventHubShape
 }
 
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
@@ -332,7 +334,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     subagentBroker,
     subagentCeiling,
     lifecycle,
-    fleetListeners
+    fleetEvents
   } = input
   const { session } = embedded.result
   return {
@@ -341,13 +343,21 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
     subscribe: (listener) => session.subscribe((event) => {
+      const progress = piSubagentProgress(event)
+      if (progress) lifecycle.progress(progress)
       const attention = piSupervisorAttention(event)
       if (attention) lifecycle.attention(attention)
       listener(event)
     }),
     subscribeFleet: (listener) => {
-      fleetListeners.add(listener)
-      return () => fleetListeners.delete(listener)
+      const unsubscribe = Effect.runSync(fleetEvents.subscribe(listener))
+      for (const event of lifecycle.replay()) {
+        listener({ _tag: "SubagentFleetChanged", event })
+      }
+      void Effect.runPromise(
+        Effect.tryPromise(() => lifecycle.refresh()).pipe(Effect.ignore)
+      )
+      return unsubscribe
     },
     controlSubagent: async (request) => {
       const outcome = await lifecycle.control(request)
@@ -355,7 +365,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
         _tag: "SubagentFleetControlAcknowledged",
         outcome
       }
-      for (const listener of fleetListeners) listener(projected)
+      await Effect.runPromise(fleetEvents.publish(projected))
       return outcome
     },
     subagentFleetSnapshot: () => lifecycle.refresh(),
@@ -366,7 +376,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     dispose: async () => {
       try {
         lifecycle.stop()
-        fleetListeners.clear()
+        Effect.runSync(fleetEvents.clear)
         session.dispose()
       } finally {
         subagentCeiling?.dispose()
@@ -375,7 +385,9 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
           childCredentials
             ? Effect.runPromise(childCredentials.remove(session.sessionId))
             : Promise.resolve(),
-          Promise.resolve(subagentBroker?.unregister(session.sessionId))
+          subagentBroker
+            ? Effect.runPromise(subagentBroker.unregister(session.sessionId))
+            : Promise.resolve()
         ])
       }
     },
@@ -458,7 +470,7 @@ const createSessionHandle = (
       registry,
       nativeSubagentsEnabled
     })
-    const fleetListeners = new Set<(event: StreamEvent) => void>()
+    const fleetEvents = yield* makeSubagentFleetEventHub()
     const lifecycle = new PiSubagentLifecycleAdapter({
       events: prepared.eventBus,
       parentPiSessionId: embedded.result.session.sessionId,
@@ -467,14 +479,13 @@ const createSessionHandle = (
         : [],
       emit: (event) => {
         const projected: StreamEvent = { _tag: "SubagentFleetChanged", event }
-        for (const listener of fleetListeners) listener(projected)
+        Effect.runSync(fleetEvents.publish(projected))
       },
       trustedSessionRoots: embedded.result.session.sessionFile
         ? piSubagentTrustedSessionRoots(embedded.result.session.sessionFile)
         : []
     })
     lifecycle.start()
-    lifecycle.beginPolling()
     if ((options.childCredentials === undefined) !== (options.subagentBroker === undefined)) {
       lifecycle.stop()
       embedded.result.session.dispose()
@@ -488,23 +499,19 @@ const createSessionHandle = (
     let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
     if (options.childCredentials && options.subagentBroker) {
       const parentPiSessionId = embedded.result.session.sessionId
-      const capability = yield* Effect.tryPromise({
-        try: () => options.subagentBroker!.register({
-          parentPiSessionId,
-          agents: JINGLER_SUBAGENT_AGENT_NAMES,
-          spec,
-          registry,
-          context
-        }),
-        catch: (cause) =>
-          new AgentRuntimeError({
-            reason: "runtime",
-            message: cause instanceof Error
-              ? `Could not register the child capability broker: ${cause.message}`
-              : "Could not register the child capability broker",
-            cause
-          })
+      const capability = yield* options.subagentBroker.register({
+        parentPiSessionId,
+        agents: JINGLER_SUBAGENT_AGENT_NAMES,
+        spec,
+        registry,
+        context,
+        supervisorState: () => lifecycle.supervisorSnapshot()
       }).pipe(
+        Effect.mapError((cause) => new AgentRuntimeError({
+          reason: "runtime",
+          message: `Could not register the child capability broker: ${cause.message}`,
+          cause
+        })),
         Effect.onError(() => Effect.sync(() => {
           lifecycle.stop()
           embedded.result.session.dispose()
@@ -518,11 +525,12 @@ const createSessionHandle = (
           cause
         })
       }).pipe(
-        Effect.onError(() => Effect.sync(() => {
-          options.subagentBroker!.unregister(parentPiSessionId)
-          lifecycle.stop()
-          embedded.result.session.dispose()
-        }))
+        Effect.onError(() => options.subagentBroker!.unregister(parentPiSessionId).pipe(
+          Effect.andThen(Effect.sync(() => {
+            lifecycle.stop()
+            embedded.result.session.dispose()
+          }))
+        ))
       )
       subagentCeiling = capabilityCeiling.registerSubagentCapabilityCeiling({
         sessionId: parentPiSessionId,
@@ -548,14 +556,13 @@ const createSessionHandle = (
                 cause
               })
           ),
-          Effect.onError(() =>
-            Effect.sync(() => {
-              options.subagentBroker!.unregister(parentPiSessionId)
+          Effect.onError(() => options.subagentBroker!.unregister(parentPiSessionId).pipe(
+            Effect.andThen(Effect.sync(() => {
               subagentCeiling?.dispose()
               lifecycle.stop()
               embedded.result.session.dispose()
-            })
-          )
+            }))
+          ))
         )
     }
     const diagnostic = makeRuntimeDiagnosticObserver({
@@ -583,7 +590,7 @@ const createSessionHandle = (
       childCredentials: options.childCredentials,
       subagentBroker: options.subagentBroker,
       lifecycle,
-      fleetListeners,
+      fleetEvents,
       ...(subagentCeiling ? { subagentCeiling } : {})
     })
   })

@@ -1,13 +1,18 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { SubagentFleetNode } from "@jingler/core"
-import { FleetDrawer } from "./fleet-drawer.js"
+import { FleetDrawer, SubagentCompletionLinks } from "./fleet-drawer.js"
 
 afterEach(cleanup)
 const FLEET_BUTTON = /Fleet/
 
 const node = (overrides: Partial<SubagentFleetNode> = {}): SubagentFleetNode => ({
   id: "parent/run-1",
+  subagentId: "run-1",
+  orchestrationRunId: "run-1",
+  nodeKind: "agent",
+  registryRevision: 1,
+  childSequence: 1,
   runId: "run-1",
   parentId: null,
   parentPiSessionId: "parent",
@@ -15,6 +20,10 @@ const node = (overrides: Partial<SubagentFleetNode> = {}): SubagentFleetNode => 
   task: "Review the capability boundary",
   model: "anthropic/claude-test:high",
   status: "running",
+  health: "connected",
+  phase: null,
+  blocking: null,
+  terminal: null,
   background: true,
   sessionFile: "/sessions/reviewer.jsonl",
   currentTool: "workspace_read_file",
@@ -49,7 +58,8 @@ describe("FleetDrawer", () => {
         requestId: "attention-1",
         reason: "need_decision",
         message: "Which public API should I use?",
-        requestedAt: 21
+        requestedAt: 21,
+        deadlineAt: null
       }
     })
     render(
@@ -58,7 +68,19 @@ describe("FleetDrawer", () => {
         selectedId={child.id}
         expanded
         height={180}
-        outcomeMessage="reply acknowledged"
+        outcome={{
+          version: 2,
+          requestId: "reply-1",
+          runId: child.runId,
+          action: "reply",
+          acknowledged: true,
+          status: "accepted",
+          deliveryStatus: "delivered",
+          sequence: 1,
+          nativeRequestId: "native-reply-1",
+          message: "reply delivered",
+          acknowledgedAt: 22
+        }}
         onSelect={onSelect}
         onToggle={vi.fn()}
         onResize={vi.fn()}
@@ -69,6 +91,7 @@ describe("FleetDrawer", () => {
     expect(screen.getByText("2 active · 2 total")).toBeTruthy()
     expect(screen.getByText("Which public API should I use?")).toBeTruthy()
     expect(screen.getByText("Review")).toBeTruthy()
+    expect(screen.getByTestId("fleet-control-receipt").textContent).toBe("delivered")
     fireEvent.click(screen.getByTestId("fleet-agent-run-1"))
     expect(onSelect).toHaveBeenCalledWith(parent.id)
     fireEvent.change(screen.getByLabelText("Reply to agent"), {
@@ -106,6 +129,71 @@ describe("FleetDrawer", () => {
       .not.toBeNull()
     fireEvent.click(screen.getByLabelText("Close reviewer"))
     expect(onDismiss).toHaveBeenCalledWith(reviewer)
+  })
+
+  it("requires an explicit continuation message before resume", () => {
+    const onControl = vi.fn()
+    const paused = node({ status: "paused" })
+    render(
+      <FleetDrawer
+        nodes={[paused]}
+        selectedId={paused.id}
+        expanded
+        height={180}
+        onSelect={vi.fn()}
+        onToggle={vi.fn()}
+        onResize={vi.fn()}
+        onControl={onControl}
+      />
+    )
+
+    const resume = screen.getByLabelText("Resume agent")
+    expect(resume.getAttribute("disabled")).not.toBeNull()
+    expect(resume.getAttribute("title")).toBe("Enter a continuation message to resume")
+    fireEvent.change(screen.getByPlaceholderText("Steer agent…"), {
+      target: { value: "Continue from the persisted session" }
+    })
+    expect(resume.getAttribute("disabled")).toBeNull()
+    fireEvent.click(resume)
+    expect(onControl).toHaveBeenCalledWith(
+      paused,
+      "resume",
+      "Continue from the persisted session",
+      undefined
+    )
+  })
+
+  it("keeps bounded completion transcript and artifact links outside Fleet chrome", () => {
+    const onSelect = vi.fn()
+    const onOpenArtifact = vi.fn()
+    const completed = node({ status: "completed", currentTool: null })
+    const artifactOnly = node({
+      id: "parent/run-2",
+      subagentId: "run-2",
+      runId: "run-2",
+      agent: "archiver",
+      status: "completed",
+      currentTool: null,
+      sessionFile: null,
+      artifacts: [{ path: "archive.md", label: "Archive", kind: "report" }]
+    })
+    render(
+      <SubagentCompletionLinks
+        nodes={[completed, artifactOnly]}
+        selectedId="main"
+        onSelect={onSelect}
+        onOpenArtifact={onOpenArtifact}
+      />
+    )
+
+    expect(screen.queryByTestId("fleet-drawer")).toBeNull()
+    fireEvent.click(screen.getByText("reviewer transcript"))
+    fireEvent.click(screen.getByText("Review"))
+    fireEvent.click(screen.getByText("Archive"))
+    expect(screen.queryByText("archiver transcript")).toBeNull()
+    expect(onSelect).toHaveBeenCalledWith(completed.id)
+    expect(onOpenArtifact).toHaveBeenCalledWith("review.md")
+    expect(onOpenArtifact).toHaveBeenCalledWith("archive.md")
   })
 
   it("uses the composer's chrome instead of drawing a detached card", () => {
