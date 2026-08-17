@@ -53,6 +53,7 @@ interface RegisteredChild {
   readonly agent: string
   readonly role: AgentRole
   readonly mode: RuntimeMode
+  readonly grantedToolIds: ReadonlySet<string>
   readonly registry: ToolRegistry
   readonly context: AgentRuntimeContext
   readonly supervisorState: () => SubagentSupervisorSnapshot
@@ -202,6 +203,9 @@ const handleRequest = (
   if (!child || child.parentPiSessionId !== decoded.parentPiSessionId) {
     return yield* writeJson(response, 403, { error: "forbidden" })
   }
+  if (!child.grantedToolIds.has(decoded.toolId)) {
+    return yield* writeJson(response, 403, { error: "forbidden-tool" })
+  }
   if (decoded.toolId === SUPERVISOR_STATE_TOOL.id) {
     return yield* writeJson(response, 200, {
       version: SUBAGENT_CAPABILITY_VERSION,
@@ -287,11 +291,13 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
           const capabilities = agents.map((agent) => {
             const token = randomBytes(32).toString("base64url")
             const profile = childExecutionProfile(input.spec, agent)
+            const tools = childTools(input.registry, profile.role, profile.mode)
             children.set(token, {
               parentPiSessionId: input.parentPiSessionId,
               agent,
               role: profile.role,
               mode: profile.mode,
+              grantedToolIds: new Set(tools.map(({ id }) => id)),
               registry: input.registry,
               context: input.context,
               supervisorState: input.supervisorState
@@ -306,7 +312,7 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
               targetId: input.spec.targetCapabilities.targetId,
               role: profile.role,
               mode: profile.mode,
-              tools: childTools(input.registry, profile.role, profile.mode)
+              tools
             } satisfies SubagentCapability
           })
           parentTokens.set(input.parentPiSessionId, tokens)

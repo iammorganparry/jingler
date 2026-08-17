@@ -577,6 +577,12 @@ describe("PiAgentRuntime", () => {
     expect(missing._tag).toBe("Left")
     await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "/sessions/parent.jsonl")))
       .rejects.toMatchObject({ message: "pi session is not active: /sessions/parent.jsonl" })
+    await expect(Effect.runPromise(runtime.subagentTranscript(
+      "session-1",
+      "chat-1",
+      "pi-parent-internal",
+      "child-1"
+    ))).resolves.toHaveLength(1)
   })
 
   it("surfaces prompt rejection when final reconciliation also rejects", async () => {

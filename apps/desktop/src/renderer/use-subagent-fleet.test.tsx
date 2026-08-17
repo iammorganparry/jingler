@@ -77,6 +77,31 @@ afterEach(() => {
 })
 
 describe("useSubagentFleet reconciliation", () => {
+  it("retries a transient initial reconciliation without a focus change", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.snapshot
+        .mockRejectedValueOnce(new Error("Pi session is not active"))
+        .mockResolvedValue(snapshot)
+
+      const events: ReadonlyArray<SubagentFleetEvent> = []
+      renderHook(() => useSubagentFleet({
+        sessionId: "session-1",
+        chatId: "chat-1",
+        piSessionId: "parent",
+        events
+      }))
+
+      await act(async () => {
+        await Promise.resolve()
+        await vi.advanceTimersByTimeAsync(250)
+      })
+      expect(mocks.snapshot).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("retries on focus after the Pi runtime is not active yet", async () => {
     mocks.snapshot
       .mockRejectedValueOnce(new Error("Pi session is not active"))

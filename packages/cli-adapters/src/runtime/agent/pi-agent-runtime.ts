@@ -273,6 +273,13 @@ const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): 
   )
 }
 
+interface ArchivedPiTranscript {
+  readonly sessionId: string
+  readonly chatId: string
+  readonly aliases: ReadonlySet<string>
+  readonly read: PiSessionHandle["subagentTranscript"]
+}
+
 interface RetainedPiSession {
   readonly handle: PiSessionHandle
   readonly sessionId: string
@@ -285,6 +292,8 @@ interface RetainedPiSession {
 
 class PiSessionRegistry {
   readonly #aliases = new Map<string, RetainedPiSession>()
+  readonly #transcriptArchives = new Map<string, ArchivedPiTranscript>()
+  readonly #archiveOrder: ArchivedPiTranscript[] = []
 
   constructor(
     readonly factory: PiSessionFactory,
@@ -334,7 +343,10 @@ class PiSessionRegistry {
           reapTimer: null,
           disposing: false
         }
-        for (const alias of aliases) this.#aliases.set(alias, record)
+        for (const alias of aliases) {
+          this.#transcriptArchives.delete(alias)
+          this.#aliases.set(alias, record)
+        }
         return record
       })
     )
@@ -352,6 +364,21 @@ class PiSessionRegistry {
     const record = this.#aliases.get(id)
     return record?.sessionId === sessionId && record.chatId === chatId
       ? record.handle
+      : undefined
+  }
+
+  lookupTranscriptOwned(
+    sessionId: string,
+    chatId: string,
+    id: string
+  ): PiSessionHandle["subagentTranscript"] | undefined {
+    const live = this.#aliases.get(id)
+    if (live?.sessionId === sessionId && live.chatId === chatId) {
+      return live.handle.subagentTranscript
+    }
+    const archived = this.#transcriptArchives.get(id)
+    return archived?.sessionId === sessionId && archived.chatId === chatId
+      ? archived.read
       : undefined
   }
 
@@ -388,8 +415,25 @@ class PiSessionRegistry {
     try {
       await record.handle.dispose()
     } finally {
+      const archive: ArchivedPiTranscript = {
+        sessionId: record.sessionId,
+        chatId: record.chatId,
+        aliases: record.aliases,
+        read: record.handle.subagentTranscript
+      }
       for (const alias of record.aliases) {
         if (this.#aliases.get(alias) === record) this.#aliases.delete(alias)
+        this.#transcriptArchives.set(alias, archive)
+      }
+      this.#archiveOrder.push(archive)
+      while (this.#archiveOrder.length > 16) {
+        const expired = this.#archiveOrder.shift()
+        if (!expired) break
+        for (const alias of expired.aliases) {
+          if (this.#transcriptArchives.get(alias) === expired) {
+            this.#transcriptArchives.delete(alias)
+          }
+        }
       }
     }
   }
@@ -503,10 +547,25 @@ export const makePiAgentRuntime = (
         chatId,
         parentPiSessionId,
         runId
-      ) => sessionOperation(
-        sessions.lookupOwned(sessionId, chatId, parentPiSessionId),
-        parentPiSessionId,
-        (session) => session.subagentTranscript(runId)
-      )
+      ) => {
+        const read = sessions.lookupTranscriptOwned(
+          sessionId,
+          chatId,
+          parentPiSessionId
+        )
+        return read
+          ? Effect.tryPromise({
+              try: () => read(runId),
+              catch: (cause) => new AgentRuntimeError({
+                reason: "runtime",
+                message: "pi session operation failed",
+                cause
+              })
+            })
+          : Effect.fail(new AgentRuntimeError({
+              reason: "runtime",
+              message: `pi session is not active: ${parentPiSessionId}`
+            }))
+      }
     }
   })

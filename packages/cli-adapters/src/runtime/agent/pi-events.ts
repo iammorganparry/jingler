@@ -65,6 +65,7 @@ const SubagentProgress = Schema.Struct({
   })),
   results: Schema.Array(Schema.Struct({
     index: Schema.Number,
+    runId: Schema.optional(Schema.String),
     sessionFile: Schema.optional(Schema.String)
   }))
 })
@@ -139,13 +140,14 @@ export const piSubagentProgress = (
   const result = event.type === "tool_execution_update" ? event.partialResult : event.result
   const decoded = Option.getOrUndefined(decodeSubagentProgress(result?.details))
   if (!decoded) return null
-  const sessions = new Map(decoded.results.map((child) => [child.index, child.sessionFile ?? null]))
+  const results = new Map(decoded.results.map((child) => [child.index, child]))
   return {
     runId: decoded.runId,
     mode: decoded.mode,
     children: decoded.progress.map((child) => ({
       ...child,
-      sessionFile: sessions.get(child.index) ?? null
+      runId: results.get(child.index)?.runId ?? null,
+      sessionFile: results.get(child.index)?.sessionFile ?? null
     }))
   }
 }

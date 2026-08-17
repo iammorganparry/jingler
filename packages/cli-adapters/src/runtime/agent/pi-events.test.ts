@@ -255,7 +255,11 @@ describe("pi file-change events", () => {
         details: {
           mode: "single",
           runId: "run-1",
-          results: [{ index: 0, sessionFile: "/sessions/child.jsonl" }],
+          results: [{
+            index: 0,
+            runId: "child-run-1",
+            sessionFile: "/sessions/child.jsonl"
+          }],
           progress: [{
             index: 0,
             agent: "worker",
@@ -276,6 +280,7 @@ describe("pi file-change events", () => {
       mode: "single",
       children: [expect.objectContaining({
         index: 0,
+        runId: "child-run-1",
         currentTool: "workspace_read_file",
         sessionFile: "/sessions/child.jsonl"
       })]

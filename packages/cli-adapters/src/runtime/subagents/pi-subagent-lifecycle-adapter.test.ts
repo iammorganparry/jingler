@@ -1,4 +1,4 @@
-import { createEventBus } from "@earendil-works/pi-coding-agent"
+import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent"
 import type { SubagentFleetEvent } from "@jingler/core"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -91,6 +91,68 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
+  it("reads a completed child transcript after its active node is removed", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".pi-completed-transcript-"))
+    const manager = SessionManager.create(process.cwd(), root)
+    manager.appendMessage({ role: "user", content: "Inspect", timestamp: 1 })
+    manager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Done" }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "claude-test",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: "stop",
+      timestamp: 2
+    })
+    const sessionFile = manager.getSessionFile()
+    if (!sessionFile) throw new Error("Expected a child session file")
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      trustedSessionRoots: [root],
+      controlJournal: null,
+      emit: () => undefined,
+      now: () => 10
+    })
+    adapter.start()
+    try {
+      events.emit("subagent:async-complete", {
+        runId: "run-1",
+        sessionId: parent,
+        state: "complete",
+        success: true,
+        results: [{
+          index: 0,
+          runId: "child-run",
+          agent: "worker",
+          success: true,
+          sessionFile
+        }]
+      })
+
+      expect(adapter.snapshot().nodes).toEqual([])
+      adapter.stop()
+      await expect(adapter.transcript("child-run")).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({
+          role: "user",
+          parts: [{ _tag: "Text", text: "Inspect" }]
+        })])
+      )
+    } finally {
+      adapter.stop()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("reconciles bounded RPC fleet status and ignores malformed or foreign events", async () => {
     const events = createEventBus()
     const emitted: SubagentFleetEvent[] = []
@@ -172,6 +234,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       mode: "single",
       children: [{
         index: 0,
+        runId: null,
         agent: "worker",
         status: "running",
         task: "Inspect",
@@ -207,6 +270,7 @@ describe("PiSubagentLifecycleAdapter", () => {
         mode: "single",
         children: [{
           index: 0,
+          runId: null,
           agent: "worker",
           status: "running",
           task: "Inspect",
@@ -223,6 +287,51 @@ describe("PiSubagentLifecycleAdapter", () => {
     expect(emitted.some((event) =>
       event._tag === "Upsert" && event.node.currentTool === "workspace_read_file"
     )).toBe(true)
+    adapter.stop()
+  })
+
+  it("uses the native child run ID across progress and completion", () => {
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      controlJournal: null,
+      emit: () => undefined,
+      now: () => 50
+    })
+    adapter.start()
+    adapter.progress({
+      runId: "workflow-run",
+      mode: "workflow",
+      children: [{
+        index: 0,
+        runId: "canonical-child",
+        agent: "worker",
+        status: "running",
+        task: "Inspect",
+        tokens: 0,
+        toolCount: 0,
+        durationMs: 1,
+        sessionFile: null
+      }]
+    })
+    expect(adapter.snapshot().nodes.map(({ subagentId }) => subagentId))
+      .toEqual(["canonical-child"])
+
+    events.emit("subagent:async-complete", {
+      runId: "workflow-run",
+      sessionId: parent,
+      state: "complete",
+      success: true,
+      results: [{
+        index: 0,
+        runId: "canonical-child",
+        agent: "worker",
+        success: true
+      }]
+    })
+
+    expect(adapter.snapshot().nodes).toEqual([])
     adapter.stop()
   })
 
@@ -537,9 +646,26 @@ describe("PiSubagentLifecycleAdapter", () => {
     })
     adapter.start()
     try {
-      await adapter.refresh()
+      const refreshing = adapter.refresh()
+      adapter.progress({
+        runId: "run-1",
+        mode: "workflow",
+        children: [{
+          index: 0,
+          runId: "child-run",
+          agent: "scout",
+          status: "running",
+          task: "Inspect",
+          tokens: 1,
+          toolCount: 1,
+          durationMs: 1,
+          sessionFile: null
+        }]
+      })
+      await refreshing
       const durableId = adapter.snapshot().nodes[0]?.id
       expect(durableId).toBe(`${parent}/child-run`)
+      expect(adapter.snapshot().nodes[0]?.health).toBe("unknown")
       events.emit("subagent:async-complete", {
         runId: "run-1",
         sessionId: parentSessionFile,

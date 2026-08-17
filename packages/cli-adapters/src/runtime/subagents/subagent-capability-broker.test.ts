@@ -181,6 +181,9 @@ describe("SubagentCapabilityBroker", () => {
       status: "success",
       value: { inspected: "ok" }
     })
+    const parentOnly = await call(capabilities, { toolId: "jingler_submit_plan" })
+    expect(parentOnly.status).toBe(403)
+    await expect(parentOnly.json()).resolves.toEqual({ error: "forbidden-tool" })
   })
 
   it("exposes only the scoped supervisor snapshot through the internal tool", async () => {
@@ -251,10 +254,8 @@ describe("SubagentCapabilityBroker", () => {
       agent: "reviewer",
       toolId: "change"
     })
-    await expect(reviewer.json()).resolves.toMatchObject({
-      status: "error",
-      error: { code: "forbidden" }
-    })
+    expect(reviewer.status).toBe(403)
+    await expect(reviewer.json()).resolves.toEqual({ error: "forbidden-tool" })
     const impersonation = await call(capabilities, {
       agent: "reviewer",
       toolId: "change",

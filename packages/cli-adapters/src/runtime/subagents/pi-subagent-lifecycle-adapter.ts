@@ -272,6 +272,7 @@ export interface PiSubagentProgressInput {
   readonly mode: string
   readonly children: ReadonlyArray<{
     readonly index: number
+    readonly runId: string | null
     readonly agent: string
     readonly status: "pending" | "running" | "completed" | "failed" | "detached"
     readonly task: string
@@ -378,9 +379,11 @@ export class PiSubagentLifecycleAdapter {
     const node = this.#state().tree.nodes.find(
       (candidate) => candidate.runId === runId
     )
-    if (!node?.sessionFile) return []
+    const sessionFile = node?.sessionFile ??
+      Effect.runSync(this.#supervision.transcriptFile(runId))
+    if (!sessionFile) return []
     return Effect.runPromise(this.#transcripts.read({
-      sessionFile: node.sessionFile,
+      sessionFile,
       trustedRoots: [...this.#trustedSessionRoots]
     }))
   }
@@ -431,7 +434,7 @@ export class PiSubagentLifecycleAdapter {
       })
     }
     for (const child of input.children) {
-      const subagentId = `${input.runId}:step:${child.index}`
+      const subagentId = child.runId ?? `${input.runId}:step:${child.index}`
       const existing = context.nodes.find((node) => node.subagentId === subagentId)
       const status: SubagentFleetStatus = child.status === "pending"
         ? "queued"
@@ -635,18 +638,23 @@ export class PiSubagentLifecycleAdapter {
   }
 
   async refresh(): Promise<SubagentFleetSnapshot> {
-    const generatedAt = this.#now()
-    const durableRevision = this.#nextRevision()
     const durable = await Effect.runPromise(readDurablePiSubagentNodes({
       ...(this.#asyncRunsDir ? { asyncDir: this.#asyncRunsDir } : {}),
       parentPiSessionId: this.#parentPiSessionId,
       parentPiSessionAliases: this.#parentPiSessionIds,
-      registryRevision: durableRevision,
-      now: generatedAt
+      registryRevision: 0,
+      now: this.#now()
     }))
+    const generatedAt = this.#now()
     if (durable.nodes.length > 0) {
+      const durableRevision = this.#nextRevision()
+      const durableNodes = durable.nodes.map((node) => ({
+        ...node,
+        registryRevision: durableRevision,
+        updatedAt: generatedAt
+      }))
       Effect.runSync(this.#supervision.setDurableNodeIds(
-        new Set(durable.nodes.map(({ id }) => id))
+        new Set(durableNodes.map(({ id }) => id))
       ))
       this.#publish({
         _tag: "Snapshot",
@@ -661,7 +669,7 @@ export class PiSubagentLifecycleAdapter {
           totalActive: durable.totalActive,
           omitted: durable.omitted,
           activeCapacity: durable.activeCapacity,
-          nodes: durable.nodes
+          nodes: durableNodes
         }
       })
       return this.snapshot()

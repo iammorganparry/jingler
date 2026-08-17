@@ -115,6 +115,109 @@ describe("SubagentSupervisionService", () => {
       .toEqual(["queued", "queued", "delivered", "delivered"])
   })
 
+  it("rejects reuse of an idempotency key with a different control payload", async () => {
+    const service = Effect.runSync(makeSubagentSupervisionService("parent"))
+    const execute = vi.fn((sequence: number) => Effect.succeed({
+      version: 2 as const,
+      requestId: "same-id",
+      runId: "run-1",
+      action: "steer" as const,
+      acknowledged: true,
+      status: "accepted" as const,
+      deliveryStatus: "delivered" as const,
+      sequence,
+      nativeRequestId: "native-1",
+      message: "delivered",
+      acknowledgedAt: 1
+    }))
+    const original = {
+      version: 2 as const,
+      requestId: "same-id",
+      parentPiSessionId: "parent",
+      runId: "run-1",
+      action: "steer" as const,
+      message: "Continue",
+      replyTo: null
+    }
+    await Effect.runPromise(service.submitControl(original, execute))
+    const collision = await Effect.runPromise(service.submitControl({
+      ...original,
+      message: "Stop instead"
+    }, execute))
+
+    expect(collision).toMatchObject({
+      acknowledged: false,
+      status: "rejected",
+      deliveryStatus: "rejected",
+      message: "Control request ID cannot be verified against the original payload"
+    })
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
+  it("serializes journal replacements so an older snapshot cannot land last", async () => {
+    const finalSaveStarted = Effect.runSync(Deferred.make<void>())
+    const releaseFinalSave = Effect.runSync(Deferred.make<void>())
+    const landed: Array<{ readonly outcomes: ReadonlyArray<{ readonly requestId: string }> }> = []
+    let saveCount = 0
+    const service = Effect.runSync(makeSubagentSupervisionService(
+      "parent",
+      () => saveCount,
+      {
+        load: Effect.succeed({
+          version: 2 as const,
+          parentPiSessionId: "parent",
+          sequence: 0,
+          pending: [],
+          outcomes: [],
+          requests: [],
+          receipts: []
+        }),
+        save: (journal) => Effect.gen(function* () {
+          saveCount += 1
+          if (saveCount === 2) {
+            yield* Deferred.succeed(finalSaveStarted, undefined)
+            yield* Deferred.await(releaseFinalSave)
+          }
+          landed.push(journal)
+        })
+      }
+    ))
+    const request = (requestId: string) => ({
+      version: 2 as const,
+      requestId,
+      parentPiSessionId: "parent",
+      runId: requestId,
+      action: "stop" as const,
+      message: null,
+      replyTo: null
+    })
+    const execute = (requestId: string) => (sequence: number) => Effect.succeed({
+      version: 2 as const,
+      requestId,
+      runId: requestId,
+      action: "stop" as const,
+      acknowledged: true,
+      status: "accepted" as const,
+      deliveryStatus: "delivered" as const,
+      sequence,
+      nativeRequestId: `native-${requestId}`,
+      message: "delivered",
+      acknowledgedAt: sequence
+    })
+
+    const first = Effect.runPromise(service.submitControl(request("one"), execute("one")))
+    await Effect.runPromise(Deferred.await(finalSaveStarted))
+    const second = Effect.runPromise(service.submitControl(request("two"), execute("two")))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(saveCount).toBe(2)
+    Effect.runSync(Deferred.succeed(releaseFinalSave, undefined))
+    await Promise.all([first, second])
+
+    expect(landed.at(-1)?.outcomes.map(({ requestId }) => requestId).sort())
+      .toEqual(["one", "two"])
+  })
+
   it("fails closed without native execution when durable receipts are unavailable", async () => {
     const execute = vi.fn(() => Effect.die("must not execute"))
     const service = Effect.runSync(makeSubagentSupervisionService(
@@ -140,6 +243,54 @@ describe("SubagentSupervisionService", () => {
       status: "rejected",
       deliveryStatus: "rejected",
       message: "journal unavailable"
+    })
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("fails closed for cached outcomes whose original payload was not journaled", async () => {
+    const execute = vi.fn(() => Effect.die("must not execute"))
+    const service = Effect.runSync(makeSubagentSupervisionService(
+      "parent",
+      () => 3,
+      {
+        load: Effect.succeed({
+          version: 2 as const,
+          parentPiSessionId: "parent",
+          sequence: 1,
+          pending: [],
+          outcomes: [{
+            version: 2 as const,
+            requestId: "legacy-cache",
+            runId: "run-1",
+            action: "stop" as const,
+            acknowledged: true,
+            status: "accepted" as const,
+            deliveryStatus: "delivered" as const,
+            sequence: 1,
+            nativeRequestId: "native-1",
+            message: "delivered",
+            acknowledgedAt: 1
+          }],
+          receipts: []
+        }),
+        save: () => Effect.void
+      }
+    ))
+
+    const outcome = await Effect.runPromise(service.submitControl({
+      version: 2,
+      requestId: "legacy-cache",
+      parentPiSessionId: "parent",
+      runId: "run-1",
+      action: "stop",
+      message: null,
+      replyTo: null
+    }, execute))
+
+    expect(outcome).toMatchObject({
+      acknowledged: false,
+      status: "rejected",
+      message: "Control request ID cannot be verified against the original payload"
     })
     expect(execute).not.toHaveBeenCalled()
   })
@@ -186,8 +337,17 @@ describe("SubagentSupervisionService", () => {
     ))
 
     const restored = await Effect.runPromise(restarted.submitControl(request, execute))
+    const collision = await Effect.runPromise(restarted.submitControl({
+      ...request,
+      message: "Different payload"
+    }, execute))
 
     expect(restored).toEqual(accepted)
+    expect(collision).toMatchObject({
+      acknowledged: false,
+      status: "rejected",
+      message: "Control request ID cannot be verified against the original payload"
+    })
     expect(execute).toHaveBeenCalledOnce()
   })
 })

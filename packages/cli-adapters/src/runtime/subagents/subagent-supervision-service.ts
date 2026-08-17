@@ -26,6 +26,7 @@ import {
 } from "./subagent-run-tree-reducer.js"
 
 const MAX_REPLAY_EVENTS = 256
+const MAX_TRANSCRIPT_FILES = 32
 const ControlJournal = Schema.Struct({
   version: Schema.Literal(2),
   parentPiSessionId: Schema.String,
@@ -35,6 +36,7 @@ const ControlJournal = Schema.Struct({
     sequence: Schema.Number
   })),
   outcomes: Schema.Array(SubagentFleetControlOutcome),
+  requests: Schema.optional(Schema.Array(SubagentFleetControlRequest)),
   receipts: Schema.Array(SubagentControlReceipt)
 })
 
@@ -56,6 +58,7 @@ export const makeSubagentControlJournal = (input: {
     sequence: 0,
     pending: [],
     outcomes: [],
+    requests: [],
     receipts: []
   }
   return {
@@ -101,6 +104,7 @@ export interface SubagentStartRecord {
 
 type ControlRegistration =
   | { readonly _tag: "Cached"; readonly outcome: SubagentFleetControlOutcome }
+  | { readonly _tag: "Conflict"; readonly outcome: SubagentFleetControlOutcome }
   | {
       readonly _tag: "Pending"
       readonly deferred: Deferred.Deferred<SubagentFleetControlOutcome>
@@ -118,9 +122,11 @@ interface SupervisionState {
   readonly childSequences: ReadonlyMap<string, number>
   readonly asyncStarts: ReadonlyMap<string, SubagentStartRecord>
   readonly durableNodeIds: ReadonlySet<string>
+  readonly transcriptFiles: ReadonlyMap<string, string>
   readonly controlsLoaded: boolean
   readonly controlSequence: number
   readonly controlOutcomes: ReadonlyMap<string, SubagentFleetControlOutcome>
+  readonly controlRequests: ReadonlyMap<string, SubagentFleetControlRequest>
   readonly controlReceipts: ReadonlyArray<SubagentControlReceipt>
   readonly pendingControlRequests: ReadonlyMap<string, {
     readonly request: SubagentFleetControlRequest
@@ -151,6 +157,7 @@ export interface SubagentSupervisionServiceShape {
   readonly putStart: (runId: string, start: SubagentStartRecord) => Effect.Effect<void>
   readonly removeStart: (runId: string) => Effect.Effect<void>
   readonly setDurableNodeIds: (ids: ReadonlySet<string>) => Effect.Effect<void>
+  readonly transcriptFile: (runId: string) => Effect.Effect<string | null>
   readonly submitControl: (
     request: SubagentFleetControlRequest,
     execute: (sequence: number) => Effect.Effect<SubagentFleetControlOutcome>
@@ -170,6 +177,18 @@ const eventRevision = (event: SubagentFleetEvent): number => {
   return event.registryRevision
 }
 
+const sameControlRequest = (
+  left: SubagentFleetControlRequest,
+  right: SubagentFleetControlRequest
+): boolean =>
+  left.version === right.version &&
+  left.requestId === right.requestId &&
+  left.parentPiSessionId === right.parentPiSessionId &&
+  left.runId === right.runId &&
+  left.action === right.action &&
+  left.message === right.message &&
+  left.replyTo === right.replyTo
+
 export const makeSubagentSupervisionService = (
   parentPiSessionId: string,
   now: () => number = Date.now,
@@ -182,9 +201,11 @@ export const makeSubagentSupervisionService = (
     childSequences: new Map(),
     asyncStarts: new Map(),
     durableNodeIds: new Set(),
+    transcriptFiles: new Map(),
     controlsLoaded: journal === undefined,
     controlSequence: 0,
     controlOutcomes: new Map(),
+    controlRequests: new Map(),
     controlReceipts: [],
     pendingControlRequests: new Map(),
     pendingControls: new Map(),
@@ -192,6 +213,7 @@ export const makeSubagentSupervisionService = (
     unsubscribes: []
   })
   const controlGate = yield* Effect.makeSemaphore(1)
+  const journalGate = yield* Effect.makeSemaphore(1)
   const loadGate = yield* Effect.makeSemaphore(1)
 
   const modify = <A>(f: (state: SupervisionState) => readonly [A, SupervisionState]) =>
@@ -203,8 +225,12 @@ export const makeSubagentSupervisionService = (
       sequence: state.controlSequence,
       pending: [...state.pendingControlRequests.values()].slice(-MAX_REPLAY_EVENTS),
       outcomes: [...state.controlOutcomes.values()].slice(-MAX_REPLAY_EVENTS),
+      requests: [...state.controlRequests.values()].slice(-MAX_REPLAY_EVENTS),
       receipts: state.controlReceipts.slice(-MAX_REPLAY_EVENTS)
     }) ?? Effect.void
+  const persistCurrentControls = journalGate.withPermits(1)(
+    Ref.get(ref).pipe(Effect.flatMap(persistControls))
+  )
   const ensureControlsLoaded: Effect.Effect<void, Error> = journal
     ? loadGate.withPermits(1)(Effect.gen(function* () {
         if ((yield* Ref.get(ref)).controlsLoaded) return
@@ -230,6 +256,10 @@ export const makeSubagentSupervisionService = (
             ...restored.outcomes,
             ...recoveredPending
           ].map((outcome) => [outcome.requestId, outcome])),
+          controlRequests: new Map([
+            ...(restored.requests ?? []),
+            ...restored.pending.map(({ request }) => request)
+          ].map((request) => [request.requestId, request])),
           controlReceipts: restored.receipts.slice(-MAX_REPLAY_EVENTS),
           pendingControlRequests: new Map()
         }))
@@ -238,12 +268,25 @@ export const makeSubagentSupervisionService = (
 
   return {
     state: Ref.get(ref),
-    publish: (event) => Ref.update(ref, (state) => ({
-      ...state,
-      tree: reduceSubagentFleetEvent(state.tree, event),
-      eventLog: [...state.eventLog, event].slice(-MAX_REPLAY_EVENTS),
-      registryRevision: Math.max(state.registryRevision, eventRevision(event))
-    })),
+    publish: (event) => Ref.update(ref, (state) => {
+      const transcriptFiles = new Map(state.transcriptFiles)
+      if (event._tag === "Upsert" && event.node.sessionFile !== null) {
+        transcriptFiles.delete(event.node.runId)
+        transcriptFiles.set(event.node.runId, event.node.sessionFile)
+        while (transcriptFiles.size > MAX_TRANSCRIPT_FILES) {
+          const oldest = transcriptFiles.keys().next().value
+          if (oldest === undefined) break
+          transcriptFiles.delete(oldest)
+        }
+      }
+      return {
+        ...state,
+        tree: reduceSubagentFleetEvent(state.tree, event),
+        eventLog: [...state.eventLog, event].slice(-MAX_REPLAY_EVENTS),
+        registryRevision: Math.max(state.registryRevision, eventRevision(event)),
+        transcriptFiles
+      }
+    }),
     nextRevision: modify((state) => {
       const revision = state.registryRevision + 1
       return [revision, { ...state, registryRevision: revision }]
@@ -288,6 +331,9 @@ export const makeSubagentSupervisionService = (
       ...state,
       durableNodeIds: new Set(durableNodeIds)
     })),
+    transcriptFile: (runId) => Ref.get(ref).pipe(
+      Effect.map((state) => state.transcriptFiles.get(runId) ?? null)
+    ),
     submitControl: (request, execute) => Effect.gen(function* () {
       const loaded = yield* Effect.either(ensureControlsLoaded)
       if (loaded._tag === "Left") {
@@ -309,21 +355,49 @@ export const makeSubagentSupervisionService = (
       const registration = yield* SynchronizedRef.modifyEffect(
         ref,
         (state): Effect.Effect<readonly [ControlRegistration, SupervisionState]> => {
+        const conflict = (sequence: number): ControlRegistration => ({
+          _tag: "Conflict",
+          outcome: {
+            version: 2,
+            requestId: request.requestId,
+            runId: request.runId,
+            action: request.action,
+            acknowledged: false,
+            status: "rejected",
+            deliveryStatus: "rejected",
+            sequence,
+            nativeRequestId: null,
+            message: "Control request ID cannot be verified against the original payload",
+            acknowledgedAt: now()
+          }
+        })
         const cached = state.controlOutcomes.get(request.requestId)
-        if (cached) return Effect.succeed([
-          { _tag: "Cached" as const, outcome: cached },
-          state
-        ] as const)
+        if (cached) {
+          const original = state.controlRequests.get(request.requestId)
+          return Effect.succeed([
+            !original || !sameControlRequest(original, request)
+              ? conflict(cached.sequence)
+              : { _tag: "Cached" as const, outcome: cached },
+            state
+          ] as const)
+        }
         const pending = state.pendingControls.get(request.requestId)
-        if (pending) return Effect.succeed([
-          { _tag: "Pending" as const, deferred: pending },
-          state
-        ] as const)
+        if (pending) {
+          const original = state.pendingControlRequests.get(request.requestId)
+          return Effect.succeed([
+            original && !sameControlRequest(original.request, request)
+              ? conflict(original.sequence)
+              : { _tag: "Pending" as const, deferred: pending },
+            state
+          ] as const)
+        }
         const sequence = state.controlSequence + 1
         const pendingControls = new Map(state.pendingControls)
         pendingControls.set(request.requestId, candidate)
         const pendingControlRequests = new Map(state.pendingControlRequests)
         pendingControlRequests.set(request.requestId, { request, sequence })
+        const controlRequests = new Map(state.controlRequests)
+        controlRequests.set(request.requestId, request)
         const queued: SubagentControlReceipt = {
           version: 2,
           messageId: request.requestId,
@@ -343,14 +417,15 @@ export const makeSubagentSupervisionService = (
           controlSequence: sequence,
           pendingControls,
           pendingControlRequests,
+          controlRequests,
           controlReceipts: [...state.controlReceipts, queued].slice(-MAX_REPLAY_EVENTS)
         }] as const)
       })
-      if (registration._tag === "Cached") return registration.outcome
+      if (registration._tag === "Cached" || registration._tag === "Conflict") {
+        return registration.outcome
+      }
       if (registration._tag === "Pending") return yield* Deferred.await(registration.deferred)
-      const queuedPersisted = yield* Effect.either(
-        Ref.get(ref).pipe(Effect.flatMap(persistControls))
-      )
+      const queuedPersisted = yield* Effect.either(persistCurrentControls)
       if (queuedPersisted._tag === "Left") {
         const rejected: SubagentFleetControlOutcome = {
           version: 2,
@@ -424,9 +499,7 @@ export const makeSubagentSupervisionService = (
           controlReceipts: [...state.controlReceipts, receipt].slice(-MAX_REPLAY_EVENTS)
         }
       })
-      const saved = yield* Effect.either(
-        Ref.get(ref).pipe(Effect.flatMap(persistControls))
-      )
+      const saved = yield* Effect.either(persistCurrentControls)
       const settled = saved._tag === "Right"
         ? outcome
         : {
@@ -462,9 +535,11 @@ export const makeSubagentSupervisionService = (
       childSequences: new Map<string, number>(),
       asyncStarts: new Map<string, SubagentStartRecord>(),
       durableNodeIds: new Set<string>(),
+      transcriptFiles: state.transcriptFiles,
       controlsLoaded: journal === undefined,
       controlSequence: 0,
       controlOutcomes: new Map<string, SubagentFleetControlOutcome>(),
+      controlRequests: new Map<string, SubagentFleetControlRequest>(),
       controlReceipts: [],
       pendingControlRequests: new Map(),
       pendingControls: new Map<

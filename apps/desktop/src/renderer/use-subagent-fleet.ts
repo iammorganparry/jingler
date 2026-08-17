@@ -74,6 +74,8 @@ export function useSubagentFleet(input: {
   useEffect(() => {
     if (!hasFleetSession) return
     let active = true
+    let retryAttempt = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
     const refresh = async () => {
       if (refreshInFlightRef.current) return
       refreshInFlightRef.current = true
@@ -97,6 +99,11 @@ export function useSubagentFleet(input: {
             registryRevision: snapshot.registryRevision,
             id: node.id
           }))
+        retryAttempt = 0
+        if (retryTimer !== null) {
+          clearTimeout(retryTimer)
+          retryTimer = null
+        }
         actor.send({
           type: "SYNC",
           events: [
@@ -112,8 +119,16 @@ export function useSubagentFleet(input: {
           ]
         })
       } catch {
-        // The Pi session can legitimately be inactive before its first turn or
-        // after disposal; lifecycle events remain the last factual projection.
+        // Session startup and reconnect can race the first recovery read. Retry
+        // transiently without restoring steady-state polling.
+        if (active && retryAttempt < 3 && retryTimer === null) {
+          const delay = 250 * (4 ** retryAttempt)
+          retryAttempt += 1
+          retryTimer = setTimeout(() => {
+            retryTimer = null
+            void refresh()
+          }, delay)
+        }
       } finally {
         refreshInFlightRef.current = false
       }
@@ -124,6 +139,7 @@ export function useSubagentFleet(input: {
     document.addEventListener("visibilitychange", refreshOnFocus)
     return () => {
       active = false
+      if (retryTimer !== null) clearTimeout(retryTimer)
       window.removeEventListener("focus", refreshOnFocus)
       document.removeEventListener("visibilitychange", refreshOnFocus)
     }
