@@ -230,8 +230,12 @@ export const subagentFleetMachine = setup({
             const tree = projectEvents(parentPiSessionId, event.events)
             const parentChanged =
               parentPiSessionId !== context.tree.parentPiSessionId
+            const nodeAdded = tree.nodes.some(
+              (node) => !hasNode(context.tree.nodes, node.id)
+            )
             return {
               tree,
+              expanded: context.expanded || nodeAdded,
               selectedId:
                 !parentChanged &&
                 (context.selectedId === MAIN_FLEET_AGENT || hasNode(tree.nodes, context.selectedId))

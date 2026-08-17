@@ -196,6 +196,65 @@ describe("subagentFleetMachine", () => {
     actor.stop()
   })
 
+  it("reopens when a new subagent appears without reopening for status updates", () => {
+    const actor = createActor(subagentFleetMachine, {
+      input: { parentPiSessionId: "parent" }
+    }).start()
+    actor.send({
+      type: "SYNC",
+      events: [{
+        _tag: "Upsert",
+        version: 2,
+        eventId: "start-1",
+        occurredAt: 10,
+        node
+      }]
+    })
+    actor.send({ type: "TOGGLE" })
+    expect(actor.getSnapshot().context.expanded).toBe(false)
+
+    actor.send({
+      type: "SYNC",
+      events: [{
+        _tag: "Upsert",
+        version: 2,
+        eventId: "update-1",
+        occurredAt: 20,
+        node: { ...node, updatedAt: 20 }
+      }]
+    })
+    expect(actor.getSnapshot().context.expanded).toBe(false)
+
+    const nextNode = {
+      ...node,
+      id: "parent/run-2",
+      subagentId: "run-2",
+      orchestrationRunId: "run-2",
+      runId: "run-2"
+    }
+    actor.send({
+      type: "SYNC",
+      events: [
+        {
+          _tag: "Upsert",
+          version: 2,
+          eventId: "update-1",
+          occurredAt: 20,
+          node: { ...node, updatedAt: 20 }
+        },
+        {
+          _tag: "Upsert",
+          version: 2,
+          eventId: "start-2",
+          occurredAt: 30,
+          node: nextNode
+        }
+      ]
+    })
+    expect(actor.getSnapshot().context.expanded).toBe(true)
+    actor.stop()
+  })
+
   it("bounds resize and tracks acknowledged control outcomes", () => {
     const actor = createActor(subagentFleetMachine, {
       input: { parentPiSessionId: "parent" }
