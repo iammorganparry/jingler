@@ -43,7 +43,8 @@
       "!**/out/**",
       "!**/dist/**",
       "!**/.turbo/**",
-      "!**/storybook-static/**"
+      "!**/storybook-static/**",
+      "!tools/oxlint/anti-slop"
     ]
   }
 }
