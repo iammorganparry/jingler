@@ -290,6 +290,43 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
+  it("projects a running root from an async acknowledgment with no children", () => {
+    // An async spawn's tool result reports only `{mode, runId}` — the work
+    // detached before any per-child progress existed. The Fleet must still
+    // gain a node even when the `subagent:async-started` bus event is missed.
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      controlJournal: null,
+      emit: () => undefined,
+      now: () => 60
+    })
+    adapter.start()
+    adapter.progress({ runId: "run-async", mode: "workflow", children: [] })
+    expect(adapter.snapshot().nodes).toEqual([
+      expect.objectContaining({
+        runId: "run-async",
+        nodeKind: "workflow",
+        status: "running",
+        background: true
+      })
+    ])
+
+    // A stale trailing acknowledgment must not resurrect a settled run.
+    events.emit("subagent:async-complete", {
+      runId: "run-async",
+      sessionId: parent,
+      status: "complete",
+      timestamp: 61
+    })
+    const settled = adapter.snapshot().nodes.find((node) => node.runId === "run-async")
+    adapter.progress({ runId: "run-async", mode: "workflow", children: [] })
+    expect(adapter.snapshot().nodes.find((node) => node.runId === "run-async"))
+      .toEqual(settled)
+    adapter.stop()
+  })
+
   it("uses the native child run ID across progress and completion", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({

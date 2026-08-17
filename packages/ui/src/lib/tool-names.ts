@@ -26,6 +26,9 @@ const CANONICAL_TOOL_NAMES: Readonly<Record<string, string>> = {
   // Execution
   command_execute: "Bash",
   bash: "Bash",
+  // Native pi-subagents fleet tools
+  subagent: "Subagent",
+  subagent_wait: "Wait for subagents",
   // Jingler agent surface
   jingler_ask_question: "Ask",
   jingler_save_draft_plan: "Draft plan",

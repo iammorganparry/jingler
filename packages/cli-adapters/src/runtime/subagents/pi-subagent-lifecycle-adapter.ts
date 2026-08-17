@@ -423,6 +423,48 @@ export class PiSubagentLifecycleAdapter {
     const now = this.#now()
     const context = this.#state().tree
     const rootId = subagentFleetNodeId(this.#parentPiSessionId, input.runId)
+    // An empty-children report is an ASYNC spawn acknowledgment: the tool
+    // returned `{mode, runId}` with no per-child progress because the work
+    // detached into its own process. Upsert a running root so the Fleet learns
+    // about the run even when the `subagent:async-started` bus event was
+    // missed — the durable-status poll and completion events enrich or settle
+    // it later. Never resurrect a settled root from a stale trailing report.
+    if (input.children.length === 0) {
+      const existing = context.nodes.find((node) => node.id === rootId)
+      if (existing !== undefined && existing.terminal !== null) return
+      this.#publish({
+        _tag: "Upsert",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `progress-root:${input.runId}:${now}`,
+        occurredAt: now,
+        node: {
+          ...(existing ?? {}),
+          ...this.#identity(
+            input.runId,
+            input.runId,
+            input.mode === "workflow" ? "workflow" : "agent"
+          ),
+          runId: input.runId,
+          parentId: null,
+          parentPiSessionId: this.#parentPiSessionId,
+          agent: existing?.agent ?? input.mode,
+          task: existing?.task ?? "Delegated work",
+          model: existing?.model ?? null,
+          status: "running",
+          terminal: null,
+          background: true,
+          sessionFile: existing?.sessionFile ?? null,
+          currentTool: existing?.currentTool ?? null,
+          startedAt: existing?.startedAt ?? now,
+          updatedAt: now,
+          completedAt: null,
+          usage: existing?.usage ?? emptyUsage(),
+          artifacts: existing?.artifacts ?? [],
+          attention: existing?.attention ?? null
+        }
+      })
+      return
+    }
     if (input.children.length > 0 && context.nodes.some((node) => node.id === rootId)) {
       this.#publish({
         _tag: "Remove",

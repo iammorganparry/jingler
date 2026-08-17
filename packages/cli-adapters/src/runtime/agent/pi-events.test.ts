@@ -287,6 +287,45 @@ describe("pi file-change events", () => {
     })
   })
 
+  it("projects an async spawn acknowledgment that carries no progress array", () => {
+    // Real pi-subagents async output: `{mode, runId, asyncId, asyncDir,
+    // results: []}` — no `progress` key. This must decode to an empty-children
+    // report so the lifecycle adapter can still project a running root node.
+    expect(piSubagentProgress({
+      type: "tool_execution_end",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      result: {
+        content: [{ type: "text", text: "Async: scout [run-async-1]" }],
+        details: {
+          mode: "workflow",
+          runId: "run-async-1",
+          asyncId: "run-async-1",
+          asyncDir: "/tmp/async-subagent-runs/run-async-1",
+          results: []
+        }
+      },
+      isError: false
+    } as never)).toEqual({
+      runId: "run-async-1",
+      mode: "workflow",
+      children: []
+    })
+  })
+
+  it("ignores management replies that carry no runId", () => {
+    expect(piSubagentProgress({
+      type: "tool_execution_end",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      result: {
+        content: [],
+        details: { mode: "management", results: [] }
+      },
+      isError: false
+    } as never)).toBeNull()
+  })
+
   it("projects exact supervisor attention from native custom messages", () => {
     expect(piSupervisorAttention({
       type: "message_end",

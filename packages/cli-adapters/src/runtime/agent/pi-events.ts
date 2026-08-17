@@ -46,10 +46,20 @@ const SupervisorAttention = Schema.Struct({
   })
 })
 const decodeSupervisorAttention = Schema.decodeUnknownOption(SupervisorAttention)
+/**
+ * `progress`/`results` are defaulted, not required. An ASYNC spawn's tool
+ * result carries only `{mode, runId, asyncId, asyncDir, results: []}` — no
+ * `progress` array at all (verified against live pi-subagents output). When
+ * these were required, that acknowledgment failed to decode and the spawn
+ * produced no Fleet node from the tool side; if the `subagent:async-started`
+ * bus event was also missed, the Fleet drawer never learned the run existed.
+ * Management replies (list/status) carry no `runId`, so they still decode to
+ * nothing here.
+ */
 const SubagentProgress = Schema.Struct({
   mode: Schema.String,
   runId: Schema.String,
-  progress: Schema.Array(Schema.Struct({
+  progress: Schema.optionalWith(Schema.Array(Schema.Struct({
     index: Schema.Number,
     agent: Schema.String,
     status: Schema.Literal("pending", "running", "completed", "failed", "detached"),
@@ -62,12 +72,12 @@ const SubagentProgress = Schema.Struct({
     toolCount: Schema.Number,
     durationMs: Schema.Number,
     error: Schema.optional(Schema.String)
-  })),
-  results: Schema.Array(Schema.Struct({
+  })), { default: () => [] }),
+  results: Schema.optionalWith(Schema.Array(Schema.Struct({
     index: Schema.Number,
     runId: Schema.optional(Schema.String),
     sessionFile: Schema.optional(Schema.String)
-  }))
+  })), { default: () => [] })
 })
 const decodeSubagentProgress = Schema.decodeUnknownOption(SubagentProgress)
 
