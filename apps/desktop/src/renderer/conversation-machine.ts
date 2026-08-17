@@ -1457,6 +1457,16 @@ export const conversationMachine = setup({
       }
       if (e._tag === "PlanDraft") {
         if (e.draft.phase === "cleared") return { planDraft: null }
+        // Drop a "complete" draft that arrives with no draft in flight. Draft
+        // events travel the pi event queue while `PlanProposed`/`PlanUpdated`
+        // are emitted directly from the submit tool's fiber, and nothing
+        // orders the two pipes: the proposal can win the race, clear the
+        // draft, and THEN the stale "complete" drains from the queue — which
+        // re-arms the draft, pins Plan Review on "Validating plan", and hides
+        // the Approve button the parked backend is waiting on. A genuine
+        // submission always streams "composing" deltas first, so a bare
+        // "complete" here is that stale tail, not a new draft.
+        if (e.draft.phase === "complete" && context.planDraft === null) return {}
         const first = !context.planDraftPresentationRequested
         return {
           planDraft: e.draft,
@@ -1503,11 +1513,18 @@ export const conversationMachine = setup({
           ? { ...s, status: "done" as const, message: settleStreaming(s.message) }
           : s
       )
+      // `Done.tokens` NEVER reaches the context meter. It is the run's
+      // cumulative spend (see the `Usage` schema note in conversation.ts) —
+      // cache reads counted once per tool call — so on a long session it runs
+      // to hundreds of millions. It used to be a fallback when the live
+      // reading was 0, and the post-compaction reset made that 0 routine: the
+      // meter then showed lifetime spend ("239239.4k context") until the next
+      // turn's first Usage event corrected it. Occupancy comes from `Usage`
+      // alone; a harness that only knows it at turn end must emit one.
       if (e._tag === "Done") {
         return {
           messages,
           subagents: settled,
-          tokens: context.tokens > 0 ? context.tokens : e.tokens,
           runStartedAt: null,
           lastOutcome: "done" as const,
           planDraft: null,

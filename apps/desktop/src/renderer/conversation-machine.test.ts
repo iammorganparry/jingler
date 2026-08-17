@@ -468,24 +468,63 @@ describe("conversationMachine — context size", () => {
     emit({ _tag: "Usage", tokens: 45_000 })
     expect(actor.getSnapshot().context.tokens).toBe(45_000)
 
-    // Done can carry a terminal context reading for adapters without a live
-    // event. It must not overwrite the newer live reading we already received.
+    // Done's tokens are the run's cumulative spend, never occupancy. It must
+    // not overwrite the newer live reading we already received.
     emit({ _tag: "Done", costUsd: 0, tokens: 300_000 })
     await waitFor(actor, (s) => s.matches(idle))
     expect(actor.getSnapshot().context.tokens).toBe(45_000)
     actor.stop()
   })
 
-  it("uses Done as a fallback when a harness has no live context event", async () => {
+  it("never adopts Done's cumulative spend, even with no live reading", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
 
     actor.send({ type: "SEND", text: "inspect the repo" })
     await waitFor(actor, (s) => s.matches("running"))
+    // No Usage arrived this turn. Done's figure is the session's cumulative
+    // spend (cache reads counted per tool call), not a context reading — a
+    // long session reports hundreds of millions here, and adopting it showed
+    // "239239.4k context" on the meter. Zero (meter hidden) is the truth.
     emit({ _tag: "Done", costUsd: 0, tokens: 42_000 })
     await waitFor(actor, (s) => s.matches(idle))
 
-    expect(actor.getSnapshot().context.tokens).toBe(42_000)
+    expect(actor.getSnapshot().context.tokens).toBe(0)
+    actor.stop()
+  })
+
+  it("stays at zero after a compaction until a real Usage reading arrives", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+
+    actor.send({ type: "SEND", text: "inspect the repo" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({ _tag: "Usage", tokens: 220_000 })
+    emit({
+      _tag: "ContextCompacted",
+      digest: {
+        goal: "Ship the fix",
+        decisions: [],
+        filesTouched: [],
+        openThreads: [],
+        preferences: [],
+        throughMessageId: "m1",
+        builtAt: new Date(0).toISOString()
+      },
+      tokensBefore: 220_000
+    })
+    expect(actor.getSnapshot().context.tokens).toBe(0)
+
+    // The compaction reset made a zero reading ROUTINE, which is exactly how
+    // Done's cumulative fallback used to reach the meter every session.
+    emit({ _tag: "Done", costUsd: 0, tokens: 239_239_400 })
+    await waitFor(actor, (s) => s.matches(idle))
+    expect(actor.getSnapshot().context.tokens).toBe(0)
+
+    actor.send({ type: "SEND", text: "continue" })
+    await waitFor(actor, (s) => s.matches("running"))
+    emit({ _tag: "Usage", tokens: 31_000 })
+    expect(actor.getSnapshot().context.tokens).toBe(31_000)
     actor.stop()
   })
 })
@@ -1758,6 +1797,44 @@ describe("conversationMachine — volatile plan drafts", () => {
     expect(latestPlan(promoted.messages)?.raw).toBe(
       "<h1>PRD: Live plan</h1>"
     )
+    actor.stop()
+  })
+
+  it("drops a stale complete draft that drains after the proposal cleared it", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    // Draft events travel the pi event queue; PlanProposed is emitted directly
+    // from the submit tool's fiber. Nothing orders the two pipes, so the
+    // proposal can land FIRST and the draft's final "complete" snapshot drain
+    // afterwards. Re-arming the draft here pinned Plan Review on "Validating
+    // plan" — hiding the Approve button the parked backend was waiting on.
+    emit({
+      _tag: "PlanDraft",
+      draft: { id: "plan_live_1", source: "<h1>PRD: Racy</h1>", phase: "composing" }
+    })
+    emit({ _tag: "PlanProposed", plan: proposedPlan })
+    expect(actor.getSnapshot().context.planDraft).toBeNull()
+
+    emit({
+      _tag: "PlanDraft",
+      draft: { id: "plan_live_1", source: "<h1>PRD: Racy</h1>", phase: "complete" }
+    })
+    expect(actor.getSnapshot().context.planDraft).toBeNull()
+
+    // A genuinely new submission opens with "composing" and must still land.
+    emit({
+      _tag: "PlanDraft",
+      draft: { id: "plan_live_2", source: "<h1>PRD: Next</h1>", phase: "composing" }
+    })
+    expect(actor.getSnapshot().context.planDraft?.source).toContain("PRD: Next")
+    emit({
+      _tag: "PlanDraft",
+      draft: { id: "plan_live_2", source: "<h1>PRD: Next</h1>", phase: "complete" }
+    })
+    expect(actor.getSnapshot().context.planDraft?.phase).toBe("complete")
     actor.stop()
   })
 
