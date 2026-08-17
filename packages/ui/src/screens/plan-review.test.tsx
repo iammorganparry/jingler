@@ -141,6 +141,38 @@ describe("PlanReview", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
   })
 
+  it("offers Approve when a stale complete draft outlives the proposed document", async () => {
+    // The stale-draft race: the submit tool's directly-emitted proposal beats
+    // the draft's queued "complete" snapshot, so the machine can be left
+    // holding both a proposed document AND a complete draft. The draft must
+    // not win — "Validating plan" replaces the Approve button, and the
+    // backend is parked on that very approval.
+    render(
+      <PlanReview
+        plan={null}
+        document={document}
+        streamingDraft={{ id: "plan-stream", source, phase: "complete" }}
+      />
+    )
+
+    expect(await screen.findByText("Build")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Validating plan" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
+  })
+
+  it("still shows the validating loader while no document awaits a decision", async () => {
+    render(
+      <PlanReview
+        plan={null}
+        streamingDraft={{ id: "plan-stream", source, phase: "complete" }}
+      />
+    )
+
+    expect(await screen.findByText("Build")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Validating plan" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull()
+  })
+
   it("degrades gracefully on a malformed streamed plan instead of crashing", async () => {
     // A complete-but-malformed agent emission: the stage omits every required
     // array (files/notes/acceptance/…). The outline/architecture views .map over
