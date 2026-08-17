@@ -100,6 +100,18 @@ const actorFor = (
 })
 
 describe("newWorkspaceMachine", () => {
+  it("starts every model in the configured default mode and falls back to Auto", async () => {
+    const fallback = actorFor().start()
+    fallback.send({ type: "OPEN", projectId: "p-local" })
+    expect(fallback.getSnapshot().context.mode).toBe("auto")
+    fallback.stop()
+
+    const configured = actorFor(undefined, { defaultMode: "ask" }).start()
+    configured.send({ type: "OPEN", projectId: "p-local" })
+    expect(configured.getSnapshot().context.mode).toBe("ask")
+    configured.stop()
+  })
+
   it("resets incompatible checkout selections when the project changes", async () => {
     const actor = actorFor().start()
     actor.send({ type: "OPEN", projectId: "p-local" })
@@ -403,7 +415,7 @@ describe("newWorkspaceMachine", () => {
       connectionId,
       providerId,
       modelId,
-      mode: "accept-edits"
+      mode: "auto"
     }), [], expect.any(Function))
   })
 })

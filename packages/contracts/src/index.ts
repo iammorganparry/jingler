@@ -1574,6 +1574,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: NotificationsConfig
   }),
 
+  /** Persist the permission mode used for new chats across every provider model. */
+  Rpc.make("Config.setDefaultMode", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: Schema.Struct({ defaultMode: ExecutionMode })
+  }),
+
   /**
    * Persist whether plan mode runs commands unattended. Plan mode cannot edit,
    * so this only ever covers read-only commands.

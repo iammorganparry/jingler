@@ -155,7 +155,7 @@ export function Composer({
   connectionId = null,
   modelId = null,
   onSetModel,
-  mode = "accept-edits",
+  mode = "auto",
   onSetMode,
   followAgent = false,
   onToggleFollowAgent,

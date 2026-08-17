@@ -8,7 +8,8 @@ import type {
   PlanTemplateConfig,
   ContextConfig,
   ContextSnapshot,
-  Environment
+  Environment,
+  ExecutionMode
 } from "@jingler/core"
 import {
   BUDGET_RANGE,
@@ -227,6 +228,9 @@ export interface SettingsViewProps {
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
+  /** Permission mode used for new chats across every provider model. */
+  defaultMode?: ExecutionMode | null
+  onSaveDefaultMode?: (defaultMode: ExecutionMode) => void | Promise<void>
   /** Whether plan mode runs commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
@@ -278,6 +282,8 @@ export function SettingsView({
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
+  defaultMode,
+  onSaveDefaultMode,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -389,6 +395,8 @@ export function SettingsView({
             environment.kind === "owned"
           ) ?? []}
           onRefreshOffloadEnvironments={devices?.onRefresh}
+          defaultMode={defaultMode}
+          onSaveDefaultMode={onSaveDefaultMode}
           planAutoRun={planAutoRun}
           onSavePlanAutoRun={onSavePlanAutoRun}
           adhdMode={adhdMode}
@@ -924,6 +932,8 @@ function GeneralSection({
   offloadStatus,
   offloadEnvironments,
   onRefreshOffloadEnvironments,
+  defaultMode,
+  onSaveDefaultMode,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -939,6 +949,8 @@ function GeneralSection({
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
   offloadEnvironments: ReadonlyArray<Environment>
   onRefreshOffloadEnvironments?: () => void | Promise<void>
+  defaultMode?: ExecutionMode | null
+  onSaveDefaultMode?: (defaultMode: ExecutionMode) => void | Promise<void>
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
   adhdMode?: boolean | null
@@ -963,6 +975,13 @@ function GeneralSection({
       ...settings
     })
   }
+  const [defaultModeDraft, setDefaultModeDraft] = React.useState<ExecutionMode>(
+    defaultMode ?? "auto"
+  )
+  React.useEffect(
+    () => setDefaultModeDraft(defaultMode ?? "auto"),
+    [defaultMode]
+  )
   // Absent means ON, matching `PLAN_AUTO_RUN_DEFAULT` in the domain.
   const [planDraft, setPlanDraft] = React.useState<boolean>(planAutoRun ?? true)
   React.useEffect(() => setPlanDraft(planAutoRun ?? true), [planAutoRun])
@@ -1077,6 +1096,36 @@ function GeneralSection({
               Offload Compute settings could not be saved.
             </p>
           ) : null}
+        </div>
+
+        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
+          <span className="text-[13px] font-semibold text-text-bright">
+            Agent defaults
+          </span>
+        </div>
+        <div className="flex items-start gap-3 py-2.5">
+          <div className="flex-1">
+            <div className="text-[12.5px] font-medium text-text-body">
+              Default mode
+            </div>
+            <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
+              Start new chats in this permission mode for every model.
+            </div>
+          </div>
+          <SegmentedControl
+            className="mt-0.5 flex-none"
+            value={defaultModeDraft}
+            items={[
+              { value: "ask", label: "Ask" },
+              { value: "accept-edits", label: "Accept Edits" },
+              { value: "auto", label: "Auto" }
+            ]}
+            onChange={(next) => {
+              const mode = next as ExecutionMode
+              setDefaultModeDraft(mode)
+              void onSaveDefaultMode?.(mode)
+            }}
+          />
         </div>
 
         <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">

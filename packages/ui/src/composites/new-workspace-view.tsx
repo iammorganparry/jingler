@@ -1,6 +1,7 @@
 import * as React from "react";
 import type {
   Environment,
+  PermissionMode,
   ProviderCatalog,
   ProviderConnectionId,
   ProviderModelId,
@@ -291,6 +292,7 @@ export interface NewWorkspaceViewProps {
   providerCatalog?: ProviderCatalog | null;
   defaultConnectionId?: ProviderConnectionId | null;
   defaultModelId?: ProviderModelId | null;
+  defaultMode?: PermissionMode | null;
   defaultProjectId?: string | null;
   requestedProjectId?: string | null;
   prepareProject: NewWorkspaceDeps["prepareProject"];

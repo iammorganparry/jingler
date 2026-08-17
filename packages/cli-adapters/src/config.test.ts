@@ -265,6 +265,18 @@ describe("ConfigService", () => {
     }
   })
 
+  it("persists the default permission mode across unrelated saves", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setDefaultMode("ask")
+        yield* ConfigService.setLastRepoPath("/repos/widget")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") expect(exit.value?.defaultMode).toBe("ask")
+  })
+
   it("persists ADHD mode and reads it back", async () => {
     const exit = await provided(
       Effect.gen(function* () {

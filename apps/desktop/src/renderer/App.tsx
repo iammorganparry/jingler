@@ -13,6 +13,7 @@ import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
   CreateSessionInput,
+  ExecutionMode,
   GitConfig,
   GithubConfig,
   NotificationsConfig,
@@ -515,6 +516,8 @@ function AuthedApp({
     }
   }, [persistedOffloadCompute, sendOffloadSettings]);
   const offloadCompute = offloadSettingsState.context.settings;
+  // Absent means Auto for configs written before this preference existed.
+  const defaultMode = configQuery.data?.defaultMode ?? "auto";
   // Absent means on — plan mode's commands are read-only.
   const planAutoRun = configQuery.data?.planAutoRun ?? true;
   // Absent means off — ADHD mode shapes completion summaries, so it remains an
@@ -574,6 +577,10 @@ function AuthedApp({
   const saveOffloadCompute = (settings: OffloadComputeSettings) => {
     sendOffloadSettings({ type: "SET", settings });
   };
+  const saveDefaultMode = (value: ExecutionMode) =>
+    rpc.configSetDefaultMode(value).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
   const savePlanAutoRun = (value: boolean) =>
     rpc.configSetPlanAutoRun(value).then((saved) => {
       qc.setQueryData(["config"], saved);
@@ -1579,6 +1586,8 @@ function AuthedApp({
             await webSearchSkip.mutateAsync();
           },
         }}
+        defaultMode={defaultMode}
+        onSaveDefaultMode={saveDefaultMode}
         planAutoRun={planAutoRun}
         onSavePlanAutoRun={savePlanAutoRun}
         adhdMode={adhdMode}

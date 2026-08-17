@@ -944,6 +944,8 @@ export const WorkspaceConfig = Schema.Struct({
   defaultConnectionId: Schema.optional(ProviderConnectionId),
   defaultProviderId: Schema.optional(ProviderId),
   defaultModelId: Schema.optional(ProviderModelId),
+  /** Permission mode used for new chats across every provider model. */
+  defaultMode: Schema.optional(ExecutionMode),
   connectionSelectionRequired: Schema.optional(Schema.Boolean),
   /** First-run provider authentication was completed or explicitly skipped. */
   providerSetupCompleted: Schema.optional(Schema.Boolean),

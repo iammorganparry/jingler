@@ -109,6 +109,7 @@ import {
   Environment as EnvironmentSchema,
   EnvironmentError,
   createWorkspaceProvisioningPlan,
+  defaultModeFor,
   WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema,
   EnvironmentHandoffError,
   StreamEvent as StreamEventSchema,
@@ -828,12 +829,15 @@ type SessionWithPr = Session & { readonly prNumber: number };
 const hasActivePr = (session: Session | null): session is SessionWithPr =>
   session !== null && session.prNumber !== null;
 
-const sessionCreationOptions = (input: {
-  readonly modelId: CreateSessionInput["modelId"];
-  readonly mode?: PermissionMode;
-  readonly reasoning?: ReasoningSetting | null;
-}) => ({
-  defaultMode: input.mode ?? ("accept-edits" as const),
+export const sessionCreationOptions = (
+  input: {
+    readonly modelId: CreateSessionInput["modelId"];
+    readonly mode?: PermissionMode;
+    readonly reasoning?: ReasoningSetting | null;
+  },
+  configuredDefault?: PermissionMode,
+) => ({
+  defaultMode: defaultModeFor(input.mode ?? configuredDefault),
   defaultReasoning: input.reasoning ?? undefined,
 });
 
@@ -1074,7 +1078,7 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
     const allowSharedCheckout = config?.git?.shareCheckedOutBranches ?? true;
     return yield* SessionStore.createFromPr(input, {
       allowSharedCheckout,
-      ...sessionCreationOptions(input),
+      ...sessionCreationOptions(input, config?.defaultMode),
     });
   });
 
@@ -1086,6 +1090,9 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
  */
 export const createSession = (input: CreateSessionInput) =>
   Effect.gen(function* () {
+    const config = yield* ConfigService.get().pipe(
+      Effect.orElseSucceed(() => null),
+    );
     const resolvedInput =
       input.projectId === undefined
         ? input
@@ -1101,7 +1108,7 @@ export const createSession = (input: CreateSessionInput) =>
           );
     return yield* SessionStore.create(
       resolvedInput,
-      sessionCreationOptions(resolvedInput),
+      sessionCreationOptions(resolvedInput, config?.defaultMode),
     );
   });
 
@@ -1189,9 +1196,12 @@ export const createSessionRouted = (
  */
 export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
   Effect.gen(function* () {
+    const config = yield* ConfigService.get().pipe(
+      Effect.orElseSucceed(() => null),
+    );
     return yield* SessionStore.createFromIssue(
       input,
-      sessionCreationOptions(input),
+      sessionCreationOptions(input, config?.defaultMode),
     );
   });
 
@@ -5480,6 +5490,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Config.setGit": (git) => ConfigService.setGit(git),
   "Config.setNotifications": (notifications) =>
     ConfigService.setNotifications(notifications),
+  "Config.setDefaultMode": ({ defaultMode }) =>
+    ConfigService.setDefaultMode(defaultMode),
   "Config.setPlanAutoRun": ({ planAutoRun }) =>
     ConfigService.setPlanAutoRun(planAutoRun),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),

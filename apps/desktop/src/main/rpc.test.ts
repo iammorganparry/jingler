@@ -52,6 +52,7 @@ import {
   GitError,
   GitHubApiError,
   DetectedResourceCandidate,
+  ProviderModelId,
   planStageSemanticFingerprint,
 } from "@jingler/core";
 import {
@@ -102,6 +103,7 @@ import {
   selectContinuationRepository,
   setReasoning,
   setSessionPersistent,
+  sessionCreationOptions,
   sessionDiff,
   skillsList,
   transcriptHasGitHubFeedback,
@@ -112,6 +114,18 @@ import {
   withoutAttachmentData,
   workspaceRevertLines,
 } from "./rpc.js";
+
+describe("session creation defaults", () => {
+  const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/test");
+
+  it("defaults every model to Auto and respects the saved preference", () => {
+    expect(sessionCreationOptions({ modelId }).defaultMode).toBe("auto");
+    expect(sessionCreationOptions({ modelId }, "ask").defaultMode).toBe("ask");
+    expect(
+      sessionCreationOptions({ modelId, mode: "accept-edits" }, "ask").defaultMode,
+    ).toBe("accept-edits");
+  });
+});
 
 describe("publish branch verification", () => {
   const session = (branch: string, semanticBranchPending = false): Session => ({

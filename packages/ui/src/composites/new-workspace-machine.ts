@@ -27,6 +27,7 @@ export interface NewWorkspaceDeps {
   providerCatalog?: ProviderCatalog | null
   defaultConnectionId?: ProviderConnectionId | null
   defaultModelId?: ProviderModelId | null
+  defaultMode?: PermissionMode | null
   defaultProjectId?: string | null
   loadBranches: (path: string, environmentId?: string) => Promise<ReadonlyArray<string>>
   prepareProject: (projectId: string, environmentId?: string) => Promise<Project>
@@ -245,7 +246,7 @@ export const newWorkspaceMachine = setup({
         draft: "",
         attachments: [] as ReadonlyArray<Attachment>,
         ...provider,
-        mode: "accept-edits" as const,
+        mode: deps.defaultMode ?? "auto",
         reasoning: undefined,
         provisioningPhase: null,
         error: null
@@ -305,7 +306,7 @@ export const newWorkspaceMachine = setup({
     ...resetSource,
     draft: "",
     attachments: [],
-    mode: "accept-edits",
+    mode: "auto",
     reasoning: undefined,
     connectionId: null,
     providerId: null,

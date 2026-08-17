@@ -21,6 +21,7 @@ import type {
   DiffStat,
   Environment,
   EnvironmentDiscovery,
+  ExecutionMode,
   IssueProviderDescriptor,
   IssueSummary,
   SessionPrStatus,
@@ -207,6 +208,9 @@ export interface JinglerAppProps {
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
   /** Redacted WebSearch settings plus write-only credential actions. */
   webSearch?: SettingsViewProps["webSearch"]
+  /** Permission mode used for new chats across every provider model. */
+  defaultMode?: ExecutionMode | null
+  onSaveDefaultMode?: (defaultMode: ExecutionMode) => Promise<void> | void
   /** Whether plan mode runs its read-only commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => Promise<void> | void
@@ -461,6 +465,8 @@ export function JinglerApp({
   onSaveOffloadCompute,
   offloadStatus,
   webSearch,
+  defaultMode,
+  onSaveDefaultMode,
   planAutoRun,
   onSavePlanAutoRun,
   adhdMode,
@@ -1236,6 +1242,7 @@ export function JinglerApp({
               providerCatalog={providerConnections?.catalog}
               defaultConnectionId={providerConnections?.defaultConnectionId}
               defaultModelId={providerConnections?.defaultModelId}
+              defaultMode={defaultMode}
               issueProviders={issueProviders}
               loadPullRequests={loadPullRequests}
               loadGithubIssues={loadGithubIssues}
@@ -1285,6 +1292,8 @@ export function JinglerApp({
               onSaveOffloadCompute={onSaveOffloadCompute}
               offloadStatus={offloadStatus}
               webSearch={webSearch}
+              defaultMode={defaultMode}
+              onSaveDefaultMode={onSaveDefaultMode}
               planAutoRun={planAutoRun}
               onSavePlanAutoRun={onSavePlanAutoRun}
               adhdMode={adhdMode}

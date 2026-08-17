@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import type { Environment } from "@jingler/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DevicesSection } from "./settings-view.js";
+import { DevicesSection, SettingsView } from "./settings-view.js";
 
 const base: Environment = {
   kind: "owned",
@@ -57,6 +57,35 @@ const dialog = {
   onRetry: vi.fn(),
 };
 afterEach(cleanup);
+
+const githubDisconnected = {
+  mode: "disconnected" as const,
+  enabled: true,
+  connected: false,
+  user: null,
+  installations: [],
+  lastRefreshedAt: null,
+  error: null,
+};
+
+describe("General settings", () => {
+  it("defaults new chats to Auto and persists another selected mode", () => {
+    const onSaveDefaultMode = vi.fn();
+    render(
+      <SettingsView
+        githubConnection={githubDisconnected}
+        onSaveDefaultMode={onSaveDefaultMode}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /General/ }));
+
+    expect(
+      screen.getByRole("tab", { name: "Auto" }).getAttribute("aria-selected"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "Ask" }));
+    expect(onSaveDefaultMode).toHaveBeenCalledWith("ask");
+  });
+});
 
 describe("Devices settings", () => {
   it("renders account-owned device connection and compatibility states", () => {

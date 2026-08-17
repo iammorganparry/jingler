@@ -1,5 +1,6 @@
 import type {
   ContextConfig,
+  ExecutionMode,
   GitConfig,
   GithubConfig,
   MemoryConfig,
@@ -139,6 +140,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
               ? { defaultProviderId: existing.defaultProviderId }
               : {}),
             ...(existing?.defaultModelId ? { defaultModelId: existing.defaultModelId } : {}),
+            ...(existing?.defaultMode ? { defaultMode: existing.defaultMode } : {}),
             ...(existing?.connectionSelectionRequired !== undefined
               ? { connectionSelectionRequired: existing.connectionSelectionRequired }
               : {}),
@@ -174,6 +176,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       const setGit = (git: GitConfig) => patch({ git })
 
       const setNotifications = (notifications: NotificationsConfig) => patch({ notifications })
+
+      /** Permission mode used when creating chats across every provider model. */
+      const setDefaultMode = (defaultMode: ExecutionMode) => patch({ defaultMode })
 
       /** Whether plan mode runs its (read-only) commands without asking. */
       const setPlanAutoRun = (planAutoRun: boolean) => patch({ planAutoRun })
@@ -300,6 +305,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setGithub,
         setGit,
         setNotifications,
+        setDefaultMode,
         setPlanAutoRun,
         setAdhdMode,
         setFontScale,

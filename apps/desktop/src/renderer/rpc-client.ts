@@ -923,6 +923,8 @@ export const rpc = {
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setNotifications(notifications)),
   /** Turn plan mode's unattended (read-only) command execution on or off. */
+  configSetDefaultMode: (defaultMode: ExecutionMode): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setDefaultMode({ defaultMode })),
   configSetPlanAutoRun: (planAutoRun: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanAutoRun({ planAutoRun })),
   /** Persist ADHD mode; resolves with the whole updated config. */
