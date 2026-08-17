@@ -147,6 +147,49 @@ it("discovers, namespaces, validates, invokes, and closes stateless MCP clients"
     expect(state.closes).toBe(2)
 })
 
+it("dials the CURRENT server config at call time when a live resolver is present", async () => {
+  // Registration happens once per pi session, but the browser MCP lease is a
+  // fresh loopback port + bearer per RUN. A tool bound to the registration
+  // snapshot dialled turn 1's dead endpoint on every later turn.
+  const dialled: string[] = []
+  const factory: McpToolClientFactory = (requested) => {
+    dialled.push("url" in requested ? requested.url : "stdio")
+    const client: McpToolClient = {
+      listTools: () => Effect.succeed({ tools: [tool] }),
+      callTool: () => Effect.succeed({ content: [{ type: "text", text: "ok" }] }),
+      close: Effect.void
+    }
+    return Effect.succeed(client)
+  }
+  let currentLease: RuntimeMcpServer = { ...server, url: "http://127.0.0.1:1111/mcp" }
+  const registry = new ToolRegistry()
+  await Effect.runPromise(
+    registerMcpTools(
+      registry,
+      // The memory slot keeps the "network" risk so `execute` needs no
+      // approval seam; the live-resolution mechanics are slot-independent.
+      jinglerMcpSources(
+        { memory: currentLease },
+        () => ({ memory: currentLease })
+      ),
+      factory
+    )
+  )
+  currentLease = { ...server, url: "http://127.0.0.1:2222/mcp" }
+  const result = await Effect.runPromise(
+    registry.execute({
+      id: "mcp__jingler-browser__navigate",
+      arguments: { url: "https://example.com" },
+      role: "conversation",
+      mode: "ask",
+      idempotencyKey: "turn-2"
+    })
+  )
+  expect(result.status).toBe("success")
+  // Discovery dialled the registration lease; the call dialled the live one.
+  expect(dialled).toEqual(["http://127.0.0.1:1111/mcp", "http://127.0.0.1:2222/mcp"])
+})
+
 it("never trusts MCP annotations to lower the configured source risk", async () => {
     const state: FakeClientState = { calls: [], closes: 0 }
     const registry = new ToolRegistry()
