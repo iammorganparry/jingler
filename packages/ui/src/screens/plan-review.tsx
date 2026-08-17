@@ -131,8 +131,18 @@ function PlanReviewBody(props: PlanReviewProps) {
 
   const promotingSource = null
   const transientSource = streamingDraft?.source ?? promotingSource
+  // A "complete" draft never outranks a document already parked on the
+  // operator's decision. The submit tool holds the turn open on that approval,
+  // so leaving "Validating plan" up (it replaces the Approve button in
+  // `plan-floating-actions`) deadlocks the pair: the backend waits on a click
+  // the UI refuses to offer. This is the rendered backstop for the stale-draft
+  // race the conversation machine also guards against — a draft event draining
+  // from the pi queue AFTER the directly-emitted proposal already cleared it.
+  const draftSuperseded =
+    streamingDraft?.phase === "complete" &&
+    (document?.status === "proposed" || document?.status === "revising")
   const transientState =
-    streamingDraft !== null && streamingDraft !== undefined
+    streamingDraft !== null && streamingDraft !== undefined && !draftSuperseded
       ? streamingDraft.phase === "complete"
         ? "validating"
         : "composing"
