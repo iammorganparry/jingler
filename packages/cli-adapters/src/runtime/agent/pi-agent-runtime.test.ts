@@ -585,6 +585,75 @@ describe("PiAgentRuntime", () => {
     ))).resolves.toHaveLength(1)
   })
 
+  it("routes a retained session's interactive tools to the CURRENT turn's context", async () => {
+    // The factory builds the session's custom tools once, closing over the
+    // context it was handed at create. A retained continuation turn must still
+    // reach the NEW turn's askQuestion — the creating turn's mailbox has ended.
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    let toolContext: AgentRuntimeContext | null = null
+    let childActive = true
+    const handle: PiSessionHandle = {
+      ...fleetSeams,
+      id: "/sessions/parent.jsonl",
+      parentPiSessionId: "pi-parent-internal",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      // Each prompt simulates the agent invoking jingler_ask_question through
+      // the tools the factory captured at CREATE time.
+      prompt: async () => {
+        await Effect.runPromise(
+          toolContext!.askQuestion({ id: "q-1", questions: [] })
+        )
+        listener?.({ type: "agent_settled" })
+      },
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      subagentFleetSnapshot: async () => ({
+        version: 2,
+        parentPiSessionId: "pi-parent-internal",
+        registryRevision: 0,
+        generatedAt: 1,
+        totalActive: childActive ? 1 : 0,
+        omitted: 0,
+        activeCapacity: { used: childActive ? 1 : 0, limit: 4 },
+        nodes: []
+      }),
+      usage: () => ({ costUsd: 0, tokens: 1 })
+    }
+    const create = vi.fn((_spec: PiRunSpec, created: AgentRuntimeContext) => {
+      toolContext = created
+      return Effect.succeed(handle)
+    })
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
+    )
+
+    const firstAsk = vi.fn(() => Effect.succeed([]))
+    const secondAsk = vi.fn(() => Effect.succeed([]))
+    await Effect.runPromise(
+      Stream.runCollect(runtime.run(spec, { ...context, askQuestion: firstAsk }))
+    )
+    expect(firstAsk).toHaveBeenCalledOnce()
+
+    await Effect.runPromise(
+      Stream.runCollect(
+        runtime.run(
+          { ...spec, runId: "run-2", prompt: "continue", piSessionId: "/sessions/parent.jsonl" },
+          { ...context, askQuestion: secondAsk }
+        )
+      )
+    )
+    expect(create).toHaveBeenCalledOnce()
+    expect(firstAsk).toHaveBeenCalledOnce()
+    expect(secondAsk).toHaveBeenCalledOnce()
+    childActive = false
+  })
+
   it("surfaces prompt rejection when final reconciliation also rejects", async () => {
     const handle: PiSessionHandle = {
       ...fleetSeams,

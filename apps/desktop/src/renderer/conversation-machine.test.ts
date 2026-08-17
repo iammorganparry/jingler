@@ -1840,6 +1840,51 @@ describe("conversationMachine — volatile plan drafts", () => {
     actor.stop()
   })
 
+  it("requests presentation from the proposal itself when no draft was observed", async () => {
+    // Codex can deliver jingler_submit_plan without a composing draft ever
+    // reaching this machine (atomic tool arguments, throttled deltas, or the
+    // proposal winning the cross-pipe race). The gated plan must still present
+    // — the backend is parked on approval behind it.
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({ _tag: "PlanProposed", plan: proposedPlan })
+    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
+
+    // The stale trailing "complete" from the losing draft pipe stays dropped.
+    emit({
+      _tag: "PlanDraft",
+      draft: { id: "plan_live_1", source: "<h1>PRD: Live plan</h1>", phase: "complete" }
+    })
+    expect(actor.getSnapshot().context.planDraft).toBeNull()
+    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
+    actor.stop()
+  })
+
+  it("presents a gated revision via PlanUpdated but never an executing update", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "continue" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    // Progress/status sync on an approved plan must not yank the split open.
+    emit({
+      _tag: "PlanUpdated",
+      plan: { ...proposedPlan, status: "approved" } as unknown as Plan
+    })
+    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(0)
+
+    // A revision awaiting scrutiny is a gated wait exactly like a proposal.
+    emit({
+      _tag: "PlanUpdated",
+      plan: { ...proposedPlan, status: "revising" } as unknown as Plan
+    })
+    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
+    actor.stop()
+  })
+
   it("does not request presentation again after a reformat clear in the same turn", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))

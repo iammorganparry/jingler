@@ -285,10 +285,46 @@ interface RetainedPiSession {
   readonly sessionId: string
   readonly chatId: string
   readonly aliases: ReadonlySet<string>
+  /** The turn context every session-lifetime closure delegates to — see `rebindableContext`. */
+  readonly contextHolder: { current: AgentRuntimeContext }
   activeTurns: number
   reapTimer: ReturnType<typeof setTimeout> | null
   disposing: boolean
 }
+
+/**
+ * A session-lifetime facade over the CURRENT turn's context.
+ *
+ * The factory builds the pi session's custom tools, tool bridge, and subagent
+ * capability broker ONCE, at create — and each of those closes over whatever
+ * `AgentRuntimeContext` it was handed. But `askQuestion`/`proposePlan`/
+ * `canUseTool`/`publishEvent` are PER-TURN capabilities: each closes over that
+ * turn's `out` mailbox, which ends when the turn settles. Handing the factory
+ * the first turn's context directly meant every retained-session turn after the
+ * first ran its interactive tools against an already-ended mailbox — the
+ * QuestionRequested/PlanProposed/GateRequested never reached the renderer, and
+ * the run parked forever on an approval the operator could not see.
+ *
+ * So the factory gets this stable facade instead, and `acquire` repoints
+ * `holder.current` at the incoming turn's context before every prompt. `mcp`
+ * and `memoryAttachmentStatus` stay pinned to the creating turn on purpose:
+ * they are only read while the factory builds the registry, which happens once.
+ */
+const rebindableContext = (
+  holder: { current: AgentRuntimeContext },
+  initial: AgentRuntimeContext
+): AgentRuntimeContext => ({
+  ...(initial.mcp === undefined ? {} : { mcp: initial.mcp }),
+  ...(initial.memoryAttachmentStatus === undefined
+    ? {}
+    : { memoryAttachmentStatus: initial.memoryAttachmentStatus }),
+  publishEvent: (event) => holder.current.publishEvent(event),
+  registerBackgroundStop: (stop) => holder.current.registerBackgroundStop(stop),
+  canUseTool: (request) => holder.current.canUseTool(request),
+  askQuestion: (request) => holder.current.askQuestion(request),
+  saveDraftPlan: (plan) => holder.current.saveDraftPlan(plan),
+  proposePlan: (plan) => holder.current.proposePlan(plan)
+})
 
 class PiSessionRegistry {
   readonly #aliases = new Map<string, RetainedPiSession>()
@@ -329,9 +365,14 @@ class PiSessionRegistry {
       if (retained.reapTimer !== null) clearTimeout(retained.reapTimer)
       retained.reapTimer = null
       retained.activeTurns = 1
+      // The session's tools/broker delegate through this holder — repoint it at
+      // THIS turn's context so interactive emits land in the live mailbox, not
+      // the creating turn's ended one.
+      retained.contextHolder.current = context
       return Effect.succeed(retained)
     }
-    return this.factory.create(spec, context).pipe(
+    const contextHolder = { current: context }
+    return this.factory.create(spec, rebindableContext(contextHolder, context)).pipe(
       Effect.map((handle) => {
         const aliases = new Set([handle.id, handle.parentPiSessionId])
         const record: RetainedPiSession = {
@@ -339,6 +380,7 @@ class PiSessionRegistry {
           sessionId: spec.sessionId,
           chatId: spec.chatId,
           aliases,
+          contextHolder,
           activeTurns: 1,
           reapTimer: null,
           disposing: false

@@ -137,8 +137,15 @@ export function useSubagentFleet(input: {
     void refresh()
     window.addEventListener("focus", refreshOnFocus)
     document.addEventListener("visibilitychange", refreshOnFocus)
+    // Mount/focus alone is not enough: a subagent spawned MID-TURN while the
+    // window stays focused never re-triggers recovery, so a missed live fleet
+    // event left the drawer empty for the whole run. The durable-status read
+    // behind this RPC is a cheap local directory scan; a slow steady poll
+    // reconciles both missed starts and missed completions.
+    const steady = setInterval(() => void refresh(), 15_000)
     return () => {
       active = false
+      clearInterval(steady)
       if (retryTimer !== null) clearTimeout(retryTimer)
       window.removeEventListener("focus", refreshOnFocus)
       document.removeEventListener("visibilitychange", refreshOnFocus)

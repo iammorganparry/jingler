@@ -1476,11 +1476,23 @@ export const conversationMachine = setup({
         }
       }
       if (e._tag === "PlanProposed") {
+        // A proposal must be able to request presentation ITSELF. The draft
+        // pipe usually got there first (its "composing" snapshot bumped the
+        // nonce), but nothing guarantees it: atomic tool arguments, deltas
+        // coalesced under the draft throttle before a candidate formed, or the
+        // proposal winning the cross-pipe race all deliver a gated plan with
+        // the nonce never armed — the backend then parks on approval behind a
+        // surface that never opened. Deduped per run by the same flag the
+        // draft path sets, so a draft-then-proposal still presents once.
+        const first = !context.planDraftPresentationRequested
         return {
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),
           sharedPlanChatId: context.chatId,
           sharedPlan: e.plan,
-          planDraft: null
+          planDraft: null,
+          planDraftPresentationRequested: true,
+          planDraftPresentationNonce:
+            context.planDraftPresentationNonce + (first ? 1 : 0)
         }
       }
       // A `PlanUpdated` addresses a plan by id, and that plan part lives in the
@@ -1489,6 +1501,12 @@ export const conversationMachine = setup({
       // targets a message holding no plan, so every cross-turn progress tick is
       // silently dropped. Address the plan's own message instead.
       if (e._tag === "PlanUpdated") {
+        // A revision the operator must scrutinise (proposed/revising) is a
+        // gated wait exactly like a fresh proposal — it must also be able to
+        // present. Executing/progress updates stay silent: auto-opening on
+        // every tick would override an operator who closed the split.
+        const gated = e.plan.status === "proposed" || e.plan.status === "revising"
+        const first = gated && !context.planDraftPresentationRequested
         return {
           messages: context.messages.map((m) =>
             m.parts.some((p) => p._tag === "Plan" && p.plan.id === e.plan.id)
@@ -1496,7 +1514,10 @@ export const conversationMachine = setup({
               : m
           ),
           sharedPlan: e.plan,
-          planDraft: null
+          planDraft: null,
+          ...(gated ? { planDraftPresentationRequested: true } : {}),
+          planDraftPresentationNonce:
+            context.planDraftPresentationNonce + (first ? 1 : 0)
         }
       }
       const messages = patchLast(context.messages, (last) => applyStreamEvent(last, e))
