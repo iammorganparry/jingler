@@ -212,6 +212,49 @@ describe("readPiSubagentTranscript", () => {
     }))
   })
 
+  it("rebuilds the cursor when appended entries switch the active branch", async () => {
+    const { root, sessionFile, manager } = await createChildSession()
+    const reader = Effect.runSync(makePiSubagentTranscriptReader())
+    const input = {
+      sessionFile,
+      trustedRoots: piSubagentTrustedSessionRoots(join(root, "parent.jsonl"))
+    }
+    const before = await Effect.runPromise(reader.read(input))
+    const firstMessage = manager.getEntries().find((entry) => entry.type === "message")
+    if (!firstMessage) throw new Error("Expected a branch point")
+    manager.branch(firstMessage.id)
+    manager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Replacement branch" }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "claude-test",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: "stop",
+      timestamp: 80
+    })
+
+    const after = await Effect.runPromise(reader.read(input))
+
+    expect(before.some(({ parts }) => parts.some((part) =>
+      part._tag === "Text" && part.text === "The boundary is contained."
+    ))).toBe(true)
+    expect(after.some(({ parts }) => parts.some((part) =>
+      part._tag === "Text" && part.text === "The boundary is contained."
+    ))).toBe(false)
+    expect(after.at(-1)).toMatchObject({
+      role: "assistant",
+      parts: [{ _tag: "Text", text: "Replacement branch" }]
+    })
+  })
+
   it("waits for a complete JSONL record before advancing its cursor", async () => {
     const { root, sessionFile } = await createChildSession()
     const reader = Effect.runSync(makePiSubagentTranscriptReader())

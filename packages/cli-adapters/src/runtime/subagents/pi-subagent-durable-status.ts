@@ -53,6 +53,7 @@ type DurableStatusValue = typeof DurableStatus.Type
 type DurableStepValue = typeof DurableStep.Type
 
 const MAX_DURABLE_NODES = 32
+const DURABLE_STATUS_READ_CONCURRENCY = 16
 const DEFAULT_CAPACITY_LIMIT = 4
 
 const activeState = (state: string | undefined): boolean =>
@@ -213,16 +214,22 @@ export const readDurablePiSubagentNodes = (input: {
       activeCapacity: { used: 0, limit: input.capacityLimit ?? DEFAULT_CAPACITY_LIMIT }
     }
   }
-  const statuses = (await Promise.all(runIds.map(async (markerRunId) => {
-    try {
-      const decoded = Option.getOrUndefined(Schema.decodeUnknownOption(
-        Schema.parseJson(DurableStatus)
-      )(await readFile(join(asyncDir, markerRunId, "status.json"), "utf8")))
-      return decoded?.runId === markerRunId ? decoded : null
-    } catch {
-      return null
-    }
-  }))).filter((status): status is DurableStatusValue =>
+  const decodedStatuses: Array<DurableStatusValue | null> = []
+  for (let offset = 0; offset < runIds.length; offset += DURABLE_STATUS_READ_CONCURRENCY) {
+    decodedStatuses.push(...await Promise.all(
+      runIds.slice(offset, offset + DURABLE_STATUS_READ_CONCURRENCY).map(async (markerRunId) => {
+        try {
+          const decoded = Option.getOrUndefined(Schema.decodeUnknownOption(
+            Schema.parseJson(DurableStatus)
+          )(await readFile(join(asyncDir, markerRunId, "status.json"), "utf8")))
+          return decoded?.runId === markerRunId ? decoded : null
+        } catch {
+          return null
+        }
+      })
+    ))
+  }
+  const statuses = decodedStatuses.filter((status): status is DurableStatusValue =>
     status !== null &&
     activeState(status.state) &&
     input.parentPiSessionAliases.has(status.sessionId)

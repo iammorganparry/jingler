@@ -196,7 +196,9 @@ export function SubagentCompletionLinks({
       <span className="mr-2 text-[10px] uppercase text-dim">Recent results</span>
       {nodes.map((node) => (
         <span key={node.id} className="mr-2 inline-flex items-center gap-1">
-          <button type="button" aria-current={selectedId === node.id ? "page" : undefined} onClick={() => onSelect(node.id)} className="text-[10.5px] text-blue hover:underline">{node.agent} transcript</button>
+          {node.sessionFile !== null ? (
+            <button type="button" aria-current={selectedId === node.id ? "page" : undefined} onClick={() => onSelect(node.id)} className="text-[10.5px] text-blue hover:underline">{node.agent} transcript</button>
+          ) : null}
           {node.artifacts.map((artifact) => (
             <button key={artifact.path} type="button" onClick={() => onOpenArtifact?.(artifact.path)} className="text-[10px] text-purple hover:underline">{artifact.label ?? "artifact"}</button>
           ))}

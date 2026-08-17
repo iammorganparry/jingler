@@ -116,6 +116,41 @@ describe("readDurablePiSubagentNodes", () => {
     expect(projection).toMatchObject({ nodes: [], totalActive: 0, omitted: 0 })
   })
 
+  it("scans multiple read batches before bounding and reports exact omissions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-durable-batches-"))
+    roots.push(root)
+    await mkdir(join(root, ".active-runs"), { recursive: true })
+    const runIds = Array.from({ length: 40 }, (_, index) =>
+      `run-${index.toString().padStart(2, "0")}`
+    )
+    await Promise.all(runIds.map(async (runId, index) => {
+      await mkdir(join(root, runId), { recursive: true })
+      await writeFile(join(root, ".active-runs", runId), "")
+      await writeFile(join(root, runId, "status.json"), JSON.stringify({
+        runId,
+        sessionId: "parent",
+        state: "running",
+        mode: "single",
+        startedAt: runIds.length - index
+      }))
+    }))
+
+    const projection = await Effect.runPromise(readDurablePiSubagentNodes({
+      asyncDir: root,
+      parentPiSessionId: "parent",
+      parentPiSessionAliases: new Set(["parent"]),
+      maxNodes: 2
+    }))
+
+    expect(projection.nodes.map(({ subagentId }) => subagentId))
+      .toEqual(["run-39", "run-38"])
+    expect(projection).toMatchObject({
+      totalActive: 40,
+      omitted: 38,
+      activeCapacity: { used: 40, limit: 4 }
+    })
+  })
+
   it("sorts before bounding and reports exact omissions", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-durable-bound-"))
     roots.push(root)

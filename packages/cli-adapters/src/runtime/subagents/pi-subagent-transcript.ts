@@ -200,6 +200,7 @@ interface TranscriptCursor {
   readonly inode: number
   readonly offset: number
   readonly modifiedAt: number
+  readonly leafId: string | null
   readonly messageCount: number
   readonly messages: ReadonlyArray<Message>
 }
@@ -229,16 +230,21 @@ const isPiMessage = (value: unknown): value is PiMessage => {
     typeof record.isError === "boolean"
 }
 
-const contextMessages = (file: string): ReadonlyArray<PiMessage> =>
-  SessionManager.open(file, dirname(file))
-    .buildSessionContext()
-    .messages
-    .filter(isPiMessage)
+const sessionContext = (file: string): {
+  readonly messages: ReadonlyArray<PiMessage>
+  readonly leafId: string | null
+} => {
+  const session = SessionManager.open(file, dirname(file))
+  return {
+    messages: session.buildSessionContext().messages.filter(isPiMessage),
+    leafId: session.getLeafId()
+  }
+}
 
 const fullCursor = async (file: string): Promise<TranscriptCursor> => {
   for (let attempt = 0; attempt < 3; attempt++) {
     const before = await stat(file)
-    const messages = contextMessages(file)
+    const context = sessionContext(file)
     const after = await stat(file)
     if (before.size === after.size && before.ino === after.ino) {
       return {
@@ -246,8 +252,9 @@ const fullCursor = async (file: string): Promise<TranscriptCursor> => {
         inode: after.ino,
         offset: after.size,
         modifiedAt: after.mtimeMs,
-        messageCount: messages.length,
-        messages: piMessagesToJingler(messages)
+        leafId: context.leafId,
+        messageCount: context.messages.length,
+        messages: piMessagesToJingler(context.messages)
       }
     }
   }
@@ -257,23 +264,55 @@ const fullCursor = async (file: string): Promise<TranscriptCursor> => {
 const appendedMessages = async (
   cursor: TranscriptCursor,
   size: number
-): Promise<{ readonly messages: ReadonlyArray<PiMessage>; readonly consumed: number }> => {
+): Promise<{
+  readonly messages: ReadonlyArray<PiMessage>
+  readonly consumed: number
+  readonly leafId: string | null
+  readonly requiresRebuild: boolean
+}> => {
   const handle = await open(cursor.file, "r")
   try {
     const bytes = Buffer.alloc(size - cursor.offset)
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, cursor.offset)
     const read = bytes.subarray(0, bytesRead)
     const lastNewline = read.lastIndexOf(0x0a)
-    if (lastNewline < 0) return { messages: [], consumed: 0 }
+    if (lastNewline < 0) {
+      return {
+        messages: [],
+        consumed: 0,
+        leafId: cursor.leafId,
+        requiresRebuild: false
+      }
+    }
     const messages: PiMessage[] = []
+    let leafId = cursor.leafId
     for (const line of read.subarray(0, lastNewline).toString("utf8").split("\n")) {
       if (!line.trim()) continue
       const entry = recordOf(JSON.parse(line))
-      if (entry?.type === "message" && isPiMessage(entry.message)) {
-        messages.push(entry.message)
+      if (
+        entry === null ||
+        typeof entry.id !== "string" ||
+        (entry.parentId !== null && typeof entry.parentId !== "string") ||
+        entry.parentId !== leafId ||
+        entry.type !== "message" ||
+        !isPiMessage(entry.message)
+      ) {
+        return {
+          messages: [],
+          consumed: lastNewline + 1,
+          leafId,
+          requiresRebuild: true
+        }
       }
+      messages.push(entry.message)
+      leafId = entry.id
     }
-    return { messages, consumed: lastNewline + 1 }
+    return {
+      messages,
+      consumed: lastNewline + 1,
+      leafId,
+      requiresRebuild: false
+    }
   } finally {
     await handle.close()
   }
@@ -320,17 +359,22 @@ export const makePiSubagentTranscriptReader = (): Effect.Effect<
               next = cached
             } else {
               const appended = await appendedMessages(cached, metadata.size)
-              const projected = appendPiMessagesToJingler(
-                cached.messages,
-                appended.messages,
-                cached.messageCount
-              )
-              next = {
-                ...cached,
-                offset: cached.offset + appended.consumed,
-                modifiedAt: metadata.mtimeMs,
-                messageCount: cached.messageCount + appended.messages.length,
-                messages: projected
+              if (appended.requiresRebuild) {
+                next = await fullCursor(file)
+              } else {
+                const projected = appendPiMessagesToJingler(
+                  cached.messages,
+                  appended.messages,
+                  cached.messageCount
+                )
+                next = {
+                  ...cached,
+                  offset: cached.offset + appended.consumed,
+                  modifiedAt: metadata.mtimeMs,
+                  leafId: appended.leafId,
+                  messageCount: cached.messageCount + appended.messages.length,
+                  messages: projected
+                }
               }
             }
             const updated = new Map(current)

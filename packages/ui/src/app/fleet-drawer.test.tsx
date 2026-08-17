@@ -167,9 +167,19 @@ describe("FleetDrawer", () => {
     const onSelect = vi.fn()
     const onOpenArtifact = vi.fn()
     const completed = node({ status: "completed", currentTool: null })
+    const artifactOnly = node({
+      id: "parent/run-2",
+      subagentId: "run-2",
+      runId: "run-2",
+      agent: "archiver",
+      status: "completed",
+      currentTool: null,
+      sessionFile: null,
+      artifacts: [{ path: "archive.md", label: "Archive", kind: "report" }]
+    })
     render(
       <SubagentCompletionLinks
-        nodes={[completed]}
+        nodes={[completed, artifactOnly]}
         selectedId="main"
         onSelect={onSelect}
         onOpenArtifact={onOpenArtifact}
@@ -179,8 +189,11 @@ describe("FleetDrawer", () => {
     expect(screen.queryByTestId("fleet-drawer")).toBeNull()
     fireEvent.click(screen.getByText("reviewer transcript"))
     fireEvent.click(screen.getByText("Review"))
+    fireEvent.click(screen.getByText("Archive"))
+    expect(screen.queryByText("archiver transcript")).toBeNull()
     expect(onSelect).toHaveBeenCalledWith(completed.id)
     expect(onOpenArtifact).toHaveBeenCalledWith("review.md")
+    expect(onOpenArtifact).toHaveBeenCalledWith("archive.md")
   })
 
   it("uses the composer's chrome instead of drawing a detached card", () => {
