@@ -172,11 +172,28 @@ jobs:
         env:
           MANAGED_RUNTIME_SERVICE_SECRET: ${{ secrets.MANAGED_RUNTIME_SERVICE_SECRET }}
         run: |
-          test -n "$MANAGED_RUNTIME_SERVICE_SECRET"
+          # The worker rejects any secret under 32 bytes (index.ts serviceAuth),
+          # so a short GitHub secret would 401 forever — fail loudly here instead.
+          if [ "${#MANAGED_RUNTIME_SERVICE_SECRET}" -lt 32 ]; then
+            echo "MANAGED_RUNTIME_SERVICE_SECRET must be at least 32 characters (got ${#MANAGED_RUNTIME_SERVICE_SECRET})" >&2
+            exit 1
+          fi
           curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 5 \
             https://managed-runtime.jingler.dev/health >/dev/null
-          curl --fail --silent --show-error --retry 3 --retry-all-errors --max-time 180 \
-            -X POST \
-            -H "x-jingler-service-secret: $MANAGED_RUNTIME_SERVICE_SECRET" \
-            https://managed-runtime.jingler.dev/v1/offload-probe \
-            | jq -e '.success == true and .checks.r2 == true and .checks.sandboxImage == true and .checks.lifecycle == true' >/dev/null
+          # `wrangler secret bulk` (previous step) cuts a new worker version, and
+          # the very first deploy has no secret at all until that version
+          # propagates — so a probe fired seconds later 401s even when
+          # everything is correct. Retry over a propagation-sized window.
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error --max-time 180 \
+              -X POST \
+              -H "x-jingler-service-secret: $MANAGED_RUNTIME_SERVICE_SECRET" \
+              https://managed-runtime.jingler.dev/v1/offload-probe \
+              | jq -e '.success == true and .checks.r2 == true and .checks.sandboxImage == true and .checks.lifecycle == true' >/dev/null; then
+              exit 0
+            fi
+            echo "offload-probe attempt $attempt failed; retrying in 10s" >&2
+            sleep 10
+          done
+          echo "offload-probe never succeeded" >&2
+          exit 1
