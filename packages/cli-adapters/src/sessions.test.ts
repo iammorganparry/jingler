@@ -93,6 +93,11 @@ const feedbackEvent = (patch: Partial<GitHubRelayEvent> = {}): GitHubRelayEvent 
  * missing id fails with the typed error. The slug rule is checked only via
  * `session.branch`.
  */
+type JsonValue = string | number | boolean | null | JsonObject | JsonValue[]
+interface JsonObject {
+  [key: string]: JsonValue | undefined
+}
+
 describe("SessionStore", () => {
   let temp: ReturnType<typeof withTempRoot>
   let repos: ReturnType<typeof mkTemp>
@@ -1331,6 +1336,7 @@ describe("SessionStore", () => {
   const apiHead = (headRef = "chore/bump", calls: Array<string> = []) =>
     Layer.succeed(
       GitHubApi,
+      // SAFETY: this focused fixture implements every GitHubApi method exercised here.
       {
         repository: () =>
           Effect.succeed({
@@ -1357,6 +1363,7 @@ describe("SessionStore", () => {
 
   const failingApi = Layer.succeed(
     GitHubApi,
+    // SAFETY: this focused failure fixture implements every GitHubApi method exercised here.
     {
       repository: () =>
         Effect.succeed({
@@ -1569,7 +1576,7 @@ describe("SessionStore", () => {
     if (archived._tag === "Success") {
       expect(archived.value.archived).toBe(true)
       expect(archived.value.archiveReason).toBe("merged")
-      expect(typeof archived.value.archivedAt).toBe("string")
+      expect(archived.value.archivedAt).toEqual(expect.any(String))
     }
 
     const restored = await runExit(
@@ -2014,9 +2021,8 @@ describe("SessionStore", () => {
     if (created._tag !== "Success") return
 
     const sessionsFile = join(temp.root, "sessions.json")
-    const persisted = JSON.parse(readFileSync(sessionsFile, "utf-8")) as Array<
-      Record<string, unknown>
-    >
+    // SAFETY: the store wrote this JSON immediately above; this test intentionally mutates its legacy shape.
+    const persisted = JSON.parse(readFileSync(sessionsFile, "utf-8")) as JsonObject[]
     const historical = persisted[0]!
     delete historical.linkedIssue
     delete historical.linkedIssues
@@ -2039,9 +2045,8 @@ describe("SessionStore", () => {
       SessionStore.setTitle(created.value.id, "Pinned title").pipe(Effect.provide(services)),
       temp.layer
     )
-    const migrated = JSON.parse(readFileSync(sessionsFile, "utf-8")) as Array<
-      Record<string, unknown>
-    >
+    // SAFETY: the SessionStore migration just rewrote this file as valid JSON objects.
+    const migrated = JSON.parse(readFileSync(sessionsFile, "utf-8")) as JsonObject[]
     expect(migrated[0]?.linkedIssues).toStrictEqual([{
       providerId: "github",
       id: "128",
@@ -2100,7 +2105,9 @@ describe("SessionStore", () => {
  */
 describe("migrateRepoName", () => {
   const at = (repoPath: string | undefined, repo: string) => {
-    const migrated = migrateRepoName({ id: "s1", repo, ...(repoPath === undefined ? {} : { repoPath }) })
+    const input = repoPath === undefined ? { id: "s1", repo } : { id: "s1", repo, repoPath }
+    const migrated = migrateRepoName(input)
+    // SAFETY: migrateRepoName preserves this fixture's required string repo field.
     return (migrated as { repo: string }).repo
   }
 
@@ -2125,6 +2132,7 @@ describe("migrateRepoName", () => {
   })
 
   it("keeps the canonical repository name for a managed /workspace checkout", () => {
+    // SAFETY: migrateRepoName preserves this fixture's required string repo field.
     const migrated = migrateRepoName({
       id: "s_cloud_1",
       repo: "jingler",
@@ -2152,13 +2160,19 @@ describe("migrateRepoName", () => {
   })
 
   it("leaves every other field alone", () => {
+    // SAFETY: migrateRepoName preserves every named fixture field while replacing repo.
     const migrated = migrateRepoName({
       id: "s1",
       repo: "starbase",
       repoPath: "/Users/x/repos/jingler",
       branch: "starbase/fix-auth",
       worktreePath: "/Users/x/jingler/worktrees/jingler/fix-auth"
-    }) as Record<string, unknown>
+    }) as {
+      id: string
+      repo: string
+      branch: string
+      worktreePath: string
+    }
     // The BRANCH keeps its old prefix on purpose: it is a real git ref with an
     // open PR attached, and renaming it here would orphan both.
     expect(migrated.branch).toBe("starbase/fix-auth")
@@ -2169,6 +2183,7 @@ describe("migrateRepoName", () => {
 
 describe("legacy harness migration", () => {
   it("moves legacy provider reasoning onto matching active and closed chats", () => {
+    // SAFETY: migrateSessionChats returns this fixture with chats normalized to JSON objects.
     const migrated = migrateSessionChats({
       id: "s_reasoning",
       cli: "claude",
@@ -2184,7 +2199,11 @@ describe("legacy harness migration", () => {
       ],
       closedChats: [{ id: "c_closed", providerId: "openai" }],
       activeChatId: "c_claude"
-    }) as Record<string, unknown>
+    }) as {
+      reasoning?: JsonValue
+      chats: JsonValue[]
+      closedChats: JsonValue[]
+    }
 
     expect(migrated).not.toHaveProperty("reasoning")
     expect(migrated.chats).toEqual([

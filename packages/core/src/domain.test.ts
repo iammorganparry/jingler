@@ -35,6 +35,8 @@ import {
  * outcomes — never the schema's internal structure.
  */
 
+// Schema.decodeUnknownEither is the parser at this test boundary; invalid inputs are intentional.
+// oxlint-disable-next-line anti-slop/no-unknown-parameters
 const decode = <A, I>(schema: Schema.Schema<A, I>, input: unknown) =>
   Schema.decodeUnknownEither(schema)(input);
 

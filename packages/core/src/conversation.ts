@@ -837,6 +837,9 @@ export type StreamEvent = Schema.Schema.Type<typeof StreamEvent>
  */
 export const STOPPED_NOTE = "Stopped."
 
+const propertiesWhen = <T extends object>(condition: boolean, properties: T) =>
+  condition ? properties : {}
+
 // ── Constructors & fold ──────────────────────────────────────────────────────
 
 /** A fresh user turn (already complete), optionally carrying attached images. */
@@ -855,7 +858,7 @@ export const userMessage = (
   ],
   streaming: false,
   createdAt,
-  ...(externalInstruction === undefined ? {} : { externalInstruction })
+  ...propertiesWhen(externalInstruction !== undefined, { externalInstruction })
 })
 
 /** A fresh, empty assistant turn to be filled by streaming events. */
@@ -869,7 +872,7 @@ export const assistantMessage = (
   parts: [],
   streaming: true,
   createdAt,
-  ...(providerId === undefined ? {} : { providerId })
+  ...propertiesWhen(providerId !== undefined, { providerId })
 })
 
 /**
@@ -917,7 +920,7 @@ export const settleLoaded = (msg: Message): Message => {
         return { ...p, gate: { ...p.gate, status: "rejected" as const } }
       }
       if (p._tag === "Question" && p.answers === null) {
-        return { ...p, answers: [] as ReadonlyArray<QuestionAnswer> }
+        return { ...p, answers: [] }
       }
       if (p._tag === "Plan" && (p.plan.status === "proposed" || p.plan.status === "revising")) {
         return { ...p, plan: { ...p.plan, status: "stale" as const } }
@@ -1048,13 +1051,11 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
                 meta: e.meta,
                 diff: e.diff,
                 preview: e.preview,
-                ...(e.fileChanges !== undefined
-                  ? { fileChanges: e.fileChanges }
-                  : {}),
+                ...propertiesWhen(e.fileChanges !== undefined, { fileChanges: e.fileChanges }),
                 // Spread so an event without output leaves the key ABSENT rather
                 // than present-and-undefined — the field is optional, and an
                 // explicit `undefined` re-encodes differently from "not there".
-                ...(e.output !== undefined ? { output: e.output } : {})
+                ...propertiesWhen(e.output !== undefined, { output: e.output })
               }
             }
           : p
@@ -1148,17 +1149,14 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
     // A compaction IS part of the transcript: it is the only visible trace that
     // the model's memory was rebuilt, and the only place the user can check what
     // survived. It lands on the turn that applied it, above that turn's reply.
-    Match.tag("ContextCompacted", (e) => ({
-      ...msg,
-      parts: [
-        ...parts,
-        {
-          _tag: "Context",
-          digest: e.digest,
-          tokensBefore: e.tokensBefore
-        } as ContextPart
-      ]
-    })),
+    Match.tag("ContextCompacted", (e) => {
+      const context: ContextPart = {
+        _tag: "Context",
+        digest: e.digest,
+        tokensBefore: e.tokensBefore
+      }
+      return { ...msg, parts: [...parts, context] }
+    }),
 
     Match.exhaustive
   )
@@ -1176,13 +1174,18 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
  * unattributed Assistant/Tool event, which is all of them — and the sub-agent's
  * tab stayed empty while its output landed on the main turn.
  */
-const AGENT_SCOPED_TAGS: ReadonlySet<string> = new Set([
-  "Thinking",
-  "Assistant",
-  "ToolStart",
-  "ToolDelta",
-  "ToolEnd"
-])
+const agentIdOf = (event: StreamEvent): string | undefined => {
+  switch (event._tag) {
+    case "Thinking":
+    case "Assistant":
+    case "ToolStart":
+    case "ToolDelta":
+    case "ToolEnd":
+      return event.agentId
+    default:
+      return undefined
+  }
+}
 
 /**
  * Attribute an event to `agentId`, if the event is one that can carry it and is
@@ -1190,10 +1193,19 @@ const AGENT_SCOPED_TAGS: ReadonlySet<string> = new Set([
  * must win). Anything else passes through untouched — adding a field a
  * `TaggedStruct` doesn't declare would fail to encode across the RPC boundary.
  */
-export const scopeToAgent = (event: StreamEvent, agentId: string): StreamEvent =>
-  AGENT_SCOPED_TAGS.has(event._tag) && (event as { agentId?: string }).agentId == null
-    ? ({ ...event, agentId } as StreamEvent)
-    : event
+export const scopeToAgent = (event: StreamEvent, agentId: string): StreamEvent => {
+  if (agentIdOf(event) != null) return event
+  switch (event._tag) {
+    case "Thinking":
+    case "Assistant":
+    case "ToolStart":
+    case "ToolDelta":
+    case "ToolEnd":
+      return { ...event, agentId }
+    default:
+      return event
+  }
+}
 
 /**
  * True when a `StreamEvent` belongs to a spawned sub-agent rather than the main
@@ -1204,7 +1216,7 @@ export const scopeToAgent = (event: StreamEvent, agentId: string): StreamEvent =
 export const isSubagentEvent = (event: StreamEvent): boolean =>
   event._tag === "SubagentStarted" ||
   event._tag === "SubagentEnded" ||
-  (event as { agentId?: string }).agentId != null
+  agentIdOf(event) != null
 
 /**
  * Whether this event belongs to the session's background-task registry rather
@@ -1358,7 +1370,7 @@ export const applySubagentEvent = (
       return s
     })
   }
-  const scoped = (event as { agentId?: string }).agentId
+  const scoped = agentIdOf(event)
   if (scoped != null) {
     const agentId = scoped
     // Unknown id — leave the list untouched so the renderer doesn't re-render on

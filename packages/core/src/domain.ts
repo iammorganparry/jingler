@@ -1108,7 +1108,7 @@ export const FONT_SCALE_RANGE = { min: 0.5, max: 2 } as const;
  * zero or off-screen — on read or on write.
  */
 export const clampFontScale = (value: number | null | undefined): number =>
-  typeof value === "number" && Number.isFinite(value)
+  value !== null && value !== undefined && Number.isFinite(value)
     ? Math.min(FONT_SCALE_RANGE.max, Math.max(FONT_SCALE_RANGE.min, value))
     : FONT_SCALE_DEFAULT;
 
