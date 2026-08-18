@@ -37,6 +37,7 @@ export type {
   IssueActor,
   IssueComment,
   IssueDetail,
+  IssueIdentity,
   IssueLabel,
   IssueReference,
   IssueSummary,
@@ -240,6 +241,18 @@ export interface AgentToolInputSchema {
   readonly additionalProperties?: boolean
 }
 
+/** Host-owned session identity supplied separately from model-authored tool input. */
+export interface AgentToolSessionContext {
+  readonly id: string
+  readonly repository: IssueRepositoryContext
+}
+
+/** Trusted execution context for one native plugin agent tool call. */
+export interface AgentToolExecutionContext {
+  readonly signal: AbortSignal
+  readonly session: AgentToolSessionContext
+}
+
 /** One full tool definition, materialized only after its toolset is selected. */
 export interface AgentToolDefinition {
   /** Provider-safe globally unique id, conventionally `<plugin>_<action>`. */
@@ -251,7 +264,10 @@ export interface AgentToolDefinition {
   readonly outputBudget?: number
   readonly cancellable?: boolean
   readonly idempotency?: AgentToolIdempotency
-  readonly execute: (input: unknown, signal: AbortSignal) => unknown | Promise<unknown>
+  readonly execute: (
+    input: unknown,
+    context: AgentToolExecutionContext
+  ) => unknown | Promise<unknown>
 }
 
 /** Full host-side implementation of one manifest-declared toolset. */

@@ -108,6 +108,8 @@ const live = new Map<string, LivePlugin>()
  * two processes are not one lock.
  */
 const activating = new Map<string, Promise<void>>()
+/** Abort controllers for cancellable native agent tool calls, keyed by request id. */
+const agentToolCalls = new Map<string, AbortController>()
 
 const storageFor = (pluginId: string): PluginStorage => ({
   get: <T,>(key: string) =>
@@ -526,11 +528,18 @@ const invokeAgentTool = async (
     })
     return
   }
+  const controller = new AbortController()
+  agentToolCalls.set(message.requestId, controller)
   try {
-    const value = await tool.execute(message.input, new AbortController().signal)
+    const value = await tool.execute(message.input, {
+      signal: controller.signal,
+      session: message.context
+    })
     send({ kind: "agent-tool-result", requestId: message.requestId, ok: true, value })
   } catch (cause) {
     send({ kind: "agent-tool-result", requestId: message.requestId, ok: false, message: messageOf(cause) })
+  } finally {
+    agentToolCalls.delete(message.requestId)
   }
 }
 
@@ -591,6 +600,9 @@ process.parentPort.on("message", ({ data }) => {
       break
     case "agent-tool-invoke":
       void invokeAgentTool(data)
+      break
+    case "agent-tool-cancel":
+      agentToolCalls.get(data.requestId)?.abort("cancelled")
       break
     case "issue-provider-invoke":
       void invokeIssueProvider(data)

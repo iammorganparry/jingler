@@ -36,6 +36,7 @@ import {
   type FromHostMessage,
   type IssueProviderMethod,
   type PluginAgentToolDescriptor,
+  type PluginAgentToolSessionContext,
   type ToHostMessage
 } from "./plugin-host-protocol.js"
 
@@ -488,17 +489,33 @@ export class PluginHostRuntime {
     plugin: LoadedPlugin,
     toolsetId: string,
     toolId: string,
-    input: unknown
+    input: unknown,
+    context: PluginAgentToolSessionContext,
+    signal?: AbortSignal
   ): Promise<unknown> {
     await this.activate(plugin)
-    return await this.send<unknown>({
+    const requestId = this.id()
+    const invocation = this.send<unknown>({
       kind: "agent-tool-invoke",
-      requestId: this.id(),
+      requestId,
       pluginId: plugin.manifest.id,
       toolsetId,
       toolId,
-      input
+      input,
+      context
     })
+    if (!signal) return await invocation
+    if (signal.aborted) {
+      this.process?.post({ kind: "agent-tool-cancel", requestId })
+      return await invocation
+    }
+    const cancel = () => this.process?.post({ kind: "agent-tool-cancel", requestId })
+    signal.addEventListener("abort", cancel, { once: true })
+    try {
+      return await invocation
+    } finally {
+      signal.removeEventListener("abort", cancel)
+    }
   }
 
   /** Dispatch one normalized issue-provider operation through the supervised host. */

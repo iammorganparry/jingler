@@ -86,6 +86,12 @@ export type ToHostMessage =
       readonly toolsetId: string
       readonly toolId: string
       readonly input: unknown
+      /** Main-owned run context, deliberately separate from model-authored input. */
+      readonly context: PluginAgentToolSessionContext
+    }
+  | {
+      readonly kind: "agent-tool-cancel"
+      readonly requestId: string
     }
   | {
       readonly kind: "issue-provider-invoke"
@@ -168,6 +174,15 @@ export type FromHostMessage =
 
 export type PluginAgentToolRisk = "read" | "network" | "mutate" | "execute"
 export type PluginAgentToolIdempotency = "safe" | "keyed" | "unsafe"
+
+/** Trusted run identity sent by main, never accepted inside model-authored input. */
+export interface PluginAgentToolSessionContext {
+  readonly id: string
+  readonly repository: {
+    readonly name: string
+    readonly path: string
+  }
+}
 
 /** JSON-safe full definition returned only when an agent selects a toolset. */
 export interface PluginAgentToolDescriptor {

@@ -284,13 +284,57 @@ describe("agent toolsets", () => {
   it("routes a selected native tool invocation", async () => {
     const { runtime, procs } = setup()
     await activateFully(runtime, procs[0]!, toolPlugin())
-    const result = runtime.invokeAgentTool(toolPlugin(), "linear.issues", "linear_get_issue", { id: "ENG-1" })
+    const context = {
+      id: "session-1",
+      repository: { name: "acme/widgets", path: "/repos/widgets" }
+    }
+    const result = runtime.invokeAgentTool(
+      toolPlugin(),
+      "linear.issues",
+      "linear_get_issue",
+      { id: "ENG-1" },
+      context
+    )
     await tick()
     const invoke = procs[0]!.sent.find((message) => message.kind === "agent-tool-invoke")
     if (invoke?.kind !== "agent-tool-invoke") throw new Error("expected agent tool invoke")
-    expect(invoke).toMatchObject({ toolsetId: "linear.issues", toolId: "linear_get_issue", input: { id: "ENG-1" } })
+    expect(invoke).toMatchObject({
+      toolsetId: "linear.issues",
+      toolId: "linear_get_issue",
+      input: { id: "ENG-1" },
+      context
+    })
     procs[0]!.emit({ kind: "agent-tool-result", requestId: invoke.requestId, ok: true, value: { title: "Fix it" } })
     await expect(result).resolves.toEqual({ title: "Fix it" })
+  })
+
+  it("forwards cancellation to the in-flight host request", async () => {
+    const { runtime, procs } = setup()
+    await activateFully(runtime, procs[0]!, toolPlugin())
+    const abort = new AbortController()
+    const result = runtime.invokeAgentTool(
+      toolPlugin(),
+      "linear.issues",
+      "linear_get_issue",
+      { id: "ENG-1" },
+      { id: "session-1", repository: { name: "acme/widgets", path: "/repos/widgets" } },
+      abort.signal
+    )
+    await tick()
+    const invoke = procs[0]!.sent.find((message) => message.kind === "agent-tool-invoke")
+    if (invoke?.kind !== "agent-tool-invoke") throw new Error("expected agent tool invoke")
+    abort.abort()
+    expect(procs[0]!.sent).toContainEqual({
+      kind: "agent-tool-cancel",
+      requestId: invoke.requestId
+    })
+    procs[0]!.emit({
+      kind: "agent-tool-result",
+      requestId: invoke.requestId,
+      ok: false,
+      message: "cancelled"
+    })
+    await expect(result).rejects.toThrow("cancelled")
   })
 })
 
