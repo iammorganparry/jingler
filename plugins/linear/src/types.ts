@@ -27,6 +27,30 @@ export interface LinearContext {
   readonly viewer: LinearViewer
   readonly workspace: LinearWorkspace
   readonly teams: readonly LinearTeam[]
+  readonly projects: readonly LinearDisplayItem[]
+}
+
+export interface LinearProfile {
+  readonly id: string
+  readonly name: string
+  readonly viewer: LinearViewer
+  readonly workspace: LinearWorkspace
+  readonly teams: readonly LinearTeam[]
+  readonly projects: readonly LinearDisplayItem[]
+  readonly legacy?: boolean
+}
+
+export interface LinearSelection {
+  readonly profileId: string
+  readonly teamId?: string
+  readonly projectId?: string
+}
+
+export interface LinearConfiguration {
+  readonly profiles: readonly LinearProfile[]
+  readonly repoDefault: LinearSelection | null
+  readonly sessionOverride: LinearSelection | null
+  readonly resolved: LinearSelection | null
 }
 
 export interface LinearIssueDetail extends IssueDetail {
@@ -42,6 +66,7 @@ export interface LinearIssueDetail extends IssueDetail {
 
 export interface LinearCreateRequest extends IssueCreateRequest {
   readonly teamId?: string
+  readonly projectId?: string
 }
 
 export type LinearListRequest = IssueListRequest

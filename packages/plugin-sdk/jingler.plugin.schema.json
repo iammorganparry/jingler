@@ -361,6 +361,31 @@
             "additionalProperties": false
           }
         },
+        "secretProfiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/ContributionId"
+              },
+              "label": {
+                "type": "string",
+                "description": "a string at least 1 character(s) long",
+                "title": "minLength(1)",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
         "authenticationProviders": {
           "type": "array",
           "items": {

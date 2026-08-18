@@ -53,6 +53,7 @@ export interface LinearContextData {
   readonly viewer: LinearActorNode
   readonly organization: LinearDisplayNode & { readonly urlKey: string }
   readonly teams: { readonly nodes: readonly LinearTeamNode[] }
+  readonly projects: { readonly nodes: readonly LinearDisplayNode[] }
 }
 
 export interface LinearIssuesData {
@@ -105,6 +106,7 @@ export const CONTEXT_QUERY = `query LinearContext {
   viewer { id name avatarUrl }
   organization { id name urlKey }
   teams(first: 100) { nodes { id name key } }
+  projects(first: 100) { nodes { id name } }
 }`
 
 export const ISSUES_QUERY = `query LinearIssues($first: Int!, $after: String, $filter: IssueFilter) {

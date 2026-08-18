@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import type {
   Activate,
   HostContext,
@@ -41,6 +42,9 @@ import type {
   LinearGetRequest,
   LinearIssueDetail,
   LinearListRequest,
+  LinearConfiguration,
+  LinearProfile,
+  LinearSelection,
   LinearTeam,
   LinearViewer,
   LinearWorkspace
@@ -164,9 +168,14 @@ export interface LinearClientOptions {
   readonly endpoint?: string
 }
 
+export interface LinearRoute {
+  readonly sessionId?: string
+  readonly repository?: { readonly name: string; readonly path: string }
+}
+
 export interface LinearClient {
-  configured(): Promise<boolean>
-  context(): Promise<LinearContext>
+  configured(route?: LinearRoute): Promise<boolean>
+  context(route?: LinearRoute): Promise<LinearContext>
   listIssues(input: LinearListRequest): Promise<readonly IssueSummary[]>
   getIssue(input: LinearGetRequest): Promise<LinearIssueDetail | null>
   createIssue(input: LinearCreateRequest): Promise<LinearIssueDetail>
@@ -188,7 +197,12 @@ const loadContext = async (execute: Execute): Promise<LinearContext> => {
     ...displayItem(data.organization),
     urlKey: data.organization.urlKey
   }
-  return { viewer, workspace, teams: data.teams.nodes.map(team) }
+  return {
+    viewer,
+    workspace,
+    teams: data.teams.nodes.map(team),
+    projects: data.projects.nodes.map(displayItem)
+  }
 }
 
 interface CommentPageState {
@@ -304,7 +318,12 @@ const createIssue = async (
 ): Promise<LinearIssueDetail> => {
   const teamId = input.teamId ?? await onlyTeamId(context)
   const data = await execute<LinearIssueCreateData>(CREATE_ISSUE_MUTATION, {
-    input: { teamId, title: input.title, description: input.body }
+    input: {
+      teamId,
+      title: input.title,
+      description: input.body,
+      ...(input.projectId ? { projectId: input.projectId } : {})
+    }
   })
   if (!data.issueCreate.success) {
     throw new Error("Linear did not create the issue. Check the details and retry.")
@@ -357,6 +376,193 @@ export const createLinearClient = (options: LinearClientOptions): LinearClient =
   }
 }
 
+const PROFILE_COLLECTION = "linear.accounts"
+const PROFILES_KEY = "profiles"
+const REPO_DEFAULTS_KEY = "repo-defaults"
+const SESSION_OVERRIDES_KEY = "session-overrides"
+const LEGACY_PROFILE_ID = "legacy-default"
+
+type LinearConfigurationHost = Pick<HostContext, "settings" | "storage">
+
+const record = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+
+const selectionOf = (value: unknown): LinearSelection | null => {
+  const candidate = record(value)
+  if (typeof candidate?.profileId !== "string") return null
+  return {
+    profileId: candidate.profileId,
+    ...(typeof candidate.teamId === "string" ? { teamId: candidate.teamId } : {}),
+    ...(typeof candidate.projectId === "string" ? { projectId: candidate.projectId } : {})
+  }
+}
+
+const profileOf = (value: unknown): LinearProfile | null => {
+  const candidate = record(value)
+  const viewer = record(candidate?.viewer)
+  const workspace = record(candidate?.workspace)
+  if (
+    typeof candidate?.id !== "string" || typeof candidate.name !== "string" ||
+    typeof viewer?.id !== "string" || typeof viewer.name !== "string" ||
+    typeof workspace?.id !== "string" || typeof workspace.name !== "string" ||
+    typeof workspace.urlKey !== "string" || !Array.isArray(candidate.teams) ||
+    !Array.isArray(candidate.projects)
+  ) return null
+  return candidate as unknown as LinearProfile
+}
+
+const profileFromContext = (
+  id: string,
+  name: string,
+  context: LinearContext,
+  legacy = false
+): LinearProfile => ({ id, name, ...context, ...(legacy ? { legacy: true } : {}) })
+
+const mapOf = (value: unknown): Record<string, LinearSelection> => {
+  const source = record(value)
+  if (!source) return {}
+  return Object.fromEntries(
+    Object.entries(source).flatMap(([key, candidate]) => {
+      const selection = selectionOf(candidate)
+      return selection ? [[key, selection]] : []
+    })
+  )
+}
+
+export interface LinearAccountManager {
+  configuration(route: LinearRoute): Promise<LinearConfiguration>
+  addProfile(input: LinearRoute & { readonly name: string; readonly apiKey: string }): Promise<LinearConfiguration>
+  removeProfile(input: LinearRoute & { readonly profileId: string }): Promise<LinearConfiguration>
+  setRepoDefault(input: LinearRoute & { readonly selection: LinearSelection }): Promise<LinearConfiguration>
+  setSessionOverride(input: LinearRoute & { readonly selection: LinearSelection }): Promise<LinearConfiguration>
+  resetSessionOverride(input: LinearRoute): Promise<LinearConfiguration>
+  clientFor(route: LinearRoute): Promise<{ readonly client: LinearClient; readonly selection: LinearSelection }>
+}
+
+export const createLinearAccountManager = (ctx: LinearConfigurationHost): LinearAccountManager => {
+  const profiles = async (): Promise<readonly LinearProfile[]> =>
+    ((await ctx.storage.get<unknown[]>(PROFILES_KEY)) ?? []).flatMap((value) => {
+      const profile = profileOf(value)
+      return profile ? [profile] : []
+    })
+
+  const saveProfiles = (value: readonly LinearProfile[]) => ctx.storage.set(PROFILES_KEY, value)
+
+  const secret = async (profileId: string): Promise<string | undefined> =>
+    profileId === LEGACY_PROFILE_ID
+      ? ctx.settings.getSecret(API_KEY_SETTING)
+      : ctx.settings.getProfileSecret(PROFILE_COLLECTION, profileId)
+
+  const ensureLegacy = async (): Promise<readonly LinearProfile[]> => {
+    const current = await profiles()
+    if (current.some(({ id }) => id === LEGACY_PROFILE_ID)) return current
+    const apiKey = await ctx.settings.getSecret(API_KEY_SETTING)
+    if (!apiKey) return current
+    const client = createLinearClient({ getSecret: async () => apiKey })
+    const context = await client.context()
+    const next = [profileFromContext(LEGACY_PROFILE_ID, "Default", context, true), ...current]
+    await saveProfiles(next)
+    return next
+  }
+
+  const configuration = async (route: LinearRoute): Promise<LinearConfiguration> => {
+    const available = await ensureLegacy()
+    const repoDefaults = mapOf(await ctx.storage.get(REPO_DEFAULTS_KEY))
+    const sessionOverrides = mapOf(await ctx.storage.get(SESSION_OVERRIDES_KEY))
+    const repoDefault = route.repository ? repoDefaults[route.repository.name] ?? null : null
+    const sessionOverride = route.sessionId ? sessionOverrides[route.sessionId] ?? null : null
+    const resolved = sessionOverride ?? repoDefault ?? (available[0] ? { profileId: available[0].id } : null)
+    return { profiles: available, repoDefault, sessionOverride, resolved }
+  }
+
+  const validatedSelection = async (candidate: LinearSelection): Promise<LinearSelection> => {
+    const available = await ensureLegacy()
+    const profile = available.find(({ id }) => id === candidate.profileId)
+    if (!profile) throw new Error("Choose an available Linear account.")
+    if (candidate.teamId && !profile.teams.some(({ id }) => id === candidate.teamId)) {
+      throw new Error("Choose a team from the selected Linear workspace.")
+    }
+    if (candidate.projectId && !profile.projects.some(({ id }) => id === candidate.projectId)) {
+      throw new Error("Choose a project from the selected Linear workspace.")
+    }
+    return candidate
+  }
+
+  const setMapping = async (
+    key: typeof REPO_DEFAULTS_KEY | typeof SESSION_OVERRIDES_KEY,
+    identity: string,
+    selection: LinearSelection | null
+  ): Promise<void> => {
+    const mappings = mapOf(await ctx.storage.get(key))
+    if (selection) mappings[identity] = await validatedSelection(selection)
+    else delete mappings[identity]
+    await ctx.storage.set(key, mappings)
+  }
+
+  const manager: LinearAccountManager = {
+    configuration,
+    addProfile: async (input) => {
+      const name = input.name.trim()
+      const apiKey = input.apiKey.trim()
+      if (!name) throw new Error("Name this Linear account.")
+      if (!apiKey.startsWith("lin_api_")) throw new Error("Linear personal API keys start with lin_api_.")
+      const id = `account_${randomUUID().replaceAll("-", "")}`
+      const client = createLinearClient({ getSecret: async () => apiKey })
+      const context = await client.context()
+      await ctx.settings.setProfileSecret(PROFILE_COLLECTION, id, apiKey)
+      try {
+        await saveProfiles([...(await ensureLegacy()), profileFromContext(id, name, context)])
+      } catch (cause) {
+        await ctx.settings.deleteProfileSecret(PROFILE_COLLECTION, id).catch(() => undefined)
+        throw cause
+      }
+      return configuration(input)
+    },
+    removeProfile: async (input) => {
+      if (input.profileId === LEGACY_PROFILE_ID) {
+        throw new Error("Remove the legacy default API key from Plugin Settings.")
+      }
+      await ctx.settings.deleteProfileSecret(PROFILE_COLLECTION, input.profileId)
+      await saveProfiles((await profiles()).filter(({ id }) => id !== input.profileId))
+      for (const key of [REPO_DEFAULTS_KEY, SESSION_OVERRIDES_KEY] as const) {
+        const mappings = mapOf(await ctx.storage.get(key))
+        const filtered = Object.fromEntries(
+          Object.entries(mappings).filter(([, value]) => value.profileId !== input.profileId)
+        )
+        await ctx.storage.set(key, filtered)
+      }
+      return configuration(input)
+    },
+    setRepoDefault: async (input) => {
+      if (!input.repository) throw new Error("A repository is required.")
+      await setMapping(REPO_DEFAULTS_KEY, input.repository.name, input.selection)
+      return configuration(input)
+    },
+    setSessionOverride: async (input) => {
+      if (!input.sessionId) throw new Error("A session is required.")
+      await setMapping(SESSION_OVERRIDES_KEY, input.sessionId, input.selection)
+      return configuration(input)
+    },
+    resetSessionOverride: async (input) => {
+      if (input.sessionId) await setMapping(SESSION_OVERRIDES_KEY, input.sessionId, null)
+      return configuration(input)
+    },
+    clientFor: async (route) => {
+      const config = await configuration(route)
+      if (!config.resolved) throw new Error("Connect a Linear account for this repository.")
+      const apiKey = await secret(config.resolved.profileId)
+      if (!apiKey) throw new Error("The selected Linear account needs to be reconnected.")
+      return {
+        selection: config.resolved,
+        client: createLinearClient({ getSecret: async () => apiKey })
+      }
+    }
+  }
+  return manager
+}
+
 const issueTabCommand = <Input, Output>(handler: (input: Input) => Output | Promise<Output>) =>
   async (input?: unknown): Promise<Output> => {
     if (input === undefined) {
@@ -387,10 +593,29 @@ export const activateWithClient = (ctx: LinearHostContext, client: LinearClient)
 }
 
 export const activate: Activate = (ctx) => {
-  activateWithClient(
-    ctx,
-    createLinearClient({
-      getSecret: (id) => ctx.settings.getSecret(id)
-    })
+  const accounts = createLinearAccountManager(ctx)
+  const client: LinearClient = {
+    configured: async (route = {}) => (await accounts.configuration(route)).profiles.length > 0,
+    context: async (route = {}) => (await accounts.clientFor(route)).client.context(),
+    listIssues: async (input) => (await accounts.clientFor(input)).client.listIssues(input),
+    getIssue: async (input) => (await accounts.clientFor(input)).client.getIssue(input),
+    createIssue: async (input) => {
+      const selected = await accounts.clientFor(input)
+      return selected.client.createIssue({
+        ...input,
+        teamId: input.teamId ?? selected.selection.teamId,
+        projectId: input.projectId ?? selected.selection.projectId
+      })
+    },
+    addComment: async (input) => (await accounts.clientFor(input)).client.addComment(input)
+  }
+  activateWithClient(ctx, client)
+  ctx.subscriptions.push(
+    ctx.commands.register("linear.configuration", issueTabCommand((input: LinearRoute) => accounts.configuration(input))),
+    ctx.commands.register("linear.profile-add", issueTabCommand((input: LinearRoute & { name: string; apiKey: string }) => accounts.addProfile(input))),
+    ctx.commands.register("linear.profile-remove", issueTabCommand((input: LinearRoute & { profileId: string }) => accounts.removeProfile(input))),
+    ctx.commands.register("linear.repo-default", issueTabCommand((input: LinearRoute & { selection: LinearSelection }) => accounts.setRepoDefault(input))),
+    ctx.commands.register("linear.session-override", issueTabCommand((input: LinearRoute & { selection: LinearSelection }) => accounts.setSessionOverride(input))),
+    ctx.commands.register("linear.session-reset", issueTabCommand((input: LinearRoute) => accounts.resetSessionOverride(input)))
   )
 }

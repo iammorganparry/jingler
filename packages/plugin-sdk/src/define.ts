@@ -113,6 +113,13 @@ export interface SettingDeclaration {
   readonly options?: readonly string[]
 }
 
+/** A manifest-declared collection of dynamically named encrypted secrets. */
+export interface SecretProfileDeclaration {
+  readonly id: string
+  readonly label: string
+  readonly description?: string
+}
+
 /** A progressively disclosed set of native agent tools backed by the plugin host. */
 export interface AgentToolsetDeclaration {
   /** Namespaced `<pluginId>.<local>`, e.g. `expo.ios-preview`. */
@@ -174,6 +181,7 @@ export interface ManifestInput {
     readonly panes?: readonly PaneDeclaration[]
     readonly commands?: readonly CommandDeclaration[]
     readonly settings?: readonly SettingDeclaration[]
+    readonly secretProfiles?: readonly SecretProfileDeclaration[]
     readonly issueProviders?: readonly IssueProviderDeclaration[]
     readonly agentToolsets?: readonly AgentToolsetDeclaration[]
   }
@@ -217,6 +225,15 @@ export type SettingIdsOf<M> = M extends {
     : never
   : never
 
+/** The encrypted secret-profile collection ids a manifest declares. */
+export type SecretProfileIdsOf<M> = M extends {
+  contributes?: { secretProfiles?: infer S }
+}
+  ? S extends readonly { readonly id: infer Id }[]
+    ? Id & string
+    : never
+  : never
+
 /** The agent-toolset ids a manifest declares, as a union of string literals. */
 export type AgentToolsetIdsOf<M> = M extends {
   contributes?: { agentToolsets?: infer T }
@@ -248,9 +265,9 @@ export type ContributionId<M> = `${IdOf<M>}.${string}`
  * text contains the required prefix.
  */
 type NamespaceCheck<M> =
-  [TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> | SettingIdsOf<M> | AgentToolsetIdsOf<M>] extends [never]
+  [TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> | SettingIdsOf<M> | SecretProfileIdsOf<M> | AgentToolsetIdsOf<M>] extends [never]
     ? unknown
-    : TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> | SettingIdsOf<M> | AgentToolsetIdsOf<M> extends ContributionId<M>
+    : TabIdsOf<M> | PaneIdsOf<M> | CommandIdsOf<M> | SettingIdsOf<M> | SecretProfileIdsOf<M> | AgentToolsetIdsOf<M> extends ContributionId<M>
       ? unknown
       : {
           readonly __jingler_error: `every contribution id must start with "${IdOf<M>}."`

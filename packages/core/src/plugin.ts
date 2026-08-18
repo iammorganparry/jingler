@@ -390,6 +390,14 @@ export type IssueProviderDescriptor = Schema.Schema.Type<
   typeof IssueProviderDescriptor
 >
 
+/** A declared collection of dynamically named secrets owned by one plugin. */
+export const SecretProfileContribution = Schema.Struct({
+  id: ContributionId,
+  label: Schema.String.pipe(Schema.minLength(1)),
+  description: Schema.optional(Schema.String)
+})
+export type SecretProfileContribution = Schema.Schema.Type<typeof SecretProfileContribution>
+
 /** Compact manifest metadata for a native agent toolset. Full schemas stay in the host. */
 export const AgentToolsetContribution = Schema.Struct({
   id: ContributionId,
@@ -405,6 +413,7 @@ export const PluginContributes = Schema.Struct({
   commands: Schema.optional(Schema.Array(CommandContribution)),
   keybindings: Schema.optional(Schema.Array(KeybindingContribution)),
   settings: Schema.optional(Schema.Array(SettingContribution)),
+  secretProfiles: Schema.optional(Schema.Array(SecretProfileContribution)),
   authenticationProviders: Schema.optional(
     Schema.Array(AuthProviderContribution)
   ),
@@ -554,6 +563,7 @@ const contributionIds = (
     ...(c.panes ?? []).map((p) => p.id),
     ...(c.commands ?? []).map((x) => x.id),
     ...(c.settings ?? []).map((s) => s.id),
+    ...(c.secretProfiles ?? []).map((s) => s.id),
     ...(c.agentToolsets ?? []).map((t) => t.id)
   ]
 }

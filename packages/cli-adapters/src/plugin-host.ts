@@ -424,7 +424,8 @@ export class PluginHostRuntime {
       entry: `${plugin.dir}/${manifest.main}`,
       declaredCommands: (manifest.contributes?.commands ?? []).map((c) => c.id),
       declaredIssueProviders: (manifest.contributes?.issueProviders ?? []).map((p) => p.id),
-      declaredAgentToolsets: (manifest.contributes?.agentToolsets ?? []).map((t) => t.id)
+      declaredAgentToolsets: (manifest.contributes?.agentToolsets ?? []).map((t) => t.id),
+      declaredSecretProfiles: (manifest.contributes?.secretProfiles ?? []).map((p) => p.id)
     })
 
     // A plugin awaiting a network call it will never get must not hold the

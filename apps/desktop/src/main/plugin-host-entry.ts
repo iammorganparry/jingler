@@ -88,6 +88,7 @@ interface LivePlugin {
   readonly declaredCommands: ReadonlySet<string>
   readonly declaredIssueProviders: ReadonlySet<string>
   readonly declaredAgentToolsets: ReadonlySet<string>
+  readonly declaredSecretProfiles: ReadonlySet<string>
   readonly commands: Map<string, (input?: unknown) => unknown | Promise<unknown>>
   readonly agentToolsets: Map<string, AgentToolset>
   readonly issueProviders: Map<string, IssueProvider>
@@ -111,6 +112,17 @@ const activating = new Map<string, Promise<void>>()
 /** Abort controllers for cancellable native agent tool calls, keyed by request id. */
 const agentToolCalls = new Map<string, AbortController>()
 
+const PROFILE_ID = /^[A-Za-z0-9_-]{1,64}$/u
+
+const profileAccess = (plugin: LivePlugin, collectionId: string, profileId: string): void => {
+  if (!plugin.declaredSecretProfiles.has(collectionId)) {
+    throw new Error(`Plugin "${plugin.pluginId}" did not declare secret profile collection "${collectionId}".`)
+  }
+  if (!PROFILE_ID.test(profileId)) {
+    throw new Error("Secret profile ids must contain at most 64 letters, digits, underscores, or hyphens.")
+  }
+}
+
 const storageFor = (pluginId: string): PluginStorage => ({
   get: <T,>(key: string) =>
     ask<T | undefined>(pluginId, "storage.get", { key }).then((v) => v ?? undefined),
@@ -127,7 +139,30 @@ const buildContext = (plugin: LivePlugin): HostContext => ({
     getSecret: (settingId: string) =>
       ask<string | null>(plugin.pluginId, "settings.getSecret", { settingId }).then(
         (value) => value ?? undefined
-      )
+      ),
+    getProfileSecret: (collectionId, profileId) => {
+      profileAccess(plugin, collectionId, profileId)
+      return ask<string | null>(plugin.pluginId, "settings.getProfileSecret", {
+        collectionId,
+        profileId
+      }).then((value) => value ?? undefined)
+    },
+    setProfileSecret: (collectionId, profileId, value) => {
+      profileAccess(plugin, collectionId, profileId)
+      if (!value) throw new Error("Secret profile values cannot be empty.")
+      return ask<void>(plugin.pluginId, "settings.setProfileSecret", {
+        collectionId,
+        profileId,
+        value
+      })
+    },
+    deleteProfileSecret: (collectionId, profileId) => {
+      profileAccess(plugin, collectionId, profileId)
+      return ask<void>(plugin.pluginId, "settings.deleteProfileSecret", {
+        collectionId,
+        profileId
+      })
+    }
   },
   issues: {
     registerProvider: (provider) => {
@@ -362,7 +397,7 @@ const activate = async (message: Extract<ToHostMessage, { kind: "activate" }>) =
 const runActivation = async (
   message: Extract<ToHostMessage, { kind: "activate" }>
 ): Promise<void> => {
-  const { pluginId, entry, declaredCommands, declaredIssueProviders, declaredAgentToolsets } = message
+  const { pluginId, entry, declaredCommands, declaredIssueProviders, declaredAgentToolsets, declaredSecretProfiles } = message
 
   if (live.has(pluginId)) {
     // Already activated. Idempotent rather than an error: several activation
@@ -376,6 +411,7 @@ const runActivation = async (
     declaredCommands: new Set(declaredCommands),
     declaredIssueProviders: new Set(declaredIssueProviders),
     declaredAgentToolsets: new Set(declaredAgentToolsets),
+    declaredSecretProfiles: new Set(declaredSecretProfiles),
     commands: new Map(),
     agentToolsets: new Map(),
     issueProviders: new Map(),

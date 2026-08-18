@@ -14,6 +14,11 @@ export const manifest = defineManifest({
   activationEvents: ["onTab:linear.issue"],
   contributes: {
     issueProviders: [{ id: "linear", label: "Linear" }],
+    secretProfiles: [{
+      id: "linear.accounts",
+      label: "Linear accounts",
+      description: "Named Linear personal API keys, encrypted by Jingler."
+    }],
     tabs: [
       {
         id: "linear.issue",
@@ -29,7 +34,13 @@ export const manifest = defineManifest({
       { id: "linear.list", title: "Search Linear issues", category: "Linear" },
       { id: "linear.get", title: "Fetch a Linear issue", category: "Linear" },
       { id: "linear.create", title: "Create a Linear issue", category: "Linear" },
-      { id: "linear.comment", title: "Comment on a Linear issue", category: "Linear" }
+      { id: "linear.comment", title: "Comment on a Linear issue", category: "Linear" },
+      { id: "linear.configuration", title: "Load Linear account configuration", category: "Linear" },
+      { id: "linear.profile-add", title: "Add a Linear account", category: "Linear" },
+      { id: "linear.profile-remove", title: "Remove a Linear account", category: "Linear" },
+      { id: "linear.repo-default", title: "Set repository Linear defaults", category: "Linear" },
+      { id: "linear.session-override", title: "Override Linear for this session", category: "Linear" },
+      { id: "linear.session-reset", title: "Reset the session Linear override", category: "Linear" }
     ],
     settings: [
       {

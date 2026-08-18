@@ -176,11 +176,14 @@ export interface HostContext {
  * and the owning host resolves one declared id at the moment it needs it.
  */
 export interface HostSettings {
-  /**
-   * Return this plugin's configured secret, or undefined when it is unset.
-   * Rejects when `settingId` is undeclared or is an ordinary setting.
-   */
+  /** Return one manifest-declared static secret setting. */
   getSecret(settingId: string): Promise<string | undefined>
+  /** Return one member of a manifest-declared named secret collection. */
+  getProfileSecret(collectionId: string, profileId: string): Promise<string | undefined>
+  /** Persist one member of a manifest-declared named secret collection. */
+  setProfileSecret(collectionId: string, profileId: string, value: string): Promise<void>
+  /** Remove one member of a manifest-declared named secret collection. */
+  deleteProfileSecret(collectionId: string, profileId: string): Promise<void>
 }
 
 /** The selected repository supplied alongside provider operations. */

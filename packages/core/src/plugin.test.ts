@@ -185,6 +185,18 @@ describe("PluginManifest", () => {
     })
   })
 
+  it("accepts namespaced encrypted secret-profile collections", () => {
+    const decoded = Schema.decodeUnknownSync(PluginManifest)({
+      id: "linear",
+      name: "Linear",
+      version: "1.0.0",
+      contributes: {
+        secretProfiles: [{ id: "linear.accounts", label: "Linear accounts" }]
+      }
+    })
+    expect(decoded.contributes?.secretProfiles?.[0]?.id).toBe("linear.accounts")
+  })
+
   it("accepts compact agent-toolset metadata without eagerly embedding tool schemas", () => {
     const decoded = Schema.decodeUnknownSync(PluginManifest)({
       id: "expo",

@@ -28,9 +28,12 @@ import {
   RefreshCw,
   Search,
   Settings,
-  Unlink
+  SlidersHorizontal,
+  Trash2,
+  Unlink,
+  X
 } from "lucide-react"
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { ActorRefFrom, SnapshotFrom } from "xstate"
 import {
   linearIssueMachine,
@@ -39,6 +42,7 @@ import {
   type LinearWorkspaceContext
 } from "./linear-issue-machine.js"
 import { manifest } from "./manifest.js"
+import type { LinearConfiguration, LinearSelection } from "./types.js"
 
 type LinearIssueSnapshot = SnapshotFrom<typeof linearIssueMachine>
 type LinearIssueSend = ActorRefFrom<typeof linearIssueMachine>["send"]
@@ -59,14 +63,15 @@ function linearServices(
     name: session.repo,
     path: session.worktreePath ?? ""
   }
+  const route = { sessionId: session.id, repository }
   return {
-    configured: () => host.invoke<boolean>("linear.configured"),
-    context: () => host.invoke<LinearWorkspaceContext>("linear.context"),
+    configured: () => host.invoke<boolean>("linear.configured", route),
+    context: () => host.invoke<LinearWorkspaceContext>("linear.context", route),
     list: (search) =>
-      host.invoke<readonly IssueSummary[]>("linear.list", { repository, search, mine: false }),
+      host.invoke<readonly IssueSummary[]>("linear.list", { ...route, search, mine: false }),
     get: async (issueId) => {
       const issue = await host.invoke<LinearIssueDetail | null>("linear.get", {
-        repository,
+        ...route,
         issueId
       })
       if (!issue) throw new Error("Linear could not find this issue.")
@@ -74,13 +79,13 @@ function linearServices(
     },
     create: (input) =>
       host.invoke<LinearIssueDetail>("linear.create", {
-        repository,
+        ...route,
         title: input.title.trim(),
         body: input.description?.trim() ?? "",
         teamId: input.teamId
       }),
     comment: async (issueId, body) => {
-      await host.invoke<IssueComment>("linear.comment", { repository, issueId, body })
+      await host.invoke<IssueComment>("linear.comment", { ...route, issueId, body })
     },
     link: (issue) => linkIssue(session.id, issue),
     unlink: () => unlinkIssue(session.id)
@@ -295,9 +300,122 @@ function DetailView({
   )
 }
 
+const routeFor = (session: SessionSnapshot) => ({
+  sessionId: session.id,
+  repository: { name: session.repo, path: session.worktreePath ?? "" }
+})
+
+function LinearSetupFlyout({
+  session,
+  open,
+  onClose,
+  onConfigured
+}: {
+  readonly session: SessionSnapshot
+  readonly open: boolean
+  readonly onClose: () => void
+  readonly onConfigured: () => void
+}) {
+  const host = useHost()
+  const route = useMemo(() => routeFor(session), [session])
+  const [configuration, setConfiguration] = useState<LinearConfiguration | null>(null)
+  const [selection, setSelection] = useState<LinearSelection | null>(null)
+  const [name, setName] = useState("")
+  const [apiKey, setApiKey] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    const next = await host.invoke<LinearConfiguration>("linear.configuration", route)
+    setConfiguration(next)
+    setSelection(next.resolved)
+    return next
+  }
+
+  useEffect(() => {
+    if (!open) return
+    setError(null)
+    void load().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
+  }, [open, route])
+
+  if (!open) return null
+  const profile = configuration?.profiles.find(({ id }) => id === selection?.profileId) ?? null
+  const run = async (action: () => Promise<LinearConfiguration>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const next = await action()
+      setConfiguration(next)
+      setSelection(next.resolved)
+      onConfigured()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const selected = (): LinearSelection => {
+    if (!selection) throw new Error("Choose a Linear account.")
+    return selection
+  }
+
+  return (
+    <aside aria-label="Linear setup" className="absolute right-3 top-12 z-30 w-[min(420px,calc(100%-24px))] rounded-lg border border-line bg-editor p-4 shadow-xl">
+      <div className="mb-3 flex items-center justify-between">
+        <div><h2 className="text-[14px] font-semibold text-text-bright">Linear setup</h2><p className="text-[11.5px] text-dim">{session.repo}</p></div>
+        <button type="button" aria-label="Close Linear setup" onClick={onClose} className="rounded p-1 text-dim hover:bg-panel hover:text-text"><X size={15} /></button>
+      </div>
+      {error && <div className="mb-3"><ErrorNotice message={error} /></div>}
+      <label className="mb-3 flex flex-col gap-1 text-[11.5px] text-dim">
+        Account
+        <select
+          value={selection?.profileId ?? ""}
+          onChange={(event) => setSelection({ profileId: event.currentTarget.value })}
+          className="rounded border border-line bg-panel px-3 py-2 text-[12px] text-text"
+        >
+          <option value="">Choose an account</option>
+          {configuration?.profiles.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.workspace.name}</option>)}
+        </select>
+      </label>
+      {profile && (
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-[11.5px] text-dim">Team
+            <select value={selection?.teamId ?? ""} onChange={(event) => setSelection({ ...selected(), teamId: event.currentTarget.value || undefined })} className="rounded border border-line bg-panel px-2 py-2 text-[12px] text-text">
+              <option value="">No default</option>{profile.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[11.5px] text-dim">Project
+            <select value={selection?.projectId ?? ""} onChange={(event) => setSelection({ ...selected(), projectId: event.currentTarget.value || undefined })} className="rounded border border-line bg-panel px-2 py-2 text-[12px] text-text">
+              <option value="">No default</option>{profile.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button type="button" disabled={busy || !selection} onClick={() => void run(() => host.invoke<LinearConfiguration>("linear.session-override", { ...route, selection: selected() }))} className="rounded bg-purple px-2.5 py-1.5 text-[11.5px] font-medium text-editor disabled:opacity-50">Use for this session</button>
+        <button type="button" disabled={busy || !selection} onClick={() => void run(() => host.invoke<LinearConfiguration>("linear.repo-default", { ...route, selection: selected() }))} className="rounded border border-line px-2.5 py-1.5 text-[11.5px] text-text disabled:opacity-50">Save as repo default</button>
+        {configuration?.sessionOverride && <button type="button" disabled={busy} onClick={() => void run(() => host.invoke<LinearConfiguration>("linear.session-reset", route))} className="rounded border border-line px-2.5 py-1.5 text-[11.5px] text-text">Reset override</button>}
+        {profile && !profile.legacy && <button type="button" aria-label={`Remove ${profile.name}`} disabled={busy} onClick={() => void run(() => host.invoke<LinearConfiguration>("linear.profile-remove", { ...route, profileId: profile.id }))} className="rounded border border-red/50 p-1.5 text-red"><Trash2 size={13} /></button>}
+      </div>
+      <form className="border-t border-line pt-3" onSubmit={(event) => {
+        event.preventDefault()
+        void run(() => host.invoke<LinearConfiguration>("linear.profile-add", { ...route, name, apiKey })).then(() => { setName(""); setApiKey("") })
+      }}>
+        <h3 className="mb-2 text-[12px] font-medium text-text-bright">Add account</h3>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input aria-label="Account name" required placeholder="Work Linear" value={name} onChange={(event) => setName(event.currentTarget.value)} className="rounded border border-line bg-panel px-2.5 py-2 text-[12px] text-text" />
+          <input aria-label="Linear API key" required type="password" placeholder="lin_api_…" value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} className="rounded border border-line bg-panel px-2.5 py-2 text-[12px] text-text" />
+        </div>
+        <div className="mt-2 flex items-center gap-2"><button type="submit" disabled={busy} className="rounded border border-purple px-2.5 py-1.5 text-[11.5px] text-text">Add account</button><button type="button" onClick={() => void host.openExternal("https://linear.app/settings/api")} className="text-[11.5px] text-purple hover:underline">Create API key</button></div>
+      </form>
+    </aside>
+  )
+}
+
 function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
   const host = useHost()
   const { linkIssue, unlinkIssue } = useSessionActions()
+  const [setupOpen, setSetupOpen] = useState(false)
   const services = useMemo(
     () => linearServices(host, session, linkIssue, unlinkIssue),
     [host, linkIssue, session, unlinkIssue]
@@ -309,21 +427,19 @@ function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
   const waiting = snapshot.matches("checkingConfiguration") || snapshot.matches("loadingContext") || snapshot.matches("loadingIssue") || snapshot.matches("searching") || snapshot.matches("creating") || snapshot.matches("linking") || snapshot.matches("unlinking")
 
   return (
-    <div data-testid="linear-issue-body" className="flex min-h-0 flex-1 flex-col overflow-auto bg-editor">
+    <div data-testid="linear-issue-body" className="relative flex min-h-0 flex-1 flex-col overflow-auto bg-editor">
       <div className="border-b border-line bg-panel px-4 py-2.5">
-        <div className="mx-auto flex max-w-[980px] items-center gap-2 text-[12px] font-medium text-text-bright"><LinearMark className="h-4 w-4" /> Linear <span className="font-normal text-dim">{context.workspace?.workspace.name}</span></div>
+        <div className="mx-auto flex max-w-[980px] items-center gap-2 text-[12px] font-medium text-text-bright"><LinearMark className="h-4 w-4" /> Linear <span className="font-normal text-dim">{context.workspace?.workspace.name}</span><button type="button" aria-label="Configure Linear for this session" onClick={() => setSetupOpen((value) => !value)} className="ml-auto rounded p-1 text-dim hover:bg-editor hover:text-text"><SlidersHorizontal size={14} /></button></div>
       </div>
+      <LinearSetupFlyout session={session} open={setupOpen} onClose={() => setSetupOpen(false)} onConfigured={() => send({ type: "CONFIGURATION_CHANGED" })} />
       <div className="mx-auto w-full max-w-[980px] flex-1 px-4 py-6 md:px-7">
         {waiting && !context.issue && <div className="flex min-h-[220px] items-center justify-center text-dim"><Spinner size={20} /></div>}
         {snapshot.matches("needsConfiguration") && (
           <div className="mx-auto flex min-h-[280px] max-w-[460px] flex-col items-center justify-center gap-3 text-center">
             <LinearMark className="h-8 w-8" />
             <h1 className="text-[16px] font-semibold text-text-bright">Connect Linear</h1>
-            <p className="text-[12.5px] leading-relaxed text-dim">Add a Linear personal API key under Settings → Plugins → Linear. Jingler stores it encrypted and never exposes it to this view.</p>
-            <div className="flex flex-wrap justify-center gap-2">
-              <button type="button" onClick={async () => host.openExternal("https://linear.app/settings/api")} className="inline-flex items-center gap-1.5 rounded border border-line px-3 py-2 text-[12px] text-text hover:border-purple"><Settings size={13} /> Create API key</button>
-              <button type="button" onClick={() => send({ type: "CONFIGURATION_CHANGED" })} className="rounded bg-purple px-3 py-2 text-[12px] font-medium text-editor">I&apos;ve configured it</button>
-            </div>
+            <p className="text-[12.5px] leading-relaxed text-dim">Connect a named Linear account, then choose workspace defaults for this repository or only this session. Jingler encrypts API keys and never exposes them to the agent.</p>
+            <button type="button" onClick={() => setSetupOpen(true)} className="inline-flex items-center gap-1.5 rounded bg-purple px-3 py-2 text-[12px] font-medium text-editor"><Settings size={13} /> Set up Linear</button>
           </div>
         )}
         {snapshot.matches("unlinked") && <UnlinkedView snapshot={snapshot} send={send} />}

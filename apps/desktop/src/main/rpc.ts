@@ -3789,6 +3789,21 @@ const declaredSetting = (pluginId: string, settingId: string) =>
         );
   });
 
+const declaredSecretProfile = (pluginId: string, collectionId: string) =>
+  Effect.flatMap(installedPluginById(pluginId), (plugin) => {
+    const profile = (plugin.manifest.contributes?.secretProfiles ?? []).find(
+      (candidate) => candidate.id === collectionId,
+    );
+    return profile
+      ? Effect.succeed(profile)
+      : Effect.fail(
+          new PluginError({
+            pluginId,
+            reason: `"${collectionId}" is not a secret profile collection declared by this plugin`,
+          }),
+        );
+  });
+
 const declaredSecretSetting = (pluginId: string, settingId: string) =>
   Effect.flatMap(declaredSetting(pluginId, settingId), (setting) =>
     setting.type === "secret"
@@ -4119,6 +4134,48 @@ export const pluginSecretGetForHost = (pluginId: string, settingId: string) =>
     yield* declaredSecretSetting(pluginId, settingId);
     const pluginSecrets = yield* PluginSecretStore;
     return yield* pluginSecrets.get(pluginId, settingId);
+  });
+
+const profileSecretKey = (collectionId: string, profileId: string) =>
+  `$profiles/${collectionId}/${profileId}`;
+
+export const pluginProfileSecretGetForHost = (
+  pluginId: string,
+  collectionId: string,
+  profileId: string,
+) =>
+  Effect.gen(function* () {
+    yield* declaredSecretProfile(pluginId, collectionId);
+    const pluginSecrets = yield* PluginSecretStore;
+    return yield* pluginSecrets.get(pluginId, profileSecretKey(collectionId, profileId));
+  });
+
+export const pluginProfileSecretSetForHost = (
+  pluginId: string,
+  collectionId: string,
+  profileId: string,
+  value: string,
+) =>
+  Effect.gen(function* () {
+    const profile = yield* declaredSecretProfile(pluginId, collectionId);
+    if (!value) return yield* Effect.fail(new PluginError({ pluginId, reason: "Secret profile values cannot be empty" }));
+    const pluginSecrets = yield* PluginSecretStore;
+    yield* pluginSecrets.set(pluginId, profileSecretKey(collectionId, profileId), value).pipe(
+      mapPluginSecretStoreError(pluginId, (cause) => `Could not save "${profile.label}" securely: ${cause.message}`),
+    );
+  });
+
+export const pluginProfileSecretDeleteForHost = (
+  pluginId: string,
+  collectionId: string,
+  profileId: string,
+) =>
+  Effect.gen(function* () {
+    const profile = yield* declaredSecretProfile(pluginId, collectionId);
+    const pluginSecrets = yield* PluginSecretStore;
+    yield* pluginSecrets.clear(pluginId, profileSecretKey(collectionId, profileId)).pipe(
+      mapPluginSecretStoreError(pluginId, (cause) => `Could not remove "${profile.label}": ${cause.message}`),
+    );
   });
 
 const clearPluginConfiguration = (pluginId: string) =>

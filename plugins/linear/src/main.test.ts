@@ -1,6 +1,11 @@
 import type { Disposable, IssueComment, IssueSummary } from "@jingler/plugin-sdk/host"
 import { describe, expect, it, vi } from "vitest"
-import { activateWithClient, createLinearClient, type LinearClient } from "./main.js"
+import {
+  activateWithClient,
+  createLinearAccountManager,
+  createLinearClient,
+  type LinearClient
+} from "./main.js"
 import type { LinearContext, LinearIssueDetail } from "./types.js"
 
 const json = (data: unknown) =>
@@ -79,7 +84,8 @@ describe("createLinearClient", () => {
         return json({
           viewer: { id: "user-1", name: "Alex", avatarUrl: null },
           organization: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-          teams: { nodes: [{ id: "team-1", name: "Engineering", key: "ENG" }] }
+          teams: { nodes: [{ id: "team-1", name: "Engineering", key: "ENG" }] },
+          projects: { nodes: [] }
         })
       }
       expect(body.query).not.toContain("searchIssues")
@@ -226,7 +232,8 @@ describe("createLinearClient", () => {
         return json({
           viewer: { id: "user-1", name: "Alex", avatarUrl: null },
           organization: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-          teams: { nodes: [{ id: "team-default", name: "Engineering", key: "ENG" }] }
+          teams: { nodes: [{ id: "team-default", name: "Engineering", key: "ENG" }] },
+          projects: { nodes: [] }
         })
       }
       if (body.query.includes("mutation LinearIssueCreate")) {
@@ -261,7 +268,8 @@ describe("createLinearClient", () => {
             { id: "team-eng", name: "Engineering", key: "ENG" },
             { id: "team-design", name: "Design", key: "DES" }
           ]
-        }
+        },
+        projects: { nodes: [] }
       })
     })
     const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
@@ -305,6 +313,73 @@ describe("createLinearClient", () => {
   })
 })
 
+describe("Linear account configuration", () => {
+  const setupAccounts = (legacy?: string) => {
+    const storage = new Map<string, unknown>()
+    const secrets = new Map<string, string>()
+    const settings = {
+      getSecret: vi.fn(async () => legacy),
+      getProfileSecret: vi.fn(async (_collection: string, profileId: string) => secrets.get(profileId)),
+      setProfileSecret: vi.fn(async (_collection: string, profileId: string, value: string) => {
+        secrets.set(profileId, value)
+      }),
+      deleteProfileSecret: vi.fn(async (_collection: string, profileId: string) => {
+        secrets.delete(profileId)
+      })
+    }
+    const manager = createLinearAccountManager({
+      settings,
+      storage: {
+        get: async <T,>(key: string) => storage.get(key) as T | undefined,
+        set: async (key: string, value: unknown) => { storage.set(key, value) },
+        delete: async (key: string) => { storage.delete(key) },
+        keys: async () => [...storage.keys()]
+      }
+    })
+    return { manager, settings, storage, secrets }
+  }
+
+  const contextResponse = (workspace: string) => json({
+    viewer: { id: `viewer-${workspace}`, name: "Alex", avatarUrl: null },
+    organization: { id: `workspace-${workspace}`, name: workspace, urlKey: workspace.toLowerCase() },
+    teams: { nodes: [{ id: `team-${workspace}`, name: "Engineering", key: "ENG" }] },
+    projects: { nodes: [{ id: `project-${workspace}`, name: "Roadmap" }] }
+  })
+
+  it("adapts the legacy API key as a default profile without re-entry", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => contextResponse("Legacy")))
+    const { manager, settings } = setupAccounts("lin_api_legacy")
+    const configuration = await manager.configuration({ repository })
+
+    expect(configuration.profiles).toEqual([
+      expect.objectContaining({ id: "legacy-default", name: "Default", legacy: true })
+    ])
+    expect(configuration.resolved).toEqual({ profileId: "legacy-default" })
+    expect(settings.setProfileSecret).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it("encrypts named keys and resolves session overrides ahead of repo defaults", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => contextResponse("Work")))
+    const { manager, settings, storage } = setupAccounts()
+    const route = { repository, sessionId: "session-1" }
+    const added = await manager.addProfile({ ...route, name: "Work", apiKey: "lin_api_work" })
+    const profile = added.profiles[0]!
+    const repo = { profileId: profile.id, teamId: profile.teams[0]!.id }
+    await manager.setRepoDefault({ ...route, selection: repo })
+    const session = { profileId: profile.id, projectId: profile.projects[0]!.id }
+    const configured = await manager.setSessionOverride({ ...route, selection: session })
+
+    expect(settings.setProfileSecret).toHaveBeenCalledWith("linear.accounts", profile.id, "lin_api_work")
+    expect(JSON.stringify([...storage.values()])).not.toContain("lin_api_work")
+    expect(configured.repoDefault).toEqual(repo)
+    expect(configured.sessionOverride).toEqual(session)
+    expect(configured.resolved).toEqual(session)
+    expect((await manager.resetSessionOverride(route)).resolved).toEqual(repo)
+    vi.unstubAllGlobals()
+  })
+})
+
 describe("activateWithClient", () => {
   it("registers the Linear provider and every manifest command", async () => {
     const dispose = vi.fn()
@@ -323,7 +398,8 @@ describe("activateWithClient", () => {
     const emptyContext: LinearContext = {
       viewer: { id: "user-1", name: "Alex", avatarUrl: null },
       workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-      teams: []
+      teams: [],
+      projects: []
     }
     const summary: IssueSummary = {
       providerId: "linear",

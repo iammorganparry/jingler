@@ -64,6 +64,8 @@ export type ToHostMessage =
       readonly declaredIssueProviders: ReadonlyArray<string>
       /** Agent-toolset ids the manifest declares; full schemas remain lazy. */
       readonly declaredAgentToolsets: ReadonlyArray<string>
+      /** Named encrypted secret collection ids this plugin may access. */
+      readonly declaredSecretProfiles: ReadonlyArray<string>
     }
   | { readonly kind: "deactivate"; readonly requestId: string; readonly pluginId: string }
   | {
@@ -215,6 +217,9 @@ export type HostOp =
   | "storage.delete"
   | "storage.keys"
   | "settings.getSecret"
+  | "settings.getProfileSecret"
+  | "settings.setProfileSecret"
+  | "settings.deleteProfileSecret"
   | "exec"
   | "auth.getSession"
 

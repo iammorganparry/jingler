@@ -80,7 +80,8 @@ const detail: LinearIssueDetail = {
 const context = {
   viewer: { id: "user-1", name: "Morgan", avatarUrl: null },
   workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-  teams: [{ id: "team-1", name: "Engineering", key: "ENG" }]
+  teams: [{ id: "team-1", name: "Engineering", key: "ENG" }],
+  projects: []
 }
 
 function successfulHost(command: string): unknown {
@@ -90,6 +91,9 @@ function successfulHost(command: string): unknown {
   if (command === "linear.list") return [detail]
   if (command === "linear.create") return detail
   if (command === "linear.comment") return detail.comments[0]
+  if (command === "linear.configuration") return {
+    profiles: [], repoDefault: null, sessionOverride: null, resolved: null
+  }
   throw new Error(`Unexpected command ${command}`)
 }
 
@@ -120,6 +124,44 @@ describe("Linear Issue tab content", () => {
       "jingler-plugin://linear/dist/assets/linear-mark.svg?v=1.0.0"
     )
     expect(view.container.querySelector("[data-linear-mark] path")).toBeNull()
+  })
+
+  it("adds a named account from the contextual setup flyout without retaining its key", async () => {
+    const configured = {
+      profiles: [{
+        id: "account-work",
+        name: "Work",
+        viewer: context.viewer,
+        workspace: context.workspace,
+        teams: context.teams,
+        projects: [{ id: "project-1", name: "Reliability" }]
+      }],
+      repoDefault: null,
+      sessionOverride: null,
+      resolved: { profileId: "account-work" }
+    }
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "linear.configuration") {
+        return Promise.resolve({ profiles: [], repoDefault: null, sessionOverride: null, resolved: null })
+      }
+      if (command === "linear.profile-add") return Promise.resolve(configured)
+      return Promise.resolve(successfulHost(command))
+    })
+    render(<IssueTab pluginId="linear" session={session()} />)
+    await screen.findByRole("heading", { name: "Link an existing issue" })
+    fireEvent.click(screen.getByRole("button", { name: "Configure Linear for this session" }))
+    await screen.findByRole("heading", { name: "Linear setup" })
+    fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Work" } })
+    fireEvent.change(screen.getByLabelText("Linear API key"), { target: { value: "lin_api_secret" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }))
+
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("linear.profile-add", {
+      sessionId: "session-1",
+      repository: { name: "acme/web", path: "/tmp/acme-web" },
+      name: "Work",
+      apiKey: "lin_api_secret"
+    }))
+    await waitFor(() => expect((screen.getByLabelText("Linear API key") as HTMLInputElement).value).toBe(""))
   })
 
   it("renders create and link controls for an unlinked session", async () => {
@@ -153,7 +195,7 @@ describe("Linear Issue tab states", () => {
     const view = render(<IssueTab pluginId="linear" session={session()} />)
 
     expect(await screen.findByRole("heading", { name: "Connect Linear" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Create API key" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Set up Linear" })).toBeTruthy()
 
     view.unmount()
     mocks.invoke.mockRejectedValue(new Error("Linear rate limit reached. Try again later."))
