@@ -8,6 +8,7 @@ import type {
   GitHubFeedbackOutboxEntry,
   GitHubRelayEvent,
   IssueAutomations,
+  IssueIdentity,
   IssueReference,
   PermissionMode,
   ProviderConnectionId,
@@ -21,6 +22,8 @@ import {
   type GitHubApiError,
   GitError,
   issueReferenceOf,
+  issueReferencesOf,
+  sameIssueIdentity,
   ReasoningSetting,
   semanticBranchProposalFromName,
   SessionNotFoundError,
@@ -244,26 +247,63 @@ export const migrateRepoName = (value: unknown): unknown => {
   return { ...value, repo: derived }
 }
 
-/**
- * Migrate historical GitHub aliases only when a session file is next written.
- * Reads remain side-effect free; every ordinary mutation naturally upgrades the
- * full document because SessionStore persists the session array atomically.
- */
-export const migrateSessionIssue = (session: Session): Session => {
-  const linkedIssue = issueReferenceOf(session)
+/** Build the canonical multi-link fields while removing every historical alias. */
+const withCanonicalIssues = (
+  session: Session,
+  linkedIssues: ReadonlyArray<IssueReference>,
+  selectedIssue: IssueIdentity | undefined,
+  automations: IssueAutomations | undefined = session.automations
+): Session => {
   const {
     issueNumber: _issueNumber,
     issueUrl: _issueUrl,
     issueTitle: _issueTitle,
     issueLabels: _issueLabels,
-    automations,
+    linkedIssue: _linkedIssue,
+    linkedIssues: _linkedIssues,
+    selectedIssue: _selectedIssue,
+    automations: _automations,
     ...current
   } = session
+  const selection = selectedIssue && linkedIssues.some((issue) =>
+    sameIssueIdentity(issue, selectedIssue)
+  )
+    ? selectedIssue
+    : linkedIssues.at(-1)
   return {
     ...current,
-    ...(linkedIssue ? { linkedIssue } : {}),
-    ...(linkedIssue?.providerId === "github" && automations ? { automations } : {})
+    ...(linkedIssues.length === 0 ? {} : { linkedIssues: [...linkedIssues] }),
+    ...(selection
+      ? { selectedIssue: { providerId: selection.providerId, id: selection.id } }
+      : {}),
+    ...(linkedIssues.some((issue) => issue.providerId === "github") && automations
+      ? { automations }
+      : {})
   }
+}
+
+/** Merge references by provider-scoped identity, preserving first-link order. */
+export const mergeIssueReferences = (
+  current: ReadonlyArray<IssueReference>,
+  incoming: ReadonlyArray<IssueReference>
+): ReadonlyArray<IssueReference> => {
+  const merged: IssueReference[] = []
+  for (const issue of [...current, ...incoming]) {
+    const index = merged.findIndex((candidate) => sameIssueIdentity(candidate, issue))
+    if (index === -1) merged.push(issue)
+    else merged[index] = issue
+  }
+  return merged
+}
+
+/**
+ * Migrate historical singleton aliases only when a session file is next written.
+ * Reads remain side-effect free; every ordinary mutation upgrades the document.
+ */
+export const migrateSessionIssue = (session: Session): Session => {
+  const linkedIssues = mergeIssueReferences([], issueReferencesOf(session))
+  const selected = issueReferenceOf(session)
+  return withCanonicalIssues(session, linkedIssues, selected)
 }
 
 /**
@@ -320,8 +360,7 @@ const sessionLinksIssue = (
   issue: Pick<IssueReference, "providerId" | "id">
 ): boolean => {
   if (!sessionBelongsToRepository(session, repository)) return false
-  const linked = issueReferenceOf(session)
-  return linked?.providerId === issue.providerId && linked.id === issue.id
+  return issueReferencesOf(session).some((linked) => sameIssueIdentity(linked, issue))
 }
 
 /**
@@ -956,13 +995,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             diff: { added: 0, removed: 0 },
             prNumber: null,
-            linkedIssue: {
+            linkedIssues: [{
               providerId: input.issue.providerId,
               id: input.issue.id,
               identifier: input.issue.identifier,
               url: input.issue.url,
               title: input.issue.title,
               labels: input.issue.labels
+            }],
+            selectedIssue: {
+              providerId: input.issue.providerId,
+              id: input.issue.id
             },
             ...(input.issue.providerId === "github" && input.automations
               ? { automations: input.automations }
@@ -1656,7 +1699,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setProject = (id: string, projectId: string) =>
         update(id, (session) => ({ ...session, projectId }))
 
-      /** Link (or, with `null`, unlink) a normalized issue on a live session. */
+      /** Replace every link (or, with `null`, clear them) for legacy callers. */
       const setIssue = (
         id: string,
         issue: {
@@ -1664,24 +1707,49 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           automations?: IssueAutomations
         } | null
       ) =>
-        update(id, (s) => {
-          const {
-            issueNumber: _issueNumber,
-            issueUrl: _issueUrl,
-            issueTitle: _issueTitle,
-            issueLabels: _issueLabels,
-            automations: _automations,
-            linkedIssue: _linkedIssue,
-            ...current
-          } = s
-          if (!issue) return current
-          return {
-            ...current,
-            linkedIssue: issue.reference,
-            ...(issue.reference.providerId === "github" && issue.automations
-              ? { automations: issue.automations }
-              : {})
-          }
+        update(id, (session) =>
+          issue
+            ? withCanonicalIssues(
+                session,
+                [issue.reference],
+                issue.reference,
+                issue.automations
+              )
+            : withCanonicalIssues(session, [], undefined)
+        )
+
+      /** Add or refresh multiple links, selecting the last touched reference. */
+      const addIssues = (id: string, issues: ReadonlyArray<IssueReference>) =>
+        issues.length === 0
+          ? Effect.void
+          : update(id, (session) => {
+              const merged = mergeIssueReferences(issueReferencesOf(session), issues)
+              return withCanonicalIssues(session, merged, issues.at(-1))
+            })
+
+      /** Select one existing provider-scoped link; unknown identities are a no-op. */
+      const selectIssue = (id: string, issue: IssueIdentity) =>
+        update(id, (session) => {
+          const linkedIssues = issueReferencesOf(session)
+          return linkedIssues.some((candidate) => sameIssueIdentity(candidate, issue))
+            ? withCanonicalIssues(session, linkedIssues, issue)
+            : session
+        })
+
+      /** Remove one provider-scoped link while preserving every unrelated link. */
+      const removeIssue = (id: string, issue: IssueIdentity) =>
+        update(id, (session) => {
+          const linkedIssues = issueReferencesOf(session)
+          const remaining = linkedIssues.filter(
+            (candidate) => !sameIssueIdentity(candidate, issue)
+          )
+          if (remaining.length === linkedIssues.length) return session
+          const selected = issueReferenceOf(session)
+          return withCanonicalIssues(
+            session,
+            remaining,
+            selected && !sameIssueIdentity(selected, issue) ? selected : remaining.at(-1)
+          )
         })
 
       /** Clear the one-shot `initialPrompt` once the composer has consumed it. */
@@ -1825,6 +1893,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setWorktreePath,
         setProject,
         setIssue,
+        addIssues,
+        selectIssue,
+        removeIssue,
         clearInitialPrompt,
         archive,
         restore,

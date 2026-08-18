@@ -24,7 +24,7 @@
  * same reason a plugin must never bundle its own React.
  */
 import { createContext, createElement, type ReactNode } from "react"
-import type { IssueReference, PluginStorage, SessionSnapshot } from "./common.js"
+import type { IssueIdentity, IssueReference, PluginStorage, SessionSnapshot } from "./common.js"
 
 /**
  * Mutations a plugin may make to the session its view is decorating.
@@ -64,8 +64,14 @@ export interface SessionActions {
    * ```
    */
   linkIssue(sessionId: string, issue: IssueReference): Promise<void>
+  /** Add or refresh several issue links, selecting the last supplied issue. */
+  addIssues(sessionId: string, issues: readonly IssueReference[]): Promise<void>
+  /** Select one existing provider-scoped issue link. */
+  selectIssue(sessionId: string, issue: IssueIdentity): Promise<void>
+  /** Remove one provider-scoped issue link without disturbing other links. */
+  removeIssue(sessionId: string, issue: IssueIdentity): Promise<void>
   /**
-   * Detach the issue linked to a session.
+   * Detach every issue linked to a session.
    *
    * Resolves once the app's own session state has been updated, so a view can
    * `await` it and trust the next render.

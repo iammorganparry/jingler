@@ -1,4 +1,4 @@
-import { issueReferenceOf, type PrState, type Session } from "@jingler/core"
+import { issueReferenceForProvider, type PrState, type Session } from "@jingler/core"
 
 /**
  * Session ids whose linked PR has MERGED and whose linked issue should now be
@@ -59,10 +59,10 @@ export const issuesToCloseOnMerge = (
   sessions
     .filter(
       (session) => {
-        const issue = issueReferenceOf(session)
+        const issue = issueReferenceForProvider(session, "github")
         return (
           prStates[session.id] === "merged" &&
-          issue?.providerId === "github" &&
+          issue !== undefined &&
           Number.isSafeInteger(Number(issue.id)) &&
           Number(issue.id) > 0 &&
           session.automations?.closeOnMerge === true &&

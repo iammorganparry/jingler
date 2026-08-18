@@ -14,6 +14,9 @@ import type { Session } from "@jingler/core"
 
 const sessionsUnlinkIssue = vi.fn()
 const sessionsLinkIssue = vi.fn()
+const sessionsAddIssues = vi.fn()
+const sessionsSelectIssue = vi.fn()
+const sessionsRemoveIssue = vi.fn()
 
 vi.mock("./rpc-client.js", () => ({
   rpc: {
@@ -23,6 +26,9 @@ vi.mock("./rpc-client.js", () => ({
     pluginsStorageDelete: vi.fn(async () => undefined),
     pluginsStorageKeys: vi.fn(async () => []),
     sessionsLinkIssue: (id: string, issue: unknown) => sessionsLinkIssue(id, issue),
+    sessionsAddIssues: (id: string, issues: unknown) => sessionsAddIssues(id, issues),
+    sessionsSelectIssue: (id: string, issue: unknown) => sessionsSelectIssue(id, issue),
+    sessionsRemoveIssue: (id: string, issue: unknown) => sessionsRemoveIssue(id, issue),
     sessionsUnlinkIssue: (id: string) => sessionsUnlinkIssue(id)
   }
 }))
@@ -46,6 +52,12 @@ beforeEach(() => {
   sessionsUnlinkIssue.mockResolvedValue(unlinked)
   sessionsLinkIssue.mockReset()
   sessionsLinkIssue.mockResolvedValue(linked)
+  sessionsAddIssues.mockReset()
+  sessionsAddIssues.mockResolvedValue(linked)
+  sessionsSelectIssue.mockReset()
+  sessionsSelectIssue.mockResolvedValue(linked)
+  sessionsRemoveIssue.mockReset()
+  sessionsRemoveIssue.mockResolvedValue(unlinked)
 })
 
 describe("sessions.linkIssue", () => {
@@ -62,6 +74,24 @@ describe("sessions.linkIssue", () => {
     await pluginBridge("some-plugin").sessions.linkIssue("s1", issue)
 
     expect(seen).toEqual([linked])
+    off()
+  })
+})
+
+describe("multi-issue session actions", () => {
+  it("routes add/select/remove and republishes each returned session", async () => {
+    const seen: Session[] = []
+    const off = onSessionUpdate((session) => seen.push(session))
+    const identity = { providerId: issue.providerId, id: issue.id }
+
+    await pluginBridge("some-plugin").sessions.addIssues("s1", [issue])
+    await pluginBridge("some-plugin").sessions.selectIssue("s1", identity)
+    await pluginBridge("some-plugin").sessions.removeIssue("s1", identity)
+
+    expect(sessionsAddIssues).toHaveBeenCalledWith("s1", [issue])
+    expect(sessionsSelectIssue).toHaveBeenCalledWith("s1", identity)
+    expect(sessionsRemoveIssue).toHaveBeenCalledWith("s1", identity)
+    expect(seen).toEqual([linked, linked, unlinked])
     off()
   })
 })

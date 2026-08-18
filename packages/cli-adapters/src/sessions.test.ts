@@ -18,6 +18,8 @@ import type {
 } from "@jingler/core"
 import {
   GitHubApiError,
+  issueReferenceOf,
+  issueReferencesOf,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -1763,7 +1765,7 @@ describe("SessionStore", () => {
       cwd: s.worktreePath,
       encoding: "utf-8"
     }).trim()).toBe("HEAD")
-    expect(s.linkedIssue).toStrictEqual({
+    expect(issueReferenceOf(s)).toStrictEqual({
       providerId: "github",
       id: "128",
       identifier: "#128",
@@ -1866,7 +1868,7 @@ describe("SessionStore", () => {
 
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
-    expect(result.value.first.linkedIssue?.id).toBe(result.value.second.linkedIssue?.id)
+    expect(issueReferenceOf(result.value.first)?.id).toBe(issueReferenceOf(result.value.second)?.id)
     expect(result.value.first.repoPath).toBe(repoPath)
     expect(result.value.second.repoPath).toBe(otherRepoPath)
   })
@@ -1920,8 +1922,67 @@ describe("SessionStore", () => {
     if (result._tag !== "Success") return
     const { cleared, unlinked } = result.value
     expect(cleared.initialPrompt).toBeUndefined()
+    expect(issueReferencesOf(unlinked)).toStrictEqual([])
     expect(unlinked.linkedIssue).toBeUndefined()
+    expect(unlinked.linkedIssues).toBeUndefined()
+    expect(unlinked.selectedIssue).toBeUndefined()
     expect(unlinked.automations).toBeUndefined()
+  })
+
+  it("adds, refreshes, selects, and removes provider-scoped issue links", async () => {
+    const github = issueInput().issue
+    const linearOne = {
+      ...github,
+      providerId: "linear",
+      id: "same-provider-id",
+      identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1",
+      title: "First Linear issue"
+    }
+    const linearTwo = {
+      ...linearOne,
+      id: "linear-2",
+      identifier: "ENG-2",
+      url: "https://linear.app/acme/issue/ENG-2",
+      title: "Second Linear issue"
+    }
+    const githubCollision = {
+      ...github,
+      id: "same-provider-id",
+      identifier: "#999"
+    }
+    const result = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.createFromIssue(issueInput())
+        yield* SessionStore.addIssues(created.id, [linearOne, linearTwo, linearOne, githubCollision])
+        yield* SessionStore.addIssues(created.id, [{ ...linearOne, title: "Refreshed title" }])
+        const added = yield* SessionStore.get(created.id)
+        yield* SessionStore.selectIssue(created.id, { providerId: "linear", id: "linear-2" })
+        const selected = yield* SessionStore.get(created.id)
+        yield* SessionStore.removeIssue(created.id, { providerId: "linear", id: "linear-2" })
+        const removed = yield* SessionStore.get(created.id)
+        return { added, selected, removed }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+
+    expect(issueReferencesOf(result.value.added).map((issue) => [issue.providerId, issue.id])).toEqual([
+      ["github", "128"],
+      ["linear", "same-provider-id"],
+      ["linear", "linear-2"],
+      ["github", "same-provider-id"]
+    ])
+    expect(issueReferencesOf(result.value.added)[1]?.title).toBe("Refreshed title")
+    expect(issueReferenceOf(result.value.added)).toMatchObject({
+      providerId: "linear",
+      id: "same-provider-id"
+    })
+    expect(issueReferenceOf(result.value.selected)?.id).toBe("linear-2")
+    expect(issueReferencesOf(result.value.removed).some((issue) => issue.id === "linear-2")).toBe(false)
+    expect(issueReferenceOf(result.value.removed)?.providerId).toBe("github")
+    expect(issueReferenceOf(result.value.removed)?.id).toBe("same-provider-id")
   })
 
   it("retains automations only for GitHub issues", async () => {
@@ -1940,7 +2001,7 @@ describe("SessionStore", () => {
     )
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
-    expect(result.value.linkedIssue?.providerId).toBe("linear")
+    expect(issueReferenceOf(result.value)?.providerId).toBe("linear")
     expect(result.value.automations).toBeUndefined()
   })
 
@@ -1958,6 +2019,8 @@ describe("SessionStore", () => {
     >
     const historical = persisted[0]!
     delete historical.linkedIssue
+    delete historical.linkedIssues
+    delete historical.selectedIssue
     historical.issueNumber = 128
     historical.issueUrl = "https://github.com/acme/api/issues/128"
     historical.issueTitle = "Refund route 500s on a stale token"
@@ -1979,14 +2042,16 @@ describe("SessionStore", () => {
     const migrated = JSON.parse(readFileSync(sessionsFile, "utf-8")) as Array<
       Record<string, unknown>
     >
-    expect(migrated[0]?.linkedIssue).toStrictEqual({
+    expect(migrated[0]?.linkedIssues).toStrictEqual([{
       providerId: "github",
       id: "128",
       identifier: "#128",
       url: "https://github.com/acme/api/issues/128",
       title: "Refund route 500s on a stale token",
       labels: [{ name: "bug", color: "e06c75" }]
-    })
+    }])
+    expect(migrated[0]?.selectedIssue).toStrictEqual({ providerId: "github", id: "128" })
+    expect(migrated[0]).not.toHaveProperty("linkedIssue")
     expect(migrated[0]).not.toHaveProperty("issueNumber")
     expect(migrated[0]).not.toHaveProperty("issueUrl")
   })

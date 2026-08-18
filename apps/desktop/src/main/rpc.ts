@@ -95,9 +95,10 @@ import {
   GitError,
   IssueComment,
   IssueDetail,
+  type IssueIdentity,
   type IssueReference,
   IssueSummary,
-  issueReferenceOf,
+  issueReferenceForProvider,
   PlanConflictError,
   PlanPersistenceError,
   type PlanValidationError,
@@ -1944,7 +1945,31 @@ export const linkIssue = (input: {
     return yield* SessionStore.get(input.sessionId);
   });
 
-/** `Sessions.unlinkIssue` handler — detach the session's issue. */
+/** `Sessions.addIssues` handler — add/refresh links and select the last issue. */
+export const addIssues = (input: {
+  sessionId: string;
+  issues: ReadonlyArray<IssueReference>;
+}) =>
+  Effect.gen(function* () {
+    yield* SessionStore.addIssues(input.sessionId, input.issues);
+    return yield* SessionStore.get(input.sessionId);
+  });
+
+/** `Sessions.selectIssue` handler — select one existing provider-scoped link. */
+export const selectIssue = (sessionId: string, issue: IssueIdentity) =>
+  Effect.gen(function* () {
+    yield* SessionStore.selectIssue(sessionId, issue);
+    return yield* SessionStore.get(sessionId);
+  });
+
+/** `Sessions.removeIssue` handler — remove one link and preserve the rest. */
+export const removeIssue = (sessionId: string, issue: IssueIdentity) =>
+  Effect.gen(function* () {
+    yield* SessionStore.removeIssue(sessionId, issue);
+    return yield* SessionStore.get(sessionId);
+  });
+
+/** `Sessions.unlinkIssue` handler — detach every linked issue. */
 export const unlinkIssue = (sessionId: string) =>
   Effect.gen(function* () {
     yield* SessionStore.setIssue(sessionId, null);
@@ -1958,9 +1983,8 @@ export const unlinkIssue = (sessionId: string) =>
 export const githubCloseIssue = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
-    const issue = session ? issueReferenceOf(session) : undefined;
-    const issueNumber =
-      issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
+    const issue = session ? issueReferenceForProvider(session, "github") : undefined;
+    const issueNumber = issue ? Number(issue.id) : Number.NaN;
     if (
       !(session?.worktreePath && Number.isSafeInteger(issueNumber)) ||
       issueNumber <= 0
@@ -1979,9 +2003,8 @@ export const githubCloseIssue = (sessionId: string) =>
 export const githubIssue = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
-    const issue = session ? issueReferenceOf(session) : undefined;
-    const issueNumber =
-      issue?.providerId === "github" ? Number(issue.id) : Number.NaN;
+    const issue = session ? issueReferenceForProvider(session, "github") : undefined;
+    const issueNumber = issue ? Number(issue.id) : Number.NaN;
     if (
       !(session?.worktreePath && Number.isSafeInteger(issueNumber)) ||
       issueNumber <= 0
@@ -4848,6 +4871,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       createSessionFromIssueRouted(input, progress),
     ),
   "Sessions.linkIssue": (input) => linkIssue(input),
+  "Sessions.addIssues": (input) => addIssues(input),
+  "Sessions.selectIssue": ({ sessionId, issue }) => selectIssue(sessionId, issue),
+  "Sessions.removeIssue": ({ sessionId, issue }) => removeIssue(sessionId, issue),
   "Sessions.unlinkIssue": ({ sessionId }) => unlinkIssue(sessionId),
   "Sessions.clearInitialPrompt": ({ sessionId }) =>
     Effect.gen(function* () {

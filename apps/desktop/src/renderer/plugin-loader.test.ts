@@ -6,7 +6,8 @@ import {
   loadPlugins,
   pluginAssetUrl,
   pluginModuleUrl,
-  resolveIcon
+  resolveIcon,
+  toSessionSnapshot
 } from "./plugin-loader.js"
 
 /**
@@ -33,6 +34,40 @@ const plugin = (over: Partial<LoadedPlugin["manifest"]> = {}): LoadedPlugin => (
 })
 
 const View = () => null
+
+describe("toSessionSnapshot", () => {
+  it("publishes every linked issue and the selected singleton-compatible view", () => {
+    const github = {
+      providerId: "github",
+      id: "9",
+      identifier: "#9",
+      url: "https://github.com/acme/widget/issues/9",
+      title: "GitHub issue",
+      labels: []
+    }
+    const linear = {
+      providerId: "linear",
+      id: "linear-1",
+      identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1",
+      title: "Linear issue",
+      labels: []
+    }
+    const snapshot = toSessionSnapshot({
+      id: "s1",
+      repo: "acme/widget",
+      branch: "feature",
+      title: "Work",
+      prNumber: null,
+      linkedIssues: [github, linear],
+      selectedIssue: { providerId: "github", id: "9" }
+    } as never)
+
+    expect(snapshot.linkedIssues).toEqual([github, linear])
+    expect(snapshot.linkedIssue).toEqual(github)
+    expect(snapshot.selectedIssue).toEqual({ providerId: "github", id: "9" })
+  })
+})
 
 describe("pluginModuleUrl", () => {
   it("addresses the plugin's own host on the custom scheme", () => {
@@ -254,19 +289,34 @@ describe("loadPluginUi", () => {
     it("matches only the linked provider and optionally includes unlinked sessions", async () => {
       const github = await withWhen({ issueProvider: "github" })
       const linear = await withWhen({ issueProvider: "linear", includeUnlinked: true })
-      const githubSession = session({
-        linkedIssue: {
-          providerId: "github",
-          id: "9",
-          identifier: "#9",
-          url: "https://github.com/acme/widget/issues/9",
-          title: "Legacy-compatible issue",
-          labels: []
-        }
-      })
+      const githubIssue = {
+        providerId: "github",
+        id: "9",
+        identifier: "#9",
+        url: "https://github.com/acme/widget/issues/9",
+        title: "Legacy-compatible issue",
+        labels: []
+      }
+      const githubSession = session({ linkedIssue: githubIssue })
 
       expect(github(githubSession)).toBe(true)
       expect(linear(githubSession)).toBe(false)
+      const multiIssueSession = session({
+        linkedIssues: [
+          githubIssue,
+          {
+            providerId: "linear",
+            id: "linear-1",
+            identifier: "ENG-1",
+            url: "https://linear.app/acme/issue/ENG-1",
+            title: "Linear issue",
+            labels: []
+          }
+        ],
+        selectedIssue: { providerId: "github", id: "9" }
+      })
+      expect(github(multiIssueSession)).toBe(true)
+      expect(linear(multiIssueSession)).toBe(true)
       expect(github(session())).toBe(false)
       expect(linear(session())).toBe(true)
     })

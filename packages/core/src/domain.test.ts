@@ -12,7 +12,9 @@ import {
   GithubConfig,
   IssueDetail,
   IssueReference,
+  issueReferenceForProvider,
   issueReferenceOf,
+  issueReferencesOf,
   persistentOf,
   Repo,
   Session,
@@ -487,6 +489,70 @@ describe("Session", () => {
         issueLabels: [],
       }),
     ).toBe(linkedIssue);
+  });
+
+  it("round-trips ordered issue links and resolves the provider-scoped selection", () => {
+    const github: IssueReference = {
+      providerId: "github",
+      id: "123",
+      identifier: "#123",
+      url: "https://github.com/acme/widgets/issues/123",
+      title: "GitHub issue",
+      labels: [],
+    };
+    const linear: IssueReference = {
+      providerId: "linear",
+      id: "123",
+      identifier: "ENG-123",
+      url: "https://linear.app/acme/issue/ENG-123",
+      title: "Linear issue",
+      labels: [],
+    };
+    const decoded = Schema.decodeUnknownSync(Session)({
+      ...base,
+      linkedIssues: [github, linear],
+      selectedIssue: { providerId: "linear", id: "123" },
+    });
+
+    expect(issueReferencesOf(decoded)).toStrictEqual([github, linear]);
+    expect(issueReferenceOf(decoded)).toStrictEqual(linear);
+    expect(issueReferenceForProvider(decoded, "github")).toStrictEqual(github);
+  });
+
+  it("treats an explicit empty canonical collection as unlinked", () => {
+    const legacy: IssueReference = {
+      providerId: "linear",
+      id: "legacy",
+      identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1",
+      title: "Legacy",
+      labels: [],
+    };
+    const session = {
+      linkedIssues: [],
+      linkedIssue: legacy,
+      issueNumber: 123,
+    };
+    expect(issueReferencesOf(session)).toStrictEqual([]);
+    expect(issueReferenceOf(session)).toBeUndefined();
+  });
+
+  it("falls back to the newest link when a stored selection is stale", () => {
+    const first: IssueReference = {
+      providerId: "linear",
+      id: "one",
+      identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1",
+      title: "One",
+      labels: [],
+    };
+    const newest: IssueReference = { ...first, id: "two", identifier: "ENG-2" };
+    expect(
+      issueReferenceOf({
+        linkedIssues: [first, newest],
+        selectedIssue: { providerId: "linear", id: "missing" },
+      }),
+    ).toBe(newest);
   });
 
   it("rejects an unknown status", () => {

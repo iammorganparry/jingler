@@ -25,7 +25,7 @@ import {
   type TabProps
 } from "./define.js"
 import type { HostContext, IssueProvider } from "./host.js"
-import type { Disposable, IssueReference, PluginStorage, SessionSnapshot } from "./common.js"
+import type { Disposable, IssueIdentity, IssueReference, PluginStorage, SessionSnapshot } from "./common.js"
 import type { SessionActions } from "./context.js"
 
 const View: ComponentType<TabProps> = () => null
@@ -182,9 +182,20 @@ expectTypeOf<TabProps["pluginId"]>().toEqualTypeOf<string>()
 // Jingler's internal `Session` ever leaks in here, this catches it.
 expectTypeOf<SessionSnapshot["prNumber"]>().toEqualTypeOf<number | null>()
 expectTypeOf<SessionSnapshot["linkedIssue"]>().toEqualTypeOf<IssueReference | undefined>()
+expectTypeOf<SessionSnapshot["linkedIssues"]>().toEqualTypeOf<readonly IssueReference[] | undefined>()
+expectTypeOf<SessionSnapshot["selectedIssue"]>().toEqualTypeOf<IssueIdentity | undefined>()
 expectTypeOf<SessionSnapshot>().not.toBeAny()
 expectTypeOf<SessionActions["linkIssue"]>().toEqualTypeOf<
   (sessionId: string, issue: IssueReference) => Promise<void>
+>()
+expectTypeOf<SessionActions["addIssues"]>().toEqualTypeOf<
+  (sessionId: string, issues: readonly IssueReference[]) => Promise<void>
+>()
+expectTypeOf<SessionActions["selectIssue"]>().toEqualTypeOf<
+  (sessionId: string, issue: IssueIdentity) => Promise<void>
+>()
+expectTypeOf<SessionActions["removeIssue"]>().toEqualTypeOf<
+  (sessionId: string, issue: IssueIdentity) => Promise<void>
 >()
 
 expectTypeOf<HostContext>().not.toBeAny()

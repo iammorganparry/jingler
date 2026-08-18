@@ -40,6 +40,18 @@ const sessionActions: SessionActions = {
     const session = await rpc.sessionsLinkIssue(sessionId, issue)
     publishSessionUpdate(session)
   },
+  addIssues: async (sessionId, issues) => {
+    const session = await rpc.sessionsAddIssues(sessionId, issues)
+    publishSessionUpdate(session)
+  },
+  selectIssue: async (sessionId, issue) => {
+    const session = await rpc.sessionsSelectIssue(sessionId, issue)
+    publishSessionUpdate(session)
+  },
+  removeIssue: async (sessionId, issue) => {
+    const session = await rpc.sessionsRemoveIssue(sessionId, issue)
+    publishSessionUpdate(session)
+  },
   unlinkIssue: async (sessionId: string) => {
     const session = await rpc.sessionsUnlinkIssue(sessionId)
     publishSessionUpdate(session)
