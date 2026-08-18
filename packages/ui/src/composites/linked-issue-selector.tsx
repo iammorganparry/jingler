@@ -20,6 +20,8 @@ export interface LinkedIssueSelectorProps {
   readonly icon?: ReactNode
   /** Compact keeps the closed control to the identifier; full also shows its title. */
   readonly variant?: "compact" | "full"
+  /** Inline fits the control into dense metadata rows without changing its flyout. */
+  readonly appearance?: "control" | "inline"
   readonly disabled?: boolean
   readonly ariaLabel?: string
   readonly className?: string
@@ -28,39 +30,35 @@ export interface LinkedIssueSelectorProps {
 const triggerLabel = (label: string, item: LinkedIssueSelectorItem): string =>
   `${label}, current ${item.identifier}: ${item.title}`
 
-/**
- * A provider-neutral flyout for switching the issue shown by an issue surface.
- *
- * The caller owns selection and provider data. The component only folds an
- * ordered set of opaque values into a keyboard-accessible command menu.
- */
-export function LinkedIssueSelector({
-  items,
-  value,
-  onValueChange,
+function SelectorControl({
+  current,
+  count,
   icon,
-  variant = "full",
-  disabled = false,
-  ariaLabel = "Select linked issue",
+  variant,
+  appearance,
+  interactive,
   className
-}: LinkedIssueSelectorProps) {
-  if (items.length === 0) return null
-  const current = items.find((item) => item.value === value) ?? items[0]!
-  const options: ReadonlyArray<ChipOption<string>> = items.map((item) => ({
-    value: item.value,
-    label: item.identifier,
-    description: item.title,
-    ariaLabel: `${item.identifier} ${item.title}`,
-    searchText: `${item.identifier} ${item.title}`
-  }))
-  const interactive = !disabled && items.length > 1
-
-  const control = (
+}: {
+  readonly current: LinkedIssueSelectorItem
+  readonly count: number
+  readonly icon?: ReactNode
+  readonly variant: "compact" | "full"
+  readonly appearance: "control" | "inline"
+  readonly interactive: boolean
+  readonly className?: string
+}) {
+  return (
     <span
       data-testid="linked-issue-selector-control"
       className={cn(
-        "flex min-w-0 items-center gap-2 rounded-md border border-line bg-panel px-2.5 py-2 text-left",
-        interactive && "transition-colors hover:border-line-strong hover:bg-surface",
+        "flex min-w-0 items-center rounded-md text-left",
+        appearance === "control"
+          ? "gap-2 border border-line bg-panel px-2.5 py-2"
+          : "gap-1 border border-transparent bg-transparent px-1 py-0.5",
+        interactive && appearance === "control" &&
+          "transition-colors hover:border-line-strong hover:bg-surface",
+        interactive && appearance === "inline" &&
+          "transition-colors hover:bg-surface hover:text-text-bright",
         !interactive && "cursor-default",
         className
       )}
@@ -78,16 +76,61 @@ export function LinkedIssueSelector({
       </span>
       {interactive && (
         <span className="flex flex-none items-center gap-1 text-[10.5px] text-dim">
-          <span className="tabular-nums">{items.length}</span>
+          <span className="tabular-nums">{count}</span>
           <ChevronDown size={12} aria-hidden="true" />
         </span>
       )}
     </span>
   )
+}
+
+/**
+ * A provider-neutral flyout for switching the issue shown by an issue surface.
+ *
+ * The caller owns selection and provider data. The component only folds an
+ * ordered set of opaque values into a keyboard-accessible command menu.
+ */
+export function LinkedIssueSelector({
+  items,
+  value,
+  onValueChange,
+  icon,
+  variant = "full",
+  appearance = "control",
+  disabled = false,
+  ariaLabel = "Select linked issue",
+  className
+}: LinkedIssueSelectorProps) {
+  if (items.length === 0) return null
+  const current = items.find((item) => item.value === value) ?? items[0]!
+  const options: ReadonlyArray<ChipOption<string>> = items.map((item) => ({
+    value: item.value,
+    label: item.identifier,
+    description: item.title,
+    ariaLabel: `${item.identifier} ${item.title}`,
+    searchText: `${item.identifier} ${item.title}`
+  }))
+  const interactive = !disabled && items.length > 1
+
+  const control = (
+    <SelectorControl
+      current={current}
+      count={items.length}
+      icon={icon}
+      variant={variant}
+      appearance={appearance}
+      interactive={interactive}
+      className={className}
+    />
+  )
 
   if (!interactive) {
     return (
-      <div aria-label={`Linked issue ${current.identifier}: ${current.title}`} className="min-w-0">
+      <div
+        role="group"
+        aria-label={`Linked issue ${current.identifier}: ${current.title}`}
+        className="min-w-0"
+      >
         {control}
       </div>
     )

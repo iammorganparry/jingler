@@ -1,9 +1,12 @@
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { testSession } from "../test-support.js"
 import { SessionRow } from "./session-row.js"
 
 afterEach(cleanup)
+
+const LINEAR_ISSUE_TRIGGER = /Select linked Linear issue/
+const SECOND_LINEAR_ISSUE = /ENG-124 Show every linked task/
 
 describe("SessionRow linked issue badge", () => {
   it("does not present the base branch as the live branch while semantic naming is pending", () => {
@@ -56,5 +59,48 @@ describe("SessionRow linked issue badge", () => {
     const badge = screen.getByLabelText("Linked issue ENG-123")
     expect(badge.textContent).toBe("ENG-123")
     expect(badge.getAttribute("title")).toBe("ENG-123: Provider-neutral badges")
+  })
+
+})
+
+describe("SessionRow multi-issue selector", () => {
+  it("uses the Linear mark and selects among multiple linked issues", () => {
+    const onIssueSelect = vi.fn()
+    render(
+      <SessionRow
+        session={testSession({
+          id: "linear-multiple",
+          linkedIssues: [
+            {
+              providerId: "linear",
+              id: "issue-1",
+              identifier: "ENG-123",
+              url: "https://linear.app/acme/issue/ENG-123",
+              title: "Provider-neutral badges",
+              labels: []
+            },
+            {
+              providerId: "linear",
+              id: "issue-2",
+              identifier: "ENG-124",
+              url: "https://linear.app/acme/issue/ENG-124",
+              title: "Show every linked task",
+              labels: []
+            }
+          ],
+          selectedIssue: { providerId: "linear", id: "issue-1" }
+        })}
+        onIssueSelect={onIssueSelect}
+      />
+    )
+
+    const trigger = screen.getByRole("button", { name: LINEAR_ISSUE_TRIGGER })
+    expect(trigger.querySelector('[data-linear-mark="true"]')).not.toBeNull()
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
+    expect(onIssueSelect).toHaveBeenCalledWith("linear-multiple", {
+      providerId: "linear",
+      id: "issue-2"
+    })
   })
 })

@@ -3,8 +3,20 @@ import type { DragEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import { SESSION_DND_MIME } from "../app/split-layout.js"
-import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activityLabel, displayStatusOf, issueReferenceOf, persistentOf } from "@jingler/core"
+import type {
+  Environment,
+  IssueIdentity,
+  SessionPrStatus,
+  Session,
+  SessionActivity
+} from "@jingler/core"
+import {
+  activityLabel,
+  displayStatusOf,
+  issueReferenceOf,
+  issueReferencesOf,
+  persistentOf
+} from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
@@ -20,11 +32,16 @@ import { relativeTime } from "../lib/relative-time.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
 import { Badge } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
+import { LinearMark } from "../components/linear-mark.js"
 import { ThinkingOrb } from "../components/loading.js"
 import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { ContextMenu, type ContextMenuItem } from "../components/context-menu.js"
+import { LinkedIssueSelector } from "./linked-issue-selector.js"
 import { displayStatusLabel, displayStatusTone, statusTextClass } from "../tokens.js"
+
+const issueValue = (issue: IssueIdentity): string =>
+  `${encodeURIComponent(issue.providerId)}:${encodeURIComponent(issue.id)}`
 
 const compactAge = (startedAt: number, now: number): string => {
   const minutes = Math.max(0, Math.floor((now - startedAt) / 60_000))
@@ -65,6 +82,7 @@ export function SessionRow({
   onSelect,
   onRename,
   onSetPersistent,
+  onIssueSelect,
   onArchive,
   onRestore,
   onDelete,
@@ -97,6 +115,8 @@ export function SessionRow({
   onRename?: (id: string, title: string) => void
   /** Promote an active ordinary row into the persistent tray. */
   onSetPersistent?: (id: string, persistent: boolean) => void
+  /** Select which of this session's linked issues its issue surface should show. */
+  onIssueSelect?: (sessionId: string, issue: IssueIdentity) => void
   /** Archive an active session (collapses into the Archived group; undoable). */
   onArchive?: (id: string) => void | Promise<void>
   /** Restore an archived session back to active. */
@@ -117,6 +137,7 @@ export function SessionRow({
   const status = displayStatusTone[display]
   const label = displayStatusLabel[display]
   const linkedIssue = issueReferenceOf(session)
+  const linkedIssues = issueReferencesOf(session)
   // The detail the label no longer shows ("Running npm test -- auth") survives on
   // hover. It's genuinely useful when you want it, and it was the reason the
   // label used to be unbounded — a title attribute gives it a home that can't
@@ -408,7 +429,33 @@ export function SessionRow({
           >
             {session.semanticBranchPending === true ? "Naming branch…" : session.branch}
           </span>
-          {linkedIssue && (
+          {linkedIssue && linkedIssues.length > 1 && onIssueSelect ? (
+            <span className="min-w-0 max-w-[118px] flex-none">
+              <LinkedIssueSelector
+                items={linkedIssues.map((issue) => ({
+                  value: issueValue(issue),
+                  identifier: issue.identifier,
+                  title: issue.title
+                }))}
+                value={issueValue(linkedIssue)}
+                onValueChange={(value) => {
+                  const selected = linkedIssues.find((issue) =>
+                    value === issueValue(issue)
+                  )
+                  if (selected) {
+                    onIssueSelect(session.id, {
+                      providerId: selected.providerId,
+                      id: selected.id
+                    })
+                  }
+                }}
+                icon={linkedIssue.providerId === "linear" ? <LinearMark className="size-3 text-purple" /> : undefined}
+                variant="compact"
+                appearance="inline"
+                ariaLabel="Select linked Linear issue"
+              />
+            </span>
+          ) : linkedIssue ? (
             <span
               className="flex-none text-green"
               aria-label={`Linked issue ${linkedIssue.identifier}`}
@@ -416,7 +463,7 @@ export function SessionRow({
             >
               {linkedIssue.identifier}
             </span>
-          )}
+          ) : null}
           {session.prNumber !== null && (
             <span
               className="flex flex-none items-center gap-1"
