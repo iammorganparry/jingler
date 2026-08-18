@@ -7,6 +7,13 @@ export interface PublishedAgentFileActivity extends AgentFileActivity {
 }
 
 const activities = new Map<string, PublishedAgentFileActivity>()
+/**
+ * Per-session override from the Fleet: when the operator selects a delegated
+ * agent in the Fleet drawer, ITS file activity takes precedence over the main
+ * chat's, so an enabled Follow tracks the selected agent's edits. Keyed by
+ * session alone — Fleet selection is a session-level choice, not per chat.
+ */
+const fleetActivities = new Map<string, PublishedAgentFileActivity>()
 const listeners = new Set<() => void>()
 let sequence = 0
 
@@ -56,6 +63,42 @@ export const clearAgentFileActivityChat = (sessionId: string, chatId: string): v
   publishAgentFileActivity(sessionId, chatId, null)
 }
 
+/**
+ * Publish (or clear, with `null`) the SELECTED Fleet agent's file activity.
+ *
+ * While present it wins over the main chat's activity in
+ * `useAgentFileActivity`, so the file browser's existing Follow controller —
+ * rename resolution, sandboxed normalization, scroll-to-hunk — tracks the
+ * delegated agent's edits without knowing the Fleet exists.
+ */
+export const publishFleetAgentFileActivity = (
+  sessionId: string,
+  activity: AgentFileActivity | null
+): void => {
+  const previous = fleetActivities.get(sessionId)
+  if (activity === null) {
+    if (previous === undefined) return
+    fleetActivities.delete(sessionId)
+    notify()
+    return
+  }
+  if (
+    previous?.eventId === activity.eventId &&
+    previous.path === activity.path &&
+    previous.phase === activity.phase &&
+    previous.preview === activity.preview
+  ) {
+    return
+  }
+  sequence += 1
+  fleetActivities.set(sessionId, { ...activity, sequence })
+  notify()
+}
+
+export const getFleetAgentFileActivity = (
+  sessionId: string
+): PublishedAgentFileActivity | null => fleetActivities.get(sessionId) ?? null
+
 export const clearAgentFileActivitySession = (sessionId: string): void => {
   const prefix = `${sessionId}\u0000`
   let changed = false
@@ -64,6 +107,7 @@ export const clearAgentFileActivitySession = (sessionId: string): void => {
     activities.delete(key)
     changed = true
   }
+  if (fleetActivities.delete(sessionId)) changed = true
   if (changed) notify()
 }
 
@@ -73,8 +117,8 @@ export const useAgentFileActivity = (
 ): PublishedAgentFileActivity | null =>
   useSyncExternalStore(
     subscribeAgentFileActivity,
-    () => getAgentFileActivity(sessionId, chatId),
-    () => getAgentFileActivity(sessionId, chatId)
+    () => getFleetAgentFileActivity(sessionId) ?? getAgentFileActivity(sessionId, chatId),
+    () => getFleetAgentFileActivity(sessionId) ?? getAgentFileActivity(sessionId, chatId)
   )
 
 const WINDOWS_ABSOLUTE = /^[A-Za-z]:\//

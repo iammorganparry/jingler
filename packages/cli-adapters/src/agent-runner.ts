@@ -1266,6 +1266,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
           const persistedTaskMarkers = yield* Ref.make(new Set<string>())
+          /**
+           * Per-worker accumulated assistant text, keyed by `agentId`.
+           *
+           * Delegated workers execute plan stages for MINUTES while the main
+           * agent idles in "Wait for subagents" — and a worker's PLAN_TASK /
+           * PLAN_RESULT checkpoints used to vanish: sub-agent events route to
+           * the renderer and return before the marker parser runs, so the plan
+           * panel sat at "0 of N completed" until the whole delegation ended.
+           * Worker text is accumulated here (markers split across deltas) and
+           * fed through the SAME validated pipeline as the main agent's —
+           * id validation, dedupe, dropped-marker steer all included.
+           */
+          const subagentPlanText = yield* Ref.make(new Map<string, string>())
           // Marker keys already reported as dropped — the accumulated text
           // re-parses on every delta, so without this one bad marker would warn
           // hundreds of times per turn. Gates the warning only, never the
@@ -1591,7 +1604,41 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 return
               }
               if (route === "subagent" || route === "stream-only") {
-                // Renderer only. Neither belongs on the persisted main turn.
+                // Renderer only. Neither belongs on the persisted main turn —
+                // but a delegated WORKER's plan checkpoints must still reach
+                // the plan, or the panel sits frozen for the whole delegation.
+                // Parsed here, from per-worker accumulated text, through the
+                // same validated pipeline as the main agent's markers; the
+                // event itself still bypasses the persisted turn unchanged.
+                if (
+                  route === "subagent" &&
+                  event._tag === "Assistant" &&
+                  event.agentId !== undefined
+                ) {
+                  const agentId = event.agentId
+                  const accumulated = yield* Ref.modify(subagentPlanText, (current) => {
+                    const previous = current.get(agentId) ?? ""
+                    // Bounded: only the tail can hold an unfinished marker, and
+                    // the dedupe set already remembers every applied one.
+                    const text = (previous + event.text).slice(-65_536)
+                    const next = new Map(current)
+                    next.set(agentId, text)
+                    return [text, next] as const
+                  })
+                  yield* recordPlanTaskProgress(accumulated)
+                }
+                if (event._tag === "SubagentEnded") {
+                  const settled = (yield* Ref.get(subagentPlanText)).get(event.id)
+                  if (settled !== undefined) {
+                    yield* recordPlanTaskProgress(settled)
+                    yield* recordPlanEvidence(settled)
+                    yield* Ref.update(subagentPlanText, (current) => {
+                      const next = new Map(current)
+                      next.delete(event.id)
+                      return next
+                    })
+                  }
+                }
                 yield* out.offer(event)
                 return
               }
