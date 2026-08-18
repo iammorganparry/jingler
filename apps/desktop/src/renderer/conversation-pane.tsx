@@ -20,6 +20,7 @@ import {
   OpenAssetProvider,
   BackgroundTaskDock,
   BackgroundTaskOutput,
+  Composer,
   ConversationView,
   FleetAgentView,
   FleetDrawer,
@@ -755,18 +756,6 @@ export function ConversationPane({
         fleet.control(node, action, message, replyTo).catch(() => {})
       }}
       onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
-      // Quick-switch: one click selects the agent AND points the file
-      // browser's Follow at its edits (the selection is what the fleet
-      // override keys on). Clicking the followed agent again turns Follow off.
-      onFollow={(node) => {
-        if (fileBrowser.followEnabled && fleet.selectedId === node.id) {
-          toggleFollowAgent(false)
-          return
-        }
-        fleet.select(node.id)
-        toggleFollowAgent(true)
-      }}
-      followingId={fileBrowser.followEnabled ? fleet.selectedId : null}
     />
     <SubagentCompletionLinks
       nodes={fleet.completedNodes}
@@ -1061,24 +1050,79 @@ export function ConversationPane({
         />
       ))}
       {fleet.selectedId !== MAIN_FLEET_AGENT && fleet.selectedNode ? (
-        <FleetAgentView
-          node={fleet.selectedNode}
-          messages={
-            fleet.selectedLegacyAgent === null
-              ? (childTranscriptQuery.data ?? [])
-              : [fleet.selectedLegacyAgent.message]
-          }
-          providerId={session.providerId}
-          loading={
-            fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading
-          }
-          error={
-            fleet.selectedLegacyAgent === null && childTranscriptQuery.error
-              ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
-              : null
-          }
-          fleetSlot={fleetDrawer}
-        />
+        // The child view keeps the REAL composer: same input the operator
+        // already lives in, aimed at the selected agent. Model, reasoning,
+        // mode, and environment pickers are omitted — those are main-turn
+        // choices — and the composer's follow toggle points at this agent
+        // (selection is what the fleet follow override keys on). The drawer
+        // rides as the composer's topSlot, exactly as in the main view.
+        <>
+          <FleetAgentView
+            node={fleet.selectedNode}
+            messages={
+              fleet.selectedLegacyAgent === null
+                ? (childTranscriptQuery.data ?? [])
+                : [fleet.selectedLegacyAgent.message]
+            }
+            providerId={session.providerId}
+            loading={
+              fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading
+            }
+            error={
+              fleet.selectedLegacyAgent === null && childTranscriptQuery.error
+                ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
+                : null
+            }
+          />
+          <Composer
+            repo={session.repo}
+            branch={session.branch}
+            branchPending={session.semanticBranchPending === true}
+            busy={
+              fleet.selectedNode.status === "queued" ||
+              fleet.selectedNode.status === "running" ||
+              fleet.selectedNode.status === "paused" ||
+              fleet.selectedNode.status === "needs-attention"
+            }
+            placeholder={
+              fleet.selectedNode.attention
+                ? `Reply to ${fleet.selectedNode.agent}…`
+                : `Steer ${fleet.selectedNode.agent}…`
+            }
+            disabledReason={
+              fleet.selectedLegacyAgent !== null
+                ? "Inline agents are watch-only — steer them through the main chat."
+                : undefined
+            }
+            onSend={(text) => {
+              const node = fleet.selectedNode
+              if (node === null || fleet.selectedLegacyAgent !== null) return
+              fleet
+                .control(
+                  node,
+                  node.attention ? "reply" : "steer",
+                  text,
+                  node.attention?.requestId
+                )
+                .catch(() => {})
+            }}
+            onStop={() => {
+              const node = fleet.selectedNode
+              if (node === null) return
+              const legacy = fleet.legacyAgentFor(node)
+              if (legacy !== null) {
+                if (legacy.status === "working") convo.stopSubagent(legacy.id)
+                return
+              }
+              fleet.control(node, "stop").catch(() => {})
+            }}
+            followAgent={fileBrowser.followEnabled}
+            onToggleFollowAgent={toggleFollowAgent}
+            topSlot={fleetDrawer}
+            autoFocus={paneFocused}
+            focusKey={fleet.selectedNode.id}
+          />
+        </>
       ) : (
         <ConversationView
           messages={convo.messages}
