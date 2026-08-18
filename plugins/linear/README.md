@@ -8,7 +8,9 @@ The renderer receives normalized issue data and never receives the credential.
 
 The plugin can create sessions from Linear issues, link or create an issue from
 an existing session, show issue metadata and comments, add comments, refresh,
-open the issue in Linear, and unlink it.
+open the issue in Linear, and unlink it. The Issue tab can also hold multiple
+named, encrypted Linear accounts and save a default account/team/project per
+repository, with an optional per-session override.
 
 ## Development
 

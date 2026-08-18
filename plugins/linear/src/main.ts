@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import type {
   Activate,
   HostContext,
@@ -508,7 +507,7 @@ export const createLinearAccountManager = (ctx: LinearConfigurationHost): Linear
       const apiKey = input.apiKey.trim()
       if (!name) throw new Error("Name this Linear account.")
       if (!apiKey.startsWith("lin_api_")) throw new Error("Linear personal API keys start with lin_api_.")
-      const id = `account_${randomUUID().replaceAll("-", "")}`
+      const id = `account_${globalThis.crypto.randomUUID().replaceAll("-", "")}`
       const client = createLinearClient({ getSecret: async () => apiKey })
       const context = await client.context()
       await ctx.settings.setProfileSecret(PROFILE_COLLECTION, id, apiKey)

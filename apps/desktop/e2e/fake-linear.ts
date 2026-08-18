@@ -248,7 +248,8 @@ const handleGraphql = (
       data: {
         viewer: actor,
         organization: { id: "org-1", name: "Acme", urlKey: "acme" },
-        teams: { nodes: [team], pageInfo: { hasNextPage: false, endCursor: null } }
+        teams: { nodes: [team], pageInfo: { hasNextPage: false, endCursor: null } },
+        projects: { nodes: [{ id: "project-1", name: "Jingler" }] }
       }
     })
     return
