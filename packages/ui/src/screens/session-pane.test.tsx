@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Boxes } from "lucide-react"
 import type { Session } from "@jingler/core"
 import { SessionPane } from "./session-pane.js"
+import { LinearMark } from "../components/linear-mark.js"
 import {
   builtinTabContributions,
   PLUGIN_TAB_ORDER,
@@ -14,6 +15,8 @@ import { testSession as session } from "../test-support.js"
 
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
+
+const SECOND_LINEAR_ISSUE = /ENG-2 Second issue/
 
 /** The built-ins with inert bodies — these tests are about which tabs, not what's in them. */
 const BUILTINS = builtinTabContributions({
@@ -190,6 +193,33 @@ describe("plugin tab contributions", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "linear.issues" }))
     expect(screen.getByText("linear.issues body")).toBeTruthy()
+  })
+
+  it("passes a right-rail picker through to a plugin tab", () => {
+    const onSelect = vi.fn()
+    render(
+      <SessionPane
+        session={session({ id: "linear-menu" })}
+        renderConversation={() => <div>transcript</div>}
+        tabContributions={[pluginTab("linear.issue", { label: "Linear", icon: LinearMark })]}
+        viewRailMenus={{
+          "linear.issue": {
+            value: "issue-1",
+            ariaLabel: "Select linked Linear issue",
+            onSelect,
+            options: [
+              { value: "issue-1", label: "ENG-1", description: "First issue", ariaLabel: "ENG-1 First issue" },
+              { value: "issue-2", label: "ENG-2", description: "Second issue", ariaLabel: "ENG-2 Second issue" }
+            ]
+          }
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Select linked Linear issue" }))
+    fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
+    expect(onSelect).toHaveBeenCalledWith("issue-2")
+    expect(screen.getByText("linear.issue body")).toBeTruthy()
   })
 
   it("draws a plugin's own badge without the tab bar knowing what it means", () => {

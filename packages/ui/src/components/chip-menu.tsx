@@ -67,7 +67,7 @@ export function ChipMenu<T extends string>({
   disabled?: boolean
   trigger?: (state: { current: ChipOption<T> | undefined; open: boolean }) => ReactNode
   renderTrailing?: (option: ChipOption<T>) => ReactNode
-  side?: "top" | "bottom"
+  side?: "top" | "right" | "bottom" | "left"
   matchTriggerWidth?: boolean
   appearance?: "chip" | "quiet"
   ariaLabel?: string

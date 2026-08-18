@@ -25,7 +25,7 @@ import {
   SESSION_AUXILIARY_SPLIT_BREAKPOINT,
   SESSION_AUXILIARY_SPLIT_HANDLE_WIDTH
 } from "../app/session-auxiliary-split.js"
-import { ViewRail } from "../app/view-rail.js"
+import { ViewRail, type ViewRailMenu } from "../app/view-rail.js"
 
 const SESSION_AUXILIARY_RATIO_KEY = "sb.split.session-auxiliary.ratio"
 const LEGACY_SESSION_BROWSER_RATIO_KEY = "sb.split.session-browser.ratio"
@@ -205,6 +205,8 @@ export interface SessionPaneProps {
   terminalActive?: boolean
   /** Toggle this session's terminal dock from the view rail. */
   onToggleTerminal?: () => void
+  /** Optional pickers anchored to right-rail view icons, keyed by tab id. */
+  viewRailMenus?: Readonly<Record<TabKey, ViewRailMenu | undefined>>
 }
 
 /**
@@ -645,6 +647,7 @@ function SessionPaneBody(props: SessionPaneProps) {
           tabs={railTabs}
           active={activeTab}
           onChange={selectTab}
+          menus={props.viewRailMenus}
           terminalActive={props.terminalActive}
           onToggleTerminal={props.onToggleTerminal}
         />
