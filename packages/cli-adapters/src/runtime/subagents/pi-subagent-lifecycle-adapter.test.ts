@@ -585,13 +585,14 @@ describe("PiSubagentLifecycleAdapter", () => {
     }
   })
 
-  it("does not leave an observed process reported as running", () => {
+  it("settles and REMOVES an observed process instead of leaving it in the dock", () => {
+    const emitted: SubagentFleetEvent[] = []
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
       controlJournal: null,
-      emit: () => undefined,
+      emit: (event) => emitted.push(event),
       now: () => 20
     })
     adapter.start()
@@ -606,10 +607,16 @@ describe("PiSubagentLifecycleAdapter", () => {
       observedAt: 20
     })
 
-    expect(adapter.snapshot().nodes[0]).toMatchObject({
-      status: "unknown",
-      completedAt: 20
-    })
+    // The settled state is still PUBLISHED (so completion retention sees it)…
+    expect(emitted.some((event) =>
+      event._tag === "Upsert" &&
+      event.node.runId === "run-1" &&
+      event.node.status === "unknown" &&
+      event.node.completedAt === 20
+    )).toBe(true)
+    // …but the dead run does not linger as a grey UNKNOWN row: its process is
+    // gone, so no event will ever settle or revive it.
+    expect(adapter.snapshot().nodes).toEqual([])
     adapter.stop()
   })
 
@@ -635,6 +642,7 @@ describe("PiSubagentLifecycleAdapter", () => {
         sessionFile: "/sessions/child.jsonl"
       }]
     }))
+    const emitted: SubagentFleetEvent[] = []
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
@@ -642,7 +650,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       parentPiSessionAliases: [parentSessionFile],
       asyncRunsDir: root,
       controlJournal: null,
-      emit: () => undefined,
+      emit: (event) => emitted.push(event),
       now: () => 30
     })
     adapter.start()
@@ -653,10 +661,17 @@ describe("PiSubagentLifecycleAdapter", () => {
         state: "observed",
         observedAt: 30
       })
-      const workflowNode = adapter.snapshot().nodes.find(
-        (node) => node.nodeKind === "workflow"
-      )
-      expect(workflowNode).toMatchObject({ status: "completed", completedAt: 30 })
+      // Settled as completed (not decayed to unknown) — published for the
+      // retention pass — and then removed along with its children.
+      expect(emitted.some((event) =>
+        event._tag === "Upsert" &&
+        event.node.nodeKind === "workflow" &&
+        event.node.status === "completed" &&
+        event.node.completedAt === 30
+      )).toBe(true)
+      expect(adapter.snapshot().nodes.filter(
+        (node) => node.nodeKind === "workflow" || node.orchestrationRunId === "wf-1"
+      )).toEqual([])
     } finally {
       adapter.stop()
       await rm(root, { recursive: true, force: true })

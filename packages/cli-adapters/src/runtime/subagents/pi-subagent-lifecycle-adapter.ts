@@ -837,10 +837,22 @@ export class PiSubagentLifecycleAdapter {
         generatedAt - node.updatedAt > STALE_WORKFLOW_NODE_MS
       ).map((node) => node.id)
     )
+    // A finished agent has no place in the dock: completed/failed/stopped runs
+    // were already captured by the completed-agents retention, and "unknown"
+    // is a run whose process died without settling — nothing will ever revive
+    // it. Journal replay resurrects both shapes across reloads, which is how
+    // sessions accumulated rows of grey UNKNOWN workers.
+    const finished = (node: SubagentFleetNode): boolean =>
+      node.terminal !== null ||
+      node.status === "completed" ||
+      node.status === "failed" ||
+      node.status === "stopped" ||
+      node.status === "unknown"
     const nodes = this.#state().tree.nodes.filter(
       (node) =>
         !activeNodeIds.has(node.id) &&
         !durableNodeIds.has(node.id) &&
+        !finished(node) &&
         !staleWorkflowIds.has(node.id) &&
         !(
           node.parentId !== null &&
@@ -1302,5 +1314,22 @@ export class PiSubagentLifecycleAdapter {
         currentTool: null
       }
     })
+    // The process is gone — no further event will ever settle or revive this
+    // run, so its nodes leave the dock now instead of lingering as UNKNOWN
+    // rows forever. The settled upsert above is published FIRST so the
+    // completed-agents retention (which watches the event stream) captures the
+    // final state, transcripts included, before the removal lands.
+    for (const node of this.#state().tree.nodes.filter(
+      (candidate) => candidate.id === id || candidate.parentId === id
+    )) {
+      this.#publish({
+        _tag: "Remove",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `terminal-remove:${terminal.runId}:${node.subagentId}:${now}`,
+        occurredAt: now,
+        registryRevision: this.#nextRevision(),
+        id: node.id
+      })
+    }
   }
 }
