@@ -465,7 +465,15 @@ export class PiSubagentLifecycleAdapter {
       })
       return
     }
-    if (input.children.length > 0 && context.nodes.some((node) => node.id === rootId)) {
+    // A single/parallel/chain root is a redundant placeholder once real
+    // children report — remove it. A WORKFLOW root stays: it is the container
+    // its children nest under (mirroring the durable projection), rendered as
+    // an unselectable group header in the Fleet tree.
+    if (
+      input.children.length > 0 &&
+      input.mode !== "workflow" &&
+      context.nodes.some((node) => node.id === rootId)
+    ) {
       this.#publish({
         _tag: "Remove",
         version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -475,6 +483,10 @@ export class PiSubagentLifecycleAdapter {
         id: rootId
       })
     }
+    const childParentId =
+      input.mode === "workflow" && context.nodes.some((node) => node.id === rootId)
+        ? rootId
+        : null
     for (const child of input.children) {
       const subagentId = child.runId ?? `${input.runId}:step:${child.index}`
       const existing = context.nodes.find((node) => node.subagentId === subagentId)
@@ -494,7 +506,7 @@ export class PiSubagentLifecycleAdapter {
           ...(existing ?? {}),
           ...this.#identity(subagentId, input.runId),
           runId: subagentId,
-          parentId: null,
+          parentId: existing?.parentId ?? childParentId,
           parentPiSessionId: this.#parentPiSessionId,
           agent: child.agent,
           task: child.task,
