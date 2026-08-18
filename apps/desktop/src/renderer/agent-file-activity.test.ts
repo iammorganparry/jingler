@@ -3,8 +3,10 @@ import {
   clearAgentFileActivitySession,
   clearAgentFileActivityChat,
   getAgentFileActivity,
+  getFleetAgentFileActivity,
   normalizeAgentFileTarget,
   publishAgentFileActivity,
+  publishFleetAgentFileActivity,
   subscribeAgentFileActivity
 } from "./agent-file-activity.js"
 
@@ -87,6 +89,39 @@ describe("agent file activity", () => {
 })
 
 describe("normalizeAgentFileTarget", () => {
+  it("prefers the selected Fleet agent's activity over the main chat's", () => {
+    // Selecting a delegated agent redirects Follow to ITS edits; deselecting
+    // (publishing null) hands Follow straight back to the main chat.
+    publishAgentFileActivity("s1", "c1", {
+      eventId: "main-edit",
+      path: "src/main.ts",
+      phase: "editing",
+      preview: null
+    })
+    publishFleetAgentFileActivity("s1", {
+      eventId: "worker-edit",
+      path: "src/worker.ts",
+      phase: "editing",
+      preview: null
+    })
+    expect(getFleetAgentFileActivity("s1")?.path).toBe("src/worker.ts")
+
+    publishFleetAgentFileActivity("s1", null)
+    expect(getFleetAgentFileActivity("s1")).toBeNull()
+    expect(getAgentFileActivity("s1", "c1")?.path).toBe("src/main.ts")
+  })
+
+  it("clears the fleet override when the session is disposed", () => {
+    publishFleetAgentFileActivity("s1", {
+      eventId: "worker-edit",
+      path: "src/worker.ts",
+      phase: "editing",
+      preview: null
+    })
+    clearAgentFileActivitySession("s1")
+    expect(getFleetAgentFileActivity("s1")).toBeNull()
+  })
+
   it("normalizes contained absolute and repository-relative agent targets", () => {
     expect(normalizeAgentFileTarget("./src/a.ts:12:4", "/work/repo")).toBe("src/a.ts")
     expect(normalizeAgentFileTarget("/work/repo/src/a.ts", "/work/repo")).toBe("src/a.ts")

@@ -2686,6 +2686,131 @@ describe("AgentRunner plan progress across turns", () => {
   })
 })
 
+describe("AgentRunner worker plan checkpoints", () => {
+  const WT_W = "/tmp/jingler/worktrees/jingler/workers"
+
+  const seedWorkerSession = () => {
+    const session: Session = {
+      id: SESSION,
+      repo: "acme/widget",
+      branch: "feat/workers",
+      title: "Worker delegation session",
+      status: "idle",
+      diff: { added: 0, removed: 0 },
+      prNumber: null,
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-07-11T10:00:00.000Z",
+      worktreePath: WT_W,
+      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode: "auto" })],
+      activeChatId: SESSION,
+      mode: "auto"
+    }
+    mkdirSync(temp.root, { recursive: true })
+    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
+  }
+
+  /**
+   * Turn 1 proposes the plan; turn 2 delegates: a WORKER (agentId-tagged
+   * stream) emits the PLAN_TASK checkpoint, the main agent emits none. This is
+   * the delegation shape that used to freeze the plan panel — sub-agent events
+   * route to the renderer and returned before the marker parser ran, so a
+   * worker executing a stage for ten minutes never moved a task off "pending".
+   */
+  const delegatingAdapter = (): Layer.Layer<AgentTurnDriver> => {
+    let turn = 0
+    return Layer.succeed(
+      AgentTurnDriver,
+      AgentTurnDriver.of({
+        run: (sessionId, _spec, ctx) =>
+          Effect.gen(function* () {
+            turn += 1
+            if (turn === 1) {
+              yield* ctx.proposePlan(scriptedPlanPrd(sessionId, 1))
+              yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+              return
+            }
+            yield* ctx.emit({
+              _tag: "SubagentStarted",
+              id: "task_worker_1",
+              name: "worker",
+              description: "Implement stage s_02",
+              parentId: null
+            })
+            // The marker arrives split across two deltas, as a live stream
+            // delivers it — the accumulator has to reassemble it. A stale
+            // fingerprint applies by id with a warning, exactly as main's does.
+            yield* ctx.emit({
+              _tag: "Assistant",
+              agentId: "task_worker_1",
+              text: "Working on the stage.\nPLAN_TASK stage=s_02 finger"
+            })
+            yield* ctx.emit({
+              _tag: "Assistant",
+              agentId: "task_worker_1",
+              text: "print=stale task=s_02.task.1 status=completed\n"
+            })
+            yield* ctx.emit({
+              _tag: "SubagentEnded",
+              id: "task_worker_1",
+              status: "done"
+            })
+            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+          }) as ReturnType<AgentTurnDriverShape["run"]>,
+        stop: () => Effect.void
+      })
+    )
+  }
+
+  it("applies a delegated worker's PLAN_TASK checkpoints to the live plan", async () => {
+    seedWorkerSession()
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      delegatingAdapter(),
+      ContextManager.Default,
+      temp.layer
+    )
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        yield* runner.prompt(SESSION, SESSION, "plan the work").pipe(
+          Stream.tap((event) =>
+            event._tag === "PlanProposed"
+              ? runner.approvePlan(SESSION, event.plan.id)
+              : Effect.void
+          ),
+          Stream.runDrain
+        )
+        yield* runner.prompt(SESSION, SESSION, "delegate stage two").pipe(Stream.runDrain)
+        return {
+          document: yield* PlanStore.readDocument(WT_W),
+          transcript: yield* TranscriptStore.list(SESSION)
+        }
+      }).pipe(Effect.provide(base))
+    )
+
+    const stage = result.document?.plan.stages.find((candidate) => candidate.id === "s_02")
+    expect(stage?.tasks?.find((task) => task.id === "s_02.task.1")?.status).toBe("completed")
+    // The worker's text still never lands on the persisted main turn.
+    const mainText = result.transcript
+      .flatMap((message) => message.parts)
+      .filter((part) => part._tag === "Text")
+      .map((part) => part.text)
+      .join("\n")
+    expect(mainText).not.toContain("PLAN_TASK")
+    expect(mainText).not.toContain("Working on the stage.")
+  })
+})
+
 describe("AgentRunner failures", () => {
   it("refuses a direct turn after the shared checkout moves to another branch", async () => {
     const repoPath = initGitRepo(join(temp.root, "direct-repo"), {

@@ -10,10 +10,11 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   Environment,
   ExecutionMode,
+  Message,
   ProviderCatalog,
   Session
 } from "@jingler/core"
-import { clampFontScale } from "@jingler/core"
+import { agentFileActivityOf, clampFontScale } from "@jingler/core"
 import {
   AttachmentSourceProvider,
   OpenAssetProvider,
@@ -29,6 +30,7 @@ import {
   useContainerWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
+import { publishFleetAgentFileActivity } from "./agent-file-activity.js"
 import { publishSessionUpdate } from "./session-updates.js"
 import {
   disposeChatActor,
@@ -674,6 +676,44 @@ export function ConversationPane({
     fleet.selectedNode?.status,
     fleet.selectedNode?.updatedAt
   ])
+  // Selecting a Fleet agent redirects the file browser's Follow to THAT
+  // agent's edits: its file activity is derived from its own transcript with
+  // the same pure deriver the main chat uses, and published as the session's
+  // fleet override (which wins in `useAgentFileActivity`). Cleared whenever
+  // the selection returns to Main — Follow then tracks the main chat again.
+  const selectedChildMessages: ReadonlyArray<Message> | null = useMemo(
+    () =>
+      fleet.selectedNode === null
+        ? null
+        : fleet.selectedLegacyAgent !== null
+          ? [fleet.selectedLegacyAgent.message]
+          : childTranscriptQuery.data ?? null,
+    [childTranscriptQuery.data, fleet.selectedLegacyAgent, fleet.selectedNode]
+  )
+  useEffect(() => {
+    if (fleet.selectedNode === null || selectedChildMessages === null) {
+      publishFleetAgentFileActivity(session.id, null)
+      return
+    }
+    const active =
+      fleet.selectedNode.status === "queued" ||
+      fleet.selectedNode.status === "running" ||
+      fleet.selectedNode.status === "paused" ||
+      fleet.selectedNode.status === "needs-attention"
+    publishFleetAgentFileActivity(
+      session.id,
+      agentFileActivityOf(selectedChildMessages, active ? "running" : "settling")
+    )
+  }, [
+    fleet.selectedNode,
+    selectedChildMessages,
+    session.id
+  ])
+  // A closed pane must not leave Follow pinned to a stale agent.
+  useEffect(
+    () => () => publishFleetAgentFileActivity(session.id, null),
+    [session.id]
+  )
   const fleetDrawer = (
     <>
     <FleetDrawer
