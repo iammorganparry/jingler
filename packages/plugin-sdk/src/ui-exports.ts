@@ -24,6 +24,7 @@ export const UI_EXPORT_NAMES = [
   "Input",
   "IssueLabelChip",
   "Kbd",
+  "LinkedIssueSelector",
   "Markdown",
   "Pill",
   "SearchInput",

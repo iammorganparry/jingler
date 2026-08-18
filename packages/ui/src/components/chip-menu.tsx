@@ -16,6 +16,8 @@ export interface ChipOption<T extends string> {
   value: T
   label: ReactNode
   description?: string
+  /** Accessible name when visual label + description are split across blocks. */
+  ariaLabel?: string
   searchText?: string
 }
 
@@ -154,6 +156,7 @@ export function ChipMenu<T extends string>({
                     key={option.value}
                     value={option.value}
                     keywords={[section.label, textOf(option)]}
+                    aria-label={option.ariaLabel}
                     onSelect={() => pick(option.value)}
                   >
                     <span className="min-w-0 flex-1">
