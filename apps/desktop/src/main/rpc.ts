@@ -1935,6 +1935,9 @@ export const linkIssue = (input: {
       reference: {
         providerId: input.issue.providerId,
         id: input.issue.id,
+        ...(input.issue.providerAccountId === undefined
+          ? {}
+          : { providerAccountId: input.issue.providerAccountId }),
         identifier: input.issue.identifier,
         url: input.issue.url,
         title: input.issue.title,

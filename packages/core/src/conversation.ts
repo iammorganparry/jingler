@@ -692,6 +692,8 @@ export const StreamEvent = Schema.Union(
     output: Schema.optional(Schema.String),
     agentId: AgentId
   }),
+  /** Session-level issue links changed outside renderer state (for example, an agent tool). */
+  Schema.TaggedStruct("SessionIssueLinksChanged", {}),
   Schema.TaggedStruct("GateRequested", { gate: ApprovalGate }),
   Schema.TaggedStruct("QuestionRequested", { request: QuestionRequest }),
   /**
@@ -1058,6 +1060,8 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
           : p
       )
     })),
+
+    Match.tag("SessionIssueLinksChanged", () => msg),
 
     Match.tag("GateRequested", (e) => {
       const part: GatePart = { _tag: "Gate", gate: e.gate }

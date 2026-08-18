@@ -34,7 +34,8 @@ const actor = {
   displayName: "Morgan",
   avatarUrl: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%236faef6'/%3E%3Ccircle cx='24' cy='18' r='8' fill='%23f4f1f1'/%3E%3Cpath d='M10 43c1-10 6-15 14-15s13 5 14 15' fill='%23f4f1f1'/%3E%3C/svg%3E"
 }
-const state = { id: "state-1", name: "In Progress", type: "started" }
+const workflowState = { id: "state-1", name: "In Progress", type: "started", team: { id: team.id, name: team.name } }
+const state = workflowState
 const labels = { nodes: [{ id: "label-1", name: "Bug", color: "#5E6AD2" }] }
 const project = { id: "project-1", name: "Payments" }
 const cycle = { id: "cycle-1", name: "Cycle 42", number: 42 }
@@ -155,6 +156,24 @@ const createComment = (
   })
 }
 
+const updateIssue = (
+  state: FakeLinearState,
+  variables: Record<string, unknown>,
+  response: ServerResponse
+): void => {
+  state.operations.push("issueUpdate")
+  const issue = state.issues.find(({ id, identifier }) => id === variables.id || identifier === variables.id)
+  if (!issue) {
+    json(response, 200, { errors: [{ message: "Issue not found" }] })
+    return
+  }
+  const input = inputOf(variables)
+  if (typeof input.title === "string") (issue as { title: string }).title = input.title
+  if (typeof input.description === "string") (issue as { description: string }).description = input.description
+  if (typeof input.priority === "number") (issue as { priority: number }).priority = input.priority
+  json(response, 200, { data: { issueUpdate: { success: true, issue: { id: issue.id } } } })
+}
+
 const createIssue = (
   state: FakeLinearState,
   variables: Record<string, unknown>,
@@ -184,7 +203,7 @@ const readIssue = (
   response: ServerResponse
 ): void => {
   state.operations.push("issue")
-  const issue = state.issues.find(({ id }) => id === variables.id)
+  const issue = state.issues.find(({ id, identifier }) => id === variables.id || identifier === variables.id)
   json(response, 200, { data: { issue: issue ? issueNode(issue) : null } })
 }
 
@@ -230,6 +249,10 @@ const handleGraphql = (
     createIssue(state, variables, response)
     return
   }
+  if (query.includes("issueUpdate")) {
+    updateIssue(state, variables, response)
+    return
+  }
   if (ISSUE_QUERY.test(query)) {
     readIssue(state, variables, response)
     return
@@ -249,7 +272,10 @@ const handleGraphql = (
         viewer: actor,
         organization: { id: "org-1", name: "Acme", urlKey: "acme" },
         teams: { nodes: [team], pageInfo: { hasNextPage: false, endCursor: null } },
-        projects: { nodes: [{ id: "project-1", name: "Jingler" }] }
+        projects: { nodes: [{ id: "project-1", name: "Jingler" }] },
+        workflowStates: { nodes: [workflowState] },
+        issueLabels: labels,
+        users: { nodes: [actor] }
       }
     })
     return

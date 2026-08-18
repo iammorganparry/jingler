@@ -49,11 +49,29 @@ export interface LinearIssueNode {
   }
 }
 
+export interface LinearConnection<Node> {
+  readonly nodes: readonly Node[]
+  readonly pageInfo?: LinearPageInfo
+}
+
+export type LinearWorkflowStateNode = LinearDisplayNode & {
+  readonly type: string
+  readonly team: LinearDisplayNode | null
+}
+export type LinearLabelNode = LinearDisplayNode & { readonly color: string | null }
+
 export interface LinearContextData {
   readonly viewer: LinearActorNode
   readonly organization: LinearDisplayNode & { readonly urlKey: string }
-  readonly teams: { readonly nodes: readonly LinearTeamNode[] }
-  readonly projects: { readonly nodes: readonly LinearDisplayNode[] }
+  readonly teams: LinearConnection<LinearTeamNode>
+  readonly projects: LinearConnection<LinearDisplayNode>
+  readonly workflowStates: LinearConnection<LinearWorkflowStateNode>
+  readonly issueLabels: LinearConnection<LinearLabelNode>
+  readonly users: LinearConnection<LinearActorNode>
+}
+
+export interface LinearMetadataPageData<Node> {
+  readonly items: LinearConnection<Node> & { readonly pageInfo: LinearPageInfo }
 }
 
 export interface LinearIssuesData {
@@ -83,6 +101,13 @@ export interface LinearIssueCreateData {
   }
 }
 
+export interface LinearIssueUpdateData {
+  readonly issueUpdate: {
+    readonly success: boolean
+    readonly issue: { readonly id: string }
+  }
+}
+
 export interface LinearCommentCreateData {
   readonly commentCreate: {
     readonly success: boolean
@@ -105,8 +130,27 @@ const ISSUE_FIELDS = `
 export const CONTEXT_QUERY = `query LinearContext {
   viewer { id name avatarUrl }
   organization { id name urlKey }
-  teams(first: 100) { nodes { id name key } }
-  projects(first: 100) { nodes { id name } }
+  teams(first: 50) { nodes { id name key } pageInfo { hasNextPage endCursor } }
+  projects(first: 50) { nodes { id name } pageInfo { hasNextPage endCursor } }
+  workflowStates(first: 50) { nodes { id name type team { id name } } pageInfo { hasNextPage endCursor } }
+  issueLabels(first: 50) { nodes { id name color } pageInfo { hasNextPage endCursor } }
+  users(first: 50) { nodes { id name avatarUrl } pageInfo { hasNextPage endCursor } }
+}`
+
+export const TEAMS_PAGE_QUERY = `query LinearTeamsPage($after: String) {
+  items: teams(first: 50, after: $after) { nodes { id name key } pageInfo { hasNextPage endCursor } }
+}`
+export const PROJECTS_PAGE_QUERY = `query LinearProjectsPage($after: String) {
+  items: projects(first: 50, after: $after) { nodes { id name } pageInfo { hasNextPage endCursor } }
+}`
+export const WORKFLOW_STATES_PAGE_QUERY = `query LinearWorkflowStatesPage($after: String) {
+  items: workflowStates(first: 50, after: $after) { nodes { id name type team { id name } } pageInfo { hasNextPage endCursor } }
+}`
+export const LABELS_PAGE_QUERY = `query LinearLabelsPage($after: String) {
+  items: issueLabels(first: 50, after: $after) { nodes { id name color } pageInfo { hasNextPage endCursor } }
+}`
+export const USERS_PAGE_QUERY = `query LinearUsersPage($after: String) {
+  items: users(first: 50, after: $after) { nodes { id name avatarUrl } pageInfo { hasNextPage endCursor } }
 }`
 
 export const ISSUES_QUERY = `query LinearIssues($first: Int!, $after: String, $filter: IssueFilter) {
@@ -138,6 +182,10 @@ export const COMMENTS_QUERY = `query LinearComments($id: String!, $first: Int!, 
 
 export const CREATE_ISSUE_MUTATION = `mutation LinearIssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) { success issue { id } }
+}`
+
+export const UPDATE_ISSUE_MUTATION = `mutation LinearIssueUpdate($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) { success issue { id } }
 }`
 
 export const CREATE_COMMENT_MUTATION = `mutation LinearCommentCreate($input: CommentCreateInput!) {

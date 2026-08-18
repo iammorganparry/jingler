@@ -1762,6 +1762,10 @@ export const conversationMachine = setup({
     liveRefreshDiff: ({ context, event, self }) => {
       if (event.type !== "STREAM_EVENT") return
       const e = event.event
+      if (e._tag === "SessionIssueLinksChanged") {
+        void rpc.sessionsGet(context.session.id).then(publishSessionUpdate).catch(() => {})
+        return
+      }
       if (e._tag !== "ToolEnd" || e.status !== "success") return
       const toolName = toolNameFor(context, e.id, e.agentId)
       const hasCanonicalChanges = (e.fileChanges?.changes.length ?? 0) > 0

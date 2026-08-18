@@ -1,10 +1,13 @@
 import type {
   Activate,
   HostContext,
+  AgentToolDefinition,
+  AgentToolExecutionContext,
   IssueActor,
   IssueComment,
   IssueLabel,
   IssueProvider,
+  IssueReference,
   IssueSummary
 } from "@jingler/plugin-sdk/host"
 import {
@@ -20,6 +23,12 @@ import {
   ISSUES_QUERY,
   ISSUE_QUERY,
   SEARCH_ISSUES_QUERY,
+  UPDATE_ISSUE_MUTATION,
+  TEAMS_PAGE_QUERY,
+  PROJECTS_PAGE_QUERY,
+  WORKFLOW_STATES_PAGE_QUERY,
+  LABELS_PAGE_QUERY,
+  USERS_PAGE_QUERY,
   type LinearActorNode,
   type LinearCommentCreateData,
   type LinearCommentNode,
@@ -29,8 +38,11 @@ import {
   type LinearIssueCreateData,
   type LinearIssueData,
   type LinearIssueNode,
+  type LinearIssueUpdateData,
   type LinearIssuesData,
   type LinearPageInfo,
+  type LinearConnection,
+  type LinearMetadataPageData,
   type LinearTeamNode
 } from "./operations.js"
 import type {
@@ -44,6 +56,8 @@ import type {
   LinearConfiguration,
   LinearProfile,
   LinearSelection,
+  LinearToolEnvelope,
+  LinearUpdateRequest,
   LinearTeam,
   LinearViewer,
   LinearWorkspace
@@ -170,14 +184,19 @@ export interface LinearClientOptions {
 export interface LinearRoute {
   readonly sessionId?: string
   readonly repository?: { readonly name: string; readonly path: string }
+  /** Explicit link-bound account; overrides mutable session/repository mappings. */
+  readonly profileId?: string
 }
 
 export interface LinearClient {
   configured(route?: LinearRoute): Promise<boolean>
+  /** Resolved named account for durable issue-link routing, when account-managed. */
+  profileId(route?: LinearRoute): Promise<string | undefined>
   context(route?: LinearRoute): Promise<LinearContext>
   listIssues(input: LinearListRequest): Promise<readonly IssueSummary[]>
   getIssue(input: LinearGetRequest): Promise<LinearIssueDetail | null>
   createIssue(input: LinearCreateRequest): Promise<LinearIssueDetail>
+  updateIssue(input: LinearUpdateRequest): Promise<LinearIssueDetail>
   addComment(input: LinearCommentRequest): Promise<IssueComment>
 }
 
@@ -186,8 +205,40 @@ type Execute = <Data extends object>(
   variables?: Readonly<Record<string, unknown>>
 ) => Promise<Data>
 
+const LINEAR_PRIORITIES = [
+  { value: 0, label: "No priority" },
+  { value: 1, label: "Urgent" },
+  { value: 2, label: "High" },
+  { value: 3, label: "Medium" },
+  { value: 4, label: "Low" }
+] as const
+
+const loadMetadataConnection = async <Node>(
+  execute: Execute,
+  query: string,
+  initial: LinearConnection<Node>,
+  page = 0
+): Promise<readonly Node[]> => {
+  if (page >= 100) throw new Error("Linear returned too many metadata pages.")
+  const info = initial.pageInfo
+  if (!info?.hasNextPage) return initial.nodes
+  if (!info.endCursor) throw new Error("Linear returned invalid metadata pagination information.")
+  const next = await execute<LinearMetadataPageData<Node>>(query, { after: info.endCursor })
+  return [
+    ...initial.nodes,
+    ...await loadMetadataConnection(execute, query, next.items, page + 1)
+  ]
+}
+
 const loadContext = async (execute: Execute): Promise<LinearContext> => {
   const data = await execute<LinearContextData>(CONTEXT_QUERY)
+  const [teams, projects, workflowStates, issueLabels, users] = await Promise.all([
+    loadMetadataConnection(execute, TEAMS_PAGE_QUERY, data.teams),
+    loadMetadataConnection(execute, PROJECTS_PAGE_QUERY, data.projects),
+    loadMetadataConnection(execute, WORKFLOW_STATES_PAGE_QUERY, data.workflowStates ?? { nodes: [] }),
+    loadMetadataConnection(execute, LABELS_PAGE_QUERY, data.issueLabels ?? { nodes: [] }),
+    loadMetadataConnection(execute, USERS_PAGE_QUERY, data.users ?? { nodes: [] })
+  ])
   const viewer: LinearViewer = {
     ...displayItem(data.viewer),
     avatarUrl: data.viewer.avatarUrl
@@ -199,8 +250,22 @@ const loadContext = async (execute: Execute): Promise<LinearContext> => {
   return {
     viewer,
     workspace,
-    teams: data.teams.nodes.map(team),
-    projects: data.projects.nodes.map(displayItem)
+    teams: teams.map(team),
+    projects: projects.map(displayItem),
+    workflowStates: workflowStates.map((state) => ({
+      ...displayItem(state),
+      type: state.type,
+      team: optionalDisplayItem(state.team)
+    })),
+    labels: issueLabels.map((label) => ({
+      ...displayItem(label),
+      color: label.color
+    })),
+    members: users.map((member) => ({
+      ...displayItem(member),
+      avatarUrl: member.avatarUrl
+    })),
+    priorities: LINEAR_PRIORITIES
   }
 }
 
@@ -321,7 +386,11 @@ const createIssue = async (
       teamId,
       title: input.title,
       description: input.body,
-      ...(input.projectId ? { projectId: input.projectId } : {})
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.stateId ? { stateId: input.stateId } : {}),
+      ...(input.priority === undefined ? {} : { priority: input.priority }),
+      ...(input.assigneeId ? { assigneeId: input.assigneeId } : {}),
+      ...(input.labelIds ? { labelIds: [...input.labelIds] } : {})
     }
   })
   if (!data.issueCreate.success) {
@@ -332,6 +401,38 @@ const createIssue = async (
     issueId: data.issueCreate.issue.id
   })
   if (!issue) throw new Error("Linear created the issue but could not load it.")
+  return issue
+}
+
+const updateIssue = async (
+  execute: Execute,
+  input: LinearUpdateRequest
+): Promise<LinearIssueDetail> => {
+  const mutationInput = {
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.body === undefined ? {} : { description: input.body }),
+    ...(input.teamId === undefined ? {} : { teamId: input.teamId }),
+    ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+    ...(input.stateId === undefined ? {} : { stateId: input.stateId }),
+    ...(input.priority === undefined ? {} : { priority: input.priority }),
+    ...(input.assigneeId === undefined ? {} : { assigneeId: input.assigneeId }),
+    ...(input.labelIds === undefined ? {} : { labelIds: [...input.labelIds] })
+  }
+  if (Object.keys(mutationInput).length === 0) {
+    throw new Error("Choose at least one Linear issue field to update.")
+  }
+  const data = await execute<LinearIssueUpdateData>(UPDATE_ISSUE_MUTATION, {
+    id: input.issueId,
+    input: mutationInput
+  })
+  if (!data.issueUpdate.success) throw new Error("Linear did not update the issue.")
+  // A team transfer may change the human identifier; the mutation's stable UUID
+  // is the only reliable key for the authoritative reload.
+  const issue = await loadIssue(execute, {
+    ...input,
+    issueId: data.issueUpdate.issue.id
+  })
+  if (!issue) throw new Error("Linear updated the issue but could not load it.")
   return issue
 }
 
@@ -358,6 +459,7 @@ export const createLinearClient = (options: LinearClientOptions): LinearClient =
 
   return {
     configured: async () => Boolean(await options.getSecret(API_KEY_SETTING)),
+    profileId: async () => undefined,
     context,
     listIssues: async (input) => {
       const viewerId = input.mine ? (await context()).viewer.id : null
@@ -371,6 +473,7 @@ export const createLinearClient = (options: LinearClientOptions): LinearClient =
     },
     getIssue: (input) => loadIssue(execute, input),
     createIssue: (input) => createIssue(execute, context, input),
+    updateIssue: (input) => updateIssue(execute, input),
     addComment: (input) => addComment(execute, input)
   }
 }
@@ -472,7 +575,10 @@ export const createLinearAccountManager = (ctx: LinearConfigurationHost): Linear
     const sessionOverrides = mapOf(await ctx.storage.get(SESSION_OVERRIDES_KEY))
     const repoDefault = route.repository ? repoDefaults[route.repository.name] ?? null : null
     const sessionOverride = route.sessionId ? sessionOverrides[route.sessionId] ?? null : null
-    const resolved = sessionOverride ?? repoDefault ?? (available[0] ? { profileId: available[0].id } : null)
+    const explicit = route.profileId && available.some(({ id }) => id === route.profileId)
+      ? { profileId: route.profileId }
+      : null
+    const resolved = explicit ?? sessionOverride ?? repoDefault ?? (available[0] ? { profileId: available[0].id } : null)
     return { profiles: available, repoDefault, sessionOverride, resolved }
   }
 
@@ -570,7 +676,229 @@ const issueTabCommand = <Input, Output>(handler: (input: Input) => Output | Prom
     return handler(input as Input)
   }
 
-type LinearHostContext = Pick<HostContext, "issues" | "commands" | "subscriptions">
+type LinearHostContext = Pick<HostContext, "issues" | "commands" | "agentTools" | "subscriptions">
+
+const toolInput = (input: unknown): Record<string, unknown> => {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("Linear tool input must be an object.")
+  }
+  return input as Record<string, unknown>
+}
+
+const stringInput = (input: Record<string, unknown>, key: string, required = false): string | undefined => {
+  const value = input[key]
+  if (value === undefined && !required) return
+  if (typeof value !== "string" || (required && !value.trim())) {
+    throw new Error(`Linear tool field "${key}" must be a${required ? " non-empty" : ""} string.`)
+  }
+  return value
+}
+
+const reference = (
+  issue: IssueReference,
+  providerAccountId: string | undefined
+): IssueReference => ({
+  providerId: issue.providerId,
+  id: issue.id,
+  ...(providerAccountId === undefined ? {} : { providerAccountId }),
+  identifier: issue.identifier,
+  url: issue.url,
+  title: issue.title,
+  labels: issue.labels
+})
+
+const envelope = <T>(
+  issues: readonly IssueReference[],
+  result: T,
+  providerAccountId?: string
+): LinearToolEnvelope<T> => ({
+  kind: "linear.issue-result",
+  issues: issues.map((issue) => reference(issue, providerAccountId)),
+  result
+})
+
+const boundedIssue = (issue: LinearIssueDetail) => ({
+  ...issue,
+  body: issue.body.slice(0, 8_000),
+  comments: issue.comments.slice(-20).map((entry) => ({
+    ...entry,
+    body: entry.body.slice(0, 2_000)
+  }))
+})
+
+const boundedSummary = (issue: IssueSummary) => ({ ...issue, body: issue.body.slice(0, 1_000) })
+
+const routeFrom = (
+  context: AgentToolExecutionContext
+): Pick<Required<LinearRoute>, "sessionId" | "repository"> => ({
+  sessionId: context.session.id,
+  repository: context.session.repository
+})
+
+const optionalStringArray = (input: Record<string, unknown>, key: string): readonly string[] | undefined => {
+  const value = input[key]
+  if (value === undefined) return
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error(`Linear tool field "${key}" must be an array of strings.`)
+  }
+  return value
+}
+
+const LINEAR_TOOLSET_ID = "linear.issues"
+
+const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] => {
+  const base = {
+    timeoutMs: 30_000,
+    outputBudget: 64_000,
+    cancellable: true
+  } as const
+  return [
+    {
+      ...base,
+      id: "linear_context",
+      description: "Load the mapped Linear workspace metadata (teams, projects, states, labels, members, priorities). Call once before create/update and reuse returned IDs.",
+      inputSchema: { type: "object", additionalProperties: false },
+      risk: "network",
+      idempotency: "safe",
+      execute: async (_input, context) => envelope([], await client.context(routeFrom(context)))
+    },
+    {
+      ...base,
+      id: "linear_search_issues",
+      description: "Search issues in the session's mapped Linear account. Use a focused identifier/title query; returned issues are linked to this session.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Identifier or title text; empty lists recent issues." },
+          mine: { type: "boolean", description: "Only issues assigned to the authenticated viewer." },
+          limit: { type: "integer", minimum: 1, maximum: 20 }
+        },
+        additionalProperties: false
+      },
+      risk: "network",
+      idempotency: "safe",
+      execute: async (raw, context) => {
+        const input = toolInput(raw)
+        const limit = typeof input.limit === "number" ? Math.max(1, Math.min(20, Math.trunc(input.limit))) : 20
+        const route = routeFrom(context)
+        const issues = (await client.listIssues({
+          ...route,
+          search: stringInput(input, "query") ?? "",
+          mine: input.mine === true
+        })).slice(0, limit)
+        return envelope(issues, issues.map(boundedSummary), await client.profileId(route))
+      }
+    },
+    {
+      ...base,
+      id: "linear_get_issue",
+      description: "Fetch one Linear issue and comments by UUID or identifier. The issue is linked to this session.",
+      inputSchema: {
+        type: "object",
+        properties: { issueId: { type: "string" } },
+        required: ["issueId"],
+        additionalProperties: false
+      },
+      risk: "network",
+      idempotency: "safe",
+      execute: async (raw, context) => {
+        const input = toolInput(raw)
+        const route = routeFrom(context)
+        const issue = await client.getIssue({ ...route, issueId: stringInput(input, "issueId", true)! })
+        if (!issue) throw new Error("Linear could not find this issue.")
+        return envelope([issue], boundedIssue(issue), await client.profileId(route))
+      }
+    },
+    {
+      ...base,
+      id: "linear_create_issue",
+      description: "Create an issue using repository/session defaults. Call linear_context first only when you need explicit team/project/state/assignee/label IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" }, description: { type: "string" }, teamId: { type: "string" },
+          projectId: { type: "string" }, stateId: { type: "string" }, priority: { type: "integer", minimum: 0, maximum: 4 },
+          assigneeId: { type: "string" }, labelIds: { type: "array", items: { type: "string" } }
+        },
+        required: ["title"],
+        additionalProperties: false
+      },
+      risk: "mutate",
+      idempotency: "keyed",
+      execute: async (raw, context) => {
+        const input = toolInput(raw)
+        const route = routeFrom(context)
+        const issue = await client.createIssue({
+          ...route, title: stringInput(input, "title", true)!,
+          body: stringInput(input, "description") ?? "",
+          ...(stringInput(input, "teamId") ? { teamId: stringInput(input, "teamId") } : {}),
+          ...(stringInput(input, "projectId") ? { projectId: stringInput(input, "projectId") } : {}),
+          ...(stringInput(input, "stateId") ? { stateId: stringInput(input, "stateId") } : {}),
+          ...(typeof input.priority === "number" ? { priority: input.priority } : {}),
+          ...(stringInput(input, "assigneeId") ? { assigneeId: stringInput(input, "assigneeId") } : {}),
+          ...(optionalStringArray(input, "labelIds") ? { labelIds: optionalStringArray(input, "labelIds") } : {})
+        })
+        return envelope([issue], boundedIssue(issue), await client.profileId(route))
+      }
+    },
+    {
+      ...base,
+      id: "linear_update_issue",
+      description: "Update one Linear issue. Call linear_context first for metadata IDs; omit unchanged fields. The refreshed issue is linked to this session.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          issueId: { type: "string" }, title: { type: "string" }, description: { type: "string" }, teamId: { type: "string" },
+          projectId: { type: ["string", "null"] }, stateId: { type: "string" }, priority: { type: "integer", minimum: 0, maximum: 4 },
+          assigneeId: { type: ["string", "null"] }, labelIds: { type: "array", items: { type: "string" } }
+        },
+        required: ["issueId"],
+        additionalProperties: false
+      },
+      risk: "mutate",
+      idempotency: "keyed",
+      execute: async (raw, context) => {
+        const input = toolInput(raw)
+        const route = routeFrom(context)
+        const nullable = (key: string): string | null | undefined => input[key] === null ? null : stringInput(input, key)
+        const issue = await client.updateIssue({
+          ...route, issueId: stringInput(input, "issueId", true)!,
+          ...(input.title === undefined ? {} : { title: stringInput(input, "title") }),
+          ...(input.description === undefined ? {} : { body: stringInput(input, "description") }),
+          ...(input.teamId === undefined ? {} : { teamId: stringInput(input, "teamId") }),
+          ...(input.projectId === undefined ? {} : { projectId: nullable("projectId") }),
+          ...(input.stateId === undefined ? {} : { stateId: stringInput(input, "stateId") }),
+          ...(typeof input.priority === "number" ? { priority: input.priority } : {}),
+          ...(input.assigneeId === undefined ? {} : { assigneeId: nullable("assigneeId") }),
+          ...(input.labelIds === undefined ? {} : { labelIds: optionalStringArray(input, "labelIds") })
+        })
+        return envelope([issue], boundedIssue(issue), await client.profileId(route))
+      }
+    },
+    {
+      ...base,
+      id: "linear_add_comment",
+      description: "Add a comment to one Linear issue, then return and link the refreshed issue.",
+      inputSchema: {
+        type: "object",
+        properties: { issueId: { type: "string" }, body: { type: "string" } },
+        required: ["issueId", "body"],
+        additionalProperties: false
+      },
+      risk: "mutate",
+      idempotency: "keyed",
+      execute: async (raw, context) => {
+        const input = toolInput(raw)
+        const issueId = stringInput(input, "issueId", true)!
+        const route = routeFrom(context)
+        await client.addComment({ ...route, issueId, body: stringInput(input, "body", true)! })
+        const issue = await client.getIssue({ ...route, issueId })
+        if (!issue) throw new Error("Linear added the comment but could not reload the issue.")
+        return envelope([issue], boundedIssue(issue), await client.profileId(route))
+      }
+    }
+  ]
+}
 
 export const activateWithClient = (ctx: LinearHostContext, client: LinearClient): void => {
   const provider: IssueProvider = {
@@ -582,6 +910,7 @@ export const activateWithClient = (ctx: LinearHostContext, client: LinearClient)
   }
   ctx.subscriptions.push(
     ctx.issues.registerProvider(provider),
+    ctx.agentTools.registerToolset({ id: LINEAR_TOOLSET_ID, tools: linearAgentTools(client) }),
     ctx.commands.register("linear.configured", () => client.configured()),
     ctx.commands.register("linear.context", () => client.context()),
     ctx.commands.register("linear.list", issueTabCommand(client.listIssues)),
@@ -595,6 +924,7 @@ export const activate: Activate = (ctx) => {
   const accounts = createLinearAccountManager(ctx)
   const client: LinearClient = {
     configured: async (route = {}) => (await accounts.configuration(route)).profiles.length > 0,
+    profileId: async (route = {}) => (await accounts.clientFor(route)).selection.profileId,
     context: async (route = {}) => (await accounts.clientFor(route)).client.context(),
     listIssues: async (input) => (await accounts.clientFor(input)).client.listIssues(input),
     getIssue: async (input) => (await accounts.clientFor(input)).client.getIssue(input),
@@ -606,6 +936,7 @@ export const activate: Activate = (ctx) => {
         projectId: input.projectId ?? selected.selection.projectId
       })
     },
+    updateIssue: async (input) => (await accounts.clientFor(input)).client.updateIssue(input),
     addComment: async (input) => (await accounts.clientFor(input)).client.addComment(input)
   }
   activateWithClient(ctx, client)

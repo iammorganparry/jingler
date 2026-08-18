@@ -3,7 +3,8 @@ import type {
   IssueCreateRequest,
   IssueDetail,
   IssueGetRequest,
-  IssueListRequest
+  IssueListRequest,
+  IssueReference
 } from "@jingler/plugin-sdk/host"
 
 export interface LinearDisplayItem {
@@ -23,11 +24,28 @@ export interface LinearWorkspace extends LinearDisplayItem {
   readonly urlKey: string
 }
 
+export interface LinearWorkflowState extends LinearDisplayItem {
+  readonly type: string
+  readonly team: LinearDisplayItem | null
+}
+
+export interface LinearLabel extends LinearDisplayItem {
+  readonly color: string | null
+}
+
+export interface LinearMember extends LinearDisplayItem {
+  readonly avatarUrl: string | null
+}
+
 export interface LinearContext {
   readonly viewer: LinearViewer
   readonly workspace: LinearWorkspace
   readonly teams: readonly LinearTeam[]
   readonly projects: readonly LinearDisplayItem[]
+  readonly workflowStates: readonly LinearWorkflowState[]
+  readonly labels: readonly LinearLabel[]
+  readonly members: readonly LinearMember[]
+  readonly priorities: readonly { readonly value: number; readonly label: string }[]
 }
 
 export interface LinearProfile {
@@ -67,6 +85,28 @@ export interface LinearIssueDetail extends IssueDetail {
 export interface LinearCreateRequest extends IssueCreateRequest {
   readonly teamId?: string
   readonly projectId?: string
+  readonly stateId?: string
+  readonly priority?: number
+  readonly assigneeId?: string
+  readonly labelIds?: readonly string[]
+}
+
+export interface LinearUpdateRequest extends IssueGetRequest {
+  readonly title?: string
+  readonly body?: string
+  readonly teamId?: string
+  readonly projectId?: string | null
+  readonly stateId?: string
+  readonly priority?: number
+  readonly assigneeId?: string | null
+  readonly labelIds?: readonly string[]
+}
+
+/** Bounded machine-readable linkage metadata included in every agent tool result. */
+export interface LinearToolEnvelope<T = unknown> {
+  readonly kind: "linear.issue-result"
+  readonly issues: readonly IssueReference[]
+  readonly result: T
 }
 
 export type LinearListRequest = IssueListRequest

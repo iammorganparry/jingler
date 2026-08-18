@@ -70,8 +70,12 @@ function linearServices(
     list: (search) =>
       host.invoke<readonly IssueSummary[]>("linear.list", { ...route, search, mine: false }),
     get: async (issueId) => {
+      const providerAccountId = session.linkedIssues?.find(
+        (issue) => issue.providerId === "linear" && issue.id === issueId
+      )?.providerAccountId
       const issue = await host.invoke<LinearIssueDetail | null>("linear.get", {
         ...route,
+        ...(providerAccountId === undefined ? {} : { profileId: providerAccountId }),
         issueId
       })
       if (!issue) throw new Error("Linear could not find this issue.")
@@ -85,7 +89,15 @@ function linearServices(
         teamId: input.teamId
       }),
     comment: async (issueId, body) => {
-      await host.invoke<IssueComment>("linear.comment", { ...route, issueId, body })
+      const providerAccountId = session.linkedIssues?.find(
+        (issue) => issue.providerId === "linear" && issue.id === issueId
+      )?.providerAccountId
+      await host.invoke<IssueComment>("linear.comment", {
+        ...route,
+        ...(providerAccountId === undefined ? {} : { profileId: providerAccountId }),
+        issueId,
+        body
+      })
     },
     link: (issue) => linkIssue(session.id, issue),
     unlink: () => unlinkIssue(session.id)

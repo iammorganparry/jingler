@@ -5,6 +5,8 @@ import type { PluginHostRuntime } from "../../plugin-host.js"
 import { ToolRegistry } from "./tool-registry.js"
 import {
   enabledPluginAgentToolsets,
+  issueReferencesFromPluginResult,
+  persistPluginIssueReferences,
   registerPluginAgentTools
 } from "./plugin-agent-tools.js"
 
@@ -27,6 +29,8 @@ const plugin = (enabled = true): LoadedPlugin => ({
   activated: false,
   builtin: true
 })
+
+const origin = { kind: "plugin", pluginId: "linear", toolsetId: "linear.issues" } as const
 
 const context = {
   id: "session-1",
@@ -81,6 +85,41 @@ describe("plugin agent tools", () => {
       context,
       expect.any(AbortSignal)
     )
+  })
+
+  it("decodes only typed issue-link envelopes", () => {
+    const issue = {
+      providerId: "linear", id: "issue-1", identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1", title: "Fix it", labels: []
+    }
+    expect(issueReferencesFromPluginResult(origin, {
+      kind: "linear.issue-result", issues: [issue], result: { title: "Fix it" }
+    })).toEqual([issue])
+    expect(issueReferencesFromPluginResult(origin, { issues: [issue] })).toEqual([])
+    expect(issueReferencesFromPluginResult(origin, { kind: "linear.issue-result", issues: [{ id: "bad" }] })).toEqual([])
+    expect(issueReferencesFromPluginResult(
+      { ...origin, pluginId: "other" },
+      { kind: "linear.issue-result", issues: [issue] }
+    )).toEqual([])
+    expect(issueReferencesFromPluginResult(origin, {
+      kind: "linear.issue-result", issues: [{ ...issue, providerId: "github" }]
+    })).toEqual([])
+  })
+
+  it("persists every typed issue atomically and ignores untyped results", async () => {
+    const issue = {
+      providerId: "linear", id: "issue-1", identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1", title: "Fix it", labels: []
+    }
+    const persist = vi.fn(async () => undefined)
+    await expect(persistPluginIssueReferences(
+      origin,
+      { kind: "linear.issue-result", issues: [issue, { ...issue, id: "issue-2", identifier: "ENG-2" }] },
+      persist
+    )).resolves.toBe(true)
+    await expect(persistPluginIssueReferences(origin, { kind: "other", issues: [issue] }, persist)).resolves.toBe(false)
+    expect(persist).toHaveBeenCalledOnce()
+    expect(persist).toHaveBeenCalledWith([issue, { ...issue, id: "issue-2", identifier: "ENG-2" }])
   })
 
   it("isolates a broken or colliding toolset", async () => {

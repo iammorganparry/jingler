@@ -14,6 +14,11 @@ export const manifest = defineManifest({
   activationEvents: ["onTab:linear.issue"],
   contributes: {
     issueProviders: [{ id: "linear", label: "Linear" }],
+    agentToolsets: [{
+      id: "linear.issues",
+      label: "Linear issues",
+      description: "Discover Linear metadata, then search, read, create, update, and comment on issues using this session's mapped workspace defaults."
+    }],
     secretProfiles: [{
       id: "linear.accounts",
       label: "Linear accounts",

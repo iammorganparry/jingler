@@ -58,6 +58,9 @@ const message = (cause: unknown): string =>
 const referenceOf = (issue: IssueReference): IssueReference => ({
   providerId: issue.providerId,
   id: issue.id,
+  ...(issue.providerAccountId === undefined
+    ? {}
+    : { providerAccountId: issue.providerAccountId }),
   identifier: issue.identifier,
   url: issue.url,
   title: issue.title,

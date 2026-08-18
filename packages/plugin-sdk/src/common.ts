@@ -55,6 +55,8 @@ export interface IssueIdentity {
 export interface IssueReference extends IssueIdentity {
   readonly providerId: string
   readonly id: string
+  /** Optional provider-local account/profile needed to resolve this issue later. */
+  readonly providerAccountId?: string
   readonly identifier: string
   readonly url: string
   readonly title: string

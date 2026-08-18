@@ -358,6 +358,8 @@ const IssueReferenceFields = {
   providerId: Schema.String,
   /** Provider-owned opaque id. Consumers must never parse this value. */
   id: Schema.String,
+  /** Optional provider-local account/profile needed to resolve this issue later. */
+  providerAccountId: Schema.optional(Schema.String),
   /** Human-readable provider identifier, e.g. `#128` or `ENG-123`. */
   identifier: Schema.String,
   url: Schema.String,

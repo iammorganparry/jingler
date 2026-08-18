@@ -30,6 +30,7 @@ import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import {
   enabledPluginAgentToolsets,
+  persistPluginIssueReferences,
   registerPluginAgentTools
 } from "../tools/plugin-agent-tools.js"
 import type {
@@ -289,17 +290,32 @@ export const makePiAgentRuntimeLive = (
               ...(Option.isSome(memory)
                 ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }
                 : {}),
-              ...(options.onPluginToolSuccessfulResult && plugins
+              ...(plugins
                 ? {
-                    onSuccessfulResult: (result: ToolSuccessfulResult) =>
-                      result.origin?.kind === "plugin"
-                        ? options.onPluginToolSuccessfulResult!({
-                            ...result,
-                            origin: result.origin,
-                            sessionId: plugins.context.id,
-                            repository: plugins.context.repository
-                          })
-                        : undefined
+                    onSuccessfulResult: async (result: ToolSuccessfulResult) => {
+                      if (result.origin?.kind !== "plugin") return
+                      const linked = await persistPluginIssueReferences(
+                        result.origin,
+                        result.value,
+                        (issues) => Effect.runPromise(
+                          sessionStore.addIssues(plugins.context.id, issues).pipe(
+                            Effect.provideService(FileSystem.FileSystem, fs),
+                            Effect.provideService(AppPaths, paths)
+                          )
+                        )
+                      )
+                      if (linked) {
+                        await Effect.runPromise(
+                          context.publishEvent({ _tag: "SessionIssueLinksChanged" })
+                        )
+                      }
+                      await options.onPluginToolSuccessfulResult?.({
+                        ...result,
+                        origin: result.origin,
+                        sessionId: plugins.context.id,
+                        repository: plugins.context.repository
+                      })
+                    }
                   }
                 : {}),
               observer: createMutationObserver({

@@ -998,6 +998,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             linkedIssues: [{
               providerId: input.issue.providerId,
               id: input.issue.id,
+              ...(input.issue.providerAccountId === undefined
+                ? {}
+                : { providerAccountId: input.issue.providerAccountId }),
               identifier: input.issue.identifier,
               url: input.issue.url,
               title: input.issue.title,
