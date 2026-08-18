@@ -33,7 +33,7 @@ export interface ToolArtifactReference {
 export interface ToolProviderInputSchema {
   readonly $schema?: string
   readonly type: "object"
-  readonly properties?: Readonly<Record<string, object>>
+  readonly properties?: object
   readonly required?: ReadonlyArray<string>
   readonly additionalProperties?: boolean
 }
@@ -92,7 +92,7 @@ export interface ToolSuccessfulResult<Value = unknown> {
   readonly value: Value
 }
 
-export interface ToolDefinition<Input, Encoded = Input> {
+export interface ToolDefinition<Input, Encoded = Input, Output = unknown> {
   readonly id: string
   readonly version: string
   readonly description: string
@@ -108,10 +108,10 @@ export interface ToolDefinition<Input, Encoded = Input> {
   readonly outputBudget: number
   readonly cancellable: boolean
   readonly idempotency: ToolIdempotency
-  readonly execute: (input: Input, context: ToolExecutionContext) => Promise<unknown>
+  readonly execute: (input: Input, context: ToolExecutionContext) => Promise<Output>
 }
 
-type AnyToolDefinition = ToolDefinition<unknown, unknown>
+type AnyToolDefinition = ToolDefinition<unknown, unknown, unknown>
 
 export interface ToolMemoryFailure {
   readonly signature: string
@@ -235,10 +235,10 @@ const settleObservation = async (
   return { ...result, fileChanges: changes }
 }
 
-const executeDefinition = async (
+const executeDefinition = async <Value>(
   options: ToolRegistryOptions,
   tool: AnyToolDefinition,
-  value: unknown,
+  value: Value,
   input: ToolExecutionRequest
 ): Promise<ToolResultEnvelope> => {
   if (input.signal?.aborted) return errorEnvelope(abortError(input.signal))
@@ -362,6 +362,14 @@ const publishSuccessfulResult = async (
   }
 }
 
+export interface ToolMemoryTelemetry {
+  readonly mutatingExecutions: number
+  readonly advisories: number
+  readonly proposals: number
+  readonly workflowPolls: number
+  readonly failureCandidates: number
+}
+
 export class ToolRegistry {
   readonly #tools = new Map<string, AnyToolDefinition>()
   readonly #options: ToolRegistryOptions
@@ -383,6 +391,8 @@ export class ToolRegistry {
     if (definition.timeoutMs <= 0 || definition.outputBudget <= 0) {
       throw new Error(`invalid limits for tool: ${definition.id}`)
     }
+    // SAFETY: registration erases only the schema's generic input parameter;
+    // execution always decodes through that same stored schema before invoking it.
     this.#tools.set(definition.id, definition as AnyToolDefinition)
   }
 
@@ -402,13 +412,7 @@ export class ToolRegistry {
     return this.#options.memory?.failures() ?? []
   }
 
-  memoryTelemetry(): {
-    readonly mutatingExecutions: number
-    readonly advisories: number
-    readonly proposals: number
-    readonly workflowPolls: number
-    readonly failureCandidates: number
-  } {
+  memoryTelemetry(): ToolMemoryTelemetry {
     return {
       mutatingExecutions: this.#mutatingExecutions,
       advisories: this.#memoryAdvisories,

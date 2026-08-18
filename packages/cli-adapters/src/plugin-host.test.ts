@@ -70,7 +70,7 @@ const plugin = (over: Partial<LoadedPlugin["manifest"]> = {}): LoadedPlugin =>
     enabled: true,
     activated: false,
     builtin: false
-  }) as LoadedPlugin
+  } satisfies LoadedPlugin)
 
 const noRequests = async () => ({ ok: true as const, value: null })
 

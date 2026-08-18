@@ -1,10 +1,10 @@
 import type { LoadedPlugin } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import type { PluginHostRuntime } from "../../plugin-host.js"
 import { ToolRegistry } from "./tool-registry.js"
 import {
   enabledPluginAgentToolsets,
+  type PluginAgentToolHost,
   issueReferencesFromPluginResult,
   persistPluginIssueReferences,
   registerPluginAgentTools
@@ -63,7 +63,7 @@ describe("plugin agent tools", () => {
   it("registers provider schemas and passes trusted context outside model input", async () => {
     const loadAgentToolset = vi.fn(async () => [descriptor])
     const invokeAgentTool = vi.fn(async () => ({ id: "issue-1" }))
-    const host = { loadAgentToolset, invokeAgentTool } as unknown as PluginHostRuntime
+    const host = { loadAgentToolset, invokeAgentTool } satisfies PluginAgentToolHost
     const registry = new ToolRegistry()
     const sources = enabledPluginAgentToolsets([plugin()])
 
@@ -141,7 +141,7 @@ describe("plugin agent tools", () => {
     const host = {
       loadAgentToolset: vi.fn(async () => [descriptor]),
       invokeAgentTool: vi.fn()
-    } as unknown as PluginHostRuntime
+    } satisfies PluginAgentToolHost
 
     const failures = await registerPluginAgentTools(
       registry,

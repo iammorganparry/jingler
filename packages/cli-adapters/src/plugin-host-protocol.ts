@@ -73,7 +73,7 @@ export type ToHostMessage =
       readonly requestId: string
       readonly pluginId: string
       readonly commandId: string
-      readonly arg?: unknown
+      readonly arg?: PluginHostPayload
     }
   | {
       readonly kind: "agent-toolset-load"
@@ -87,7 +87,7 @@ export type ToHostMessage =
       readonly pluginId: string
       readonly toolsetId: string
       readonly toolId: string
-      readonly input: unknown
+      readonly input: PluginHostPayload
       /** Main-owned run context, deliberately separate from model-authored input. */
       readonly context: PluginAgentToolSessionContext
     }
@@ -101,14 +101,14 @@ export type ToHostMessage =
       readonly pluginId: string
       readonly providerId: string
       readonly method: IssueProviderMethod
-      readonly input: unknown
+      readonly input: PluginHostPayload
     }
   /** A reply to something the HOST asked main for. */
   | {
       readonly kind: "host-reply"
       readonly requestId: string
       readonly ok: boolean
-      readonly value?: unknown
+      readonly value?: PluginHostPayload
       readonly message?: string
     }
 
@@ -126,7 +126,7 @@ export type FromHostMessage =
       readonly kind: "invoke-result"
       readonly requestId: string
       readonly ok: boolean
-      readonly value?: unknown
+      readonly value?: PluginHostPayload
       readonly message?: string
     }
   | {
@@ -140,14 +140,14 @@ export type FromHostMessage =
       readonly kind: "agent-tool-result"
       readonly requestId: string
       readonly ok: boolean
-      readonly value?: unknown
+      readonly value?: PluginHostPayload
       readonly message?: string
     }
   | {
       readonly kind: "issue-provider-result"
       readonly requestId: string
       readonly ok: boolean
-      readonly value?: unknown
+      readonly value?: PluginHostPayload
       readonly message?: string
     }
   /** The host asking main to do something on a plugin's behalf. */
@@ -156,14 +156,14 @@ export type FromHostMessage =
       readonly requestId: string
       readonly pluginId: string
       readonly op: HostOp
-      readonly payload: unknown
+      readonly payload: PluginHostPayload
     }
   /** A plugin emitted an event for the renderer. */
   | {
       readonly kind: "event"
       readonly pluginId: string
       readonly topic: string
-      readonly payload: unknown
+      readonly payload: PluginHostPayload
     }
   | {
       readonly kind: "log"
@@ -176,6 +176,16 @@ export type FromHostMessage =
 
 export type PluginAgentToolRisk = "read" | "network" | "mutate" | "execute"
 export type PluginAgentToolIdempotency = "safe" | "keyed" | "unsafe"
+
+/** Structured-clone values accepted across the plugin host boundary. */
+export type PluginHostPayload =
+  | string
+  | number
+  | boolean
+  | bigint
+  | object
+  | null
+  | undefined
 
 /** Trusted run identity sent by main, never accepted inside model-authored input. */
 export interface PluginAgentToolSessionContext {
@@ -193,7 +203,7 @@ export interface PluginAgentToolDescriptor {
   readonly inputSchema: {
     readonly $schema?: string
     readonly type: "object"
-    readonly properties?: Readonly<Record<string, object>>
+    readonly properties?: object
     readonly required?: ReadonlyArray<string>
     readonly additionalProperties?: boolean
   }
