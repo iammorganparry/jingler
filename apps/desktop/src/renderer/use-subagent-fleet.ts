@@ -175,11 +175,17 @@ export function useSubagentFleet(input: {
     [completedNodes]
   )
   const selectedId = completedSelection ?? context.selectedId
-  const selectedNode = useMemo(
-    () => context.tree.nodes.find((node) => node.id === selectedId) ??
-      completedById.get(selectedId) ?? null,
-    [completedById, context.tree.nodes, selectedId]
-  )
+  const selectedNode = useMemo(() => {
+    const resolved = context.tree.nodes.find((node) => node.id === selectedId) ??
+      completedById.get(selectedId) ?? null
+    // A workflow node is an unselectable container (its output lives in the
+    // agents it controls). A selection can still land on one — a stale id from
+    // before its children registered — so resolve it to its first child.
+    if (resolved?.nodeKind === "workflow") {
+      return context.tree.nodes.find((node) => node.parentId === resolved.id) ?? null
+    }
+    return resolved
+  }, [completedById, context.tree.nodes, selectedId])
   const legacyByNodeId = useMemo(
     () => new Map(legacyAgents.map((agent) => [
       legacySubagentNodeId(parentPiSessionId, agent.id),

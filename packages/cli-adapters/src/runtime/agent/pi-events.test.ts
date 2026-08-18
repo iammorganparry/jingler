@@ -313,6 +313,131 @@ describe("pi file-change events", () => {
     })
   })
 
+  it("projects workflow children from the live call trace when no progress array exists", () => {
+    // A scripted workflow's live-card updates carry `workflow.trace` and an
+    // empty `results` — the trace is the ONLY live per-child signal. Dropping
+    // it left the Fleet with a lone workflow container and nothing to select.
+    expect(piSubagentProgress({
+      type: "tool_execution_update",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      args: {},
+      partialResult: {
+        content: [{ type: "text", text: "Workflow running." }],
+        details: {
+          mode: "workflow",
+          runId: "wf-1",
+          results: [],
+          workflow: {
+            trace: [
+              { operation: "run", key: "main", state: "running" },
+              { operation: "run", key: "main", state: "running", runId: "child-1" }
+            ]
+          }
+        }
+      }
+    } as never)).toEqual({
+      runId: "wf-1",
+      mode: "workflow",
+      children: [expect.objectContaining({
+        index: 0,
+        runId: "child-1",
+        agent: "main",
+        status: "running",
+        sessionFile: null
+      })]
+    })
+  })
+
+  it("projects completed workflow children from the final results when no progress array exists", () => {
+    // The foreground workflow's terminal tool result carries children only as
+    // `results` (with agent/task/sessionFile). Registering them here is what
+    // makes each step's transcript openable after the run.
+    expect(piSubagentProgress({
+      type: "tool_execution_end",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      result: {
+        content: [{ type: "text", text: "Workflow completed." }],
+        details: {
+          mode: "workflow",
+          runId: "wf-1",
+          results: [{
+            index: 0,
+            runId: "child-1",
+            agent: "reviewer",
+            task: "Review the diff",
+            sessionFile: "/sessions/child-1.jsonl"
+          }, {
+            index: 1,
+            runId: "child-2",
+            agent: "builder",
+            error: "budget exceeded"
+          }]
+        }
+      },
+      isError: false
+    } as never)).toEqual({
+      runId: "wf-1",
+      mode: "workflow",
+      children: [
+        expect.objectContaining({
+          index: 0,
+          runId: "child-1",
+          agent: "reviewer",
+          status: "completed",
+          task: "Review the diff",
+          sessionFile: "/sessions/child-1.jsonl"
+        }),
+        expect.objectContaining({
+          index: 1,
+          runId: "child-2",
+          agent: "builder",
+          status: "failed",
+          error: "budget exceeded"
+        })
+      ]
+    })
+  })
+
+  it("merges settled results into trace-derived children by runId", () => {
+    expect(piSubagentProgress({
+      type: "tool_execution_end",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      result: {
+        content: [{ type: "text", text: "Workflow completed." }],
+        details: {
+          mode: "workflow",
+          runId: "wf-1",
+          results: [{
+            index: 0,
+            runId: "child-1",
+            agent: "reviewer",
+            sessionFile: "/sessions/child-1.jsonl"
+          }],
+          workflow: {
+            trace: [
+              { operation: "run", key: "main", state: "running", runId: "child-1" },
+              { operation: "run", key: "main", state: "complete", runId: "child-1", durationMs: 1200 }
+            ]
+          }
+        }
+      },
+      isError: false
+    } as never)).toEqual({
+      runId: "wf-1",
+      mode: "workflow",
+      children: [expect.objectContaining({
+        runId: "child-1",
+        agent: "reviewer",
+        status: "completed",
+        durationMs: 1200,
+        sessionFile: "/sessions/child-1.jsonl"
+      })]
+    })
+  })
+
   it("ignores management replies that carry no runId", () => {
     expect(piSubagentProgress({
       type: "tool_execution_end",

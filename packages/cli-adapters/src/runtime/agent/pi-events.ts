@@ -56,6 +56,22 @@ const decodeSupervisorAttention = Schema.decodeUnknownOption(SupervisorAttention
  * Management replies (list/status) carry no `runId`, so they still decode to
  * nothing here.
  */
+/**
+ * A scripted workflow's live updates carry no `progress` array at all — its
+ * only per-child signal is the workflow call trace (`{operation, key, state,
+ * runId?}` entries), and its final result carries the children only as
+ * `results` (with `agent`/`sessionFile`). Both are decoded here so workflow
+ * children register in the Fleet; before this, a workflow run surfaced as a
+ * lone container node with nothing to select and no transcript ever.
+ */
+const WorkflowTraceEntry = Schema.Struct({
+  operation: Schema.String,
+  key: Schema.String,
+  state: Schema.String,
+  runId: Schema.optional(Schema.String),
+  durationMs: Schema.optional(Schema.Number),
+  error: Schema.optional(Schema.String)
+})
 const SubagentProgress = Schema.Struct({
   mode: Schema.String,
   runId: Schema.String,
@@ -76,10 +92,31 @@ const SubagentProgress = Schema.Struct({
   results: Schema.optionalWith(Schema.Array(Schema.Struct({
     index: Schema.Number,
     runId: Schema.optional(Schema.String),
+    agent: Schema.optional(Schema.String),
+    task: Schema.optional(Schema.String),
+    error: Schema.optional(Schema.String),
+    stopped: Schema.optional(Schema.Boolean),
+    timedOut: Schema.optional(Schema.Boolean),
+    interrupted: Schema.optional(Schema.Boolean),
     sessionFile: Schema.optional(Schema.String)
-  })), { default: () => [] })
+  })), { default: () => [] }),
+  workflow: Schema.optional(Schema.Struct({
+    trace: Schema.optionalWith(Schema.Array(WorkflowTraceEntry), {
+      default: () => []
+    })
+  }))
 })
 const decodeSubagentProgress = Schema.decodeUnknownOption(SubagentProgress)
+
+const traceStatus = (
+  state: string
+): "pending" | "running" | "completed" | "failed" | "detached" => {
+  if (state === "complete" || state === "completed") return "completed"
+  if (state === "failed" || state === "error" || state === "rejected") return "failed"
+  if (state === "pending" || state === "queued") return "pending"
+  if (state === "detached") return "detached"
+  return "running"
+}
 
 type ToolResultEvent = Extract<
   AgentSessionEvent,
@@ -151,15 +188,73 @@ export const piSubagentProgress = (
   const decoded = Option.getOrUndefined(decodeSubagentProgress(result?.details))
   if (!decoded) return null
   const results = new Map(decoded.results.map((child) => [child.index, child]))
-  return {
-    runId: decoded.runId,
-    mode: decoded.mode,
-    children: decoded.progress.map((child) => ({
-      ...child,
-      runId: results.get(child.index)?.runId ?? null,
-      sessionFile: results.get(child.index)?.sessionFile ?? null
-    }))
+  if (decoded.progress.length > 0) {
+    return {
+      runId: decoded.runId,
+      mode: decoded.mode,
+      children: decoded.progress.map((child) => ({
+        ...child,
+        runId: results.get(child.index)?.runId ?? null,
+        sessionFile: results.get(child.index)?.sessionFile ?? null
+      }))
+    }
   }
+  // No progress array: a scripted workflow. Its live updates describe children
+  // only through the call trace, and its final result only through `results`.
+  const trace = decoded.workflow?.trace ?? []
+  if (trace.length > 0) {
+    // The trace is append-only and a child appears once per state change, so
+    // keep first-appearance order and each key's latest entry.
+    const order: Array<string> = []
+    const latest = new Map<string, typeof trace[number]>()
+    for (const entry of trace) {
+      if (!latest.has(entry.key)) order.push(entry.key)
+      latest.set(entry.key, entry)
+    }
+    return {
+      runId: decoded.runId,
+      mode: decoded.mode,
+      children: order.map((key, position) => {
+        const entry = latest.get(key)!
+        const settled = decoded.results.find(
+          (candidate) => candidate.runId !== undefined && candidate.runId === entry.runId
+        ) ?? results.get(position)
+        return {
+          index: position,
+          runId: entry.runId ?? settled?.runId ?? null,
+          agent: settled?.agent ?? key,
+          status: traceStatus(entry.state),
+          task: settled?.task ?? `${entry.operation} ${key}`,
+          tokens: 0,
+          toolCount: 0,
+          durationMs: entry.durationMs ?? 0,
+          ...(entry.error !== undefined ? { error: entry.error } : {}),
+          sessionFile: settled?.sessionFile ?? null
+        }
+      })
+    }
+  }
+  if (event.type === "tool_execution_end" && decoded.results.length > 0) {
+    return {
+      runId: decoded.runId,
+      mode: decoded.mode,
+      children: decoded.results.map((child, position) => ({
+        index: child.index ?? position,
+        runId: child.runId ?? null,
+        agent: child.agent ?? `step-${(child.index ?? position) + 1}`,
+        status: child.error !== undefined || child.timedOut || child.stopped || child.interrupted
+          ? "failed" as const
+          : "completed" as const,
+        task: child.task ?? "Delegated work",
+        tokens: 0,
+        toolCount: 0,
+        durationMs: 0,
+        ...(child.error !== undefined ? { error: child.error } : {}),
+        sessionFile: child.sessionFile ?? null
+      }))
+    }
+  }
+  return { runId: decoded.runId, mode: decoded.mode, children: [] }
 }
 
 export const piSupervisorAttention = (

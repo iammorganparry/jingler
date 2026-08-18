@@ -108,6 +108,21 @@ function FleetTreeNode({ node, depth, selected, onSelect }: {
   readonly onSelect: (id: string) => void
 }) {
   const dot = DOT[node.status]
+  // A workflow node is an orchestrator with no transcript or steer channel of
+  // its own — selecting it dead-ends on an empty pane. Render it as a group
+  // header instead: the agents it controls sit indented beneath it and those
+  // are what the operator inspects and steers.
+  if (node.nodeKind === "workflow") {
+    return (
+      <div data-testid={`fleet-workflow-${node.runId}`} data-agent-status={node.status} className="flex w-full items-start gap-2 py-1.5 pr-2 text-left text-dim" style={{ paddingLeft: 8 + depth * 14 }}>
+        <StatusDot tone={dot.tone} pulse={dot.pulse} size={7} className="mt-1" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[10.5px] font-medium uppercase tracking-wide">{node.agent}</span>
+          <span className="block truncate text-[10px]">{node.task}</span>
+        </span>
+      </div>
+    )
+  }
   return (
     <button type="button" data-testid={`fleet-agent-${node.runId}`} data-agent-status={node.status} aria-current={selected ? "page" : undefined} onClick={() => onSelect(node.id)} className={cn("flex w-full items-start gap-2 rounded-md py-1.5 pr-2 text-left outline-none", selected ? "bg-panel text-text-bright" : "text-muted-foreground hover:bg-panel/60")} style={{ paddingLeft: 8 + depth * 14 }}>
       <StatusDot tone={dot.tone} pulse={dot.pulse} size={7} className="mt-1" />
