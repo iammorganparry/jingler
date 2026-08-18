@@ -498,6 +498,16 @@ interface LoadedData {
   /** Whether older turns remain on disk before the loaded tail. */
   readonly hasMore: boolean
   readonly cursor: string | null
+  /**
+   * Whether main reports a live, unsettled turn for this chat RIGHT NOW.
+   *
+   * A renderer reload resets this machine while main's turn keeps streaming.
+   * Dequeuing a held message straight into Agent.run then hits the runner's
+   * single-flight refusal, and the message's only "reply" is the refusal text.
+   * When busy, the load parks in `awaitingInput` instead; the live turn's
+   * envelopes re-attach the view and the queue drains at the turn boundary.
+   */
+  readonly busy: boolean
 }
 
 export const CONVERSATION_LOAD_TIMEOUT_MS = 30_000
@@ -592,12 +602,18 @@ const loadConversation = fromPromise<
             streaming: false
           }
         ]
+  // Best-effort: an errored probe must not fail the whole load, and "not busy"
+  // is the safe default — it restores exactly the pre-probe behaviour.
+  const busy = await rpc
+    .agentChatBusy(input.session.id, input.chatId)
+    .catch(() => false)
   return {
     transcript,
     sharedPlanChatId: artifact?.producingChatId ?? null,
     sharedPlan: projectedPlan,
     hasMore: page.hasMore,
-    cursor: page.cursor ?? null
+    cursor: page.cursor ?? null,
+    busy
   }
 })
 
@@ -969,28 +985,26 @@ export const conversationMachine = setup({
       return queued !== undefined && !requiresFreshTurn(queued)
     },
     /**
-     * "Send now" on a message that carries hidden code-reference context.
+     * "Send now" on a message that cannot travel the native steer channel —
+     * hidden code-reference context (the steer RPC has no field for it) or
+     * external feedback (its durable identity must be accepted through
+     * Agent.run to keep relay replay idempotent).
      *
-     * Such a message cannot travel the native steer channel (the steer RPC has
-     * no field for the hidden context, so steering would silently drop the
-     * snippet), and merely promoting it did nothing visible: the row said
+     * Merely promoting such a message did nothing visible: the row said
      * "queued", the button appeared dead, and the message waited for the whole
-     * turn to end. Honouring "now" therefore takes the same stop-and-replay
-     * escalation a plain-text send-now takes on a harness with no live channel.
-     *
-     * External feedback is deliberately excluded: its durable identity
-     * acceptance is what makes relay replay idempotent, and interrupting a
-     * turn for a machine-delivered instruction is not an operator request.
+     * turn to end — indefinitely, when the turn was parked inside a
+     * long-running tool (`gh pr checks --watch` held one for half an hour).
+     * Honouring "now" takes the same stop-and-replay escalation a plain-text
+     * send-now takes on a harness with no live channel. That path is SAFE for
+     * external feedback: the dequeue runs through Agent.run, which is exactly
+     * the durable identity-acceptance boundary — only steering would bypass
+     * it, and this guard never steers. The machine never escalates on its own;
+     * a click on the row's "Send now" is an operator request by definition.
      */
     sendNowNeedsFreshTurn: ({ context, event }) => {
       if (event.type !== "SEND_NOW") return false
       const queued = context.queued.find((item) => item.id === event.id)
-      return (
-        queued !== undefined &&
-        queued.agentContext !== "" &&
-        queued.externalInstruction === undefined &&
-        queued.externalAcceptances.length === 0
-      )
+      return queued !== undefined && requiresFreshTurn(queued)
     },
     /** A queued row exists for this SEND_NOW — the idle dequeue path's guard. */
     hasQueuedMessage: ({ context, event }) =>
@@ -2304,7 +2318,13 @@ export const conversationMachine = setup({
         // settles; otherwise we go idle. The transcript is applied either way.
         onDone: [
           {
-            guard: "hasQueued",
+            // Not bare `hasQueued`: when main still has a live turn for this
+            // chat (renderer reload mid-run), starting the queued message now
+            // would only collect the single-flight refusal. Hold it; the live
+            // turn's envelopes re-attach the view and the queue drains at the
+            // turn boundary — or the operator releases it with "Send now".
+            guard: ({ context, event }) =>
+              context.queued.length > 0 && !event.output.busy,
             target: "running",
             actions: [
               assign(({ event }) => ({

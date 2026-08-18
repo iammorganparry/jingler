@@ -1178,6 +1178,19 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   }),
 
   /**
+   * Whether this chat has a live, unsettled turn in main right now.
+   *
+   * Read at conversation load: a freshly reloaded renderer that dequeues a
+   * held message straight into `Agent.run` while main's previous turn still
+   * streams gets only the single-flight refusal as its "reply". Asking first
+   * lets the load hold the queue until the live turn settles.
+   */
+  Rpc.make("Agent.chatBusy", {
+    success: Schema.Boolean,
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /**
    * Kill ONE live sub-agent, leaving the turn (and its siblings) running.
    *
    * `agentId` is the tab's id — the spawning tool-call id — not the runtime's

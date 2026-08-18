@@ -104,7 +104,9 @@ const SubagentProgress = Schema.Struct({
     trace: Schema.optionalWith(Schema.Array(WorkflowTraceEntry), {
       default: () => []
     })
-  }))
+  })),
+  /** Present on an ASYNC spawn acknowledgment: the run detached and lives on. */
+  asyncId: Schema.optional(Schema.String)
 })
 const decodeSubagentProgress = Schema.decodeUnknownOption(SubagentProgress)
 
@@ -188,10 +190,14 @@ export const piSubagentProgress = (
   const decoded = Option.getOrUndefined(decodeSubagentProgress(result?.details))
   if (!decoded) return null
   const results = new Map(decoded.results.map((child) => [child.index, child]))
+  // The tool result ENDING settles the run — unless it is an async spawn
+  // acknowledgment, whose detached run lives on after the tool returns.
+  const settled = event.type === "tool_execution_end" && decoded.asyncId === undefined
   if (decoded.progress.length > 0) {
     return {
       runId: decoded.runId,
       mode: decoded.mode,
+      settled,
       children: decoded.progress.map((child) => ({
         ...child,
         runId: results.get(child.index)?.runId ?? null,
@@ -214,22 +220,23 @@ export const piSubagentProgress = (
     return {
       runId: decoded.runId,
       mode: decoded.mode,
+      settled,
       children: order.map((key, position) => {
         const entry = latest.get(key)!
-        const settled = decoded.results.find(
+        const finished = decoded.results.find(
           (candidate) => candidate.runId !== undefined && candidate.runId === entry.runId
         ) ?? results.get(position)
         return {
           index: position,
-          runId: entry.runId ?? settled?.runId ?? null,
-          agent: settled?.agent ?? key,
+          runId: entry.runId ?? finished?.runId ?? null,
+          agent: finished?.agent ?? key,
           status: traceStatus(entry.state),
-          task: settled?.task ?? `${entry.operation} ${key}`,
+          task: finished?.task ?? `${entry.operation} ${key}`,
           tokens: 0,
           toolCount: 0,
           durationMs: entry.durationMs ?? 0,
           ...(entry.error !== undefined ? { error: entry.error } : {}),
-          sessionFile: settled?.sessionFile ?? null
+          sessionFile: finished?.sessionFile ?? null
         }
       })
     }
@@ -238,6 +245,7 @@ export const piSubagentProgress = (
     return {
       runId: decoded.runId,
       mode: decoded.mode,
+      settled,
       children: decoded.results.map((child, position) => ({
         index: child.index ?? position,
         runId: child.runId ?? null,
@@ -254,7 +262,7 @@ export const piSubagentProgress = (
       }))
     }
   }
-  return { runId: decoded.runId, mode: decoded.mode, children: [] }
+  return { runId: decoded.runId, mode: decoded.mode, settled, children: [] }
 }
 
 export const piSupervisorAttention = (

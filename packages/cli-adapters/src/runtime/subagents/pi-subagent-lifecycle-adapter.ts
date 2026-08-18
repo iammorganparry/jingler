@@ -39,6 +39,13 @@ const ASYNC_COMPLETE_EVENT = "subagent:async-complete"
 const FOREGROUND_COMPLETE_EVENT = "subagent:foreground-complete"
 const PROCESS_TERMINAL_EVENT = "subagent:process-terminal"
 const RPC_TIMEOUT_MS = 5_000
+/**
+ * How long a non-terminal workflow header may sit unknown to both the harness
+ * status reply and the durable projection before the refresh sweep treats it
+ * as debris from a dead run. Generous, because a live foreground workflow's
+ * progress events refresh its `updatedAt` continuously.
+ */
+const STALE_WORKFLOW_NODE_MS = 10 * 60_000
 const RPC_ERROR_PREFIX = /^[a-z_]+:\s*/u
 
 const FleetEntry = Schema.Struct({
@@ -270,6 +277,14 @@ const usageFor = (
 export interface PiSubagentProgressInput {
   readonly runId: string
   readonly mode: string
+  /**
+   * The tool result ENDED and the run ended with it (not an async spawn
+   * acknowledgment, whose detached run lives on). A settled foreground
+   * workflow's nodes leave the dock, exactly as async completions do —
+   * without this, every reviewer run left a permanently-"running" workflow
+   * header, and the Fleet accumulated them for the session's whole life.
+   */
+  readonly settled?: boolean
   readonly children: ReadonlyArray<{
     readonly index: number
     readonly runId: string | null
@@ -432,6 +447,21 @@ export class PiSubagentLifecycleAdapter {
     if (input.children.length === 0) {
       const existing = context.nodes.find((node) => node.id === rootId)
       if (existing !== undefined && existing.terminal !== null) return
+      // A settled run with no children reported nothing worth keeping — a
+      // failed/empty foreground workflow. Clear its root instead of leaving a
+      // permanently-"running" header in the dock.
+      if (input.settled && existing !== undefined) {
+        this.#publish({
+          _tag: "Remove",
+          version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+          eventId: `progress-settle:${input.runId}:${now}`,
+          occurredAt: now,
+          registryRevision: this.#nextRevision(),
+          id: rootId
+        })
+        return
+      }
+      if (input.settled) return
       this.#publish({
         _tag: "Upsert",
         version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -538,6 +568,37 @@ export class PiSubagentLifecycleAdapter {
           attention: existing?.attention ?? null
         }
       })
+    }
+    // The run settled with this report: its nodes leave the dock, exactly as
+    // an async completion's do. The upserts above are published FIRST so the
+    // completed-nodes retention (which watches the event stream, keeping the
+    // last few finished agents with a transcript) still captures each child
+    // before the removal lands. Skipping this left every foreground workflow
+    // in the Fleet as a permanently-"running" header for the session's life.
+    if (input.settled) {
+      const settledIds = new Set([
+        rootId,
+        ...input.children.map((child) =>
+          subagentFleetNodeId(
+            this.#parentPiSessionId,
+            child.runId ?? `${input.runId}:step:${child.index}`
+          )
+        )
+      ])
+      for (const node of this.#state().tree.nodes.filter(
+        (candidate) =>
+          settledIds.has(candidate.id) ||
+          (candidate.parentId !== null && settledIds.has(candidate.parentId))
+      )) {
+        this.#publish({
+          _tag: "Remove",
+          version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+          eventId: `progress-settle:${input.runId}:${node.subagentId}:${now}`,
+          occurredAt: now,
+          registryRevision: this.#nextRevision(),
+          id: node.id
+        })
+      }
     }
   }
 
@@ -760,8 +821,32 @@ export class PiSubagentLifecycleAdapter {
     const activeNodes = this.#activeNodes(reply, generatedAt, registryRevision)
     const activeNodeIds = new Set(activeNodes.map((node) => node.id))
     const durableNodeIds = this.#state().durableNodeIds
+    // Reload hygiene: a workflow header replayed from the journal can claim
+    // "running" forever — its run died with a previous process, so no
+    // completion or terminal event is ever coming for it. If neither the
+    // harness's status reply nor the durable projection knows the run and it
+    // has not been touched in a long while, it (and its orphaned children) is
+    // debris, not work. The generous threshold keeps a LIVE foreground
+    // workflow safe: its progress events refresh `updatedAt` continuously.
+    const staleWorkflowIds = new Set(
+      this.#state().tree.nodes.filter((node) =>
+        node.nodeKind === "workflow" &&
+        node.terminal === null &&
+        !activeNodeIds.has(node.id) &&
+        !durableNodeIds.has(node.id) &&
+        generatedAt - node.updatedAt > STALE_WORKFLOW_NODE_MS
+      ).map((node) => node.id)
+    )
     const nodes = this.#state().tree.nodes.filter(
-      (node) => !activeNodeIds.has(node.id) && !durableNodeIds.has(node.id)
+      (node) =>
+        !activeNodeIds.has(node.id) &&
+        !durableNodeIds.has(node.id) &&
+        !staleWorkflowIds.has(node.id) &&
+        !(
+          node.parentId !== null &&
+          staleWorkflowIds.has(node.parentId) &&
+          node.terminal === null
+        )
     ).concat(activeNodes)
     this.#publish({
       _tag: "Snapshot",

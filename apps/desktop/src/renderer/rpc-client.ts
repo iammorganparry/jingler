@@ -876,6 +876,8 @@ export const rpc = {
     run((c) => c.Agent.setModel({ sessionId, chatId, connectionId, providerId, modelId })),
   agentStop: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.Agent.stop({ sessionId, chatId })),
+  agentChatBusy: (sessionId: string, chatId: string): Promise<boolean> =>
+    run((c) => c.Agent.chatBusy({ sessionId, chatId })),
   agentStopSubagent: (
     sessionId: string,
     chatId: string,

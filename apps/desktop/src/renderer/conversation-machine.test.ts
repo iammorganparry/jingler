@@ -58,6 +58,8 @@ const h = vi.hoisted(() => ({
   steerGate: Promise.resolve() as Promise<void>,
   // Drives the "a stop that rejects must still let the session move on" case.
   stopFails: false,
+  // Whether main reports a live, unsettled turn for this chat at load time.
+  chatBusy: false,
   /** Push reviewer events into the machine, as ReviewService's stream would. */
   reviewCb: null as null | ((event: unknown) => void),
   // Same, for the skills probe — it spawns the harness, so nothing may wait on it.
@@ -204,6 +206,7 @@ vi.mock("./rpc-client.js", () => ({
       await h.stopGate
       if (h.stopFails) throw new Error("stop failed")
     },
+    agentChatBusy: async () => h.chatBusy,
     sessionsSetStatus: async (_id: string, status: string) => {
       h.statusWrites.push(status)
     }
@@ -276,6 +279,7 @@ beforeEach(() => {
   h.steerStatus = "unsupported"
   h.steerGate = Promise.resolve()
   h.stopFails = false
+  h.chatBusy = false
   h.setModelCalls.length = 0
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
@@ -619,11 +623,10 @@ describe("conversationMachine — queue while busy", () => {
     expect(firstAccepted).not.toHaveBeenCalled()
     expect(replayAccepted).not.toHaveBeenCalled()
 
-    // Neither the automatic ToolEnd flush nor the operator's native Send-now
-    // path may consume external feedback. Both would bypass transcript identity
-    // acceptance and let a crash replay create a second turn.
+    // The automatic ToolEnd flush must never consume external feedback: the
+    // steer channel bypasses transcript identity acceptance, and a crash
+    // replay would then create a second turn.
     emit({ _tag: "ToolEnd", id: "t-external", status: "success", meta: null, diff: null, preview: null })
-    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(h.steerCalls).toEqual([])
     expect(actor.getSnapshot().context.queued).toHaveLength(1)
@@ -879,6 +882,75 @@ describe("conversationMachine — queue while busy", () => {
     expect(h.agentRunCalls[1]!.text).toBe(`look at this\n\n${agentContext}`)
     expect(h.agentRunCalls[1]!.options).toMatchObject({ displayText: "look at this" })
     expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+
+  it("SEND_NOW on queued external feedback stops the turn and replays it through Agent.run", async () => {
+    // A long-running tool (`gh pr checks --watch`) can hold a turn for half an
+    // hour. External feedback can't steer (durable identity must be accepted
+    // through Agent.run), so "Send now" used to only reorder the queue — a
+    // dead button while the feedback sat there. It now takes the same
+    // stop-and-replay escalation, which still runs through Agent.run and
+    // therefore preserves replay idempotency.
+    const accepted = vi.fn()
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "long watch" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({
+      type: "SEND",
+      text: "review feedback",
+      externalInstruction: githubIdentity,
+      onExternalAccepted: accepted
+    })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
+
+    // Never the steer channel.
+    expect(h.steerCalls).toEqual([])
+    await waitFor(actor, () => h.stopCalls.length === 1, { timeout: 3000 })
+    await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
+    expect(h.agentRunCalls[1]!.text).toBe("review feedback")
+    expect(h.agentRunCalls[1]!.options).toMatchObject({ externalInstruction: githubIdentity })
+    expect(accepted).not.toHaveBeenCalled()
+    emit({ _tag: "ExternalInstructionAccepted", identity: githubIdentity, duplicate: false })
+    expect(accepted).toHaveBeenCalledOnce()
+    actor.stop()
+  })
+
+  it("holds a queued message at load while main still runs the previous turn", async () => {
+    // A renderer fast-refresh resets the machine while main's turn keeps
+    // streaming. Dequeuing the held message straight into Agent.run only
+    // collected the single-flight refusal ("This chat is already running…")
+    // as its reply — and consumed the message.
+    h.chatBusy = true
+    const accepted = vi.fn()
+    const actor = start()
+    actor.send({
+      type: "SEND",
+      text: "review feedback",
+      externalInstruction: githubIdentity,
+      onExternalAccepted: accepted
+    })
+    await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
+
+    // Held, not fired into the busy chat.
+    expect(h.agentRunCalls).toEqual([])
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+
+    // The live turn ends (its terminal envelope arrives) → the queue drains
+    // through the ordinary boundary as a fresh durable run.
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: remoteEnvelope(1, { _tag: "Started", sessionId: session.id, model: "remote-model" })
+    })
+    await waitFor(actor, (s) => s.matches("remoteRunning"))
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: remoteEnvelope(2, { _tag: "Done", costUsd: 0, tokens: 0 })
+    })
+    await waitFor(actor, () => h.agentRunCalls.length === 1, { timeout: 3000 })
+    expect(h.agentRunCalls[0]!.text).toBe("review feedback")
     actor.stop()
   })
 
