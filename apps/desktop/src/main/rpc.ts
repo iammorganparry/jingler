@@ -246,12 +246,23 @@ const relayAcknowledgementKey = (clientId: string, cursor: number): string =>
 export const githubAckEvent = (
   clientId: string,
   cursor: number,
+  outcome?: "routed" | "retry",
 ): Effect.Effect<void> =>
   Effect.sync(() => {
     const key = relayAcknowledgementKey(clientId, cursor);
     const pending = pendingRelayAcknowledgements.get(key);
     if (!pending) return;
     pendingRelayAcknowledgements.delete(key);
+    if (outcome === "retry") {
+      // A negative acknowledgement: the renderer could not route this frame.
+      // Rejecting fails the connection's serial delivery, which closes the
+      // socket and replays the frame with backoff — instead of holding the
+      // cursor (and every frame behind it) hostage forever.
+      pending.reject(
+        new Error("The renderer asked for this GitHub delivery to be replayed"),
+      );
+      return;
+    }
     pending.resolve();
   });
 
@@ -2643,13 +2654,46 @@ export const reconcileRelaySessionRoutes = async (
   });
 };
 
+/**
+ * How long a delivery may sit un-acknowledged before it is treated as failed.
+ *
+ * The renderer's acknowledgement can legitimately take a while (the target
+ * conversation may still be loading, or the instruction may be queued behind a
+ * running turn), but it must not take forever: an acknowledgement that never
+ * comes wedges the connection's serial delivery chain, freezes the cursor, and
+ * silently blocks every later event for that session until the app restarts.
+ * Timing out rejects instead, which closes the socket and replays the frame.
+ */
+export const RELAY_ACKNOWLEDGEMENT_TIMEOUT_MS = 5 * 60_000;
+
 export const awaitRelayAcknowledgement = (
   delivery: GitHubRelayDelivery,
   offer: (delivery: GitHubRelayDelivery) => void,
+  timeoutMs: number = RELAY_ACKNOWLEDGEMENT_TIMEOUT_MS,
 ): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     const key = relayAcknowledgementKey(delivery.clientId, delivery.cursor);
-    pendingRelayAcknowledgements.set(key, { resolve, reject });
+    const timer = setTimeout(() => {
+      if (pendingRelayAcknowledgements.get(key) !== pending) return;
+      pendingRelayAcknowledgements.delete(key);
+      reject(
+        new Error(
+          `GitHub relay delivery ${delivery.event.deliveryId} was not acknowledged in time`,
+        ),
+      );
+    }, timeoutMs);
+    timer.unref?.();
+    const pending: PendingRelayAcknowledgement = {
+      resolve: () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      reject: (cause) => {
+        clearTimeout(timer);
+        reject(cause);
+      },
+    };
+    pendingRelayAcknowledgements.set(key, pending);
     offer(delivery);
   });
 
@@ -2842,6 +2886,41 @@ export const githubEvents = () =>
         }),
       );
       yield* Effect.tryPromise(() => supervisor.start());
+      // Re-drive feedback that was claimed but never finished routing. A relay
+      // replay cannot recover these: their cursor may already be acknowledged
+      // (the route resolved down an "ignored" branch), so the Durable Object
+      // will never send the frame again. The recovery pass validates each
+      // entry against current session state and hands back only the ones a
+      // fresh claim would still accept; each is offered through the same
+      // mailbox as a live delivery, so the renderer routes and acknowledges it
+      // identically. A failed or timed-out attempt stays pending for the next
+      // recovery pass rather than being dropped.
+      yield* Effect.forkScoped(
+        Effect.tryPromise(async () => {
+          const entries = await run(
+            SessionStore.recoverGitHubFeedbackOutbox(),
+          );
+          for (const [index, entry] of entries.entries()) {
+            const clientId = `outbox-replay:${entry.sessionId}`;
+            ownedClientIds.add(clientId);
+            try {
+              await awaitRelayAcknowledgement(
+                {
+                  clientId,
+                  cursor: index + 1,
+                  event: entry.event,
+                  relaySessionId: "outbox-replay",
+                  sessionId: entry.sessionId,
+                  chatId: entry.chatId,
+                },
+                (delivery) => mailbox.unsafeOffer(delivery),
+              );
+            } catch {
+              // Still pending; the next stream start retries it.
+            }
+          }
+        }).pipe(Effect.ignore),
+      );
       return Mailbox.toStream(mailbox);
     }),
   ).pipe(Stream.catchAll(() => Stream.empty));
@@ -5577,7 +5656,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       ),
     );
   },
-  "Github.ackEvent": ({ clientId, cursor }) => githubAckEvent(clientId, cursor),
+  "Github.ackEvent": ({ clientId, cursor, outcome }) =>
+    githubAckEvent(clientId, cursor, outcome),
 });
 
 const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({

@@ -30,7 +30,7 @@ import {
  * node with no Electron/`window`. We drive it through the same events the view
  * sends and assert the OUTCOMES the operator sees: a mid-run send is queued and
  * replayed, the Changes rail refreshes live on an edit, images ride along on the
- * turn, and Stop abandons the queue.
+ * turn, and Stop parks the queue without destroying it.
  */
 
 // Shared harness state the mocked rpc reads/writes (hoisted for the vi.mock factory).
@@ -854,6 +854,92 @@ describe("conversationMachine — queue while busy", () => {
     actor.stop()
   })
 
+  /**
+   * A message carrying hidden code-reference context cannot travel the steer
+   * channel (the steer RPC has no field for it), and merely promoting it left
+   * "Send now" visibly dead: the row stayed queued until the whole turn ended.
+   * Honouring "now" takes the stop-and-replay escalation instead.
+   */
+  it("SEND_NOW on a snippet-bearing message stops the turn and replays it through Agent.run", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    const agentContext = "<repository-code-references>\nsnippet\n</repository-code-references>"
+    actor.send({ type: "SEND", text: "look at this", agentContext })
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
+
+    // Never the steer channel — it would silently drop the hidden context.
+    expect(h.steerCalls).toEqual([])
+    await waitFor(actor, () => h.stopCalls.length === 1, { timeout: 3000 })
+
+    // The interrupted turn is replayed as a fresh durable run, context intact.
+    await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
+    expect(h.agentRunCalls[1]!.text).toBe(`look at this\n\n${agentContext}`)
+    expect(h.agentRunCalls[1]!.options).toMatchObject({ displayText: "look at this" })
+    expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+
+  it("UNQUEUE of external feedback resolves its acceptance instead of stranding it", async () => {
+    const accepted = vi.fn()
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({
+      type: "SEND",
+      text: "review feedback",
+      externalInstruction: githubIdentity,
+      onExternalAccepted: accepted
+    })
+    expect(accepted).not.toHaveBeenCalled()
+
+    // The operator deliberately discarded the row. The relay's dispatch promise
+    // must resolve — a stranded acceptance withholds the cursor and freezes the
+    // session's whole event stream until an app restart.
+    actor.send({ type: "UNQUEUE", id: queuedId(actor, 0) })
+    expect(accepted).toHaveBeenCalledOnce()
+    expect(actor.getSnapshot().context.queued).toEqual([])
+    actor.stop()
+  })
+
+  it("settles a late steer reply that lands while observing a remote turn", async () => {
+    // The reply and the local turn's end travel different paths; a session
+    // envelope can move the machine to `remoteRunning` before the steer RPC
+    // returns. Unhandled there, `steeringId` latched forever — silently
+    // disabling the flush, "Send now", and the queue itself.
+    h.steerStatus = "deferred"
+    let release = () => {}
+    h.steerGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({ type: "SEND", text: "steer me" })
+    emit({ _tag: "ToolEnd", id: "t1", status: "success", meta: null, diff: null, preview: null })
+    await waitFor(actor, () => h.steerCalls.length === 1, { timeout: 3000 })
+    expect(actor.getSnapshot().context.steeringId).not.toBeNull()
+
+    // The local turn ends and a REMOTE turn begins while the reply is held.
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, (s) => s.matches(idle) || s.matches("remoteRunning"), { timeout: 3000 })
+    actor.send({
+      type: "SESSION_EVENT_ENVELOPE",
+      envelope: remoteEnvelope(1, { _tag: "Started", sessionId: session.id, model: "remote-model" })
+    })
+    await waitFor(actor, (s) => s.matches("remoteRunning"))
+
+    release()
+    await waitFor(actor, (s) => s.context.steeringId === null, { timeout: 3000 })
+    actor.stop()
+  })
+
   it("EDIT_QUEUED rewrites a queued message in place, keeping its position", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
@@ -1042,7 +1128,7 @@ describe("conversationMachine — queue while busy", () => {
     actor.stop()
   })
 
-  it("STOP abandons any queued messages", async () => {
+  it("STOP parks queued messages instead of destroying them", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
     actor.send({ type: "SEND", text: "first" })
@@ -1052,7 +1138,53 @@ describe("conversationMachine — queue while busy", () => {
 
     actor.send({ type: "STOP" })
     await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
+    // Halting must not silently delete what the operator typed: the row stays
+    // on screen, parked — nothing auto-runs it.
+    expect(actor.getSnapshot().context.queued.map((q) => q.text)).toEqual(["queued"])
+    expect(actor.getSnapshot().context.queueParked).toBe(true)
+    expect(h.agentRunCalls).toHaveLength(1)
+    actor.stop()
+  })
+
+  it("Send now on a parked row runs it, after a stop", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+    actor.send({ type: "SEND", text: "held over" })
+
+    actor.send({ type: "STOP" })
+    await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+
+    actor.send({ type: "SEND_NOW", id: queuedId(actor, 0) })
+    await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
+    expect(h.agentRunCalls[1]!.text).toBe("held over")
     expect(actor.getSnapshot().context.queued).toEqual([])
+    expect(actor.getSnapshot().context.queueParked).toBe(false)
+    actor.stop()
+  })
+
+  it("a fresh send after a stop unparks the held queue", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+    actor.send({ type: "SEND", text: "parked" })
+    actor.send({ type: "STOP" })
+    await waitFor(actor, (s) => s.matches(idle), { timeout: 3000 })
+
+    // Typing again re-engages the queue: the new turn runs, then the parked
+    // message drains behind it in order.
+    actor.send({ type: "SEND", text: "back to work" })
+    await waitFor(actor, () => h.agentRunCalls.length === 2, { timeout: 3000 })
+    expect(h.agentRunCalls[1]!.text).toBe("back to work")
+    actor.send({ type: "SEND", text: "and this" })
+    expect(actor.getSnapshot().context.queueParked).toBe(false)
+
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, () => h.agentRunCalls.length === 3, { timeout: 3000 })
+    expect(h.agentRunCalls[2]!.text).toBe("parked")
     actor.stop()
   })
 })
@@ -2340,7 +2472,7 @@ describe("conversationMachine — stop", () => {
     actor.stop()
   })
 
-  it("asks the main process to stop the agent, and drops the queue", async () => {
+  it("asks the main process to stop the agent, and parks the queue", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
     actor.send({ type: "SEND", text: "go" })
@@ -2351,7 +2483,8 @@ describe("conversationMachine — stop", () => {
     actor.send({ type: "STOP" })
 
     expect(h.stopCalls).toContain("s1")
-    expect(actor.getSnapshot().context.queued).toEqual([])
+    expect(actor.getSnapshot().context.queued).toHaveLength(1)
+    expect(actor.getSnapshot().context.queueParked).toBe(true)
     actor.stop()
   })
 

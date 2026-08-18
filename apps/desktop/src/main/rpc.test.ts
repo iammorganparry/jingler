@@ -221,34 +221,35 @@ describe("remote session environment lifecycle", () => {
 });
 
 describe("relay acknowledgement lifetime", () => {
-  it("keeps delivered feedback pending beyond the former timeout until the renderer acknowledges it", async () => {
-    vi.useFakeTimers();
-    const delivery: GitHubRelayDelivery = {
-      clientId: "client-1",
-      cursor: 7,
-      relaySessionId: "relay-session-1",
-      sessionId: "session-1",
-      chatId: "chat-1",
-      event: {
-        version: 1,
-        deliveryId: "delivery-1",
-        semanticKey: "comment-1",
-        event: "issue_comment",
-        action: "created",
-        installationId: "installation-1",
-        repository: {
-          id: "repository-1",
-          owner: "acme",
-          name: "widgets",
-          fullName: "acme/widgets",
-        },
-        pullRequest: null,
-        actor: { id: "user-1", login: "octocat", type: "User" },
-        feedback: null,
-        actionable: true,
-        occurredAt: "2026-08-05T12:00:00.000Z",
+  const delivery: GitHubRelayDelivery = {
+    clientId: "client-1",
+    cursor: 7,
+    relaySessionId: "relay-session-1",
+    sessionId: "session-1",
+    chatId: "chat-1",
+    event: {
+      version: 1,
+      deliveryId: "delivery-1",
+      semanticKey: "comment-1",
+      event: "issue_comment",
+      action: "created",
+      installationId: "installation-1",
+      repository: {
+        id: "repository-1",
+        owner: "acme",
+        name: "widgets",
+        fullName: "acme/widgets",
       },
-    };
+      pullRequest: null,
+      actor: { id: "user-1", login: "octocat", type: "User" },
+      feedback: null,
+      actionable: true,
+      occurredAt: "2026-08-05T12:00:00.000Z",
+    },
+  };
+
+  it("keeps delivered feedback pending until the renderer acknowledges it", async () => {
+    vi.useFakeTimers();
     let settled = false;
     const acknowledgement = awaitRelayAcknowledgement(
       delivery,
@@ -257,12 +258,44 @@ describe("relay acknowledgement lifetime", () => {
       settled = true;
     });
 
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    // A legitimate acknowledgement can take a while (the target conversation
+    // may be loading, or the instruction queued behind a running turn).
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
     expect(settled).toBe(false);
 
     await Effect.runPromise(githubAckEvent(delivery.clientId, delivery.cursor));
     await expect(acknowledgement).resolves.toBeUndefined();
     vi.useRealTimers();
+  });
+
+  it("rejects an acknowledgement nobody ever sends, so the stream replays instead of wedging", async () => {
+    // An acknowledgement withheld forever freezes the connection's serial
+    // delivery chain and the durable cursor: every later event for the session
+    // is invisible until an app restart. The timeout converts that silent wedge
+    // into a failed delivery, which closes the socket and replays the frame.
+    vi.useFakeTimers();
+    const acknowledgement = awaitRelayAcknowledgement(delivery, () => undefined);
+    const outcome = acknowledgement.then(
+      () => "resolved" as const,
+      () => "rejected" as const,
+    );
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await expect(outcome).resolves.toBe("rejected");
+    // The slot is released: a late renderer ack is a harmless no-op.
+    await Effect.runPromise(githubAckEvent(delivery.clientId, delivery.cursor));
+    vi.useRealTimers();
+  });
+
+  it("rejects immediately when the renderer answers with a retry outcome", async () => {
+    const acknowledgement = awaitRelayAcknowledgement(delivery, () => undefined);
+    const outcome = acknowledgement.then(
+      () => "resolved" as const,
+      () => "rejected" as const,
+    );
+    await Effect.runPromise(
+      githubAckEvent(delivery.clientId, delivery.cursor, "retry"),
+    );
+    await expect(outcome).resolves.toBe("rejected");
   });
 });
 

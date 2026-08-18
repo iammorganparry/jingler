@@ -1050,8 +1050,12 @@ export const rpc = {
     event: GitHubRelayEvent
   }): Promise<GitHubFeedbackClaimStatus> =>
     run((client) => client.Github.claimFeedback(input)),
-  githubAckEvent: (clientId: string, cursor: number): Promise<void> =>
-    run((client) => client.Github.ackEvent({ clientId, cursor })),
+  githubAckEvent: (
+    clientId: string,
+    cursor: number,
+    outcome?: "routed" | "retry"
+  ): Promise<void> =>
+    run((client) => client.Github.ackEvent({ clientId, cursor, outcome })),
   /**
    * Run an adversarial review of the session's PR. Cheap and safe to call
    * speculatively: the main process short-circuits on an unchanged PR head, so
