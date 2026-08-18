@@ -11,7 +11,6 @@ import {
   FastForward,
   GitBranch,
   MessageSquareMore,
-  MousePointer2,
   Pause,
   Play,
   Send,
@@ -54,13 +53,6 @@ export interface FleetDrawerProps {
   readonly canDismiss?: (node: SubagentFleetNode) => boolean
   readonly onDismiss?: (node: SubagentFleetNode) => void
   readonly onOpenArtifact?: (path: string) => void
-  /**
-   * Quick-switch Follow to this agent's file edits (select + follow in one
-   * click). Absent → no follow affordance on the rows.
-   */
-  readonly onFollow?: (node: SubagentFleetNode) => void
-  /** The node id Follow is currently tracking, for the pressed state. */
-  readonly followingId?: string | null
 }
 
 const depthOf = (node: SubagentFleetNode, byId: ReadonlyMap<string, SubagentFleetNode>): number => {
@@ -95,7 +87,7 @@ function FleetHeader({ nodes, expanded, onToggle }: Pick<FleetDrawerProps, "node
   )
 }
 
-function FleetTree({ nodes, selectedId, onSelect, onFollow, followingId }: Pick<FleetDrawerProps, "nodes" | "selectedId" | "onSelect" | "onFollow" | "followingId">) {
+function FleetTree({ nodes, selectedId, onSelect }: Pick<FleetDrawerProps, "nodes" | "selectedId" | "onSelect">) {
   const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   return (
     <div className="overflow-auto border-r border-line p-1.5">
@@ -103,19 +95,17 @@ function FleetTree({ nodes, selectedId, onSelect, onFollow, followingId }: Pick<
         <GitBranch className="size-3.5 text-blue" /> Main
       </button>
       {nodes.map((node) => (
-        <FleetTreeNode key={node.id} node={node} depth={depthOf(node, byId)} selected={selectedId === node.id} onSelect={onSelect} onFollow={onFollow} following={followingId === node.id} />
+        <FleetTreeNode key={node.id} node={node} depth={depthOf(node, byId)} selected={selectedId === node.id} onSelect={onSelect} />
       ))}
     </div>
   )
 }
 
-function FleetTreeNode({ node, depth, selected, onSelect, onFollow, following = false }: {
+function FleetTreeNode({ node, depth, selected, onSelect }: {
   readonly node: SubagentFleetNode
   readonly depth: number
   readonly selected: boolean
   readonly onSelect: (id: string) => void
-  readonly onFollow?: (node: SubagentFleetNode) => void
-  readonly following?: boolean
 }) {
   const dot = DOT[node.status]
   // A workflow node is an orchestrator with no transcript or steer channel of
@@ -134,37 +124,14 @@ function FleetTreeNode({ node, depth, selected, onSelect, onFollow, following = 
     )
   }
   return (
-    <div className="group relative">
-      <button type="button" data-testid={`fleet-agent-${node.runId}`} data-agent-status={node.status} aria-current={selected ? "page" : undefined} onClick={() => onSelect(node.id)} className={cn("flex w-full items-start gap-2 rounded-md py-1.5 text-left outline-none", onFollow ? "pr-8" : "pr-2", selected ? "bg-panel text-text-bright" : "text-muted-foreground hover:bg-panel/60")} style={{ paddingLeft: 8 + depth * 14 }}>
-        <StatusDot tone={dot.tone} pulse={dot.pulse} size={7} className="mt-1" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[11.5px] font-medium">{node.agent}</span>
-          <span className="block truncate text-[10.5px] text-dim">{node.task}</span>
-        </span>
-        <span className="flex-none text-[9.5px] text-dim">{metric(node)}</span>
-      </button>
-      {onFollow && (
-        // A sibling, not a child: a button may not nest inside the row button.
-        // One click both selects the agent and points Follow at its edits —
-        // the quick-switch the row-then-Files-tab round trip was missing.
-        <button
-          type="button"
-          data-testid={`fleet-follow-${node.runId}`}
-          aria-pressed={following}
-          aria-label={following ? `Stop following ${node.agent}'s file edits` : `Follow ${node.agent}'s file edits`}
-          title={following ? "Following this agent's file edits" : "Follow this agent's file edits"}
-          onClick={() => onFollow(node)}
-          className={cn(
-            "absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 outline-none",
-            following
-              ? "text-blue"
-              : "text-dim opacity-0 hover:text-text focus-visible:opacity-100 group-hover:opacity-100"
-          )}
-        >
-          <MousePointer2 className="size-3" aria-hidden />
-        </button>
-      )}
-    </div>
+    <button type="button" data-testid={`fleet-agent-${node.runId}`} data-agent-status={node.status} aria-current={selected ? "page" : undefined} onClick={() => onSelect(node.id)} className={cn("flex w-full items-start gap-2 rounded-md py-1.5 pr-2 text-left outline-none", selected ? "bg-panel text-text-bright" : "text-muted-foreground hover:bg-panel/60")} style={{ paddingLeft: 8 + depth * 14 }}>
+      <StatusDot tone={dot.tone} pulse={dot.pulse} size={7} className="mt-1" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[11.5px] font-medium">{node.agent}</span>
+        <span className="block truncate text-[10.5px] text-dim">{node.task}</span>
+      </span>
+      <span className="flex-none text-[9.5px] text-dim">{metric(node)}</span>
+    </button>
   )
 }
 
@@ -282,7 +249,7 @@ export function FleetDrawer(props: FleetDrawerProps) {
       )}
     >
       <FleetHeader nodes={props.nodes} expanded={props.expanded} onToggle={props.onToggle} />
-      {props.expanded && <><button type="button" aria-label="Resize Fleet drawer" onPointerDown={startResize} className="block h-1 w-full cursor-row-resize border-t border-line/50 outline-none hover:bg-blue/20" /><div className="grid min-h-0 grid-cols-[minmax(180px,0.8fr)_minmax(220px,1.2fr)]" style={{ height: props.height }}><FleetTree nodes={props.nodes} selectedId={props.selectedId} onSelect={props.onSelect} onFollow={props.onFollow} followingId={props.followingId} /><FleetDetails selected={selected} pending={props.pending} outcome={props.outcome} onControl={props.onControl} canControl={props.canControl} canDismiss={props.canDismiss} onDismiss={props.onDismiss} onOpenArtifact={props.onOpenArtifact} /></div></>}
+      {props.expanded && <><button type="button" aria-label="Resize Fleet drawer" onPointerDown={startResize} className="block h-1 w-full cursor-row-resize border-t border-line/50 outline-none hover:bg-blue/20" /><div className="grid min-h-0 grid-cols-[minmax(180px,0.8fr)_minmax(220px,1.2fr)]" style={{ height: props.height }}><FleetTree nodes={props.nodes} selectedId={props.selectedId} onSelect={props.onSelect} /><FleetDetails selected={selected} pending={props.pending} outcome={props.outcome} onControl={props.onControl} canControl={props.canControl} canDismiss={props.canDismiss} onDismiss={props.onDismiss} onOpenArtifact={props.onOpenArtifact} /></div></>}
     </section>
   )
 }

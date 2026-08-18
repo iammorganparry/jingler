@@ -106,50 +106,6 @@ describe("FleetDrawer", () => {
     )
   })
 
-  it("offers a per-row follow quick-switch that selects and follows in one click", () => {
-    const onSelect = vi.fn()
-    const onFollow = vi.fn()
-    const worker = node({ agent: "worker" })
-    render(
-      <FleetDrawer
-        nodes={[worker]}
-        selectedId="main"
-        expanded
-        height={180}
-        onSelect={onSelect}
-        onToggle={() => {}}
-        onResize={() => {}}
-        onControl={() => {}}
-        onFollow={onFollow}
-        followingId={null}
-      />
-    )
-    fireEvent.click(screen.getByTestId("fleet-follow-run-1"))
-    // The follow affordance is its own action, not a row select.
-    expect(onFollow).toHaveBeenCalledWith(expect.objectContaining({ id: worker.id }))
-    expect(onSelect).not.toHaveBeenCalled()
-    expect(screen.getByTestId("fleet-follow-run-1").getAttribute("aria-pressed")).toBe("false")
-  })
-
-  it("marks the followed agent's row as pressed", () => {
-    const worker = node({ agent: "worker" })
-    render(
-      <FleetDrawer
-        nodes={[worker]}
-        selectedId={worker.id}
-        expanded
-        height={180}
-        onSelect={() => {}}
-        onToggle={() => {}}
-        onResize={() => {}}
-        onControl={() => {}}
-        onFollow={() => {}}
-        followingId={worker.id}
-      />
-    )
-    expect(screen.getByTestId("fleet-follow-run-1").getAttribute("aria-pressed")).toBe("true")
-  })
-
   it("keeps read-only reviewer transcripts visible and preserves legacy close", () => {
     const onDismiss = vi.fn()
     const reviewer = node({ status: "completed" })
