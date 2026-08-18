@@ -5,7 +5,8 @@ import {
   isSlashCommand,
   leadsWithCommand,
   managedToolsNote,
-  planPointerNote
+  planPointerNote,
+  researchFirstNote
 } from "./turn-prompt.js"
 
 /**
@@ -96,6 +97,29 @@ describe("composeTurnPrompt", () => {
     ).toBe("TOOLS\n\nASK\n\nbrowse")
     expect(managedToolsNote()).toContain("jingler-browser")
     expect(managedToolsNote()).toContain("OpenConnector")
+  })
+
+  it("places research-first between tools and the ask protocol", () => {
+    expect(
+      composeTurnPrompt(
+        "integrate",
+        { tools: "TOOLS", research: "RESEARCH", ask: "ASK" },
+        { leadWithText: false }
+      )
+    ).toBe("TOOLS\n\nRESEARCH\n\nASK\n\nintegrate")
+  })
+
+  it("tells the agent its trained integration knowledge is stale and to research current docs first", () => {
+    const note = researchFirstNote()
+    // The failure mode this exists for: implementing a vendor flow (e.g. a
+    // Clerk invite flow) from memory instead of the vendor's current guide.
+    expect(note).toContain("<research-first>")
+    expect(note).toContain("Never assume")
+    expect(note).toContain("Web-search")
+    expect(note).toContain("installed package version")
+    expect(note).toContain("cite the guide")
+    // Scoped: repo-local work is exempt, so every refactor is not taxed.
+    expect(note).toContain("repo-local")
   })
 })
 

@@ -53,7 +53,8 @@ import {
   composeTurnPrompt,
   leadsWithCommand,
   managedToolsNote,
-  planPointerNote
+  planPointerNote,
+  researchFirstNote
 } from "./turn-prompt.js"
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
@@ -1122,6 +1123,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 planPointer,
                 adhd,
                 tools: managedToolsNote(),
+                research: researchFirstNote(),
                 ask,
                 planProtocol
               },

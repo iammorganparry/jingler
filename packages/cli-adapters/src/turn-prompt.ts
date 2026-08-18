@@ -49,6 +49,8 @@ export interface TurnNotes {
   readonly memory?: string | null
   /** Managed-tool precedence, including the visible in-app browser. */
   readonly tools?: string | null
+  /** Research-first: verify current vendor docs before implementing against them. */
+  readonly research?: string | null
   /** How to ask the operator a question so it actually reaches them. */
   readonly ask?: string | null
   /** How the agent submits a plan through Jingler's control tool. */
@@ -57,7 +59,7 @@ export interface TurnNotes {
 
 /** The notes, in order, each followed by a blank line. Empty when there are none. */
 const prefixOf = (notes: TurnNotes): string =>
-  [notes.primer, notes.planPointer, notes.adhd, notes.memory, notes.tools, notes.ask, notes.planProtocol]
+  [notes.primer, notes.planPointer, notes.adhd, notes.memory, notes.tools, notes.research, notes.ask, notes.planProtocol]
     .filter((note): note is string => note !== null && note !== undefined && note !== "")
     .map((note) => `${note}\n\n`)
     .join("")
@@ -69,6 +71,29 @@ export const managedToolsNote = (): string =>
     "Jingler's attached MCP servers are the authoritative tool set for this run. Use OpenConnector providers before any harness-native equivalent.",
     "For browser interaction use the attached jingler-browser tools, which control the in-app browser visible to the operator. Do not use browser-use, Playwright MCP, or a harness browser plugin. Running the repository's own Playwright test suite as a normal shell command is still allowed when the task requires it.",
     "</managed-tools>"
+  ].join("\n")
+
+/**
+ * The agent's trained knowledge of external libraries is stale by definition,
+ * and the failure mode is silent: it implements a Clerk invite flow (or a
+ * Stripe webhook, or a Next.js API surface) from memory, the code compiles,
+ * and only review reveals it ignored the vendor's current recommended flow.
+ * This note makes current-docs research a required first step for any work
+ * that touches an external integration surface — while explicitly exempting
+ * repo-local work, so it does not tax every refactor with a web search.
+ */
+export const researchFirstNote = (): string =>
+  [
+    "<research-first>",
+    "Never assume your built-in knowledge of a third-party SDK, API, service, or framework is current. It is stale by definition: methods get renamed, flows get replaced, and vendors publish recommended patterns that did not exist when you learned the library. Working from memory here ships plausible-but-outdated code.",
+    "",
+    "Before implementing or reworking anything that touches an external integration surface — auth/invite flows, billing, webhooks, SDK calls, provider configuration, framework APIs — research first:",
+    "1. Web-search for the vendor's CURRENT official docs or guide for the exact flow (e.g. \"clerk manage organization invitations custom flow\") and read the most relevant page(s) before writing code.",
+    "2. Check the installed package version in this repository and match the docs to it; prefer the vendor's recommended flow over one reconstructed from memory.",
+    "3. In your summary, cite the guide(s) you implemented against so the operator can verify the source.",
+    "",
+    "Skip the research only for purely repo-local work (refactors, tests over existing code, logic with no external surface). If web access is unavailable, say so explicitly instead of silently falling back to trained assumptions.",
+    "</research-first>"
   ].join("\n")
 
 /**
