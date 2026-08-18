@@ -240,17 +240,23 @@ export const readDurablePiSubagentNodes = (input: {
   const now = input.now ?? Date.now()
   const registryRevision = input.registryRevision ?? 0
   const allNodes = statuses.flatMap((status) => {
-    const activeSteps = (status.steps ?? [])
+    const nodeInput = { parentPiSessionId: input.parentPiSessionId, registryRevision, now }
+    // A step is worth projecting while it is active — and STAYS worth
+    // projecting once it has a transcript. A workflow's only output IS its
+    // steps' sessions; dropping completed steps left a lone sessionFile-less
+    // root whose view said "the transcript is not available yet" forever.
+    const steps = (status.steps ?? [])
       .map((step, index) => ({ step, index }))
-      .filter(({ step }) => activeState(step.status))
-    if (activeSteps.length === 0) {
-      return [projectRoot(status, { parentPiSessionId: input.parentPiSessionId, registryRevision, now })]
+      .filter(({ step }) => activeState(step.status) || step.sessionFile !== undefined)
+      .map(({ step, index }) => projectStep(status, step, index, nodeInput))
+    if (status.mode === "workflow") {
+      // The workflow root is an orchestrator with no pi session of its own.
+      // Project it as the container its steps hang off — never INSTEAD of
+      // them — so selecting a step (which has the transcript) always works.
+      const root = projectRoot(status, nodeInput)
+      return [root, ...steps.map((step) => ({ ...step, parentId: root.id }))]
     }
-    return activeSteps.map(({ step, index }) => projectStep(status, step, index, {
-      parentPiSessionId: input.parentPiSessionId,
-      registryRevision,
-      now
-    }))
+    return steps.length === 0 ? [projectRoot(status, nodeInput)] : steps
   }).sort((left, right) =>
     left.startedAt - right.startedAt || left.subagentId.localeCompare(right.subagentId)
   )
@@ -259,7 +265,12 @@ export const readDurablePiSubagentNodes = (input: {
   const reportedLimit = statuses.find((status) => status.topLevelAsyncCapacity)?.topLevelAsyncCapacity?.limit
   return {
     nodes,
-    totalActive: allNodes.length,
+    // Completed steps and workflow container roots are projected for their
+    // transcripts, but they are not ACTIVE work.
+    totalActive: allNodes.filter((node) =>
+      node.status === "queued" || node.status === "running" ||
+      node.status === "paused" || node.status === "needs-attention"
+    ).length,
     omitted: Math.max(0, allNodes.length - nodes.length),
     activeCapacity: {
       used: statuses.length,

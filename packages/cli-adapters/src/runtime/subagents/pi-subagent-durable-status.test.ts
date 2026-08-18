@@ -64,13 +64,22 @@ describe("readDurablePiSubagentNodes", () => {
       now: 30
     }))
 
-    expect(projection.nodes).toHaveLength(2)
+    // A workflow projects its container root AND its steps: the root has no
+    // pi session of its own, so the steps must stay selectable beside it.
+    expect(projection.nodes).toHaveLength(3)
     expect(projection.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "parent/run-1",
+        subagentId: "run-1",
+        nodeKind: "workflow",
+        parentId: null,
+        sessionFile: null
+      }),
       expect.objectContaining({
         id: "parent/run-1%3Astep%3A0",
         subagentId: "run-1:step:0",
         orchestrationRunId: "run-1",
-        parentId: null,
+        parentId: "parent/run-1",
         agent: "scout",
         model: "test/model"
       }),
@@ -82,6 +91,56 @@ describe("readDurablePiSubagentNodes", () => {
         status: "queued"
       })
     ]))
+  })
+
+  it("keeps a workflow's completed steps selectable for their transcripts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-durable-steps-"))
+    roots.push(root)
+    await mkdir(join(root, ".active-runs"), { recursive: true })
+    await mkdir(join(root, "wf-1"), { recursive: true })
+    await writeFile(join(root, ".active-runs", "wf-1"), "")
+    await writeFile(join(root, "wf-1", "status.json"), JSON.stringify({
+      runId: "wf-1",
+      sessionId: "parent",
+      state: "running",
+      mode: "workflow",
+      startedAt: 10,
+      lastUpdate: 40,
+      steps: [
+        {
+          agent: "scout",
+          status: "completed",
+          startedAt: 12,
+          sessionFile: "/sessions/child-a.jsonl"
+        },
+        { agent: "builder", status: "running", startedAt: 20 },
+        // No transcript and no longer active: nothing to select, so dropped.
+        { agent: "planner", status: "completed" }
+      ]
+    }))
+
+    const projection = await Effect.runPromise(readDurablePiSubagentNodes({
+      asyncDir: root,
+      parentPiSessionId: "parent",
+      parentPiSessionAliases: new Set(["parent"]),
+      now: 50
+    }))
+
+    // A completed step's sessionFile is the workflow's only output — dropping
+    // it left "the transcript is not available yet" as the permanent answer.
+    expect(projection.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ subagentId: "wf-1", nodeKind: "workflow" }),
+      expect.objectContaining({
+        agent: "scout",
+        status: "completed",
+        sessionFile: "/sessions/child-a.jsonl",
+        parentId: "parent/wf-1"
+      }),
+      expect.objectContaining({ agent: "builder", status: "running" })
+    ]))
+    expect(projection.nodes).toHaveLength(3)
+    // Root + builder are running; the finished step is not active work.
+    expect(projection.totalActive).toBe(2)
   })
 
   it("rejects malformed and marker-mismatched status records", async () => {
