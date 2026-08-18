@@ -175,15 +175,29 @@ export function FileBrowserView({
         treeLoading={browser.treeLoading}
         treeError={browser.treeError}
         toolbar={
-          <div className="ml-auto flex min-w-0 items-center gap-2">
-            {browser.agentTargetPath !== null ? (
+          <>
+            {/* The open file, filename-first: the directory clips, the name
+                never does. It used to sit right-aligned with a tail-truncate,
+                which is exactly backwards — the ellipsis ate the filename and
+                kept the least useful half of the path. */}
+            {browser.selectedPath !== null ? (
               <span
-                className="max-w-48 truncate font-mono text-[10.5px] text-dim"
-                title={browser.agentTargetPath}
+                className="flex min-w-0 flex-1 items-baseline font-mono text-[10.5px]"
+                title={browser.selectedPath}
               >
-                {browser.agentTargetPath}
+                {browser.selectedPath.includes("/") ? (
+                  <span className="truncate text-dim">
+                    {browser.selectedPath.slice(0, browser.selectedPath.lastIndexOf("/") + 1)}
+                  </span>
+                ) : null}
+                <span className="flex-none text-text">
+                  {browser.selectedPath.slice(browser.selectedPath.lastIndexOf("/") + 1)}
+                </span>
               </span>
-            ) : null}
+            ) : (
+              <span className="flex-1" />
+            )}
+          <div className="ml-auto flex min-w-0 flex-none items-center gap-2">
             <button
               type="button"
               className={[
@@ -203,6 +217,7 @@ export function FileBrowserView({
               <span className="jingler-mode-toggle__label">Follow agent</span>
             </button>
           </div>
+          </>
         }
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}

@@ -175,11 +175,29 @@ export function AssetBrowser({
 
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {toolbar !== undefined ? (
-            <div className="flex h-8 flex-none items-center border-b border-line bg-panel px-2">
+            <div className="flex h-8 flex-none items-center gap-1.5 border-b border-line bg-panel px-2">
+              {/* The collapsed-tree toggle lives IN the toolbar, not floating
+                  over the code — the overlay square read as a (useless) copy
+                  button and covered the first lines of every file. */}
+              {!roomy ? (
+                <button
+                  type="button"
+                  aria-label="Repository files"
+                  aria-expanded={sheetOpen}
+                  title="Repository files"
+                  onClick={() => send({ type: "TOGGLE_TREE" })}
+                  className={cn(
+                    "flex size-6 flex-none items-center justify-center rounded-md text-dim hover:bg-surface hover:text-text-bright",
+                    sheetOpen && "bg-selection text-text-bright"
+                  )}
+                >
+                  <Files className="size-3.5" aria-hidden />
+                </button>
+              ) : null}
               {toolbar}
             </div>
           ) : null}
-          {!roomy ? (
+          {!roomy && toolbar === undefined ? (
             <button
               type="button"
               aria-label="Repository files"
