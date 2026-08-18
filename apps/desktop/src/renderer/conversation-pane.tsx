@@ -755,6 +755,18 @@ export function ConversationPane({
         fleet.control(node, action, message, replyTo).catch(() => {})
       }}
       onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
+      // Quick-switch: one click selects the agent AND points the file
+      // browser's Follow at its edits (the selection is what the fleet
+      // override keys on). Clicking the followed agent again turns Follow off.
+      onFollow={(node) => {
+        if (fileBrowser.followEnabled && fleet.selectedId === node.id) {
+          toggleFollowAgent(false)
+          return
+        }
+        fleet.select(node.id)
+        toggleFollowAgent(true)
+      }}
+      followingId={fileBrowser.followEnabled ? fleet.selectedId : null}
     />
     <SubagentCompletionLinks
       nodes={fleet.completedNodes}
