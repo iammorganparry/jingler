@@ -10,13 +10,33 @@ interface FakeLinearComment {
 interface FakeLinearIssue {
   readonly id: string
   readonly identifier: string
-  readonly title: string
+  title: string
   readonly url: string
-  readonly description: string
-  readonly priority: number
+  description: string
+  priority: number
   readonly createdAt: string
   readonly updatedAt: string
   readonly comments: FakeLinearComment[]
+}
+
+interface FakeLinearInput {
+  readonly issueId?: string
+  readonly body?: string
+  readonly title?: string
+  readonly description?: string
+  readonly priority?: number
+}
+
+interface FakeLinearVariables {
+  readonly id?: string
+  readonly term?: string
+  readonly after?: string
+  readonly input?: FakeLinearInput
+}
+
+interface FakeLinearRequestBody {
+  readonly query?: string
+  readonly variables?: FakeLinearVariables
 }
 
 export interface FakeLinearServer {
@@ -94,7 +114,7 @@ const issueNode = (issue: FakeLinearIssue) => ({
   }
 })
 
-const json = (response: ServerResponse, status: number, body: unknown): void => {
+const json = <Body>(response: ServerResponse, status: number, body: Body): void => {
   response.writeHead(status, {
     "content-type": "application/json",
     "cache-control": "no-store"
@@ -102,35 +122,35 @@ const json = (response: ServerResponse, status: number, body: unknown): void => 
   response.end(JSON.stringify(body))
 }
 
-const bodyOf = async (request: IncomingMessage): Promise<Record<string, unknown>> => {
+const bodyOf = async (request: IncomingMessage): Promise<FakeLinearRequestBody> => {
   const chunks: Buffer[] = []
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
   }
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"))
-  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : {}
+  // The fake server only receives GraphQL requests from the desktop client under
+  // test. Keep malformed-but-valid JSON at this one harness boundary.
+  const decoded: FakeLinearRequestBody | null = JSON.parse(
+    Buffer.concat(chunks).toString("utf8")
+  )
+  if (decoded === null || Array.isArray(decoded) ||
+      Object.prototype.toString.call(decoded) !== "[object Object]") return {}
+  return decoded
 }
 
-const variablesOf = (body: Record<string, unknown>): Record<string, unknown> => {
-  const variables = body.variables
-  return variables !== null && typeof variables === "object" && !Array.isArray(variables)
-    ? (variables as Record<string, unknown>)
-    : {}
-}
+const variablesOf = (body: FakeLinearRequestBody): FakeLinearVariables =>
+  body.variables ?? {}
 
 interface FakeLinearState {
   readonly issues: FakeLinearIssue[]
   readonly operations: string[]
 }
 
-const inputOf = (variables: Record<string, unknown>): Record<string, unknown> =>
-  (variables.input as Record<string, unknown> | undefined) ?? {}
+const inputOf = (variables: FakeLinearVariables): FakeLinearInput =>
+  variables.input ?? {}
 
 const createComment = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   state.operations.push("commentCreate")
@@ -158,7 +178,7 @@ const createComment = (
 
 const updateIssue = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   state.operations.push("issueUpdate")
@@ -168,15 +188,15 @@ const updateIssue = (
     return
   }
   const input = inputOf(variables)
-  if (typeof input.title === "string") (issue as { title: string }).title = input.title
-  if (typeof input.description === "string") (issue as { description: string }).description = input.description
-  if (typeof input.priority === "number") (issue as { priority: number }).priority = input.priority
+  if (input.title !== undefined) issue.title = input.title
+  if (input.description !== undefined) issue.description = input.description
+  if (input.priority !== undefined) issue.priority = input.priority
   json(response, 200, { data: { issueUpdate: { success: true, issue: { id: issue.id } } } })
 }
 
 const createIssue = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   state.operations.push("issueCreate")
@@ -199,7 +219,7 @@ const createIssue = (
 
 const readIssue = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   state.operations.push("issue")
@@ -209,7 +229,7 @@ const readIssue = (
 
 const listIssues = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse,
   operation = "issues"
 ): void => {
@@ -238,7 +258,7 @@ const listIssues = (
 const handleGraphql = (
   state: FakeLinearState,
   query: string,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   if (query.includes("commentCreate")) {
@@ -299,7 +319,7 @@ const handleRequest = async (
     json(response, 401, { errors: [{ message: "Authentication required" }] })
     return
   }
-  let body: Record<string, unknown>
+  let body: FakeLinearRequestBody
   try {
     body = await bodyOf(request)
   } catch {
@@ -308,7 +328,7 @@ const handleRequest = async (
   }
   handleGraphql(
     state,
-    typeof body.query === "string" ? body.query : "",
+    body.query ?? "",
     variablesOf(body),
     response
   )
@@ -323,6 +343,8 @@ export const startFakeLinearServer = async (): Promise<FakeLinearServer> => {
   })
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  // SAFETY: The awaited listen callback guarantees an active TCP address, and
+  // this server was opened with a numeric port rather than a Unix socket path.
   const address = server.address() as AddressInfo
   return {
     url: `http://127.0.0.1:${address.port}/graphql`,

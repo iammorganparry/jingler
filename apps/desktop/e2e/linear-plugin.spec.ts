@@ -36,6 +36,8 @@ test("shows every new-session source and starts from a Linear issue", async ({
     await launched.window.getByPlaceholder(/Message the agent/).press("Enter")
     await expect(sessionRow(launched.window, "Document retry policy")).toBeVisible({ timeout: 20_000 })
 
+    // SAFETY: The desktop session store owns this file and validates its schema
+    // before writing it; this test reads the same persisted representation.
     const sessions = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     ) as ReadonlyArray<{ readonly linkedIssue?: { readonly providerId: string; readonly identifier: string } }>
@@ -132,6 +134,8 @@ test("selects and removes one of several linked Linear issues from the right rai
       timeout: 20_000
     })
 
+    // SAFETY: The desktop session store owns and schema-validates this file;
+    // this test only inspects the persisted linked-issue fields.
     const sessions = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     ) as ReadonlyArray<{
@@ -195,6 +199,8 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
     await expect(linkRow.getByLabel(LINKED_LINEAR_ISSUE)).toBeVisible()
     expect(linear.operations).toContain("issueCreate")
 
+    // SAFETY: The desktop session store owns this file and validates its schema
+    // before writing it; this test reads the corresponding persisted fields.
     const sessions = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     ) as ReadonlyArray<{

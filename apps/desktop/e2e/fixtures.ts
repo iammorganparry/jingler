@@ -252,6 +252,19 @@ const withCanonicalRuntimeIdentity = (session: SeedSession): SeedSession => {
   };
 };
 
+type FixtureConfigValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ReadonlyArray<FixtureConfigValue>
+  | FixtureConfig
+
+interface FixtureConfig {
+  readonly [key: string]: FixtureConfigValue;
+}
+
 export interface LaunchOptions {
   /**
    * Seed a deterministic pi transport script. The production PiAgentRuntime,
@@ -294,7 +307,7 @@ export interface LaunchOptions {
   /** Seed config.json so the app boots configured (past first-run). */
   readonly configured?: boolean;
   /** Additional persisted workspace config for settings/routing scenarios. */
-  readonly config?: Readonly<Record<string, unknown>>;
+  readonly config?: FixtureConfig;
   /** Create a real git repo in the seeded repos dir (for the create-session flow). */
   readonly withRepo?: boolean;
   /** Seed the default repository on the fake remote host (defaults to true). */
@@ -487,32 +500,25 @@ export const test = base.extend<{
       const configPath = join(jinglerDir, "config.json");
       if (options.configured && !(reused && existsSync(configPath))) {
         mkdirSync(jinglerDir, { recursive: true });
-        writeFileSync(
-          configPath,
-          JSON.stringify(
-            {
-              reposDir,
-              createdAt: "2026-07-11T00:00:00.000Z",
-              ...(piFixture.seedConnection === false
-                ? {}
-                : {
-                    defaultConnectionId: E2E_PI_CONNECTION_ID,
-                    defaultProviderId: E2E_PI_PROVIDER_ID,
-                    defaultModelId: E2E_PI_MODEL_ID,
-                    connectionSelectionRequired: false,
-                  }),
-              ...options.config,
-            },
-            null,
-            2,
-          ),
-        );
+        const seededConfig: FixtureConfig = {
+          reposDir,
+          createdAt: "2026-07-11T00:00:00.000Z",
+        };
+        if (piFixture.seedConnection !== false) {
+          Object.assign(seededConfig, {
+            defaultConnectionId: E2E_PI_CONNECTION_ID,
+            defaultProviderId: E2E_PI_PROVIDER_ID,
+            defaultModelId: E2E_PI_MODEL_ID,
+            connectionSelectionRequired: false,
+          });
+        }
+        Object.assign(seededConfig, options.config);
+        writeFileSync(configPath, JSON.stringify(seededConfig, null, 2));
       }
       if (options.sessions) {
-        const sessions =
-          typeof options.sessions === "function"
-            ? options.sessions({ reposDir, repoPath })
-            : options.sessions;
+        const sessions = Array.isArray(options.sessions)
+          ? options.sessions
+          : options.sessions({ reposDir, repoPath });
         mkdirSync(jinglerDir, { recursive: true });
         writeFileSync(
           join(jinglerDir, "sessions.json"),
@@ -602,7 +608,7 @@ export const test = base.extend<{
             2,
           ),
         );
-        deviceRelay = await startFakeDeviceRelay({
+        const relayOptions = {
           deviceAgentBundle: DEVICE_AGENT_ENTRY,
           deviceHome,
           deviceBinDir: binDir,
@@ -613,13 +619,14 @@ export const test = base.extend<{
             modelId: E2E_PI_MODEL_ID,
           },
           spawnAgentOnClaim: options.realRemoteEnvironment === undefined,
-          ...(options.realRemoteEnvironment
-            ? {
-                listenHost: "0.0.0.0",
-                publicHost: options.realRemoteEnvironment.relayHost,
-              }
-            : {}),
-        });
+        };
+        if (options.realRemoteEnvironment) {
+          Object.assign(relayOptions, {
+            listenHost: "0.0.0.0",
+            publicHost: options.realRemoteEnvironment.relayHost,
+          });
+        }
+        deviceRelay = await startFakeDeviceRelay(relayOptions);
         cleanups.push(() => deviceRelay?.close());
         if (options.realRemoteEnvironment) {
           const target = options.realRemoteEnvironment;
@@ -655,19 +662,17 @@ export const test = base.extend<{
       // e2e plaintext SecretStore reads, so the app boots past the wall.
       const authServer =
         options.authServer ??
-        (await startFakeAuthServer(
-          deviceRelay
-            ? {
-                deviceRelayUrl: deviceRelay.url,
-                ...(options.realRemoteEnvironment
-                  ? {
-                      listenHost: "0.0.0.0",
-                      publicHost: options.realRemoteEnvironment.relayHost,
-                    }
-                  : {}),
-              }
-            : {},
-        ));
+        (await startFakeAuthServer((() => {
+          if (!deviceRelay) return {};
+          const authOptions = { deviceRelayUrl: deviceRelay.url };
+          if (options.realRemoteEnvironment) {
+            Object.assign(authOptions, {
+              listenHost: "0.0.0.0",
+              publicHost: options.realRemoteEnvironment.relayHost,
+            });
+          }
+          return authOptions;
+        })()));
       if (options.authServer === undefined) {
         cleanups.push(() => {
           authServer.close().catch(() => {});
@@ -692,16 +697,19 @@ export const test = base.extend<{
 
       const githubServer =
         options.githubServer ??
-        (await startFakeGitHubServer(authServer.token, {
-          ...options.githubApp,
-          relayUrl: githubRelay.url,
-          relayGrant: githubRelay.grant,
+        (await startFakeGitHubServer(authServer.token, (() => {
+          const githubOptions = {
+            ...options.githubApp,
+            relayUrl: githubRelay.url,
+            relayGrant: githubRelay.grant,
+          };
           // A native App fixture normally resolves PR heads from the repository
           // created for this launch. Callers can still supply a fork checkout.
-          ...(repoPath && options.githubApp?.cloneUrl === undefined
-            ? { cloneUrl: repoPath }
-            : {}),
-        }));
+          if (repoPath && options.githubApp?.cloneUrl === undefined) {
+            Object.assign(githubOptions, { cloneUrl: repoPath });
+          }
+          return githubOptions;
+        })()));
       if (options.githubServer === undefined) {
         cleanups.push(() => {
           githubServer.close().catch(() => {});
@@ -741,44 +749,35 @@ export const test = base.extend<{
         "JINGLER_SUBAGENT_CHILD_TOOLS_PATH",
         "JINGLER_SUBAGENT_WRAPPER_PATH",
       ]) delete inheritedEnv[name];
+      const launchEnv = {
+        ...inheritedEnv,
+        // Run every built-app scenario against the same clean-machine boundary.
+        PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        JINGLER_HOME: home,
+        PI_CODING_AGENT_DIR: join(home, "jingler", "agent-resources"),
+        ELECTRON_RENDERER_URL: "",
+        JINGLER_AUTH_URL: authSessionServer.url,
+        JINGLER_GITHUB_URL: githubServer.url,
+        JINGLER_GITHUB_API_URL: githubServer.url,
+        JINGLER_SECRET_STORE: "memory",
+        JINGLER_E2E_PI_FIXTURE: piFixtureFile,
+        JINGLER_E2E: "1",
+        JINGLER_E2E_HEADLESS:
+          process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
+        ...options.e2eEnv,
+      };
+      if (options.isolateSystemHome) Object.assign(launchEnv, { HOME: home });
+      if (deviceRelay) {
+        Object.assign(launchEnv, {
+          JINGLER_DEVICE_RELAY_URL: deviceRelay.url,
+          JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ARCHIVE,
+          JINGLER_SSH_DIR: join(home, ".ssh"),
+          JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl"),
+        });
+      }
       const app = await electron.launch({
         args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
-        env: {
-          ...inheritedEnv,
-          // Run every built-app scenario against the same clean-machine
-          // boundary: embedded pi, Electron/Node, and system git. Never inherit
-          // the developer's PATH. In particular, a locally installed
-          // GitHub CLI must not hide a built-in regression back to `gh`.
-          PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
-          ...(options.isolateSystemHome ? { HOME: home } : {}),
-          JINGLER_HOME: home,
-          PI_CODING_AGENT_DIR: join(home, "jingler", "agent-resources"),
-          ELECTRON_RENDERER_URL: "",
-          // Auth: talk to the offline fake backend, and store the token as a plain
-          // file (no OS keychain prompts under headless Playwright).
-          JINGLER_AUTH_URL: authSessionServer.url,
-          ...(deviceRelay
-            ? {
-                JINGLER_DEVICE_RELAY_URL: deviceRelay.url,
-                JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ARCHIVE,
-                JINGLER_SSH_DIR: join(home, ".ssh"),
-                JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl"),
-              }
-            : {}),
-          JINGLER_GITHUB_URL: githubServer.url,
-          JINGLER_GITHUB_API_URL: githubServer.url,
-          JINGLER_SECRET_STORE: "memory",
-          JINGLER_E2E_PI_FIXTURE: piFixtureFile,
-          JINGLER_E2E: "1",
-          // Keep the window hidden and off the dock. The suite launches a real
-          // Electron app dozens of times, and a visible window steals focus on
-          // every launch — which makes running the suite locally (its only home;
-          // it's not in CI) incompatible with using the machine at the same time.
-          // Set JINGLER_E2E_HEADED=1 to watch a run instead.
-          JINGLER_E2E_HEADLESS:
-            process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
-          ...options.e2eEnv,
-        },
+        env: launchEnv,
       });
       apps.push(app);
       app.on("window", (page) => {
@@ -812,7 +811,7 @@ export const test = base.extend<{
 
       const githubOperations = () => [...githubServer.operations];
 
-      return {
+      const launched: LaunchedApp = {
         app,
         window,
         home,
@@ -822,12 +821,13 @@ export const test = base.extend<{
         authServer,
         githubServer,
         githubRelay,
-        ...(deviceRelay ? { deviceRelay } : {}),
-        ...(deviceHome ? { deviceHome } : {}),
         completeDeepLinkSignIn,
         completeGitHubConnection,
         githubOperations,
       };
+      if (deviceRelay) Object.assign(launched, { deviceRelay });
+      if (deviceHome) Object.assign(launched, { deviceHome });
+      return launched;
     };
 
     await use(launch);

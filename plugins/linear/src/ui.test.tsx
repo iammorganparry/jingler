@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   tier: "wide"
 }))
 
+// The plugin SDK hooks are process-provided renderer context. This focused view
+// test supplies that host boundary without booting the desktop plugin loader.
+// oxlint-disable-next-line anti-slop/no-module-mocking
 vi.mock("@jingler/plugin-sdk", async (load) => {
   const actual = await load<typeof import("@jingler/plugin-sdk")>()
   return {
@@ -29,6 +32,9 @@ vi.mock("@jingler/plugin-sdk", async (load) => {
   }
 })
 
+// Width-tier context is another process-provided SDK boundary; fixing it keeps
+// these tests about Linear view behavior rather than responsive measurement.
+// oxlint-disable-next-line anti-slop/no-module-mocking
 vi.mock("@jingler/plugin-sdk/ui", async (load) => {
   const actual = await load<typeof import("@jingler/plugin-sdk/ui")>()
   return { ...actual, useWidthTier: () => mocks.tier }
@@ -84,7 +90,7 @@ const context = {
   projects: []
 }
 
-function successfulHost(command: string): unknown {
+function successfulHost(command: string) {
   if (command === "linear.configured") return true
   if (command === "linear.context") return context
   if (command === "linear.get") return detail
@@ -161,7 +167,7 @@ describe("Linear Issue tab content", () => {
       name: "Work",
       apiKey: "lin_api_secret"
     }))
-    await waitFor(() => expect((screen.getByLabelText("Linear API key") as HTMLInputElement).value).toBe(""))
+    await waitFor(() => expect(screen.getByLabelText<HTMLInputElement>("Linear API key").value).toBe(""))
   })
 
   it("renders create and link controls for an unlinked session", async () => {
@@ -237,7 +243,7 @@ describe("Linear Issue tab states", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("Linear rate limit reached")
     expect(screen.getByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
-    expect((screen.getByLabelText("Add a comment") as HTMLTextAreaElement).value).toBe(
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Add a comment").value).toBe(
       "Keep this draft."
     )
   })

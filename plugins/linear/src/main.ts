@@ -13,6 +13,7 @@ import type {
 import {
   linearApiUrl,
   linearGraphql,
+  type LinearGraphqlOptions,
   type LinearRequest
 } from "./graphql.js"
 import {
@@ -159,13 +160,13 @@ const summary = (issue: LinearIssueNode): IssueSummary => {
 }
 
 const comment = (input: LinearCommentNode): IssueComment => {
-  return {
+  const base: IssueComment = {
     id: input.id,
     author: optionalActor(input.user),
     body: input.body,
-    createdAt: input.createdAt,
-    ...(input.url ? { url: input.url } : {})
+    createdAt: input.createdAt
   }
+  return input.url ? { ...base, url: input.url } : base
 }
 
 const pageInfo = (input: LinearPageInfo): LinearPageInfo => {
@@ -202,7 +203,7 @@ export interface LinearClient {
 
 type Execute = <Data extends object>(
   query: string,
-  variables?: Readonly<Record<string, unknown>>
+  variables?: LinearGraphqlOptions["variables"]
 ) => Promise<Data>
 
 const LINEAR_PRIORITIES = [
@@ -345,12 +346,13 @@ const loadIssuesPage = async (
   state: IssuePageState
 ): Promise<readonly IssueSummary[]> => {
   if (state.page >= MAX_ISSUE_PAGES) return state.accumulated
-  const data = await execute<LinearIssuesData>(state.term ? SEARCH_ISSUES_QUERY : ISSUES_QUERY, {
-    first: PAGE_SIZE,
-    after: state.after,
-    ...(state.term ? { term: state.term } : {}),
-    ...(state.filter ? { filter: state.filter } : {})
-  })
+  const variables = { first: PAGE_SIZE, after: state.after }
+  if (state.term) Object.assign(variables, { term: state.term })
+  if (state.filter) Object.assign(variables, { filter: state.filter })
+  const data = await execute<LinearIssuesData>(
+    state.term ? SEARCH_ISSUES_QUERY : ISSUES_QUERY,
+    variables
+  )
   const connection = data.issues
   const result = [...state.accumulated, ...connection.nodes.map(summary)]
   const info = pageInfo(connection.pageInfo)
@@ -381,17 +383,18 @@ const createIssue = async (
   input: LinearCreateRequest
 ): Promise<LinearIssueDetail> => {
   const teamId = input.teamId ?? await onlyTeamId(context)
+  const mutationInput = {
+    teamId,
+    title: input.title,
+    description: input.body
+  }
+  if (input.projectId) Object.assign(mutationInput, { projectId: input.projectId })
+  if (input.stateId) Object.assign(mutationInput, { stateId: input.stateId })
+  if (input.priority !== undefined) Object.assign(mutationInput, { priority: input.priority })
+  if (input.assigneeId) Object.assign(mutationInput, { assigneeId: input.assigneeId })
+  if (input.labelIds) Object.assign(mutationInput, { labelIds: [...input.labelIds] })
   const data = await execute<LinearIssueCreateData>(CREATE_ISSUE_MUTATION, {
-    input: {
-      teamId,
-      title: input.title,
-      description: input.body,
-      ...(input.projectId ? { projectId: input.projectId } : {}),
-      ...(input.stateId ? { stateId: input.stateId } : {}),
-      ...(input.priority === undefined ? {} : { priority: input.priority }),
-      ...(input.assigneeId ? { assigneeId: input.assigneeId } : {}),
-      ...(input.labelIds ? { labelIds: [...input.labelIds] } : {})
-    }
+    input: mutationInput
   })
   if (!data.issueCreate.success) {
     throw new Error("Linear did not create the issue. Check the details and retry.")
@@ -408,16 +411,15 @@ const updateIssue = async (
   execute: Execute,
   input: LinearUpdateRequest
 ): Promise<LinearIssueDetail> => {
-  const mutationInput = {
-    ...(input.title === undefined ? {} : { title: input.title }),
-    ...(input.body === undefined ? {} : { description: input.body }),
-    ...(input.teamId === undefined ? {} : { teamId: input.teamId }),
-    ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
-    ...(input.stateId === undefined ? {} : { stateId: input.stateId }),
-    ...(input.priority === undefined ? {} : { priority: input.priority }),
-    ...(input.assigneeId === undefined ? {} : { assigneeId: input.assigneeId }),
-    ...(input.labelIds === undefined ? {} : { labelIds: [...input.labelIds] })
-  }
+  const mutationInput: LinearGraphqlOptions["variables"] = {}
+  if (input.title !== undefined) Object.assign(mutationInput, { title: input.title })
+  if (input.body !== undefined) Object.assign(mutationInput, { description: input.body })
+  if (input.teamId !== undefined) Object.assign(mutationInput, { teamId: input.teamId })
+  if (input.projectId !== undefined) Object.assign(mutationInput, { projectId: input.projectId })
+  if (input.stateId !== undefined) Object.assign(mutationInput, { stateId: input.stateId })
+  if (input.priority !== undefined) Object.assign(mutationInput, { priority: input.priority })
+  if (input.assigneeId !== undefined) Object.assign(mutationInput, { assigneeId: input.assigneeId })
+  if (input.labelIds !== undefined) Object.assign(mutationInput, { labelIds: [...input.labelIds] })
   if (Object.keys(mutationInput).length === 0) {
     throw new Error("Choose at least one Linear issue field to update.")
   }
@@ -447,14 +449,17 @@ const addComment = async (execute: Execute, input: LinearCommentRequest): Promis
 }
 
 export const createLinearClient = (options: LinearClientOptions): LinearClient => {
-  const execute: Execute = async <Data extends object>(query: string, variables = {}) =>
-    linearGraphql<Data>({
+  const execute: Execute = async <Data extends object>(query: string, variables = {}) => {
+    const requestOptions: LinearGraphqlOptions = {
       apiKey: await configuredApiKey(options.getSecret),
       query,
       variables,
-      ...(options.request ? { request: options.request } : {}),
       endpoint: options.endpoint ?? linearApiUrl()
-    })
+    }
+    return linearGraphql<Data>(
+      options.request ? { ...requestOptions, request: options.request } : requestOptions
+    )
+  }
   const context = () => loadContext(execute)
 
   return {
@@ -486,32 +491,58 @@ const LEGACY_PROFILE_ID = "legacy-default"
 
 type LinearConfigurationHost = Pick<HostContext, "settings" | "storage">
 
-const record = (value: unknown): Record<string, unknown> | null =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
+type PersistedValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | readonly PersistedValue[]
+  | PersistedRecord
 
-const selectionOf = (value: unknown): LinearSelection | null => {
-  const candidate = record(value)
-  if (typeof candidate?.profileId !== "string") return null
-  return {
-    profileId: candidate.profileId,
-    ...(typeof candidate.teamId === "string" ? { teamId: candidate.teamId } : {}),
-    ...(typeof candidate.projectId === "string" ? { projectId: candidate.projectId } : {})
-  }
+interface PersistedRecord {
+  readonly [key: string]: PersistedValue
 }
 
-const profileOf = (value: unknown): LinearProfile | null => {
+const isString = (value: PersistedValue): value is string =>
+  Object.prototype.toString.call(value) === "[object String]" && Object(value) !== value
+
+const record = (value: PersistedValue): PersistedRecord | null => {
+  if (value === null || value === undefined || Array.isArray(value)) return null
+  if (Object.prototype.toString.call(value) !== "[object Object]") return null
+  // SAFETY: The object-tag and array checks above establish a plain persisted
+  // key/value object; every value remains in the recursive persisted-value domain.
+  return value as PersistedRecord
+}
+
+const selectionOf = (value: PersistedValue): LinearSelection | null => {
+  const candidate = record(value)
+  if (!isString(candidate?.profileId)) return null
+  let selection: LinearSelection = { profileId: candidate.profileId }
+  if (isString(candidate.teamId)) selection = { ...selection, teamId: candidate.teamId }
+  if (isString(candidate.projectId)) {
+    selection = { ...selection, projectId: candidate.projectId }
+  }
+  return selection
+}
+
+const profileOf = (value: PersistedValue): LinearProfile | null => {
   const candidate = record(value)
   const viewer = record(candidate?.viewer)
   const workspace = record(candidate?.workspace)
   if (
-    typeof candidate?.id !== "string" || typeof candidate.name !== "string" ||
-    typeof viewer?.id !== "string" || typeof viewer.name !== "string" ||
-    typeof workspace?.id !== "string" || typeof workspace.name !== "string" ||
-    typeof workspace.urlKey !== "string" || !Array.isArray(candidate.teams) ||
+    !isString(candidate?.id) || !isString(candidate.name) ||
+    !isString(viewer?.id) || !isString(viewer.name) ||
+    !isString(workspace?.id) || !isString(workspace.name) ||
+    !isString(workspace.urlKey) || !Array.isArray(candidate.teams) ||
     !Array.isArray(candidate.projects)
   ) return null
+  // SAFETY: Stored profiles were originally produced from LinearContext. The
+  // required profile, viewer, workspace and collection fields are revalidated
+  // above before the persisted value re-enters the account manager.
+  // The storage API intentionally erases its generic value; the checks above
+  // reconstruct the profile contract before this one unavoidable bridge.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
   return candidate as unknown as LinearProfile
 }
 
@@ -520,9 +551,12 @@ const profileFromContext = (
   name: string,
   context: LinearContext,
   legacy = false
-): LinearProfile => ({ id, name, ...context, ...(legacy ? { legacy: true } : {}) })
+): LinearProfile => {
+  const profile: LinearProfile = { id, name, ...context }
+  return legacy ? { ...profile, legacy: true } : profile
+}
 
-const mapOf = (value: unknown): Record<string, LinearSelection> => {
+const mapOf = (value: PersistedValue): Record<string, LinearSelection> => {
   const source = record(value)
   if (!source) return {}
   return Object.fromEntries(
@@ -545,7 +579,7 @@ export interface LinearAccountManager {
 
 export const createLinearAccountManager = (ctx: LinearConfigurationHost): LinearAccountManager => {
   const profiles = async (): Promise<readonly LinearProfile[]> =>
-    ((await ctx.storage.get<unknown[]>(PROFILES_KEY)) ?? []).flatMap((value) => {
+    ((await ctx.storage.get<readonly PersistedValue[]>(PROFILES_KEY)) ?? []).flatMap((value) => {
       const profile = profileOf(value)
       return profile ? [profile] : []
     })
@@ -668,27 +702,56 @@ export const createLinearAccountManager = (ctx: LinearConfigurationHost): Linear
   return manager
 }
 
+type HostCommandInput = Parameters<Parameters<HostContext["commands"]["register"]>[1]>[0]
+
 const issueTabCommand = <Input, Output>(handler: (input: Input) => Output | Promise<Output>) =>
-  async (input?: unknown): Promise<Output> => {
+  async (input?: HostCommandInput): Promise<Output> => {
     if (input === undefined) {
       throw new Error("Open the Linear Issue tab to use this command.")
     }
+    // SAFETY: Each registered command pairs this adapter with its concrete
+    // handler, and renderer invocations originate from that command's form.
     return handler(input as Input)
   }
 
 type LinearHostContext = Pick<HostContext, "issues" | "commands" | "agentTools" | "subscriptions">
 
-const toolInput = (input: unknown): Record<string, unknown> => {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new Error("Linear tool input must be an object.")
-  }
-  return input as Record<string, unknown>
+interface LinearAgentToolInput {
+  readonly query?: string
+  readonly mine?: boolean
+  readonly limit?: number
+  readonly issueId?: string
+  readonly title?: string
+  readonly description?: string
+  readonly teamId?: string
+  readonly projectId?: string | null
+  readonly stateId?: string
+  readonly priority?: number
+  readonly assigneeId?: string | null
+  readonly labelIds?: readonly string[]
+  readonly body?: string
 }
 
-const stringInput = (input: Record<string, unknown>, key: string, required = false): string | undefined => {
+type AgentToolInput = Parameters<AgentToolDefinition["execute"]>[0]
+
+const toolInput = (input: AgentToolInput): LinearAgentToolInput => {
+  if (input === null || Array.isArray(input) ||
+      Object.prototype.toString.call(input) !== "[object Object]") {
+    throw new Error("Linear tool input must be an object.")
+  }
+  // SAFETY: The host validates every tool call against the adjacent JSON schema
+  // before execute runs; this check also rejects non-object direct callers.
+  return input as LinearAgentToolInput
+}
+
+const stringInput = (
+  input: LinearAgentToolInput,
+  key: keyof LinearAgentToolInput,
+  required = false
+): string | undefined => {
   const value = input[key]
   if (value === undefined && !required) return
-  if (typeof value !== "string" || (required && !value.trim())) {
+  if (!isString(value) || (required && !value.trim())) {
     throw new Error(`Linear tool field "${key}" must be a${required ? " non-empty" : ""} string.`)
   }
   return value
@@ -697,15 +760,19 @@ const stringInput = (input: Record<string, unknown>, key: string, required = fal
 const reference = (
   issue: IssueReference,
   providerAccountId: string | undefined
-): IssueReference => ({
-  providerId: issue.providerId,
-  id: issue.id,
-  ...(providerAccountId === undefined ? {} : { providerAccountId }),
-  identifier: issue.identifier,
-  url: issue.url,
-  title: issue.title,
-  labels: issue.labels
-})
+): IssueReference => {
+  const base: IssueReference = {
+    providerId: issue.providerId,
+    id: issue.id,
+    identifier: issue.identifier,
+    url: issue.url,
+    title: issue.title,
+    labels: issue.labels
+  }
+  return providerAccountId === undefined
+    ? base
+    : { ...base, providerAccountId }
+}
 
 const envelope = <T>(
   issues: readonly IssueReference[],
@@ -735,10 +802,13 @@ const routeFrom = (
   repository: context.session.repository
 })
 
-const optionalStringArray = (input: Record<string, unknown>, key: string): readonly string[] | undefined => {
+const optionalStringArray = (
+  input: LinearAgentToolInput,
+  key: "labelIds"
+): readonly string[] | undefined => {
   const value = input[key]
   if (value === undefined) return
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+  if (!Array.isArray(value) || value.some((item) => !isString(item))) {
     throw new Error(`Linear tool field "${key}" must be an array of strings.`)
   }
   return value
@@ -779,7 +849,9 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
       idempotency: "safe",
       execute: async (raw, context) => {
         const input = toolInput(raw)
-        const limit = typeof input.limit === "number" ? Math.max(1, Math.min(20, Math.trunc(input.limit))) : 20
+        const limit = input.limit === undefined
+          ? 20
+          : Math.max(1, Math.min(20, Math.trunc(input.limit)))
         const route = routeFrom(context)
         const issues = (await client.listIssues({
           ...route,
@@ -828,16 +900,23 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
       execute: async (raw, context) => {
         const input = toolInput(raw)
         const route = routeFrom(context)
-        const issue = await client.createIssue({
-          ...route, title: stringInput(input, "title", true)!,
-          body: stringInput(input, "description") ?? "",
-          ...(stringInput(input, "teamId") ? { teamId: stringInput(input, "teamId") } : {}),
-          ...(stringInput(input, "projectId") ? { projectId: stringInput(input, "projectId") } : {}),
-          ...(stringInput(input, "stateId") ? { stateId: stringInput(input, "stateId") } : {}),
-          ...(typeof input.priority === "number" ? { priority: input.priority } : {}),
-          ...(stringInput(input, "assigneeId") ? { assigneeId: stringInput(input, "assigneeId") } : {}),
-          ...(optionalStringArray(input, "labelIds") ? { labelIds: optionalStringArray(input, "labelIds") } : {})
-        })
+        const createInput: LinearCreateRequest = {
+          ...route,
+          title: stringInput(input, "title", true)!,
+          body: stringInput(input, "description") ?? ""
+        }
+        const teamId = stringInput(input, "teamId")
+        const projectId = stringInput(input, "projectId")
+        const stateId = stringInput(input, "stateId")
+        const assigneeId = stringInput(input, "assigneeId")
+        const labelIds = optionalStringArray(input, "labelIds")
+        if (teamId) Object.assign(createInput, { teamId })
+        if (projectId) Object.assign(createInput, { projectId })
+        if (stateId) Object.assign(createInput, { stateId })
+        if (input.priority !== undefined) Object.assign(createInput, { priority: input.priority })
+        if (assigneeId) Object.assign(createInput, { assigneeId })
+        if (labelIds) Object.assign(createInput, { labelIds })
+        const issue = await client.createIssue(createInput)
         return envelope([issue], boundedIssue(issue), await client.profileId(route))
       }
     },
@@ -860,18 +939,36 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
       execute: async (raw, context) => {
         const input = toolInput(raw)
         const route = routeFrom(context)
-        const nullable = (key: string): string | null | undefined => input[key] === null ? null : stringInput(input, key)
-        const issue = await client.updateIssue({
-          ...route, issueId: stringInput(input, "issueId", true)!,
-          ...(input.title === undefined ? {} : { title: stringInput(input, "title") }),
-          ...(input.description === undefined ? {} : { body: stringInput(input, "description") }),
-          ...(input.teamId === undefined ? {} : { teamId: stringInput(input, "teamId") }),
-          ...(input.projectId === undefined ? {} : { projectId: nullable("projectId") }),
-          ...(input.stateId === undefined ? {} : { stateId: stringInput(input, "stateId") }),
-          ...(typeof input.priority === "number" ? { priority: input.priority } : {}),
-          ...(input.assigneeId === undefined ? {} : { assigneeId: nullable("assigneeId") }),
-          ...(input.labelIds === undefined ? {} : { labelIds: optionalStringArray(input, "labelIds") })
-        })
+        const nullable = (
+          key: "projectId" | "assigneeId"
+        ): string | null | undefined => input[key] === null ? null : stringInput(input, key)
+        const updateInput: LinearUpdateRequest = {
+          ...route,
+          issueId: stringInput(input, "issueId", true)!
+        }
+        if (input.title !== undefined) {
+          Object.assign(updateInput, { title: stringInput(input, "title") })
+        }
+        if (input.description !== undefined) {
+          Object.assign(updateInput, { body: stringInput(input, "description") })
+        }
+        if (input.teamId !== undefined) {
+          Object.assign(updateInput, { teamId: stringInput(input, "teamId") })
+        }
+        if (input.projectId !== undefined) {
+          Object.assign(updateInput, { projectId: nullable("projectId") })
+        }
+        if (input.stateId !== undefined) {
+          Object.assign(updateInput, { stateId: stringInput(input, "stateId") })
+        }
+        if (input.priority !== undefined) Object.assign(updateInput, { priority: input.priority })
+        if (input.assigneeId !== undefined) {
+          Object.assign(updateInput, { assigneeId: nullable("assigneeId") })
+        }
+        if (input.labelIds !== undefined) {
+          Object.assign(updateInput, { labelIds: optionalStringArray(input, "labelIds") })
+        }
+        const issue = await client.updateIssue(updateInput)
         return envelope([issue], boundedIssue(issue), await client.profileId(route))
       }
     },

@@ -65,6 +65,10 @@ function linearServices(
     path: session.worktreePath ?? ""
   }
   const route = { sessionId: session.id, repository }
+  const accountRoute = (providerAccountId: string | undefined) => {
+    if (providerAccountId === undefined) return route
+    return { ...route, profileId: providerAccountId }
+  }
   return {
     configured: () => host.invoke<boolean>("linear.configured", route),
     context: () => host.invoke<LinearWorkspaceContext>("linear.context", route),
@@ -75,8 +79,7 @@ function linearServices(
         (issue) => issue.providerId === "linear" && issue.id === issueId
       )?.providerAccountId
       const issue = await host.invoke<LinearIssueDetail | null>("linear.get", {
-        ...route,
-        ...(providerAccountId === undefined ? {} : { profileId: providerAccountId }),
+        ...accountRoute(providerAccountId),
         issueId
       })
       if (!issue) throw new Error("Linear could not find this issue.")
@@ -94,8 +97,7 @@ function linearServices(
         (issue) => issue.providerId === "linear" && issue.id === issueId
       )?.providerAccountId
       await host.invoke<IssueComment>("linear.comment", {
-        ...route,
-        ...(providerAccountId === undefined ? {} : { profileId: providerAccountId }),
+        ...accountRoute(providerAccountId),
         issueId,
         body
       })
@@ -106,13 +108,11 @@ function linearServices(
       if (issue?.providerId !== "linear") {
         throw new Error("No selected Linear issue to unlink.")
       }
-      await removeIssue(session.id, {
+      const identity: IssueIdentity = {
         providerId: issue.providerId,
-        ...(issue.providerAccountId
-          ? { providerAccountId: issue.providerAccountId }
-          : {}),
         id: issue.id
-      })
+      }
+      await removeIssue(session.id, identity)
     }
   }
 }

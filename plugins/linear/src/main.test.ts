@@ -1,4 +1,4 @@
-import type { AgentToolset, Disposable, IssueComment, IssueSummary } from "@jingler/plugin-sdk/host"
+import type { AgentToolset, Disposable, HostContext, IssueComment, IssueSummary } from "@jingler/plugin-sdk/host"
 import { describe, expect, it, vi } from "vitest"
 import {
   activateWithClient,
@@ -8,13 +8,19 @@ import {
 } from "./main.js"
 import type { LinearContext, LinearIssueDetail } from "./types.js"
 
-const json = (data: unknown) =>
+const json = <Data>(data: Data) =>
   new Response(JSON.stringify({ data }), {
     status: 200,
     headers: { "content-type": "application/json" }
   })
 
-const rawIssue = (overrides: Record<string, unknown> = {}) => ({
+interface RawIssueOverrides {
+  readonly id?: string
+  readonly identifier?: string
+  readonly title?: string
+}
+
+const rawIssue = (overrides: RawIssueOverrides = {}) => ({
   id: "issue-1",
   identifier: "ENG-123",
   title: "Retry failed payments",
@@ -389,8 +395,12 @@ describe("Linear account configuration", () => {
     const manager = createLinearAccountManager({
       settings,
       storage: {
+        // SAFETY: This in-memory test store returns only values written through
+        // the same PluginStorage interface in this setup.
         get: async <T,>(key: string) => storage.get(key) as T | undefined,
-        set: async (key: string, value: unknown) => { storage.set(key, value) },
+        set: async (key: string, value: Parameters<HostContext["storage"]["set"]>[1]) => {
+          storage.set(key, value)
+        },
         delete: async (key: string) => { storage.delete(key) },
         keys: async () => [...storage.keys()]
       }
@@ -445,9 +455,10 @@ describe("activateWithClient", () => {
     const registration: Disposable = { dispose }
     const registerProvider = vi.fn(() => registration)
     const registeredCommandIds: string[] = []
-    const registeredCommands = new Map<string, (input?: unknown) => unknown | Promise<unknown>>()
+    type CommandHandler = Parameters<HostContext["commands"]["register"]>[1]
+    const registeredCommands = new Map<string, CommandHandler>()
     const registerCommand = vi.fn(
-      (commandId: string, handler: (input?: unknown) => unknown | Promise<unknown>) => {
+      (commandId: string, handler: CommandHandler) => {
         registeredCommandIds.push(commandId)
         registeredCommands.set(commandId, handler)
         return registration
