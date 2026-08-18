@@ -195,6 +195,18 @@ export interface ConversationContext {
    */
   readonly steeringId: string | null
   /**
+   * True after the operator pressed Stop with messages still queued.
+   *
+   * Stop used to CLEAR the queue, which silently destroyed exactly the messages
+   * the machine itself refuses to steer (hidden code-reference context and
+   * external feedback must dequeue through Agent.run, so they are the ones most
+   * likely to still be queued when the operator halts the turn). Parking keeps
+   * the rows on screen and inert: nothing auto-runs or auto-flushes until the
+   * operator acts on a row ("Send now") or sends something new — halting stays
+   * halting, and nothing typed is lost.
+   */
+  readonly queueParked: boolean
+  /**
    * Live sub-agents (harness `Task` spawns) for the current turn — each a
    * watch-only tab. Populated from `agentId`-tagged + `Subagent*` events, dropped
    * when an agent finishes; never persisted (transcripts.json holds the main turn).
@@ -919,7 +931,10 @@ export const conversationMachine = setup({
      * So a pending steer parks the queue instead, and its reply restarts it (see
      * `awaitingInput`'s `STEER_RESULT`).
      */
-    hasSettledQueue: ({ context }) => context.queued.length > 0 && context.steeringId === null,
+    hasSettledQueue: ({ context }) =>
+      context.queued.length > 0 &&
+      context.steeringId === null &&
+      !context.queueParked,
     /**
      * Whether anything is left to run once THIS steer result is applied — asked of
      * the event, because the guard runs before `settleLateSteer` removes an
@@ -927,6 +942,9 @@ export const conversationMachine = setup({
      */
     queueSurvivesSteer: ({ context, event }) => {
       if (event.type !== "STEER_RESULT") return false
+      // A parked queue stays parked: a late steer reply settles the latch but
+      // must not auto-run messages the operator explicitly halted.
+      if (context.queueParked) return false
       return context.queued.length > (event.result.status === "accepted" ? 1 : 0)
     },
     /**
@@ -938,6 +956,8 @@ export const conversationMachine = setup({
     canAutoFlush: ({ context, event }) => {
       if (event.type !== "STREAM_EVENT" || event.event._tag !== "ToolEnd") return false
       if (context.steeringId !== null || context.queued.length === 0) return false
+      // A parked queue is inert until the operator acts on it — see `queueParked`.
+      if (context.queueParked) return false
       return (
         context.resumePlanId === null &&
         !requiresFreshTurn(context.queued[0]!)
@@ -948,6 +968,34 @@ export const conversationMachine = setup({
       const queued = context.queued.find((item) => item.id === event.id)
       return queued !== undefined && !requiresFreshTurn(queued)
     },
+    /**
+     * "Send now" on a message that carries hidden code-reference context.
+     *
+     * Such a message cannot travel the native steer channel (the steer RPC has
+     * no field for the hidden context, so steering would silently drop the
+     * snippet), and merely promoting it did nothing visible: the row said
+     * "queued", the button appeared dead, and the message waited for the whole
+     * turn to end. Honouring "now" therefore takes the same stop-and-replay
+     * escalation a plain-text send-now takes on a harness with no live channel.
+     *
+     * External feedback is deliberately excluded: its durable identity
+     * acceptance is what makes relay replay idempotent, and interrupting a
+     * turn for a machine-delivered instruction is not an operator request.
+     */
+    sendNowNeedsFreshTurn: ({ context, event }) => {
+      if (event.type !== "SEND_NOW") return false
+      const queued = context.queued.find((item) => item.id === event.id)
+      return (
+        queued !== undefined &&
+        queued.agentContext !== "" &&
+        queued.externalInstruction === undefined &&
+        queued.externalAcceptances.length === 0
+      )
+    },
+    /** A queued row exists for this SEND_NOW — the idle dequeue path's guard. */
+    hasQueuedMessage: ({ context, event }) =>
+      event.type === "SEND_NOW" &&
+      context.queued.some((item) => item.id === event.id),
     canRoutePlanFeedback: ({ context, event }) =>
       planFeedbackFor(context, event) !== null,
     canCoalesceExternalSend: ({ context, event }) =>
@@ -1151,6 +1199,9 @@ export const conversationMachine = setup({
       const images = event.images ?? []
       if (text.length === 0 && images.length === 0 && agentContext === "") return {}
       return {
+        // A fresh send re-engages a queue parked by Stop: the operator is
+        // active again, so held messages resume draining in order.
+        queueParked: false,
         queued: [
           ...context.queued,
           {
@@ -1210,19 +1261,33 @@ export const conversationMachine = setup({
       for (const accepted of context.pendingExternalAcceptances) accepted()
       return { pendingExternalAcceptances: [] }
     }),
-    discardDuplicateExternalTurn: assign(({ context }) => ({
-      messages: context.messages.slice(0, -2),
-      pendingText: "",
-      pendingAgentContext: "",
-      pendingImages: [],
-      pendingExternalInstruction: null,
-      pendingExternalAcceptances: [],
-      runStartedAt: null,
-      lastOutcome: null
-    })),
+    discardDuplicateExternalTurn: assign(({ context }) => {
+      // A duplicate acceptance means the instruction is already durably in the
+      // transcript. Any acceptance callback still pending here must fire, not
+      // vanish: a dropped callback strands the relay dispatch promise, which
+      // withholds the cursor acknowledgement and freezes the session's whole
+      // event stream. (`acceptExternalInstruction` usually fired them already,
+      // in which case this array is empty and the loop is a no-op.)
+      for (const accepted of context.pendingExternalAcceptances) accepted()
+      return {
+        messages: context.messages.slice(0, -2),
+        pendingText: "",
+        pendingAgentContext: "",
+        pendingImages: [],
+        pendingExternalInstruction: null,
+        pendingExternalAcceptances: [],
+        runStartedAt: null,
+        lastOutcome: null
+      }
+    }),
     // Drop a still-pending queued message before it's sent.
     removeQueued: assign(({ context, event }) => {
       if (event.type !== "UNQUEUE") return {}
+      const removed = context.queued.find((queued) => queued.id === event.id)
+      // The operator deliberately discarded this message. Resolve any external
+      // acceptance waiting on it — the relay treats that as handled and moves
+      // on, instead of holding the cursor for a dispatch that can never come.
+      for (const accepted of removed?.externalAcceptances ?? []) accepted()
       return { queued: context.queued.filter((queued) => queued.id !== event.id) }
     }),
     // Rewrite a queued message in place. Nothing has been sent yet, so this is a
@@ -1250,7 +1315,8 @@ export const conversationMachine = setup({
       const picked = context.queued.find((queued) => queued.id === event.id)
       if (picked === undefined) return {}
       const rest = context.queued.filter((queued) => queued.id !== event.id)
-      return { queued: [picked, ...rest] }
+      // "Send now" is an explicit operator action, so it always unparks.
+      return { queued: [picked, ...rest], queueParked: false }
     }),
     promoteAndSteer: assign(({ context, event, self }) => {
       if (event.type !== "SEND_NOW" || context.steeringId !== null) return {}
@@ -1258,7 +1324,7 @@ export const conversationMachine = setup({
       if (picked === undefined) return {}
       const rest = context.queued.filter((queued) => queued.id !== event.id)
       beginSteer(context, self, picked, false)
-      return { queued: [picked, ...rest], steeringId: picked.id }
+      return { queued: [picked, ...rest], steeringId: picked.id, queueParked: false }
     }),
     routePlanFeedback: assign(({ context, event }) => {
       const feedback = planFeedbackFor(context, event)
@@ -1377,7 +1443,14 @@ export const conversationMachine = setup({
             : context.queued
       }
     }),
-    clearQueue: assign(() => ({ queued: [] })),
+    /**
+     * Stop with messages still queued: keep them, but hold them inert. See
+     * `queueParked` — clearing here silently destroyed exactly the messages
+     * that cannot steer (snippet context, external feedback).
+     */
+    parkQueue: assign(({ context }) => ({
+      queueParked: context.queued.length > 0
+    })),
     // Pop the head of the queue into a fresh turn — the same shape `appendTurns`
     // produces for a live SEND, so `running` streams it exactly as a normal turn.
     dequeueTurn: assign(({ context }) => {
@@ -1396,6 +1469,7 @@ export const conversationMachine = setup({
         // against the turn it was aimed at; carrying it into the next turn would
         // disable the flush and "Send now" for a reply that can no longer come.
         steeringId: null,
+        queueParked: false,
         subagents: [],
         reviewer: keepReviewer(context.reviewer),
         resumePlanId: null,
@@ -2160,6 +2234,7 @@ export const conversationMachine = setup({
       reasoning: chat.reasoning,
       queued: [],
       steeringId: null,
+      queueParked: false,
       subagents: [],
       subagentFleetEvents: [],
       subagentControlOutcomes: [],
@@ -2291,6 +2366,17 @@ export const conversationMachine = setup({
           { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
           { target: "running", actions: "appendTurns" }
         ],
+        // A queue parked by Stop survives into idle, so its rows' actions must
+        // work here: "Send now" runs the picked message immediately (promote
+        // unparks, then the ordinary dequeue starts the turn), and remove/edit
+        // behave exactly as they do while running.
+        SEND_NOW: {
+          guard: "hasQueuedMessage",
+          target: "running",
+          actions: ["promoteQueued", "dequeueTurn"]
+        },
+        UNQUEUE: { actions: "removeQueued" },
+        EDIT_QUEUED: { actions: "editQueued" },
         /**
          * The parked queue's release valve.
          *
@@ -2378,9 +2464,18 @@ export const conversationMachine = setup({
         SEND_NOW: [
           { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
           { guard: "canSteerQueued", actions: "promoteAndSteer" },
-          // External feedback and hidden reference context may be prioritised,
-          // but both must dequeue through Agent.run. Steering cannot atomically
-          // persist their durable identity / separate operator-visible text.
+          // Hidden reference context cannot steer (the steer RPC has no field
+          // for it), so "now" is honoured the only other way there is: stop the
+          // turn and replay the message as the next Agent.run — the same
+          // escalation a plain-text send-now takes on a steer-less harness.
+          {
+            guard: "sendNowNeedsFreshTurn",
+            target: "stopping",
+            actions: ["promoteQueued", "settleStoppedRun"]
+          },
+          // External feedback may be prioritised, but must dequeue through
+          // Agent.run without interrupting the operator's turn: steering cannot
+          // atomically persist its durable identity.
           { actions: "promoteQueued" }
         ],
         STEER_RESULT: [
@@ -2407,11 +2502,13 @@ export const conversationMachine = setup({
         REVISE_PLAN: { actions: "optimisticPlanRevise" },
         APPROVE_PLAN: { actions: "optimisticPlanApprove" },
         SET_MODE: { actions: "persistMode" },
-        // Stopping abandons the queue too — the operator asked the agent to halt.
-        // Live sub-agent tabs go with it (no completion events will arrive).
+        // Stopping PARKS the queue rather than clearing it — the operator asked
+        // the agent to halt, not to destroy what they typed. The rows stay on
+        // screen and inert until acted on (see `queueParked`). Live sub-agent
+        // tabs still go (no completion events will arrive).
         STOP: {
           target: "stopping",
-          actions: ["settleStoppedRun", "clearQueue", "clearSubagents"]
+          actions: ["settleStoppedRun", "parkQueue", "clearSubagents"]
         }
       }
     },
@@ -2433,6 +2530,12 @@ export const conversationMachine = setup({
           { actions: ["foldEvent", "liveRefreshDiff"] }
         ],
         SEND: { actions: "enqueue" },
+        UNQUEUE: { actions: "removeQueued" },
+        EDIT_QUEUED: { actions: "editQueued" },
+        // A late steer reply can land here too (a session envelope moved the
+        // machine while the RPC was in flight). Unhandled, `steeringId` latches
+        // forever — see `settleLateSteer`.
+        STEER_RESULT: { actions: "settleLateSteer" },
         PATCH_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
@@ -2474,8 +2577,8 @@ export const conversationMachine = setup({
         SEND_NOW: { actions: "promoteQueued" },
         // A steer's reply can outlive the turn it was aimed at. See `settleLateSteer`.
         STEER_RESULT: { actions: "settleLateSteer" },
-        // The run is already being halted; a second STOP only clears the queue.
-        STOP: { actions: ["clearQueue", "clearSubagents"] },
+        // The run is already being halted; a second STOP only parks the queue.
+        STOP: { actions: ["parkQueue", "clearSubagents"] },
         PATCH_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },

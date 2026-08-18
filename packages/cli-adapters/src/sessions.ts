@@ -1497,6 +1497,86 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
+      /**
+       * Reconcile the durable feedback outbox after a restart, and return the
+       * pending entries that still deserve a delivery attempt.
+       *
+       * A `pending` entry means the delivery was claimed but the renderer never
+       * finished routing it — the app quit, the conversation actor discarded the
+       * dispatch, or the relay acknowledged the frame down an "ignored" branch
+       * that never marks dispatch. Nothing else ever re-reads these entries, so
+       * without this pass they are stranded forever: the relay's cursor may
+       * already be past the frame, meaning no replay will ever redeliver it.
+       *
+       * Three cases, decided against the CURRENT session state:
+       * - the session ledger already has the delivery → flip to `dispatched`
+       *   (the instruction reached the transcript; only the outbox missed it);
+       * - the session is gone, archived, or relinked → drop the entry (a fresh
+       *   claim would reject it, and keeping it blocks other sessions' claims);
+       * - still validly linked → keep it and hand it back for a replay attempt,
+       *   retargeted at the session's ACTIVE chat (the recorded chat may have
+       *   been closed since the claim).
+       */
+      const recoverGitHubFeedbackOutbox = (): Effect.Effect<
+        ReadonlyArray<GitHubFeedbackOutboxEntry>,
+        GitError,
+        PersistEnv
+      > =>
+        atomically(
+          Effect.gen(function* () {
+            const sessions = yield* readAll()
+            const outbox = yield* readFeedbackOutbox()
+            const kept: Array<GitHubFeedbackOutboxEntry> = []
+            const replay: Array<GitHubFeedbackOutboxEntry> = []
+            let changed = false
+            for (const entry of outbox) {
+              if (entry.status !== "pending") {
+                kept.push(entry)
+                continue
+              }
+              const session = sessions.find(
+                (candidate) => candidate.id === entry.sessionId
+              )
+              const linked =
+                session !== undefined &&
+                !session.archived &&
+                session.githubInstallationId === entry.installationId &&
+                session.githubRepositoryId === entry.repositoryId &&
+                session.prNumber === entry.prNumber
+              if (!linked) {
+                changed = true
+                continue
+              }
+              const deliveries = session.githubFeedbackDeliveryIds ?? []
+              const semantics = session.githubFeedbackSemanticKeys ?? []
+              if (
+                deliveries.includes(entry.event.deliveryId) ||
+                semantics.includes(entry.event.semanticKey)
+              ) {
+                changed = true
+                kept.push({
+                  ...entry,
+                  status: "dispatched" as const,
+                  dispatchedAt: entry.dispatchedAt ?? new Date().toISOString()
+                })
+                continue
+              }
+              kept.push(entry)
+              replay.push({ ...entry, chatId: session.activeChatId })
+            }
+            if (changed) {
+              const pendingOutbox = kept.filter(
+                (candidate) => candidate.status === "pending"
+              )
+              const dispatchedOutbox = kept
+                .filter((candidate) => candidate.status === "dispatched")
+                .slice(-2_048)
+              yield* writeFeedbackOutbox([...pendingOutbox, ...dispatchedOutbox])
+            }
+            return replay
+          })
+        )
+
       const markGitHubFeedbackDispatched = (
         id: string,
         deliveryId: string,
@@ -1740,6 +1820,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setGitHubLink,
         claimGitHubFeedback,
         markGitHubFeedbackDispatched,
+        recoverGitHubFeedbackOutbox,
         setPublishCheckpoint,
         setWorktreePath,
         setProject,

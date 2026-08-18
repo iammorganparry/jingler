@@ -1016,6 +1016,88 @@ describe("SessionStore", () => {
     expect(result.value.persisted.githubFeedbackSemanticKeys).toEqual(["comment-1"])
   })
 
+  it("recovers claimed-but-undispatched feedback and drops entries a fresh claim would reject", async () => {
+    const result = await runExit(
+      Effect.gen(function* () {
+        // A claimed delivery whose renderer routing never completed (an app
+        // quit, a discarded dispatch, or an "ignored" ack) sits pending forever
+        // — nothing else re-reads the outbox, and the relay cursor may already
+        // be past the frame. Recovery must hand it back for a replay attempt.
+        const alive = yield* SessionStore.create(input({ title: "Alive target" }))
+        yield* SessionStore.setGitHubLink(alive.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42
+        })
+        yield* SessionStore.claimGitHubFeedback(alive.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42,
+          deliveryId: "delivery-alive",
+          semanticKey: "comment-alive",
+          event: feedbackEvent({ deliveryId: "delivery-alive", semanticKey: "comment-alive" })
+        })
+
+        // A claim whose session has since been archived: keeping it would both
+        // lie about a delivery that can no longer happen and permanently block
+        // any other session from claiming the same delivery.
+        const gone = yield* SessionStore.create(input({ title: "Archived claimant" }))
+        yield* SessionStore.setGitHubLink(gone.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42
+        })
+        yield* SessionStore.claimGitHubFeedback(gone.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42,
+          deliveryId: "delivery-orphaned",
+          semanticKey: "comment-orphaned",
+          event: feedbackEvent({ deliveryId: "delivery-orphaned", semanticKey: "comment-orphaned" })
+        })
+        yield* SessionStore.archive(gone.id, "closed")
+
+        const replay = yield* SessionStore.recoverGitHubFeedbackOutbox()
+
+        // The surviving claim is untouched (still claimable by its owner)...
+        const aliveStatus = yield* SessionStore.claimGitHubFeedback(alive.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42,
+          deliveryId: "delivery-alive",
+          semanticKey: "comment-alive",
+          event: feedbackEvent({ deliveryId: "delivery-alive", semanticKey: "comment-alive" })
+        })
+        // ...while the orphaned one no longer blocks a different session from
+        // claiming the same delivery.
+        const reclaimed = yield* SessionStore.claimGitHubFeedback(alive.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42,
+          deliveryId: "delivery-orphaned",
+          semanticKey: "comment-orphaned",
+          event: feedbackEvent({ deliveryId: "delivery-orphaned", semanticKey: "comment-orphaned" })
+        })
+        return { alive, replay, aliveStatus, reclaimed }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value.replay).toHaveLength(1)
+    expect(result.value.replay[0]).toMatchObject({
+      sessionId: result.value.alive.id,
+      // Retargeted at the session's active chat, not the chat recorded at claim
+      // time (that chat may have been closed since).
+      chatId: result.value.alive.activeChatId,
+      status: "pending"
+    })
+    expect(result.value.replay[0]?.event.deliveryId).toBe("delivery-alive")
+    expect(result.value.aliveStatus).toBe("pending")
+    expect(result.value.reclaimed).toBe("pending")
+  })
+
   it("setMode and setProviderModel persist across a fresh read", async () => {
     const exit = await runExit(
       Effect.gen(function* () {

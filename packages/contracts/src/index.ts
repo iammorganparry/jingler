@@ -1550,7 +1550,18 @@ export class JinglerCoreRpcs extends RpcGroup.make(
 
   /** Release a held relay cursor only after visible routing settles. */
   Rpc.make("Github.ackEvent", {
-    payload: { clientId: Schema.String, cursor: Schema.Number }
+    payload: {
+      clientId: Schema.String,
+      cursor: Schema.Number,
+      /**
+       * "retry" is a negative acknowledgement: the renderer could not route the
+       * delivery (no matching local session yet, or routing failed outright).
+       * Main rejects the held cursor so the relay connection replays the frame
+       * with backoff instead of wedging behind it forever. Optional so an older
+       * renderer's plain ack still decodes as a routed acknowledgement.
+       */
+      outcome: Schema.optional(Schema.Literal("routed", "retry"))
+    }
   }),
 
   /** Persist the user's GitHub integration preferences. */

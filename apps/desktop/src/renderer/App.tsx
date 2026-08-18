@@ -987,13 +987,13 @@ function AuthedApp({
     if (!connected) return;
     const cancelEvents = rpc.githubEvents(
       (delivery) => {
-        const session = sessionsRef.current.find(
-          (candidate) => candidate.id === delivery.sessionId,
-        );
-        const target =
-          session?.githubInstallationId &&
-          session.githubRepositoryId &&
-          session.prNumber !== null
+        const resolveTarget = () => {
+          const session = sessionsRef.current.find(
+            (candidate) => candidate.id === delivery.sessionId,
+          );
+          return session?.githubInstallationId &&
+            session.githubRepositoryId &&
+            session.prNumber !== null
             ? {
                 sessionId: delivery.sessionId,
                 chatId: delivery.chatId,
@@ -1003,24 +1003,51 @@ function AuthedApp({
                 archived: Boolean(session.archived),
               }
             : undefined;
-
-        if (!target) {
-          console.error(
-            `GitHub feedback relay route ${delivery.relaySessionId} does not match an active local session; withholding acknowledgement.`,
-          );
+        };
+        const routeDelivery = (target: NonNullable<ReturnType<typeof resolveTarget>>) => {
+          void feedbackRouter
+            .route(delivery.event, target)
+            // Main selected this exact session from its opaque relay connection;
+            // renderer never searches by repository or pull-request payload.
+            .then(() => rpc.githubAckEvent(delivery.clientId, delivery.cursor))
+            .catch((cause: unknown) => {
+              // A routing failure must not hold the cursor hostage: every later
+              // event for this session queues behind an acknowledgement that
+              // will never come, and only an app restart would recover. Reject
+              // instead, so main fails the connection and replays with backoff.
+              console.error(
+                "GitHub feedback delivery failed; asking main to replay it:",
+                cause,
+              );
+              void rpc.githubAckEvent(delivery.clientId, delivery.cursor, "retry");
+            });
+        };
+        const target = resolveTarget();
+        if (target) {
+          routeDelivery(target);
           return;
         }
-        void feedbackRouter
-          .route(delivery.event, target)
-          // Main selected this exact session from its opaque relay connection;
-          // renderer never searches by repository or pull-request payload.
-          .then(() => rpc.githubAckEvent(delivery.clientId, delivery.cursor))
-          .catch((cause: unknown) => {
+        // A freshly linked PR can reach main's on-disk session before React's
+        // `sessions` state reflects it, so give the state a moment to catch up
+        // before giving up. Withholding forever is never an option — a delivery
+        // that is neither acknowledged nor rejected wedges the whole stream.
+        let waited = 0;
+        const timer = window.setInterval(() => {
+          const late = resolveTarget();
+          if (late) {
+            window.clearInterval(timer);
+            routeDelivery(late);
+            return;
+          }
+          waited += 1_000;
+          if (waited >= 15_000) {
+            window.clearInterval(timer);
             console.error(
-              "GitHub feedback delivery failed; withholding acknowledgement:",
-              cause,
+              `GitHub feedback relay route ${delivery.relaySessionId} does not match an active local session; asking main to replay it.`,
             );
-          });
+            void rpc.githubAckEvent(delivery.clientId, delivery.cursor, "retry");
+          }
+        }, 1_000);
       },
       (status) => {
         const key = status.relaySessionId ?? "relay-supervisor";
