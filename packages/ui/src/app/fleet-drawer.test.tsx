@@ -94,16 +94,12 @@ describe("FleetDrawer", () => {
     expect(screen.getByTestId("fleet-control-receipt").textContent).toBe("delivered")
     fireEvent.click(screen.getByTestId("fleet-agent-run-1"))
     expect(onSelect).toHaveBeenCalledWith(parent.id)
-    fireEvent.change(screen.getByLabelText("Reply to agent"), {
-      target: { value: "Use the exported bridge" }
-    })
-    fireEvent.click(screen.getByLabelText("Steer agent"))
-    expect(onControl).toHaveBeenCalledWith(
-      child,
-      "reply",
-      "Use the exported bridge",
-      "attention-1"
-    )
+    // No mini steer input: the real composer below the child view is the one
+    // way to message a selected agent. Lifecycle controls remain.
+    expect(screen.queryByLabelText("Reply to agent")).toBeNull()
+    expect(screen.queryByLabelText("Steer agent")).toBeNull()
+    expect(screen.getByLabelText("Interrupt agent")).toBeTruthy()
+    expect(onControl).not.toHaveBeenCalled()
   })
 
   it("keeps read-only reviewer transcripts visible and preserves legacy close", () => {
@@ -125,13 +121,12 @@ describe("FleetDrawer", () => {
       />
     )
 
-    expect(screen.getByPlaceholderText("Read-only agent").getAttribute("disabled"))
-      .not.toBeNull()
+    expect(screen.queryByPlaceholderText("Read-only agent")).toBeNull()
     fireEvent.click(screen.getByLabelText("Close reviewer"))
     expect(onDismiss).toHaveBeenCalledWith(reviewer)
   })
 
-  it("requires an explicit continuation message before resume", () => {
+  it("keeps Stop for a paused agent and leaves resume to the composer", () => {
     const onControl = vi.fn()
     const paused = node({ status: "paused" })
     render(
@@ -147,20 +142,12 @@ describe("FleetDrawer", () => {
       />
     )
 
-    const resume = screen.getByLabelText("Resume agent")
-    expect(resume.getAttribute("disabled")).not.toBeNull()
-    expect(resume.getAttribute("title")).toBe("Enter a continuation message to resume")
-    fireEvent.change(screen.getByPlaceholderText("Steer agent…"), {
-      target: { value: "Continue from the persisted session" }
-    })
-    expect(resume.getAttribute("disabled")).toBeNull()
-    fireEvent.click(resume)
-    expect(onControl).toHaveBeenCalledWith(
-      paused,
-      "resume",
-      "Continue from the persisted session",
-      undefined
-    )
+    // Resume moved to the composer (it needs a continuation message, and the
+    // composer is where messages are typed). The drawer keeps Stop for a
+    // paused agent and offers no resume button of its own.
+    expect(screen.queryByLabelText("Resume agent")).toBeNull()
+    fireEvent.click(screen.getByLabelText("Stop agent"))
+    expect(onControl).toHaveBeenCalledWith(paused, "stop")
   })
 
   it("keeps bounded completion transcript and artifact links outside Fleet chrome", () => {

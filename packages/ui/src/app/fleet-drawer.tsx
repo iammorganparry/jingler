@@ -1,4 +1,4 @@
-import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { useMemo, type PointerEvent as ReactPointerEvent } from "react"
 import type {
   SubagentFleetControlAction,
   SubagentFleetControlOutcome,
@@ -8,12 +8,9 @@ import type {
 import {
   ChevronRight,
   CircleStop,
-  FastForward,
   GitBranch,
   MessageSquareMore,
   Pause,
-  Play,
-  Send,
   Users,
   X
 } from "lucide-react"
@@ -146,24 +143,15 @@ function FleetDetails(props: Pick<FleetDrawerProps, "pending" | "outcome" | "onC
     onDismiss,
     onOpenArtifact
   } = props
-  const [draft, setDraft] = useState("")
   if (!selected) return <div className="flex flex-1 items-center justify-center text-[11px] text-dim">Select an agent to inspect and control it.</div>
-  const messageAction = selected.attention ? "reply" : "steer"
-  const controlEnabled = canControl(selected, messageAction)
-  const send = (action: "steer" | "follow-up" | "resume" | "reply") => {
-    const message = draft.trim()
-    if (!message) return
-    onControl(selected, action, message, selected.attention?.requestId)
-    setDraft("")
-  }
   return (
     <div className="flex min-h-0 flex-col p-2.5">
       <FleetSummary node={selected} onOpenArtifact={onOpenArtifact} />
+      {/* No mini steer input here: the REAL composer below the child view is
+          the one way to talk to a selected agent (steer, reply, resume). This
+          row keeps only the lifecycle controls the composer does not carry. */}
       <div className="mt-2 flex items-center gap-1.5">
-        <LifecycleButtons node={selected} pending={pending} canControl={canControl} onControl={onControl} onResume={() => send("resume")} hasResumeMessage={Boolean(draft.trim())} />
-        <input value={draft} disabled={!controlEnabled} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && send(selected.attention ? "reply" : "steer")} placeholder={controlEnabled ? (selected.attention ? "Reply to agent…" : "Steer agent…") : "Read-only agent"} aria-label={selected.attention ? "Reply to agent" : "Steer agent"} className="min-w-0 flex-1 rounded-md border border-line bg-editor px-2 py-1 text-[11px] outline-none focus:border-blue disabled:opacity-50" />
-        <button type="button" aria-label="Steer agent" title="Steer" disabled={!controlEnabled || pending || !draft.trim()} onClick={() => send(selected.attention ? "reply" : "steer")} className="rounded p-1.5 text-blue hover:bg-panel disabled:opacity-40"><Send className="size-3.5" /></button>
-        <button type="button" aria-label="Queue follow-up" title="Follow up after current work" disabled={!canControl(selected, "follow-up") || pending || !draft.trim()} onClick={() => send("follow-up")} className="rounded p-1.5 text-purple hover:bg-panel disabled:opacity-40"><FastForward className="size-3.5" /></button>
+        <LifecycleButtons node={selected} pending={pending} canControl={canControl} onControl={onControl} />
         {canDismiss(selected) && <button type="button" aria-label={`Close ${selected.agent}`} title="Close" onClick={() => onDismiss?.(selected)} className="rounded p-1.5 text-dim hover:bg-panel hover:text-text"><X className="size-3.5" /></button>}
       </div>
       {outcome && <p className="mt-1 text-[10px] text-dim"><MessageSquareMore className="mr-1 inline size-3" /><span data-testid="fleet-control-receipt" className="mr-1 rounded bg-panel px-1 py-0.5 uppercase">{outcome.deliveryStatus}</span>{outcome.message}</p>}
@@ -183,9 +171,11 @@ function FleetSummary({ node, onOpenArtifact }: { readonly node: SubagentFleetNo
   )
 }
 
-function LifecycleButtons({ node, pending, canControl, onControl, onResume, hasResumeMessage }: { readonly node: SubagentFleetNode; readonly pending: boolean; readonly canControl: NonNullable<FleetDrawerProps["canControl"]>; readonly onControl: FleetDrawerProps["onControl"]; readonly onResume: () => void; readonly hasResumeMessage: boolean }) {
+function LifecycleButtons({ node, pending, canControl, onControl }: { readonly node: SubagentFleetNode; readonly pending: boolean; readonly canControl: NonNullable<FleetDrawerProps["canControl"]>; readonly onControl: FleetDrawerProps["onControl"] }) {
+  // Resume lives in the composer: it requires a continuation message, and the
+  // composer is where messages are typed — a paused agent's send resumes it.
   return node.status === "paused" ? (
-    <button type="button" title={hasResumeMessage ? "Resume with continuation" : "Enter a continuation message to resume"} aria-label="Resume agent" disabled={pending || !hasResumeMessage || !canControl(node, "resume")} onClick={onResume} className="rounded p-1.5 text-green hover:bg-panel disabled:opacity-40"><Play className="size-3.5" /></button>
+    <button type="button" title="Stop" aria-label="Stop agent" disabled={pending || !canControl(node, "stop")} onClick={() => onControl(node, "stop")} className="rounded p-1.5 text-red hover:bg-panel disabled:opacity-40"><CircleStop className="size-3.5" /></button>
   ) : (
     <>
       <button type="button" title="Interrupt" aria-label="Interrupt agent" disabled={pending || !ACTIVE.has(node.status) || !canControl(node, "interrupt")} onClick={() => onControl(node, "interrupt")} className="rounded p-1.5 text-yellow hover:bg-panel disabled:opacity-40"><Pause className="size-3.5" /></button>

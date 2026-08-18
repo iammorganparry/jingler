@@ -1074,6 +1074,10 @@ export function ConversationPane({
                 : null
             }
           />
+          {/* Same gutter + centered max-width as the transcript column above —
+              a full-bleed composer read as a different surface entirely. */}
+          <div className="flex-none px-[30px] pb-[18px] pt-[11px]">
+          <div className="mx-auto w-full max-w-[760px]">
           <Composer
             repo={session.repo}
             branch={session.branch}
@@ -1085,9 +1089,11 @@ export function ConversationPane({
               fleet.selectedNode.status === "needs-attention"
             }
             placeholder={
-              fleet.selectedNode.attention
-                ? `Reply to ${fleet.selectedNode.agent}…`
-                : `Steer ${fleet.selectedNode.agent}…`
+              fleet.selectedNode.status === "paused"
+                ? `Resume ${fleet.selectedNode.agent} with a continuation…`
+                : fleet.selectedNode.attention
+                  ? `Reply to ${fleet.selectedNode.agent}…`
+                  : `Steer ${fleet.selectedNode.agent}…`
             }
             disabledReason={
               fleet.selectedLegacyAgent !== null
@@ -1100,7 +1106,11 @@ export function ConversationPane({
               fleet
                 .control(
                   node,
-                  node.attention ? "reply" : "steer",
+                  node.status === "paused"
+                    ? "resume"
+                    : node.attention
+                      ? "reply"
+                      : "steer",
                   text,
                   node.attention?.requestId
                 )
@@ -1122,6 +1132,8 @@ export function ConversationPane({
             autoFocus={paneFocused}
             focusKey={fleet.selectedNode.id}
           />
+          </div>
+          </div>
         </>
       ) : (
         <ConversationView

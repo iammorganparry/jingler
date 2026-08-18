@@ -631,7 +631,10 @@ export function Composer({
             (paused
               ? "Reply, or answer the prompt above…"
               : busy
-                ? "Queue a message while the agent works…"
+                // An explicit placeholder wins even while busy: a composer
+                // aimed at a Fleet agent steers live ("Steer worker…"), and
+                // the queue default would promise semantics it doesn't have.
+                ? placeholder ?? "Queue a message while the agent works…"
                 : prompt)
           }
           onChange={(e) =>
