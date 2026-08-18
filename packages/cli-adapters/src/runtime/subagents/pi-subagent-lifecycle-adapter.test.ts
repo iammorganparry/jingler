@@ -613,6 +613,56 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
+  it("settles a terminal workflow root as completed when every child finished", async () => {
+    // A workflow root's completion results are keyed to child run ids, so the
+    // root itself is never settled by them — its process ending used to decay
+    // a still-"running" root to "unknown" even with every step finished.
+    const root = await mkdtemp(join(tmpdir(), "jingler-workflow-terminal-"))
+    await mkdir(join(root, ".active-runs"), { recursive: true })
+    await mkdir(join(root, "wf-1"), { recursive: true })
+    await writeFile(join(root, ".active-runs", "wf-1"), "")
+    await writeFile(join(root, "wf-1", "status.json"), JSON.stringify({
+      runId: "wf-1",
+      sessionId: parentSessionFile,
+      state: "running",
+      mode: "workflow",
+      startedAt: 10,
+      steps: [{
+        runId: "child-run",
+        agent: "scout",
+        status: "completed",
+        startedAt: 11,
+        sessionFile: "/sessions/child.jsonl"
+      }]
+    }))
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      parentPiSessionAliases: [parentSessionFile],
+      asyncRunsDir: root,
+      controlJournal: null,
+      emit: () => undefined,
+      now: () => 30
+    })
+    adapter.start()
+    try {
+      await adapter.refresh()
+      events.emit("subagent:process-terminal", {
+        runId: "wf-1",
+        state: "observed",
+        observedAt: 30
+      })
+      const workflowNode = adapter.snapshot().nodes.find(
+        (node) => node.nodeKind === "workflow"
+      )
+      expect(workflowNode).toMatchObject({ status: "completed", completedAt: 30 })
+    } finally {
+      adapter.stop()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("rejects unowned missing-session events but accepts correlated completion", () => {
     const events = createEventBus()
     const emitted: SubagentFleetEvent[] = []
@@ -700,9 +750,16 @@ describe("PiSubagentLifecycleAdapter", () => {
         }]
       })
       await refreshing
-      const durableId = adapter.snapshot().nodes[0]?.id
+      // The workflow container root is projected alongside its step child.
+      const child = adapter.snapshot().nodes.find(
+        (node) => node.nodeKind === "agent"
+      )
+      const durableId = child?.id
       expect(durableId).toBe(`${parent}/child-run`)
-      expect(adapter.snapshot().nodes[0]?.health).toBe("unknown")
+      expect(child?.health).toBe("unknown")
+      expect(adapter.snapshot().nodes.some(
+        (node) => node.nodeKind === "workflow" && node.id === `${parent}/run-1`
+      )).toBe(true)
       events.emit("subagent:async-complete", {
         runId: "run-1",
         sessionId: parentSessionFile,

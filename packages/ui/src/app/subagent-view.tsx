@@ -40,7 +40,15 @@ export function FleetAgentView({
           {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
           {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
           {!(loading || error) && messages.length === 0 && (
-            <p className="text-[12px] text-dim">The child session transcript is not available yet.</p>
+            // A workflow node is an orchestrator with no pi session of its
+            // own — its output lives in the step agents it spawns. Saying
+            // "not available yet" for one promised a transcript that could
+            // never arrive.
+            <p className="text-[12px] text-dim">
+              {node?.nodeKind === "workflow"
+                ? "This workflow orchestrates other agents and has no transcript of its own — select one of its step agents to see their output."
+                : "The child session transcript is not available yet."}
+            </p>
           )}
           {messages.map((message) => (
             <MessageTurn key={message.id} message={message} providerId={providerId} />

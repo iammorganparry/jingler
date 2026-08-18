@@ -1175,6 +1175,20 @@ export class PiSubagentLifecycleAdapter {
     )
     if (!existing) return
     const now = terminal.observedAt ?? this.#now()
+    // A workflow root is never settled by its own completion event (results
+    // are keyed to child run ids), so its process ending used to decay a
+    // still-"running" root to "unknown" even when every child had finished.
+    // If all its registered children settled cleanly, the workflow did too.
+    const settledWorkflow =
+      existing.nodeKind === "workflow" &&
+      (() => {
+        const children = this.#state().tree.nodes.filter(
+          (node) => node.parentId === existing.id
+        )
+        return children.length > 0 && children.every(
+          (child) => child.status === "completed" || child.terminal !== null
+        )
+      })()
     this.#publish({
       _tag: "Upsert",
       version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -1184,7 +1198,7 @@ export class PiSubagentLifecycleAdapter {
         ...existing,
         ...this.#identity(existing.subagentId, existing.orchestrationRunId, existing.nodeKind),
         status: terminal.state === "observed" && existing.status === "running"
-          ? "unknown"
+          ? settledWorkflow ? "completed" : "unknown"
           : existing.status,
         updatedAt: now,
         completedAt: existing.completedAt ?? now,
