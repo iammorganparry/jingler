@@ -133,6 +133,8 @@ export interface TabContribution {
   readonly order: number
   /** Whether this tab applies to the session in `ctx`. Must be cheap and pure. */
   readonly when: (ctx: TabContext) => boolean
+  /** Provider whose linked issues this tab presents, when declared by a plugin. */
+  readonly issueProviderId?: string
   /** Optional decoration drawn beside the label. */
   readonly badge?: (ctx: TabContext) => TabBadge | undefined
   /**

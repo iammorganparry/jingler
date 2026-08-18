@@ -33,7 +33,12 @@ import {
   DEVICE_AGENT_ENTRY,
   MAIN_ENTRY
 } from "./global-setup.js";
-import type { Chat, RuntimeRecoveryState } from "@jingler/core";
+import type {
+  Chat,
+  IssueIdentity,
+  IssueReference,
+  RuntimeRecoveryState,
+} from "@jingler/core";
 import {
   E2E_PI_CONNECTION_ID,
   E2E_PI_MODEL_ID,
@@ -183,6 +188,8 @@ export interface SeedSession {
   readonly githubFeedbackDeliveryIds?: ReadonlyArray<string>;
   readonly githubFeedbackSemanticKeys?: ReadonlyArray<string>;
   readonly issueNumber?: number | null;
+  readonly linkedIssues?: ReadonlyArray<IssueReference>;
+  readonly selectedIssue?: IssueIdentity;
   readonly costUsd: number;
   readonly tokens: number;
   readonly contextTokens?: number;

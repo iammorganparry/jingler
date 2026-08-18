@@ -142,6 +142,24 @@ describe("loadPluginUi", () => {
     expect(result.plugin.tabs[0]?.label).toBe("Hello")
   })
 
+  it("retains an issue provider declaration for the view-rail selector", async () => {
+    const result = await loadPluginUi(
+      plugin({
+        contributes: {
+          tabs: [{
+            id: "hello.greeting",
+            label: "Hello",
+            when: { issueProvider: "linear", includeUnlinked: true }
+          }]
+        }
+      }),
+      async () => ({ default: { views: { "hello.greeting": View } } })
+    )
+
+    if (!result.ok) throw new Error("expected ok")
+    expect(result.plugin.tabs[0]?.issueProviderId).toBe("linear")
+  })
+
   it("defaults a plugin tab to sorting after the built-ins", async () => {
     const result = await loadPluginUi(plugin(), async () => ({
       default: { views: { "hello.greeting": View } }

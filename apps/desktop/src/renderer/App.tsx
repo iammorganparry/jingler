@@ -15,6 +15,7 @@ import type {
   CreateSessionInput,
   ExecutionMode,
   GitConfig,
+  IssueIdentity,
   GithubConfig,
   NotificationsConfig,
   OffloadComputeSettings,
@@ -84,7 +85,7 @@ import {
   disposeFileBrowserActor,
   openSessionFile,
 } from "./use-file-browser.js";
-import { onSessionUpdate } from "./session-updates.js";
+import { onSessionUpdate, publishSessionUpdate } from "./session-updates.js";
 import { setVisibleSessionIds } from "./active-session.js";
 import { prNotification } from "./notifier.js";
 import { completedSessionIds } from "./pr-refresh.js";
@@ -735,6 +736,9 @@ function AuthedApp({
       send({ type: "SESSION_PUBLISH_UPDATED", sessionId, checkpoint }),
     [send],
   );
+  const selectIssue = useCallback((sessionId: string, issue: IssueIdentity) => {
+    void rpc.sessionsSelectIssue(sessionId, issue).then(publishSessionUpdate);
+  }, []);
 
   // Unlinking an issue used to live here, wired to the built-in Issue tab's
   // `onUnlink`. That tab retired in favour of the github-issues plugin and this
@@ -1532,6 +1536,7 @@ function AuthedApp({
       )}
       <JinglerApp
         tabContributions={pluginTabs}
+        onSelectIssue={selectIssue}
         paneContributions={pluginPanes}
         pluginCommands={pluginCommands}
         onRunPluginCommand={runPluginCommand}

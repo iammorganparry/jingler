@@ -222,6 +222,88 @@ describe("plugin tab contributions", () => {
     expect(screen.getByText("linear.issue body")).toBeTruthy()
   })
 
+  it("derives a provider issue picker and persists the chosen issue", () => {
+    const onSelectIssue = vi.fn()
+    render(
+      <SessionPane
+        session={session({
+          id: "linear-derived-menu",
+          linkedIssues: [
+            {
+              providerId: "linear",
+              providerAccountId: "work",
+              id: "issue-1",
+              identifier: "ENG-1",
+              title: "First issue",
+              url: "https://linear.app/issue/ENG-1",
+              labels: []
+            },
+            {
+              providerId: "linear",
+              providerAccountId: "personal",
+              id: "issue-2",
+              identifier: "ENG-2",
+              title: "Second issue",
+              url: "https://linear.app/issue/ENG-2",
+              labels: []
+            }
+          ],
+          selectedIssue: { providerId: "linear", id: "issue-1" }
+        })}
+        renderConversation={() => <div>transcript</div>}
+        tabContributions={[
+          pluginTab("linear.issue", {
+            label: "Linear",
+            icon: LinearMark,
+            issueProviderId: "linear"
+          })
+        ]}
+        onSelectIssue={onSelectIssue}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Select linked Linear issue" }))
+    fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
+    expect(onSelectIssue).toHaveBeenCalledWith("linear-derived-menu", {
+      providerId: "linear",
+      providerAccountId: "personal",
+      id: "issue-2"
+    })
+    expect(screen.getByText("linear.issue body")).toBeTruthy()
+  })
+
+  it("opens a provider tab directly when it has only one linked issue", () => {
+    render(
+      <SessionPane
+        session={session({
+          id: "linear-single",
+          linkedIssues: [{
+            providerId: "linear",
+            id: "issue-1",
+            identifier: "ENG-1",
+            title: "Only issue",
+            url: "https://linear.app/issue/ENG-1",
+            labels: []
+          }],
+          selectedIssue: { providerId: "linear", id: "issue-1" }
+        })}
+        renderConversation={() => <div>transcript</div>}
+        tabContributions={[
+          pluginTab("linear.issue", {
+            label: "Linear",
+            icon: LinearMark,
+            issueProviderId: "linear"
+          })
+        ]}
+        onSelectIssue={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }))
+    expect(screen.getByText("linear.issue body")).toBeTruthy()
+    expect(screen.queryByRole("listbox")).toBeNull()
+  })
+
   it("draws a plugin's own badge without the tab bar knowing what it means", () => {
     render(
       <SessionPane

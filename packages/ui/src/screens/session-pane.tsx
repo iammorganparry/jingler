@@ -1,6 +1,19 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
-import type { DiffStat, Session, SessionActivity, SessionDisplayStatus } from "@jingler/core"
-import { activityLabel, displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
+import type {
+  DiffStat,
+  IssueIdentity,
+  IssueReference,
+  Session,
+  SessionActivity,
+  SessionDisplayStatus
+} from "@jingler/core"
+import {
+  activityLabel,
+  displayStatusOf,
+  issueReferenceOf,
+  issueReferencesOf,
+  UNTITLED_SESSION
+} from "@jingler/core"
 import { displayStatusLabel } from "../tokens.js"
 import { usePaneWidth, WidthTierProvider } from "../hooks/width-tier.js"
 import { ResizeHandle } from "../components/resizable.js"
@@ -29,6 +42,9 @@ import { ViewRail, type ViewRailMenu } from "../app/view-rail.js"
 
 const SESSION_AUXILIARY_RATIO_KEY = "sb.split.session-auxiliary.ratio"
 const LEGACY_SESSION_BROWSER_RATIO_KEY = "sb.split.session-browser.ratio"
+
+const issueMenuValue = (issue: IssueReference): string =>
+  `${issue.providerId}:${issue.providerAccountId ?? ""}:${issue.id}`
 
 const initialSessionAuxiliaryRatio = (): number => {
   try {
@@ -205,6 +221,8 @@ export interface SessionPaneProps {
   terminalActive?: boolean
   /** Toggle this session's terminal dock from the view rail. */
   onToggleTerminal?: () => void
+  /** Persist selection of a provider-scoped issue from the right view rail. */
+  onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
   /** Optional pickers anchored to right-rail view icons, keyed by tab id. */
   viewRailMenus?: Readonly<Record<TabKey, ViewRailMenu | undefined>>
 }
@@ -378,6 +396,24 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const selectTab = useCallback(
     (nextTab: TabKey) => {
+      const providerId = props.tabContributions?.find(
+        (contribution) => contribution.id === nextTab
+      )?.issueProviderId
+      const selectedIssue = issueReferenceOf(active)
+      if (providerId && selectedIssue?.providerId !== providerId) {
+        const issue = issueReferencesOf(active).find(
+          (candidate) => candidate.providerId === providerId
+        )
+        if (issue) {
+          props.onSelectIssue?.(active.id, {
+            providerId: issue.providerId,
+            ...(issue.providerAccountId
+              ? { providerAccountId: issue.providerAccountId }
+              : {}),
+            id: issue.id
+          })
+        }
+      }
       if (nextTab === BUILTIN_TAB.browser && !browserActive) {
         props.onToggleBrowser?.(active.id)
       } else if (nextTab !== BUILTIN_TAB.browser && browserActive) {
@@ -386,7 +422,14 @@ function SessionPaneBody(props: SessionPaneProps) {
       if (nextTab === BUILTIN_TAB.plan) openPlanReview()
       else setTab(nextTab)
     },
-    [active.id, browserActive, openPlanReview, props.onToggleBrowser]
+    [
+      active,
+      browserActive,
+      openPlanReview,
+      props.onSelectIssue,
+      props.onToggleBrowser,
+      props.tabContributions
+    ]
   )
   const planStepTarget = target?.sessionId === active.id ? target.stepId : null
 
@@ -525,6 +568,44 @@ function SessionPaneBody(props: SessionPaneProps) {
     )
     .map((contribution) => describeTab(contribution, tabCtx))
 
+  const selectedIssue = issueReferenceOf(active)
+  const providerMenus: Record<TabKey, ViewRailMenu | undefined> = {}
+  if (props.onSelectIssue) {
+    for (const contribution of tabs) {
+      const providerId = contribution.issueProviderId
+      if (!providerId) continue
+      const issues = issueReferencesOf(active).filter(
+        (issue) => issue.providerId === providerId
+      )
+      if (issues.length < 2) continue
+      const selected =
+        selectedIssue?.providerId === providerId ? selectedIssue : issues[0]!
+      providerMenus[contribution.id] = {
+        value: issueMenuValue(selected),
+        ariaLabel: `Select linked ${providerId[0]?.toUpperCase() ?? ""}${providerId.slice(1)} issue`,
+        options: issues.map((issue) => ({
+          value: issueMenuValue(issue),
+          label: issue.identifier,
+          description: issue.title,
+          ariaLabel: `${issue.identifier} ${issue.title}`,
+          searchText: `${issue.identifier} ${issue.title}`
+        })),
+        onSelect: (value) => {
+          const issue = issues.find((candidate) => issueMenuValue(candidate) === value)
+          if (!issue) return
+          props.onSelectIssue?.(active.id, {
+            providerId: issue.providerId,
+            ...(issue.providerAccountId
+              ? { providerAccountId: issue.providerAccountId }
+              : {}),
+            id: issue.id
+          })
+        }
+      }
+    }
+  }
+  const viewRailMenus = { ...providerMenus, ...props.viewRailMenus }
+
   return (
     <>
       <TabBar
@@ -647,7 +728,7 @@ function SessionPaneBody(props: SessionPaneProps) {
           tabs={railTabs}
           active={activeTab}
           onChange={selectTab}
-          menus={props.viewRailMenus}
+          menus={viewRailMenus}
           terminalActive={props.terminalActive}
           onToggleTerminal={props.onToggleTerminal}
         />

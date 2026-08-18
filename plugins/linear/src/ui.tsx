@@ -2,6 +2,7 @@ import { useMachine } from "@xstate/react"
 import {
   definePlugin,
   type IssueComment,
+  type IssueIdentity,
   type IssueReference,
   type IssueSummary,
   type SessionSnapshot,
@@ -57,7 +58,7 @@ function linearServices(
   host: ReturnType<typeof useHost>,
   session: SessionSnapshot,
   linkIssue: (sessionId: string, issue: IssueReference) => Promise<void>,
-  unlinkIssue: (sessionId: string) => Promise<void>
+  removeIssue: (sessionId: string, issue: IssueIdentity) => Promise<void>
 ): LinearIssueServices {
   const repository: HostRepository = {
     name: session.repo,
@@ -100,7 +101,19 @@ function linearServices(
       })
     },
     link: (issue) => linkIssue(session.id, issue),
-    unlink: () => unlinkIssue(session.id)
+    unlink: async () => {
+      const issue = session.linkedIssue
+      if (issue?.providerId !== "linear") {
+        throw new Error("No selected Linear issue to unlink.")
+      }
+      await removeIssue(session.id, {
+        providerId: issue.providerId,
+        ...(issue.providerAccountId
+          ? { providerAccountId: issue.providerAccountId }
+          : {}),
+        id: issue.id
+      })
+    }
   }
 }
 
@@ -426,11 +439,11 @@ function LinearSetupFlyout({
 
 function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
   const host = useHost()
-  const { linkIssue, unlinkIssue } = useSessionActions()
+  const { linkIssue, removeIssue } = useSessionActions()
   const [setupOpen, setSetupOpen] = useState(false)
   const services = useMemo(
-    () => linearServices(host, session, linkIssue, unlinkIssue),
-    [host, linkIssue, session, unlinkIssue]
+    () => linearServices(host, session, linkIssue, removeIssue),
+    [host, linkIssue, removeIssue, session]
   )
   const [snapshot, send] = useMachine(linearIssueMachine, {
     input: { linkedIssue: session.linkedIssue, services }
@@ -463,7 +476,11 @@ function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
 }
 
 export function IssueTab({ session }: TabProps) {
-  return <LinearIssueView key={session.id} session={session} />
+  const selected = session.linkedIssue
+  const selectedKey = selected
+    ? `${selected.providerId}:${selected.providerAccountId ?? ""}:${selected.id}`
+    : "unlinked"
+  return <LinearIssueView key={`${session.id}:${selectedKey}`} session={session} />
 }
 
 export default definePlugin(manifest, { views: { "linear.issue": IssueTab } })

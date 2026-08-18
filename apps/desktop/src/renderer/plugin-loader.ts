@@ -429,6 +429,9 @@ export const loadPluginUi = async (
       icon: resolvePluginIcon(plugin, declared.icon),
       order: declared.order ?? PLUGIN_TAB_ORDER,
       when: visibilityPredicate(declared.when),
+      ...(typeof declared.when === "object"
+        ? { issueProviderId: declared.when.issueProvider }
+        : {}),
       // The session comes from context, not from this argument. `PluginTabHost`
       // wraps every plugin body and is the one place an internal `Session` is
       // narrowed to a `SessionSnapshot`; taking it from the argument here would

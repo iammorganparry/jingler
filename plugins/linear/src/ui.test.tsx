@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   openExternal: vi.fn().mockResolvedValue(undefined),
   linkIssue: vi.fn().mockResolvedValue(undefined),
-  unlinkIssue: vi.fn().mockResolvedValue(undefined),
+  removeIssue: vi.fn().mockResolvedValue(undefined),
   tier: "wide"
 }))
 
@@ -20,11 +20,11 @@ vi.mock("@jingler/plugin-sdk", async (load) => {
       invoke: mocks.invoke,
       openExternal: mocks.openExternal,
       storage: {},
-      sessions: { linkIssue: mocks.linkIssue, unlinkIssue: mocks.unlinkIssue }
+      sessions: { linkIssue: mocks.linkIssue, removeIssue: mocks.removeIssue }
     }),
     useSessionActions: () => ({
       linkIssue: mocks.linkIssue,
-      unlinkIssue: mocks.unlinkIssue
+      removeIssue: mocks.removeIssue
     })
   }
 })
@@ -102,7 +102,7 @@ beforeEach(() => {
   mocks.invoke.mockImplementation((command: string) => Promise.resolve(successfulHost(command)))
   mocks.openExternal.mockClear()
   mocks.linkIssue.mockClear()
-  mocks.unlinkIssue.mockClear()
+  mocks.removeIssue.mockClear()
   mocks.tier = "wide"
 })
 
@@ -180,9 +180,9 @@ describe("Linear Issue tab content", () => {
     view.rerender(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
     expect(await screen.findByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
 
-    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.configured")).toHaveLength(1)
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.configured")).toHaveLength(2)
     expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.context")).toHaveLength(1)
-    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.get")).toHaveLength(1)
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.get")).toHaveLength(2)
   })
 })
 
@@ -215,7 +215,10 @@ describe("Linear Issue tab states", () => {
       "Linear could not find this issue."
     )
     fireEvent.click(screen.getByRole("button", { name: "Unlink issue" }))
-    await waitFor(() => expect(mocks.unlinkIssue).toHaveBeenCalledWith("session-1"))
+    await waitFor(() => expect(mocks.removeIssue).toHaveBeenCalledWith("session-1", {
+      providerId: "linear",
+      id: "issue-123"
+    }))
   })
 
   it("keeps issue detail and the draft visible when commenting fails", async () => {
@@ -241,6 +244,38 @@ describe("Linear Issue tab states", () => {
 })
 
 describe("Linear Issue tab rendering", () => {
+  it("reloads selected issue detail with its account-bound profile", async () => {
+    const first = { ...linkedIssue, providerAccountId: "work" }
+    const second = {
+      ...linkedIssue,
+      providerAccountId: "personal",
+      id: "issue-456",
+      identifier: "ENG-456",
+      title: "Reconcile duplicate charges"
+    }
+    const selectedSession = (issue: IssueReference): SessionSnapshot => ({
+      ...session(issue),
+      linkedIssues: [first, second],
+      selectedIssue: { providerId: issue.providerId, id: issue.id }
+    })
+    mocks.invoke.mockImplementation((command: string, input?: { issueId?: string }) => {
+      if (command === "linear.get") {
+        const issue = input?.issueId === second.id ? second : first
+        return Promise.resolve({ ...detail, ...issue })
+      }
+      return Promise.resolve(successfulHost(command))
+    })
+
+    const view = render(<IssueTab pluginId="linear" session={selectedSession(first)} />)
+    expect(await screen.findByRole("heading", { name: first.title })).toBeTruthy()
+    view.rerender(<IssueTab pluginId="linear" session={selectedSession(second)} />)
+    expect(await screen.findByRole("heading", { name: second.title })).toBeTruthy()
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "linear.get",
+      expect.objectContaining({ issueId: second.id, profileId: "personal" })
+    ))
+  })
+
   it("keeps primary actions accessible at narrow width", async () => {
     mocks.tier = "narrow"
     render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
