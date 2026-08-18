@@ -278,6 +278,7 @@ describe("pi file-change events", () => {
     })).toEqual({
       runId: "run-1",
       mode: "single",
+      settled: false,
       children: [expect.objectContaining({
         index: 0,
         runId: "child-run-1",
@@ -309,6 +310,8 @@ describe("pi file-change events", () => {
     } as never)).toEqual({
       runId: "run-async-1",
       mode: "workflow",
+      // An async acknowledgment never settles the run: it detached and lives on.
+      settled: false,
       children: []
     })
   })
@@ -339,6 +342,7 @@ describe("pi file-change events", () => {
     } as never)).toEqual({
       runId: "wf-1",
       mode: "workflow",
+      settled: false,
       children: [expect.objectContaining({
         index: 0,
         runId: "child-1",
@@ -380,6 +384,7 @@ describe("pi file-change events", () => {
     } as never)).toEqual({
       runId: "wf-1",
       mode: "workflow",
+      settled: true,
       children: [
         expect.objectContaining({
           index: 0,
@@ -428,6 +433,7 @@ describe("pi file-change events", () => {
     } as never)).toEqual({
       runId: "wf-1",
       mode: "workflow",
+      settled: true,
       children: [expect.objectContaining({
         runId: "child-1",
         agent: "reviewer",

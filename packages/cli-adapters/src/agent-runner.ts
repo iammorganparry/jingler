@@ -2480,6 +2480,25 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* drop(execDefaults)
       })
 
+    /**
+     * Whether this chat has a live, UNSETTLED turn right now — the same
+     * staleness rule the single-flight refusal applies (a live fiber whose
+     * turn already emitted its terminal event holds nothing worth protecting).
+     *
+     * Exists for the renderer's reload path: a fresh renderer that dequeued a
+     * held message straight into Agent.run while main's previous turn was
+     * still streaming got only the refusal text as its "reply", and the
+     * message was consumed. Asking first lets the reload hold the queue until
+     * the live turn settles.
+     */
+    const chatBusy = (chatId: string): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
+        const running = (yield* Ref.get(fibers)).get(chatId)
+        if (running === undefined) return false
+        if (Option.isSome(yield* Fiber.poll(running.fiber))) return false
+        return !(yield* Ref.get(running.settled))
+      })
+
     return {
       /**
        * Whether any session is mid-run. Read by the learning daemon so a
@@ -2488,6 +2507,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
        * beats a second source of truth that could disagree.
        */
       anyRunning: anySessionRunActive,
+      chatBusy,
       prompt,
       decideGate,
       answerQuestion,

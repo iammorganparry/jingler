@@ -5319,6 +5319,14 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         (cause) => new GitError({ message: "Could not stop the agent", cause }),
       ),
     ),
+  // Local-only by design: a remote session's turns never contend with the
+  // local single-flight slot, and its liveness surfaces through session
+  // envelopes — reporting "not busy" is the correct answer for it here.
+  "Agent.chatBusy": ({ chatId }) =>
+    Effect.gen(function* () {
+      const runner = yield* AgentRunner;
+      return yield* runner.chatBusy(chatId);
+    }),
   // Not `AgentRunner.stop` scoped smaller: that halts the whole turn. A
   // sub-agent is killed through the run's own per-task handle, which is what
   // `BackgroundTaskStore` holds.
