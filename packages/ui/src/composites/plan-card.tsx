@@ -22,8 +22,16 @@ const PREVIEW_STEPS = 3
 
 const comparableText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
 
-const planDescription = (plan: Plan): string | null =>
-  plan.raw
+const planDescription = (plan: Plan, document?: PlanDocument | null): string | null => {
+  if (document?.id === plan.id) {
+    for (const section of document.plan.sections) {
+      const prose = section.blocks.find((block) => block.kind === "prose")
+      if (prose?.kind === "prose" && prose.text.trim().length > 0) return prose.text.trim()
+    }
+    return null
+  }
+
+  return plan.raw
     .split(/\n+/)
     .map((line) => line.trim())
     .find((line) =>
@@ -31,6 +39,7 @@ const planDescription = (plan: Plan): string | null =>
       !line.startsWith("#") &&
       comparableText(line) !== comparableText(plan.summary)
     ) ?? null
+}
 
 const downloadPlan = (plan: Plan) => {
   const url = URL.createObjectURL(new Blob([plan.raw], { type: "text/markdown" }))
@@ -99,7 +108,7 @@ export function PlanApprovalCard({
   const stages = approvalStages(plan, document)
   const visibleStages = showAll ? stages : stages.slice(0, PREVIEW_STEPS)
   const remaining = Math.max(0, stages.length - PREVIEW_STEPS)
-  const description = planDescription(plan)
+  const description = planDescription(plan, document)
 
   return (
     <section

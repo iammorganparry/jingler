@@ -42,7 +42,11 @@ const document: PlanDocument = {
   status: "proposed",
   plan: {
     title: plan.summary,
-    sections: [],
+    sections: [{
+      id: "overview",
+      title: "Overview",
+      blocks: [{ kind: "prose", id: "overview-copy", text: "Canonical plan summary." }]
+    }],
     stages: [{
       id: "canonical-stage",
       title: "Canonical stage",
@@ -83,6 +87,7 @@ describe("PlanApprovalCard approval", () => {
   it("renders canonical stages with their nested tasks when ids match", () => {
     render(<PlanApprovalCard plan={plan} document={document} />)
 
+    expect(screen.getByText("Canonical plan summary.")).toBeTruthy()
     expect(screen.getByText("Canonical stage")).toBeTruthy()
     expect(screen.getByText("First stage task")).toBeTruthy()
     expect(screen.getByText("Second stage task")).toBeTruthy()

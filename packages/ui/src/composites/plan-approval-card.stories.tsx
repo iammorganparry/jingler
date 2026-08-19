@@ -42,7 +42,15 @@ const documentFor = (value: Plan): PlanDocument => ({
   status: value.status === "approved" ? "approved" : value.status,
   plan: {
     title: value.summary,
-    sections: [],
+    sections: [{
+      id: "overview",
+      title: "Overview",
+      blocks: [{
+        kind: "prose",
+        id: "overview-copy",
+        text: "Apply the AI CSS approval, task-list, and streaming patterns with Jingler theme tokens."
+      }]
+    }],
     stages: value.steps.map((step, index) => ({
       id: step.id,
       title: step.title,
