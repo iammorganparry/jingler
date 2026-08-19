@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronRight, CircleStop } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
 import { FileIcon } from "../components/file-icon.js"
@@ -26,6 +26,11 @@ export interface ToolCallProps {
    */
   expanded?: boolean
   onToggle?: () => void
+  /**
+   * Interrupt a long-running tool (a Bash command can hang for minutes). Shown
+   * as a stop button on the header only while `status` is "running".
+   */
+  onStop?: () => void
   className?: string
 }
 
@@ -112,6 +117,7 @@ export function ToolCall({
   icon,
   expanded = false,
   onToggle,
+  onStop,
   className
 }: ToolCallProps) {
   const header = (
@@ -154,18 +160,31 @@ export function ToolCall({
         className
       )}
     >
-      {onToggle ? (
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          className={cn(headerClass, "outline-none focus-visible:ring-2 focus-visible:ring-ring")}
-        >
-          {header}
-        </button>
-      ) : (
-        <div className={headerClass}>{header}</div>
-      )}
+      <div className="flex items-stretch">
+        {onToggle ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className={cn(headerClass, "min-w-0 flex-1 outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+          >
+            {header}
+          </button>
+        ) : (
+          <div className={cn(headerClass, "min-w-0 flex-1")}>{header}</div>
+        )}
+        {onStop && status === "running" && (
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label="Stop tool"
+            title="Stop"
+            className="flex-none px-2.5 text-red outline-none transition-colors hover:bg-red/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            <CircleStop className="size-3.5" />
+          </button>
+        )}
+      </div>
       {/* While running with no peek yet, a shimmer bar signals live work. */}
       {status === "running" && children == null && (
         <div className="h-[22px] animate-shine bg-[length:220px_100%] bg-gradient-to-r from-transparent via-hover to-transparent" />

@@ -29,7 +29,7 @@ import { Composer, type ComposerCodeReference } from "../composites/composer.js"
 import { ThinkingOrb } from "../components/loading.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
-import { MessageTurn } from "../composites/message-turn.js"
+import { MessageTurn, ToolStopContext } from "../composites/message-turn.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
 import { RunStats } from "../composites/run-stats.js"
@@ -532,6 +532,7 @@ export function ConversationView({
               </button>
             </div>
           )}
+          <ToolStopContext.Provider value={busy ? (onStop ?? null) : null}>
           <div
             ref={transcriptRef}
             className="relative w-full"
@@ -570,6 +571,7 @@ export function ConversationView({
               )
             })}
           </div>
+          </ToolStopContext.Provider>
           {busy ? (
             <div className="mx-auto mt-1 flex w-full max-w-[760px] justify-start" data-testid="chat-thinking-orb">
               <ThinkingOrb />

@@ -1,7 +1,7 @@
 import type { Message, ToolCall as ToolCallModel } from "@jingler/core"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
-import { MessageTurn } from "./message-turn.js"
+import { MessageTurn, ToolStopContext } from "./message-turn.js"
 
 /**
  * What the operator needs off a tool card: which FILE is being written (the part
@@ -194,5 +194,34 @@ describe("plan task progress — protocol stays out of chat", () => {
     expect(screen.getByText("The registry tests now cover replay rejection.")).toBeDefined()
     expect(screen.queryByText(/PLAN_TASK/)).toBeNull()
     expect(screen.queryByText(/secret/)).toBeNull()
+  })
+})
+
+describe("tool card — stopping a hung command", () => {
+  it("shows a stop button on a running Bash tool and fires the interrupt", () => {
+    const onStop = vi.fn()
+    render(
+      <ToolStopContext.Provider value={onStop}>
+        <MessageTurn message={tool({ name: "Bash", target: "sleep 999", status: "running" })} />
+      </ToolStopContext.Provider>
+    )
+    fireEvent.click(screen.getByLabelText("Stop tool"))
+    expect(onStop).toHaveBeenCalledTimes(1)
+  })
+
+  it("hides the stop button on a non-command tool and on a settled command", () => {
+    const { rerender } = render(
+      <ToolStopContext.Provider value={vi.fn()}>
+        <MessageTurn message={tool({ name: "Read", target: "a.ts", status: "running" })} />
+      </ToolStopContext.Provider>
+    )
+    expect(screen.queryByLabelText("Stop tool")).toBeNull()
+
+    rerender(
+      <ToolStopContext.Provider value={vi.fn()}>
+        <MessageTurn message={tool({ name: "Bash", target: "ls", status: "success" })} />
+      </ToolStopContext.Provider>
+    )
+    expect(screen.queryByLabelText("Stop tool")).toBeNull()
   })
 })
