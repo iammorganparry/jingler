@@ -1,4 +1,4 @@
-import type { PlanDocument, PlanPrdStage } from "@jingler/core"
+import type { PlanDocument, PlanPrdStage, PlanTaskStatus } from "@jingler/core"
 import { planStageExecutionStatus } from "@jingler/core"
 import {
   CheckCircle2,
@@ -41,6 +41,17 @@ const STATUS: Readonly<Record<PlanProgressStatus, {
   interrupted: { label: "Interrupted", className: "text-orange", icon: PauseCircle }
 }
 
+/** Per-subtask status icon for the extended (overview) drawer view. */
+const TASK_STATUS: Readonly<Record<PlanTaskStatus, {
+  readonly className: string
+  readonly icon: ComponentType<{ className?: string }>
+}>> = {
+  pending: { className: "text-dim", icon: Circle },
+  "in-progress": { className: "text-blue", icon: Loader2 },
+  completed: { className: "text-green", icon: CheckCircle2 },
+  blocked: { className: "text-yellow", icon: CircleAlert }
+}
+
 /**
  * Collapsible task-list projection of the live canonical plan. It owns only its
  * open state; stage/task status continues to come exclusively from PlanDocument.
@@ -60,13 +71,16 @@ export function PlanTaskList({
   document,
   onOpenStage,
   className,
-  bare = false
+  bare = false,
+  overview = false
 }: {
   document: PlanDocument
   onOpenStage?: (stageId: string) => void
   className?: string
   /** Render only the task rows — no header, no collapse. For the tabbed drawer. */
   bare?: boolean
+  /** The extended drawer view: stages with their nested subtasks (the plan overview). */
+  overview?: boolean
 }) {
   const [expanded, setExpanded] = useState(true)
   const listId = useId()
@@ -109,10 +123,47 @@ export function PlanTaskList({
     </ol>
   )
 
+  const overviewList = (
+    <ol className="m-0 flex list-none flex-col gap-1 p-0">
+      {rows.map(({ stage, status }) => {
+        const config = STATUS[status]
+        const StageIcon = config.icon
+        const tasks = stage.tasks ?? []
+        return (
+          <li key={stage.id}>
+            <button
+              type="button"
+              data-testid={`plan-progress-stage-${stage.id}`}
+              onClick={() => onOpenStage?.(stage.id)}
+              className="group flex min-h-7 w-full items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <StageIcon aria-hidden="true" className={cn("size-3.5 shrink-0", config.className, status === "in-progress" && "animate-spin")} />
+              <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-text-body">{stage.title}</span>
+            </button>
+            {tasks.length > 0 && (
+              <ul className="m-0 ml-[22px] flex list-none flex-col gap-0.5 py-0.5">
+                {tasks.map((task) => {
+                  const ts = TASK_STATUS[task.status]
+                  const TaskIcon = ts.icon
+                  return (
+                    <li key={task.id} className="flex min-h-5 items-center gap-1.5 text-[10.5px] text-muted-foreground">
+                      <TaskIcon aria-hidden="true" className={cn("size-3 shrink-0", ts.className, task.status === "in-progress" && "animate-spin")} />
+                      <span className={cn("min-w-0 flex-1 truncate", task.status === "completed" && "line-through decoration-line-strong")}>{task.text}</span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </li>
+        )
+      })}
+    </ol>
+  )
+
   if (bare) {
     return (
-      <div data-testid="plan-task-list" className={cn("max-h-[240px] overflow-y-auto px-2 py-1.5", className)}>
-        {list}
+      <div data-testid="plan-task-list" className={cn("max-h-[280px] overflow-y-auto px-2 py-1.5", className)}>
+        {overview ? overviewList : list}
       </div>
     )
   }

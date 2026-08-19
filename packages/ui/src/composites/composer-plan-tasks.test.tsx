@@ -49,4 +49,24 @@ describe("Composer plan task list", () => {
     fireEvent.click(screen.getByTestId("plan-progress-stage-stage-1"))
     expect(onOpenPlanStage).toHaveBeenCalledWith("stage-1")
   })
+
+  it("extends the Plan tab to the overview, revealing nested subtasks", () => {
+    const withSubtask: PlanDocument = {
+      ...document,
+      plan: {
+        ...document.plan,
+        stages: [{
+          ...document.plan.stages[0]!,
+          title: "Build the consent route",
+          tasks: [{ id: "t-a", text: "Wire the OAuth callback", status: "pending" }]
+        }]
+      }
+    }
+    render(<Composer planDocument={withSubtask} />)
+
+    // Compact list shows the stage, not its subtasks.
+    expect(screen.queryByText("Wire the OAuth callback")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Extend to plan overview" }))
+    expect(screen.getByText("Wire the OAuth callback")).toBeDefined()
+  })
 })

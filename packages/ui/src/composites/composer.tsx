@@ -20,6 +20,8 @@ import {
   GitBranch,
   ImagePlus,
   ListChecks,
+  Maximize2,
+  Minimize2,
   Monitor,
   MousePointer2,
   Plus,
@@ -424,6 +426,9 @@ export function Composer({
   // The Plan/Fleet drawer: which tab is showing, and whether it's expanded.
   const [drawerTab, setDrawerTab] = useState<"plan" | "fleet">("plan");
   const [drawerOpen, setDrawerOpen] = useState(true);
+  // Extend the Plan tab from the flat task list to the full plan overview
+  // (stages with their nested subtasks) inside the drawer.
+  const [planExtended, setPlanExtended] = useState(false);
   // With only one of the two present, that tab is forced active regardless of
   // the last manual pick, so a lone drawer never renders an empty panel.
   const drawerActiveTab: "plan" | "fleet" =
@@ -660,6 +665,17 @@ export function Composer({
                 />
               )}
               <span className="flex-1" />
+              {drawerActiveTab === "plan" && planDocument && drawerOpen && (
+                <button
+                  type="button"
+                  aria-label={planExtended ? "Collapse plan overview" : "Extend to plan overview"}
+                  aria-pressed={planExtended}
+                  onClick={() => setPlanExtended((value) => !value)}
+                  className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {planExtended ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                </button>
+              )}
               <button
                 type="button"
                 aria-label={drawerOpen ? "Collapse drawer" : "Expand drawer"}
@@ -673,7 +689,7 @@ export function Composer({
             {drawerOpen && (
               <div className="max-h-[280px] overflow-y-auto">
                 {drawerActiveTab === "plan" && planDocument && (
-                  <PlanTaskList bare document={planDocument} onOpenStage={onOpenPlanStage} />
+                  <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} />
                 )}
                 {drawerActiveTab === "fleet" && topSlot}
               </div>
