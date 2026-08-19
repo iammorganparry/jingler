@@ -77,6 +77,7 @@ import { DialogService } from "./dialog.js";
 import {
   adoptBranch,
   forkOntoBranch,
+  transcriptForFork,
   chooseReposDir,
   awaitRelayAcknowledgement,
   completeDurableGitHubFeedbackReplay,
@@ -631,6 +632,41 @@ describe("RPC handlers", () => {
       );
 
       expect(updated.branch).toBe("main");
+    });
+
+    it("transcriptForFork keeps the work but strips the drift banner that led to the fork", () => {
+      const now = "2026-08-19T11:00:00.000Z";
+      const messages = [
+        {
+          id: "a1",
+          role: "assistant" as const,
+          streaming: false,
+          createdAt: now,
+          parts: [
+            { _tag: "Tool" as const, tool: { id: "t1", name: "Bash", target: "git switch -c fix/x", status: "success" as const, meta: null, diff: null, preview: null } },
+            { _tag: "BranchDrift" as const, sessionId: "s1", pinnedBranch: "main", liveBranch: "fix/x" },
+          ],
+        },
+        {
+          id: "a2",
+          role: "assistant" as const,
+          streaming: false,
+          createdAt: now,
+          parts: [
+            { _tag: "BranchDrift" as const, sessionId: "s1", pinnedBranch: "main", liveBranch: "fix/x" },
+          ],
+        },
+      ];
+
+      const forked = transcriptForFork(messages);
+
+      // The lone-banner message is dropped entirely; the work message keeps its
+      // tool call but loses the banner.
+      expect(forked).toHaveLength(1);
+      expect(forked[0]?.parts.map((p) => p._tag)).toEqual(["Tool"]);
+      expect(
+        forked.some((m) => m.parts.some((p) => p._tag === "BranchDrift")),
+      ).toBe(false);
     });
 
     it("forkOntoBranch fails with GitError when the checkout has not drifted", async () => {
