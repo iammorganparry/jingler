@@ -113,6 +113,10 @@ const renderPart = (part: ContentPart): string | null => {
     }
     case "PlanTaskProgress":
       return `- PLAN TASK ${part.stageId}/${part.taskId}: ${part.status}`
+    case "BranchDrift":
+      // A transient recovery banner (fork/adopt the live branch). It records no
+      // decision and no work — nothing a successor conversation can act on.
+      return null
   }
 }
 

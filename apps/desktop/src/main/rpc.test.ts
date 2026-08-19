@@ -75,6 +75,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DialogService } from "./dialog.js";
 import {
+  adoptBranch,
+  forkOntoBranch,
   chooseReposDir,
   awaitRelayAcknowledgement,
   completeDurableGitHubFeedbackReplay,
@@ -544,6 +546,105 @@ describe("RPC handlers", () => {
 
     expect(updated.persistent).toBe(true);
     expect(reloaded.persistent).toBe(true);
+  });
+
+  describe("Sessions.adoptBranch / forkOntoBranch", () => {
+    const now = "2026-08-19T10:00:00.000Z";
+    // A direct session sharing a checkout, pinned to `main`, whose checkout has
+    // been moved onto `feature/other` — the exact BranchDrift the banner recovers.
+    const seedDriftedDirectSession = (checkoutPath: string) => {
+      mkdirSync(checkoutPath, { recursive: true });
+      execFileSync("git", ["init"], { cwd: checkoutPath, stdio: "ignore" });
+      execFileSync("git", ["checkout", "-b", "main"], {
+        cwd: checkoutPath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.email", "t@example.com"], {
+        cwd: checkoutPath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "Test"], {
+        cwd: checkoutPath,
+        stdio: "ignore",
+      });
+      writeFileSync(join(checkoutPath, "README.md"), "# repo\n");
+      execFileSync("git", ["add", "."], { cwd: checkoutPath, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "init"], {
+        cwd: checkoutPath,
+        stdio: "ignore",
+      });
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "s1",
+            repo: "widget",
+            branch: "main",
+            title: "Widget",
+            status: "idle",
+            connectionId: "anthropic-max",
+            providerId: "anthropic",
+            modelId: "anthropic/claude-sonnet-4-5",
+            diff: { added: 0, removed: 0 },
+            prNumber: null,
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: now,
+            workspaceMode: "direct",
+            worktreePath: checkoutPath,
+            repoPath: checkoutPath,
+            chats: [{ id: "c1", title: null, createdAt: now, updatedAt: now }],
+            activeChatId: "c1",
+          },
+        ]),
+      );
+    };
+
+    it("adoptBranch re-points a drifted session at the live branch and persists it", async () => {
+      const checkoutPath = join(dir, "adopt-repo");
+      seedDriftedDirectSession(checkoutPath);
+      execFileSync("git", ["checkout", "-b", "feature/other"], {
+        cwd: checkoutPath,
+        stdio: "ignore",
+      });
+      const layer = Layer.mergeAll(base, SessionStore.Default);
+
+      const updated = await Effect.runPromise(
+        adoptBranch("s1").pipe(Effect.provide(layer)),
+      );
+      const reloaded = await Effect.runPromise(
+        SessionStore.get("s1").pipe(Effect.provide(layer)),
+      );
+
+      expect(updated.branch).toBe("feature/other");
+      expect(reloaded.branch).toBe("feature/other");
+    });
+
+    it("adoptBranch is a no-op when the checkout has not drifted", async () => {
+      const checkoutPath = join(dir, "adopt-noop-repo");
+      seedDriftedDirectSession(checkoutPath);
+      const layer = Layer.mergeAll(base, SessionStore.Default);
+
+      const updated = await Effect.runPromise(
+        adoptBranch("s1").pipe(Effect.provide(layer)),
+      );
+
+      expect(updated.branch).toBe("main");
+    });
+
+    it("forkOntoBranch fails with GitError when the checkout has not drifted", async () => {
+      const checkoutPath = join(dir, "fork-nodrift-repo");
+      seedDriftedDirectSession(checkoutPath);
+      const layer = Layer.mergeAll(base, SessionStore.Default);
+
+      const exit = await Effect.runPromiseExit(
+        forkOntoBranch("s1").pipe(Effect.provide(layer)),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(String(exit)).toContain("has not drifted");
+    });
   });
 
   it("routes revision-guarded thread mutations through the session plan worktree", async () => {

@@ -82,6 +82,7 @@ import {
   exportWorkspaceHandoff,
   checkoutWorkspaceHandoffBase,
   importWorkspaceHandoff,
+  branchAt,
 } from "@jingler/cli-adapters";
 import { appendFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -1916,6 +1917,158 @@ export const continueOnEnvironment = (
           );
         }),
     });
+  });
+
+/**
+ * Read the branch a direct session's shared checkout is currently on — the live
+ * branch a `BranchDrift` recovery acts against. Fails when the session has no
+ * checkout or sits on a detached HEAD (no named branch to adopt or fork).
+ */
+const driftedLiveBranch = (session: Session) =>
+  Effect.gen(function* () {
+    const checkoutPath = session.worktreePath ?? session.repoPath;
+    if (!checkoutPath) {
+      return yield* Effect.fail(
+        new GitError({
+          message: "This session has no checkout to read a branch from.",
+        }),
+      );
+    }
+    const liveBranch = yield* branchAt(checkoutPath);
+    if (liveBranch === null) {
+      return yield* Effect.fail(
+        new GitError({
+          message:
+            "The checkout is on a detached HEAD; check out a named branch before recovering.",
+        }),
+      );
+    }
+    return { checkoutPath, liveBranch };
+  });
+
+/**
+ * `Sessions.adoptBranch` — re-point a drifted direct session at the branch its
+ * shared checkout is now on. The operator chose to keep working there, so the
+ * session's pin follows the checkout. A no-op (returns the session unchanged) if
+ * the checkout never actually drifted.
+ */
+export const adoptBranch = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionStore;
+    const session = yield* sessions.get(sessionId);
+    if (workspaceModeOf(session) !== "direct") {
+      return yield* Effect.fail(
+        new GitError({
+          message: "Only a direct session can adopt its checkout's branch.",
+        }),
+      );
+    }
+    const { liveBranch } = yield* driftedLiveBranch(session);
+    if (liveBranch === session.branch) return session;
+    yield* sessions.setBranch(sessionId, liveBranch);
+    return yield* sessions.get(sessionId);
+  });
+
+/**
+ * `Sessions.forkOntoBranch` — hand a drifted direct session's work off to a
+ * fresh, isolated worktree session forked from the branch the checkout is now
+ * on, carrying the transcript and the uncommitted changes. The source session
+ * stays pinned to its original branch, so the developer can switch their primary
+ * checkout back and it unfreezes.
+ */
+export const forkOntoBranch = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionStore;
+    const source = yield* sessions.get(sessionId);
+    if (workspaceModeOf(source) !== "direct") {
+      return yield* Effect.fail(
+        new GitError({
+          message:
+            "Only a direct session can fork its drifted branch into a worktree.",
+        }),
+      );
+    }
+    const { checkoutPath, liveBranch } = yield* driftedLiveBranch(source);
+    if (liveBranch === source.branch) {
+      return yield* Effect.fail(
+        new GitError({
+          message: "The checkout has not drifted; there is nothing to fork.",
+        }),
+      );
+    }
+    if (
+      source.connectionId === undefined ||
+      source.providerId === undefined ||
+      source.modelId === undefined
+    ) {
+      return yield* Effect.fail(
+        new GitError({
+          message: "Choose a provider connection before forking this session.",
+        }),
+      );
+    }
+    const repoPath = source.repoPath;
+    if (!repoPath) {
+      return yield* Effect.fail(
+        new GitError({
+          message: "This session has no repository to fork from.",
+        }),
+      );
+    }
+    const sourceMessages = yield* TranscriptStore.list(source.activeChatId).pipe(
+      Effect.orElseSucceed(() => []),
+    );
+    const checkpoint = yield* Effect.tryPromise({
+      try: () =>
+        exportWorkspaceHandoff({
+          workspacePath: checkoutPath,
+          sourceSessionId: source.id,
+          eventCursor: sourceMessages.length,
+        }),
+      catch: () =>
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message: "The source workspace could not be checkpointed.",
+          sessionId: source.id,
+        }),
+    });
+    const created = yield* createSession({
+      repoPath,
+      repoName: source.repo,
+      connectionId: source.connectionId,
+      providerId: source.providerId,
+      modelId: source.modelId,
+      baseBranch: liveBranch,
+      title: `${source.title} (fork)`,
+    }).pipe(
+      Effect.mapError(
+        () =>
+          new GitError({
+            message: "The desktop could not provision the fork workspace.",
+          }),
+      ),
+    );
+    if (!created.worktreePath) {
+      return yield* Effect.fail(
+        new GitError({ message: "The fork has no verified workspace." }),
+      );
+    }
+    yield* Effect.tryPromise({
+      try: async () => {
+        await checkoutWorkspaceHandoffBase(created.worktreePath!, checkpoint);
+        await importWorkspaceHandoff(created.worktreePath!, checkpoint);
+      },
+      catch: () =>
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message: "The fork did not match the source checkpoint.",
+          sessionId: source.id,
+        }),
+    });
+    for (const message of sourceMessages) {
+      yield* TranscriptStore.append(created.activeChatId, message);
+    }
+    return created;
   });
 
 /** A remote cleanup failure must not strand the desktop's local mirror forever. */
@@ -4962,6 +5115,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     setEnvironment(sessionId, environmentId),
   "Sessions.continueOnEnvironment": ({ sessionId, environmentId }) =>
     continueOnEnvironment(sessionId, environmentId),
+  "Sessions.adoptBranch": ({ sessionId }) => adoptBranch(sessionId),
+  "Sessions.forkOntoBranch": ({ sessionId }) => forkOntoBranch(sessionId),
   "Sessions.delete": ({ sessionId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId).pipe(

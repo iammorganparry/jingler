@@ -23,6 +23,7 @@ import {
   applyStreamEvent,
   assistantMessage,
   AgentRunError,
+  BranchDriftError,
   CURRENT_RUNTIME_CONTRACTS,
   defaultModeFor,
   findApprovedPlan,
@@ -933,15 +934,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           if (workspaceModeOf(session) === "direct") {
             const liveBranch = yield* branchAt(worktreePath)
             if (liveBranch !== session.branch) {
-              const actual =
-                liveBranch === null ? "detached HEAD" : `branch "${liveBranch}"`
               return yield* Effect.fail(
-                new AgentRunError({
-                  kind: session.providerId ?? "provider",
-                  message:
-                    `This direct session is pinned to branch "${session.branch}", but ` +
-                    `the repository checkout is now on ${actual}. Switch the repository ` +
-                    `back to "${session.branch}" before continuing.`
+                new BranchDriftError({
+                  sessionId: session.id,
+                  pinnedBranch: session.branch,
+                  liveBranch
                 })
               )
             }
@@ -2147,17 +2144,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                         Effect.gen(function* () {
                           const liveBranch = yield* branchAt(worktreePath)
                           if (liveBranch === session.branch) return
-                          const actual =
-                            liveBranch === null
-                              ? "detached HEAD"
-                              : `branch "${liveBranch}"`
                           return yield* Effect.fail(
-                            new AgentRunError({
-                              kind: session.providerId ?? "provider",
-                              message:
-                                `This direct session was stopped because its repository ` +
-                                `moved from branch "${session.branch}" to ${actual}. Switch ` +
-                                `the repository back to "${session.branch}" before continuing.`
+                            new BranchDriftError({
+                              sessionId: session.id,
+                              pinnedBranch: session.branch,
+                              liveBranch
                             })
                           )
                         })
@@ -2195,6 +2186,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             Effect.catchAllCause((cause) => {
               if (Cause.isInterruptedOnly(cause)) return Effect.void
               const failure = Option.getOrUndefined(Cause.failureOption(cause))
+              // A drifted checkout is recoverable, not a crash: emit the branch
+              // pair the renderer's recovery banner needs instead of an error line.
+              if (failure instanceof BranchDriftError) {
+                return emit({
+                  _tag: "BranchDrift",
+                  sessionId: failure.sessionId,
+                  pinnedBranch: failure.pinnedBranch,
+                  liveBranch: failure.liveBranch
+                })
+              }
               return emit({
                 _tag: "Failed",
                 message: failure instanceof AgentRunError ? failure.message : "The agent run failed."
@@ -2465,13 +2466,22 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               ).pipe(
                 Effect.catchAll((error) =>
                   Effect.succeed(
-                    Stream.fromIterable<StreamEvent>([{
-                      _tag: "Failed",
-                      message:
-                        error instanceof AgentRunError
-                          ? error.message
-                          : "The agent run could not start."
-                    }])
+                    Stream.fromIterable<StreamEvent>([
+                      error instanceof BranchDriftError
+                        ? {
+                            _tag: "BranchDrift",
+                            sessionId: error.sessionId,
+                            pinnedBranch: error.pinnedBranch,
+                            liveBranch: error.liveBranch
+                          }
+                        : {
+                            _tag: "Failed",
+                            message:
+                              error instanceof AgentRunError
+                                ? error.message
+                                : "The agent run could not start."
+                          }
+                    ])
                   )
                 )
               )

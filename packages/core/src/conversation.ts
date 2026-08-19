@@ -365,6 +365,19 @@ export const PlanPart = Schema.TaggedStruct("Plan", { plan: Plan })
 export type PlanPart = Schema.Schema.Type<typeof PlanPart>
 
 /**
+ * A direct session's shared checkout drifted off its pinned branch mid-turn.
+ * Rendered as a recovery banner (fork the work onto the live branch, or adopt
+ * the live branch here) rather than a plain error line, so it carries both
+ * branch names the banner's buttons need. `liveBranch` is null for detached HEAD.
+ */
+export const BranchDriftPart = Schema.TaggedStruct("BranchDrift", {
+  sessionId: Schema.String,
+  pinnedBranch: Schema.String,
+  liveBranch: Schema.NullOr(Schema.String)
+})
+export type BranchDriftPart = Schema.Schema.Type<typeof BranchDriftPart>
+
+/**
  * The carried-forward summary of a conversation, produced by a background run
  * over our own transcript and used to seed a fresh harness conversation.
  *
@@ -459,6 +472,7 @@ export const ContentPart = Schema.Union(
   GatePart,
   QuestionPart,
   PlanPart,
+  BranchDriftPart,
   ContextPart
 )
 export type ContentPart = Schema.Schema.Type<typeof ContentPart>
@@ -822,6 +836,18 @@ export const StreamEvent = Schema.Union(
     costUsd: Schema.Number,
     tokens: Schema.Number
   }),
+  /**
+   * A direct session's shared checkout drifted off its pinned branch. Terminal
+   * for the turn like `Failed`, but recoverable: the renderer turns it into a
+   * banner (fork onto / adopt the live branch) rather than an error line. The
+   * runner emits this INSTEAD OF `Failed` whenever a turn's failure is a
+   * `BranchDriftError`.
+   */
+  Schema.TaggedStruct("BranchDrift", {
+    sessionId: Schema.String,
+    pinnedBranch: Schema.String,
+    liveBranch: Schema.NullOr(Schema.String)
+  }),
   Schema.TaggedStruct("Failed", { message: Schema.String })
 )
 export type StreamEvent = Schema.Schema.Type<typeof StreamEvent>
@@ -1102,6 +1128,16 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
 
     Match.tag("Failed", (e) => {
       const part: TextPart = { _tag: "Text", text: e.message }
+      return { ...msg, streaming: false, parts: [...parts, part] }
+    }),
+
+    Match.tag("BranchDrift", (e) => {
+      const part: BranchDriftPart = {
+        _tag: "BranchDrift",
+        sessionId: e.sessionId,
+        pinnedBranch: e.pinnedBranch,
+        liveBranch: e.liveBranch
+      }
       return { ...msg, streaming: false, parts: [...parts, part] }
     }),
 

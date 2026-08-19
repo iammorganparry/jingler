@@ -20,6 +20,28 @@ export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundErro
 ) {}
 
 /**
+ * Raised when a direct session's shared checkout has drifted off the branch the
+ * session is pinned to — the agent (or the developer) moved `HEAD` to a
+ * different branch, so continuing would run the turn against a branch the
+ * session's plans and review state do not name.
+ *
+ * NOT a dead end: it carries both branches so the renderer can offer recovery
+ * (fork the work onto the live branch, or adopt the live branch into this
+ * session) instead of a plain error message. Emitted onto the transcript as a
+ * `BranchDrift` stream event, never surfaced through an RPC error channel.
+ */
+export class BranchDriftError extends Schema.TaggedError<BranchDriftError>()(
+  "BranchDriftError",
+  {
+    sessionId: Schema.String,
+    /** The branch the session is pinned to (where it must run). */
+    pinnedBranch: Schema.String,
+    /** The branch the shared checkout is on now, or null for detached HEAD. */
+    liveBranch: Schema.NullOr(Schema.String)
+  }
+) {}
+
+/**
  * Raised when an operation needs a configured repos directory but the user has
  * not completed first-run setup yet. A `Schema.TaggedError` — it is the
  * `Workspace.repos` RPC error channel.

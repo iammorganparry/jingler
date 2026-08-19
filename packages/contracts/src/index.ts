@@ -971,6 +971,31 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
+  /**
+   * Re-point a drifted direct session at the branch its shared checkout is now
+   * on. The recovery for a `BranchDrift`: the agent (or developer) moved `HEAD`
+   * to a new branch, and the operator chooses to keep working there. Preserves
+   * every other section of the session record; returns the updated session.
+   */
+  Rpc.make("Sessions.adoptBranch", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError),
+    payload: { sessionId: Schema.String }
+  }),
+
+  /**
+   * Fork a drifted direct session's work onto a fresh, isolated worktree session
+   * pinned to the branch the checkout is now on — carrying the transcript and
+   * the uncommitted changes — while leaving the source session pinned to its
+   * original branch. The recovery for a `BranchDrift` when the operator wants
+   * their primary checkout back on the original branch. Returns the new session.
+   */
+  Rpc.make("Sessions.forkOntoBranch", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError, EnvironmentHandoffError),
+    payload: { sessionId: Schema.String }
+  }),
+
   /** Permanently delete a session and remove its worktree. Irreversible. */
   Rpc.make("Sessions.delete", {
     error: GitError,
