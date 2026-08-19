@@ -2,7 +2,7 @@
 import type { PlanDocument, PlanPrdStage, PlanTaskStatus } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { PlanProgressDock, planProgressStatus } from "./plan-progress-dock.js"
+import { PlanTaskList, planProgressStatus } from "./plan-progress-dock.js"
 
 const stage = (
   id: string,
@@ -49,7 +49,7 @@ const document: PlanDocument = {
 
 afterEach(cleanup)
 
-describe("PlanProgressDock", () => {
+describe("PlanTaskList task list", () => {
   it("projects selected-agent task and evidence progress", () => {
     expect(planProgressStatus(stage("1", "Todo"))).toBe("todo")
     expect(planProgressStatus(stage("2", "Working", "in-progress"))).toBe("in-progress")
@@ -61,10 +61,9 @@ describe("PlanProgressDock", () => {
 
   it("expands from the composer summary and opens a stable plan stage", () => {
     const onOpenStage = vi.fn()
-    render(<PlanProgressDock document={document} onOpenStage={onOpenStage} />)
-    const summary = screen.getByRole("button", { name: "Plan progress: 1 of 3 done" })
-    expect(screen.getByText(/Build the dock · In progress/)).toBeTruthy()
-    fireEvent.click(summary)
+    render(<PlanTaskList document={document} onOpenStage={onOpenStage} />)
+    const summary = screen.getByRole("button", { name: "Plan tasks: 1 of 3 done" })
+    expect(summary.getAttribute("aria-expanded")).toBe("true")
     expect(screen.getByTestId("plan-progress-stage-02").textContent).toContain("Build the dock")
     expect(screen.getByTestId("plan-progress-stage-02").textContent).not.toContain("worker")
     fireEvent.click(screen.getByTestId("plan-progress-stage-02"))
@@ -72,8 +71,8 @@ describe("PlanProgressDock", () => {
   })
 
   it("reflects a Plan.watch revision without retaining local progress", () => {
-    const view = render(<PlanProgressDock document={document} />)
-    view.rerender(<PlanProgressDock document={{
+    const view = render(<PlanTaskList document={document} />)
+    view.rerender(<PlanTaskList document={{
       ...document,
       revision: 8,
       plan: {
@@ -89,6 +88,6 @@ describe("PlanProgressDock", () => {
         }))
       }
     }} />)
-    expect(screen.getByRole("button", { name: "Plan progress: 3 of 3 done" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Plan tasks: 3 of 3 done" })).toBeTruthy()
   })
 })

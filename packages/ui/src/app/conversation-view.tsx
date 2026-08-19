@@ -33,7 +33,6 @@ import { MessageTurn } from "../composites/message-turn.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
 import { RunStats } from "../composites/run-stats.js"
-import { PlanProgressDock } from "../composites/plan-progress-dock.js"
 
 /**
  * How many queued messages show before the list collapses behind a "+N more".
@@ -537,6 +536,11 @@ export function ConversationView({
           >
             {virtualizer.getVirtualItems().map((item) => {
               const m = messages[item.index]!
+              const matchingPlanDocument = planDocument && m.parts.some(
+                (part) => part._tag === "Plan" && part.plan.id === planDocument.id
+              )
+                ? planDocument
+                : undefined
               return (
                 <div
                   key={item.key}
@@ -549,6 +553,7 @@ export function ConversationView({
                   <div className="mx-auto w-full max-w-[760px] pb-6">
                     <MessageTurn
                       message={m}
+                      planDocument={matchingPlanDocument}
                       providerId={m.providerId ?? providerId}
                       onDecideGate={onDecideGate}
                       onApprovePlan={onApprovePlan}
@@ -572,13 +577,6 @@ export function ConversationView({
         {/* Same gutter + centered max-width as the transcript column above. */}
         <div className={cn("flex-none pb-[18px] pt-[11px]", gutter)}>
           <div className="mx-auto w-full max-w-[760px]">
-            {!archived && planDocument && (
-              <PlanProgressDock
-                document={planDocument}
-                onOpenStage={(stageId) => onOpenPlanReview?.(stageId)}
-                className="mb-2"
-              />
-            )}
             {/* Live session analytics — elapsed time + current context size, right
               above the composer so it stays visible while the user works. */}
           {!archived && (busy || runStartedAt !== null || tokens > 0) && (
@@ -723,6 +721,8 @@ export function ConversationView({
                 codeReferences={draftCodeReferences}
                 onCodeReferenceRemove={onDraftCodeReferenceRemove}
                 onCodeReferencesClear={onDraftCodeReferencesClear}
+                planDocument={planDocument ?? undefined}
+                onOpenPlanStage={(stageId) => onOpenPlanReview?.(stageId)}
                 topSlot={fleetSlot}
                 autoFocus={autoFocusComposer}
                 focusKey={focusKey}

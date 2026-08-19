@@ -3,6 +3,7 @@ import type {
   Attachment,
   Environment,
   PermissionMode,
+  PlanDocument,
   ProviderCatalog,
   ProviderConnectionId,
   ProviderModelId,
@@ -41,6 +42,7 @@ import { Pill } from "../components/pill.js";
 import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
+import { PlanTaskList } from "./plan-progress-dock.js";
 import {
   ProviderModelBrowser,
   type ProviderModelSelection,
@@ -177,6 +179,8 @@ export function Composer({
   codeReferences = [],
   onCodeReferenceRemove,
   onCodeReferencesClear,
+  planDocument,
+  onOpenPlanStage,
   topSlot,
   className,
 }: {
@@ -220,6 +224,10 @@ export function Composer({
   onCodeReferenceRemove?: (index: number) => void;
   /** Clear every captured range after a composer send. */
   onCodeReferencesClear?: () => void;
+  /** Live canonical plan projected as a task list inside the composer chrome. */
+  planDocument?: PlanDocument;
+  /** Open Plan Review at a selected canonical stage. */
+  onOpenPlanStage?: (stageId: string) => void;
   /** Content integrated into the top of the composer's shared chrome. */
   topSlot?: ReactNode;
   /** Canonical certified model surface. */
@@ -567,8 +575,15 @@ export function Composer({
           dragging && "border-cyan/60 bg-cyan/5 shadow-none",
         )}
       >
+        {planDocument && (
+          <PlanTaskList
+            document={planDocument}
+            onOpenStage={onOpenPlanStage}
+            className="-mx-4 -mt-3.5 rounded-none border-x-0 border-t-0 bg-transparent"
+          />
+        )}
         {topSlot && (
-          <div className="-mx-4 -mt-3.5 overflow-hidden border-b border-line">
+          <div className={cn("-mx-4 overflow-hidden border-b border-line", !planDocument && "-mt-3.5")}>
             {topSlot}
           </div>
         )}
