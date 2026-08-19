@@ -36,7 +36,10 @@ export function BranchDriftBanner({
     const result = handler()
     if (result instanceof Promise) {
       setBusy(which)
-      void result.finally(() => setBusy(null))
+      result.then(
+        () => setBusy(null),
+        () => setBusy(null)
+      )
     }
   }
   // Adopting a detached HEAD has no named branch to pin to, so that path is

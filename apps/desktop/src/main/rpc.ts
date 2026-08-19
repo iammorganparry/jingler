@@ -1976,10 +1976,13 @@ export const adoptBranch = (sessionId: string) =>
  * stays pinned to its original branch, so the developer can switch their primary
  * checkout back and it unfreezes.
  */
-export const forkOntoBranch = (sessionId: string) =>
+/**
+ * Validate a `forkOntoBranch` request and return the settled inputs a clean
+ * worktree fork needs. Fails (GitError) when the session is not a drifted direct
+ * session, or is missing a provider connection or a repository.
+ */
+const forkInputs = (source: Session) =>
   Effect.gen(function* () {
-    const sessions = yield* SessionStore;
-    const source = yield* sessions.get(sessionId);
     if (workspaceModeOf(source) !== "direct") {
       return yield* Effect.fail(
         new GitError({
@@ -1988,7 +1991,7 @@ export const forkOntoBranch = (sessionId: string) =>
         }),
       );
     }
-    const { checkoutPath, liveBranch } = yield* driftedLiveBranch(source);
+    const { liveBranch } = yield* driftedLiveBranch(source);
     if (liveBranch === source.branch) {
       return yield* Effect.fail(
         new GitError({
@@ -2007,37 +2010,42 @@ export const forkOntoBranch = (sessionId: string) =>
         }),
       );
     }
-    const repoPath = source.repoPath;
-    if (!repoPath) {
+    if (!source.repoPath) {
       return yield* Effect.fail(
-        new GitError({
-          message: "This session has no repository to fork from.",
-        }),
+        new GitError({ message: "This session has no repository to fork from." }),
       );
     }
-    const sourceMessages = yield* TranscriptStore.list(source.activeChatId).pipe(
-      Effect.orElseSucceed(() => []),
-    );
-    const checkpoint = yield* Effect.tryPromise({
-      try: () =>
-        exportWorkspaceHandoff({
-          workspacePath: checkoutPath,
-          sourceSessionId: source.id,
-          eventCursor: sourceMessages.length,
-        }),
-      catch: () =>
-        new EnvironmentHandoffError({
-          reason: "unavailable",
-          message: "The source workspace could not be checkpointed.",
-          sessionId: source.id,
-        }),
-    });
-    const created = yield* createSession({
-      repoPath,
-      repoName: source.repo,
+    return {
+      liveBranch,
+      repoPath: source.repoPath,
       connectionId: source.connectionId,
       providerId: source.providerId,
       modelId: source.modelId,
+    };
+  });
+
+export const forkOntoBranch = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionStore;
+    const source = yield* sessions.get(sessionId);
+    const { liveBranch, repoPath, connectionId, providerId, modelId } =
+      yield* forkInputs(source);
+    const sourceMessages = yield* TranscriptStore.list(source.activeChatId).pipe(
+      Effect.orElseSucceed(() => []),
+    );
+    // A fresh, CLEAN worktree forked from the drifted branch's committed tip —
+    // deliberately NOT a working-tree handoff. The shared checkout that drifted
+    // usually carries the developer's own uncommitted changes (the ones that
+    // rode along when the agent ran `git switch -c`); dragging that dirty tree
+    // into the fork is exactly what makes the fork "look like main". The fork
+    // keeps the branch's committed history and the conversation; the agent
+    // re-derives its edits from that context in a clean tree.
+    const created = yield* createSession({
+      repoPath,
+      repoName: source.repo,
+      connectionId,
+      providerId,
+      modelId,
       baseBranch: liveBranch,
       title: `${source.title} (fork)`,
     }).pipe(
@@ -2053,18 +2061,6 @@ export const forkOntoBranch = (sessionId: string) =>
         new GitError({ message: "The fork has no verified workspace." }),
       );
     }
-    yield* Effect.tryPromise({
-      try: async () => {
-        await checkoutWorkspaceHandoffBase(created.worktreePath!, checkpoint);
-        await importWorkspaceHandoff(created.worktreePath!, checkpoint);
-      },
-      catch: () =>
-        new EnvironmentHandoffError({
-          reason: "unavailable",
-          message: "The fork did not match the source checkpoint.",
-          sessionId: source.id,
-        }),
-    });
     // Carry the conversation for context, but NEVER the drift banner that led
     // here (see `transcriptForFork`).
     for (const message of transcriptForFork(sourceMessages)) {
