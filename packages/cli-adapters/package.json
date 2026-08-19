@@ -19,6 +19,8 @@
     "./open-connector": "./src/open-connector.ts",
     "./offload-snapshot": "./src/offload-snapshot.ts",
     "./plan-store": "./src/plan-store.ts",
+    "./plugin-host": "./src/plugin-host.ts",
+    "./plugins": "./src/plugins.ts",
     "./projects": "./src/projects.ts",
     "./publish-metadata": "./src/publish-metadata.ts",
     "./remote-session": "./src/remote-session.ts",
