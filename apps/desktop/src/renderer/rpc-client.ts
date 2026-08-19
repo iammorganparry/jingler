@@ -619,6 +619,12 @@ export const rpc = {
     run((c) => c.Sessions.setEnvironment({ sessionId, environmentId })),
   sessionsContinueOnEnvironment: (sessionId: string, environmentId?: string): Promise<Session> =>
     run((c) => c.Sessions.continueOnEnvironment({ sessionId, environmentId })),
+  /** Re-point a drifted direct session at the branch its checkout is now on. */
+  sessionsAdoptBranch: (sessionId: string): Promise<Session> =>
+    run((c) => c.Sessions.adoptBranch({ sessionId })),
+  /** Fork a drifted direct session's work onto a new worktree session on the live branch. */
+  sessionsForkOntoBranch: (sessionId: string): Promise<Session> =>
+    run((c) => c.Sessions.forkOntoBranch({ sessionId })),
   sessionsSetStatus: (
     sessionId: string,
     status: SettledSessionStatus

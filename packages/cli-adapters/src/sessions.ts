@@ -1380,6 +1380,15 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           semanticBranchPending: false
         }))
 
+      /**
+       * Re-point a direct session at the branch its shared checkout has drifted
+       * onto — the deliberate operator recovery for a `BranchDrift`. Touches only
+       * `branch`; an established branch is live state, so every other section
+       * (plans, PR link, GitHub routing) is preserved by `update`'s read-modify-write.
+       */
+      const setBranch = (id: string, branch: string) =>
+        update(id, (s) => ({ ...s, branch }))
+
       /** Manual rename — pins the title so the agent stops auto-retitling it. */
       const renameTitle = (id: string, title: string) =>
         update(id, (s) => ({ ...s, title, autoTitle: false }))
@@ -1813,6 +1822,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setTitle,
         setSemanticBranchProposal,
         setTitleAndBranch,
+        setBranch,
         renameTitle,
         setStatus,
         addAllowlist,

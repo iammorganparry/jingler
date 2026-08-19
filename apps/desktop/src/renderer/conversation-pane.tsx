@@ -238,6 +238,23 @@ export function ConversationPane({
         : undefined,
     [approvePlanForRevision, convo.resumePlan, planRevision]
   )
+  // Branch-drift recovery (the `BranchDrift` banner). Stable per session so the
+  // memoised transcript turns don't re-render while a turn streams. Adopt updates
+  // this session in place; fork publishes a NEW worktree session into the sidebar
+  // (the operator opens it) and leaves this one pinned to its original branch.
+  const onAdoptBranchStable = useCallback(
+    () =>
+      rpc.sessionsAdoptBranch(session.id).then(publishSessionUpdate).then(() => {}),
+    [session.id]
+  )
+  const onForkOntoBranchStable = useCallback(
+    () =>
+      rpc
+        .sessionsForkOntoBranch(session.id)
+        .then(publishSessionUpdate)
+        .then(() => {}),
+    [session.id]
+  )
   const initialThreadDispatches = useRef(new Set<string>())
   // A direct reply RPC persists its pending message before it finishes routing.
   // Plan.watch can publish that intermediate revision, so tell the recovery
@@ -1211,6 +1228,8 @@ export function ConversationPane({
           onApprovePlan={onApprovePlanStable}
           onResumePlan={onResumePlanStable}
           onOpenPlanReview={onOpenPlanReview}
+          onForkOntoBranch={onForkOntoBranchStable}
+          onAdoptBranch={onAdoptBranchStable}
           plan={convo.plan}
           planDocument={canonicalPlan.document}
           draft={draft.text}

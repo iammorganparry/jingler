@@ -2876,9 +2876,10 @@ describe("AgentRunner failures", () => {
 
     expect(adapterCalled).toBe(false)
     expect(Array.from(events)).toContainEqual({
-      _tag: "Failed",
-      message:
-        'This direct session is pinned to branch "main", but the repository checkout is now on branch "feature/other". Switch the repository back to "main" before continuing.'
+      _tag: "BranchDrift",
+      sessionId: SESSION,
+      pinnedBranch: "main",
+      liveBranch: "feature/other"
     })
   })
 
@@ -2944,9 +2945,10 @@ describe("AgentRunner failures", () => {
     )
 
     expect(Array.from(events)).toContainEqual({
-      _tag: "Failed",
-      message:
-        'This direct session was stopped because its repository moved from branch "main" to branch "feature/other". Switch the repository back to "main" before continuing.'
+      _tag: "BranchDrift",
+      sessionId: SESSION,
+      pinnedBranch: "main",
+      liveBranch: "feature/other"
     })
   })
 

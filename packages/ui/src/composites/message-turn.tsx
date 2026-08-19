@@ -10,6 +10,7 @@ import { FileChangeList } from "../components/file-change-list.js"
 import { Markdown } from "../components/markdown.js"
 import { providerColor, providerLabel, ProviderIcon } from "../components/provider-icon.js"
 import { ApprovalGate } from "./approval-gate.js"
+import { BranchDriftBanner } from "./branch-drift-banner.js"
 import { ContextDivider } from "./context-divider.js"
 import { PlanCard } from "./plan-card.js"
 import { QuestionSummary } from "./question-summary.js"
@@ -256,7 +257,9 @@ function PartView({
   onDecideGate,
   onApprovePlan,
   onResumePlan,
-  onOpenPlanReview
+  onOpenPlanReview,
+  onForkOntoBranch,
+  onAdoptBranch
 }: {
   part: ContentPart
   markdown: boolean
@@ -264,6 +267,8 @@ function PartView({
   onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
   onResumePlan?: (planId: string) => void
   onOpenPlanReview?: () => void
+  onForkOntoBranch?: () => void | Promise<void>
+  onAdoptBranch?: () => void | Promise<void>
 }) {
   switch (part._tag) {
     case "Text": {
@@ -320,6 +325,16 @@ function PartView({
       // Deliberately full-width and unindented: this marks a boundary in the
       // conversation rather than being something the agent said.
       return <ContextDivider digest={part.digest} tokensBefore={part.tokensBefore} />
+    case "BranchDrift":
+      return (
+        <BranchDriftBanner
+          pinnedBranch={part.pinnedBranch}
+          liveBranch={part.liveBranch}
+          onFork={onForkOntoBranch}
+          onAdopt={onAdoptBranch}
+          className={WIDTH}
+        />
+      )
   }
 }
 
@@ -336,6 +351,8 @@ function renderParts(
     onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
     onResumePlan?: (planId: string) => void
     onOpenPlanReview?: () => void
+    onForkOntoBranch?: () => void | Promise<void>
+    onAdoptBranch?: () => void | Promise<void>
   },
   // When a mega-turn's prefix is collapsed, `parts` is a suffix of the real
   // array — keys must stay ABSOLUTE so expanding doesn't remount the tail.
@@ -449,7 +466,9 @@ function MessageTurnImpl({
   onDecideGate,
   onApprovePlan,
   onResumePlan,
-  onOpenPlanReview
+  onOpenPlanReview,
+  onForkOntoBranch,
+  onAdoptBranch
 }: {
   message: Message
   /** Canonical provider identity for the assistant eyebrow. */
@@ -461,6 +480,10 @@ function MessageTurnImpl({
   onResumePlan?: (planId: string) => void
   /** Open the full Plan Review view from the inline plan card. */
   onOpenPlanReview?: () => void
+  /** Fork a drifted direct session's work onto a new worktree session. */
+  onForkOntoBranch?: () => void | Promise<void>
+  /** Adopt the drifted checkout's branch into this session. */
+  onAdoptBranch?: () => void | Promise<void>
 }) {
   const isAssistant = message.role === "assistant"
   const [showAllParts, setShowAllParts] = useState(false)
@@ -493,7 +516,14 @@ function MessageTurnImpl({
       {renderParts(
         visibleParts,
         isAssistant,
-        { onDecideGate, onApprovePlan, onResumePlan, onOpenPlanReview },
+        {
+          onDecideGate,
+          onApprovePlan,
+          onResumePlan,
+          onOpenPlanReview,
+          onForkOntoBranch,
+          onAdoptBranch
+        },
         hiddenParts
       )}
     </div>
