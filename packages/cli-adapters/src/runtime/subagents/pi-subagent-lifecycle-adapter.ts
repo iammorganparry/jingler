@@ -17,9 +17,14 @@ import {
 } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
 import {
+  cleanAgentLabel,
+  cleanTaskLabel,
   defaultPiSubagentAsyncDir,
   readDurablePiSubagentNodes
 } from "./pi-subagent-durable-status.js"
+
+// Re-exported for tests that assert the shared fleet identity cleanup.
+export { cleanAgentLabel, cleanTaskLabel } from "./pi-subagent-durable-status.js"
 import {
   makePiSubagentTranscriptReader,
   type PiSubagentTranscriptReaderShape
@@ -31,26 +36,6 @@ import {
   type SubagentStartRecord,
   type SubagentSupervisionServiceShape
 } from "./subagent-supervision-service.js"
-import { JINGLER_SUBAGENT_AGENT_NAMES } from "./pi-subagents-bootstrap.js"
-
-/** The agent types jingler actually spawns children as — the only genuine names. */
-const SUBAGENT_CATALOGUE: ReadonlySet<string> = new Set(JINGLER_SUBAGENT_AGENT_NAMES)
-
-/**
- * The pi vendor collapses an unresolved child's agent onto the workflow key
- * (usually the default `"main"`) and formats its task as `"run <key>"` (e.g.
- * `"run main"`). Neither is a genuine identity — a child surfaced through the
- * bare status RPC carries no opaque-key join back to the run that named it — so
- * present them honestly rather than surfacing a "main" agent doing "run main".
- * A resolved catalogue agent (scout, worker, reviewer, …) passes through as-is.
- */
-export const cleanAgentLabel = (agent: string): string =>
-  SUBAGENT_CATALOGUE.has(agent) ? agent : "Subagent"
-
-export const cleanTaskLabel = (goal: string | undefined): string => {
-  const task = goal?.trim() ?? ""
-  return task === "" || /^run\s+\S+$/i.test(task) ? "Active delegated work" : task
-}
 
 const RPC_REQUEST_EVENT = "subagents:rpc:v1:request"
 const RPC_REPLY_PREFIX = "subagents:rpc:v1:reply:"

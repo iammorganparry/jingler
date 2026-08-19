@@ -11,16 +11,20 @@ import {
 } from "./pi-subagent-lifecycle-adapter.js"
 
 describe("fleet identity cleanup", () => {
-  it("keeps a real catalogue agent but relabels a collapsed workflow key", () => {
+  it("keeps genuine agent and workflow names, relabelling only bare collapse tokens", () => {
     expect(cleanAgentLabel("scout")).toBe("scout")
     expect(cleanAgentLabel("reviewer")).toBe("reviewer")
-    // The pi vendor collapses an unresolved child onto the "main" workflow key.
+    // A descriptive workflow key is a real name — keep it.
+    expect(cleanAgentLabel("review-followup")).toBe("review-followup")
+    // The pi vendor collapses an unresolved child onto a bare mode/key.
     expect(cleanAgentLabel("main")).toBe("Subagent")
     expect(cleanAgentLabel("single")).toBe("Subagent")
+    expect(cleanAgentLabel("workflow")).toBe("Subagent")
   })
 
   it("strips the vendor's 'run <key>' task noise but keeps a real task", () => {
     expect(cleanTaskLabel("run main")).toBe("Active delegated work")
+    expect(cleanTaskLabel("run review-followup")).toBe("Active delegated work")
     expect(cleanTaskLabel(undefined)).toBe("Active delegated work")
     expect(cleanTaskLabel("")).toBe("Active delegated work")
     expect(cleanTaskLabel("Map the signals pipeline")).toBe("Map the signals pipeline")
