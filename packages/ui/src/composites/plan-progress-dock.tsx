@@ -45,14 +45,28 @@ const STATUS: Readonly<Record<PlanProgressStatus, {
  * Collapsible task-list projection of the live canonical plan. It owns only its
  * open state; stage/task status continues to come exclusively from PlanDocument.
  */
+/** Completed / total task counts for the plan — used by the composer tab badge. */
+export const planTaskCounts = (
+  document: PlanDocument
+): { readonly completed: number; readonly total: number } => {
+  const stages = document.plan.stages
+  return {
+    completed: stages.filter((stage) => planProgressStatus(stage) === "done").length,
+    total: stages.length
+  }
+}
+
 export function PlanTaskList({
   document,
   onOpenStage,
-  className
+  className,
+  bare = false
 }: {
   document: PlanDocument
   onOpenStage?: (stageId: string) => void
   className?: string
+  /** Render only the task rows — no header, no collapse. For the tabbed drawer. */
+  bare?: boolean
 }) {
   const [expanded, setExpanded] = useState(true)
   const listId = useId()
@@ -63,6 +77,45 @@ export function PlanTaskList({
   const completed = rows.filter((row) => row.status === "done").length
   const allDone = completed === rows.length
   const progress = Math.round((completed / rows.length) * 100)
+
+  const list = (
+    <ol className="m-0 flex list-none flex-col gap-0.5 p-0">
+      {rows.map(({ stage, status }) => {
+        const config = STATUS[status]
+        const Icon = config.icon
+        return (
+          <li key={stage.id}>
+            <button
+              type="button"
+              data-testid={`plan-progress-stage-${stage.id}`}
+              onClick={() => onOpenStage?.(stage.id)}
+              className="group flex min-h-8 w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Icon
+                aria-hidden="true"
+                className={cn("size-3.5 shrink-0", config.className, status === "in-progress" && "animate-spin")}
+              />
+              <span className={cn(
+                "min-w-0 flex-1 truncate text-[11.5px]",
+                status === "done" ? "text-muted-foreground line-through decoration-line-strong" : "text-text-body"
+              )}>
+                {stage.title}
+              </span>
+              <span className={cn("shrink-0 text-[9.5px] font-medium", config.className)}>{config.label}</span>
+            </button>
+          </li>
+        )
+      })}
+    </ol>
+  )
+
+  if (bare) {
+    return (
+      <div data-testid="plan-task-list" className={cn("max-h-[240px] overflow-y-auto px-2 py-1.5", className)}>
+        {list}
+      </div>
+    )
+  }
 
   return (
     <section

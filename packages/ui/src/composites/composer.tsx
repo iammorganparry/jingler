@@ -13,17 +13,20 @@ import type {
 } from "@jingler/core";
 import {
   ArrowUp,
+  ChevronDown,
   Cloud,
   FileDiff,
   FolderGit2,
   GitBranch,
   ImagePlus,
+  ListChecks,
   Monitor,
   MousePointer2,
   Plus,
   Server,
   Sparkles,
   Square,
+  Users,
 } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { downscaleImage } from "../lib/image-downscale.js";
@@ -42,7 +45,7 @@ import { Pill } from "../components/pill.js";
 import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
-import { PlanTaskList } from "./plan-progress-dock.js";
+import { planTaskCounts, PlanTaskList } from "./plan-progress-dock.js";
 import {
   ProviderModelBrowser,
   type ProviderModelSelection,
@@ -135,6 +138,51 @@ const activeToken = (value: string, caret: number): MenuState | null => {
 /** Codex invokes skills with `$name`; the palette keeps `/` as its common discovery trigger. */
 const skillInsertion = (skill: Skill): string => skill.name;
 
+/** One tab in the composer's Plan/Fleet drawer strip. */
+function DrawerTab({
+  active,
+  tone,
+  icon,
+  label,
+  badge,
+  onClick,
+}: {
+  active: boolean;
+  tone: "plan" | "fleet";
+  icon: ReactNode;
+  label: string;
+  badge?: string;
+  onClick: () => void;
+}) {
+  const accentText = tone === "plan" ? "text-purple" : "text-blue";
+  const accentBar = tone === "plan" ? "bg-purple" : "bg-blue";
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "relative flex items-center gap-1.5 rounded-t-md px-3 pb-2.5 pt-2 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        active
+          ? "text-text-bright"
+          : "text-muted-foreground hover:bg-hover hover:text-text",
+      )}
+    >
+      <span className={cn("flex size-3.5 items-center justify-center", active && accentText)}>
+        {icon}
+      </span>
+      {label}
+      {badge && (
+        <span className="rounded-full bg-panel px-1.5 py-0.5 font-mono text-[9.5px] tabular-nums text-dim">
+          {badge}
+        </span>
+      )}
+      {active && <span className={cn("absolute inset-x-2.5 -bottom-px h-0.5 rounded-t", accentBar)} />}
+    </button>
+  );
+}
+
 /**
  * The prompt composer — a real controlled textarea with Enter-to-send /
  * Shift+Enter newline, plus two typeahead palettes: `/` surfaces the harness's
@@ -182,6 +230,7 @@ export function Composer({
   planDocument,
   onOpenPlanStage,
   topSlot,
+  fleetActiveCount,
   className,
 }: {
   skills?: ReadonlyArray<Skill>;
@@ -230,6 +279,8 @@ export function Composer({
   onOpenPlanStage?: (stageId: string) => void;
   /** Content integrated into the top of the composer's shared chrome. */
   topSlot?: ReactNode;
+  /** Active-agent count for the Fleet tab badge (the fleet content is `topSlot`). */
+  fleetActiveCount?: number;
   /** Canonical certified model surface. */
   providerCatalog?: ProviderCatalog | null;
   connectionId?: ProviderConnectionId | null;
@@ -370,6 +421,14 @@ export function Composer({
     onAttachmentsChange?.(resolved);
   };
   const [dragging, setDragging] = useState(false);
+  // The Plan/Fleet drawer: which tab is showing, and whether it's expanded.
+  const [drawerTab, setDrawerTab] = useState<"plan" | "fleet">("plan");
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  // With only one of the two present, that tab is forced active regardless of
+  // the last manual pick, so a lone drawer never renders an empty panel.
+  const drawerActiveTab: "plan" | "fleet" =
+    planDocument && topSlot ? drawerTab : planDocument ? "plan" : "fleet";
+  const planDrawerCounts = planDocument ? planTaskCounts(planDocument) : null;
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachIdRef = useRef(0);
@@ -575,16 +634,50 @@ export function Composer({
           dragging && "border-cyan/60 bg-cyan/5 shadow-none",
         )}
       >
-        {planDocument && (
-          <PlanTaskList
-            document={planDocument}
-            onOpenStage={onOpenPlanStage}
-            className="-mx-4 -mt-3.5 rounded-none border-x-0 border-t-0 bg-transparent"
-          />
-        )}
-        {topSlot && (
-          <div className={cn("-mx-4 overflow-hidden border-b border-line", !planDocument && "-mt-3.5")}>
-            {topSlot}
+        {(planDocument || topSlot) && (
+          <div className="-mx-4 -mt-3.5">
+            {/* One tabbed drawer, not two stacked docks — the tab strip is the
+                header (label, count, collapse) and Plan/Fleet share the space. */}
+            <div role="tablist" aria-label="Plan and Fleet" className="flex items-stretch gap-0.5 border-b border-line px-2.5 pt-1.5">
+              {planDocument && (
+                <DrawerTab
+                  active={drawerActiveTab === "plan"}
+                  tone="plan"
+                  icon={<ListChecks className="size-3.5" />}
+                  label="Plan"
+                  badge={planDrawerCounts ? `${planDrawerCounts.completed}/${planDrawerCounts.total}` : undefined}
+                  onClick={() => setDrawerTab("plan")}
+                />
+              )}
+              {topSlot && (
+                <DrawerTab
+                  active={drawerActiveTab === "fleet"}
+                  tone="fleet"
+                  icon={<Users className="size-3.5" />}
+                  label="Fleet"
+                  badge={fleetActiveCount ? String(fleetActiveCount) : undefined}
+                  onClick={() => setDrawerTab("fleet")}
+                />
+              )}
+              <span className="flex-1" />
+              <button
+                type="button"
+                aria-label={drawerOpen ? "Collapse drawer" : "Expand drawer"}
+                aria-expanded={drawerOpen}
+                onClick={() => setDrawerOpen((open) => !open)}
+                className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronDown className={cn("size-3.5 transition-transform", !drawerOpen && "-rotate-90")} />
+              </button>
+            </div>
+            {drawerOpen && (
+              <div className="max-h-[280px] overflow-y-auto">
+                {drawerActiveTab === "plan" && planDocument && (
+                  <PlanTaskList bare document={planDocument} onOpenStage={onOpenPlanStage} />
+                )}
+                {drawerActiveTab === "fleet" && topSlot}
+              </div>
+            )}
           </div>
         )}
         {(codeReferences.length > 0 || mentions.length > 0) && (

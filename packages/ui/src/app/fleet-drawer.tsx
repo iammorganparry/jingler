@@ -39,6 +39,8 @@ export interface FleetDrawerProps {
   readonly pending?: boolean
   readonly outcome?: SubagentFleetControlOutcome | null
   readonly embedded?: boolean
+  /** Render only the agent grid — no header, resize, or chrome. For the tabbed drawer. */
+  readonly bare?: boolean
   readonly onSelect: (id: string) => void
   readonly onToggle: () => void
   readonly onResize: (height: number) => void
@@ -206,6 +208,55 @@ export function FleetDrawer(props: FleetDrawerProps) {
     window.addEventListener("pointerup", finish)
   }
   if (props.nodes.length === 0) return null
+  // A single-child workflow surfaces both its container node AND its one step.
+  // In the old indented tree they nested; in this flat grid they read as the
+  // SAME agent twice. A workflow container is an orchestrator with no output of
+  // its own — drop it whenever one of its children is already shown, so each
+  // running agent appears exactly once.
+  const parentIds = new Set(
+    props.nodes.map((node) => node.parentId).filter((id): id is string => id !== null)
+  )
+  const visibleNodes = props.nodes.filter(
+    (node) => !(node.nodeKind === "workflow" && parentIds.has(node.id))
+  )
+  const grid = (
+    <div className="grid grid-cols-4 gap-2">
+      <MainCard selected={props.selectedId === "main"} onSelect={props.onSelect} />
+      {visibleNodes.map((node) => (
+        <AgentCard
+          key={node.id}
+          node={node}
+          selected={props.selectedId === node.id}
+          onSelect={props.onSelect}
+          pending={props.pending}
+          canControl={props.canControl}
+          onControl={props.onControl}
+          canDismiss={props.canDismiss}
+          onDismiss={props.onDismiss}
+          onOpenArtifact={props.onOpenArtifact}
+        />
+      ))}
+    </div>
+  )
+  const receipt = props.outcome && (
+    <p className="mt-2 px-1 text-[10px] text-dim">
+      <MessageSquareMore className="mr-1 inline size-3" />
+      <span data-testid="fleet-control-receipt" className="mr-1 rounded bg-panel px-1 py-0.5 uppercase">{props.outcome.deliveryStatus}</span>
+      {props.outcome.message}
+    </p>
+  )
+  // Tabbed-drawer mode: the composer's tab strip supplies the tab label and
+  // collapse, so render the grid plus a compact live summary (no full header).
+  if (props.bare) {
+    const active = props.nodes.filter((node) => ACTIVE.has(node.status)).length
+    return (
+      <section data-testid="fleet-drawer" aria-label="Subagent Fleet" className="p-2">
+        <p className="mb-1.5 px-1 text-[10px] text-dim">{active} active · {props.nodes.length} total</p>
+        {grid}
+        {receipt}
+      </section>
+    )
+  }
   return (
     <section
       data-testid="fleet-drawer"
@@ -223,30 +274,8 @@ export function FleetDrawer(props: FleetDrawerProps) {
           <div className="min-h-0 overflow-auto p-2" style={{ height: props.height }}>
             {/* A flat 4-column grid that wraps to new rows — no detail panel; the
                 selected card carries controls and clicking swaps the output above. */}
-            <div className="grid grid-cols-4 gap-2">
-              <MainCard selected={props.selectedId === "main"} onSelect={props.onSelect} />
-              {props.nodes.map((node) => (
-                <AgentCard
-                  key={node.id}
-                  node={node}
-                  selected={props.selectedId === node.id}
-                  onSelect={props.onSelect}
-                  pending={props.pending}
-                  canControl={props.canControl}
-                  onControl={props.onControl}
-                  canDismiss={props.canDismiss}
-                  onDismiss={props.onDismiss}
-                  onOpenArtifact={props.onOpenArtifact}
-                />
-              ))}
-            </div>
-            {props.outcome && (
-              <p className="mt-2 px-1 text-[10px] text-dim">
-                <MessageSquareMore className="mr-1 inline size-3" />
-                <span data-testid="fleet-control-receipt" className="mr-1 rounded bg-panel px-1 py-0.5 uppercase">{props.outcome.deliveryStatus}</span>
-                {props.outcome.message}
-              </p>
-            )}
+            {grid}
+            {receipt}
           </div>
         </>
       )}

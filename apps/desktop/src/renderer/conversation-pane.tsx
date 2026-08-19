@@ -735,6 +735,7 @@ export function ConversationPane({
   const fleetDrawer = (
     <>
     <FleetDrawer
+      bare
       nodes={fleet.nodes}
       selectedId={fleet.selectedId}
       expanded={fleet.expanded}
@@ -1155,7 +1156,12 @@ export function ConversationPane({
       ) : (
         <ConversationView
           messages={convo.messages}
-          fleetSlot={fleetDrawer}
+          fleetSlot={
+            fleet.nodes.length > 0 || fleet.completedNodes.length > 0
+              ? fleetDrawer
+              : undefined
+          }
+          fleetActiveCount={fleet.nodes.length}
           hasMoreHistory={convo.hasMoreHistory}
           loadingHistory={convo.loadingHistory}
           onLoadEarlier={convo.loadOlder}

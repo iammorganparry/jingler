@@ -224,6 +224,8 @@ export interface ConversationViewProps {
   composerDisabledReason?: string
   /** Composer-adjacent first-class subagent Fleet drawer. */
   fleetSlot?: ReactNode
+  /** Active-agent count for the composer's Fleet tab badge. */
+  fleetActiveCount?: number
   /** Whether the session Files workspace follows this chat's agent mutations. */
   followAgent?: boolean
   /** Toggle follow mode; enabling may present Files beside the conversation. */
@@ -304,6 +306,7 @@ export function ConversationView({
   focusKey,
   composerDisabledReason,
   fleetSlot,
+  fleetActiveCount,
   followAgent = false,
   onToggleFollowAgent,
   archived,
@@ -724,6 +727,7 @@ export function ConversationView({
                 planDocument={planDocument ?? undefined}
                 onOpenPlanStage={(stageId) => onOpenPlanReview?.(stageId)}
                 topSlot={fleetSlot}
+                fleetActiveCount={fleetActiveCount}
                 autoFocus={autoFocusComposer}
                 focusKey={focusKey}
               />
