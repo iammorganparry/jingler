@@ -1,77 +1,64 @@
 import type { AgentRole, IssueReference, LoadedPlugin, RuntimeMode } from "@jingler/core"
-import { Option, Schema } from "effect"
+import type { PluginHostRuntime } from "../../plugin-host.js"
 import type {
   PluginAgentToolDescriptor,
-  PluginAgentToolSessionContext,
-  PluginHostPayload
+  PluginAgentToolSessionContext
 } from "../../plugin-host-protocol.js"
+import { Schema } from "effect"
 import type { PluginToolOrigin, ToolRegistry } from "./tool-registry.js"
 
 const roles = ["conversation", "plan", "plan-execution", "review", "background"] as const satisfies ReadonlyArray<AgentRole>
 const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const satisfies ReadonlyArray<RuntimeMode>
-type PluginAgentToolInputValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | PluginAgentToolInput
-  | ReadonlyArray<PluginAgentToolInputValue>
+const PluginToolInput = Schema.Record({ key: Schema.String, value: Schema.Unknown })
 
-interface PluginAgentToolInput {
-  readonly [key: string]: PluginAgentToolInputValue
+const issueReferenceOf = (value: unknown): IssueReference | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null
+  const issue = value as Record<string, unknown>
+  if (
+    typeof issue.providerId !== "string" || typeof issue.id !== "string" ||
+    typeof issue.identifier !== "string" || typeof issue.url !== "string" ||
+    typeof issue.title !== "string" || !Array.isArray(issue.labels)
+  ) return null
+  const labels = issue.labels.flatMap((candidate) => {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) return []
+    const label = candidate as Record<string, unknown>
+    return typeof label.name === "string" && (typeof label.color === "string" || label.color === null)
+      ? [{ name: label.name, color: label.color as string | null }]
+      : []
+  })
+  if (labels.length !== issue.labels.length) return null
+  return {
+    providerId: issue.providerId,
+    id: issue.id,
+    ...(typeof issue.providerAccountId === "string"
+      ? { providerAccountId: issue.providerAccountId }
+      : {}),
+    identifier: issue.identifier,
+    url: issue.url,
+    title: issue.title,
+    labels
+  }
 }
 
-const PluginAgentToolInputValue: Schema.Schema<PluginAgentToolInputValue> = Schema.suspend(() =>
-  Schema.Union(
-    Schema.String,
-    Schema.Number,
-    Schema.Boolean,
-    Schema.Null,
-    Schema.Undefined,
-    Schema.Array(PluginAgentToolInputValue),
-    Schema.Record({ key: Schema.String, value: PluginAgentToolInputValue })
-  )
-)
-const PluginToolInput: Schema.Schema<PluginAgentToolInput> = Schema.Record({
-  key: Schema.String,
-  value: PluginAgentToolInputValue
-})
-
-const IssueReferenceResult = Schema.Struct({
-  providerId: Schema.String,
-  providerAccountId: Schema.optional(Schema.String),
-  id: Schema.String,
-  identifier: Schema.String,
-  url: Schema.String,
-  title: Schema.String,
-  labels: Schema.Array(Schema.Struct({
-    name: Schema.String,
-    color: Schema.NullOr(Schema.String)
-  }))
-})
-const LinearIssueResultEnvelope = Schema.Struct({
-  kind: Schema.Literal("linear.issue-result"),
-  issues: Schema.Array(IssueReferenceResult)
-})
-
 /** Decode the trusted Linear toolset's bounded issue-link envelope without parsing prose. */
-export const issueReferencesFromPluginResult = <Value>(
+export const issueReferencesFromPluginResult = (
   origin: PluginToolOrigin,
-  value: Value
+  value: unknown
 ): readonly IssueReference[] => {
   if (origin.pluginId !== "linear" || origin.toolsetId !== "linear.issues") return []
-  const decoded = Schema.decodeUnknownOption(LinearIssueResultEnvelope)(value)
-  if (Option.isNone(decoded)) return []
-  return decoded.value.issues.every((issue) => issue.providerId === "linear")
-    ? decoded.value.issues
-    : []
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return []
+  const envelope = value as Record<string, unknown>
+  if (envelope.kind !== "linear.issue-result" || !Array.isArray(envelope.issues)) return []
+  const issues = envelope.issues.map(issueReferenceOf)
+  return issues.every((issue): issue is IssueReference =>
+    issue !== null && issue.providerId === "linear"
+  ) ? issues : []
 }
 
 /** Atomically hand every trusted typed reference to persistence; returns whether links changed. */
-export const persistPluginIssueReferences = async <Value>(
+export const persistPluginIssueReferences = async (
   origin: PluginToolOrigin,
-  value: Value,
+  value: unknown,
   persist: (issues: readonly IssueReference[]) => Promise<void>
 ): Promise<boolean> => {
   const issues = issueReferencesFromPluginResult(origin, value)
@@ -89,22 +76,6 @@ export interface PluginAgentToolRegistrationFailure {
   readonly pluginId: string
   readonly toolsetId: string
   readonly message: string
-}
-
-/** Minimal host capability needed to register and invoke plugin agent tools. */
-export interface PluginAgentToolHost {
-  readonly loadAgentToolset: (
-    plugin: LoadedPlugin,
-    toolsetId: string
-  ) => Promise<ReadonlyArray<PluginAgentToolDescriptor>>
-  readonly invokeAgentTool: (
-    plugin: LoadedPlugin,
-    toolsetId: string,
-    toolId: string,
-    input: PluginAgentToolInput,
-    context: PluginAgentToolSessionContext,
-    signal?: AbortSignal
-  ) => Promise<PluginHostPayload>
 }
 
 /** Enabled manifest toolsets, without importing any plugin host entry. */
@@ -125,7 +96,7 @@ const messageOf = (cause: unknown): string =>
 
 const registerDescriptor = (
   registry: ToolRegistry,
-  host: PluginAgentToolHost,
+  host: PluginHostRuntime,
   source: PluginAgentToolsetSource,
   descriptor: PluginAgentToolDescriptor,
   context: PluginAgentToolSessionContext
@@ -171,7 +142,7 @@ const registerDescriptor = (
  */
 export const registerPluginAgentTools = async (
   registry: ToolRegistry,
-  host: PluginAgentToolHost,
+  host: PluginHostRuntime,
   sources: ReadonlyArray<PluginAgentToolsetSource>,
   context: PluginAgentToolSessionContext
 ): Promise<ReadonlyArray<PluginAgentToolRegistrationFailure>> => {

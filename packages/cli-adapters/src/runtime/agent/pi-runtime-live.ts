@@ -36,7 +36,6 @@ import {
 import type {
   PluginToolOrigin,
   ToolRegistry,
-  ToolRegistryOptions,
   ToolSuccessfulResult
 } from "../tools/tool-registry.js"
 import { makeToolMemory } from "../tools/tool-memory.js"
@@ -145,7 +144,7 @@ export const makePiAgentRuntimeLive = (
       )
     )
 
-    const factoryOptions: PiSessionFactoryOptions = {
+    const factory = makePiSessionFactory({
       agentDir: paths.managedResourcesDir,
       sessionsDir: paths.piSessionsDir,
       credentials,
@@ -264,8 +263,61 @@ export const makePiAgentRuntimeLive = (
               cause
             })
           ),
-          Effect.flatMap(({ managedMcp, managedFiles, plugins }) => {
-            const registryOptions: ToolRegistryOptions = {
+          Effect.flatMap(({ managedMcp, managedFiles, plugins }) => createJinglerTools({
+            context,
+            cwd: spec.cwd,
+            workspace,
+            ...(runWebSearch === undefined ? {} : { webSearch: runWebSearch }),
+            mcp: {
+              ...context.mcp,
+              imported: managedMcp.map((server) =>
+                server.transport === "stdio"
+                  ? { ...server, cwd: spec.cwd }
+                  : server
+              )
+            },
+            // Per-run attachments (the browser lease rotates every turn on a
+            // retained session) resolve from the LIVE context at call time.
+            // Imported managed servers keep their registration-time config —
+            // the cwd-adjusted mapping above — so they are excluded here.
+            liveMcp: () => {
+              const current = context.mcp
+              return current === undefined
+                ? undefined
+                : { ...current, imported: undefined }
+            },
+            registryOptions: {
+              ...(Option.isSome(memory)
+                ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }
+                : {}),
+              ...(plugins
+                ? {
+                    onSuccessfulResult: async (result: ToolSuccessfulResult) => {
+                      if (result.origin?.kind !== "plugin") return
+                      const linked = await persistPluginIssueReferences(
+                        result.origin,
+                        result.value,
+                        (issues) => Effect.runPromise(
+                          sessionStore.addIssues(plugins.context.id, issues).pipe(
+                            Effect.provideService(FileSystem.FileSystem, fs),
+                            Effect.provideService(AppPaths, paths)
+                          )
+                        )
+                      )
+                      if (linked) {
+                        await Effect.runPromise(
+                          context.publishEvent({ _tag: "SessionIssueLinksChanged" })
+                        )
+                      }
+                      await options.onPluginToolSuccessfulResult?.({
+                        ...result,
+                        origin: result.origin,
+                        sessionId: plugins.context.id,
+                        repository: plugins.context.repository
+                      })
+                    }
+                  }
+                : {}),
               observer: createMutationObserver({
                 cwd: spec.cwd,
                 runId: spec.runId,
@@ -277,99 +329,32 @@ export const makePiAgentRuntimeLive = (
                 })
               })
             }
-            if (Option.isSome(memory)) {
-              Object.assign(registryOptions, {
-                memory: makeToolMemory({ memory: memory.value, runId: spec.runId })
+          }).pipe(
+            Effect.tap((registry) => Effect.sync(() =>
+              registerManagedFileTools(registry, managedResources, managedFiles)
+            )),
+            Effect.tap((registry) => Effect.sync(() =>
+              registerWorkspaceMutationTools(registry, spec.cwd, mutations, {
+                sessionId: spec.sessionId,
+                offload
               })
-            }
-            if (plugins) {
-              const onSuccessfulResult = async (
-                result: ToolSuccessfulResult
-              ): Promise<void> => {
-                if (result.origin?.kind !== "plugin") return
-                const linked = await persistPluginIssueReferences(
-                  result.origin,
-                  result.value,
-                  (issues) =>
-                    Effect.runPromise(
-                      sessionStore.addIssues(plugins.context.id, issues).pipe(
-                        Effect.provideService(FileSystem.FileSystem, fs),
-                        Effect.provideService(AppPaths, paths)
-                      )
+            )),
+            Effect.tap((registry) =>
+              plugins === null
+                ? Effect.void
+                : Effect.promise(() =>
+                    registerPluginAgentTools(
+                      registry,
+                      plugins.host,
+                      plugins.sources,
+                      plugins.context
                     )
-                )
-                if (linked) {
-                  await Effect.runPromise(
-                    context.publishEvent({ _tag: "SessionIssueLinksChanged" })
-                  )
-                }
-                await options.onPluginToolSuccessfulResult?.({
-                  ...result,
-                  origin: result.origin,
-                  sessionId: plugins.context.id,
-                  repository: plugins.context.repository
-                })
-              }
-              Object.assign(registryOptions, { onSuccessfulResult })
-            }
-            const toolOptions = {
-              context,
-              cwd: spec.cwd,
-              workspace,
-              mcp: {
-                ...context.mcp,
-                imported: managedMcp.map((server) =>
-                  server.transport === "stdio"
-                    ? { ...server, cwd: spec.cwd }
-                    : server
-                )
-              },
-              // Per-run attachments (the browser lease rotates every turn on a
-              // retained session) resolve from the LIVE context at call time.
-              // Imported managed servers keep their registration-time config —
-              // the cwd-adjusted mapping above — so they are excluded here.
-              liveMcp: () => {
-                const current = context.mcp
-                return current === undefined
-                  ? undefined
-                  : { ...current, imported: undefined }
-              },
-              registryOptions
-            }
-            if (runWebSearch !== undefined) {
-              Object.assign(toolOptions, { webSearch: runWebSearch })
-            }
-            return createJinglerTools(toolOptions).pipe(
-              Effect.tap((registry) =>
-                Effect.sync(() =>
-                  registerManagedFileTools(registry, managedResources, managedFiles)
-                )
-              ),
-              Effect.tap((registry) =>
-                Effect.sync(() =>
-                  registerWorkspaceMutationTools(registry, spec.cwd, mutations, {
-                    sessionId: spec.sessionId,
-                    offload
-                  })
-                )
-              ),
-              Effect.tap((registry) =>
-                plugins === null
-                  ? Effect.void
-                  : Effect.promise(() =>
-                      registerPluginAgentTools(
-                        registry,
-                        plugins.host,
-                        plugins.sources,
-                        plugins.context
-                      )
-                    ).pipe(Effect.asVoid)
-              ),
-              Effect.tap((registry) =>
-                options.configureToolRegistry?.({ registry, spec, context }) ?? Effect.void
-              )
+                  ).pipe(Effect.asVoid)
+            ),
+            Effect.tap((registry) =>
+              options.configureToolRegistry?.({ registry, spec, context }) ?? Effect.void
             )
-          }),
+          )),
           Effect.mapError((cause) =>
             new AgentRuntimeError({
               reason: "runtime",
@@ -379,14 +364,11 @@ export const makePiAgentRuntimeLive = (
           )
         )
       },
-      recordDiagnostic: diagnostics.record
-    }
-    if (options.configureModelRuntime) {
-      Object.assign(factoryOptions, {
-        configureModelRuntime: options.configureModelRuntime
-      })
-    }
-    const factory = makePiSessionFactory(factoryOptions)
+      recordDiagnostic: diagnostics.record,
+      ...(options.configureModelRuntime
+        ? { configureModelRuntime: options.configureModelRuntime }
+        : {})
+    })
 
     return yield* makePiAgentRuntime(factory)
   })

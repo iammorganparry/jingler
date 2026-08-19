@@ -37,7 +37,6 @@ import {
   type IssueProviderMethod,
   type PluginAgentToolDescriptor,
   type PluginAgentToolSessionContext,
-  type PluginHostPayload,
   type ToHostMessage
 } from "./plugin-host-protocol.js"
 
@@ -68,21 +67,19 @@ export interface HostRequestHandler {
   (
     pluginId: string,
     op: string,
-    payload: PluginHostPayload
-  ): Promise<{ ok: true; value: PluginHostPayload } | { ok: false; message: string }>
+    payload: unknown
+  ): Promise<{ ok: true; value: unknown } | { ok: false; message: string }>
 }
 
 export interface PluginHostEvents {
-  readonly onPluginEvent?: (pluginId: string, topic: string, payload: PluginHostPayload) => void
+  readonly onPluginEvent?: (pluginId: string, topic: string, payload: unknown) => void
   readonly onActivated?: (pluginId: string) => void
   readonly onActivationFailed?: (pluginId: string, message: string) => void
   readonly onLog?: (pluginId: string, level: string, message: string) => void
 }
 
-type PluginHostResponse = PluginHostPayload | ReadonlyArray<PluginAgentToolDescriptor>
-
 interface Waiter {
-  readonly resolve: (value: PluginHostResponse) => void
+  readonly resolve: (value: unknown) => void
   readonly reject: (error: PluginError) => void
 }
 
@@ -320,7 +317,7 @@ export class PluginHostRuntime {
   private settle(
     requestId: string,
     ok: boolean,
-    value: PluginHostResponse,
+    value: unknown,
     message?: string
   ): void {
     const waiter = this.waiters.get(requestId)
@@ -371,8 +368,7 @@ export class PluginHostRuntime {
   private send<T>(message: ToHostMessage & { requestId: string }): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       this.waiters.set(message.requestId, {
-        // SAFETY: correlation ids pair each waiter with the response type of its request.
-        resolve: resolve as (value: PluginHostResponse) => void,
+        resolve: resolve as (value: unknown) => void,
         reject
       })
       this.process?.post(message)
@@ -464,9 +460,9 @@ export class PluginHostRuntime {
   }
 
   /** Dispatch a command, activating the plugin first if needed. */
-  async invoke(plugin: LoadedPlugin, commandId: string, arg?: PluginHostPayload): Promise<PluginHostPayload> {
+  async invoke(plugin: LoadedPlugin, commandId: string, arg?: unknown): Promise<unknown> {
     await this.activate(plugin)
-    return await this.send<PluginHostPayload>({
+    return await this.send<unknown>({
       kind: "invoke",
       requestId: this.id(),
       pluginId: plugin.manifest.id,
@@ -494,13 +490,13 @@ export class PluginHostRuntime {
     plugin: LoadedPlugin,
     toolsetId: string,
     toolId: string,
-    input: PluginHostPayload,
+    input: unknown,
     context: PluginAgentToolSessionContext,
     signal?: AbortSignal
-  ): Promise<PluginHostPayload> {
+  ): Promise<unknown> {
     await this.activate(plugin)
     const requestId = this.id()
-    const invocation = this.send<PluginHostPayload>({
+    const invocation = this.send<unknown>({
       kind: "agent-tool-invoke",
       requestId,
       pluginId: plugin.manifest.id,
@@ -528,10 +524,10 @@ export class PluginHostRuntime {
     plugin: LoadedPlugin,
     providerId: string,
     method: IssueProviderMethod,
-    input: PluginHostPayload
-  ): Promise<PluginHostPayload> {
+    input: unknown
+  ): Promise<unknown> {
     await this.activate(plugin)
-    return await this.send<PluginHostPayload>({
+    return await this.send<unknown>({
       kind: "issue-provider-invoke",
       requestId: this.id(),
       pluginId: plugin.manifest.id,
