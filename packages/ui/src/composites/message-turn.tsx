@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useState } from "react"
+import { createContext, memo, type ReactNode, useContext, useState } from "react"
 import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
 import type { ContentPart, ExecutionMode, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
@@ -146,7 +146,19 @@ function ProtocolText({
   )
 }
 
+/**
+ * Interrupt the currently-running tool. Provided by the transcript host
+ * (ConversationView) so a running Bash card can carry a stop button without
+ * threading the callback through every nested renderer (ToolGroup, PartView).
+ */
+export const ToolStopContext = createContext<(() => void) | null>(null)
+
+/** Command tools that can hang for minutes and so earn an inline stop button. */
+const isStoppableTool = (displayName: string): boolean =>
+  /^(bash|shell|terminal|command)/i.test(displayName)
+
 function ToolCardView({ tool }: { tool: ToolCallModel }) {
+  const stopTool = useContext(ToolStopContext)
   const [expanded, setExpanded] = useState(false)
   const canonicalChanges = tool.fileChanges?.changes ?? []
   const legacyPreview = canonicalChanges.length === 0 ? tool.preview : null
@@ -160,6 +172,10 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
     (tool.output !== undefined || (tool.target?.length ?? 0) > 0)
   const displayName = toolDisplayName(tool.name)
   const path = pathOf(tool, displayName)
+  const onStop =
+    tool.status === "running" && stopTool !== null && isStoppableTool(displayName)
+      ? stopTool
+      : undefined
   return (
     <ToolCall
       status={tool.status}
@@ -169,6 +185,7 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
       meta={toolMeta(tool)}
       expanded={expanded}
       onToggle={openable ? () => setExpanded((v) => !v) : undefined}
+      onStop={onStop}
       className={WIDTH}
     >
       {canonicalChanges.length > 0 && <FileChangeList changes={canonicalChanges} />}
