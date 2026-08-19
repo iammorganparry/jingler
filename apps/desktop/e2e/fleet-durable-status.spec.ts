@@ -219,15 +219,8 @@ test("durable native status appears in the integrated Fleet drawer", async ({
     ).toBeVisible()
     await expect(fleet).toContainText("scout")
     await expect(fleet).toContainText("1 active · 1 total")
-    const resize = fleet.getByRole("button", { name: "Resize Fleet drawer" })
-    await expect(resize).toBeVisible()
-    expect(await resize.evaluate((element) => {
-      const style = getComputedStyle(element)
-      return {
-        top: style.borderTopWidth,
-        bottom: style.borderBottomWidth
-      }
-    })).toEqual({ top: "1px", bottom: "0px" })
+    // The Fleet now lives in the composer's tabbed drawer (no resize handle —
+    // it auto-sizes with a max-height and scrolls).
 
     await fleet.getByTestId("fleet-agent-child-run").click()
     const childView = window.getByTestId("fleet-agent-transcript")

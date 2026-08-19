@@ -102,6 +102,39 @@ describe("FleetDrawer", () => {
     expect(onControl).not.toHaveBeenCalled()
   })
 
+  it("drops a single-child workflow container so its one step is not shown twice", () => {
+    const workflow = node({
+      id: "parent/wf",
+      runId: "wf",
+      nodeKind: "workflow",
+      agent: "REVIEWER",
+      task: "Active delegated work"
+    })
+    const step = node({
+      id: "parent/wf/0",
+      runId: "wf:0",
+      parentId: workflow.id,
+      agent: "reviewer",
+      task: "Review the diff"
+    })
+    render(
+      <FleetDrawer
+        nodes={[workflow, step]}
+        selectedId={step.id}
+        expanded
+        height={180}
+        onSelect={vi.fn()}
+        onToggle={vi.fn()}
+        onResize={vi.fn()}
+        onControl={vi.fn()}
+      />
+    )
+
+    // The container is redundant with its child in a flat grid — only the child shows.
+    expect(screen.queryByTestId("fleet-workflow-wf")).toBeNull()
+    expect(screen.getByTestId("fleet-agent-wf:0")).toBeTruthy()
+  })
+
   it("keeps read-only reviewer transcripts visible and preserves legacy close", () => {
     const onDismiss = vi.fn()
     const reviewer = node({ status: "completed" })

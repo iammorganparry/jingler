@@ -41,7 +41,11 @@ describe("Composer plan task list", () => {
     const taskList = screen.getByTestId("plan-task-list")
     expect(composer.contains(taskList)).toBe(true)
 
-    expect(screen.getByRole("button", { name: "Plan tasks: 0 of 1 done" }).getAttribute("aria-expanded")).toBe("true")
+    // The drawer's Plan tab labels the list (with a done/total badge); the list
+    // itself renders bare and always expanded inside the tab.
+    const planTab = screen.getByRole("tab", { name: /Plan/ })
+    expect(planTab.getAttribute("aria-selected")).toBe("true")
+    expect(planTab.textContent).toContain("0/1")
     fireEvent.click(screen.getByTestId("plan-progress-stage-stage-1"))
     expect(onOpenPlanStage).toHaveBeenCalledWith("stage-1")
   })

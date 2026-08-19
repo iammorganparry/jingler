@@ -125,9 +125,11 @@ test("selecting a Fleet child shows its session view and Main restores the compo
   await window.getByTestId("fleet-agent-main").click()
   await expect(window.getByPlaceholder("Queue a message while the agent works…")).toBeVisible()
 
-  const fleetToggle = window.getByRole("button", { name: /Fleet 2 active/ })
-  await fleetToggle.click()
-  await expect(fleetToggle).toHaveAttribute("aria-expanded", "false")
-  await fleetToggle.click()
-  await expect(fleetToggle).toHaveAttribute("aria-expanded", "true")
+  // The Plan/Fleet drawer collapses from the tab strip's chevron (label flips
+  // between "Collapse drawer" and "Expand drawer", so match either).
+  const drawerToggle = window.getByRole("button", { name: /drawer/i })
+  await drawerToggle.click()
+  await expect(drawerToggle).toHaveAttribute("aria-expanded", "false")
+  await drawerToggle.click()
+  await expect(drawerToggle).toHaveAttribute("aria-expanded", "true")
 })
