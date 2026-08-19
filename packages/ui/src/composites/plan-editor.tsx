@@ -192,6 +192,7 @@ export interface PlanEditorProps {
   onResume?: () => void
   onRevise?: () => void
   onSendToAgent?: () => void
+  onDiscard?: () => void
   /** Reload the document after a load failure. */
   onRetry?: () => void
   /** One-shot stable stage id requested by the composer progress dock. */
@@ -240,6 +241,7 @@ export function PlanEditor({
   onResume,
   onRevise,
   onSendToAgent,
+  onDiscard,
   onRetry,
   targetStageId,
   revisionTarget,
@@ -422,6 +424,7 @@ export function PlanEditor({
         onResume={onResume}
         onRevise={onRevise}
         onSendToAgent={onSendToAgent}
+        onDiscard={onDiscard}
         onRetry={onRetry}
       />
     </div>

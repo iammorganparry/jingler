@@ -1312,6 +1312,8 @@ export const rpc = {
     run((c) => c.Plan.current({ sessionId })),
   planStartDraft: (sessionId: string): Promise<PlanDocument> =>
     run((c) => c.Plan.startDraft({ sessionId })),
+  planDiscard: (sessionId: string): Promise<null> =>
+    run((c) => c.Plan.discard({ sessionId })),
   planUpdateDocument: (input: {
     sessionId: string
     planId: string
@@ -1362,7 +1364,7 @@ export const rpc = {
   }): Promise<PlanDocument> => run((c) => c.Plan.setThreadResolved(input)),
   planWatch: (
     sessionId: string,
-    onDocument: (document: PlanDocument) => void
+    onDocument: (document: PlanDocument | null) => void
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false

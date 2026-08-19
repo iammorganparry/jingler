@@ -4,7 +4,7 @@ import { assign, fromCallback, fromPromise, setup } from "xstate"
 export interface PlanDocumentInput {
   readonly sessionId: string
   readonly load: () => Promise<PlanDocument | null>
-  readonly subscribe?: (listener: (document: PlanDocument) => void) => () => void
+  readonly subscribe?: (listener: (document: PlanDocument | null) => void) => () => void
 }
 
 export interface PlanDocumentContext extends PlanDocumentInput {
@@ -17,7 +17,7 @@ export interface PlanDocumentContext extends PlanDocumentInput {
 export type PlanDocumentEvent =
   | { readonly type: "RETRY" }
   | { readonly type: "REVISION_STARTED"; readonly stageId: string | null }
-  | { readonly type: "REMOTE"; readonly document: PlanDocument }
+  | { readonly type: "REMOTE"; readonly document: PlanDocument | null }
 
 /**
  * Approval is revision-sensitive, so the transcript card and canonical document
@@ -77,9 +77,19 @@ export const planDocumentMachine = setup({
     })
   },
   guards: {
-    remoteAdvances: ({ context, event }) =>
-      event.type === "REMOTE" &&
-      (context.document === null || event.document.revision > context.document.revision)
+    // The watch stream re-reads the single canonical plan file, so a differing
+    // id means the file now holds a DIFFERENT plan (a fresh replacement resets
+    // to revision 1) and a null document means the plan was discarded. Neither
+    // is ordered against the held revision — only same-id updates are.
+    remoteAdvances: ({ context, event }) => {
+      if (event.type !== "REMOTE") return false
+      if (event.document === null) return context.document !== null
+      return (
+        context.document === null ||
+        event.document.id !== context.document.id ||
+        event.document.revision > context.document.revision
+      )
+    }
   },
   actions: {
     loaded: assign((_, params: { readonly document: PlanDocument | null }) => {
@@ -94,7 +104,7 @@ export const planDocumentMachine = setup({
       event.type === "REMOTE"
         ? {
             document: event.document,
-            draft: JSON.stringify(event.document.plan),
+            draft: event.document === null ? "" : JSON.stringify(event.document.plan),
             error: null
           }
         : {}

@@ -228,6 +228,36 @@ describe("Jingler pi control tools", () => {
   })
 })
 
+describe("Jingler plan discard tool", () => {
+  it("discards the canonical plan through the run context", async () => {
+    const discardPlan = vi.fn(() => Effect.void)
+    const registry = createJinglerControlTools(runtimeContext({ discardPlan }))
+    const result = await Effect.runPromise(
+      registry.execute({
+        id: "jingler_discard_plan",
+        arguments: {},
+        role: "conversation",
+        mode: "ask"
+      })
+    )
+    expect(result.status).toBe("success")
+    expect(discardPlan).toHaveBeenCalledOnce()
+  })
+
+  it("treats discard as a no-op when the run context cannot supply it", async () => {
+    const registry = createJinglerControlTools(runtimeContext({ discardPlan: undefined }))
+    const result = await Effect.runPromise(
+      registry.execute({
+        id: "jingler_discard_plan",
+        arguments: {},
+        role: "plan",
+        mode: "plan"
+      })
+    )
+    expect(result.status).toBe("success")
+  })
+})
+
 describe("Jingler plan tool containment", () => {
   it("submits the canonical PlanPrd contract in plan mode", async () => {
     const proposePlan = vi.fn(() => Effect.succeed({ _tag: "Reject" } as const))

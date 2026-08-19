@@ -9,18 +9,18 @@ import {
 } from "./plan-document-registry.js"
 import { rpc } from "./rpc-client.js"
 
-const listeners = new Map<string, Set<(document: PlanDocument) => void>>()
+const listeners = new Map<string, Set<(document: PlanDocument | null) => void>>()
 // One live `Plan.watch` stream per session, shared by all subscribers; the value
 // is its stop handle. Replaces the previous fixed-interval `Plan.current` poll.
 const watchers = new Map<string, () => void>()
 
-const publish = (sessionId: string, document: PlanDocument): void => {
+const publish = (sessionId: string, document: PlanDocument | null): void => {
   for (const listener of listeners.get(sessionId) ?? []) listener(document)
 }
 
 const subscribe = (
   sessionId: string,
-  listener: (document: PlanDocument) => void
+  listener: (document: PlanDocument | null) => void
 ): (() => void) => {
   const existing = listeners.get(sessionId) ?? new Set()
   existing.add(listener)

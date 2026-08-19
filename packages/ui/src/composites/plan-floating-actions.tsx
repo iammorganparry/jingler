@@ -14,9 +14,11 @@ import {
   Play,
   RefreshCw,
   Send,
+  Trash2,
   Zap
 } from "lucide-react"
 import type { ComponentType } from "react"
+import { useState } from "react"
 import { Button } from "../components/button.js"
 import { ButtonGroup } from "../components/button-group.js"
 import { Pill } from "../components/pill.js"
@@ -31,7 +33,19 @@ interface Action {
   readonly icon: ComponentType<{ className?: string }>
   readonly onRun?: () => void
   readonly disabled?: boolean
+  readonly destructive?: boolean
+  /** Keep the dropdown open when run — used by the discard confirm step. */
+  readonly keepOpen?: boolean
 }
+
+/** Every settled status where discarding the canonical plan makes sense. */
+const DISCARDABLE: ReadonlyArray<PlanDocumentStatus> = [
+  "approved",
+  "needs-verification",
+  "done",
+  "stale",
+  "rejected"
+]
 
 const primaryAction = (input: {
   readonly status?: PlanDocumentStatus
@@ -119,7 +133,8 @@ export function PlanFloatingActions({
   onResume,
   onRevise,
   onSendToAgent,
-  onRetry
+  onRetry,
+  onDiscard
 }: {
   status?: PlanDocumentStatus
   /** Accepted for compatibility; the read-only bar no longer displays it. */
@@ -133,7 +148,11 @@ export function PlanFloatingActions({
   onRevise?: () => void
   onSendToAgent?: () => void
   onRetry?: () => void
+  onDiscard?: () => void
 }) {
+  // Discard is destructive and irreversible, so its menu item arms on the
+  // first select and only runs on the second.
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
   const primary = primaryAction({
     status,
     syncState,
@@ -163,6 +182,24 @@ export function PlanFloatingActions({
       : []),
     ...(status === "draft"
       ? [{ label: "Send to agent to refine", icon: Send, onRun: onSendToAgent }]
+      : []),
+    ...(onDiscard !== undefined && status !== undefined && DISCARDABLE.includes(status)
+      ? [
+          {
+            label: confirmingDiscard ? "Click again to discard" : "Discard plan",
+            icon: Trash2,
+            destructive: true,
+            keepOpen: !confirmingDiscard,
+            onRun: () => {
+              if (confirmingDiscard) {
+                setConfirmingDiscard(false)
+                onDiscard()
+              } else {
+                setConfirmingDiscard(true)
+              }
+            }
+          }
+        ]
       : [])
   ]
   const PrimaryIcon = primary?.icon
@@ -221,7 +258,11 @@ export function PlanFloatingActions({
               {!compact && primary.label}
             </Button>
             {secondary.length > 0 && (
-              <DropdownMenuRoot>
+              <DropdownMenuRoot
+                onOpenChange={(open) => {
+                  if (!open) setConfirmingDiscard(false)
+                }}
+              >
                 <DropdownMenuTrigger asChild>
                   <Button
                     size="sm"
@@ -245,8 +286,16 @@ export function PlanFloatingActions({
                         <DropdownMenuItem
                           key={action.label}
                           disabled={action.disabled}
-                          onSelect={action.onRun}
-                          className="flex cursor-default items-center gap-2 rounded-md px-2.5 py-2 text-[11px] text-text-body outline-none data-[disabled]:opacity-45 data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                          onSelect={(event) => {
+                            if (action.keepOpen) event.preventDefault()
+                            action.onRun?.()
+                          }}
+                          className={cn(
+                            "flex cursor-default items-center gap-2 rounded-md px-2.5 py-2 text-[11px] outline-none data-[disabled]:opacity-45 data-[highlighted]:bg-surface",
+                            action.destructive
+                              ? "text-red data-[highlighted]:text-red"
+                              : "text-text-body data-[highlighted]:text-text-bright"
+                          )}
                         >
                           <Icon className="size-3.5" />
                           {action.label}

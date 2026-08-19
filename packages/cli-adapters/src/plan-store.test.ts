@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync
 } from "node:fs"
 import { basename, dirname, join } from "node:path"
@@ -253,6 +254,125 @@ describe("PlanStore canonical document", () => {
       const document = Chunk.toReadonlyArray(chunk)[0]
       expect(document?.revision).toBe(2)
       expect(JSON.stringify(document?.plan)).toContain("Edited externally.")
+    } finally {
+      clearInterval(interval)
+    }
+  }, 15_000)
+
+  it("watch emits a replacement plan whose revision matches the baseline's", async () => {
+    // A fresh replacement restarts at `revision: 1`. When the subscriber's
+    // baseline is also revision 1, a revision-only filter suppressed the swap
+    // forever — emission identity must be the (id, revision) pair.
+    const first = await run(promote())
+    expect(first.revision).toBe(1)
+    const file = await run(PlanStore.currentFileFor(WT))
+    const replacement = readFileSync(file, "utf8").replace(
+      '"id": "plan-1"',
+      '"id": "plan-2"'
+    )
+    const interval = setInterval(() => {
+      try {
+        writeFileSync(file, replacement)
+      } catch {
+        // ignore mid-rename races
+      }
+    }, 300)
+    try {
+      const chunk = await run(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+          Stream.take(1),
+          Stream.runCollect
+        )
+      )
+      const document = Chunk.toReadonlyArray(chunk)[0]
+      expect(document?.id).toBe("plan-2")
+      expect(document?.revision).toBe(1)
+    } finally {
+      clearInterval(interval)
+    }
+  }, 15_000)
+
+  it("discard removes only the canonical file and watch emits the deletion", async () => {
+    const first = await run(promote())
+    expect(first.revision).toBe(1)
+    const file = await run(PlanStore.currentFileFor(WT))
+    const dir = await run(PlanStore.dirFor(WT))
+    await run(PlanStore.discard(WT))
+    expect(existsSync(file)).toBe(false)
+    expect(existsSync(dir)).toBe(true)
+    // Idempotent: discarding an absent plan succeeds.
+    await run(PlanStore.discard(WT))
+
+    // Re-promote so the watcher has a baseline document, then discard while a
+    // subscriber is live: the deletion must reach it as a `null` emission. A
+    // poke file keeps directory events flowing until the watcher has attached.
+    const again = await run(promote())
+    expect(again.revision).toBe(1)
+    const interval = setInterval(() => {
+      try {
+        // Same effect as `discard`, driven synchronously from the timer; the
+        // poke write keeps directory events flowing until the (async-attaching)
+        // watcher observes the file's absence.
+        rmSync(file, { force: true })
+        writeFileSync(join(dir, "poke"), String(Date.now()))
+      } catch {
+        // ignore mid-rename races
+      }
+    }, 300)
+    try {
+      const chunk = await run(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+          Stream.take(1),
+          Stream.runCollect
+        )
+      )
+      expect(Chunk.toReadonlyArray(chunk)[0]).toBeNull()
+    } finally {
+      clearInterval(interval)
+    }
+    // The store recovers cleanly: the next promote is a fresh revision-1 plan.
+    const next = await run(promote(ORCHESTRATED_SOURCE))
+    expect(next.revision).toBe(1)
+    expect(JSON.stringify(next.plan)).toContain("Orchestrated change")
+  }, 15_000)
+
+  it("watch opened before any plan exists still observes a later discard", async () => {
+    // The renderer subscribes when the pane mounts, usually before a plan is
+    // proposed — baseline null. A standing baseline-key filter dropped the
+    // discard's null emission (key also null); only CONSECUTIVE duplicates may
+    // be suppressed.
+    const seeded = await run(promote())
+    const file = await run(PlanStore.currentFileFor(WT))
+    const dir = await run(PlanStore.dirFor(WT))
+    const content = readFileSync(file, "utf8")
+    await run(PlanStore.discard(WT))
+    expect(existsSync(file)).toBe(false)
+    expect(seeded.revision).toBe(1)
+
+    let tick = 0
+    const interval = setInterval(() => {
+      try {
+        tick += 1
+        if (tick <= 3) {
+          writeFileSync(file, content)
+        } else {
+          rmSync(file, { force: true })
+          writeFileSync(join(dir, "poke"), String(Date.now()))
+        }
+      } catch {
+        // ignore mid-rename races
+      }
+    }, 300)
+    try {
+      const chunk = await run(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+          Stream.take(2),
+          Stream.runCollect
+        )
+      )
+      const emissions = Chunk.toReadonlyArray(chunk)
+      expect(emissions[0]?.id).toBe("plan-1")
+      expect(emissions[1]).toBeNull()
     } finally {
       clearInterval(interval)
     }

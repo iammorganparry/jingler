@@ -5956,6 +5956,25 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       ),
       Effect.orElseSucceed(() => null),
     ),
+  "Plan.discard": ({ sessionId }) =>
+    SessionStore.get(sessionId).pipe(
+      Effect.catchAll(() =>
+        Effect.fail(
+          new PlanPersistenceError({
+            message: "This session has no plan worktree.",
+            cause: "no-session",
+          }),
+        ),
+      ),
+      Effect.flatMap((session) =>
+        session.worktreePath
+          ? PlanStore.discard(session.worktreePath)
+          : // Discard is idempotent: a session that never had a plan worktree
+            // has nothing to discard.
+            Effect.void,
+      ),
+      Effect.as(null),
+    ),
   "Plan.startDraft": ({ sessionId }) =>
     SessionStore.get(sessionId).pipe(
       // Collapse a missing session into the RPC's declared error union

@@ -2025,6 +2025,20 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   )
                 )
 
+          // Discard the canonical plan document so the NEXT submission takes the
+          // fresh-proposal path (new plan id, approval gate) instead of amending
+          // the discarded one. Clears this run's execution/settle plan refs; the
+          // watch stream tells every renderer surface the plan is gone.
+          const discardPlan = (): Effect.Effect<void> =>
+            worktreePath.length === 0
+              ? Effect.void
+              : PlanStore.discard(worktreePath).pipe(
+                  Effect.provide(env),
+                  Effect.ignore,
+                  Effect.zipRight(Ref.set(executingPlanId, null)),
+                  Effect.zipRight(Ref.set(settlingPlanId, null))
+                )
+
           // Publish live handles so comment/revise/approve can reach this run;
           // torn down when the run ends so out-of-band calls become no-ops.
           const steer = (
@@ -2131,6 +2145,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             askQuestion,
             proposePlan,
             saveDraftPlan,
+            discardPlan,
             registerBackgroundStop,
             registerTurnSteer
           })

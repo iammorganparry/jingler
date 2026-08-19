@@ -1808,11 +1808,23 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /**
    * Live-stream the canonical PRD as it changes on disk — the agent writing a
    * revision, or an external edit to `current-plan.mdx`. Replaces the renderer's
-   * fixed-interval poll of `Plan.current`. Emits the full document on each write.
+   * fixed-interval poll of `Plan.current`. Emits the full document on each
+   * write, and `null` when the canonical plan is discarded.
    */
   Rpc.make("Plan.watch", {
-    success: PlanDocument,
+    success: Schema.NullOr(PlanDocument),
     stream: true,
+    payload: { sessionId: Schema.String }
+  }),
+
+  /**
+   * Discard the canonical plan for a session. The next agent submission then
+   * takes the fresh-proposal path (new plan id, operator approval gate) instead
+   * of amending the discarded document. Idempotent when no plan exists.
+   */
+  Rpc.make("Plan.discard", {
+    success: Schema.Null,
+    error: PlanPersistenceError,
     payload: { sessionId: Schema.String }
   }),
 

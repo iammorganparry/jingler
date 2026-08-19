@@ -150,6 +150,7 @@ describe("pi session creation", () => {
     ]))
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([
       "jingler_ask_question",
+      "jingler_discard_plan",
       "jingler_submit_plan"
     ])
     expect(received?.resourceLoader?.getExtensions().extensions).toEqual([

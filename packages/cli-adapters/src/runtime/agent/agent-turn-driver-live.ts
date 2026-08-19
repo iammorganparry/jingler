@@ -31,6 +31,7 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
   askQuestion: context.askQuestion,
   saveDraftPlan: (plan: Parameters<NonNullable<AgentContext["saveDraftPlan"]>>[0]) =>
     context.saveDraftPlan?.(plan) ?? Effect.void,
+  discardPlan: () => context.discardPlan?.() ?? Effect.void,
   proposePlan: (plan: Parameters<AgentContext["proposePlan"]>[0]) =>
     context.proposePlan(plan).pipe(
       Effect.map((decision) =>

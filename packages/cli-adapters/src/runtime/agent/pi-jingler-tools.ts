@@ -66,6 +66,16 @@ export const createJinglerControlTools = (
   )
   registry.register(
     controlTool({
+      id: "jingler_discard_plan",
+      description:
+        "Discard the session's current plan entirely. The next submitted plan starts fresh (new plan id, operator approval) instead of amending the discarded one.",
+      input: Schema.Struct({}),
+      roles: ["conversation", "plan", "plan-execution"],
+      execute: () => Effect.runPromise(context.discardPlan?.() ?? Effect.void)
+    })
+  )
+  registry.register(
+    controlTool({
       id: "jingler_submit_plan",
       description: "Submit the structured plan for operator review and approval.",
       input: Schema.Struct({ plan: PlanPrd }),

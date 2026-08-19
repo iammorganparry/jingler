@@ -64,6 +64,8 @@ export interface AgentRuntimeContext {
   ) => Effect.Effect<RuntimePermissionDecision>
   readonly askQuestion: (request: QuestionRequest) => Effect.Effect<ReadonlyArray<QuestionAnswer>>
   readonly saveDraftPlan: (plan: PlanPrd) => Effect.Effect<void>
+  /** Discard the canonical plan; the next submission proposes fresh. Optional: only `AgentRunner` supplies it. */
+  readonly discardPlan?: () => Effect.Effect<void>
   readonly proposePlan: (plan: PlanPrd) => Effect.Effect<RuntimePlanDecision>
 }
 

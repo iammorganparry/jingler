@@ -58,6 +58,8 @@ export interface PlanReviewProps {
   onComment?: (stepId: string, body: string) => void
   onStartDraft?: () => void
   onSendToAgent?: () => void
+  /** Discard the canonical plan; shown for settled statuses with a confirm step. */
+  onDiscard?: () => void
   onRetryDocument?: () => void
   /**
    * Comment-layer seams (a later stage owns rendering). The plan document is
@@ -113,6 +115,7 @@ function PlanReviewBody(props: PlanReviewProps) {
     onRevise,
     onStartDraft,
     onSendToAgent,
+    onDiscard,
     onRetryDocument,
     selectedStepId,
     revisionTarget,
@@ -215,6 +218,7 @@ function PlanReviewBody(props: PlanReviewProps) {
           onResume={onResume}
           onRevise={onRevise}
           onSendToAgent={onSendToAgent}
+          onDiscard={onDiscard}
           onRetry={onRetryDocument}
           targetStageId={selectedStepId}
           revisionTarget={revisionTarget}

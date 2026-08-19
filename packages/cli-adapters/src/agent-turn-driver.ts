@@ -95,6 +95,7 @@ export type ProposePlan = (
  * non-draft plan, so calling it is always safe. Returns immediately.
  */
 export type SaveDraftPlan = (plan: PlanPrd, block?: string) => Effect.Effect<void>
+export type DiscardPlan = () => Effect.Effect<void>
 
 /**
  * What the adapter is handed for a run: an ordered `emit` sink for normalized
@@ -136,6 +137,11 @@ export interface AgentContext {
    * absent (`ctx.saveDraftPlan?.(source)`).
    */
   readonly saveDraftPlan?: SaveDraftPlan
+  /**
+   * Discard the canonical plan so the next submission proposes fresh instead of
+   * amending. Optional for the same reason as `saveDraftPlan`.
+   */
+  readonly discardPlan?: DiscardPlan
   /**
    * Publish a handle the operator's "Stop" button can reach. Adapters whose
    * harness has no per-task cancellation (codex, opencode — both can only abort

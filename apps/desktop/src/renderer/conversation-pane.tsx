@@ -818,6 +818,11 @@ export function ConversationPane({
         canonicalPlan.beginRevision(null)
         convo.revisePlan(planId)
       }}
+      onDiscard={() => {
+        // Deleting the canonical file flows back through Plan.watch as a null
+        // emission, which clears the drawer and this overview together.
+        rpc.planDiscard(session.id).catch(() => {})
+      }}
       onComment={(stepId, body) => planId && convo.commentPlanStep(planId, stepId, body)}
       onAddComment={(target, body) => {
         if (!planId) return

@@ -27,7 +27,7 @@ const document = (revision = 1, label = "Initial"): PlanDocument => ({
 
 const start = (
   load: () => Promise<PlanDocument | null>,
-  subscribe?: (listener: (document: PlanDocument) => void) => () => void
+  subscribe?: (listener: (document: PlanDocument | null) => void) => () => void
 ) =>
   createActor(planDocumentMachine, {
     input: { sessionId: "s1", load, subscribe }
@@ -74,6 +74,48 @@ describe("planDocumentMachine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("clean"))
     watched.listener?.(document(2, "Older"))
     expect(actor.getSnapshot().context.document?.revision).toBe(3)
+    actor.stop()
+  })
+
+  it("adopts a replacement plan with a different id even at a lower revision", async () => {
+    // A fresh replacement restarts at revision 1, so a completed plan whose
+    // revision climbed high must not shadow it — identity is (id, revision).
+    const watched: { listener?: (document: PlanDocument | null) => void } = {}
+    const actor = start(
+      async () => document(9, "Completed"),
+      (next) => {
+        watched.listener = next
+        return () => {
+          watched.listener = undefined
+        }
+      }
+    )
+    await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+    watched.listener?.({ ...document(1, "Replacement"), id: "plan-2" })
+    await waitFor(actor, (snapshot) => snapshot.context.document?.id === "plan-2")
+    expect(actor.getSnapshot().context.document?.revision).toBe(1)
+    expect(actor.getSnapshot().context.draft).toBe(source("Replacement"))
+    actor.stop()
+  })
+
+  it("clears the document when the plan is discarded (remote null)", async () => {
+    const watched: { listener?: (document: PlanDocument | null) => void } = {}
+    const actor = start(
+      async () => document(5, "Current"),
+      (next) => {
+        watched.listener = next
+        return () => {
+          watched.listener = undefined
+        }
+      }
+    )
+    await waitFor(actor, (snapshot) => snapshot.matches("clean"))
+    watched.listener?.(null)
+    await waitFor(actor, (snapshot) => snapshot.context.document === null)
+    expect(actor.getSnapshot().context.draft).toBe("")
+    // A second null is a no-op, not a transition storm.
+    watched.listener?.(null)
+    expect(actor.getSnapshot().context.document).toBeNull()
     actor.stop()
   })
 

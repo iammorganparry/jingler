@@ -20,7 +20,7 @@ import {
   reconcilePlanAmendment
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
-import { Effect, Schema, Stream } from "effect"
+import { Effect, Option, Schema, Stream } from "effect"
 import { createHash } from "node:crypto"
 import { AppPaths } from "./app-paths.js"
 import {
@@ -37,6 +37,10 @@ export type PlanStoreEnv = FileSystem.FileSystem | Path.Path | AppPaths
 
 /** Editors save a file two or three times within a few ms; collapse the burst. */
 const WATCH_DEBOUNCE_MS = 150
+
+/** Watch-emission identity: a discarded plan (null) or a specific (id, revision). */
+const emissionKey = (document: PlanDocument | null): string =>
+  document === null ? "" : `${document.id}:${document.revision}`
 const WATCH_FALLBACK_POLL_INTERVAL = "2 seconds"
 
 /** Retained for callers that link to a plan file; all plans now use one name. */
@@ -922,11 +926,30 @@ export class PlanStore extends Effect.Service<PlanStore>()(
        * a `Stream` is wanted and silently yields a stream-of-one-stream. Same
        * shape and reason as `Theme.watch` / `Review.watch`.
        */
+      // A null read is ambiguous: the plan may have been discarded (file gone)
+      // or the read raced a writer / belongs to another chat. Only the file's
+      // absence is a deletion a `watch` subscriber must observe.
+      const readWatchEmission = (
+        worktreePath: string,
+        sessionId?: string,
+        producingChatId?: string
+      ): Effect.Effect<Option.Option<PlanDocument | null>, never, PlanStoreEnv> =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const document = yield* readDocument(worktreePath, sessionId, producingChatId)
+          if (document !== null) return Option.some<PlanDocument | null>(document)
+          const file = yield* currentFileFor(worktreePath)
+          const exists = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => true))
+          return exists
+            ? Option.none<PlanDocument | null>()
+            : Option.some<PlanDocument | null>(null)
+        })
+
       const watch = (
         worktreePath: string,
         sessionId?: string,
         producingChatId?: string
-      ): Stream.Stream<PlanDocument, never, PlanStoreEnv> =>
+      ): Stream.Stream<PlanDocument | null, never, PlanStoreEnv> =>
         Stream.unwrap(
           Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem
@@ -939,34 +962,62 @@ export class PlanStore extends Effect.Service<PlanStore>()(
               sessionId,
               producingChatId
             )
+            const readEmission = readWatchEmission(worktreePath, sessionId, producingChatId)
             const filesystemChanges = fs.watch(dir).pipe(
               Stream.debounce(WATCH_DEBOUNCE_MS),
-              Stream.mapEffect(() =>
-                readDocument(worktreePath, sessionId, producingChatId)
-              )
+              Stream.mapEffect(() => readEmission)
             )
             const pollingChanges = Stream.tick(WATCH_FALLBACK_POLL_INTERVAL).pipe(
-              Stream.mapEffect(() =>
-                readDocument(worktreePath, sessionId, producingChatId)
-              )
+              Stream.mapEffect(() => readEmission)
             )
             const changes = filesystemChanges.pipe(
               Stream.concat(pollingChanges),
               Stream.catchAll(() => pollingChanges)
             )
-            return changes.pipe(
-              Stream.filter((document): document is PlanDocument => document !== null),
-              Stream.filter(
-                (document) =>
-                  baseline === null ||
-                  document.revision !== baseline.revision
-              ),
+            // A replacement plan restarts at `revision: 1`, so emission identity
+            // is the (id, revision) pair — comparing revision alone suppressed a
+            // fresh plan until its revision happened to pass the old plan's.
+            //
+            // Seed the change-detector with the subscribe-time baseline (then
+            // drop the seed) instead of filtering the baseline key outright: a
+            // standing filter suppressed any LATER return to that key — most
+            // visibly a discard (null) on a subscription opened before the plan
+            // existed (baseline also null), which never reached the renderer.
+            return Stream.make<[PlanDocument | null]>(baseline).pipe(
+              Stream.concat(changes.pipe(Stream.filterMap((emission) => emission))),
               Stream.changesWith(
-                (previous, current) => previous.revision === current.revision
-              )
+                (previous, current) => emissionKey(previous) === emissionKey(current)
+              ),
+              Stream.drop(1)
             )
           })
         )
+
+      /**
+       * Discard only the canonical plan document, leaving the namespaced
+       * directory (and any live directory watcher on it) in place so `watch`
+       * subscribers observe the deletion and the next plan's first write.
+       * Idempotent — discarding an absent plan succeeds. Full teardown on
+       * session deletion stays `removeAll`.
+       */
+      const discard = (
+        worktreePath: string
+      ): Effect.Effect<void, PlanPersistenceError, PlanStoreEnv> =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const file = yield* currentFileFor(worktreePath)
+          const exists = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))
+          if (!exists) return
+          yield* fs.remove(file).pipe(
+            Effect.mapError(
+              (error) =>
+                new PlanPersistenceError({
+                  message: `Could not discard the canonical plan for ${worktreePath}.`,
+                  cause: String(error)
+                })
+            )
+          )
+        })
 
       const removeAll = (worktreePath: string): Effect.Effect<void, never, PlanStoreEnv> =>
         Effect.gen(function* () {
@@ -1001,6 +1052,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         promote,
         rehomeArtifact,
         markInterrupted,
+        discard,
         removeAll
       }
     }
