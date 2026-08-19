@@ -27,6 +27,7 @@ import {
   PluginRegistry,
   PluginSecretStore,
   PluginSecretStoreUnavailable,
+  ProjectService,
   ReviewService,
   ReviewStore,
   SessionStore,
@@ -551,29 +552,10 @@ describe("RPC handlers", () => {
 
   describe("Sessions.adoptBranch / forkOntoBranch", () => {
     const now = "2026-08-19T10:00:00.000Z";
-    // A direct session sharing a checkout, pinned to `main`, whose checkout has
-    // been moved onto `feature/other` — the exact BranchDrift the banner recovers.
-    const seedDriftedDirectSession = (checkoutPath: string) => {
-      mkdirSync(checkoutPath, { recursive: true });
-      execFileSync("git", ["init"], { cwd: checkoutPath, stdio: "ignore" });
-      execFileSync("git", ["checkout", "-b", "main"], {
-        cwd: checkoutPath,
-        stdio: "ignore",
-      });
-      execFileSync("git", ["config", "user.email", "t@example.com"], {
-        cwd: checkoutPath,
-        stdio: "ignore",
-      });
-      execFileSync("git", ["config", "user.name", "Test"], {
-        cwd: checkoutPath,
-        stdio: "ignore",
-      });
-      writeFileSync(join(checkoutPath, "README.md"), "# repo\n");
-      execFileSync("git", ["add", "."], { cwd: checkoutPath, stdio: "ignore" });
-      execFileSync("git", ["commit", "-m", "init"], {
-        cwd: checkoutPath,
-        stdio: "ignore",
-      });
+    const git = (cwd: string, args: ReadonlyArray<string>) =>
+      execFileSync("git", args, { cwd, stdio: "ignore" });
+    // The `s1` record for a direct session pinned to `main`, sharing `checkoutPath`.
+    const writeDirectSessionRecord = (checkoutPath: string) => {
       mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "sessions.json"),
@@ -601,14 +583,24 @@ describe("RPC handlers", () => {
         ]),
       );
     };
+    // A direct session sharing a checkout, pinned to `main` — the starting point
+    // a BranchDrift recovery acts on once the checkout moves off `main`.
+    const seedDriftedDirectSession = (checkoutPath: string) => {
+      mkdirSync(checkoutPath, { recursive: true });
+      git(checkoutPath, ["init"]);
+      git(checkoutPath, ["checkout", "-b", "main"]);
+      git(checkoutPath, ["config", "user.email", "t@example.com"]);
+      git(checkoutPath, ["config", "user.name", "Test"]);
+      writeFileSync(join(checkoutPath, "README.md"), "# repo\n");
+      git(checkoutPath, ["add", "."]);
+      git(checkoutPath, ["commit", "-m", "init"]);
+      writeDirectSessionRecord(checkoutPath);
+    };
 
     it("adoptBranch re-points a drifted session at the live branch and persists it", async () => {
       const checkoutPath = join(dir, "adopt-repo");
       seedDriftedDirectSession(checkoutPath);
-      execFileSync("git", ["checkout", "-b", "feature/other"], {
-        cwd: checkoutPath,
-        stdio: "ignore",
-      });
+      git(checkoutPath, ["checkout", "-b", "feature/other"]);
       const layer = Layer.mergeAll(base, SessionStore.Default);
 
       const updated = await Effect.runPromise(
@@ -669,13 +661,63 @@ describe("RPC handlers", () => {
       ).toBe(false);
     });
 
+    it("forkOntoBranch forks a CLEAN isolated worktree from the drifted branch — commits kept, dirty tree dropped", async () => {
+      const checkoutPath = join(dir, "fork-real-repo");
+      seedDriftedDirectSession(checkoutPath);
+      git(checkoutPath, ["checkout", "-b", "fix/linkedin"]);
+      // A COMMITTED change on the drifted branch — the fork must keep it (proves
+      // it forks from the branch tip, not the refreshed main base).
+      writeFileSync(join(checkoutPath, "committed-on-fix.txt"), "fix work\n");
+      git(checkoutPath, ["add", "."]);
+      git(checkoutPath, ["commit", "-m", "fix work"]);
+      // An UNCOMMITTED change — the developer's dirty tree that rode along on the
+      // branch switch. The fork must NOT carry it (a fresh, clean worktree).
+      writeFileSync(join(checkoutPath, "dirty-from-main.txt"), "not mine\n");
+
+      const fork = await Effect.runPromise(
+        forkOntoBranch("s1").pipe(
+          Effect.provide(SessionStore.Default),
+          Effect.provide(GitService.Default),
+          Effect.provide(TranscriptStore.Default),
+          Effect.provide(ProjectService.Default),
+          Effect.provide(base),
+        ),
+      );
+
+      // An ISOLATED worktree, not the shared checkout.
+      expect(fork.workspaceMode).toBe("worktree");
+      expect(fork.worktreePath).toBeDefined();
+      expect(fork.worktreePath).not.toBe(checkoutPath);
+      // Committed history on the drifted branch is preserved.
+      expect(existsSync(join(fork.worktreePath!, "committed-on-fix.txt"))).toBe(
+        true,
+      );
+      // The dirty working tree is NOT dragged in — the fork is clean.
+      expect(existsSync(join(fork.worktreePath!, "dirty-from-main.txt"))).toBe(
+        false,
+      );
+      // The source session stays pinned to its original branch.
+      const source = await Effect.runPromise(
+        SessionStore.get("s1").pipe(
+          Effect.provide(SessionStore.Default),
+          Effect.provide(base),
+        ),
+      );
+      expect(source.branch).toBe("main");
+    });
+
     it("forkOntoBranch fails with GitError when the checkout has not drifted", async () => {
       const checkoutPath = join(dir, "fork-nodrift-repo");
       seedDriftedDirectSession(checkoutPath);
-      const layer = Layer.mergeAll(base, SessionStore.Default);
 
       const exit = await Effect.runPromiseExit(
-        forkOntoBranch("s1").pipe(Effect.provide(layer)),
+        forkOntoBranch("s1").pipe(
+          Effect.provide(SessionStore.Default),
+          Effect.provide(GitService.Default),
+          Effect.provide(TranscriptStore.Default),
+          Effect.provide(ProjectService.Default),
+          Effect.provide(base),
+        ),
       );
 
       expect(exit._tag).toBe("Failure");

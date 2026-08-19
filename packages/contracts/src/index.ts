@@ -992,7 +992,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    */
   Rpc.make("Sessions.forkOntoBranch", {
     success: Session,
-    error: Schema.Union(GitError, SessionNotFoundError, EnvironmentHandoffError),
+    error: Schema.Union(GitError, SessionNotFoundError),
     payload: { sessionId: Schema.String }
   }),
 
