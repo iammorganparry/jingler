@@ -117,7 +117,9 @@ test("selecting a Fleet child shows its session view and Main restores the compo
 
   await first.click()
   await expect(window.getByTestId("fleet-agent-transcript")).toBeVisible()
-  await expect(window.getByText("The child session transcript is not available yet.")).toBeVisible()
+  // A running child with no readable transcript now shows its live activity —
+  // agent, task, and running totals — rather than a blank "not available yet".
+  await expect(window.getByTestId("fleet-agent-live")).toBeVisible()
   await expect(window.getByTestId("fleet-drawer")).toBeVisible()
 
   await window.getByTestId("fleet-agent-main").click()

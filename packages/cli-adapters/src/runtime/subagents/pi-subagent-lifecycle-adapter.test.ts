@@ -4,7 +4,28 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import { PiSubagentLifecycleAdapter } from "./pi-subagent-lifecycle-adapter.js"
+import {
+  cleanAgentLabel,
+  cleanTaskLabel,
+  PiSubagentLifecycleAdapter
+} from "./pi-subagent-lifecycle-adapter.js"
+
+describe("fleet identity cleanup", () => {
+  it("keeps a real catalogue agent but relabels a collapsed workflow key", () => {
+    expect(cleanAgentLabel("scout")).toBe("scout")
+    expect(cleanAgentLabel("reviewer")).toBe("reviewer")
+    // The pi vendor collapses an unresolved child onto the "main" workflow key.
+    expect(cleanAgentLabel("main")).toBe("Subagent")
+    expect(cleanAgentLabel("single")).toBe("Subagent")
+  })
+
+  it("strips the vendor's 'run <key>' task noise but keeps a real task", () => {
+    expect(cleanTaskLabel("run main")).toBe("Active delegated work")
+    expect(cleanTaskLabel(undefined)).toBe("Active delegated work")
+    expect(cleanTaskLabel("")).toBe("Active delegated work")
+    expect(cleanTaskLabel("Map the signals pipeline")).toBe("Map the signals pipeline")
+  })
+})
 
 const parent = "parent-session"
 const parentSessionFile = "/sessions/parent.jsonl"
