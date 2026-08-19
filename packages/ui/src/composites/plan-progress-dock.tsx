@@ -5,7 +5,7 @@ import {
   ChevronDown,
   Circle,
   CircleAlert,
-  ClipboardList,
+  ListChecks,
   Loader2,
   PauseCircle,
   XCircle
@@ -14,13 +14,7 @@ import type { ComponentType } from "react"
 import { useId, useState } from "react"
 import { cn } from "../lib/cn.js"
 
-export type PlanProgressStatus =
-  | "todo"
-  | "in-progress"
-  | "done"
-  | "blocked"
-  | "failed"
-  | "interrupted"
+export type PlanProgressStatus = "todo" | "in-progress" | "done" | "blocked" | "failed" | "interrupted"
 
 /** Project canonical single-agent task/evidence state into compact UI status. */
 export const planProgressStatus = (stage: PlanPrdStage): PlanProgressStatus => {
@@ -34,40 +28,24 @@ export const planProgressStatus = (stage: PlanPrdStage): PlanProgressStatus => {
   }
 }
 
-const STATUS: Readonly<
-  Record<
-    PlanProgressStatus,
-    {
-      readonly label: string
-      readonly className: string
-      readonly icon: ComponentType<{ className?: string }>
-    }
-  >
-> = {
-  todo: { label: "To do", className: "text-muted", icon: Circle },
-  "in-progress": {
-    label: "In progress",
-    className: "text-blue",
-    icon: Loader2
-  },
+const STATUS: Readonly<Record<PlanProgressStatus, {
+  readonly label: string
+  readonly className: string
+  readonly icon: ComponentType<{ className?: string }>
+}>> = {
+  todo: { label: "Pending", className: "text-dim", icon: Circle },
+  "in-progress": { label: "In progress", className: "text-blue", icon: Loader2 },
   done: { label: "Done", className: "text-green", icon: CheckCircle2 },
   blocked: { label: "Blocked", className: "text-yellow", icon: CircleAlert },
   failed: { label: "Failed", className: "text-red", icon: XCircle },
-  interrupted: {
-    label: "Interrupted",
-    className: "text-orange",
-    icon: PauseCircle
-  }
+  interrupted: { label: "Interrupted", className: "text-orange", icon: PauseCircle }
 }
 
 /**
- * Composer-adjacent view of the live canonical plan.
- *
- * It owns no progress state: Plan.watch updates the PlanDocument and the
- * selected agent updates each task and criterion. This component is only a projection,
- * so the plan and the dock cannot become competing sources of truth.
+ * Collapsible task-list projection of the live canonical plan. It owns only its
+ * open state; stage/task status continues to come exclusively from PlanDocument.
  */
-export function PlanProgressDock({
+export function PlanTaskList({
   document,
   onOpenStage,
   className
@@ -76,135 +54,96 @@ export function PlanProgressDock({
   onOpenStage?: (stageId: string) => void
   className?: string
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const listId = useId()
   const stages = document.plan.stages
   if (stages.length === 0) return null
 
-  const rows = stages.map((stage, index) => ({
-    stage,
-    number: String(index + 1).padStart(2, "0"),
-    status: planProgressStatus(stage)
-  }))
+  const rows = stages.map((stage) => ({ stage, status: planProgressStatus(stage) }))
   const completed = rows.filter((row) => row.status === "done").length
-  const active =
-    rows.find((row) => row.status === "in-progress") ??
-    rows.find(
-      (row) =>
-        row.status === "blocked" ||
-        row.status === "failed" ||
-        row.status === "interrupted"
-    ) ??
-    rows.find((row) => row.status === "todo") ??
-    null
-  const summary =
-    active === null
-      ? "All steps done"
-      : `${active.number} ${active.stage.title} · ${STATUS[active.status].label}`
+  const allDone = completed === rows.length
   const progress = Math.round((completed / rows.length) * 100)
 
   return (
     <section
-      data-testid="plan-progress-dock"
-      className={cn(
-        "overflow-hidden rounded-xl border border-line bg-panel shadow-sm",
-        className
-      )}
+      data-testid="plan-task-list"
+      className={cn("overflow-hidden rounded-xl border border-line bg-panel", className)}
     >
       <button
         type="button"
         aria-expanded={expanded}
         aria-controls={listId}
-        aria-label={`Plan progress: ${completed} of ${rows.length} done`}
+        aria-label={`Plan tasks: ${completed} of ${rows.length} done`}
         onClick={() => setExpanded((value) => !value)}
-        className="group relative flex min-h-11 w-full items-center gap-2.5 px-3 py-2 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
+        className="group flex min-h-11 w-full items-center gap-2.5 px-3 py-2 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <ClipboardList className="size-4 shrink-0 text-purple" />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2">
-            <strong className="text-[11.5px] font-semibold text-text-bright">
-              Plan progress
-            </strong>
-            <span className="font-mono text-[10px] tabular-nums text-muted">
-              {completed}/{rows.length}
-            </span>
-          </span>
-          <span className="block truncate text-[10.5px] text-muted-foreground">
-            {summary}
-          </span>
-        </span>
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 text-dim transition-transform duration-200",
-            expanded && "rotate-180"
+        <span className="relative grid size-5 shrink-0 place-items-center text-purple">
+          {allDone ? (
+            <CheckCircle2 className="size-4 text-green" />
+          ) : completed > 0 ? (
+            <svg aria-hidden="true" className="size-4 -rotate-90" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.18" />
+              <circle
+                cx="10"
+                cy="10"
+                r="8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                pathLength="100"
+                strokeDasharray={`${progress} 100`}
+                strokeLinecap="round"
+              />
+            </svg>
+          ) : (
+            <ListChecks className="size-4" />
           )}
-        />
-        <span
-          aria-hidden="true"
-          className="absolute inset-x-0 bottom-0 h-px bg-line"
-        >
-          <span
-            className="block h-full bg-green transition-[width] duration-300"
-            style={{ width: `${progress}%` }}
-          />
         </span>
+        <strong className="text-[11.5px] font-semibold text-text-bright">Plan tasks</strong>
+        <span className="font-mono text-[10px] tabular-nums text-muted">{completed}/{rows.length}</span>
+        <span className="flex-1" />
+        <ChevronDown
+          className={cn("size-3.5 shrink-0 text-dim transition-transform duration-200", expanded && "rotate-180")}
+        />
       </button>
 
-      {expanded && (
-        <div
-          id={listId}
-          className="max-h-[240px] overflow-y-auto border-t border-line p-1.5"
-        >
-          {rows.map(({ stage, number, status }) => {
+      <div
+        id={listId}
+        hidden={!expanded}
+        className="max-h-[240px] overflow-y-auto border-t border-line px-2 py-1.5"
+      >
+        <ol className="m-0 flex list-none flex-col gap-0.5 p-0">
+          {rows.map(({ stage, status }) => {
             const config = STATUS[status]
             const Icon = config.icon
             return (
-              <button
-                key={stage.id}
-                type="button"
-                data-testid={`plan-progress-stage-${stage.id}`}
-                onClick={() => onOpenStage?.(stage.id)}
-                className="group flex min-h-9 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <Icon
-                  aria-hidden="true"
-                  className={cn(
-                    "size-3.5 shrink-0",
-                    config.className,
-                    status === "in-progress" && "animate-spin"
-                  )}
-                />
-                <span className="w-5 shrink-0 font-mono text-[9.5px] tabular-nums text-dim">
-                  {number}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={cn(
-                      "block truncate text-[11.5px]",
-                      status === "done"
-                        ? "text-muted-foreground"
-                        : "text-text-body"
-                    )}
-                  >
+              <li key={stage.id}>
+                <button
+                  type="button"
+                  data-testid={`plan-progress-stage-${stage.id}`}
+                  onClick={() => onOpenStage?.(stage.id)}
+                  className="group flex min-h-8 w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Icon
+                    aria-hidden="true"
+                    className={cn("size-3.5 shrink-0", config.className, status === "in-progress" && "animate-spin")}
+                  />
+                  <span className={cn(
+                    "min-w-0 flex-1 truncate text-[11.5px]",
+                    status === "done" ? "text-muted-foreground line-through decoration-line-strong" : "text-text-body"
+                  )}>
                     {stage.title}
                   </span>
-                  <span className="mt-0.5 block truncate text-[9.5px] text-dim">
-                    {stage.intent}
-                  </span>
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 text-[9.5px] font-medium",
-                    config.className
-                  )}
-                >
-                  {config.label}
-                </span>
-              </button>
+                  <span className={cn("shrink-0 text-[9.5px] font-medium", config.className)}>{config.label}</span>
+                </button>
+              </li>
             )
           })}
-        </div>
-      )}
+        </ol>
+      </div>
     </section>
   )
 }
+
+/** @deprecated Use PlanTaskList. */
+export const PlanProgressDock = PlanTaskList

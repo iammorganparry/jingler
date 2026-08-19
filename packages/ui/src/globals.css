@@ -815,6 +815,29 @@
   overflow-y: hidden;
 }
 
+/* The token stream already controls text arrival. This caret only identifies
+ * the currently active Markdown tail, matching the streaming-text treatment
+ * without replaying or delaying content. */
+.jingler-streaming-text > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 1.5px;
+  height: 1em;
+  margin-left: 0.18em;
+  vertical-align: -0.12em;
+  border-radius: 999px;
+  background: currentColor;
+  animation: jingler-streaming-caret 850ms step-end infinite;
+}
+
+@keyframes jingler-streaming-caret {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jingler-streaming-text > :last-child::after { animation: none; }
+}
+
 /*
  * Pierre integration hosts. Every File, FileDiff, CodeView, and Editor gets the
  * same Jingler-owned class; row-level styling remains inside pierre-theme.ts's

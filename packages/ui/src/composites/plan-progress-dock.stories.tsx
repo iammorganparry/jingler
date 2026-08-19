@@ -1,6 +1,6 @@
 import type { PlanDocument, PlanPrdStage, PlanTaskStatus } from "@jingler/core"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { PlanProgressDock } from "./plan-progress-dock.js"
+import { PlanTaskList } from "./plan-progress-dock.js"
 
 const stage = (id: string, title: string, status: PlanTaskStatus, passed = false): PlanPrdStage => ({
   id,
@@ -35,11 +35,11 @@ const document: PlanDocument = {
 }
 
 const meta = {
-  title: "Plan/Plan Progress Dock",
-  component: PlanProgressDock,
+  title: "Plan/Task List",
+  component: PlanTaskList,
   parameters: { layout: "centered" },
   decorators: [(Story) => <div className="w-[560px] rounded-2xl bg-editor p-4"><Story /></div>]
-} satisfies Meta<typeof PlanProgressDock>
+} satisfies Meta<typeof PlanTaskList>
 export default meta
 type Story = StoryObj<typeof meta>
 

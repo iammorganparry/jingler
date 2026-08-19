@@ -1,6 +1,6 @@
 import { memo, type ReactNode, useState } from "react"
 import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
-import type { ContentPart, ExecutionMode, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
+import type { ContentPart, ExecutionMode, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
@@ -12,10 +12,11 @@ import { providerColor, providerLabel, ProviderIcon } from "../components/provid
 import { ApprovalGate } from "./approval-gate.js"
 import { BranchDriftBanner } from "./branch-drift-banner.js"
 import { ContextDivider } from "./context-divider.js"
-import { PlanCard } from "./plan-card.js"
+import { PlanApprovalCard } from "./plan-card.js"
 import { QuestionSummary } from "./question-summary.js"
 import { ThoughtBlock } from "./thought-block.js"
 import { ToolCall } from "./tool-call.js"
+import { StreamingText } from "./streaming-text.js"
 import { toolDisplayName } from "../lib/tool-names.js"
 
 // Parts fill the transcript's centered content column (width is owned by
@@ -98,20 +99,29 @@ function PlanTaskProgressChip({ progress }: { progress: Omit<PlanTaskProgressPar
   )
 }
 
-function ProtocolText({ text, markdown }: { text: string; markdown: boolean }) {
+function ProtocolText({
+  text,
+  markdown,
+  streaming = false
+}: {
+  text: string
+  markdown: boolean
+  streaming?: boolean
+}) {
   const tokens = planTaskProtocolTokens(markdown ? stripPlanResultProtocol(text) : text)
   const hasProgress = tokens.some((token) => token.kind === "progress")
   if (!hasProgress) {
     const visible = tokens.map((token) => token.kind === "text" ? token.text : "").join("")
     if (visible.length === 0) return null
     return markdown ? (
-      <Markdown className={WIDTH}>{visible}</Markdown>
+      <StreamingText text={visible} streaming={streaming} className={WIDTH} />
     ) : (
       <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
         {visible}
       </p>
     )
   }
+  const lastTextToken = tokens.findLastIndex((token) => token.kind === "text" && token.text.trim().length > 0)
   return (
     <div className={cn(WIDTH, "flex flex-col gap-2")}>
       {tokens.map((token, index) =>
@@ -119,7 +129,12 @@ function ProtocolText({ text, markdown }: { text: string; markdown: boolean }) {
           <PlanTaskProgressChip key={`progress-${index}`} progress={token.progress} />
         ) : token.text.trim().length > 0 ? (
           markdown ? (
-            <Markdown key={`text-${index}`} className={WIDTH}>{token.text}</Markdown>
+            <StreamingText
+              key={`text-${index}`}
+              text={token.text}
+              streaming={streaming && index === lastTextToken}
+              className={WIDTH}
+            />
           ) : (
             <p key={`text-${index}`} className="m-0 whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body">
               {token.text}
@@ -254,15 +269,19 @@ function MergedThoughts({ parts }: { parts: ReadonlyArray<ThinkingPart> }) {
 function PartView({
   part,
   markdown,
+  planDocument,
   onDecideGate,
   onApprovePlan,
   onResumePlan,
   onOpenPlanReview,
   onForkOntoBranch,
-  onAdoptBranch
+  onAdoptBranch,
+  streamingText = false
 }: {
   part: ContentPart
   markdown: boolean
+  planDocument?: PlanDocument | null
+  streamingText?: boolean
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
   onResumePlan?: (planId: string) => void
@@ -272,7 +291,7 @@ function PartView({
 }) {
   switch (part._tag) {
     case "Text": {
-      return <ProtocolText text={part.text} markdown={markdown} />
+      return <ProtocolText text={part.text} markdown={markdown} streaming={streamingText} />
     }
     case "PlanTaskProgress":
       return <PlanTaskProgressChip progress={part} />
@@ -306,8 +325,9 @@ function PartView({
       )
     case "Plan":
       return (
-        <PlanCard
+        <PlanApprovalCard
           plan={part.plan}
+          document={planDocument?.id === part.plan.id ? planDocument : undefined}
           onApprove={
             onApprovePlan === undefined
               ? undefined
@@ -347,6 +367,7 @@ function renderParts(
   parts: ReadonlyArray<ContentPart>,
   markdown: boolean,
   handlers: {
+    planDocument?: PlanDocument | null
     onDecideGate?: (gateId: string, decision: GateDecision) => void
     onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
     onResumePlan?: (planId: string) => void
@@ -356,7 +377,8 @@ function renderParts(
   },
   // When a mega-turn's prefix is collapsed, `parts` is a suffix of the real
   // array — keys must stay ABSOLUTE so expanding doesn't remount the tail.
-  keyOffset = 0
+  keyOffset = 0,
+  streamingTextIndex = -1
 ): ReactNode[] {
   const out: ReactNode[] = []
   let run: ToolPart[] = []
@@ -420,7 +442,15 @@ function renderParts(
     flush()
     flushImgs()
     flushThoughts()
-    out.push(<PartView key={i} part={part} markdown={markdown} {...handlers} />)
+    out.push(
+      <PartView
+        key={i}
+        part={part}
+        markdown={markdown}
+        streamingText={i === streamingTextIndex}
+        {...handlers}
+      />
+    )
   })
   flush()
   flushImgs()
@@ -463,6 +493,7 @@ const hiddenPrefixLength = (partCount: number): number =>
 function MessageTurnImpl({
   message,
   providerId,
+  planDocument,
   onDecideGate,
   onApprovePlan,
   onResumePlan,
@@ -471,6 +502,8 @@ function MessageTurnImpl({
   onAdoptBranch
 }: {
   message: Message
+  /** Canonical live document used only when it matches an inline plan id. */
+  planDocument?: PlanDocument | null
   /** Canonical provider identity for the assistant eyebrow. */
   providerId?: ProviderId | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
@@ -490,6 +523,11 @@ function MessageTurnImpl({
   const hiddenParts = showAllParts ? 0 : hiddenPrefixLength(message.parts.length)
   const visibleParts =
     hiddenParts > 0 ? message.parts.slice(hiddenParts) : message.parts
+  const lastPart = message.parts[message.parts.length - 1]
+  const streamingTextIndex =
+    isAssistant && message.streaming && lastPart?._tag === "Text"
+      ? message.parts.length - 1
+      : -1
   return (
     <div className="flex flex-col gap-3">
       {isAssistant ? (
@@ -517,6 +555,7 @@ function MessageTurnImpl({
         visibleParts,
         isAssistant,
         {
+          planDocument,
           onDecideGate,
           onApprovePlan,
           onResumePlan,
@@ -524,7 +563,8 @@ function MessageTurnImpl({
           onForkOntoBranch,
           onAdoptBranch
         },
-        hiddenParts
+        hiddenParts,
+        streamingTextIndex
       )}
     </div>
   )

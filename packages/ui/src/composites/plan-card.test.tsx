@@ -1,7 +1,7 @@
-import type { ExecutionMode, Plan } from "@jingler/core"
+import type { Plan, PlanDocument } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { PlanCard } from "./plan-card.js"
+import { PlanApprovalCard } from "./plan-card.js"
 
 afterEach(cleanup)
 
@@ -34,28 +34,70 @@ const plan: Plan = {
   ]
 }
 
-describe("PlanCard approval", () => {
-  it("offers the selected mode and an explicit auto path as one grouped choice", () => {
-    const approvals: Array<ExecutionMode | undefined> = []
-    render(<PlanCard plan={plan} onApprove={(mode) => approvals.push(mode)} />)
+const document: PlanDocument = {
+  id: plan.id,
+  sessionId: "session-1",
+  producingChatId: "chat-1",
+  revision: 1,
+  status: "proposed",
+  plan: {
+    title: plan.summary,
+    sections: [{
+      id: "overview",
+      title: "Overview",
+      blocks: [{ kind: "prose", id: "overview-copy", text: "Canonical plan summary." }]
+    }],
+    stages: [{
+      id: "canonical-stage",
+      title: "Canonical stage",
+      intent: "Use the structured plan.",
+      approach: [],
+      tasks: [
+        { id: "task-a", text: "First stage task", status: "completed" },
+        { id: "task-b", text: "Second stage task", status: "in-progress" }
+      ],
+      files: [],
+      diagrams: [],
+      notes: [],
+      acceptance: []
+    }],
+    annotations: []
+  },
+  updatedAt: "2026-08-01T00:00:00.000Z",
+  updatedBy: "agent"
+}
 
-    const group = screen.getByRole("group", { name: "Plan approval options" })
-    expect(group).toBeTruthy()
+describe("PlanApprovalCard approval", () => {
+  it("offers review and approval actions", () => {
+    const approvals: Array<string | undefined> = []
+    const onOpenReview = vi.fn()
+    render(<PlanApprovalCard plan={plan} onApprove={(mode) => approvals.push(mode)} onOpenReview={onOpenReview} />)
+
+    expect(screen.getByTestId("plan-approval-card")).toBeTruthy()
+    expect(screen.getByText("1").textContent).toBe(String(plan.steps.length))
+    expect(screen.getByText("Implement it")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "View Plan" }))
+    expect(onOpenReview).toHaveBeenCalledOnce()
 
     fireEvent.click(screen.getByRole("button", { name: /^Approve$/ }))
-    fireEvent.click(screen.getByRole("button", { name: /^Approve and auto$/ }))
 
-    expect(approvals).toStrictEqual([undefined, "auto"])
+    expect(approvals).toStrictEqual([undefined])
+  })
+
+  it("renders canonical stages with their nested tasks when ids match", () => {
+    render(<PlanApprovalCard plan={plan} document={document} />)
+
+    expect(screen.getByText("Canonical plan summary.")).toBeTruthy()
+    expect(screen.getByText("Canonical stage")).toBeTruthy()
+    expect(screen.getByText("First stage task")).toBeTruthy()
+    expect(screen.getByText("Second stage task")).toBeTruthy()
+    expect(screen.queryByText("Implement it")).toBeNull()
   })
 
   it("disables inline approval until the canonical revision is available", () => {
-    render(<PlanCard plan={plan} />)
+    render(<PlanApprovalCard plan={plan} />)
 
     expect(screen.getByRole("button", { name: /^Approve$/ })).toHaveProperty(
-      "disabled",
-      true
-    )
-    expect(screen.getByRole("button", { name: /^Approve and auto$/ })).toHaveProperty(
       "disabled",
       true
     )
