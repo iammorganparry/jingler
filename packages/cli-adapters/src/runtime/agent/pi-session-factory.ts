@@ -68,7 +68,18 @@ const NATIVE_SUBAGENT_TOOLS = [
   {
     id: "subagent",
     version: "1",
-    description: "Delegate bounded work to native child agents shown in Fleet."
+    // ALWAYS name the agent. The pi runtime keys an unnamed child to the
+    // default workflow key "main" and Fleet then shows it as an agent called
+    // "main" doing "run main" — no identity, no purpose. Passing a catalogue
+    // agent makes the child resolve to that name end-to-end (trace, durable
+    // status, and Fleet), so every child reads as what it actually is.
+    description:
+      "Delegate bounded work to a named child agent, shown in Fleet by its type and task. " +
+      "ALWAYS set `agent` to the catalogue type that fits the work: " +
+      "scout (fast codebase recon), worker (implementation), reviewer (review diffs/plans/PRs), " +
+      "researcher (web research), oracle (high-context decisions that must not drift), " +
+      "delegate (lightweight, inherits your model), fanout (parallel spread of one task). " +
+      "Never leave `agent` unset."
   },
   {
     id: "subagent_wait",
