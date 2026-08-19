@@ -7,6 +7,37 @@ import {
 } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
 
+/**
+ * Bare tokens the pi vendor surfaces as an agent name when it collapses an
+ * unresolved child onto its workflow mode/key (a single-child request keys to
+ * "main"; a mode leaks as "single"/"parallel"/"chain"/"workflow"). A REAL name —
+ * a catalogue agent (scout, reviewer, …) or a descriptive workflow key
+ * ("review-followup") — is kept as-is; only these bare tokens are relabelled.
+ */
+const COLLAPSE_TOKENS: ReadonlySet<string> = new Set([
+  "main",
+  "single",
+  "parallel",
+  "chain",
+  "workflow",
+  "subagent"
+])
+
+/** Keep a genuine agent/workflow name; relabel a bare collapse token honestly. */
+export const cleanAgentLabel = (agent: string): string =>
+  COLLAPSE_TOKENS.has(agent.trim().toLowerCase()) ? "Subagent" : agent
+
+/**
+ * Strip the vendor's "run <key>" task noise (e.g. "run review-followup") — a
+ * degenerate label with no information — while keeping a real task description.
+ */
+export const cleanTaskLabel = (task: string | undefined): string => {
+  const trimmed = task?.trim() ?? ""
+  return trimmed === "" || /^run\s+\S+$/i.test(trimmed)
+    ? "Active delegated work"
+    : trimmed
+}
+
 const DurableStep = Schema.Struct({
   agent: Schema.optional(Schema.String),
   label: Schema.optional(Schema.String),
@@ -144,7 +175,7 @@ const projectRoot = (
     }),
     nodeKind: status.mode === "workflow" ? "workflow" : "agent",
     parentId: null,
-    agent: status.steps?.[0]?.agent ?? status.mode,
+    agent: cleanAgentLabel(status.steps?.[0]?.agent ?? status.mode),
     task: "Active delegated work",
     model: null,
     status: nodeStatus(status.state),
@@ -178,8 +209,8 @@ const projectStep = (
     }),
     nodeKind: "agent",
     parentId: null,
-    agent: step.agent ?? step.label ?? `step-${index + 1}`,
-    task: step.label ?? "Delegated work",
+    agent: cleanAgentLabel(step.agent ?? step.label ?? `step-${index + 1}`),
+    task: cleanTaskLabel(step.label ?? "Delegated work"),
     model: step.model ?? null,
     status: nodeStatus(step.status),
     phase: step.phase ?? null,

@@ -87,7 +87,8 @@ describe("readDurablePiSubagentNodes", () => {
         id: "parent/starting",
         subagentId: "starting",
         parentId: null,
-        agent: "workflow",
+        // The bare "workflow" mode token is relabelled honestly.
+        agent: "Subagent",
         status: "queued"
       })
     ]))

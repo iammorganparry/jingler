@@ -79,7 +79,10 @@ const NATIVE_SUBAGENT_TOOLS = [
       "scout (fast codebase recon), worker (implementation), reviewer (review diffs/plans/PRs), " +
       "researcher (web research), oracle (high-context decisions that must not drift), " +
       "delegate (lightweight, inherits your model), fanout (parallel spread of one task). " +
-      "Never leave `agent` unset."
+      "Never leave `agent` unset. " +
+      "For long work (a PR review, an audit), let the workflow spawn its children and RETURN promptly — " +
+      "do NOT block the workflow script awaiting them inline, or it hits the orchestrator timeout; " +
+      "poll status or use subagent_wait instead. Never call resume at the top level — resume belongs on a runs.run/runs.all item."
   },
   {
     id: "subagent_wait",
