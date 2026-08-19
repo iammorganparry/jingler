@@ -2065,11 +2065,33 @@ export const forkOntoBranch = (sessionId: string) =>
           sessionId: source.id,
         }),
     });
-    for (const message of sourceMessages) {
+    // Carry the conversation for context, but NEVER the drift banner that led
+    // here (see `transcriptForFork`).
+    for (const message of transcriptForFork(sourceMessages)) {
       yield* TranscriptStore.append(created.activeChatId, message);
     }
     return created;
   });
+
+/**
+ * The source transcript a fork should inherit: the whole conversation MINUS the
+ * `BranchDrift` banner that led to the fork.
+ *
+ * The source session's last turn ends in a `BranchDrift` part. Replaying it into
+ * the fork would open the fork on a stale "checkout moved" banner offering to
+ * fork again — the exact dead-end this recovery exists to end. The tool calls
+ * that preceded it (the real work) are kept; a message left empty by the strip
+ * is dropped so the fork does not open on a blank turn.
+ */
+export const transcriptForFork = (
+  messages: ReadonlyArray<Message>,
+): ReadonlyArray<Message> =>
+  messages
+    .map((message) => ({
+      ...message,
+      parts: message.parts.filter((part) => part._tag !== "BranchDrift"),
+    }))
+    .filter((message) => message.parts.length > 0);
 
 /** A remote cleanup failure must not strand the desktop's local mirror forever. */
 export const removeRemoteSessionMirror = <A, E1, R1, E2, R2>(

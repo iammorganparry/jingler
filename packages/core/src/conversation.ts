@@ -1126,18 +1126,21 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
 
     Match.tag("Done", () => ({ ...msg, streaming: false })),
 
-    Match.tag("Failed", (e) => {
-      const part: TextPart = { _tag: "Text", text: e.message }
-      return { ...msg, streaming: false, parts: [...parts, part] }
-    }),
-
-    Match.tag("BranchDrift", (e) => {
-      const part: BranchDriftPart = {
-        _tag: "BranchDrift",
-        sessionId: e.sessionId,
-        pinnedBranch: e.pinnedBranch,
-        liveBranch: e.liveBranch
-      }
+    // `Failed` and `BranchDrift` share a handler ON PURPOSE: both settle the turn
+    // and append one terminal part. They are merged into a single arm because
+    // this `pipe` sits at its 20-argument ceiling — a separate `BranchDrift` arm
+    // pushed it to 21, which silently drops every overload and infers the match
+    // subject as `never` (see the SubagentStarted grouping below for the same reason).
+    Match.tag("Failed", "BranchDrift", (e) => {
+      const part: ContentPart =
+        e._tag === "BranchDrift"
+          ? {
+              _tag: "BranchDrift",
+              sessionId: e.sessionId,
+              pinnedBranch: e.pinnedBranch,
+              liveBranch: e.liveBranch
+            }
+          : { _tag: "Text", text: e.message }
       return { ...msg, streaming: false, parts: [...parts, part] }
     }),
 
