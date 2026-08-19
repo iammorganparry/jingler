@@ -358,6 +358,8 @@ const IssueReferenceFields = {
   providerId: Schema.String,
   /** Provider-owned opaque id. Consumers must never parse this value. */
   id: Schema.String,
+  /** Optional provider-local account/profile needed to resolve this issue later. */
+  providerAccountId: Schema.optional(Schema.String),
   /** Human-readable provider identifier, e.g. `#128` or `ENG-123`. */
   identifier: Schema.String,
   url: Schema.String,
@@ -368,6 +370,13 @@ const IssueReferenceFields = {
 /** The durable provider-neutral issue identity persisted on a session. */
 export const IssueReference = Schema.Struct(IssueReferenceFields);
 export type IssueReference = Schema.Schema.Type<typeof IssueReference>;
+
+/** Provider-scoped identity used to select or remove one durable issue link. */
+export const IssueIdentity = Schema.Struct({
+  providerId: Schema.String,
+  id: Schema.String,
+});
+export type IssueIdentity = Schema.Schema.Type<typeof IssueIdentity>;
 
 /** A single agent session shown in the sidebar and opened in the main pane. */
 /** One isolated conversation inside a session's shared worktree. */
@@ -570,8 +579,12 @@ export const Session = Schema.Struct({
       }),
     ),
   ),
-  /** Provider-neutral linked issue identity written by current Jingler versions. */
+  /** Legacy provider-neutral singleton written before sessions supported multiple links. */
   linkedIssue: Schema.optional(IssueReference),
+  /** Canonical ordered provider-neutral issue links. */
+  linkedIssues: Schema.optional(Schema.Array(IssueReference)),
+  /** The issue currently shown by issue-aware session surfaces. */
+  selectedIssue: Schema.optional(IssueIdentity),
   /** Issue automation prefs (progress comments / close-on-merge). */
   automations: Schema.optional(IssueAutomations),
   /**
@@ -660,30 +673,75 @@ export const Session = Schema.Struct({
 });
 export type Session = Schema.Schema.Type<typeof Session>;
 
+/** The persisted fields needed to resolve canonical and historical issue links. */
+export type SessionIssueLinks = Pick<
+  Session,
+  | "linkedIssues"
+  | "selectedIssue"
+  | "linkedIssue"
+  | "issueNumber"
+  | "issueUrl"
+  | "issueTitle"
+  | "issueLabels"
+>;
+
+/** Provider-scoped equality; provider-owned ids are not globally unique. */
+export const sameIssueIdentity = (
+  left: Pick<IssueIdentity, "providerId" | "id">,
+  right: Pick<IssueIdentity, "providerId" | "id">,
+): boolean => left.providerId === right.providerId && left.id === right.id;
+
+const historicalGithubIssueOf = (
+  session: SessionIssueLinks,
+): IssueReference | undefined =>
+  session.issueNumber == null
+    ? undefined
+    : {
+        providerId: "github",
+        id: String(session.issueNumber),
+        identifier: `#${session.issueNumber}`,
+        url: session.issueUrl ?? "",
+        title: session.issueTitle ?? `Issue #${session.issueNumber}`,
+        labels: session.issueLabels ?? [],
+      };
+
 /**
- * Resolve the current provider-neutral issue link without rewriting legacy data.
+ * Resolve every provider-neutral issue link without rewriting legacy data.
  *
- * Sessions written before issue providers persisted four GitHub-specific fields.
- * Reads adapt those fields in memory so old sessions keep their badge, title and
- * link; the session store migrates the durable shape only when it next writes.
+ * The presence of `linkedIssues` marks the canonical representation, including
+ * an explicitly empty array. Older singleton and GitHub-specific fields are
+ * adapted only when that canonical field is absent.
  */
-export const issueReferenceOf = (
-  session: Pick<
-    Session,
-    "linkedIssue" | "issueNumber" | "issueUrl" | "issueTitle" | "issueLabels"
-  >,
-): IssueReference | undefined => {
-  if (session.linkedIssue) return session.linkedIssue;
-  if (session.issueNumber == null) return undefined;
-  return {
-    providerId: "github",
-    id: String(session.issueNumber),
-    identifier: `#${session.issueNumber}`,
-    url: session.issueUrl ?? "",
-    title: session.issueTitle ?? `Issue #${session.issueNumber}`,
-    labels: session.issueLabels ?? [],
-  };
+export const issueReferencesOf = (
+  session: SessionIssueLinks,
+): ReadonlyArray<IssueReference> => {
+  if (session.linkedIssues !== undefined) return session.linkedIssues;
+  if (session.linkedIssue) return [session.linkedIssue];
+  const historical = historicalGithubIssueOf(session);
+  return historical ? [historical] : [];
 };
+
+/** Resolve the selected issue, falling back to the newest canonical link. */
+export const issueReferenceOf = (
+  session: SessionIssueLinks,
+): IssueReference | undefined => {
+  const issues = issueReferencesOf(session);
+  const requested = session.selectedIssue;
+  if (requested) {
+    const selected = issues.find((issue) =>
+      sameIssueIdentity(issue, requested),
+    );
+    if (selected) return selected;
+  }
+  return issues.at(-1);
+};
+
+/** Find one provider's link without changing the session's visible selection. */
+export const issueReferenceForProvider = (
+  session: SessionIssueLinks,
+  providerId: string,
+): IssueReference | undefined =>
+  issueReferencesOf(session).find((issue) => issue.providerId === providerId);
 
 /** A missing environment id is deliberately the local desktop. */
 export const executionTargetOf = (
@@ -1050,7 +1108,7 @@ export const FONT_SCALE_RANGE = { min: 0.5, max: 2 } as const;
  * zero or off-screen — on read or on write.
  */
 export const clampFontScale = (value: number | null | undefined): number =>
-  typeof value === "number" && Number.isFinite(value)
+  value !== null && value !== undefined && Number.isFinite(value)
     ? Math.min(FONT_SCALE_RANGE.max, Math.max(FONT_SCALE_RANGE.min, value))
     : FONT_SCALE_DEFAULT;
 

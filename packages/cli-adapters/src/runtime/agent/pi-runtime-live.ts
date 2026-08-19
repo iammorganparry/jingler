@@ -1,10 +1,15 @@
 import { join } from "node:path"
 import type { PiRunSpec } from "@jingler/core"
+import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
+import { ConfigService } from "../../config.js"
 import { EnvironmentService } from "../../environment.js"
 import { SecretStore } from "../../secret-store.js"
 import { MemoryAttachmentService } from "../../memory-session.js"
+import { PluginHost } from "../../plugin-host.js"
+import { PluginRegistry } from "../../plugins.js"
+import { SessionStore } from "../../sessions.js"
 import { makeOffloadCommandRouterWithOwnedDevice } from "../../offload-command-router.js"
 import { makeOwnedDeviceOffloadPort } from "../../owned-device-offload.js"
 import { RemoteSessionService } from "../../remote-session.js"
@@ -23,7 +28,16 @@ import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { ImportedMcpService } from "../resources/imported-mcp-service.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
-import type { ToolRegistry } from "../tools/tool-registry.js"
+import {
+  enabledPluginAgentToolsets,
+  persistPluginIssueReferences,
+  registerPluginAgentTools
+} from "../tools/plugin-agent-tools.js"
+import type {
+  PluginToolOrigin,
+  ToolRegistry,
+  ToolSuccessfulResult
+} from "../tools/tool-registry.js"
 import { makeToolMemory } from "../tools/tool-memory.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
 import {
@@ -42,7 +56,21 @@ import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
 const connectionFailure = (message: string, cause?: unknown) =>
   new AgentRuntimeError({ reason: "authentication", message, cause })
 
+export interface PluginToolSuccessfulResult
+  extends Omit<ToolSuccessfulResult, "origin"> {
+  readonly origin: PluginToolOrigin
+  readonly sessionId: string
+  readonly repository: {
+    readonly name: string
+    readonly path: string
+  }
+}
+
 export interface PiAgentRuntimeLiveOptions {
+  /** Settled bounded plugin-tool values; failures never alter the agent result. */
+  readonly onPluginToolSuccessfulResult?: (
+    result: PluginToolSuccessfulResult
+  ) => void | Promise<void>
   /** Explicit test transport seam. Production must leave this unset. */
   readonly configureModelRuntime?: PiSessionFactoryOptions["configureModelRuntime"]
   /** Explicit test tool seam. Production must leave this unset. */
@@ -60,11 +88,17 @@ export const makePiAgentRuntimeLive = (
   AgentRuntime,
   Effect.gen(function* () {
     const paths = yield* AppPaths
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const config = yield* ConfigService
     const secretStore = yield* SecretStore
     const providers = yield* ProviderConnections
     const importedMcp = yield* ImportedMcpService
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
+    const pluginRegistry = yield* PluginRegistry
+    const pluginHost = yield* PluginHost
+    const sessionStore = yield* SessionStore
     const memory = yield* Effect.serviceOption(MemoryAttachmentService)
     const workspace = yield* makeWorkspaceInspectionPort
     const webSearch = yield* Effect.serviceOption(WebSearchService)
@@ -184,6 +218,31 @@ export const makePiAgentRuntimeLive = (
               )
             : webSearch.value
           : undefined
+        const pluginSetup = Effect.all({
+          catalog: pluginRegistry.list().pipe(
+            Effect.provideService(FileSystem.FileSystem, fs),
+            Effect.provideService(Path.Path, path),
+            Effect.provideService(AppPaths, paths),
+            Effect.provideService(ConfigService, config)
+          ),
+          host: pluginHost.get(),
+          session: sessionStore.get(spec.sessionId).pipe(
+            Effect.provideService(FileSystem.FileSystem, fs),
+            Effect.provideService(AppPaths, paths)
+          )
+        }).pipe(
+          Effect.map(({ catalog, host, session }) => ({
+            host,
+            sources: enabledPluginAgentToolsets(catalog.plugins),
+            context: {
+              id: session.id,
+              repository: { name: session.repo, path: spec.cwd }
+            }
+          })),
+          // Plugin tools are additive. A missing/dead host must not remove
+          // Jingler's built-in tools from an otherwise healthy run.
+          Effect.orElseSucceed(() => null)
+        )
         if (!tracker) {
           return Effect.fail(
             new AgentRuntimeError({
@@ -194,7 +253,8 @@ export const makePiAgentRuntimeLive = (
         }
         return Effect.all({
           managedMcp: importedMcp.resolveForTarget(spec.targetCapabilities.targetId),
-          managedFiles: managedResources.enabledForTarget(spec.targetCapabilities.targetId)
+          managedFiles: managedResources.enabledForTarget(spec.targetCapabilities.targetId),
+          plugins: pluginSetup
         }).pipe(
           Effect.mapError((cause) =>
             new AgentRuntimeError({
@@ -203,7 +263,7 @@ export const makePiAgentRuntimeLive = (
               cause
             })
           ),
-          Effect.flatMap(({ managedMcp, managedFiles }) => createJinglerTools({
+          Effect.flatMap(({ managedMcp, managedFiles, plugins }) => createJinglerTools({
             context,
             cwd: spec.cwd,
             workspace,
@@ -230,6 +290,34 @@ export const makePiAgentRuntimeLive = (
               ...(Option.isSome(memory)
                 ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }
                 : {}),
+              ...(plugins
+                ? {
+                    onSuccessfulResult: async (result: ToolSuccessfulResult) => {
+                      if (result.origin?.kind !== "plugin") return
+                      const linked = await persistPluginIssueReferences(
+                        result.origin,
+                        result.value,
+                        (issues) => Effect.runPromise(
+                          sessionStore.addIssues(plugins.context.id, issues).pipe(
+                            Effect.provideService(FileSystem.FileSystem, fs),
+                            Effect.provideService(AppPaths, paths)
+                          )
+                        )
+                      )
+                      if (linked) {
+                        await Effect.runPromise(
+                          context.publishEvent({ _tag: "SessionIssueLinksChanged" })
+                        )
+                      }
+                      await options.onPluginToolSuccessfulResult?.({
+                        ...result,
+                        origin: result.origin,
+                        sessionId: plugins.context.id,
+                        repository: plugins.context.repository
+                      })
+                    }
+                  }
+                : {}),
               observer: createMutationObserver({
                 cwd: spec.cwd,
                 runId: spec.runId,
@@ -251,6 +339,18 @@ export const makePiAgentRuntimeLive = (
                 offload
               })
             )),
+            Effect.tap((registry) =>
+              plugins === null
+                ? Effect.void
+                : Effect.promise(() =>
+                    registerPluginAgentTools(
+                      registry,
+                      plugins.host,
+                      plugins.sources,
+                      plugins.context
+                    )
+                  ).pipe(Effect.asVoid)
+            ),
             Effect.tap((registry) =>
               options.configureToolRegistry?.({ registry, spec, context }) ?? Effect.void
             )

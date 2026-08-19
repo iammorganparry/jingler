@@ -8,10 +8,13 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   openExternal: vi.fn().mockResolvedValue(undefined),
   linkIssue: vi.fn().mockResolvedValue(undefined),
-  unlinkIssue: vi.fn().mockResolvedValue(undefined),
+  removeIssue: vi.fn().mockResolvedValue(undefined),
   tier: "wide"
 }))
 
+// The plugin SDK hooks are process-provided renderer context. This focused view
+// test supplies that host boundary without booting the desktop plugin loader.
+// oxlint-disable-next-line anti-slop/no-module-mocking
 vi.mock("@jingler/plugin-sdk", async (load) => {
   const actual = await load<typeof import("@jingler/plugin-sdk")>()
   return {
@@ -20,15 +23,18 @@ vi.mock("@jingler/plugin-sdk", async (load) => {
       invoke: mocks.invoke,
       openExternal: mocks.openExternal,
       storage: {},
-      sessions: { linkIssue: mocks.linkIssue, unlinkIssue: mocks.unlinkIssue }
+      sessions: { linkIssue: mocks.linkIssue, removeIssue: mocks.removeIssue }
     }),
     useSessionActions: () => ({
       linkIssue: mocks.linkIssue,
-      unlinkIssue: mocks.unlinkIssue
+      removeIssue: mocks.removeIssue
     })
   }
 })
 
+// Width-tier context is another process-provided SDK boundary; fixing it keeps
+// these tests about Linear view behavior rather than responsive measurement.
+// oxlint-disable-next-line anti-slop/no-module-mocking
 vi.mock("@jingler/plugin-sdk/ui", async (load) => {
   const actual = await load<typeof import("@jingler/plugin-sdk/ui")>()
   return { ...actual, useWidthTier: () => mocks.tier }
@@ -80,16 +86,20 @@ const detail: LinearIssueDetail = {
 const context = {
   viewer: { id: "user-1", name: "Morgan", avatarUrl: null },
   workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-  teams: [{ id: "team-1", name: "Engineering", key: "ENG" }]
+  teams: [{ id: "team-1", name: "Engineering", key: "ENG" }],
+  projects: []
 }
 
-function successfulHost(command: string): unknown {
+function successfulHost(command: string) {
   if (command === "linear.configured") return true
   if (command === "linear.context") return context
   if (command === "linear.get") return detail
   if (command === "linear.list") return [detail]
   if (command === "linear.create") return detail
   if (command === "linear.comment") return detail.comments[0]
+  if (command === "linear.configuration") return {
+    profiles: [], repoDefault: null, sessionOverride: null, resolved: null
+  }
   throw new Error(`Unexpected command ${command}`)
 }
 
@@ -98,7 +108,7 @@ beforeEach(() => {
   mocks.invoke.mockImplementation((command: string) => Promise.resolve(successfulHost(command)))
   mocks.openExternal.mockClear()
   mocks.linkIssue.mockClear()
-  mocks.unlinkIssue.mockClear()
+  mocks.removeIssue.mockClear()
   mocks.tier = "wide"
 })
 
@@ -122,6 +132,44 @@ describe("Linear Issue tab content", () => {
     expect(view.container.querySelector("[data-linear-mark] path")).toBeNull()
   })
 
+  it("adds a named account from the contextual setup flyout without retaining its key", async () => {
+    const configured = {
+      profiles: [{
+        id: "account-work",
+        name: "Work",
+        viewer: context.viewer,
+        workspace: context.workspace,
+        teams: context.teams,
+        projects: [{ id: "project-1", name: "Reliability" }]
+      }],
+      repoDefault: null,
+      sessionOverride: null,
+      resolved: { profileId: "account-work" }
+    }
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "linear.configuration") {
+        return Promise.resolve({ profiles: [], repoDefault: null, sessionOverride: null, resolved: null })
+      }
+      if (command === "linear.profile-add") return Promise.resolve(configured)
+      return Promise.resolve(successfulHost(command))
+    })
+    render(<IssueTab pluginId="linear" session={session()} />)
+    await screen.findByRole("heading", { name: "Link an existing issue" })
+    fireEvent.click(screen.getByRole("button", { name: "Configure Linear for this session" }))
+    await screen.findByRole("heading", { name: "Linear setup" })
+    fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Work" } })
+    fireEvent.change(screen.getByLabelText("Linear API key"), { target: { value: "lin_api_secret" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }))
+
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("linear.profile-add", {
+      sessionId: "session-1",
+      repository: { name: "acme/web", path: "/tmp/acme-web" },
+      name: "Work",
+      apiKey: "lin_api_secret"
+    }))
+    await waitFor(() => expect(screen.getByLabelText<HTMLInputElement>("Linear API key").value).toBe(""))
+  })
+
   it("renders create and link controls for an unlinked session", async () => {
     const view = render(<IssueTab pluginId="linear" session={session()} />)
 
@@ -138,9 +186,9 @@ describe("Linear Issue tab content", () => {
     view.rerender(<IssueTab pluginId="linear" session={session(linkedIssue)} />)
     expect(await screen.findByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
 
-    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.configured")).toHaveLength(1)
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.configured")).toHaveLength(2)
     expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.context")).toHaveLength(1)
-    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.get")).toHaveLength(1)
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "linear.get")).toHaveLength(2)
   })
 })
 
@@ -153,7 +201,7 @@ describe("Linear Issue tab states", () => {
     const view = render(<IssueTab pluginId="linear" session={session()} />)
 
     expect(await screen.findByRole("heading", { name: "Connect Linear" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Create API key" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Set up Linear" })).toBeTruthy()
 
     view.unmount()
     mocks.invoke.mockRejectedValue(new Error("Linear rate limit reached. Try again later."))
@@ -173,7 +221,10 @@ describe("Linear Issue tab states", () => {
       "Linear could not find this issue."
     )
     fireEvent.click(screen.getByRole("button", { name: "Unlink issue" }))
-    await waitFor(() => expect(mocks.unlinkIssue).toHaveBeenCalledWith("session-1"))
+    await waitFor(() => expect(mocks.removeIssue).toHaveBeenCalledWith("session-1", {
+      providerId: "linear",
+      id: "issue-123"
+    }))
   })
 
   it("keeps issue detail and the draft visible when commenting fails", async () => {
@@ -192,13 +243,45 @@ describe("Linear Issue tab states", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("Linear rate limit reached")
     expect(screen.getByRole("heading", { name: "Retry failed payments" })).toBeTruthy()
-    expect((screen.getByLabelText("Add a comment") as HTMLTextAreaElement).value).toBe(
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Add a comment").value).toBe(
       "Keep this draft."
     )
   })
 })
 
 describe("Linear Issue tab rendering", () => {
+  it("reloads selected issue detail with its account-bound profile", async () => {
+    const first = { ...linkedIssue, providerAccountId: "work" }
+    const second = {
+      ...linkedIssue,
+      providerAccountId: "personal",
+      id: "issue-456",
+      identifier: "ENG-456",
+      title: "Reconcile duplicate charges"
+    }
+    const selectedSession = (issue: IssueReference): SessionSnapshot => ({
+      ...session(issue),
+      linkedIssues: [first, second],
+      selectedIssue: { providerId: issue.providerId, id: issue.id }
+    })
+    mocks.invoke.mockImplementation((command: string, input?: { issueId?: string }) => {
+      if (command === "linear.get") {
+        const issue = input?.issueId === second.id ? second : first
+        return Promise.resolve({ ...detail, ...issue })
+      }
+      return Promise.resolve(successfulHost(command))
+    })
+
+    const view = render(<IssueTab pluginId="linear" session={selectedSession(first)} />)
+    expect(await screen.findByRole("heading", { name: first.title })).toBeTruthy()
+    view.rerender(<IssueTab pluginId="linear" session={selectedSession(second)} />)
+    expect(await screen.findByRole("heading", { name: second.title })).toBeTruthy()
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "linear.get",
+      expect.objectContaining({ issueId: second.id, profileId: "personal" })
+    ))
+  })
+
   it("keeps primary actions accessible at narrow width", async () => {
     mocks.tier = "narrow"
     render(<IssueTab pluginId="linear" session={session(linkedIssue)} />)

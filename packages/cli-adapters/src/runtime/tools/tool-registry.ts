@@ -75,10 +75,29 @@ export interface ToolExecutionContext {
   readonly progress: (progress: ToolProgress) => void
 }
 
+export interface PluginToolOrigin {
+  readonly kind: "plugin"
+  readonly pluginId: string
+  readonly toolsetId: string
+}
+
+export type ToolOrigin = PluginToolOrigin
+
+export interface ToolSuccessfulResult<Value = unknown> {
+  readonly toolId: string
+  readonly callId: string | null
+  readonly risk: ToolRisk
+  readonly origin: ToolOrigin | null
+  /** Present only when the serialized value fit the tool's declared output budget. */
+  readonly value: Value
+}
+
 export interface ToolDefinition<Input, Encoded = Input> {
   readonly id: string
   readonly version: string
   readonly description: string
+  /** Optional trusted source metadata attached by Jingler, never by model input. */
+  readonly origin?: ToolOrigin
   readonly input: Schema.Schema<Input, Encoded>
   /** Exact provider-visible schema when execution uses an external validator. */
   readonly providerInputSchema?: ToolProviderInputSchema
@@ -117,6 +136,8 @@ export interface ToolRegistryOptions {
   readonly writeArtifact?: (toolId: string, content: string) => Promise<ToolArtifactReference>
   readonly observer?: ToolExecutionObserver
   readonly memory?: ToolMemoryHooks
+  /** Observe settled, bounded successful values without changing the tool outcome. */
+  readonly onSuccessfulResult?: (result: ToolSuccessfulResult) => void | Promise<void>
 }
 
 export interface ToolExecutionRequest {
@@ -320,6 +341,27 @@ const recordToolMemoryFailure = async (
   }
 }
 
+const publishSuccessfulResult = async (
+  options: ToolRegistryOptions,
+  request: ToolExecutionRequest,
+  tool: AnyToolDefinition,
+  result: ToolResultEnvelope
+): Promise<void> => {
+  if (!options.onSuccessfulResult || result.status !== "success" || result.artifact !== null) return
+  try {
+    await options.onSuccessfulResult({
+      toolId: tool.id,
+      callId: request.callId ?? request.idempotencyKey ?? null,
+      risk: tool.risk,
+      origin: tool.origin ?? null,
+      value: result.value
+    })
+  } catch {
+    // Observers are downstream bookkeeping. A failed observer must not make a
+    // completed external mutation look retryable to the model.
+  }
+}
+
 export class ToolRegistry {
   readonly #tools = new Map<string, AnyToolDefinition>()
   readonly #options: ToolRegistryOptions
@@ -497,6 +539,7 @@ export class ToolRegistry {
       )
     }
     if (mutatingRisk(tool.risk)) this.#mutatingExecutions += 1
+    await publishSuccessfulResult(this.#options, input, tool, result)
     if (
       input.id.startsWith("mcp__jingler-memory__memory_propose") &&
       result.status === "success"

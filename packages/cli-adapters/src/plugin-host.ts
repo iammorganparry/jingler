@@ -35,6 +35,8 @@ import {
   HOST_READY_TIMEOUT_MS,
   type FromHostMessage,
   type IssueProviderMethod,
+  type PluginAgentToolDescriptor,
+  type PluginAgentToolSessionContext,
   type ToHostMessage
 } from "./plugin-host-protocol.js"
 
@@ -265,7 +267,11 @@ export class PluginHostRuntime {
         this.settle(message.requestId, false, undefined, message.message)
         this.events.onActivationFailed?.(message.pluginId, message.message)
         break
+      case "agent-toolset-result":
+        this.settle(message.requestId, message.ok, message.tools, message.message)
+        break
       case "invoke-result":
+      case "agent-tool-result":
       case "issue-provider-result":
         this.settle(message.requestId, message.ok, message.value, message.message)
         break
@@ -417,7 +423,9 @@ export class PluginHostRuntime {
       pluginId: manifest.id,
       entry: `${plugin.dir}/${manifest.main}`,
       declaredCommands: (manifest.contributes?.commands ?? []).map((c) => c.id),
-      declaredIssueProviders: (manifest.contributes?.issueProviders ?? []).map((p) => p.id)
+      declaredIssueProviders: (manifest.contributes?.issueProviders ?? []).map((p) => p.id),
+      declaredAgentToolsets: (manifest.contributes?.agentToolsets ?? []).map((t) => t.id),
+      declaredSecretProfiles: (manifest.contributes?.secretProfiles ?? []).map((p) => p.id)
     })
 
     // A plugin awaiting a network call it will never get must not hold the
@@ -461,6 +469,54 @@ export class PluginHostRuntime {
       commandId,
       arg
     })
+  }
+
+  /** Activate a plugin and materialize one selected toolset's full definitions. */
+  async loadAgentToolset(
+    plugin: LoadedPlugin,
+    toolsetId: string
+  ): Promise<ReadonlyArray<PluginAgentToolDescriptor>> {
+    await this.activate(plugin)
+    return await this.send<ReadonlyArray<PluginAgentToolDescriptor>>({
+      kind: "agent-toolset-load",
+      requestId: this.id(),
+      pluginId: plugin.manifest.id,
+      toolsetId
+    })
+  }
+
+  /** Dispatch one native plugin tool through the supervised host. */
+  async invokeAgentTool(
+    plugin: LoadedPlugin,
+    toolsetId: string,
+    toolId: string,
+    input: unknown,
+    context: PluginAgentToolSessionContext,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    await this.activate(plugin)
+    const requestId = this.id()
+    const invocation = this.send<unknown>({
+      kind: "agent-tool-invoke",
+      requestId,
+      pluginId: plugin.manifest.id,
+      toolsetId,
+      toolId,
+      input,
+      context
+    })
+    if (!signal) return await invocation
+    if (signal.aborted) {
+      this.process?.post({ kind: "agent-tool-cancel", requestId })
+      return await invocation
+    }
+    const cancel = () => this.process?.post({ kind: "agent-tool-cancel", requestId })
+    signal.addEventListener("abort", cancel, { once: true })
+    try {
+      return await invocation
+    } finally {
+      signal.removeEventListener("abort", cancel)
+    }
   }
 
   /** Dispatch one normalized issue-provider operation through the supervised host. */

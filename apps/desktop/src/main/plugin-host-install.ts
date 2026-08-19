@@ -23,6 +23,9 @@ import {
   type HostRequestHandler
 } from "@jingler/cli-adapters"
 import {
+  pluginProfileSecretDeleteForHost,
+  pluginProfileSecretGetForHost,
+  pluginProfileSecretSetForHost,
   pluginSecretGetForHost,
   pluginStorageDelete,
   pluginStorageGet,
@@ -47,6 +50,9 @@ export const installPluginHost = (
     storageDelete: (pluginId: string, key: string) => Promise<void>
     storageKeys: (pluginId: string) => Promise<ReadonlyArray<string>>
     getSecret: (pluginId: string, settingId: string) => Promise<string | null>
+    getProfileSecret: (pluginId: string, collectionId: string, profileId: string) => Promise<string | null>
+    setProfileSecret: (pluginId: string, collectionId: string, profileId: string, value: string) => Promise<void>
+    deleteProfileSecret: (pluginId: string, collectionId: string, profileId: string) => Promise<void>
     defaultCwd: () => string | undefined
     getSession: (
       pluginId: string,
@@ -73,6 +79,12 @@ export const installPluginHost = (
       storageKeys: (pluginId) => appRuntime.runPromise(pluginStorageKeys(pluginId)),
       getSecret: (pluginId, settingId) =>
         appRuntime.runPromise(pluginSecretGetForHost(pluginId, settingId)),
+      getProfileSecret: (pluginId, collectionId, profileId) =>
+        appRuntime.runPromise(pluginProfileSecretGetForHost(pluginId, collectionId, profileId)),
+      setProfileSecret: (pluginId, collectionId, profileId, value) =>
+        appRuntime.runPromise(pluginProfileSecretSetForHost(pluginId, collectionId, profileId, value)),
+      deleteProfileSecret: (pluginId, collectionId, profileId) =>
+        appRuntime.runPromise(pluginProfileSecretDeleteForHost(pluginId, collectionId, profileId)),
       // No default. `exec` with no `cwd` runs in the host process's own
       // directory, and the SDK now says so.
       //

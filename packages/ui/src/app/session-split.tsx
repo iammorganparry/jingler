@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from "react"
-import type { DiffStat, Session, SessionActivity } from "@jingler/core"
+import type { DiffStat, IssueIdentity, Session, SessionActivity } from "@jingler/core"
 import type { DockSide } from "./terminal-panel.js"
 import type { Pane, SplitGroup } from "./split-layout.js"
 import { usePaneWidth } from "../hooks/width-tier.js"
@@ -67,6 +67,8 @@ export interface SessionSplitProps {
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
   tabContributions?: ReadonlyArray<TabContribution>
+  /** Persist selection of a provider-scoped issue from a pane's right rail. */
+  onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
   /**
    * Dock panels contributed by plugins.
    *
@@ -154,6 +156,7 @@ export function SessionSplit(props: SessionSplitProps) {
         onActiveTabChange={reportActiveTab}
         renderPullRequest={props.renderPullRequest}
         tabContributions={props.tabContributions}
+        onSelectIssue={props.onSelectIssue}
         renderReview={props.renderReview}
         renderCode={props.renderCode}
         // The terminal dock follows the FOCUSED pane's session (dockSession),

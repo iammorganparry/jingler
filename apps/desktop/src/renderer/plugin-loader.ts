@@ -29,7 +29,7 @@
  * advisory, since a module could register whatever it liked at import time.
  */
 import { createElement, type ComponentType } from "react"
-import { issueReferenceOf, PLUGIN_API_VERSION } from "@jingler/core"
+import { issueReferenceOf, issueReferencesOf, PLUGIN_API_VERSION } from "@jingler/core"
 import type {
   LoadedPlugin,
   PluginIcon as PluginIconDeclaration,
@@ -87,17 +87,25 @@ export interface PluginViewProps {
  * to `Session` should NOT silently become visible to plugins, and a spread would
  * make it so.
  */
-export const toSessionSnapshot = (session: Session): SessionSnapshot => ({
-  id: session.id,
-  repo: session.repo,
-  branch: session.branch,
-  title: session.title,
-  ...(session.providerId === undefined ? {} : { providerId: session.providerId }),
-  prNumber: session.prNumber ?? null,
-  ...(session.issueNumber != null ? { issueNumber: session.issueNumber } : {}),
-  ...(issueReferenceOf(session) ? { linkedIssue: issueReferenceOf(session) } : {}),
-  ...(session.worktreePath != null ? { worktreePath: session.worktreePath } : {})
-})
+export const toSessionSnapshot = (session: Session): SessionSnapshot => {
+  const linkedIssues = issueReferencesOf(session)
+  const linkedIssue = issueReferenceOf(session)
+  return {
+    id: session.id,
+    repo: session.repo,
+    branch: session.branch,
+    title: session.title,
+    ...(session.providerId === undefined ? {} : { providerId: session.providerId }),
+    prNumber: session.prNumber ?? null,
+    ...(session.issueNumber != null ? { issueNumber: session.issueNumber } : {}),
+    ...(linkedIssue ? { linkedIssue } : {}),
+    linkedIssues,
+    ...(linkedIssue
+      ? { selectedIssue: { providerId: linkedIssue.providerId, id: linkedIssue.id } }
+      : {}),
+    ...(session.worktreePath != null ? { worktreePath: session.worktreePath } : {})
+  }
+}
 
 /** A plugin that loaded, with the contributions it actually provided. */
 export interface ActivePlugin {
@@ -188,9 +196,9 @@ const visibilityPredicate = (
 ): ((ctx: TabContext) => boolean) => {
   if (typeof when === "object") {
     return ({ session }) => {
-      const issue = issueReferenceOf(session)
-      return issue
-        ? issue.providerId === when.issueProvider
+      const issues = issueReferencesOf(session)
+      return issues.length > 0
+        ? issues.some((issue) => issue.providerId === when.issueProvider)
         : when.includeUnlinked === true
     }
   }
@@ -421,6 +429,9 @@ export const loadPluginUi = async (
       icon: resolvePluginIcon(plugin, declared.icon),
       order: declared.order ?? PLUGIN_TAB_ORDER,
       when: visibilityPredicate(declared.when),
+      ...(typeof declared.when === "object"
+        ? { issueProviderId: declared.when.issueProvider }
+        : {}),
       // The session comes from context, not from this argument. `PluginTabHost`
       // wraps every plugin body and is the one place an internal `Session` is
       // narrowed to a `SessionSnapshot`; taking it from the argument here would

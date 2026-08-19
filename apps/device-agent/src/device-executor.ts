@@ -25,6 +25,8 @@ import {
   WebSearchService
 } from "@jingler/cli-adapters/web-search"
 import { PlanStore } from "@jingler/cli-adapters/plan-store"
+import { PluginHost } from "@jingler/cli-adapters/plugin-host"
+import { PluginRegistry } from "@jingler/cli-adapters/plugins"
 import { ProjectService } from "@jingler/cli-adapters/projects"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
@@ -455,6 +457,9 @@ const deviceRuntime = (root: string, targetId: string) => {
         Layer.provide(Layer.succeed(WebSearchService, managedWebSearch))
       )
   const piRuntime = embeddedWithSearch.pipe(
+    Layer.provide(PluginHost.Default),
+    Layer.provide(PluginRegistry.Default),
+    Layer.provide(SessionStore.Default),
     Layer.provide(ConfigService.Default),
     Layer.provide(GitService.Default),
     Layer.provide(RuntimeDiagnostics.Default),

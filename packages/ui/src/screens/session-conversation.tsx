@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import type {
   DiffStat,
   Environment,
+  IssueIdentity,
   SessionPrStatus,
   Session,
   SessionActivity,
@@ -179,6 +180,8 @@ export interface SessionConversationProps {
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
   tabContributions?: ReadonlyArray<TabContribution>
+  /** Persist selection of a provider-scoped issue from a pane's right rail. */
+  onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
   /** Dock panes contributed by plugins, mounted once beside the built-in docks. */
   paneContributions?: ReadonlyArray<PaneContribution>
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
@@ -317,6 +320,7 @@ export function SessionConversation(props: SessionConversationProps) {
             onOpenProviderSettings={props.onOpenProviderSettings ?? props.onOpenSettings}
             renderPullRequest={props.renderPullRequest}
             tabContributions={props.tabContributions}
+            onSelectIssue={props.onSelectIssue}
             paneContributions={props.paneContributions}
             renderReview={props.renderReview}
             renderCode={props.renderCode}

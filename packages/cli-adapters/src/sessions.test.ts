@@ -18,6 +18,8 @@ import type {
 } from "@jingler/core"
 import {
   GitHubApiError,
+  issueReferenceOf,
+  issueReferencesOf,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -91,6 +93,11 @@ const feedbackEvent = (patch: Partial<GitHubRelayEvent> = {}): GitHubRelayEvent 
  * missing id fails with the typed error. The slug rule is checked only via
  * `session.branch`.
  */
+type JsonValue = string | number | boolean | null | JsonObject | JsonValue[]
+interface JsonObject {
+  [key: string]: JsonValue | undefined
+}
+
 describe("SessionStore", () => {
   let temp: ReturnType<typeof withTempRoot>
   let repos: ReturnType<typeof mkTemp>
@@ -1329,6 +1336,7 @@ describe("SessionStore", () => {
   const apiHead = (headRef = "chore/bump", calls: Array<string> = []) =>
     Layer.succeed(
       GitHubApi,
+      // SAFETY: this focused fixture implements every GitHubApi method exercised here.
       {
         repository: () =>
           Effect.succeed({
@@ -1355,6 +1363,7 @@ describe("SessionStore", () => {
 
   const failingApi = Layer.succeed(
     GitHubApi,
+    // SAFETY: this focused failure fixture implements every GitHubApi method exercised here.
     {
       repository: () =>
         Effect.succeed({
@@ -1567,7 +1576,7 @@ describe("SessionStore", () => {
     if (archived._tag === "Success") {
       expect(archived.value.archived).toBe(true)
       expect(archived.value.archiveReason).toBe("merged")
-      expect(typeof archived.value.archivedAt).toBe("string")
+      expect(archived.value.archivedAt).toEqual(expect.any(String))
     }
 
     const restored = await runExit(
@@ -1763,7 +1772,7 @@ describe("SessionStore", () => {
       cwd: s.worktreePath,
       encoding: "utf-8"
     }).trim()).toBe("HEAD")
-    expect(s.linkedIssue).toStrictEqual({
+    expect(issueReferenceOf(s)).toStrictEqual({
       providerId: "github",
       id: "128",
       identifier: "#128",
@@ -1866,7 +1875,7 @@ describe("SessionStore", () => {
 
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
-    expect(result.value.first.linkedIssue?.id).toBe(result.value.second.linkedIssue?.id)
+    expect(issueReferenceOf(result.value.first)?.id).toBe(issueReferenceOf(result.value.second)?.id)
     expect(result.value.first.repoPath).toBe(repoPath)
     expect(result.value.second.repoPath).toBe(otherRepoPath)
   })
@@ -1920,8 +1929,67 @@ describe("SessionStore", () => {
     if (result._tag !== "Success") return
     const { cleared, unlinked } = result.value
     expect(cleared.initialPrompt).toBeUndefined()
+    expect(issueReferencesOf(unlinked)).toStrictEqual([])
     expect(unlinked.linkedIssue).toBeUndefined()
+    expect(unlinked.linkedIssues).toBeUndefined()
+    expect(unlinked.selectedIssue).toBeUndefined()
     expect(unlinked.automations).toBeUndefined()
+  })
+
+  it("adds, refreshes, selects, and removes provider-scoped issue links", async () => {
+    const github = issueInput().issue
+    const linearOne = {
+      ...github,
+      providerId: "linear",
+      id: "same-provider-id",
+      identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1",
+      title: "First Linear issue"
+    }
+    const linearTwo = {
+      ...linearOne,
+      id: "linear-2",
+      identifier: "ENG-2",
+      url: "https://linear.app/acme/issue/ENG-2",
+      title: "Second Linear issue"
+    }
+    const githubCollision = {
+      ...github,
+      id: "same-provider-id",
+      identifier: "#999"
+    }
+    const result = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.createFromIssue(issueInput())
+        yield* SessionStore.addIssues(created.id, [linearOne, linearTwo, linearOne, githubCollision])
+        yield* SessionStore.addIssues(created.id, [{ ...linearOne, title: "Refreshed title" }])
+        const added = yield* SessionStore.get(created.id)
+        yield* SessionStore.selectIssue(created.id, { providerId: "linear", id: "linear-2" })
+        const selected = yield* SessionStore.get(created.id)
+        yield* SessionStore.removeIssue(created.id, { providerId: "linear", id: "linear-2" })
+        const removed = yield* SessionStore.get(created.id)
+        return { added, selected, removed }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+
+    expect(issueReferencesOf(result.value.added).map((issue) => [issue.providerId, issue.id])).toEqual([
+      ["github", "128"],
+      ["linear", "same-provider-id"],
+      ["linear", "linear-2"],
+      ["github", "same-provider-id"]
+    ])
+    expect(issueReferencesOf(result.value.added)[1]?.title).toBe("Refreshed title")
+    expect(issueReferenceOf(result.value.added)).toMatchObject({
+      providerId: "linear",
+      id: "same-provider-id"
+    })
+    expect(issueReferenceOf(result.value.selected)?.id).toBe("linear-2")
+    expect(issueReferencesOf(result.value.removed).some((issue) => issue.id === "linear-2")).toBe(false)
+    expect(issueReferenceOf(result.value.removed)?.providerId).toBe("github")
+    expect(issueReferenceOf(result.value.removed)?.id).toBe("same-provider-id")
   })
 
   it("retains automations only for GitHub issues", async () => {
@@ -1940,7 +2008,7 @@ describe("SessionStore", () => {
     )
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
-    expect(result.value.linkedIssue?.providerId).toBe("linear")
+    expect(issueReferenceOf(result.value)?.providerId).toBe("linear")
     expect(result.value.automations).toBeUndefined()
   })
 
@@ -1953,11 +2021,12 @@ describe("SessionStore", () => {
     if (created._tag !== "Success") return
 
     const sessionsFile = join(temp.root, "sessions.json")
-    const persisted = JSON.parse(readFileSync(sessionsFile, "utf-8")) as Array<
-      Record<string, unknown>
-    >
+    // SAFETY: the store wrote this JSON immediately above; this test intentionally mutates its legacy shape.
+    const persisted = JSON.parse(readFileSync(sessionsFile, "utf-8")) as JsonObject[]
     const historical = persisted[0]!
     delete historical.linkedIssue
+    delete historical.linkedIssues
+    delete historical.selectedIssue
     historical.issueNumber = 128
     historical.issueUrl = "https://github.com/acme/api/issues/128"
     historical.issueTitle = "Refund route 500s on a stale token"
@@ -1976,17 +2045,18 @@ describe("SessionStore", () => {
       SessionStore.setTitle(created.value.id, "Pinned title").pipe(Effect.provide(services)),
       temp.layer
     )
-    const migrated = JSON.parse(readFileSync(sessionsFile, "utf-8")) as Array<
-      Record<string, unknown>
-    >
-    expect(migrated[0]?.linkedIssue).toStrictEqual({
+    // SAFETY: the SessionStore migration just rewrote this file as valid JSON objects.
+    const migrated = JSON.parse(readFileSync(sessionsFile, "utf-8")) as JsonObject[]
+    expect(migrated[0]?.linkedIssues).toStrictEqual([{
       providerId: "github",
       id: "128",
       identifier: "#128",
       url: "https://github.com/acme/api/issues/128",
       title: "Refund route 500s on a stale token",
       labels: [{ name: "bug", color: "e06c75" }]
-    })
+    }])
+    expect(migrated[0]?.selectedIssue).toStrictEqual({ providerId: "github", id: "128" })
+    expect(migrated[0]).not.toHaveProperty("linkedIssue")
     expect(migrated[0]).not.toHaveProperty("issueNumber")
     expect(migrated[0]).not.toHaveProperty("issueUrl")
   })
@@ -2035,7 +2105,9 @@ describe("SessionStore", () => {
  */
 describe("migrateRepoName", () => {
   const at = (repoPath: string | undefined, repo: string) => {
-    const migrated = migrateRepoName({ id: "s1", repo, ...(repoPath === undefined ? {} : { repoPath }) })
+    const input = repoPath === undefined ? { id: "s1", repo } : { id: "s1", repo, repoPath }
+    const migrated = migrateRepoName(input)
+    // SAFETY: migrateRepoName preserves this fixture's required string repo field.
     return (migrated as { repo: string }).repo
   }
 
@@ -2060,6 +2132,7 @@ describe("migrateRepoName", () => {
   })
 
   it("keeps the canonical repository name for a managed /workspace checkout", () => {
+    // SAFETY: migrateRepoName preserves this fixture's required string repo field.
     const migrated = migrateRepoName({
       id: "s_cloud_1",
       repo: "jingler",
@@ -2087,13 +2160,19 @@ describe("migrateRepoName", () => {
   })
 
   it("leaves every other field alone", () => {
+    // SAFETY: migrateRepoName preserves every named fixture field while replacing repo.
     const migrated = migrateRepoName({
       id: "s1",
       repo: "starbase",
       repoPath: "/Users/x/repos/jingler",
       branch: "starbase/fix-auth",
       worktreePath: "/Users/x/jingler/worktrees/jingler/fix-auth"
-    }) as Record<string, unknown>
+    }) as {
+      id: string
+      repo: string
+      branch: string
+      worktreePath: string
+    }
     // The BRANCH keeps its old prefix on purpose: it is a real git ref with an
     // open PR attached, and renaming it here would orphan both.
     expect(migrated.branch).toBe("starbase/fix-auth")
@@ -2104,6 +2183,7 @@ describe("migrateRepoName", () => {
 
 describe("legacy harness migration", () => {
   it("moves legacy provider reasoning onto matching active and closed chats", () => {
+    // SAFETY: migrateSessionChats returns this fixture with chats normalized to JSON objects.
     const migrated = migrateSessionChats({
       id: "s_reasoning",
       cli: "claude",
@@ -2119,7 +2199,11 @@ describe("legacy harness migration", () => {
       ],
       closedChats: [{ id: "c_closed", providerId: "openai" }],
       activeChatId: "c_claude"
-    }) as Record<string, unknown>
+    }) as {
+      reasoning?: JsonValue
+      chats: JsonValue[]
+      closedChats: JsonValue[]
+    }
 
     expect(migrated).not.toHaveProperty("reasoning")
     expect(migrated.chats).toEqual([

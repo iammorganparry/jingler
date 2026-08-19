@@ -185,6 +185,48 @@ describe("PluginManifest", () => {
     })
   })
 
+  it("accepts namespaced encrypted secret-profile collections", () => {
+    const decoded = Schema.decodeUnknownSync(PluginManifest)({
+      id: "linear",
+      name: "Linear",
+      version: "1.0.0",
+      contributes: {
+        secretProfiles: [{ id: "linear.accounts", label: "Linear accounts" }]
+      }
+    })
+    expect(decoded.contributes?.secretProfiles?.[0]?.id).toBe("linear.accounts")
+  })
+
+  it("accepts compact agent-toolset metadata without eagerly embedding tool schemas", () => {
+    const decoded = Schema.decodeUnknownSync(PluginManifest)({
+      id: "expo",
+      name: "Expo",
+      version: "1.0.0",
+      main: "dist/main.js",
+      contributes: {
+        agentToolsets: [{
+          id: "expo.ios-preview",
+          label: "Expo iOS preview",
+          description: "Open and automate the app in iOS Simulator."
+        }]
+      }
+    })
+    expect(decoded.contributes?.agentToolsets).toStrictEqual([{
+      id: "expo.ios-preview",
+      label: "Expo iOS preview",
+      description: "Open and automate the app in iOS Simulator."
+    }])
+  })
+
+  it("includes agent toolsets in contribution namespace enforcement", () => {
+    expect(errorOf({
+      ...HELLO,
+      contributes: {
+        agentToolsets: [{ id: "expo.ios-preview", label: "iOS", description: "Preview iOS." }]
+      }
+    })).toContain("expo.ios-preview")
+  })
+
   it("accepts a stable issue-provider contribution", () => {
     const decoded = Schema.decodeUnknownSync(PluginManifest)({
       id: "linear",

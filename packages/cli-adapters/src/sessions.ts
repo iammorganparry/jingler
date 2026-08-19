@@ -8,6 +8,7 @@ import type {
   GitHubFeedbackOutboxEntry,
   GitHubRelayEvent,
   IssueAutomations,
+  IssueIdentity,
   IssueReference,
   PermissionMode,
   ProviderConnectionId,
@@ -21,6 +22,8 @@ import {
   type GitHubApiError,
   GitError,
   issueReferenceOf,
+  issueReferencesOf,
+  sameIssueIdentity,
   ReasoningSetting,
   semanticBranchProposalFromName,
   SessionNotFoundError,
@@ -42,7 +45,14 @@ import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime
 const SessionArray = Schema.Array(SessionSchema)
 const GitHubFeedbackOutbox = Schema.Array(GitHubFeedbackOutboxEntrySchema)
 
+// These migration adapters deliberately accept historical JSON and return invalid
+// representations unchanged for the canonical Effect Schema decoder below. The
+// runtime discriminator checks are the parser at this persistence boundary.
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type */
 type JsonRecord = Record<string, unknown>
+
+const propertiesWhen = <T extends object>(condition: boolean, properties: T) =>
+  condition ? properties : {}
 
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -74,28 +84,35 @@ const initialChat = (
     readonly modelId?: ProviderModelId
     readonly reasoning?: ReasoningSetting
   } = {}
-): Chat => ({
-  id: chatIdFor(sessionId, "1"),
-  title: null,
-  createdAt: now,
-  updatedAt: now,
-  ...(persistedMode(legacy.mode) === undefined ? {} : { mode: persistedMode(legacy.mode) }),
-  ...(Array.isArray(legacy.allowlist) &&
-  legacy.allowlist.every((entry) => typeof entry === "string")
-    ? { allowlist: legacy.allowlist }
-    : {}),
-  ...(typeof legacy.contextTokens === "number" &&
-  Number.isFinite(legacy.contextTokens) &&
-  legacy.contextTokens >= 0
-    ? { contextTokens: legacy.contextTokens }
-    : {}),
-  ...runtime
-})
+): Chat => {
+  const mode = persistedMode(legacy.mode)
+  const allowlist =
+    Array.isArray(legacy.allowlist) &&
+    legacy.allowlist.every((entry) => typeof entry === "string")
+      ? legacy.allowlist
+      : undefined
+  const contextTokens =
+    typeof legacy.contextTokens === "number" &&
+    Number.isFinite(legacy.contextTokens) &&
+    legacy.contextTokens >= 0
+      ? legacy.contextTokens
+      : undefined
+  return {
+    id: chatIdFor(sessionId, "1"),
+    title: null,
+    createdAt: now,
+    updatedAt: now,
+    ...propertiesWhen(mode !== undefined, { mode }),
+    ...propertiesWhen(allowlist !== undefined, { allowlist }),
+    ...propertiesWhen(contextTokens !== undefined, { contextTokens }),
+    ...runtime
+  }
+}
 
 const legacyInitialChat = (sessionId: string, now: string, legacy: JsonRecord): JsonRecord => ({
   ...initialChat(sessionId, now, legacy),
-  ...(typeof legacy.resumeId === "string" ? { resumeId: legacy.resumeId } : {}),
-  ...(typeof legacy.model === "string" ? { model: legacy.model } : {})
+  ...propertiesWhen(typeof legacy.resumeId === "string", { resumeId: legacy.resumeId }),
+  ...propertiesWhen(typeof legacy.model === "string", { model: legacy.model })
 })
 
 const runtimeSelection = (input: {
@@ -103,9 +120,9 @@ const runtimeSelection = (input: {
   readonly providerId?: ProviderId
   readonly modelId?: ProviderModelId
 }) => ({
-  ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
-  ...(input.providerId === undefined ? {} : { providerId: input.providerId }),
-  ...(input.modelId === undefined ? {} : { modelId: input.modelId })
+  ...propertiesWhen(input.connectionId !== undefined, { connectionId: input.connectionId }),
+  ...propertiesWhen(input.providerId !== undefined, { providerId: input.providerId }),
+  ...propertiesWhen(input.modelId !== undefined, { modelId: input.modelId })
 })
 
 const migrateReasoning = (value: unknown): ReasoningSetting | undefined => {
@@ -170,8 +187,8 @@ export const migrateSessionChats = (value: unknown): unknown => {
     const reasoning = legacyReasoningFor(value, chat)
     return {
       ...chat,
-      ...(persistedMode(chat.mode) === undefined ? {} : { mode: persistedMode(chat.mode) }),
-      ...(chat.reasoning !== undefined || reasoning === undefined ? {} : { reasoning })
+      ...propertiesWhen(persistedMode(chat.mode) !== undefined, { mode: persistedMode(chat.mode) }),
+      ...propertiesWhen(chat.reasoning === undefined && reasoning !== undefined, { reasoning })
     }
   }
   const rawChats =
@@ -203,7 +220,7 @@ export const migrateSessionChats = (value: unknown): unknown => {
   return {
     ...session,
     chats,
-    ...(closedChats === undefined ? {} : { closedChats }),
+    ...propertiesWhen(closedChats !== undefined, { closedChats }),
     activeChatId
   }
 }
@@ -243,27 +260,66 @@ export const migrateRepoName = (value: unknown): unknown => {
   if (derived.length === 0 || derived === value.repo) return value
   return { ...value, repo: derived }
 }
+/* oxlint-enable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type */
 
-/**
- * Migrate historical GitHub aliases only when a session file is next written.
- * Reads remain side-effect free; every ordinary mutation naturally upgrades the
- * full document because SessionStore persists the session array atomically.
- */
-export const migrateSessionIssue = (session: Session): Session => {
-  const linkedIssue = issueReferenceOf(session)
+/** Build the canonical multi-link fields while removing every historical alias. */
+const withCanonicalIssues = (
+  session: Session,
+  linkedIssues: ReadonlyArray<IssueReference>,
+  selectedIssue: IssueIdentity | undefined,
+  automations: IssueAutomations | undefined = session.automations
+): Session => {
   const {
     issueNumber: _issueNumber,
     issueUrl: _issueUrl,
     issueTitle: _issueTitle,
     issueLabels: _issueLabels,
-    automations,
+    linkedIssue: _linkedIssue,
+    linkedIssues: _linkedIssues,
+    selectedIssue: _selectedIssue,
+    automations: _automations,
     ...current
   } = session
+  const selection = selectedIssue && linkedIssues.some((issue) =>
+    sameIssueIdentity(issue, selectedIssue)
+  )
+    ? selectedIssue
+    : linkedIssues.at(-1)
   return {
     ...current,
-    ...(linkedIssue ? { linkedIssue } : {}),
-    ...(linkedIssue?.providerId === "github" && automations ? { automations } : {})
+    ...propertiesWhen(linkedIssues.length > 0, { linkedIssues: [...linkedIssues] }),
+    ...propertiesWhen(selection !== undefined, {
+      selectedIssue: selection && { providerId: selection.providerId, id: selection.id }
+    }),
+    ...propertiesWhen(
+      linkedIssues.some((issue) => issue.providerId === "github") && automations !== undefined,
+      { automations }
+    )
   }
+}
+
+/** Merge references by provider-scoped identity, preserving first-link order. */
+export const mergeIssueReferences = (
+  current: ReadonlyArray<IssueReference>,
+  incoming: ReadonlyArray<IssueReference>
+): ReadonlyArray<IssueReference> => {
+  const merged: IssueReference[] = []
+  for (const issue of [...current, ...incoming]) {
+    const index = merged.findIndex((candidate) => sameIssueIdentity(candidate, issue))
+    if (index === -1) merged.push(issue)
+    else merged[index] = issue
+  }
+  return merged
+}
+
+/**
+ * Migrate historical singleton aliases only when a session file is next written.
+ * Reads remain side-effect free; every ordinary mutation upgrades the document.
+ */
+export const migrateSessionIssue = (session: Session): Session => {
+  const linkedIssues = mergeIssueReferences([], issueReferencesOf(session))
+  const selected = issueReferenceOf(session)
+  return withCanonicalIssues(session, linkedIssues, selected)
 }
 
 /**
@@ -320,8 +376,7 @@ const sessionLinksIssue = (
   issue: Pick<IssueReference, "providerId" | "id">
 ): boolean => {
   if (!sessionBelongsToRepository(session, repository)) return false
-  const linked = issueReferenceOf(session)
-  return linked?.providerId === issue.providerId && linked.id === issue.id
+  return issueReferencesOf(session).some((linked) => sameIssueIdentity(linked, issue))
 }
 
 /**
@@ -599,26 +654,22 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const selection = runtimeSelection(input)
           const chat = initialChat(id, now, { mode: options.defaultMode }, {
             ...selection,
-            ...(options.defaultReasoning === undefined
-              ? {}
-              : { reasoning: options.defaultReasoning })
+            ...propertiesWhen(options.defaultReasoning !== undefined, { reasoning: options.defaultReasoning })
           })
           const makeSession = (
             workspace: { path: string; branch: string; repoPath: string },
             workspaceMode: WorkspaceMode
           ): Session => ({
             id,
-            ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
-            ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
+            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+            ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
             branch: workspace.branch,
-            ...(workspaceMode === "worktree" && input.continueBranch !== true
-              ? { semanticBranchPending: true }
-              : {}),
+            ...propertiesWhen(workspaceMode === "worktree" && input.continueBranch !== true, { semanticBranchPending: true }),
             title,
-            ...(input.initialPrompt?.trim()
-              ? { initialPrompt: input.initialPrompt.trim() }
-              : {}),
+            ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
+              initialPrompt: input.initialPrompt?.trim()
+            }),
             autoTitle: explicit.length === 0,
             status: "idle",
             ...selection,
@@ -821,20 +872,18 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const selection = runtimeSelection(input)
           const chat = initialChat(id, now, { mode: opts.defaultMode }, {
             ...selection,
-            ...(opts.defaultReasoning === undefined
-              ? {}
-              : { reasoning: opts.defaultReasoning })
+            ...propertiesWhen(opts.defaultReasoning !== undefined, { reasoning: opts.defaultReasoning })
           })
           const session: Session = {
             id,
-            ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
-            ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
+            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+            ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
             branch,
             title: input.pr.title,
-            ...(input.initialPrompt?.trim()
-              ? { initialPrompt: input.initialPrompt.trim() }
-              : {}),
+            ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
+              initialPrompt: input.initialPrompt?.trim()
+            }),
             status: "idle",
             ...selection,
             diff: { added: 0, removed: 0 },
@@ -935,17 +984,15 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const selection = runtimeSelection(input)
           const chat = initialChat(id, now, { mode: options.defaultMode }, {
             ...selection,
-            ...(options.defaultReasoning === undefined
-              ? {}
-              : { reasoning: options.defaultReasoning })
+            ...propertiesWhen(options.defaultReasoning !== undefined, { reasoning: options.defaultReasoning })
           })
           const session: Session = {
             // Stamp the id (like `createFromPr`) so a delete-then-recreate of the
             // same issue can't collide with the old session's persisted data; the
             // worktree slug stays deterministic for the one-session-per-issue guard.
             id,
-            ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
-            ...(input.environmentId === undefined ? {} : { environmentId: input.environmentId }),
+            ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
+            ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
             branch: worktree.branch,
             semanticBranchPending: true,
@@ -956,18 +1003,21 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             diff: { added: 0, removed: 0 },
             prNumber: null,
-            linkedIssue: {
+            linkedIssues: [{
               providerId: input.issue.providerId,
               id: input.issue.id,
+              ...propertiesWhen(input.issue.providerAccountId !== undefined, { providerAccountId: input.issue.providerAccountId }),
               identifier: input.issue.identifier,
               url: input.issue.url,
               title: input.issue.title,
               labels: input.issue.labels
+            }],
+            selectedIssue: {
+              providerId: input.issue.providerId,
+              id: input.issue.id
             },
-            ...(input.issue.providerId === "github" && input.automations
-              ? { automations: input.automations }
-              : {}),
-            ...(task.length > 0 ? { initialPrompt: task } : {}),
+            ...propertiesWhen(input.issue.providerId === "github" && Boolean(input.automations), { automations: input.automations }),
+            ...propertiesWhen(task.length > 0, { initialPrompt: task }),
             costUsd: 0,
             tokens: 0,
             updatedAt: now,
@@ -1027,12 +1077,12 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
-              ...(source?.mode === undefined ? {} : { mode: source.mode }),
-              ...(source?.reasoning === undefined ? {} : { reasoning: source.reasoning }),
-              ...(source?.connectionId === undefined ? {} : { connectionId: source.connectionId }),
-              ...(source?.providerId === undefined ? {} : { providerId: source.providerId }),
-              ...(source?.modelId === undefined ? {} : { modelId: source.modelId }),
-              ...(source?.allowlist === undefined ? {} : { allowlist: source.allowlist })
+              ...propertiesWhen(source?.mode !== undefined, { mode: source?.mode }),
+              ...propertiesWhen(source?.reasoning !== undefined, { reasoning: source?.reasoning }),
+              ...propertiesWhen(source?.connectionId !== undefined, { connectionId: source?.connectionId }),
+              ...propertiesWhen(source?.providerId !== undefined, { providerId: source?.providerId }),
+              ...propertiesWhen(source?.modelId !== undefined, { modelId: source?.modelId }),
+              ...propertiesWhen(source?.allowlist !== undefined, { allowlist: source?.allowlist })
             }
             return {
               ...session,
@@ -1081,12 +1131,12 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               title: null,
               createdAt: now,
               updatedAt: now,
-              ...(closed?.mode === undefined ? {} : { mode: closed.mode }),
-              ...(closed?.reasoning === undefined ? {} : { reasoning: closed.reasoning }),
-              ...(closed?.connectionId === undefined ? {} : { connectionId: closed.connectionId }),
-              ...(closed?.providerId === undefined ? {} : { providerId: closed.providerId }),
-              ...(closed?.modelId === undefined ? {} : { modelId: closed.modelId }),
-              ...(closed?.allowlist === undefined ? {} : { allowlist: closed.allowlist })
+              ...propertiesWhen(closed?.mode !== undefined, { mode: closed?.mode }),
+              ...propertiesWhen(closed?.reasoning !== undefined, { reasoning: closed?.reasoning }),
+              ...propertiesWhen(closed?.connectionId !== undefined, { connectionId: closed?.connectionId }),
+              ...propertiesWhen(closed?.providerId !== undefined, { providerId: closed?.providerId }),
+              ...propertiesWhen(closed?.modelId !== undefined, { modelId: closed?.modelId }),
+              ...propertiesWhen(closed?.allowlist !== undefined, { allowlist: closed?.allowlist })
             }
             const chats = remaining.length > 0 ? remaining : [replacement]
             const activeChatId =
@@ -1179,7 +1229,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
                     modelId,
                     connectionSelectionRequired: false,
                     modelSelectionRequired: false,
-                    ...(changed ? { reasoning: undefined } : {})
+                    ...propertiesWhen(changed, { reasoning: undefined })
                   }
             )
           }
@@ -1376,7 +1426,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           ...s,
           title,
           branch,
-          ...(semanticBranchProposal === undefined ? {} : { semanticBranchProposal }),
+          ...propertiesWhen(semanticBranchProposal !== undefined, { semanticBranchProposal }),
           semanticBranchPending: false
         }))
 
@@ -1428,7 +1478,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       ) =>
         update(id, (session) => ({
           ...session,
-          ...(link.branch === undefined ? {} : { branch: link.branch }),
+          ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
           prNumber: link.prNumber,
           githubInstallationId: link.installationId,
           githubRepositoryId: link.repositoryId
@@ -1656,7 +1706,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setProject = (id: string, projectId: string) =>
         update(id, (session) => ({ ...session, projectId }))
 
-      /** Link (or, with `null`, unlink) a normalized issue on a live session. */
+      /** Replace every link (or, with `null`, clear them) for legacy callers. */
       const setIssue = (
         id: string,
         issue: {
@@ -1664,24 +1714,49 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           automations?: IssueAutomations
         } | null
       ) =>
-        update(id, (s) => {
-          const {
-            issueNumber: _issueNumber,
-            issueUrl: _issueUrl,
-            issueTitle: _issueTitle,
-            issueLabels: _issueLabels,
-            automations: _automations,
-            linkedIssue: _linkedIssue,
-            ...current
-          } = s
-          if (!issue) return current
-          return {
-            ...current,
-            linkedIssue: issue.reference,
-            ...(issue.reference.providerId === "github" && issue.automations
-              ? { automations: issue.automations }
-              : {})
-          }
+        update(id, (session) =>
+          issue
+            ? withCanonicalIssues(
+                session,
+                [issue.reference],
+                issue.reference,
+                issue.automations
+              )
+            : withCanonicalIssues(session, [], undefined)
+        )
+
+      /** Add or refresh multiple links, selecting the last touched reference. */
+      const addIssues = (id: string, issues: ReadonlyArray<IssueReference>) =>
+        issues.length === 0
+          ? Effect.void
+          : update(id, (session) => {
+              const merged = mergeIssueReferences(issueReferencesOf(session), issues)
+              return withCanonicalIssues(session, merged, issues.at(-1))
+            })
+
+      /** Select one existing provider-scoped link; unknown identities are a no-op. */
+      const selectIssue = (id: string, issue: IssueIdentity) =>
+        update(id, (session) => {
+          const linkedIssues = issueReferencesOf(session)
+          return linkedIssues.some((candidate) => sameIssueIdentity(candidate, issue))
+            ? withCanonicalIssues(session, linkedIssues, issue)
+            : session
+        })
+
+      /** Remove one provider-scoped link while preserving every unrelated link. */
+      const removeIssue = (id: string, issue: IssueIdentity) =>
+        update(id, (session) => {
+          const linkedIssues = issueReferencesOf(session)
+          const remaining = linkedIssues.filter(
+            (candidate) => !sameIssueIdentity(candidate, issue)
+          )
+          if (remaining.length === linkedIssues.length) return session
+          const selected = issueReferenceOf(session)
+          return withCanonicalIssues(
+            session,
+            remaining,
+            selected && !sameIssueIdentity(selected, issue) ? selected : remaining.at(-1)
+          )
         })
 
       /** Clear the one-shot `initialPrompt` once the composer has consumed it. */
@@ -1825,6 +1900,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setWorktreePath,
         setProject,
         setIssue,
+        addIssues,
+        selectIssue,
+        removeIssue,
         clearInitialPrompt,
         archive,
         restore,

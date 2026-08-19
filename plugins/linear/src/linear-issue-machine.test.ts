@@ -41,7 +41,8 @@ const services = (overrides: Partial<LinearIssueServices> = {}): LinearIssueServ
   context: vi.fn().mockResolvedValue({
     viewer: { id: "user-1", name: "Morgan", avatarUrl: null },
     workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-    teams: [{ id: "team-1", name: "Engineering", key: "ENG" }]
+    teams: [{ id: "team-1", name: "Engineering", key: "ENG" }],
+  projects: []
   }),
   list: vi.fn().mockResolvedValue([summary]),
   get: vi.fn().mockResolvedValue(detail),

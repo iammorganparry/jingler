@@ -68,6 +68,11 @@ export { SegmentedControl } from "@jingler/ui"
 export { StatusDot } from "@jingler/ui"
 export { Kbd } from "@jingler/ui"
 export { CodeChip } from "@jingler/ui"
+export {
+  LinkedIssueSelector,
+  type LinkedIssueSelectorItem,
+  type LinkedIssueSelectorProps
+} from "@jingler/ui"
 
 /**
  * Markdown with the app's own renderer — syntax highlighting, math, the lot.

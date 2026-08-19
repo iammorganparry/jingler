@@ -11,6 +11,9 @@ const setup = (
     storageDelete: async () => undefined,
     storageKeys: async () => [],
     getSecret,
+    getProfileSecret: async () => null,
+    setProfileSecret: async () => undefined,
+    deleteProfileSecret: async () => undefined,
     defaultCwd: () => undefined,
     getSession: async () => null
   })
@@ -40,6 +43,37 @@ describe("plugin host settings bridge", () => {
     // The namespace comes only from the host-request envelope that the context
     // bound at activation; payload data cannot redirect it to another plugin.
     expect(getSecret).toHaveBeenCalledWith("linear", "linear.api-key")
+  })
+
+  it("writes named profile secrets only inside the requesting plugin namespace", async () => {
+    const setProfileSecret = vi.fn(async () => undefined)
+    const handle = makeHostRequestHandler({
+      storageGet: async () => null,
+      storageSet: async () => undefined,
+      storageDelete: async () => undefined,
+      storageKeys: async () => [],
+      getSecret: async () => null,
+      getProfileSecret: async () => null,
+      setProfileSecret,
+      deleteProfileSecret: async () => undefined,
+      defaultCwd: () => undefined,
+      getSession: async () => null
+    })
+
+    const reply = await handle("linear", "settings.setProfileSecret", {
+      collectionId: "linear.accounts",
+      profileId: "work",
+      value: "lin_api_secret",
+      pluginId: "github"
+    })
+
+    expect(setProfileSecret).toHaveBeenCalledWith(
+      "linear",
+      "linear.accounts",
+      "work",
+      "lin_api_secret"
+    )
+    expect(reply).toEqual({ ok: true, value: undefined })
   })
 
   it("returns a refusal without including a secret value", async () => {

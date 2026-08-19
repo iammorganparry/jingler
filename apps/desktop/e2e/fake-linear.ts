@@ -10,13 +10,33 @@ interface FakeLinearComment {
 interface FakeLinearIssue {
   readonly id: string
   readonly identifier: string
-  readonly title: string
+  title: string
   readonly url: string
-  readonly description: string
-  readonly priority: number
+  description: string
+  priority: number
   readonly createdAt: string
   readonly updatedAt: string
   readonly comments: FakeLinearComment[]
+}
+
+interface FakeLinearInput {
+  readonly issueId?: string
+  readonly body?: string
+  readonly title?: string
+  readonly description?: string
+  readonly priority?: number
+}
+
+interface FakeLinearVariables {
+  readonly id?: string
+  readonly term?: string
+  readonly after?: string
+  readonly input?: FakeLinearInput
+}
+
+interface FakeLinearRequestBody {
+  readonly query?: string
+  readonly variables?: FakeLinearVariables
 }
 
 export interface FakeLinearServer {
@@ -34,7 +54,8 @@ const actor = {
   displayName: "Morgan",
   avatarUrl: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='12' fill='%236faef6'/%3E%3Ccircle cx='24' cy='18' r='8' fill='%23f4f1f1'/%3E%3Cpath d='M10 43c1-10 6-15 14-15s13 5 14 15' fill='%23f4f1f1'/%3E%3C/svg%3E"
 }
-const state = { id: "state-1", name: "In Progress", type: "started" }
+const workflowState = { id: "state-1", name: "In Progress", type: "started", team: { id: team.id, name: team.name } }
+const state = workflowState
 const labels = { nodes: [{ id: "label-1", name: "Bug", color: "#5E6AD2" }] }
 const project = { id: "project-1", name: "Payments" }
 const cycle = { id: "cycle-1", name: "Cycle 42", number: 42 }
@@ -93,7 +114,7 @@ const issueNode = (issue: FakeLinearIssue) => ({
   }
 })
 
-const json = (response: ServerResponse, status: number, body: unknown): void => {
+const json = <Body>(response: ServerResponse, status: number, body: Body): void => {
   response.writeHead(status, {
     "content-type": "application/json",
     "cache-control": "no-store"
@@ -101,35 +122,35 @@ const json = (response: ServerResponse, status: number, body: unknown): void => 
   response.end(JSON.stringify(body))
 }
 
-const bodyOf = async (request: IncomingMessage): Promise<Record<string, unknown>> => {
+const bodyOf = async (request: IncomingMessage): Promise<FakeLinearRequestBody> => {
   const chunks: Buffer[] = []
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
   }
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"))
-  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : {}
+  // The fake server only receives GraphQL requests from the desktop client under
+  // test. Keep malformed-but-valid JSON at this one harness boundary.
+  const decoded: FakeLinearRequestBody | null = JSON.parse(
+    Buffer.concat(chunks).toString("utf8")
+  )
+  if (decoded === null || Array.isArray(decoded) ||
+      Object.prototype.toString.call(decoded) !== "[object Object]") return {}
+  return decoded
 }
 
-const variablesOf = (body: Record<string, unknown>): Record<string, unknown> => {
-  const variables = body.variables
-  return variables !== null && typeof variables === "object" && !Array.isArray(variables)
-    ? (variables as Record<string, unknown>)
-    : {}
-}
+const variablesOf = (body: FakeLinearRequestBody): FakeLinearVariables =>
+  body.variables ?? {}
 
 interface FakeLinearState {
   readonly issues: FakeLinearIssue[]
   readonly operations: string[]
 }
 
-const inputOf = (variables: Record<string, unknown>): Record<string, unknown> =>
-  (variables.input as Record<string, unknown> | undefined) ?? {}
+const inputOf = (variables: FakeLinearVariables): FakeLinearInput =>
+  variables.input ?? {}
 
 const createComment = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   state.operations.push("commentCreate")
@@ -155,9 +176,27 @@ const createComment = (
   })
 }
 
+const updateIssue = (
+  state: FakeLinearState,
+  variables: FakeLinearVariables,
+  response: ServerResponse
+): void => {
+  state.operations.push("issueUpdate")
+  const issue = state.issues.find(({ id, identifier }) => id === variables.id || identifier === variables.id)
+  if (!issue) {
+    json(response, 200, { errors: [{ message: "Issue not found" }] })
+    return
+  }
+  const input = inputOf(variables)
+  if (input.title !== undefined) issue.title = input.title
+  if (input.description !== undefined) issue.description = input.description
+  if (input.priority !== undefined) issue.priority = input.priority
+  json(response, 200, { data: { issueUpdate: { success: true, issue: { id: issue.id } } } })
+}
+
 const createIssue = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   state.operations.push("issueCreate")
@@ -180,17 +219,17 @@ const createIssue = (
 
 const readIssue = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   state.operations.push("issue")
-  const issue = state.issues.find(({ id }) => id === variables.id)
+  const issue = state.issues.find(({ id, identifier }) => id === variables.id || identifier === variables.id)
   json(response, 200, { data: { issue: issue ? issueNode(issue) : null } })
 }
 
 const listIssues = (
   state: FakeLinearState,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse,
   operation = "issues"
 ): void => {
@@ -219,7 +258,7 @@ const listIssues = (
 const handleGraphql = (
   state: FakeLinearState,
   query: string,
-  variables: Record<string, unknown>,
+  variables: FakeLinearVariables,
   response: ServerResponse
 ): void => {
   if (query.includes("commentCreate")) {
@@ -228,6 +267,10 @@ const handleGraphql = (
   }
   if (query.includes("issueCreate")) {
     createIssue(state, variables, response)
+    return
+  }
+  if (query.includes("issueUpdate")) {
+    updateIssue(state, variables, response)
     return
   }
   if (ISSUE_QUERY.test(query)) {
@@ -248,7 +291,11 @@ const handleGraphql = (
       data: {
         viewer: actor,
         organization: { id: "org-1", name: "Acme", urlKey: "acme" },
-        teams: { nodes: [team], pageInfo: { hasNextPage: false, endCursor: null } }
+        teams: { nodes: [team], pageInfo: { hasNextPage: false, endCursor: null } },
+        projects: { nodes: [{ id: "project-1", name: "Jingler" }] },
+        workflowStates: { nodes: [workflowState] },
+        issueLabels: labels,
+        users: { nodes: [actor] }
       }
     })
     return
@@ -272,7 +319,7 @@ const handleRequest = async (
     json(response, 401, { errors: [{ message: "Authentication required" }] })
     return
   }
-  let body: Record<string, unknown>
+  let body: FakeLinearRequestBody
   try {
     body = await bodyOf(request)
   } catch {
@@ -281,7 +328,7 @@ const handleRequest = async (
   }
   handleGraphql(
     state,
-    typeof body.query === "string" ? body.query : "",
+    body.query ?? "",
     variablesOf(body),
     response
   )
@@ -296,6 +343,8 @@ export const startFakeLinearServer = async (): Promise<FakeLinearServer> => {
   })
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  // SAFETY: The awaited listen callback guarantees an active TCP address, and
+  // this server was opened with a numeric port rather than a Unix socket path.
   const address = server.address() as AddressInfo
   return {
     url: `http://127.0.0.1:${address.port}/graphql`,

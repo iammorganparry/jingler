@@ -58,6 +58,61 @@ describe("ToolRegistry", () => {
     expect(result.preview?.length).toBeLessThanOrEqual(8)
   })
 
+  it("publishes only settled successful values that fit the output budget", async () => {
+    const onSuccessfulResult = vi.fn()
+    const registry = new ToolRegistry({
+      writeArtifact: async (_tool, content) => ({ id: "artifact-1", byteLength: content.length }),
+      onSuccessfulResult
+    })
+    registry.register(definition({
+      origin: { kind: "plugin", pluginId: "linear", toolsetId: "linear.issues" }
+    }))
+    registry.register(definition({
+      id: "large_plugin_result",
+      outputBudget: 8,
+      origin: { kind: "plugin", pluginId: "linear", toolsetId: "linear.issues" },
+      execute: async () => ({ content: "large output" })
+    }))
+
+    await Effect.runPromise(registry.execute({
+      id: "workspace_read",
+      arguments: { path: "README.md" },
+      role: "conversation",
+      mode: "ask",
+      callId: "call-1"
+    }))
+    await Effect.runPromise(registry.execute({
+      id: "large_plugin_result",
+      arguments: { path: "README.md" },
+      role: "conversation",
+      mode: "ask",
+      callId: "call-2"
+    }))
+
+    expect(onSuccessfulResult).toHaveBeenCalledTimes(1)
+    expect(onSuccessfulResult).toHaveBeenCalledWith({
+      toolId: "workspace_read",
+      callId: "call-1",
+      risk: "read",
+      origin: { kind: "plugin", pluginId: "linear", toolsetId: "linear.issues" },
+      value: { path: "README.md" }
+    })
+  })
+
+  it("does not turn a successful tool into a failure when result observation rejects", async () => {
+    const registry = new ToolRegistry({
+      onSuccessfulResult: async () => { throw new Error("observer unavailable") }
+    })
+    registry.register(definition())
+    const result = await Effect.runPromise(registry.execute({
+      id: "workspace_read",
+      arguments: { path: "README.md" },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(result.status).toBe("success")
+  })
+
   it("cancels a cancellable tool with a tagged result", async () => {
     const registry = new ToolRegistry()
     registry.register(definition({ execute: async (_input, context) =>

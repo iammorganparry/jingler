@@ -50,6 +50,8 @@ export { defineManifest, definePlugin } from "./define.js"
 
 export type {
   ActivationEvent,
+  AgentToolsetDeclaration,
+  AgentToolsetIdsOf,
   CommandDeclaration,
   CommandIdsOf,
   ContributionId,
@@ -70,6 +72,7 @@ export type {
   IssueActor,
   IssueComment,
   IssueDetail,
+  IssueIdentity,
   IssueLabel,
   IssueReference,
   IssueSummary,

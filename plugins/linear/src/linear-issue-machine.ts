@@ -55,19 +55,29 @@ type LinearIssueEvent =
 const message = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause)
 
-const referenceOf = (issue: IssueReference): IssueReference => ({
-  providerId: issue.providerId,
-  id: issue.id,
-  identifier: issue.identifier,
-  url: issue.url,
-  title: issue.title,
-  labels: issue.labels
-})
+const referenceOf = (issue: IssueReference): IssueReference => {
+  const reference: IssueReference = {
+    providerId: issue.providerId,
+    id: issue.id,
+    identifier: issue.identifier,
+    url: issue.url,
+    title: issue.title,
+    labels: issue.labels
+  }
+  if (issue.providerAccountId !== undefined) {
+    return { ...reference, providerAccountId: issue.providerAccountId }
+  }
+  return reference
+}
 
 export const linearIssueMachine = setup({
   types: {
+    // SAFETY: XState's setup API uses erased placeholders solely to carry these
+    // compile-time machine contracts; no runtime value is read from them.
     context: {} as LinearIssueContext,
+    // SAFETY: See the XState contract explanation above.
     events: {} as LinearIssueEvent,
+    // SAFETY: See the XState contract explanation above.
     input: {} as LinearIssueMachineInput
   },
   actors: {

@@ -41,6 +41,7 @@ export const routeOf = (event: StreamEvent): EventRoute => {
   if (isSubagentEvent(event)) return "subagent"
   if (
     event._tag === "ToolDelta" ||
+    event._tag === "SessionIssueLinksChanged" ||
     event._tag === "PlanDraft" ||
     event._tag === "SubagentFleetChanged" ||
     event._tag === "SubagentFleetControlAcknowledged"

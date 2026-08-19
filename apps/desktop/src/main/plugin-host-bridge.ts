@@ -70,6 +70,9 @@ export const makeHostRequestHandler = (deps: {
   storageKeys: (pluginId: string) => Promise<ReadonlyArray<string>>
   /** Resolve only the requesting plugin's declared secret setting. */
   getSecret: (pluginId: string, settingId: string) => Promise<string | null>
+  getProfileSecret: (pluginId: string, collectionId: string, profileId: string) => Promise<string | null>
+  setProfileSecret: (pluginId: string, collectionId: string, profileId: string, value: string) => Promise<void>
+  deleteProfileSecret: (pluginId: string, collectionId: string, profileId: string) => Promise<void>
   /** The worktree an `exec` with no `cwd` should run in. */
   defaultCwd: () => string | undefined
   /** Resolve a credential grant, prompting the operator if there is none yet. */
@@ -111,6 +114,35 @@ export const makeHostRequestHandler = (deps: {
         const { settingId } = payload as { settingId: string }
         try {
           return { ok: true, value: await deps.getSecret(pluginId, settingId) }
+        } catch (cause) {
+          return refuse(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
+
+      case "settings.getProfileSecret": {
+        const { collectionId, profileId } = payload as { collectionId: string; profileId: string }
+        try {
+          return { ok: true, value: await deps.getProfileSecret(pluginId, collectionId, profileId) }
+        } catch (cause) {
+          return refuse(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
+      case "settings.setProfileSecret": {
+        const { collectionId, profileId, value } = payload as {
+          collectionId: string; profileId: string; value: string
+        }
+        try {
+          await deps.setProfileSecret(pluginId, collectionId, profileId, value)
+          return { ok: true, value: undefined }
+        } catch (cause) {
+          return refuse(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
+      case "settings.deleteProfileSecret": {
+        const { collectionId, profileId } = payload as { collectionId: string; profileId: string }
+        try {
+          await deps.deleteProfileSecret(pluginId, collectionId, profileId)
+          return { ok: true, value: undefined }
         } catch (cause) {
           return refuse(cause instanceof Error ? cause.message : String(cause))
         }

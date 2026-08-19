@@ -25,6 +25,7 @@ import {
   IssueAutomations,
   IssueComment,
   IssueDetail,
+  IssueIdentity,
   IssueReference,
   IssueProviderDescriptor,
   IssueSummary,
@@ -855,7 +856,28 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
-  /** Unlink the session's provider-neutral issue; returns the updated session. */
+  /** Add or refresh several provider-neutral links and select the last one. */
+  Rpc.make("Sessions.addIssues", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError),
+    payload: { sessionId: Schema.String, issues: Schema.Array(IssueReference) }
+  }),
+
+  /** Select one existing provider-scoped issue link. */
+  Rpc.make("Sessions.selectIssue", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError),
+    payload: { sessionId: Schema.String, issue: IssueIdentity }
+  }),
+
+  /** Remove one provider-scoped issue link without disturbing the others. */
+  Rpc.make("Sessions.removeIssue", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError),
+    payload: { sessionId: Schema.String, issue: IssueIdentity }
+  }),
+
+  /** Unlink every provider-neutral issue; returns the updated session. */
   Rpc.make("Sessions.unlinkIssue", {
     success: Session,
     error: Schema.Union(GitError, SessionNotFoundError),

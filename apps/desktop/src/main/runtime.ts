@@ -140,6 +140,12 @@ const WebSearchLive = Layer.effect(
 )
 
 const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
+  // These exact Default layer references are also retained by AppServicesLayer.
+  // Effect memoizes them, so agent tool calls use the PluginHost instance main
+  // installed rather than a private host with no Electron process factory.
+  Layer.provide(PluginHost.Default),
+  Layer.provide(PluginRegistry.Default),
+  Layer.provide(SessionStore.Default),
   Layer.provide(RemoteSessionsLive),
   Layer.provide(WebSearchLive),
   Layer.provide(ConfigService.Default),

@@ -22,6 +22,7 @@ import type {
   Environment,
   EnvironmentDiscovery,
   ExecutionMode,
+  IssueIdentity,
   IssueProviderDescriptor,
   IssueSummary,
   SessionPrStatus,
@@ -251,6 +252,8 @@ export interface JinglerAppProps {
    * consumer of contributions, whoever built them.
    */
   tabContributions?: ReadonlyArray<TabContribution>
+  /** Persist selection of a provider-scoped issue from the right view rail. */
+  onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
   /**
    * Dock panes contributed by plugins.
    *
@@ -485,6 +488,7 @@ export function JinglerApp({
   connector,
   renderPullRequest,
   tabContributions,
+  onSelectIssue,
   paneContributions,
   renderReview,
   renderCode,
@@ -1316,6 +1320,7 @@ export function JinglerApp({
         }
         renderPullRequest={renderPullRequest}
         tabContributions={tabContributions}
+        onSelectIssue={onSelectIssue}
         paneContributions={paneContributions}
         renderReview={renderReview}
         renderCode={renderCode}

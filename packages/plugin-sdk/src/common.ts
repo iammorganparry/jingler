@@ -45,10 +45,18 @@ export interface IssueLabel {
   readonly color: string | null
 }
 
-/** The durable issue identity exposed to plugin UI and host events. */
-export interface IssueReference {
+/** Provider-scoped identity used to select or remove one linked issue. */
+export interface IssueIdentity {
   readonly providerId: string
   readonly id: string
+}
+
+/** The durable issue identity exposed to plugin UI and host events. */
+export interface IssueReference extends IssueIdentity {
+  readonly providerId: string
+  readonly id: string
+  /** Optional provider-local account/profile needed to resolve this issue later. */
+  readonly providerAccountId?: string
   readonly identifier: string
   readonly url: string
   readonly title: string
@@ -101,8 +109,12 @@ export interface SessionSnapshot {
   readonly prNumber: number | null
   /** The linked GitHub issue number, when one drove the session. */
   readonly issueNumber?: number
-  /** The provider-neutral issue identity linked to this session. */
+  /** Selected provider-neutral issue identity (legacy singleton-compatible). */
   readonly linkedIssue?: IssueReference
+  /** Every provider-neutral issue linked to this session, in durable order. */
+  readonly linkedIssues?: readonly IssueReference[]
+  /** Provider-scoped identity of the issue currently selected in issue surfaces. */
+  readonly selectedIssue?: IssueIdentity
   /** Absolute path to the session's isolated git worktree, when one exists. */
   readonly worktreePath?: string
 }

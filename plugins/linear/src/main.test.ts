@@ -1,15 +1,26 @@
-import type { Disposable, IssueComment, IssueSummary } from "@jingler/plugin-sdk/host"
+import type { AgentToolset, Disposable, HostContext, IssueComment, IssueSummary } from "@jingler/plugin-sdk/host"
 import { describe, expect, it, vi } from "vitest"
-import { activateWithClient, createLinearClient, type LinearClient } from "./main.js"
+import {
+  activateWithClient,
+  createLinearAccountManager,
+  createLinearClient,
+  type LinearClient
+} from "./main.js"
 import type { LinearContext, LinearIssueDetail } from "./types.js"
 
-const json = (data: unknown) =>
+const json = <Data>(data: Data) =>
   new Response(JSON.stringify({ data }), {
     status: 200,
     headers: { "content-type": "application/json" }
   })
 
-const rawIssue = (overrides: Record<string, unknown> = {}) => ({
+interface RawIssueOverrides {
+  readonly id?: string
+  readonly identifier?: string
+  readonly title?: string
+}
+
+const rawIssue = (overrides: RawIssueOverrides = {}) => ({
   id: "issue-1",
   identifier: "ENG-123",
   title: "Retry failed payments",
@@ -79,7 +90,8 @@ describe("createLinearClient", () => {
         return json({
           viewer: { id: "user-1", name: "Alex", avatarUrl: null },
           organization: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-          teams: { nodes: [{ id: "team-1", name: "Engineering", key: "ENG" }] }
+          teams: { nodes: [{ id: "team-1", name: "Engineering", key: "ENG" }] },
+          projects: { nodes: [] }
         })
       }
       expect(body.query).not.toContain("searchIssues")
@@ -96,6 +108,28 @@ describe("createLinearClient", () => {
     const issues = await client.listIssues({ repository, search: "", mine: true })
 
     expect(issues.map(({ id }) => id)).toEqual(["issue-1"])
+  })
+
+  it("loads issue workflow metadata for efficient writes", async () => {
+    const request = vi.fn(async () => json({
+      viewer: { id: "user-1", name: "Alex", avatarUrl: null },
+      organization: { id: "workspace-1", name: "Acme", urlKey: "acme" },
+      teams: { nodes: [{ id: "team-1", name: "Engineering", key: "ENG" }] },
+      projects: { nodes: [{ id: "project-1", name: "Billing" }] },
+      workflowStates: { nodes: [{ id: "state-1", name: "Todo", type: "unstarted", team: { id: "team-1", name: "Engineering" } }] },
+      issueLabels: { nodes: [{ id: "label-1", name: "Bug", color: "#ff0000" }] },
+      users: { nodes: [{ id: "user-1", name: "Alex", avatarUrl: null }] }
+    }))
+    const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
+
+    const context = await client.context()
+
+    expect(context).toMatchObject({
+      workflowStates: [{ id: "state-1", type: "unstarted", team: { id: "team-1" } }],
+      labels: [{ id: "label-1", color: "#ff0000" }],
+      members: [{ id: "user-1" }],
+      priorities: [{ value: 0 }, { value: 1 }, { value: 2 }, { value: 3 }, { value: 4 }]
+    })
   })
 
   it("normalizes a complete Linear issue and paginated comments", async () => {
@@ -226,7 +260,8 @@ describe("createLinearClient", () => {
         return json({
           viewer: { id: "user-1", name: "Alex", avatarUrl: null },
           organization: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-          teams: { nodes: [{ id: "team-default", name: "Engineering", key: "ENG" }] }
+          teams: { nodes: [{ id: "team-default", name: "Engineering", key: "ENG" }] },
+          projects: { nodes: [] }
         })
       }
       if (body.query.includes("mutation LinearIssueCreate")) {
@@ -261,7 +296,8 @@ describe("createLinearClient", () => {
             { id: "team-eng", name: "Engineering", key: "ENG" },
             { id: "team-design", name: "Design", key: "DES" }
           ]
-        }
+        },
+        projects: { nodes: [] }
       })
     })
     const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
@@ -270,6 +306,43 @@ describe("createLinearClient", () => {
       client.createIssue({ repository, title: "New issue", body: "" })
     ).rejects.toThrow("Choose a team in the Linear Issue tab before creating an issue.")
     expect(request).toHaveBeenCalledOnce()
+  })
+
+  it("updates supported issue fields and returns the refreshed issue", async () => {
+    const request = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      if (body.query.includes("mutation LinearIssueUpdate")) {
+        expect(body.variables).toEqual({
+          id: "ENG-123",
+          input: {
+            title: "Retry payments safely",
+            stateId: "state-done",
+            priority: 1,
+            projectId: null,
+            assigneeId: null,
+            labelIds: ["label-1"]
+          }
+        })
+        return json({ issueUpdate: { success: true, issue: { id: "issue-1" } } })
+      }
+      if (body.query.includes("query LinearIssue(")) return json({ issue: rawIssue({ title: "Retry payments safely" }) })
+      return json({ issue: { comments: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } })
+    })
+    const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
+
+    const issue = await client.updateIssue({
+      repository,
+      issueId: "ENG-123",
+      title: "Retry payments safely",
+      stateId: "state-done",
+      priority: 1,
+      projectId: null,
+      assigneeId: null,
+      labelIds: ["label-1"]
+    })
+
+    expect(issue.title).toBe("Retry payments safely")
+    expect(request).toHaveBeenCalledTimes(3)
   })
 
   it("adds a comment and normalizes the mutation result", async () => {
@@ -305,25 +378,103 @@ describe("createLinearClient", () => {
   })
 })
 
+describe("Linear account configuration", () => {
+  const setupAccounts = (legacy?: string) => {
+    const storage = new Map<string, unknown>()
+    const secrets = new Map<string, string>()
+    const settings = {
+      getSecret: vi.fn(async () => legacy),
+      getProfileSecret: vi.fn(async (_collection: string, profileId: string) => secrets.get(profileId)),
+      setProfileSecret: vi.fn(async (_collection: string, profileId: string, value: string) => {
+        secrets.set(profileId, value)
+      }),
+      deleteProfileSecret: vi.fn(async (_collection: string, profileId: string) => {
+        secrets.delete(profileId)
+      })
+    }
+    const manager = createLinearAccountManager({
+      settings,
+      storage: {
+        // SAFETY: This in-memory test store returns only values written through
+        // the same PluginStorage interface in this setup.
+        get: async <T,>(key: string) => storage.get(key) as T | undefined,
+        set: async (key: string, value: Parameters<HostContext["storage"]["set"]>[1]) => {
+          storage.set(key, value)
+        },
+        delete: async (key: string) => { storage.delete(key) },
+        keys: async () => [...storage.keys()]
+      }
+    })
+    return { manager, settings, storage, secrets }
+  }
+
+  const contextResponse = (workspace: string) => json({
+    viewer: { id: `viewer-${workspace}`, name: "Alex", avatarUrl: null },
+    organization: { id: `workspace-${workspace}`, name: workspace, urlKey: workspace.toLowerCase() },
+    teams: { nodes: [{ id: `team-${workspace}`, name: "Engineering", key: "ENG" }] },
+    projects: { nodes: [{ id: `project-${workspace}`, name: "Roadmap" }] }
+  })
+
+  it("adapts the legacy API key as a default profile without re-entry", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => contextResponse("Legacy")))
+    const { manager, settings } = setupAccounts("lin_api_legacy")
+    const configuration = await manager.configuration({ repository })
+
+    expect(configuration.profiles).toEqual([
+      expect.objectContaining({ id: "legacy-default", name: "Default", legacy: true })
+    ])
+    expect(configuration.resolved).toEqual({ profileId: "legacy-default" })
+    expect(settings.setProfileSecret).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it("encrypts named keys and resolves session overrides ahead of repo defaults", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => contextResponse("Work")))
+    const { manager, settings, storage } = setupAccounts()
+    const route = { repository, sessionId: "session-1" }
+    const added = await manager.addProfile({ ...route, name: "Work", apiKey: "lin_api_work" })
+    const profile = added.profiles[0]!
+    const repo = { profileId: profile.id, teamId: profile.teams[0]!.id }
+    await manager.setRepoDefault({ ...route, selection: repo })
+    const session = { profileId: profile.id, projectId: profile.projects[0]!.id }
+    const configured = await manager.setSessionOverride({ ...route, selection: session })
+
+    expect(settings.setProfileSecret).toHaveBeenCalledWith("linear.accounts", profile.id, "lin_api_work")
+    expect(JSON.stringify([...storage.values()])).not.toContain("lin_api_work")
+    expect(configured.repoDefault).toEqual(repo)
+    expect(configured.sessionOverride).toEqual(session)
+    expect(configured.resolved).toEqual(session)
+    expect((await manager.resetSessionOverride(route)).resolved).toEqual(repo)
+    vi.unstubAllGlobals()
+  })
+})
+
 describe("activateWithClient", () => {
   it("registers the Linear provider and every manifest command", async () => {
     const dispose = vi.fn()
     const registration: Disposable = { dispose }
     const registerProvider = vi.fn(() => registration)
     const registeredCommandIds: string[] = []
-    const registeredCommands = new Map<string, (input?: unknown) => unknown | Promise<unknown>>()
+    type CommandHandler = Parameters<HostContext["commands"]["register"]>[1]
+    const registeredCommands = new Map<string, CommandHandler>()
     const registerCommand = vi.fn(
-      (commandId: string, handler: (input?: unknown) => unknown | Promise<unknown>) => {
+      (commandId: string, handler: CommandHandler) => {
         registeredCommandIds.push(commandId)
         registeredCommands.set(commandId, handler)
         return registration
       }
     )
     const subscriptions: Disposable[] = []
+    const registerToolset = vi.fn(() => registration)
     const emptyContext: LinearContext = {
       viewer: { id: "user-1", name: "Alex", avatarUrl: null },
       workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-      teams: []
+      teams: [],
+      projects: [],
+      workflowStates: [],
+      labels: [],
+      members: [],
+      priorities: []
     }
     const summary: IssueSummary = {
       providerId: "linear",
@@ -356,10 +507,12 @@ describe("activateWithClient", () => {
     }
     const client: LinearClient = {
       configured: async () => true,
+      profileId: async () => "profile-1",
       context: async () => emptyContext,
       listIssues: async () => [summary],
       getIssue: async () => detail,
       createIssue: async () => detail,
+      updateIssue: async () => detail,
       addComment: async () => createdComment
     }
 
@@ -367,6 +520,7 @@ describe("activateWithClient", () => {
       {
         subscriptions,
         issues: { registerProvider },
+        agentTools: { registerToolset },
         commands: { register: registerCommand }
       },
       client
@@ -381,7 +535,8 @@ describe("activateWithClient", () => {
       "linear.create",
       "linear.comment"
     ])
-    expect(subscriptions).toHaveLength(7)
+    expect(registerToolset).toHaveBeenCalledWith(expect.objectContaining({ id: "linear.issues" }))
+    expect(subscriptions).toHaveLength(8)
 
     await Promise.all(
       ["linear.list", "linear.get", "linear.create", "linear.comment"].map((commandId) =>
@@ -390,5 +545,43 @@ describe("activateWithClient", () => {
         )
       )
     )
+  })
+
+  it("registers tools that use trusted session repository context and return link envelopes", async () => {
+    let toolset: AgentToolset | undefined
+    const getIssue = vi.fn(async () => ({
+      providerId: "linear", id: "issue-1", identifier: "ENG-1", title: "Trusted route",
+      url: "https://linear.app/acme/issue/ENG-1", labels: [], state: "open" as const,
+      body: "", author: null, assignees: [], updatedAt: "2026-08-08T10:00:00.000Z",
+      createdAt: "2026-08-08T09:00:00.000Z", comments: [], statusName: "Todo",
+      priority: { value: 0, label: "No priority" }, team: { id: "team-1", name: "Engineering", key: "ENG" },
+      project: null, cycle: null
+    }))
+    const client = {
+      configured: async () => true,
+      profileId: async () => "profile-1",
+      context: async () => ({ viewer: { id: "u", name: "U", avatarUrl: null }, workspace: { id: "w", name: "W", urlKey: "w" }, teams: [], projects: [], workflowStates: [], labels: [], members: [], priorities: [] }),
+      listIssues: async () => [],
+      getIssue,
+      createIssue: async () => getIssue(),
+      updateIssue: async () => getIssue(),
+      addComment: async () => ({ id: "c", author: null, body: "", createdAt: "" })
+    } satisfies LinearClient
+    const registration = { dispose: () => undefined }
+    activateWithClient({
+      subscriptions: [],
+      issues: { registerProvider: () => registration },
+      commands: { register: () => registration },
+      agentTools: { registerToolset: (value) => { toolset = value; return registration } }
+    }, client)
+
+    const tool = toolset?.tools.find(({ id }) => id === "linear_get_issue")
+    const result = await tool?.execute(
+      { issueId: "ENG-1", repository: { name: "spoofed", path: "/evil" } },
+      { signal: new AbortController().signal, session: { id: "session-1", repository } }
+    )
+
+    expect(getIssue).toHaveBeenCalledWith({ sessionId: "session-1", repository, issueId: "ENG-1" })
+    expect(result).toMatchObject({ kind: "linear.issue-result", issues: [{ id: "issue-1" }] })
   })
 })

@@ -43,6 +43,7 @@ import type {
   IssueAutomations,
   IssueComment,
   IssueDetail,
+  IssueIdentity,
   IssueReference,
   IssueProviderDescriptor,
   IssueSummary,
@@ -595,6 +596,14 @@ export const rpc = {
     issue: IssueReference,
     automations?: IssueAutomations
   ): Promise<Session> => run((c) => c.Sessions.linkIssue({ sessionId, issue, automations })),
+  sessionsAddIssues: (
+    sessionId: string,
+    issues: ReadonlyArray<IssueReference>
+  ): Promise<Session> => run((c) => c.Sessions.addIssues({ sessionId, issues: [...issues] })),
+  sessionsSelectIssue: (sessionId: string, issue: IssueIdentity): Promise<Session> =>
+    run((c) => c.Sessions.selectIssue({ sessionId, issue })),
+  sessionsRemoveIssue: (sessionId: string, issue: IssueIdentity): Promise<Session> =>
+    run((c) => c.Sessions.removeIssue({ sessionId, issue })),
   sessionsUnlinkIssue: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.unlinkIssue({ sessionId })),
   sessionsClearInitialPrompt: (sessionId: string): Promise<Session> =>

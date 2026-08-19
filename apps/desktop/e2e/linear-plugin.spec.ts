@@ -36,6 +36,8 @@ test("shows every new-session source and starts from a Linear issue", async ({
     await launched.window.getByPlaceholder(/Message the agent/).press("Enter")
     await expect(sessionRow(launched.window, "Document retry policy")).toBeVisible({ timeout: 20_000 })
 
+    // SAFETY: The desktop session store owns this file and validates its schema
+    // before writing it; this test reads the same persisted representation.
     const sessions = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     ) as ReadonlyArray<{ readonly linkedIssue?: { readonly providerId: string; readonly identifier: string } }>
@@ -75,6 +77,77 @@ const openLinearIssueTab = async (window: Page): Promise<void> => {
   await tab.click()
   await expect(window.getByTestId("linear-issue-body")).toBeVisible({ timeout: 15_000 })
 }
+
+test("selects and removes one of several linked Linear issues from the right rail", async ({
+  launchApp
+}) => {
+  const linear = await startFakeLinearServer()
+  try {
+    const launched = await launchApp({
+      configured: true,
+      withRepo: true,
+      sessions: ({ repoPath }) => [{
+        id: "linear-multi",
+        repo: "widget",
+        branch: "main",
+        title: "Linear multi-issue session",
+        status: "idle",
+        diff: { added: 0, removed: 0 },
+        prNumber: null,
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: "2026-08-10T12:00:00.000Z",
+        worktreePath: repoPath,
+        repoPath,
+        linkedIssues: [
+          {
+            providerId: "linear",
+            id: "issue-uuid-123",
+            identifier: "ENG-123",
+            title: "Retry failed payments",
+            url: "https://linear.app/acme/issue/ENG-123/retry-failed-payments",
+            labels: []
+          },
+          {
+            providerId: "linear",
+            id: "issue-uuid-124",
+            identifier: "ENG-124",
+            title: "Document retry policy",
+            url: "https://linear.app/acme/issue/ENG-124/document-retry-policy",
+            labels: []
+          }
+        ],
+        selectedIssue: { providerId: "linear", id: "issue-uuid-123" }
+      }],
+      e2eEnv: { JINGLER_LINEAR_API_URL: linear.url }
+    })
+    await configureLinear(launched.window)
+
+    await launched.window.getByRole("button", { name: "Select linked Linear issue" }).click()
+    await launched.window.getByRole("option", { name: /ENG-124 Document retry policy/ }).click()
+    await expect(launched.window.getByRole("heading", { name: "Document retry policy" })).toBeVisible({
+      timeout: 20_000
+    })
+
+    await launched.window.getByRole("button", { name: "Unlink", exact: true }).click()
+    await expect(launched.window.getByRole("heading", { name: "Retry failed payments" })).toBeVisible({
+      timeout: 20_000
+    })
+
+    // SAFETY: The desktop session store owns and schema-validates this file;
+    // this test only inspects the persisted linked-issue fields.
+    const sessions = JSON.parse(
+      readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
+    ) as ReadonlyArray<{
+      readonly linkedIssues?: ReadonlyArray<{ readonly id: string }>
+      readonly selectedIssue?: { readonly id: string }
+    }>
+    expect(sessions[0]?.linkedIssues?.map(({ id }) => id)).toEqual(["issue-uuid-123"])
+    expect(sessions[0]?.selectedIssue?.id).toBe("issue-uuid-123")
+  } finally {
+    await linear.close()
+  }
+})
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: one restart-spanning user workflow is clearer than hidden setup phases
 test("links an existing Linear issue and creates a new one from workspace Issue tabs", async ({
@@ -126,6 +199,8 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
     await expect(linkRow.getByLabel(LINKED_LINEAR_ISSUE)).toBeVisible()
     expect(linear.operations).toContain("issueCreate")
 
+    // SAFETY: The desktop session store owns this file and validates its schema
+    // before writing it; this test reads the corresponding persisted fields.
     const sessions = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     ) as ReadonlyArray<{

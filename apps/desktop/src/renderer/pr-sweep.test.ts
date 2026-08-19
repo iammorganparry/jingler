@@ -53,6 +53,33 @@ describe("issuesToCloseOnMerge", () => {
     expect(issuesToCloseOnMerge({ a: "merged" }, [current], none)).toStrictEqual(["a"])
   })
 
+  it("keeps GitHub close automation when a Linear link is selected", () => {
+    const current = session({
+      id: "a",
+      linkedIssues: [
+        {
+          providerId: "github",
+          id: "7",
+          identifier: "#7",
+          url: "https://github.com/acme/widget/issues/7",
+          title: "GitHub link",
+          labels: []
+        },
+        {
+          providerId: "linear",
+          id: "linear-7",
+          identifier: "ENG-7",
+          url: "https://linear.app/acme/issue/ENG-7",
+          title: "Selected Linear link",
+          labels: []
+        }
+      ],
+      selectedIssue: { providerId: "linear", id: "linear-7" },
+      automations: { progressComments: false, closeOnMerge: true }
+    })
+    expect(issuesToCloseOnMerge({ a: "merged" }, [current], none)).toStrictEqual(["a"])
+  })
+
   it("never sends a non-GitHub issue to the GitHub close automation", () => {
     const linear = session({
       id: "a",
