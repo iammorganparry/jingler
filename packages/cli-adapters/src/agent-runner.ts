@@ -2177,6 +2177,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     // turn they never touched.
                     if (yield* Ref.get(sawTerminal)) return
                     yield* emit({ _tag: "Failed", message: STOPPED_NOTE })
+                    // "Stopped." IS the turn's terminal event, so mark it settled
+                    // (right after the emit — `emit` drops events once settled).
+                    // Otherwise the run's `settled` flag stays false while the
+                    // interrupted fiber unwinds, and a queued message sent in that
+                    // window is refused with "already running".
+                    yield* Ref.set(sawTerminal, true)
                   })
                 )
               )
