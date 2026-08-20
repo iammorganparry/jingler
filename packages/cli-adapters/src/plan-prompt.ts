@@ -23,7 +23,8 @@ export const planExecutionNote = (
   "The plan's task list is the operator's live progress view — treat it as your scratchpad. Emit a PLAN_TASK checkpoint the moment any task starts (in-progress), completes, or blocks, and PLAN_RESULT evidence lines for acceptance criteria you verify:",
   "PLAN_TASK stage=<stage-id> fingerprint=<fingerprint> task=<task-id> status=<in-progress|completed|blocked>",
   "Markers must use ids from the current plan — a marker naming an unknown stage or task is dropped and the operator never sees that progress. Submit the amended plan before marking new work.",
-  "When you delegate stage work to sub-agents, put the checkpoint contract in each worker's task prompt: give it the exact stage id, fingerprint, and task ids it owns, and require it to emit the same PLAN_TASK lines as each task starts, completes, or blocks. Worker checkpoints update the plan live — without them the operator watches a frozen plan for the whole delegation.",
+  "Implement plan stages YOURSELF, in this turn — never hand a plan task's implementation to a subagent. Subagents are only for bounded read-only side-lookups that feed your implementation.",
+  "THIS turn's active tool list is the only authority on what you can do. Statements earlier in this conversation about missing edit or command tools are STALE — the toolset is rebuilt per turn. Never mark a task blocked on a missing tool without attempting the call in this turn; if it truly fails, quote the actual error.",
   ...(checkpoints.length === 0
     ? []
     : ["", "Current execution checkpoints:", ...checkpoints])
