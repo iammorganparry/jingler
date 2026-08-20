@@ -75,9 +75,9 @@ const NATIVE_SUBAGENT_TOOLS = [
     // status, and Fleet), so every child reads as what it actually is.
     description:
       "Delegate bounded SUPPORT work to a named child agent, shown in Fleet by its type and task. " +
-      "Implementation belongs to YOU: never hand your own coding work to a subagent — write the " +
-      "changes yourself and delegate only work that feeds yours (recon, research, review) or " +
-      "parallel implementation the operator explicitly asked for. " +
+      "Implementation belongs to YOU: do it in the visible Main transcript. Never launch a " +
+      "workflow or child named `main` as a proxy for your own work. Delegate only work that feeds " +
+      "yours (recon, research, review) or parallel implementation the operator explicitly asked for. " +
       "ALWAYS set `agent` to the catalogue type that fits the work: " +
       "scout (fast codebase recon), reviewer (review diffs/plans/PRs), researcher (web research), " +
       "oracle (high-context decisions that must not drift), delegate (lightweight, inherits your " +
@@ -85,8 +85,8 @@ const NATIVE_SUBAGENT_TOOLS = [
       "task). Never leave `agent` unset. " +
       "One unit of work is ALWAYS `{ agent, task }` — NEVER wrap a single child in a " +
       "`workflowScript`; a workflow run has no transcript of its own, so its output is invisible " +
-      "to the operator. Reserve `workflowScript` for coordinating two or more children, and inside " +
-      "one, every runs.run child must name a catalogue agent and a task. " +
+      "to the operator. Reserve `workflowScript` for coordinating two or more named children with " +
+      "distinct tasks, and inside one, every runs.run child must name a catalogue agent and a task. " +
       "Runs are foreground by default: the tool call returns the child's report into this " +
       "transcript. For a long multi-child workflow pass `async: true`, do NOT block the script " +
       "awaiting children inline (it hits the orchestrator timeout), and collect results with " +

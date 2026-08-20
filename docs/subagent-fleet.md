@@ -10,6 +10,31 @@ Jingler ships `pi-subagents` with its managed Pi runtime and presents delegated 
 - Steer a running child, queue a follow-up, interrupt or stop it, resume a paused child, or answer a supervisor request. Jingler waits for the extension's exact acknowledgement before presenting the result.
 - Background children remain visible after the parent turn settles. Missing processes are reconciled to `unknown`, never left falsely running.
 
+## Agent launch contract
+
+Self-implementation stays in **Main**. An agent must not launch a workflow or a child named `main` as a proxy for work it is doing itself.
+
+One delegated unit uses the structured single-child form:
+
+```ts
+subagent({ agent: "reviewer", task: "Review the current diff" })
+```
+
+That call creates one named child. The child owns the Pi transcript and control identity shown in Fleet; there is no workflow container between Main and the child.
+
+`workflowScript` is reserved for two or more named children with distinct bounded tasks:
+
+```ts
+subagent({
+  workflowScript: `return runs.all([
+    { key: "correctness", agent: "reviewer", task: "Review correctness" },
+    { key: "tests", agent: "reviewer", task: "Review test coverage" }
+  ])`
+})
+```
+
+A real workflow container represents orchestration and has no Pi transcript of its own. Select its children to read or steer their sessions. Parallel implementation children need distinct scopes and isolated worktrees; otherwise keep one writer.
+
 ## Containment model
 
 Each managed child profile receives a distinct unguessable capability token bound server-side to one parent Pi session, target, role, and mode. Agent identity is not accepted from tool-call input, so a read-only child cannot claim a mutable profile. Child tool calls return through Jingler's capability broker, which reuses the normal schema validation, permission policy, cancellation, output budgets, idempotency, and mutation receipts. Reviewer, oracle, and advisor profiles remain read-only. Only the explicit `fanout` profile may recursively delegate.

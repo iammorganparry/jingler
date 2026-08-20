@@ -306,20 +306,26 @@ const heldSubagentsResponse = (
   context: PiContext
 ): ReturnType<typeof fauxAssistantMessage> | null => {
   const prompts = operatorText(context)
-  if (!prompts.some((prompt) => prompt.includes("[[held-subagents]]"))) return null
+  const direct = prompts.some((prompt) => prompt.includes("[[direct-subagent]]"))
+  if (!direct && !prompts.some((prompt) => prompt.includes("[[held-subagents]]"))) return null
 
+  const marker = direct ? "[[direct-subagent]]" : "[[held-subagents]]"
   const prompt = latestOperatorText(context)
-  const steered = !prompt.includes("[[held-subagents]]")
+  const steered = !prompt.includes(marker)
   const resultsAfterLatestPrompt = recentToolResultCount(context, E2E_HELD_SUBAGENTS_TOOL)
   if (!steered) {
     const toolCall = fauxToolCall(
       E2E_HELD_SUBAGENTS_TOOL,
-      { phase: resultsAfterLatestPrompt === 0 ? "start" : "wait" },
-      { id: `held-subagents-${resultsAfterLatestPrompt}` }
+      {
+        phase: resultsAfterLatestPrompt === 0
+          ? direct ? "direct-start" : "start"
+          : "wait"
+      },
+      { id: `${direct ? "direct-subagent" : "held-subagents"}-${resultsAfterLatestPrompt}` }
     )
     return fauxAssistantMessage(
       resultsAfterLatestPrompt === 0
-        ? [fauxText("Delegated to two agents."), toolCall]
+        ? [fauxText(direct ? "Delegated to one direct child." : "Delegated to two agents."), toolCall]
         : toolCall,
       { stopReason: "toolUse" }
     )
@@ -336,11 +342,11 @@ const heldSubagentsResponse = (
   if (resultsAfterLatestPrompt === 1) {
     return callTool(
       E2E_HELD_SUBAGENTS_TOOL,
-      { phase: "settle" },
+      { phase: direct ? "direct-settle" : "settle" },
       "held-steer-settle"
     )
   }
-  return fauxAssistantMessage("Both agents reported back.")
+  return fauxAssistantMessage(direct ? "Direct child reported back." : "Both agents reported back.")
 }
 
 const memoryResponse = (

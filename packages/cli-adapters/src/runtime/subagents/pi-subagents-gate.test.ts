@@ -17,11 +17,18 @@ interface PublicExecutionModule {
   readonly isSingleChildWorkflowScript: (script: string) => boolean
 }
 
+interface ToolDescriptionModule {
+  readonly FULL_SUBAGENT_TOOL_DESCRIPTION: string
+  readonly COMPACT_SUBAGENT_TOOL_DESCRIPTION: string
+}
+
 const jiti = createJiti(import.meta.url)
+const extensionSource = (file: string): string =>
+  join(dirname(PI_SUBAGENTS_EXTENSION_PATH), "src", "extension", file)
 const loadModule = (): Promise<PublicExecutionModule> =>
-  jiti.import<PublicExecutionModule>(
-    join(dirname(PI_SUBAGENTS_EXTENSION_PATH), "src", "extension", "public-execution.ts")
-  )
+  jiti.import<PublicExecutionModule>(extensionSource("public-execution.ts"))
+const loadToolDescription = (): Promise<ToolDescriptionModule> =>
+  jiti.import<ToolDescriptionModule>(extensionSource("tool-description.ts"))
 
 describe("patched pi-subagents single-child workflow gate", () => {
   it("rejects a workflowScript that wraps exactly one child", async () => {
@@ -53,21 +60,40 @@ describe("patched pi-subagents single-child workflow gate", () => {
     }
   })
 
-  it("leaves the structured single-child form as the sanctioned path, keyed by its agent", async () => {
+  it("keeps structured single-child options on the direct executor path", async () => {
     const { normalizePublicSubagentExecution } = await loadModule()
-    // { agent, task } is converted by the vendor into its own internal
-    // single-run script — that synthesized script must NOT be gated, and the
-    // run must be keyed by the agent name so Fleet never shows an identity-less
-    // "main · run main" card for it.
+    const childOptions = {
+      task: "Review PR #12",
+      async: false,
+      context: "fork",
+      model: "anthropic/claude-test",
+      cwd: "/tmp/project",
+      worktree: true,
+      timeoutMs: 1_234,
+      output: "review.md",
+      toolBudget: { hard: 12 },
+      acceptance: "checked"
+    }
     const result = normalizePublicSubagentExecution({
-      agent: "reviewer",
-      task: "Review PR #12"
+      agent: " reviewer ",
+      ...childOptions
     })
-    expect(result.ok).toBe(true)
-    if (result.ok) {
-      const script = (result.params as { workflowScript?: string }).workflowScript ?? ""
-      expect(script).toContain('runs.run("reviewer"')
-      expect(script).not.toContain('"main"')
+    expect(result).toEqual({
+      ok: true,
+      params: { agent: "reviewer", ...childOptions }
+    })
+    if (result.ok) expect(result.params).not.toHaveProperty("workflowScript")
+  })
+
+  it("advertises a direct single child and real multi-child workflows", async () => {
+    const descriptions = await loadToolDescription()
+    for (const description of [
+      descriptions.FULL_SUBAGENT_TOOL_DESCRIPTION,
+      descriptions.COMPACT_SUBAGENT_TOOL_DESCRIPTION
+    ]) {
+      expect(description).toContain("one direct child with its own transcript and controls")
+      expect(description).toContain("two or more named children with distinct tasks")
+      expect(description).not.toContain("through the workflow runtime")
     }
   })
 
