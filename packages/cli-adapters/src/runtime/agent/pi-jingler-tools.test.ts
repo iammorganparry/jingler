@@ -241,6 +241,10 @@ describe("Jingler plan discard tool", () => {
       })
     )
     expect(result.status).toBe("success")
+    // A void execute must land as null, never undefined: an undefined value
+    // serialized into the pi session as a text block with NO text, and every
+    // later provider request crashed replaying it ("reading 'length'").
+    expect(result.value).toBeNull()
     expect(discardPlan).toHaveBeenCalledOnce()
   })
 

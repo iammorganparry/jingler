@@ -235,6 +235,19 @@ const settleObservation = async (
   return { ...result, fileChanges: changes }
 }
 
+/**
+ * A void execute resolves `undefined`, which JSON round-trips as a MISSING
+ * key — pi then records a text block with no text, and every later provider
+ * request crashes replaying it. Null survives the round trip.
+ */
+const successEnvelope = (value: unknown): ToolResultEnvelope => ({
+  status: "success",
+  value: value ?? null,
+  preview: null,
+  artifact: null,
+  error: null
+})
+
 const executeDefinition = async (
   options: ToolRegistryOptions,
   tool: AnyToolDefinition,
@@ -265,13 +278,7 @@ const executeDefinition = async (
     ])
     const serialized = JSON.stringify(result) ?? "null"
     if (serialized.length <= tool.outputBudget) {
-      return {
-        status: "success",
-        value: result,
-        preview: null,
-        artifact: null,
-        error: null
-      }
+      return successEnvelope(result)
     }
     if (!options.writeArtifact) {
       return errorEnvelope(

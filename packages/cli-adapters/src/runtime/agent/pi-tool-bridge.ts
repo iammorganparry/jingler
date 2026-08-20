@@ -28,7 +28,7 @@ const renderResult = (result: ToolResultEnvelope): string => {
     value = `${result.error.code}: ${result.error.message}`
   } else if (result.preview !== null) {
     value = result.preview
-  } else if (result.value === null) {
+  } else if (result.value === null || result.value === undefined) {
     value = result.status
   } else {
     const command = Option.getOrNull(decodeCommandResult(result.value))
