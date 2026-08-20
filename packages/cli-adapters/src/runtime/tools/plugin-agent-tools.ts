@@ -40,28 +40,58 @@ const issueReferenceOf = (value: unknown): IssueReference | null => {
   }
 }
 
-/** Decode the trusted Linear toolset's bounded issue-link envelope without parsing prose. */
+const ISSUE_TOKEN_CHARACTER = /[a-z0-9-]/u
+const isIssueTokenCharacter = (character: string | undefined): boolean =>
+  character !== undefined && ISSUE_TOKEN_CHARACTER.test(character)
+
+const hasBoundedReference = (text: string, candidate: string): boolean => {
+  if (!candidate) return false
+  let offset = text.indexOf(candidate)
+  while (offset !== -1) {
+    const before = text[offset - 1]
+    const after = text[offset + candidate.length]
+    if (!(isIssueTokenCharacter(before) || isIssueTokenCharacter(after))) return true
+    offset = text.indexOf(candidate, offset + 1)
+  }
+  return false
+}
+
+const promptReferencesIssue = (prompt: string, issue: IssueReference): boolean => {
+  const text = prompt.toLowerCase()
+  return hasBoundedReference(text, issue.url.toLowerCase()) ||
+    hasBoundedReference(text, issue.id.toLowerCase()) ||
+    hasBoundedReference(text, issue.identifier.toLowerCase())
+}
+
+/** Decode the trusted Linear toolset's bounded issue-link envelope without parsing tool prose. */
 export const issueReferencesFromPluginResult = (
   origin: PluginToolOrigin,
-  value: unknown
+  value: unknown,
+  userPrompt: string
 ): readonly IssueReference[] => {
   if (origin.pluginId !== "linear" || origin.toolsetId !== "linear.issues") return []
   if (typeof value !== "object" || value === null || Array.isArray(value)) return []
   const envelope = value as Record<string, unknown>
   if (envelope.kind !== "linear.issue-result" || !Array.isArray(envelope.issues)) return []
+  if (envelope.linkIntent === "none") return []
+  if (envelope.linkIntent !== "mutation" && envelope.linkIntent !== "user-reference") return []
   const issues = envelope.issues.map(issueReferenceOf)
-  return issues.every((issue): issue is IssueReference =>
+  if (!issues.every((issue): issue is IssueReference =>
     issue !== null && issue.providerId === "linear"
-  ) ? issues : []
+  )) return []
+  return envelope.linkIntent === "mutation"
+    ? issues
+    : issues.filter((issue) => promptReferencesIssue(userPrompt, issue))
 }
 
-/** Atomically hand every trusted typed reference to persistence; returns whether links changed. */
+/** Atomically hand every intentional trusted reference to persistence. */
 export const persistPluginIssueReferences = async (
   origin: PluginToolOrigin,
   value: unknown,
+  userPrompt: string,
   persist: (issues: readonly IssueReference[]) => Promise<void>
 ): Promise<boolean> => {
-  const issues = issueReferencesFromPluginResult(origin, value)
+  const issues = issueReferencesFromPluginResult(origin, value, userPrompt)
   if (issues.length === 0) return false
   await persist(issues)
   return true
