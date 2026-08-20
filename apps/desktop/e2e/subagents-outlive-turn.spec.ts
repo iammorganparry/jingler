@@ -18,6 +18,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
 
 const FIRST_AGENT = /Survey the tab bar/
 const SECOND_AGENT = /Audit the theme tokens/
+const DIRECT_AGENT = /Inspect direct delegation/
 
 test("Fleet stays composer-adjacent while subagents run and the operator steers Main", async ({
   launchApp
@@ -51,6 +52,43 @@ test("Fleet stays composer-adjacent while subagents run and the operator steers 
   await expect(window.getByText("Both agents reported back.")).toBeVisible({ timeout: 15_000 })
   await expect(fleet).toContainText("0 active · 2 total")
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
+})
+
+test("one direct child remains inspectable while the operator steers Main", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[direct-subagent]] inspect delegation")
+  await composer.press("Enter")
+
+  const fleet = window.getByTestId("fleet-drawer")
+  const direct = fleet.getByRole("button", { name: DIRECT_AGENT })
+  await expect(direct).toBeVisible({ timeout: 15_000 })
+  await expect(fleet.locator('[data-testid^="fleet-workflow-"]')).toHaveCount(0)
+  await expect(fleet).toContainText("1 active · 1 total")
+  await expect(window.getByText("Delegated to one direct child.")).toBeVisible()
+
+  await direct.click()
+  await expect(window.getByTestId("fleet-agent-live")).toContainText(
+    "This agent is running. Its full transcript appears here once it records output."
+  )
+  await window.getByTestId("fleet-agent-main").click()
+
+  const busyComposer = window.getByPlaceholder("Queue a message while the agent works…")
+  await busyComposer.fill("keep the direct child visible")
+  await busyComposer.press("Enter")
+  await expect(window.getByText("Noted: keep the direct child visible")).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(fleet.locator('[data-testid^="fleet-workflow-"]')).toHaveCount(0)
+  await expect(direct).toBeVisible()
+
+  await expect(window.getByText("Direct child reported back.")).toBeVisible({ timeout: 15_000 })
+  await expect(fleet).toContainText("0 active · 1 total")
+  await expect(fleet.locator('[data-testid^="fleet-workflow-"]')).toHaveCount(0)
 })
 
 test("global Stop reaps every held Fleet child and restores the idle composer", async ({

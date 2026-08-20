@@ -210,7 +210,8 @@ const heldSubagentIds = (runId: string) => ({
 
 const heldSubagentEvents = (
   runId: string,
-  phase: "start" | "settle"
+  phase: "start" | "settle",
+  direct: boolean
 ): ReadonlyArray<StreamEvent> => {
   const { first, second } = heldSubagentIds(runId)
   const parentPiSessionId = `e2e-parent-${runId}`
@@ -270,10 +271,12 @@ const heldSubagentEvents = (
       }
     }
   })
-  return [
-    fleetNode(first, "Explore", "Survey the tab bar"),
-    fleetNode(second, "Explore", "Audit the theme tokens")
-  ]
+  return direct
+    ? [fleetNode(first, "Worker", "Inspect direct delegation")]
+    : [
+        fleetNode(first, "Explore", "Survey the tab bar"),
+        fleetNode(second, "Explore", "Audit the theme tokens")
+      ]
 }
 
 const registerHeldSubagentsTool = (
@@ -286,7 +289,7 @@ const registerHeldSubagentsTool = (
     version: "1",
     description: "Drive deterministic foreground sub-agent lifecycle events in Electron e2e.",
     input: Schema.Struct({
-      phase: Schema.Literal("start", "wait", "settle")
+      phase: Schema.Literal("start", "wait", "settle", "direct-start", "direct-settle")
     }),
     risk: "read",
     roles: ["conversation"],
@@ -299,7 +302,11 @@ const registerHeldSubagentsTool = (
       Effect.runPromise(
         Effect.gen(function* () {
           if (phase !== "wait") {
-            yield* publishAll(context, heldSubagentEvents(spec.runId, phase))
+            const direct = phase.startsWith("direct-")
+            yield* publishAll(
+              context,
+              heldSubagentEvents(spec.runId, phase.endsWith("start") ? "start" : "settle", direct)
+            )
           }
           yield* Effect.sleep("400 millis")
           return { phase }
