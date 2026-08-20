@@ -74,20 +74,23 @@ const NATIVE_SUBAGENT_TOOLS = [
     // agent makes the child resolve to that name end-to-end (trace, durable
     // status, and Fleet), so every child reads as what it actually is.
     description:
-      "Delegate bounded work to a named child agent, shown in Fleet by its type and task. " +
+      "Delegate bounded SUPPORT work to a named child agent, shown in Fleet by its type and task. " +
+      "Implementation belongs to YOU: never hand your own coding work to a subagent — write the " +
+      "changes yourself and delegate only work that feeds yours (recon, research, review) or " +
+      "parallel implementation the operator explicitly asked for. " +
       "ALWAYS set `agent` to the catalogue type that fits the work: " +
-      "scout (fast codebase recon), worker (implementation), reviewer (review diffs/plans/PRs), " +
-      "researcher (web research), oracle (high-context decisions that must not drift), " +
-      "delegate (lightweight, inherits your model), fanout (parallel spread of one task). " +
-      "Never leave `agent` unset. " +
-      "One unit of work — even long work like a PR review or an audit — is ALWAYS `{ agent, task }`. " +
-      "NEVER wrap a single child in a `workflowScript`: a workflow run has no transcript of its own, " +
-      "so its output is invisible to the operator. Reserve `workflowScript` for coordinating two or " +
-      "more children, and inside one, every runs.run child must name a catalogue agent and a task. " +
-      "In a multi-child workflow, do NOT block the script awaiting children inline (it hits the " +
-      "orchestrator timeout) — let it return, then poll status or use subagent_wait. " +
-      "When THIS turn needs a child's result, collect it with subagent_wait before finishing the turn; " +
-      "never end the turn with detached runs whose output the user is waiting on. " +
+      "scout (fast codebase recon), reviewer (review diffs/plans/PRs), researcher (web research), " +
+      "oracle (high-context decisions that must not drift), delegate (lightweight, inherits your " +
+      "model), worker (operator-requested parallel implementation), fanout (parallel spread of one " +
+      "task). Never leave `agent` unset. " +
+      "One unit of work is ALWAYS `{ agent, task }` — NEVER wrap a single child in a " +
+      "`workflowScript`; a workflow run has no transcript of its own, so its output is invisible " +
+      "to the operator. Reserve `workflowScript` for coordinating two or more children, and inside " +
+      "one, every runs.run child must name a catalogue agent and a task. " +
+      "Runs are foreground by default: the tool call returns the child's report into this " +
+      "transcript. For a long multi-child workflow pass `async: true`, do NOT block the script " +
+      "awaiting children inline (it hits the orchestrator timeout), and collect results with " +
+      "subagent_wait before finishing any turn that needs them. " +
       "Never call resume at the top level — resume belongs on a runs.run/runs.all item."
   },
   {

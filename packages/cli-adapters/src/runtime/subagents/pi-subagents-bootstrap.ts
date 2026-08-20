@@ -44,7 +44,12 @@ const PiSubagentConfig = Schema.Struct({
 
 const CONFIG = {
   artifactDir: "session",
-  asyncByDefault: true,
+  // Foreground by default: a delegated child's report lands in the PARENT
+  // transcript when the tool call settles, where the operator can read it.
+  // Async detach hid the output entirely unless the model later polled — a
+  // running card with no transcript and no result. Long multi-child
+  // orchestration opts back in per call with `async: true` + subagent_wait.
+  asyncByDefault: false,
   asyncWidget: false,
   fleetView: false,
   inlineToolDisplay: "summary",

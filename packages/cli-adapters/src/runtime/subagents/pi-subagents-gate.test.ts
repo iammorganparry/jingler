@@ -53,15 +53,22 @@ describe("patched pi-subagents single-child workflow gate", () => {
     }
   })
 
-  it("leaves the structured single-child form as the sanctioned path", async () => {
+  it("leaves the structured single-child form as the sanctioned path, keyed by its agent", async () => {
     const { normalizePublicSubagentExecution } = await loadModule()
     // { agent, task } is converted by the vendor into its own internal
-    // single-run script — that synthesized script must NOT be gated.
+    // single-run script — that synthesized script must NOT be gated, and the
+    // run must be keyed by the agent name so Fleet never shows an identity-less
+    // "main · run main" card for it.
     const result = normalizePublicSubagentExecution({
       agent: "reviewer",
       task: "Review PR #12"
     })
     expect(result.ok).toBe(true)
+    if (result.ok) {
+      const script = (result.params as { workflowScript?: string }).workflowScript ?? ""
+      expect(script).toContain('runs.run("reviewer"')
+      expect(script).not.toContain('"main"')
+    }
   })
 
   it("classifies scripts conservatively", async () => {

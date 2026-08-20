@@ -11,10 +11,18 @@ index fa7a5d60c9a5e7c0f8f41eb8fa2f48b237678816..600fcee5225990ae283b2b0e2bcd88e0
  	});
  
 diff --git a/src/extension/public-execution.ts b/src/extension/public-execution.ts
-index 50a9e6385d920b9cfe3f5d8b5f33c6c237ccbd1f..238088100925c186e8e01c06fe412d65725ce0b0 100644
+index 50a9e6385d920b9cfe3f5d8b5f33c6c237ccbd1f..7986180ee54471813c9e65eedbe6ed752bacac4f 100644
 --- a/src/extension/public-execution.ts
 +++ b/src/extension/public-execution.ts
-@@ -98,5 +98,25 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
+@@ -91,12 +91,32 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
+ 			ok: true,
+ 			params: {
+ 				...workflowDefaults,
+-				workflowScript: `console.info("Converted structured single-child request to workflow runs.run('main', ...)."); return runs.run("main", ${JSON.stringify(child)})`,
++				workflowScript: `console.info("Converted structured single-child request to a single workflow run."); return runs.run(${JSON.stringify(child.agent)}, ${JSON.stringify(child)})`,
+ 			} as T,
+ 		};
+ 	}
  	if (typeof params.workflowScript !== "string" || !params.workflowScript.trim()) {
  		return { ok: false, error: "Execution requires either { agent, task? } for one child or a non-empty workflowScript for orchestration.", mode: "workflow" };
  	}
