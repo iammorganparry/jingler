@@ -244,6 +244,15 @@ describe("Jingler plan discard tool", () => {
     expect(discardPlan).toHaveBeenCalledOnce()
   })
 
+  it("pins an object provider schema — Codex rejects the empty-struct derivation", () => {
+    // JSONSchema.make(Schema.Struct({})) emits an anyOf with no top-level
+    // `type`; providers require `type: "object"` on tool parameters.
+    const registry = createJinglerControlTools(runtimeContext())
+    expect(registry.providerInputSchemaFor("jingler_discard_plan")).toMatchObject({
+      type: "object"
+    })
+  })
+
   it("treats discard as a no-op when the run context cannot supply it", async () => {
     const registry = createJinglerControlTools(runtimeContext({ discardPlan: undefined }))
     const result = await Effect.runPromise(

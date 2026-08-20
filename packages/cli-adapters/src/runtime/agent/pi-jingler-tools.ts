@@ -29,7 +29,10 @@ const roles = ["conversation", "plan", "plan-execution", "background"] as const
 const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 
 const controlTool = <Input, Encoded>(
-  input: Pick<ToolDefinition<Input, Encoded>, "id" | "description" | "input" | "roles" | "execute">
+  input: Pick<
+    ToolDefinition<Input, Encoded>,
+    "id" | "description" | "input" | "roles" | "execute" | "providerInputSchema"
+  >
 ): ToolDefinition<Input, Encoded> => ({
   ...input,
   version: "1",
@@ -70,6 +73,15 @@ export const createJinglerControlTools = (
       description:
         "Discard the session's current plan entirely. The next submitted plan starts fresh (new plan id, operator approval) instead of amending the discarded one.",
       input: Schema.Struct({}),
+      // An empty Struct's derived JSON Schema is an anyOf with no top-level
+      // `type`, which Codex rejects ("schema must be of type: object"). Every
+      // no-argument tool must pin the provider schema explicitly.
+      providerInputSchema: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false
+      },
       roles: ["conversation", "plan", "plan-execution"],
       execute: () => Effect.runPromise(context.discardPlan?.() ?? Effect.void)
     })
