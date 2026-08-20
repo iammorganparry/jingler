@@ -10,6 +10,36 @@ index fa7a5d60c9a5e7c0f8f41eb8fa2f48b237678816..600fcee5225990ae283b2b0e2bcd88e0
  		state,
  	});
  
+diff --git a/src/extension/public-execution.ts b/src/extension/public-execution.ts
+index 50a9e6385d920b9cfe3f5d8b5f33c6c237ccbd1f..238088100925c186e8e01c06fe412d65725ce0b0 100644
+--- a/src/extension/public-execution.ts
++++ b/src/extension/public-execution.ts
+@@ -98,5 +98,25 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
+ 	if (typeof params.workflowScript !== "string" || !params.workflowScript.trim()) {
+ 		return { ok: false, error: "Execution requires either { agent, task? } for one child or a non-empty workflowScript for orchestration.", mode: "workflow" };
+ 	}
++	if (isSingleChildWorkflowScript(params.workflowScript)) {
++		return { ok: false, error: "A single child does not need a workflow. Call the subagent tool with { agent, task } instead; reserve workflowScript for coordinating two or more children.", mode: "workflow" };
++	}
+ 	return { ok: true, params };
+ }
++
++/**
++ * A caller-supplied script that wraps exactly one child gains nothing over the
++ * structured { agent, task } form and costs the operator visibility (a workflow
++ * root has no transcript of its own). Deliberately conservative: anything that
++ * could spawn more than one child — runs.all, several runs.run call sites, or
++ * a loop/map — passes through untouched.
++ */
++export function isSingleChildWorkflowScript(script: string): boolean {
++	const runCalls = script.match(/runs\.run\s*\(/g)?.length ?? 0;
++	if (runCalls !== 1) return false;
++	if (/runs\.all\s*\(/.test(script)) return false;
++	if (/\bfor\b|\bwhile\b|\.map\s*\(|\.forEach\s*\(/.test(script)) return false;
++	// Resuming one retained child is only expressible as a runs.run item.
++	if (/\bresume\s*:/.test(script)) return false;
++	return true;
++}
 diff --git a/src/extension/rpc.ts b/src/extension/rpc.ts
 index 9dd171b3cfb97d2253fb3244ced4ebed4508df47..b396153b7b5da83d7413d7786d016e94dea2f841 100644
 --- a/src/extension/rpc.ts
@@ -81,8 +111,52 @@ index 3e30e8b49e774d82fd62f07acba1266e44e7197a..92aacfc4e4cb6df1e4cdd2850565cf15
  		pending,
  	};
  }
+diff --git a/src/runs/background/subagent-runner.ts b/src/runs/background/subagent-runner.ts
+index bc133614a1d92ba2d5e9339cc545ca091e94b558..33818228bbbc394555762877b9a7bc09160d555b 100644
+--- a/src/runs/background/subagent-runner.ts
++++ b/src/runs/background/subagent-runner.ts
+@@ -10,7 +10,7 @@ import { isActiveAsyncState, updateActiveRunIndex } from "./active-run-index.ts"
+ import { createChildTranscriptWriter, type ChildTranscriptWriter } from "../../shared/child-transcript.ts";
+ import { closeSteerInbox, consumeInterruptRequest, consumeSteerRequests, deliverInterruptRequest, deliverStopRequest, deliverTimeoutRequest, enqueueStepSteer, steerAcksDir, steerCapabilityPath, stepSteerInboxDir, watchAsyncControlInbox, type SteerAck, type SteerCapability, type SteerRequest } from "./control-channel.ts";
+ import { appendJsonl as appendRawJsonl, formatOutputArtifactContent, getArtifactPaths, writeArtifact, writeMetadata } from "../../shared/artifacts.ts";
+-import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
++import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, getPiSpawnEnv, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
+ import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
+ import {
+ 	type ActivityState,
+@@ -555,7 +555,7 @@ function runPiStreaming(
+ 		const child = spawn(spawnSpec.command, spawnSpec.args, {
+ 			cwd,
+ 			stdio: ["ignore", "pipe", "pipe"],
+-			env: spawnEnv,
++			env: getPiSpawnEnv(spawnEnv),
+ 			windowsHide: true,
+ 			detached: process.platform !== "win32",
+ 		});
+diff --git a/src/runs/foreground/execution.ts b/src/runs/foreground/execution.ts
+index 1241a290c9bd4da16c129a913b7ecdb656b7831b..757d69cf6bd60cd491d4c8c3d7b515f1b6f2704e 100644
+--- a/src/runs/foreground/execution.ts
++++ b/src/runs/foreground/execution.ts
+@@ -55,7 +55,7 @@ import { buildSkillInjection, resolveSkillsWithFallback } from "../../agents/ski
+ import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
+ import { evaluateCompletionMutationGuard } from "../shared/completion-guard.ts";
+ import { arbitrateCompletionGuardRescue } from "../shared/llm-intent-arbiter.ts";
+-import { getPiSpawnCommand } from "../shared/pi-spawn.ts";
++import { getPiSpawnCommand, getPiSpawnEnv } from "../shared/pi-spawn.ts";
+ import { createJsonlWriter } from "../../shared/jsonl-writer.ts";
+ import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
+ import { resolvePermissionRules } from "../shared/permissions.ts";
+@@ -482,7 +482,7 @@ async function runSingleAttempt(
+ 		const spawnSpec = getPiSpawnCommand(args);
+ 		const proc = spawn(spawnSpec.command, spawnSpec.args, {
+ 			cwd: options.cwd ?? runtimeCwd,
+-			env: spawnEnv,
++			env: getPiSpawnEnv(spawnEnv),
+ 			stdio: ["ignore", "pipe", "pipe"],
+ 			windowsHide: true,
+ 		});
 diff --git a/src/runs/shared/pi-spawn.ts b/src/runs/shared/pi-spawn.ts
-index 26081e0..a297f12 100644
+index abfbdb2fb871887b5d592735ef971bf581b2e633..abd4391a04ef7b29148ad860bc1677f744e73790 100644
 --- a/src/runs/shared/pi-spawn.ts
 +++ b/src/runs/shared/pi-spawn.ts
 @@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
@@ -94,7 +168,7 @@ index 26081e0..a297f12 100644
  
  export function findPiPackageRootFromEntry(
  	entryPoint: string,
-@@ -59,6 +61,12 @@ interface PiSpawnCommand {
+@@ -58,6 +60,12 @@ interface PiSpawnCommand {
  	args: string[];
  }
  
@@ -127,45 +201,3 @@ index 26081e0..a297f12 100644
  	}
  
  	const execPath = deps.execPath ?? process.execPath;
-diff --git a/src/runs/foreground/execution.ts b/src/runs/foreground/execution.ts
-index b9aa998..9d123b1 100644
---- a/src/runs/foreground/execution.ts
-+++ b/src/runs/foreground/execution.ts
-@@ -55,7 +55,7 @@ import { buildSkillInjection, resolveSkillsWithFallback } from "../../agents/skills.ts";
- import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
- import { evaluateCompletionMutationGuard } from "../shared/completion-guard.ts";
- import { arbitrateCompletionGuardRescue } from "../shared/llm-intent-arbiter.ts";
--import { getPiSpawnCommand } from "../shared/pi-spawn.ts";
-+import { getPiSpawnCommand, getPiSpawnEnv } from "../shared/pi-spawn.ts";
- import { createJsonlWriter } from "../../shared/jsonl-writer.ts";
- import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
- import { resolvePermissionRules } from "../shared/permissions.ts";
-@@ -483,6 +483,6 @@ export async function executeSingleAgent(
- 		const proc = spawn(spawnSpec.command, spawnSpec.args, {
- 			cwd: options.cwd ?? runtimeCwd,
--			env: spawnEnv,
-+			env: getPiSpawnEnv(spawnEnv),
- 			stdio: ["ignore", "pipe", "pipe"],
- 			windowsHide: true,
- 		});
-diff --git a/src/runs/background/subagent-runner.ts b/src/runs/background/subagent-runner.ts
-index 14093e4..249f293 100644
---- a/src/runs/background/subagent-runner.ts
-+++ b/src/runs/background/subagent-runner.ts
-@@ -10,6 +10,6 @@ import { createChildTranscriptWriter, type ChildTranscriptWriter } from "../../shared/child-transcript.ts";
- import { closeSteerInbox, consumeInterruptRequest, consumeSteerRequests, deliverInterruptRequest, deliverStopRequest, deliverTimeoutRequest, enqueueStepSteer, steerAcksDir, steerCapabilityPath, stepSteerInboxDir, watchAsyncControlInbox, type SteerAck, type SteerCapability, type SteerRequest } from "./control-channel.ts";
- import { appendJsonl as appendRawJsonl, formatOutputArtifactContent, getArtifactPaths, writeArtifact, writeMetadata } from "../../shared/artifacts.ts";
--import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
-+import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, getPiSpawnEnv, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
- import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
- import {
- 	type ActivityState,
-@@ -554,7 +554,7 @@ export async function runPiStreaming(
- 		const child = spawn(spawnSpec.command, spawnSpec.args, {
- 			cwd,
- 			stdio: ["ignore", "pipe", "pipe"],
--			env: spawnEnv,
-+			env: getPiSpawnEnv(spawnEnv),
- 			windowsHide: true,
- 			detached: process.platform !== "win32",
- 		});

@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { FleetAgentView } from "./subagent-view.js"
 
 const NOT_AVAILABLE = /not available yet/
+const ORCHESTRATES = /orchestrates other agents/
 const TOOL_RESULT = /Tool result \(command_execute\)/
 
 const fleetNode = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => ({
@@ -93,5 +94,48 @@ describe("FleetAgentView", () => {
 
     expect(screen.getByText(NOT_AVAILABLE)).toBeDefined()
     expect(screen.queryByTestId("fleet-agent-live")).toBeNull()
+  })
+
+})
+
+describe("FleetAgentView workflow nodes", () => {
+  it("explains a live workflow node instead of promising a transcript", () => {
+    render(
+      <FleetAgentView
+        node={fleetNode({ nodeKind: "workflow", agent: "workflow", currentTool: null })}
+        messages={[]}
+      />
+    )
+
+    expect(screen.getByText(ORCHESTRATES)).toBeDefined()
+    expect(screen.queryByTestId("workflow-outcome")).toBeNull()
+    expect(screen.queryByText(NOT_AVAILABLE)).toBeNull()
+    expect(screen.queryByTestId("fleet-agent-live")).toBeNull()
+  })
+
+  it("shows a settled workflow's terminal outcome, not an empty pane", () => {
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          nodeKind: "workflow",
+          agent: "workflow",
+          status: "completed",
+          currentTool: null,
+          completedAt: 30,
+          terminal: {
+            reason: "completed",
+            summary: "Reviewed the PR across 3 step agents.",
+            at: 30,
+            retryable: false
+          }
+        })}
+        messages={[]}
+      />
+    )
+
+    expect(screen.getByTestId("workflow-outcome").textContent).toBe(
+      "Workflow completed: Reviewed the PR across 3 step agents."
+    )
+    expect(screen.getByText(ORCHESTRATES)).toBeDefined()
   })
 })

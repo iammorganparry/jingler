@@ -80,9 +80,15 @@ const NATIVE_SUBAGENT_TOOLS = [
       "researcher (web research), oracle (high-context decisions that must not drift), " +
       "delegate (lightweight, inherits your model), fanout (parallel spread of one task). " +
       "Never leave `agent` unset. " +
-      "For long work (a PR review, an audit), let the workflow spawn its children and RETURN promptly — " +
-      "do NOT block the workflow script awaiting them inline, or it hits the orchestrator timeout; " +
-      "poll status or use subagent_wait instead. Never call resume at the top level — resume belongs on a runs.run/runs.all item."
+      "One unit of work — even long work like a PR review or an audit — is ALWAYS `{ agent, task }`. " +
+      "NEVER wrap a single child in a `workflowScript`: a workflow run has no transcript of its own, " +
+      "so its output is invisible to the operator. Reserve `workflowScript` for coordinating two or " +
+      "more children, and inside one, every runs.run child must name a catalogue agent and a task. " +
+      "In a multi-child workflow, do NOT block the script awaiting children inline (it hits the " +
+      "orchestrator timeout) — let it return, then poll status or use subagent_wait. " +
+      "When THIS turn needs a child's result, collect it with subagent_wait before finishing the turn; " +
+      "never end the turn with detached runs whose output the user is waiting on. " +
+      "Never call resume at the top level — resume belongs on a runs.run/runs.all item."
   },
   {
     id: "subagent_wait",

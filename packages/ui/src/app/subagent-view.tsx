@@ -139,10 +139,17 @@ export function FleetAgentView({
             // never arrive. An agent node, in contrast, always has live
             // activity to show even before any transcript is readable.
             node?.nodeKind === "workflow" ? (
-              <p className="text-[12px] text-dim">
-                This workflow orchestrates other agents and has no transcript of
-                its own — select one of its step agents to see their output.
-              </p>
+              <div className="space-y-2">
+                {node.terminal !== null && (
+                  <p data-testid="workflow-outcome" className="text-[12px] text-text-body">
+                    Workflow {node.terminal.reason}: {node.terminal.summary}
+                  </p>
+                )}
+                <p className="text-[12px] text-dim">
+                  This workflow orchestrates other agents and has no transcript of
+                  its own — select one of its step agents to see their output.
+                </p>
+              </div>
             ) : node ? (
               <LiveAgentActivity node={node} />
             ) : (

@@ -201,6 +201,71 @@ describe("useSubagentFleet reconciliation", () => {
     expect(result.current.selectedNode).toEqual(completed)
   })
 
+  it("resolves a workflow selection to its first child when one exists", async () => {
+    mocks.snapshot.mockResolvedValue(snapshot)
+    const workflow: SubagentFleetNode = {
+      ...node,
+      id: "parent/wf-1",
+      subagentId: "wf-1",
+      runId: "wf-1",
+      nodeKind: "workflow",
+      agent: "workflow"
+    }
+    const child: SubagentFleetNode = {
+      ...node,
+      id: "parent/wf-1-step-1",
+      subagentId: "wf-1-step-1",
+      runId: "wf-1-step-1",
+      parentId: workflow.id
+    }
+    const events: ReadonlyArray<SubagentFleetEvent> = [workflow, child].map((n, index) => ({
+      _tag: "Upsert",
+      version: 2,
+      eventId: `upsert-${index}`,
+      occurredAt: 30 + index,
+      node: n
+    }))
+    const { result } = renderHook(() => useSubagentFleet({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      piSessionId: "parent",
+      events
+    }))
+
+    act(() => result.current.select(workflow.id))
+    expect(result.current.selectedNode).toEqual(child)
+  })
+
+  it("resolves a childless workflow selection to the workflow itself, never null", async () => {
+    // A null resolution silently rendered the MAIN conversation — a dead node
+    // with no explanation. The workflow node itself renders a real panel.
+    mocks.snapshot.mockResolvedValue(snapshot)
+    const workflow: SubagentFleetNode = {
+      ...node,
+      id: "parent/wf-1",
+      subagentId: "wf-1",
+      runId: "wf-1",
+      nodeKind: "workflow",
+      agent: "workflow"
+    }
+    const events: ReadonlyArray<SubagentFleetEvent> = [{
+      _tag: "Upsert",
+      version: 2,
+      eventId: "upsert-wf",
+      occurredAt: 30,
+      node: workflow
+    }]
+    const { result } = renderHook(() => useSubagentFleet({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      piSessionId: "parent",
+      events
+    }))
+
+    act(() => result.current.select(workflow.id))
+    expect(result.current.selectedNode).toEqual(workflow)
+  })
+
   it("does not restart or overlap reconciliation when events change", async () => {
     const pending = deferred<SubagentFleetSnapshot>()
     const nextPending = deferred<SubagentFleetSnapshot>()

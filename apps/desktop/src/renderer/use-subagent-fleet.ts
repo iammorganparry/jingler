@@ -178,11 +178,13 @@ export function useSubagentFleet(input: {
   const selectedNode = useMemo(() => {
     const resolved = context.tree.nodes.find((node) => node.id === selectedId) ??
       completedById.get(selectedId) ?? null
-    // A workflow node is an unselectable container (its output lives in the
-    // agents it controls). A selection can still land on one — a stale id from
-    // before its children registered — so resolve it to its first child.
+    // A workflow node is a container (its output lives in the agents it
+    // controls), so a selection landing on one resolves to its first child.
+    // With NO child in the tree (detached async run, journal debris, children
+    // settled away), fall back to the workflow node itself — resolving to null
+    // silently rendered the MAIN conversation, a dead end with no explanation.
     if (resolved?.nodeKind === "workflow") {
-      return context.tree.nodes.find((node) => node.parentId === resolved.id) ?? null
+      return context.tree.nodes.find((node) => node.parentId === resolved.id) ?? resolved
     }
     return resolved
   }, [completedById, context.tree.nodes, selectedId])
