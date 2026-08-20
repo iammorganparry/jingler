@@ -297,6 +297,7 @@ export const makePiAgentRuntimeLive = (
                       const linked = await persistPluginIssueReferences(
                         result.origin,
                         result.value,
+                        spec.prompt,
                         (issues) => Effect.runPromise(
                           sessionStore.addIssues(plugins.context.id, issues).pipe(
                             Effect.provideService(FileSystem.FileSystem, fs),

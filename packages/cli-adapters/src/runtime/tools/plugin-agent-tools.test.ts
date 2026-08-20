@@ -87,26 +87,52 @@ describe("plugin agent tools", () => {
     )
   })
 
-  it("decodes only typed issue-link envelopes", () => {
+  it("decodes only typed mutation envelopes", () => {
     const issue = {
       providerId: "linear", id: "issue-1", identifier: "ENG-1",
       url: "https://linear.app/acme/issue/ENG-1", title: "Fix it", labels: []
     }
     expect(issueReferencesFromPluginResult(origin, {
-      kind: "linear.issue-result", issues: [issue], result: { title: "Fix it" }
-    })).toEqual([issue])
-    expect(issueReferencesFromPluginResult(origin, { issues: [issue] })).toEqual([])
-    expect(issueReferencesFromPluginResult(origin, { kind: "linear.issue-result", issues: [{ id: "bad" }] })).toEqual([])
+      kind: "linear.issue-result", linkIntent: "mutation", issues: [issue], result: { title: "Fix it" }
+    }, "unrelated request")).toEqual([issue])
+    expect(issueReferencesFromPluginResult(origin, {
+      kind: "linear.issue-result", issues: [issue]
+    }, "ENG-1")).toEqual([])
+    expect(issueReferencesFromPluginResult(origin, {
+      kind: "linear.issue-result", linkIntent: "mutation", issues: [{ id: "bad" }]
+    }, "ENG-1")).toEqual([])
     expect(issueReferencesFromPluginResult(
       { ...origin, pluginId: "other" },
-      { kind: "linear.issue-result", issues: [issue] }
+      { kind: "linear.issue-result", linkIntent: "mutation", issues: [issue] },
+      "ENG-1"
     )).toEqual([])
     expect(issueReferencesFromPluginResult(origin, {
-      kind: "linear.issue-result", issues: [{ ...issue, providerId: "github" }]
-    })).toEqual([])
+      kind: "linear.issue-result", linkIntent: "mutation",
+      issues: [{ ...issue, providerId: "github" }]
+    }, "ENG-1")).toEqual([])
   })
 
-  it("persists every typed issue atomically and ignores untyped results", async () => {
+  it("links reference-only results only for an exact user identifier, UUID, or URL", () => {
+    const issue = {
+      providerId: "linear", id: "6f26f725-f0ac-4d1e-a132-b87a02b1de89", identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1/fix-it", title: "Fix it", labels: []
+    }
+    const result = {
+      kind: "linear.issue-result", linkIntent: "user-reference", issues: [issue]
+    }
+    expect(issueReferencesFromPluginResult(origin, result, "Please inspect eng-1.")).toEqual([issue])
+    expect(issueReferencesFromPluginResult(origin, result, `Inspect ${issue.id}`)).toEqual([issue])
+    expect(issueReferencesFromPluginResult(origin, result, `Inspect ${issue.url}`)).toEqual([issue])
+    expect(issueReferencesFromPluginResult(origin, result, "Search ENG-12 instead")).toEqual([])
+    expect(issueReferencesFromPluginResult(origin, result, "Search FOO-ENG-1 instead")).toEqual([])
+    expect(issueReferencesFromPluginResult(origin, result, "Fix it")).toEqual([])
+    expect(issueReferencesFromPluginResult(origin, {
+      ...result,
+      issues: [{ ...issue, id: "", identifier: "", url: "" }]
+    }, "unrelated request")).toEqual([])
+  })
+
+  it("persists mutations but ignores discovery and unreferenced reads", async () => {
     const issue = {
       providerId: "linear", id: "issue-1", identifier: "ENG-1",
       url: "https://linear.app/acme/issue/ENG-1", title: "Fix it", labels: []
@@ -114,12 +140,24 @@ describe("plugin agent tools", () => {
     const persist = vi.fn(async () => undefined)
     await expect(persistPluginIssueReferences(
       origin,
-      { kind: "linear.issue-result", issues: [issue, { ...issue, id: "issue-2", identifier: "ENG-2" }] },
+      { kind: "linear.issue-result", linkIntent: "mutation", issues: [issue] },
+      "unrelated request",
       persist
     )).resolves.toBe(true)
-    await expect(persistPluginIssueReferences(origin, { kind: "other", issues: [issue] }, persist)).resolves.toBe(false)
+    await expect(persistPluginIssueReferences(
+      origin,
+      { kind: "linear.issue-result", linkIntent: "none", issues: [issue] },
+      "ENG-1",
+      persist
+    )).resolves.toBe(false)
+    await expect(persistPluginIssueReferences(
+      origin,
+      { kind: "linear.issue-result", linkIntent: "user-reference", issues: [issue] },
+      "unrelated request",
+      persist
+    )).resolves.toBe(false)
     expect(persist).toHaveBeenCalledOnce()
-    expect(persist).toHaveBeenCalledWith([issue, { ...issue, id: "issue-2", identifier: "ENG-2" }])
+    expect(persist).toHaveBeenCalledWith([issue])
   })
 
   it("isolates a broken or colliding toolset", async () => {

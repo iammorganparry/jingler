@@ -102,9 +102,12 @@ export interface LinearUpdateRequest extends IssueGetRequest {
   readonly labelIds?: readonly string[]
 }
 
+export type LinearToolLinkIntent = "none" | "user-reference" | "mutation"
+
 /** Bounded machine-readable linkage metadata included in every agent tool result. */
 export interface LinearToolEnvelope<T = unknown> {
   readonly kind: "linear.issue-result"
+  readonly linkIntent: LinearToolLinkIntent
   readonly issues: readonly IssueReference[]
   readonly result: T
 }

@@ -58,6 +58,7 @@ import type {
   LinearProfile,
   LinearSelection,
   LinearToolEnvelope,
+  LinearToolLinkIntent,
   LinearUpdateRequest,
   LinearTeam,
   LinearViewer,
@@ -775,11 +776,13 @@ const reference = (
 }
 
 const envelope = <T>(
+  linkIntent: LinearToolLinkIntent,
   issues: readonly IssueReference[],
   result: T,
   providerAccountId?: string
 ): LinearToolEnvelope<T> => ({
   kind: "linear.issue-result",
+  linkIntent,
   issues: issues.map((issue) => reference(issue, providerAccountId)),
   result
 })
@@ -830,12 +833,12 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
       inputSchema: { type: "object", additionalProperties: false },
       risk: "network",
       idempotency: "safe",
-      execute: async (_input, context) => envelope([], await client.context(routeFrom(context)))
+      execute: async (_input, context) => envelope("none", [], await client.context(routeFrom(context)))
     },
     {
       ...base,
       id: "linear_search_issues",
-      description: "Search issues in the session's mapped Linear account. Use a focused identifier/title query; returned issues are linked to this session.",
+      description: "Search issues in the session's mapped Linear account. Use a focused identifier/title query; search results are not linked to the session.",
       inputSchema: {
         type: "object",
         properties: {
@@ -858,13 +861,13 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
           search: stringInput(input, "query") ?? "",
           mine: input.mine === true
         })).slice(0, limit)
-        return envelope(issues, issues.map(boundedSummary), await client.profileId(route))
+        return envelope("none", [], issues.map(boundedSummary))
       }
     },
     {
       ...base,
       id: "linear_get_issue",
-      description: "Fetch one Linear issue and comments by UUID or identifier. The issue is linked to this session.",
+      description: "Fetch one Linear issue and comments by UUID or identifier. It is linked only when the user referenced that issue in the current request.",
       inputSchema: {
         type: "object",
         properties: { issueId: { type: "string" } },
@@ -878,7 +881,7 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
         const route = routeFrom(context)
         const issue = await client.getIssue({ ...route, issueId: stringInput(input, "issueId", true)! })
         if (!issue) throw new Error("Linear could not find this issue.")
-        return envelope([issue], boundedIssue(issue), await client.profileId(route))
+        return envelope("user-reference", [issue], boundedIssue(issue), await client.profileId(route))
       }
     },
     {
@@ -917,7 +920,7 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
         if (assigneeId) Object.assign(createInput, { assigneeId })
         if (labelIds) Object.assign(createInput, { labelIds })
         const issue = await client.createIssue(createInput)
-        return envelope([issue], boundedIssue(issue), await client.profileId(route))
+        return envelope("mutation", [issue], boundedIssue(issue), await client.profileId(route))
       }
     },
     {
@@ -969,7 +972,7 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
           Object.assign(updateInput, { labelIds: optionalStringArray(input, "labelIds") })
         }
         const issue = await client.updateIssue(updateInput)
-        return envelope([issue], boundedIssue(issue), await client.profileId(route))
+        return envelope("mutation", [issue], boundedIssue(issue), await client.profileId(route))
       }
     },
     {
@@ -991,7 +994,7 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
         await client.addComment({ ...route, issueId, body: stringInput(input, "body", true)! })
         const issue = await client.getIssue({ ...route, issueId })
         if (!issue) throw new Error("Linear added the comment but could not reload the issue.")
-        return envelope([issue], boundedIssue(issue), await client.profileId(route))
+        return envelope("mutation", [issue], boundedIssue(issue), await client.profileId(route))
       }
     }
   ]

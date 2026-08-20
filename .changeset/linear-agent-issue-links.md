@@ -4,4 +4,4 @@
 "@jingler/desktop": minor
 ---
 
-Expose mapped Linear issue workflow tools to agents and automatically link successful issue results to their session.
+Expose mapped Linear issue workflow tools to agents. Automatically link created, updated, or commented issues, plus issues explicitly referenced by the user; discovery searches remain side-effect free.

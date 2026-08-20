@@ -1,4 +1,4 @@
-import type { AgentToolset, Disposable, HostContext, IssueComment, IssueSummary } from "@jingler/plugin-sdk/host"
+import type { AgentToolDefinition, AgentToolset, Disposable, HostContext, IssueComment, IssueSummary } from "@jingler/plugin-sdk/host"
 import { describe, expect, it, vi } from "vitest"
 import {
   activateWithClient,
@@ -561,7 +561,7 @@ describe("activateWithClient", () => {
       configured: async () => true,
       profileId: async () => "profile-1",
       context: async () => ({ viewer: { id: "u", name: "U", avatarUrl: null }, workspace: { id: "w", name: "W", urlKey: "w" }, teams: [], projects: [], workflowStates: [], labels: [], members: [], priorities: [] }),
-      listIssues: async () => [],
+      listIssues: async () => [await getIssue()],
       getIssue,
       createIssue: async () => getIssue(),
       updateIssue: async () => getIssue(),
@@ -575,13 +575,31 @@ describe("activateWithClient", () => {
       agentTools: { registerToolset: (value) => { toolset = value; return registration } }
     }, client)
 
-    const tool = toolset?.tools.find(({ id }) => id === "linear_get_issue")
-    const result = await tool?.execute(
-      { issueId: "ENG-1", repository: { name: "spoofed", path: "/evil" } },
-      { signal: new AbortController().signal, session: { id: "session-1", repository } }
-    )
+    const context = {
+      signal: new AbortController().signal,
+      session: { id: "session-1", repository }
+    }
+    const execute = (toolId: string, input: Parameters<AgentToolDefinition["execute"]>[0]) =>
+      toolset?.tools.find(({ id }) => id === toolId)?.execute(input, context)
+
+    const search = await execute("linear_search_issues", { query: "ENG" })
+    const fetched = await execute("linear_get_issue", {
+      issueId: "ENG-1",
+      repository: { name: "spoofed", path: "/evil" }
+    })
+    const created = await execute("linear_create_issue", { title: "Create it" })
+    const updated = await execute("linear_update_issue", { issueId: "ENG-1", title: "Update it" })
+    const commented = await execute("linear_add_comment", { issueId: "ENG-1", body: "Done" })
 
     expect(getIssue).toHaveBeenCalledWith({ sessionId: "session-1", repository, issueId: "ENG-1" })
-    expect(result).toMatchObject({ kind: "linear.issue-result", issues: [{ id: "issue-1" }] })
+    expect(search).toMatchObject({ kind: "linear.issue-result", linkIntent: "none", issues: [] })
+    expect(fetched).toMatchObject({
+      kind: "linear.issue-result", linkIntent: "user-reference", issues: [{ id: "issue-1" }]
+    })
+    for (const result of [created, updated, commented]) {
+      expect(result).toMatchObject({
+        kind: "linear.issue-result", linkIntent: "mutation", issues: [{ id: "issue-1" }]
+      })
+    }
   })
 })
