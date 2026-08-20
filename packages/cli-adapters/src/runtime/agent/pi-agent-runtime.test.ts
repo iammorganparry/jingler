@@ -79,6 +79,34 @@ const context: AgentRuntimeContext = {
   proposePlan: () => Effect.succeed({ _tag: "Reject" })
 }
 
+/** A handle that settles each prompt immediately, retained while `fleet.childActive`. */
+const settlingHandle = (fleet: { childActive: boolean }): PiSessionHandle => ({
+  ...fleetSeams,
+  id: "/sessions/parent.jsonl",
+  parentPiSessionId: "pi-parent-internal",
+  modelId: "anthropic/claude-sonnet",
+  contextWindow: 200_000,
+  subscribe: (next) => {
+    queueMicrotask(() => next({ type: "agent_settled" }))
+    return vi.fn()
+  },
+  prompt: async () => undefined,
+  steer: async () => undefined,
+  interrupt: async () => undefined,
+  dispose: vi.fn(),
+  subagentFleetSnapshot: async () => ({
+    version: 2,
+    parentPiSessionId: "pi-parent-internal",
+    registryRevision: 0,
+    generatedAt: 1,
+    totalActive: fleet.childActive ? 1 : 0,
+    omitted: 0,
+    activeCapacity: { used: fleet.childActive ? 1 : 0, limit: 4 },
+    nodes: []
+  }),
+  usage: () => ({ costUsd: 0, tokens: 1 })
+})
+
 describe("PiAgentRuntime", () => {
   it("normalizes session construction failure as one terminal event", async () => {
     const runtime = await Effect.runPromise(
@@ -660,6 +688,56 @@ describe("PiAgentRuntime", () => {
     // CURRENT turn — a snapshot of turn 1's lease is a dead endpoint.
     expect(toolContext!.mcp).toBe(secondMcp)
     childActive = false
+  })
+
+
+  it("rebuilds a retained session when the turn role changes, reusing its session file", async () => {
+    // Tools and prompt resources are locked per role at session creation. A
+    // plan-role session reused for a plan-execution turn ran the approved plan
+    // with the planning toolset — no edit or command tools, implementation
+    // permanently blocked. A role change must dispose and recreate; the
+    // factory reopens the same pi session file so model context carries over.
+    const fleet = { childActive: true }
+    const handles: PiSessionHandle[] = []
+    const create = vi.fn((_spec: PiRunSpec, _context: AgentRuntimeContext) => {
+      const handle = settlingHandle(fleet)
+      handles.push(handle)
+      return Effect.succeed(handle)
+    })
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
+    )
+
+    await Effect.runPromise(
+      Stream.runCollect(runtime.run({ ...spec, role: "plan", mode: "plan" }, context))
+    )
+    expect(create).toHaveBeenCalledOnce()
+
+    await Effect.runPromise(
+      Stream.runCollect(
+        runtime.run(
+          {
+            ...spec,
+            runId: "run-2",
+            prompt: "execute the plan",
+            role: "plan-execution",
+            mode: "auto",
+            piSessionId: "/sessions/parent.jsonl"
+          },
+          context
+        )
+      )
+    )
+    expect(create).toHaveBeenCalledTimes(2)
+    // The stale plan-role session was disposed, not leaked.
+    expect(handles[0]?.dispose).toHaveBeenCalled()
+    // The recreation resumes the SAME session file with the new role: the
+    // factory reopens it because piSessionId is set and seed stays null.
+    const recreation = create.mock.calls[1]?.[0]
+    expect(recreation?.role).toBe("plan-execution")
+    expect(recreation?.piSessionId).toBe("/sessions/parent.jsonl")
+    expect(recreation?.seed).toBeNull()
+    fleet.childActive = false
   })
 
   it("surfaces prompt rejection when final reconciliation also rejects", async () => {

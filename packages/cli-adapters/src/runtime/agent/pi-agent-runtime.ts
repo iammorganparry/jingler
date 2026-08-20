@@ -284,6 +284,8 @@ interface RetainedPiSession {
   readonly handle: PiSessionHandle
   readonly sessionId: string
   readonly chatId: string
+  /** The role the session's locked resources were built for — see `acquire`. */
+  readonly role: PiRunSpec["role"]
   readonly aliases: ReadonlySet<string>
   /** The turn context every session-lifetime closure delegates to — see `rebindableContext`. */
   readonly contextHolder: { current: AgentRuntimeContext }
@@ -361,6 +363,19 @@ class PiSessionRegistry {
           message: `pi session is already active: ${spec.piSessionId}`
         }))
       }
+      // Tools and prompt resources are LOCKED per role at session creation
+      // (`createResources` builds them from spec.role). Reusing a retained
+      // session across a role change ran plan-execution turns caged in the
+      // plan role's read-only toolset — no edit or command tools, so an
+      // approved plan could never be implemented. Dispose the stale record
+      // and rebuild: the factory reopens the SAME pi session file
+      // (`spec.piSessionId` with no seed), so model context carries over
+      // while the locked resources are rebuilt for the new role.
+      if (retained.role !== spec.role) {
+        return Effect.promise(() => this.#dispose(retained)).pipe(
+          Effect.flatMap(() => this.#create(spec, context))
+        )
+      }
       if (retained.handle.modelId !== String(spec.modelId)) {
         return Effect.fail(new AgentRuntimeError({
           reason: "runtime",
@@ -376,6 +391,13 @@ class PiSessionRegistry {
       retained.contextHolder.current = context
       return Effect.succeed(retained)
     }
+    return this.#create(spec, context)
+  }
+
+  #create(
+    spec: PiRunSpec,
+    context: AgentRuntimeContext
+  ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
     const contextHolder = { current: context }
     return this.factory.create(spec, rebindableContext(contextHolder)).pipe(
       Effect.map((handle) => {
@@ -384,6 +406,7 @@ class PiSessionRegistry {
           handle,
           sessionId: spec.sessionId,
           chatId: spec.chatId,
+          role: spec.role,
           aliases,
           contextHolder,
           activeTurns: 1,
