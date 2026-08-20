@@ -7,7 +7,7 @@ settings:
 patchedDependencies:
   '@pierre/diffs@1.3.0-beta.11':
     hash: 5d0da83f10c372826d076676ae0aa74bb85c68ef97323f793c3e2fb6e9e27845
-    path: patches/@pierre__diffs@1.3.0-beta.11.patch
+    path: ../../../../repos/jingler/patches/@pierre__diffs@1.3.0-beta.11.patch
   pi-subagents@0.49.0:
     hash: 385daca045323f4f751b7277d9fa1bacd59ace7b43c0288a9757de9f24e8c64c
     path: patches/pi-subagents@0.49.0.patch
