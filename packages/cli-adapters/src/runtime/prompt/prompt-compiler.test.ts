@@ -89,6 +89,18 @@ describe("PromptCompiler", () => {
     expect(result.text).toContain("Never mark a stage complete")
   })
 
+  it("makes plan execution the main agent's own work, never a delegated run", () => {
+    const result = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("plan-execution", "accept-edits"),
+      tools: [tool],
+      tokenBudget: 2_000
+    })
+    expect(result.text).toContain("Implement plan stages YOURSELF")
+    expect(result.text).toContain("never hand a plan task's implementation to a subagent")
+    // The old policy actively encouraged delegating whole stages — pinned gone.
+    expect(result.text).not.toContain("When you delegate a stage to a sub-agent")
+  })
+
   it("holds conversation agents to the collaboration contract, but not approved-plan executors", () => {
     const conversation = new PromptCompiler().compile({
       layers: runtimeInvariantLayers("conversation", "ask"),

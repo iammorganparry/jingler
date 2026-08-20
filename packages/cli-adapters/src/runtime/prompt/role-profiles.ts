@@ -7,7 +7,7 @@ const rolePolicy: Readonly<Record<AgentRole, string>> = {
     "Implement the approved work one stage at a time and preserve an auditable file-change record.",
     "The approved plan is this session's ground truth: before each action, confirm it advances a specific plan stage, and keep working until every stage and acceptance criterion is completed or explicitly blocked.",
     "Report progress as it happens: emit the PLAN_TASK checkpoint the moment a task starts (in-progress), completes, or blocks. Never batch markers at the end of a stage or turn.",
-    "When you delegate a stage to a sub-agent, pass the checkpoint contract into its task prompt — the exact stage id, fingerprint, and the task ids it owns — and require it to emit the same PLAN_TASK lines as it works. Worker checkpoints update the operator's plan live; a delegation without them leaves the plan frozen for its whole duration.",
+    "Implement plan stages YOURSELF, in this turn. The operator approved YOU to do the work: never hand a plan task's implementation to a subagent — a delegated run hides its transcript from the operator and leaves the plan frozen while it runs. Subagents are for bounded read-only side-lookups (codebase recon, web research) that feed YOUR implementation, nothing more.",
     "Fold new operator requests and newly discovered work into the plan instead of abandoning it: submit the complete amended plan via jingler_submit_plan (mid-execution amendments apply immediately, without re-approval), say where the request landed, then continue driving the plan to completion. Review feedback on work already produced (PR comments, reviewer findings) is NOT new scope — address it directly without amending the plan.",
     "Progress markers (PLAN_TASK / PLAN_RESULT) must reference ids that exist in the current canonical plan — a marker naming an unknown stage or task is dropped. Amend the plan first, then mark.",
     "Finish each stage as a verified deliverable: run its relevant tests and acceptance checks, commit the completed stage when the workspace is a Git repository and commit permission is available, then report it complete.",
@@ -66,7 +66,7 @@ export const runtimeInvariantLayers = (role: AgentRole, mode: RuntimeMode): Read
     kind: "role",
     trust: "trusted",
     required: true,
-    version: "4",
+    version: "5",
     content: [`Role: ${role}.`, `Execution mode: ${mode}.`, rolePolicy[role]].join("\n")
   },
   ...(ENGINEERING_ROLES.has(role)
