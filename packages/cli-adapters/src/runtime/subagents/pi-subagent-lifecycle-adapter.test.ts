@@ -236,7 +236,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
-  it("publishes live child progress and bounded supervisor state without polling", () => {
+  it("publishes one direct child with no redundant root", () => {
     const events = createEventBus()
     const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
@@ -274,14 +274,17 @@ describe("PiSubagentLifecycleAdapter", () => {
       }]
     })
 
-    expect(adapter.snapshot().nodes).toEqual(expect.arrayContaining([
+    expect(adapter.snapshot().nodes).toEqual([
       expect.objectContaining({
         subagentId: "run-1:step:0",
+        runId: "run-1:step:0",
+        nodeKind: "agent",
+        parentId: null,
         currentTool: "workspace_read_file",
         sessionFile: "/sessions/child.jsonl",
         usage: expect.objectContaining({ totalTokens: 5, toolCalls: 1 })
       })
-    ]))
+    ])
     expect(adapter.supervisorSnapshot()).toMatchObject({
       status: "running",
       siblings: [expect.objectContaining({
