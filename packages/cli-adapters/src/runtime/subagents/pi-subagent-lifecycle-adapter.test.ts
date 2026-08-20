@@ -116,7 +116,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
-  it("reads a completed child transcript after its active node is removed", async () => {
+  it("keeps one direct child identity through steering, completion, and transcript", async () => {
     const root = await mkdtemp(join(process.cwd(), ".pi-completed-transcript-"))
     const manager = SessionManager.create(process.cwd(), root)
     manager.appendMessage({ role: "user", content: "Inspect", timestamp: 1 })
@@ -149,7 +149,70 @@ describe("PiSubagentLifecycleAdapter", () => {
       now: () => 10
     })
     adapter.start()
+    let steeredRunId = ""
+    const unsubscribe = events.on("subagents:rpc:v1:request", (request) => {
+      if (!request || typeof request !== "object" ||
+        !("requestId" in request) || !("method" in request) || !("params" in request) ||
+        typeof request.requestId !== "string" || request.method !== "steer" ||
+        !request.params || typeof request.params !== "object" || !("runId" in request.params) ||
+        typeof request.params.runId !== "string") return
+      steeredRunId = request.params.runId
+      events.emit(`subagents:rpc:v1:reply:${request.requestId}`, {
+        version: 1,
+        requestId: request.requestId,
+        method: "steer",
+        success: true,
+        data: {
+          details: {
+            steering: {
+              requestId: "native-direct-steer",
+              deliveryStatus: "delivered"
+            }
+          }
+        }
+      })
+    })
     try {
+      adapter.progress({
+        runId: "run-1",
+        mode: "single",
+        children: [{
+          index: 0,
+          runId: "child-run",
+          agent: "worker",
+          status: "running",
+          task: "Inspect",
+          tokens: 2,
+          toolCount: 1,
+          durationMs: 10,
+          sessionFile
+        }]
+      })
+      expect(adapter.snapshot().nodes).toEqual([
+        expect.objectContaining({
+          subagentId: "child-run",
+          runId: "child-run",
+          nodeKind: "agent",
+          parentId: null,
+          sessionFile
+        })
+      ])
+      await expect(adapter.control({
+        version: 2,
+        requestId: "direct-steer",
+        parentPiSessionId: parent,
+        runId: "child-run",
+        action: "steer",
+        message: "Check the edge case",
+        replyTo: null
+      })).resolves.toMatchObject({
+        acknowledged: true,
+        runId: "child-run",
+        deliveryStatus: "delivered",
+        nativeRequestId: "native-direct-steer"
+      })
+      expect(steeredRunId).toBe("child-run")
+
       events.emit("subagent:async-complete", {
         runId: "run-1",
         sessionId: parent,
@@ -173,6 +236,7 @@ describe("PiSubagentLifecycleAdapter", () => {
         })])
       )
     } finally {
+      unsubscribe()
       adapter.stop()
       await rm(root, { recursive: true, force: true })
     }
@@ -355,7 +419,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
-  it("uses the native child run ID across progress and completion", () => {
+  it("keeps a genuine workflow container and canonical children visible", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
@@ -365,23 +429,55 @@ describe("PiSubagentLifecycleAdapter", () => {
       now: () => 50
     })
     adapter.start()
+    adapter.progress({ runId: "workflow-run", mode: "workflow", children: [] })
     adapter.progress({
       runId: "workflow-run",
       mode: "workflow",
       children: [{
         index: 0,
-        runId: "canonical-child",
+        runId: "canonical-child-a",
         agent: "worker",
         status: "running",
-        task: "Inspect",
+        task: "Inspect A",
         tokens: 0,
         toolCount: 0,
         durationMs: 1,
-        sessionFile: null
+        sessionFile: "/sessions/child-a.jsonl"
+      }, {
+        index: 1,
+        runId: "canonical-child-b",
+        agent: "reviewer",
+        status: "running",
+        task: "Inspect B",
+        tokens: 0,
+        toolCount: 0,
+        durationMs: 1,
+        sessionFile: "/sessions/child-b.jsonl"
       }]
     })
-    expect(adapter.snapshot().nodes.map(({ subagentId }) => subagentId))
-      .toEqual(["canonical-child"])
+    const snapshot = adapter.snapshot()
+    expect(snapshot.nodes).toHaveLength(3)
+    const workflow = snapshot.nodes.find((node) => node.nodeKind === "workflow")
+    expect(workflow).toMatchObject({
+      subagentId: "workflow-run",
+      runId: "workflow-run",
+      parentId: null,
+      sessionFile: null
+    })
+    expect(snapshot.nodes.filter((node) => node.nodeKind === "agent")).toEqual([
+      expect.objectContaining({
+        subagentId: "canonical-child-a",
+        runId: "canonical-child-a",
+        parentId: workflow?.id,
+        sessionFile: "/sessions/child-a.jsonl"
+      }),
+      expect.objectContaining({
+        subagentId: "canonical-child-b",
+        runId: "canonical-child-b",
+        parentId: workflow?.id,
+        sessionFile: "/sessions/child-b.jsonl"
+      })
+    ])
 
     events.emit("subagent:async-complete", {
       runId: "workflow-run",
@@ -390,8 +486,13 @@ describe("PiSubagentLifecycleAdapter", () => {
       success: true,
       results: [{
         index: 0,
-        runId: "canonical-child",
+        runId: "canonical-child-a",
         agent: "worker",
+        success: true
+      }, {
+        index: 1,
+        runId: "canonical-child-b",
+        agent: "reviewer",
         success: true
       }]
     })

@@ -76,6 +76,10 @@ describe("PromptCompiler", () => {
     expect(result.manifest.activeTools).toContain("subagent")
     expect(result.text).toContain("use the native subagent tool")
     expect(result.text).toContain("Never launch coding CLIs through command_execute")
+    expect(result.text).toContain("Self-implementation stays in the visible Main transcript")
+    expect(result.text).toContain("never launch a workflow or child named main as its proxy")
+    expect(result.text).toContain("A single delegated unit is always { agent, task }")
+    expect(result.text).toContain("two or more named children with distinct tasks")
   })
 
   it("requires a plan-execution stage to be tested and committed before advancing", () => {
@@ -96,6 +100,8 @@ describe("PromptCompiler", () => {
       tokenBudget: 2_000
     })
     expect(result.text).toContain("Implement plan stages YOURSELF")
+    expect(result.text).toContain("in the visible Main transcript")
+    expect(result.text).toContain("Never launch a workflow or child named main as a proxy")
     expect(result.text).toContain("never hand a plan task's implementation to a subagent")
     // The old policy actively encouraged delegating whole stages — pinned gone.
     expect(result.text).not.toContain("When you delegate a stage to a sub-agent")

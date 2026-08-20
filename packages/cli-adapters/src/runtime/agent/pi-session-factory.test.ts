@@ -164,6 +164,15 @@ describe("pi session creation", () => {
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
       "Never launch coding CLIs through command_execute"
     )
+    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
+      "Implementation belongs to YOU: do it in the visible Main transcript"
+    )
+    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
+      "Never launch a workflow or child named `main` as a proxy"
+    )
+    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
+      "two or more named children with distinct tasks"
+    )
     expect(received?.sessionManager?.getEntries()).toEqual([
       expect.objectContaining({
         type: "custom_message",
