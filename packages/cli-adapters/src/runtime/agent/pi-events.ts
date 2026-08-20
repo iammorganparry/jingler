@@ -98,6 +98,7 @@ const SubagentProgress = Schema.Struct({
     stopped: Schema.optional(Schema.Boolean),
     timedOut: Schema.optional(Schema.Boolean),
     interrupted: Schema.optional(Schema.Boolean),
+    detached: Schema.optional(Schema.Boolean),
     sessionFile: Schema.optional(Schema.String)
   })), { default: () => [] }),
   workflow: Schema.optional(Schema.Struct({
@@ -190,9 +191,13 @@ export const piSubagentProgress = (
   const decoded = Option.getOrUndefined(decodeSubagentProgress(result?.details))
   if (!decoded) return null
   const results = new Map(decoded.results.map((child) => [child.index, child]))
-  // The tool result ENDING settles the run — unless it is an async spawn
-  // acknowledgment, whose detached run lives on after the tool returns.
-  const settled = event.type === "tool_execution_end" && decoded.asyncId === undefined
+  // The tool result ENDING settles the run unless execution continues behind
+  // an async acknowledgment or a foreground supervisor-detach receipt.
+  const detachedForeground = decoded.mode === "single" &&
+    decoded.results.some((child) => child.detached === true)
+  const settled = event.type === "tool_execution_end" &&
+    decoded.asyncId === undefined &&
+    !detachedForeground
   if (decoded.progress.length > 0) {
     return {
       runId: decoded.runId,
@@ -250,9 +255,11 @@ export const piSubagentProgress = (
         index: child.index ?? position,
         runId: child.runId ?? null,
         agent: child.agent ?? `step-${(child.index ?? position) + 1}`,
-        status: child.error !== undefined || child.timedOut || child.stopped || child.interrupted
-          ? "failed" as const
-          : "completed" as const,
+        status: child.detached
+          ? "detached" as const
+          : child.error !== undefined || child.timedOut || child.stopped || child.interrupted
+            ? "failed" as const
+            : "completed" as const,
         task: child.task ?? "Delegated work",
         tokens: 0,
         toolCount: 0,
@@ -268,7 +275,7 @@ export const piSubagentProgress = (
 export const piSupervisorAttention = (
   event: AgentSessionEvent
 ): PiSubagentSupervisorAttentionInput | null => {
-  if (event.type !== "message_end") return null
+  if (event.type !== "message_start" && event.type !== "message_end") return null
   const message = Option.getOrUndefined(decodeSupervisorAttention(event.message))
   if (!message || !message.details.expectsReply || message.details.reason === "progress_update") {
     return null

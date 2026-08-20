@@ -57,6 +57,8 @@ const READ_TOOL = "workspace_read_file"
 const WRITE_TOOL = "workspace_write"
 const RENAME_TOOL = "workspace_rename"
 const COMMAND_TOOL = "command_execute"
+const SUBAGENT_TOOL = "subagent"
+const SUPERVISOR_REVIEW_TASK = "Review the checkout flow against its acceptance criteria."
 const MEMORY_PROPOSE_TOOL = "mcp__jingler-memory__memory_propose"
 const MEMORY_WORKFLOW_TOOL = "mcp__jingler-memory__memory_workflow_status"
 const E2E_CONTEXT_WINDOW = 1_000_000
@@ -347,6 +349,26 @@ const heldSubagentsResponse = (
     )
   }
   return fauxAssistantMessage(direct ? "Direct child reported back." : "Both agents reported back.")
+}
+
+const supervisorSubagentResponse = (
+  context: PiContext
+): ReturnType<typeof fauxAssistantMessage> | null => {
+  const prompts = operatorText(context)
+  if (!prompts.some((text) => text.includes("[[supervisor-subagent]]"))) return null
+  if (prompts.some((text) =>
+    text.includes("Should I include accessibility behavior in this review?")
+  )) {
+    return fauxAssistantMessage("Reviewer is waiting for supervisor input.")
+  }
+  if (recentToolResultCount(context, SUBAGENT_TOOL) === 0) {
+    return callTool(
+      SUBAGENT_TOOL,
+      { agent: "reviewer", task: SUPERVISOR_REVIEW_TASK },
+      "supervisor-reviewer"
+    )
+  }
+  return fauxAssistantMessage("Reviewer detached promptly and is waiting for supervisor input.")
 }
 
 const memoryResponse = (
@@ -646,6 +668,8 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
   }
   const fileBrowser = fileBrowserResponse(context)
   if (fileBrowser !== null) return fileBrowser
+  const supervisorSubagent = supervisorSubagentResponse(context)
+  if (supervisorSubagent !== null) return supervisorSubagent
   const heldSubagents = heldSubagentsResponse(context)
   if (heldSubagents !== null) return heldSubagents
   const memory = memoryResponse(context)

@@ -1,8 +1,17 @@
 diff --git a/src/extension/index.ts b/src/extension/index.ts
-index fa7a5d60c9a5e7c0f8f41eb8fa2f48b237678816..600fcee5225990ae283b2b0e2bcd88e0e6260d46 100644
+index fa7a5d60c9a5e7c0f8f41eb8fa2f48b237678816..1808fb2b42db3d8aae692ed3ec8d812f1fe7b3fb 100644
 --- a/src/extension/index.ts
 +++ b/src/extension/index.ts
-@@ -569,6 +569,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+@@ -543,6 +543,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 	});
+ 
+ 	const executeSubagentCollapsed = (id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: ((result: AgentToolResult<Details>) => void) | undefined, ctx: ExtensionContext) => {
++		state.lastUiContext = ctx;
++		supervisorChannel.start();
+ 		if (ctx.hasUI) ctx.ui.setToolsExpanded(false);
+ 		return executor.executePublic(id, params, signal, onUpdate, ctx);
+ 	};
+@@ -569,6 +571,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
  		events: pi.events,
  		getContext: () => state.lastUiContext,
  		execute: (id, params, signal, onUpdate, ctx) => executor.executePublic(id, params, signal, onUpdate, ctx),
@@ -11,7 +20,7 @@ index fa7a5d60c9a5e7c0f8f41eb8fa2f48b237678816..600fcee5225990ae283b2b0e2bcd88e0
  	});
  
 diff --git a/src/extension/public-execution.ts b/src/extension/public-execution.ts
-index 50a9e6385d920b9cfe3f5d8b5f33c6c237ccbd1f..7986180ee54471813c9e65eedbe6ed752bacac4f 100644
+index 50a9e6385d920b9cfe3f5d8b5f33c6c237ccbd1f..8c7e8e3692da580c978cce0213290f497aaa3815 100644
 --- a/src/extension/public-execution.ts
 +++ b/src/extension/public-execution.ts
 @@ -91,12 +91,33 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
@@ -88,11 +97,76 @@ index 9dd171b3cfb97d2253fb3244ced4ebed4508df47..b396153b7b5da83d7413d7786d016e94
  	if (!ctx) throw new SubagentRpcError("no_active_session", "No active extension context for subagent RPC.");
  
  	if (request.method === "spawn") {
+diff --git a/src/extension/tool-description.ts b/src/extension/tool-description.ts
+index cf182f2acc133e847f720a133e5eb3e3db512019..81c705ecff3aba4c17524a1472bc8390b516dc10 100644
+--- a/src/extension/tool-description.ts
++++ b/src/extension/tool-description.ts
+@@ -18,8 +18,8 @@ export const FULL_SUBAGENT_TOOL_DESCRIPTION = `Run one child with { agent, task?
+ 
+ EXECUTION:
+ • Before executing, use { action: "list" } and run only executable/non-disabled configured agents.
+-• SINGLE CHILD: { agent:"worker", task:"..." }. This structured form starts exactly one child through the workflow runtime. Workflow-level fields such as model, context, cwd, worktree, output, budgets, acceptance, and async remain defaults for that child. Do not combine agent/task with action or workflowScript.
+-• WORKFLOW SCRIPT: { workflowScript: "return runs.run('main', {agent:'worker', task:'...'})" }. Use stable-key runs.run for one child and runs.all for parallel children; ordinary JavaScript provides sequence, branching, filtering, retries, and aggregation. workflowScript is an ordinary JavaScript statement body, so use an explicit return for a useful result. For task text with Markdown fences or shell blocks, build quoted lines instead of nesting raw template literals: \`const task=["Run:","\`\`\`bash","npm test","\`\`\`"].join("\\n")\`. Scripts start asynchronously by default; pass async:false only for a small foreground run. Same-repo foreground workflows default to a live in-chat card; set chatProgress to auto, off, or live-card to control that projection. Workflow-level child controls default onto each runs.run launch, and explicit child fields override them. Use await prompts.render("package:name" | "user:name" | "project:name", vars?) for reusable plain task text, then pass the result explicitly as task. Use {action:"children.list"} to list up to 10 completed retained children from this parent session, then continue one with runs.run(key, {resume:"run-id", task:"follow-up"}); resume and agent are mutually exclusive, resume keeps the stored agent/model/tool contract, workflow resumes wait for completed output, and loops must continue from each latest returned runId. For repository mutation lanes, set worktree:true on the workflow or individual runs.run/runs.all item for managed isolation; each parallel child gets a separate worktree and handoff artifact. A workflow usageBudget is enforced once across the workflow. Available globals are runs.run, runs.all, runs.status, runs.ref/refs, prompts.render, emit, console, and standard JavaScript only. Workflows get async state.get(key) and state.set(key, JSONValue) through their automatic or explicit mission; mission:false workflows do not have a state global. Scripts cannot access filesystem, shell, arbitrary Pi tools, or host globals.
++• SINGLE CHILD: { agent:"worker", task:"..." }. This structured form starts exactly one direct child with its own transcript and controls. Top-level fields such as model, context, cwd, worktree, output, budgets, acceptance, and async apply to that child. Do not combine agent/task with action or workflowScript.
++• WORKFLOW SCRIPT: use only to coordinate two or more named children with distinct tasks. Use stable-key runs.run for sequential phases and runs.all for parallel children; ordinary JavaScript provides sequence, branching, filtering, retries, and aggregation. workflowScript is an ordinary JavaScript statement body, so use an explicit return for a useful result. For task text with Markdown fences or shell blocks, build quoted lines instead of nesting raw template literals: \`const task=["Run:","\`\`\`bash","npm test","\`\`\`"].join("\\n")\`. Scripts start asynchronously by default; pass async:false only for a small foreground run. Same-repo foreground workflows default to a live in-chat card; set chatProgress to auto, off, or live-card to control that projection. Workflow-level child controls default onto each runs.run launch, and explicit child fields override them. Use await prompts.render("package:name" | "user:name" | "project:name", vars?) for reusable plain task text, then pass the result explicitly as task. Use {action:"children.list"} to list up to 10 completed retained children from this parent session, then continue one with runs.run(key, {resume:"run-id", task:"follow-up"}); resume and agent are mutually exclusive, resume keeps the stored agent/model/tool contract, workflow resumes wait for completed output, and loops must continue from each latest returned runId. For repository mutation lanes, set worktree:true on the workflow or individual runs.run/runs.all item for managed isolation; each parallel child gets a separate worktree and handoff artifact. A workflow usageBudget is enforced once across the workflow. Available globals are runs.run, runs.all, runs.status, runs.ref/refs, prompts.render, emit, console, and standard JavaScript only. Workflows get async state.get(key) and state.set(key, JSONValue) through their automatic or explicit mission; mission:false workflows do not have a state global. Scripts cannot access filesystem, shell, arbitrary Pi tools, or host globals.
+ • Sequential example: { workflowScript: "const a = await runs.run('analyze', {agent:'agent-a', task:'Analyze the request'}); return (await runs.run('plan', {agent:'agent-b', task:'Plan from: '+a.output})).output" }
+ • Parallel example: { workflowScript: "const [a,b] = await runs.all([{key:'correctness',agent:'agent-a',task:'Review correctness'},{key:'tests',agent:'agent-b',task:'Review tests'}]); return {correctness:a.output,tests:b.output}" }
+ • Optional context is "fresh" or "fork". timeoutMs/maxRuntimeMs apply to foreground and async workflows; foreground workflows default to 30 minutes and async workflows have no default timeout. Omit acceptance for reviewer/read-only calls; evidence levels end at verified, and acceptance.review.required requests independent writer review.
+@@ -38,8 +38,8 @@ export const COMPACT_SUBAGENT_TOOL_DESCRIPTION = `Run one child with { agent, ta
+ 
+ EXECUTE:
+ • Call { action:"list" } first and use only executable/non-disabled agents.
+-• SINGLE {agent:"worker",task:"..."} starts exactly one child through the workflow runtime. Workflow-level fields remain child defaults. Do not combine agent/task with action or workflowScript.
+-• SCRIPT {workflowScript:"return runs.run('main', {agent:'worker', task:'...'})"}. Use stable-key runs.run for one child and runs.all for parallel work. Use await prompts.render("package:name" | "user:name" | "project:name", vars?) for reusable task text and pass it explicitly to runs.run. Use {action:"children.list"} for the last 10 retained children in this parent session, then runs.run(key,{resume:"run-id",task:"follow-up"}) to continue one with its stored contract; workflow resumes wait for completion and loops continue from the latest returned runId. Workflows get async state.get/state.set through their automatic or explicit mission; mission:false does not. Scripts are ordinary JavaScript statement bodies; use explicit return for a useful result. For task text with Markdown fences or shell blocks, build quoted lines instead of nesting raw template literals: \`const task=["Run:","\`\`\`bash","npm test","\`\`\`"].join("\\n")\`. Use JavaScript for sequence, branching, retries, and aggregation. For repository mutation lanes, use worktree:true on the workflow or runs.run/runs.all item for managed isolation. Scripts start async by default; async:false is the foreground escape hatch and auto-enables a same-repo live chat card unless chatProgress is off.
++• SINGLE {agent:"worker",task:"..."} starts exactly one direct child with its own transcript and controls. Top-level fields apply to that child. Do not combine agent/task with action or workflowScript.
++• SCRIPT coordinates two or more named children with distinct tasks. Use stable-key runs.run for sequential phases and runs.all for parallel work. Use await prompts.render("package:name" | "user:name" | "project:name", vars?) for reusable task text and pass it explicitly to runs.run. Use {action:"children.list"} for the last 10 retained children in this parent session, then runs.run(key,{resume:"run-id",task:"follow-up"}) to continue one with its stored contract; workflow resumes wait for completion and loops continue from the latest returned runId. Workflows get async state.get/state.set through their automatic or explicit mission; mission:false does not. Scripts are ordinary JavaScript statement bodies; use explicit return for a useful result. For task text with Markdown fences or shell blocks, build quoted lines instead of nesting raw template literals: \`const task=["Run:","\`\`\`bash","npm test","\`\`\`"].join("\\n")\`. Use JavaScript for sequence, branching, retries, and aggregation. For repository mutation lanes, use worktree:true on the workflow or runs.run/runs.all item for managed isolation. Scripts start async by default; async:false is the foreground escape hatch and auto-enables a same-repo live chat card unless chatProgress is off.
+ • Example: {workflowScript:"const [a,b]=await runs.all([{key:'a',agent:'agent-a',task:'Implement A',worktree:true},{key:'b',agent:'agent-b',task:'Implement B',worktree:true}]); return [a.output,b.output]"}
+ • context can be fresh or fork. timeoutMs/maxRuntimeMs apply to foreground and async workflows; foreground workflows default to 30 minutes and async workflows have no default timeout. Omit acceptance for reviewer/read-only calls.
+ 
 diff --git a/src/intercom/native-supervisor-channel.ts b/src/intercom/native-supervisor-channel.ts
-index 3e30e8b49e774d82fd62f07acba1266e44e7197a..92aacfc4e4cb6df1e4cdd2850565cf153897c18e 100644
+index 3e30e8b49e774d82fd62f07acba1266e44e7197a..2ad6588d6f41fa54d8b26d3a1779f015752bbdbd 100644
 --- a/src/intercom/native-supervisor-channel.ts
 +++ b/src/intercom/native-supervisor-channel.ts
-@@ -634,7 +634,12 @@ function buildParentIntercomTool(pending: Map<string, PendingSupervisorRequest>,
+@@ -440,18 +440,29 @@ function cleanupStaleEmptySupervisorChannels(nowMs = Date.now()): number {
+ 	return removed;
+ }
+ 
+-function currentContextSessionId(state: Pick<SubagentState, "currentSessionId">, ctx: ExtensionContext): string | undefined {
+-	try {
+-		const sessionId = ctx.sessionManager.getSessionId();
+-		if (sessionId) return sessionId;
+-	} catch {
+-		// Fall through to the last known identity.
++function currentContextSessionId(
++	state: Pick<SubagentState, "currentSessionId">,
++	ctx?: ExtensionContext,
++	rememberedSessionId?: string,
++): string | undefined {
++	if (ctx) {
++		try {
++			const sessionId = ctx.sessionManager.getSessionId();
++			if (sessionId) return sessionId;
++		} catch {
++			// Fall through to the last verified identity.
++		}
+ 	}
+-	return state.currentSessionId ?? undefined;
++	return rememberedSessionId ?? state.currentSessionId ?? undefined;
+ }
+ 
+-function requestMatchesContext(request: SupervisorRequest, state: Pick<SubagentState, "currentSessionId">, ctx: ExtensionContext): boolean {
+-	const currentSessionId = currentContextSessionId(state, ctx);
++function requestMatchesContext(
++	request: SupervisorRequest,
++	state: Pick<SubagentState, "currentSessionId">,
++	ctx?: ExtensionContext,
++	rememberedSessionId?: string,
++): boolean {
++	const currentSessionId = currentContextSessionId(state, ctx, rememberedSessionId);
+ 	return Boolean(currentSessionId && request.orchestratorSessionId === currentSessionId);
+ }
+ 
+@@ -634,7 +645,12 @@ function buildParentIntercomTool(pending: Map<string, PendingSupervisorRequest>,
  	};
  }
  
@@ -106,7 +180,44 @@ index 3e30e8b49e774d82fd62f07acba1266e44e7197a..92aacfc4e4cb6df1e4cdd2850565cf15
  	const watch = deps.watch ?? fs.watch;
  	const pending = new Map<string, PendingSupervisorRequest>();
  	const seenFiles = new Set<string>();
-@@ -808,6 +813,13 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+@@ -645,6 +661,7 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 	let deferredWatcherRefresh: ReturnType<typeof setImmediate> | undefined;
+ 	let started = false;
+ 	let lastStaleCleanupAt = 0;
++	let rememberedSessionId: string | undefined;
+ 
+ 	const registerParentTools = (): void => {
+ 		if (!hasTool(pi, NATIVE_SUPERVISOR_TOOL_NAME)) pi.registerTool(buildParentIntercomTool(pending, state, NATIVE_SUPERVISOR_TOOL_NAME));
+@@ -664,14 +681,14 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 
+ 	const poll = (): void => {
+ 		cleanupStaleChannelsIfDue();
+-		const ctx = state.lastUiContext;
+-		if (!ctx) return;
++		const ctx = state.lastUiContext ?? undefined;
++		if (ctx) rememberedSessionId = currentContextSessionId(state, ctx) ?? rememberedSessionId;
+ 		refreshPendingRequests(pending, state, ctx);
+ 		const now = Date.now();
+ 		for (const { channelDir, file } of listRequestFiles()) {
+ 			if (seenFiles.has(file)) continue;
+ 			const request = parseRequestFile(file, channelDir);
+-			if (!request || !requestMatchesContext(request, state, ctx)) continue;
++			if (!request || !requestMatchesContext(request, state, ctx, rememberedSessionId)) continue;
+ 			const lifecycle = requestLifecycle(request, state, undefined, now);
+ 			if (lifecycle !== "pending") {
+ 				seenFiles.add(file);
+@@ -705,6 +722,10 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 					runId: request.runId,
+ 					agent: request.agent,
+ 					childIndex: request.childIndex,
++					reason: request.reason,
++					message: request.message,
++					requestedAt: request.createdAt,
++					deadlineAt: request.expiresAt ?? null,
+ 				});
+ 			}
+ 		}
+@@ -808,6 +829,13 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
  			pending.clear();
  			seenFiles.clear();
  		},
@@ -120,8 +231,65 @@ index 3e30e8b49e774d82fd62f07acba1266e44e7197a..92aacfc4e4cb6df1e4cdd2850565cf15
  		pending,
  	};
  }
+diff --git a/src/runs/background/async-execution.ts b/src/runs/background/async-execution.ts
+index 61a89fce90eb128710b85b46c3d368a25ae5f95f..a5c0bc50466b716c8074dc09008af0c76744a4fd 100644
+--- a/src/runs/background/async-execution.ts
++++ b/src/runs/background/async-execution.ts
+@@ -22,7 +22,7 @@ import { resolvePiPackageRoot } from "../shared/pi-spawn.ts";
+ import { resolveNodeExecutable } from "../../shared/node-executable.ts";
+ import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
+ import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
+-import { PI_CODING_AGENT_PACKAGE_ROOT_ENV, PROMPT_REDACTED, resolveChildCwd } from "../../shared/utils.ts";
++import { PI_CODING_AGENT_PACKAGE_ROOT_ENV, resolveChildCwd } from "../../shared/utils.ts";
+ import { buildModelCandidates, resolveEffectiveSubagentModel, resolveModelCandidate, resolveSubagentModelOverride, type AvailableModelInfo, type ParentModel } from "../shared/model-fallback.ts";
+ import type { ModelScopeConfig } from "../shared/model-scope.ts";
+ import { resolveEffectiveThinking } from "../../shared/model-info.ts";
+@@ -1225,8 +1225,8 @@ export function executeAsyncChain(
+ 			mode: resultMode,
+ 			agent: firstAgents[0],
+ 			agents: flatAgents,
+-			task: firstTask?.trim() ? PROMPT_REDACTED : undefined,
+-			goal: workflowGoal?.trim() ? PROMPT_REDACTED : undefined,
++			task: firstTask?.trim() ? firstTask : undefined,
++			goal: workflowGoal?.trim() ? workflowGoal : undefined,
+ 			chain: eventChain.map((s) =>
+ 				isParallelStep(s) ? `[${s.parallel.map((t) => t.agent).join("+")}]` : isDynamicParallelStep(s) ? `expand:${s.parallel.agent}` : (s as SequentialStep).agent,
+ 			),
+@@ -1637,8 +1637,8 @@ export function executeAsyncSingle(
+ 			sessionId: ctx.currentSessionId,
+ 			mode: "single",
+ 			agent,
+-			task: task?.trim() ? PROMPT_REDACTED : undefined,
+-			goal: (params.goal ?? task).trim() ? PROMPT_REDACTED : undefined,
++			task: task?.trim() ? task : undefined,
++			goal: (params.goal ?? task).trim() ? (params.goal ?? task) : undefined,
+ 			cwd: runnerCwd,
+ 			asyncDir,
+ 			...(sessionRoot ? { sessionRoot } : {}),
+diff --git a/src/runs/background/chain-append.ts b/src/runs/background/chain-append.ts
+index c823c8dac599a6e4046b1480fbcaf92d22db4c23..bd6200a1a718ef7cc71070dcc03cdb4fd829e14f 100644
+--- a/src/runs/background/chain-append.ts
++++ b/src/runs/background/chain-append.ts
+@@ -4,7 +4,7 @@ import * as path from "node:path";
+ import { writeAtomicJson } from "../../shared/atomic-json.ts";
+ import { appendJsonl } from "../../shared/artifacts.ts";
+ import type { AsyncParallelGroupStatus, AsyncStatus, WorkflowGraphNode, WorkflowGraphSnapshot } from "../../shared/types.ts";
+-import { PROMPT_REDACTED, readStatus } from "../../shared/utils.ts";
++import { readStatus } from "../../shared/utils.ts";
+ import type { DynamicRunnerGroup, ParallelStepGroup, RunnerStep, RunnerSubagentStep, RunnerCheckpointStep } from "../shared/parallel-utils.ts";
+ import { isCheckpointRunnerStep, isDynamicRunnerGroup, isParallelGroup } from "../shared/parallel-utils.ts";
+ 
+@@ -154,7 +154,7 @@ const MAX_STATUS_STEP_DESCRIPTION_CHARS = 160;
+ /** Bounded one-line per-step task description persisted into status.json for fleet display. */
+ export function statusStepDescription(task: string | undefined): string | undefined {
+ 	if (!task?.trim()) return undefined;
+-	const description = PROMPT_REDACTED;
++	const description = task.trim().replace(/\s+/g, " ");
+ 	return description.length > MAX_STATUS_STEP_DESCRIPTION_CHARS
+ 		? `${description.slice(0, MAX_STATUS_STEP_DESCRIPTION_CHARS - 1)}…`
+ 		: description;
 diff --git a/src/runs/background/subagent-runner.ts b/src/runs/background/subagent-runner.ts
-index bc133614a1d92ba2d5e9339cc545ca091e94b558..33818228bbbc394555762877b9a7bc09160d555b 100644
+index bc133614a1d92ba2d5e9339cc545ca091e94b558..813dba64f5b7ece3739308cc465d66daa687a3e6 100644
 --- a/src/runs/background/subagent-runner.ts
 +++ b/src/runs/background/subagent-runner.ts
 @@ -10,7 +10,7 @@ import { isActiveAsyncState, updateActiveRunIndex } from "./active-run-index.ts"
@@ -133,6 +301,15 @@ index bc133614a1d92ba2d5e9339cc545ca091e94b558..33818228bbbc394555762877b9a7bc09
  import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
  import {
  	type ActivityState,
+@@ -92,7 +92,7 @@ import { markProcessTerminalCandidateLeaseRelease, writeProcessTerminalCandidate
+ import { createOwnedProcessTreeController, type OwnedProcessTreeController } from "./owned-process-tree.ts";
+ import { createSteeringStatus, recordSteeringRequest, steeringStatus, terminalSteeringNoticeState, updateSteeringTarget } from "./steering.ts";
+ import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
+-import { PROMPT_REDACTED, detectSubagentError, extractTextFromContent, extractToolArgsPreview, getFinalOutput, hasEmptyTerminalAssistantResponse, readStatus } from "../../shared/utils.ts";
++import { detectSubagentError, extractTextFromContent, extractToolArgsPreview, getFinalOutput, hasEmptyTerminalAssistantResponse, readStatus } from "../../shared/utils.ts";
+ import { evaluateCompletionMutationGuard } from "../shared/completion-guard.ts";
+ import {
+ 	createMutatingFailureState,
 @@ -555,7 +555,7 @@ function runPiStreaming(
  		const child = spawn(spawnSpec.command, spawnSpec.args, {
  			cwd,
@@ -142,8 +319,44 @@ index bc133614a1d92ba2d5e9339cc545ca091e94b558..33818228bbbc394555762877b9a7bc09
  			windowsHide: true,
  			detached: process.platform !== "win32",
  		});
+@@ -1211,7 +1211,7 @@ async function runSingleStep(
+ 		artifactPaths = getArtifactPaths(ctx.artifactsDir, ctx.id, step.agent, index);
+ 		fs.mkdirSync(ctx.artifactsDir, { recursive: true });
+ 		if (ctx.artifactConfig?.includeInput !== false) {
+-			fs.writeFileSync(artifactPaths.inputPath, `# Task for ${step.agent}\n\n${PROMPT_REDACTED}; live Prompt Audit only.\n`, "utf-8");
++			fs.writeFileSync(artifactPaths.inputPath, `# Task for ${step.agent}\n\n${task}\n`, "utf-8");
+ 		}
+ 		if (ctx.artifactConfig?.includeTranscript !== false) {
+ 			transcriptWriter = createChildTranscriptWriter({
+@@ -1224,7 +1224,7 @@ async function runSingleStep(
+ 			});
+ 		}
+ 	}
+-	transcriptWriter?.writeInitialUserMessage(`${PROMPT_REDACTED}; live Prompt Audit only.`);
++	transcriptWriter?.writeInitialUserMessage(task);
+ 
+ 	if (step.runner?.type === "external-cli") {
+ 		const runner: ExternalCliRunnerStatus = {
+@@ -1267,7 +1267,7 @@ async function runSingleStep(
+ 				artifactPaths,
+ 				artifactConfig: ctx.artifactConfig,
+ 				output: formatOutputArtifactContent(omitUndefinedProperties({ output: resolvedOutput.fullOutput, error: external.error, metadataPath: ctx.artifactConfig?.includeMetadata === false ? undefined : artifactPaths.metadataPath })),
+-				metadata: { runId: ctx.id, agent: step.agent, task: PROMPT_REDACTED, runner, externalProcess: external.externalProcess, exitCode: external.exitCode, error: external.error, timestamp: Date.now() },
++				metadata: { runId: ctx.id, agent: step.agent, task, runner, externalProcess: external.externalProcess, exitCode: external.exitCode, error: external.error, timestamp: Date.now() },
+ 			})
+ 			: {};
+ 		return omitUndefinedProperties({
+@@ -1719,7 +1719,7 @@ async function runSingleStep(
+ 			metadata: {
+ 				runId: ctx.id,
+ 				agent: step.agent,
+-				task: PROMPT_REDACTED,
++				task,
+ 				exitCode: effectiveFinalExitCode,
+ 				model: finalResult?.model,
+ 				attemptedModels: attemptedModels.length > 0 ? attemptedModels : undefined,
 diff --git a/src/runs/foreground/execution.ts b/src/runs/foreground/execution.ts
-index 1241a290c9bd4da16c129a913b7ecdb656b7831b..757d69cf6bd60cd491d4c8c3d7b515f1b6f2704e 100644
+index 1241a290c9bd4da16c129a913b7ecdb656b7831b..2967e59a6839c55a111dc3b3ccd4dcc16c300cd7 100644
 --- a/src/runs/foreground/execution.ts
 +++ b/src/runs/foreground/execution.ts
 @@ -55,7 +55,7 @@ import { buildSkillInjection, resolveSkillsWithFallback } from "../../agents/ski
@@ -155,7 +368,54 @@ index 1241a290c9bd4da16c129a913b7ecdb656b7831b..757d69cf6bd60cd491d4c8c3d7b515f1
  import { createJsonlWriter } from "../../shared/jsonl-writer.ts";
  import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
  import { resolvePermissionRules } from "../shared/permissions.ts";
-@@ -482,7 +482,7 @@ async function runSingleAttempt(
+@@ -91,7 +91,6 @@ import {
+ 	summarizeRecentMutatingFailures,
+ } from "../shared/long-running-guard.ts";
+ import { acceptanceFailureMessage, buildSkippedAcceptanceLedger, evaluateAcceptance, formatAcceptancePrompt, resolveEffectiveAcceptance, stripAcceptanceReport, validateAcceptanceInput } from "../shared/acceptance.ts";
+-import { PROMPT_REDACTED } from "../../shared/utils.ts";
+ import { attachContractProjections, isAgentContractV1 } from "../shared/agent-contract.ts";
+ import { appendTurnBudgetSystemPrompt, formatTurnBudgetOutput, initialTurnBudgetState, turnBudgetDecision, turnBudgetDeferredNote, turnBudgetDeferredState, turnBudgetExceededMessage, turnBudgetSoftNote, turnBudgetState } from "../shared/turn-budget.ts";
+ import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
+@@ -119,10 +118,9 @@ function withRunContext<T extends SingleResult>(result: T, context: RunSyncOptio
+ 	return result;
+ }
+ 
+-function redactResultPrompt<T extends SingleResult>(result: T): T {
+-	result.task = PROMPT_REDACTED;
+-	if (result.progress) result.progress.task = PROMPT_REDACTED;
+-	return result;
++export function isBlockingSupervisorToolCall(toolName: string | undefined, args: Record<string, unknown>): boolean {
++	return (toolName === "intercom" && args.action === "ask")
++		|| (toolName === "contact_supervisor" && (args.reason === "need_decision" || args.reason === "interview_request"));
+ }
+ 
+ function sumUsage(target: Usage, source: Usage): void {
+@@ -147,7 +145,7 @@ function persistSingleResultMetadata(input: {
+ 	writeMetadata(input.metadataPath, {
+ 		runId: input.runId,
+ 		agent: input.agent,
+-		task: PROMPT_REDACTED,
++		task: input.task,
+ 		exitCode: target.exitCode,
+ 		processSignal: target.processSignal,
+ 		usage: target.usage,
+@@ -239,7 +237,6 @@ function stripAcceptanceReportsFromMessages(messages: Message[] | undefined): vo
+ function snapshotProgress(progress: AgentProgress): AgentProgress {
+ 	return {
+ 		...progress,
+-		task: PROMPT_REDACTED,
+ 		skills: progress.skills ? [...progress.skills] : undefined,
+ 		recentTools: boundStreamedRecentTools(progress.recentTools),
+ 		recentOutput: boundStreamedRecentOutput(progress.recentOutput),
+@@ -249,7 +246,6 @@ function snapshotProgress(progress: AgentProgress): AgentProgress {
+ function snapshotResult(result: SingleResult, progress: AgentProgress): SingleResult {
+ 	return {
+ 		...result,
+-		task: PROMPT_REDACTED,
+ 		messages: result.outputMode === "file-only" && result.savedOutputPath ? undefined : result.messages ? [...result.messages] : undefined,
+ 		usage: { ...result.usage },
+ 		skills: result.skills ? [...result.skills] : undefined,
+@@ -482,7 +478,7 @@ async function runSingleAttempt(
  		const spawnSpec = getPiSpawnCommand(args);
  		const proc = spawn(spawnSpec.command, spawnSpec.args, {
  			cwd: options.cwd ?? runtimeCwd,
@@ -164,6 +424,162 @@ index 1241a290c9bd4da16c129a913b7ecdb656b7831b..757d69cf6bd60cd491d4c8c3d7b515f1
  			stdio: ["ignore", "pipe", "pipe"],
  			windowsHide: true,
  		});
+@@ -533,6 +529,9 @@ async function runSingleAttempt(
+ 			receiptProgress.status = "detached";
+ 			receiptProgress.durationMs = Date.now() - startTime;
+ 			const receipt = snapshotResult(result, receiptProgress);
++			if (!receipt.sessionFile && options.sessionFile && existsSync(options.sessionFile)) {
++				receipt.sessionFile = options.sessionFile;
++			}
+ 			receipt.exitCode = -2;
+ 			receipt.detached = true;
+ 			receipt.detachedReason = reason;
+@@ -892,12 +891,14 @@ async function runSingleAttempt(
+ 				const toolArgs = evt.args && typeof evt.args === "object" && !Array.isArray(evt.args)
+ 					? evt.args as Record<string, unknown>
+ 					: {};
++				let shouldDetachForBlockingSupervisor = false;
+ 				if (options.structuredOutput && evt.toolName === "structured_output") {
+ 					structuredOutputToolInvoked = true;
+ 					structuredOutputMessageStartIndex = result.messages?.length ?? 0;
+ 				}
+ 				if (options.allowIntercomDetach && (evt.toolName === "intercom" || evt.toolName === "contact_supervisor")) {
+ 					intercomStarted = true;
++					shouldDetachForBlockingSupervisor = isBlockingSupervisorToolCall(evt.toolName, toolArgs);
+ 				}
+ 				progress.toolCount++;
+ 				if (options.toolBudget) {
+@@ -911,6 +912,7 @@ async function runSingleAttempt(
+ 				observedMutationAttempt = observedMutationAttempt || mutates;
+ 				pendingToolResult = { tool: evt.toolName ?? "tool", path: progress.currentPath, mutates, startedAt: now };
+ 				fireUpdate();
++				if (shouldDetachForBlockingSupervisor) detachForeground("intercom coordination");
+ 			}
+ 
+ 			if (evt.type === "tool_execution_end") {
+@@ -1391,7 +1393,7 @@ async function runSyncCompletion(
+ 	};
+ 	const agent = agents.find((a) => a.name === agentName);
+ 	if (!agent) {
+-		return redactResultPrompt(withRunContext({
++		return withRunContext({
+ 			index: options.index ?? 0,
+ 			agent: agentName,
+ 			task,
+@@ -1399,12 +1401,12 @@ async function runSyncCompletion(
+ 			messages: [],
+ 			usage: emptyUsage(),
+ 			error: `Unknown agent: ${agentName}`,
+-		}, options.context));
++		}, options.context);
+ 	}
+ 	try {
+ 		assertAgentAllowedByCapabilityCeiling(agent.name, options.capabilityCeiling);
+ 	} catch (error) {
+-		return redactResultPrompt(withRunContext({
++		return withRunContext({
+ 			index: options.index ?? 0,
+ 			agent: agent.name,
+ 			task,
+@@ -1413,11 +1415,11 @@ async function runSyncCompletion(
+ 			usage: emptyUsage(),
+ 			error: error instanceof Error ? error.message : String(error),
+ 			...(options.capabilityCeiling ? { capabilityCeiling: options.capabilityCeiling } : {}),
+-		}, options.context));
++		}, options.context);
+ 	}
+ 	const acceptanceErrors = validateAcceptanceInput(options.acceptance);
+ 	if (acceptanceErrors.length > 0) {
+-		return redactResultPrompt(withRunContext({
++		return withRunContext({
+ 			index: options.index ?? 0,
+ 			agent: agentName,
+ 			task,
+@@ -1425,11 +1427,11 @@ async function runSyncCompletion(
+ 			messages: [],
+ 			usage: emptyUsage(),
+ 			error: acceptanceErrors.join(" "),
+-		}, options.context));
++		}, options.context);
+ 	}
+ 	const outputModeValidationError = validateFileOnlyOutputMode(options.outputMode, options.outputPath, `Single run (${agentName})`);
+ 	if (outputModeValidationError) {
+-		return redactResultPrompt(withRunContext({
++		return withRunContext({
+ 			index: options.index ?? 0,
+ 			agent: agentName,
+ 			task,
+@@ -1438,7 +1440,7 @@ async function runSyncCompletion(
+ 			usage: emptyUsage(),
+ 			outputMode: options.outputMode,
+ 			error: outputModeValidationError,
+-		}, options.context));
++		}, options.context);
+ 	}
+ 
+ 	const shareEnabled = options.share === true;
+@@ -1470,7 +1472,7 @@ async function runSyncCompletion(
+ 		agent.filePath ? path.dirname(agent.filePath) : skillCwd,
+ 	);
+ 	if (skillNames.some((skill) => skill.trim() === "pi-subagents") && missingSkills.includes("pi-subagents")) {
+-		return redactResultPrompt(withRunContext({
++		return withRunContext({
+ 			index: options.index ?? 0,
+ 			agent: agentName,
+ 			task,
+@@ -1478,7 +1480,7 @@ async function runSyncCompletion(
+ 			messages: [],
+ 			usage: emptyUsage(),
+ 			error: "Skills not found: pi-subagents",
+-		}, options.context));
++		}, options.context);
+ 	}
+ 	let systemPrompt = agent.systemPrompt?.trim() || "";
+ 	if (resolvedSkills.length > 0) {
+@@ -1513,7 +1515,7 @@ async function runSyncCompletion(
+ 		artifactPathsResult = getArtifactPaths(options.artifactsDir, options.runId, agentName, options.index);
+ 		ensureArtifactsDir(options.artifactsDir);
+ 		if (options.artifactConfig?.includeInput !== false) {
+-			writeArtifact(artifactPathsResult.inputPath, `# Task for ${agentName}\n\n${PROMPT_REDACTED}; live Prompt Audit only.\n`);
++			writeArtifact(artifactPathsResult.inputPath, `# Task for ${agentName}\n\n${task}\n`);
+ 		}
+ 		if (options.artifactConfig?.includeJsonl !== false) {
+ 			jsonlPath = artifactPathsResult.jsonlPath;
+@@ -1527,7 +1529,7 @@ async function runSyncCompletion(
+ 				childIndex: options.index,
+ 				cwd: options.cwd ?? runtimeCwd,
+ 			});
+-			transcriptWriter.writeInitialUserMessage(`${PROMPT_REDACTED}; live Prompt Audit only.`);
++			transcriptWriter.writeInitialUserMessage(task);
+ 		}
+ 	}
+ 
+@@ -1803,7 +1805,6 @@ async function runSyncCompletion(
+ 		}
+ 	}
+ 	if (isAgentContractV1(options.agentContract)) attachContractProjections(result);
+-	redactResultPrompt(result);
+ 	try {
+ 		persistResultMetadata(result);
+ 	} catch (error) {
+@@ -1888,7 +1889,7 @@ export async function runSync(
+ 				durationMs: publishedReceipt.progressSummary?.durationMs ?? 0,
+ 				error: failureMessage,
+ 			};
+-		const failedResult: SingleResult = redactResultPrompt({
++		const failedResult: SingleResult = {
+ 			...publishedReceipt,
+ 			detached: undefined,
+ 			detachedReason,
+@@ -1904,7 +1905,7 @@ export async function runSync(
+ 			acceptance: publishedReceipt.acceptance
+ 				? buildSkippedAcceptanceLedger(publishedReceipt.acceptance.effectiveAcceptance, { id: "completion-pipeline", message: failureMessage })
+ 				: undefined,
+-		});
++		};
+ 		if (strictContract) attachContractProjections(failedResult);
+ 		try {
+ 			// Replace the provisional detach receipt metadata with the authoritative
 diff --git a/src/runs/shared/pi-spawn.ts b/src/runs/shared/pi-spawn.ts
 index abfbdb2fb871887b5d592735ef971bf581b2e633..abd4391a04ef7b29148ad860bc1677f744e73790 100644
 --- a/src/runs/shared/pi-spawn.ts
@@ -210,28 +626,25 @@ index abfbdb2fb871887b5d592735ef971bf581b2e633..abd4391a04ef7b29148ad860bc1677f7
  	}
  
  	const execPath = deps.execPath ?? process.execPath;
-diff --git a/src/extension/tool-description.ts b/src/extension/tool-description.ts
---- a/src/extension/tool-description.ts
-+++ b/src/extension/tool-description.ts
-@@ -18,8 +18,8 @@
- 
- EXECUTION:
- • Before executing, use { action: "list" } and run only executable/non-disabled configured agents.
--• SINGLE CHILD: { agent:"worker", task:"..." }. This structured form starts exactly one child through the workflow runtime. Workflow-level fields such as model, context, cwd, worktree, output, budgets, acceptance, and async remain defaults for that child. Do not combine agent/task with action or workflowScript.
--• WORKFLOW SCRIPT: { workflowScript: "return runs.run('main', {agent:'worker', task:'...'})" }. Use stable-key runs.run for one child and runs.all for parallel children; ordinary JavaScript provides sequence, branching, filtering, retries, and aggregation. workflowScript is an ordinary JavaScript statement body, so use an explicit return for a useful result. For task text with Markdown fences or shell blocks, build quoted lines instead of nesting raw template literals: \`const task=["Run:","\`\`\`bash","npm test","\`\`\`"].join("\\n")\`. Scripts start asynchronously by default; pass async:false only for a small foreground run. Same-repo foreground workflows default to a live in-chat card; set chatProgress to auto, off, or live-card to control that projection. Workflow-level child controls default onto each runs.run launch, and explicit child fields override them. Use await prompts.render("package:name" | "user:name" | "project:name", vars?) for reusable plain task text, then pass the result explicitly as task. Use {action:"children.list"} to list up to 10 completed retained children from this parent session, then continue one with runs.run(key, {resume:"run-id", task:"follow-up"}); resume and agent are mutually exclusive, resume keeps the stored agent/model/tool contract, workflow resumes wait for completed output, and loops must continue from each latest returned runId. For repository mutation lanes, set worktree:true on the workflow or individual runs.run/runs.all item for managed isolation; each parallel child gets a separate worktree and handoff artifact. A workflow usageBudget is enforced once across the workflow. Available globals are runs.run, runs.all, runs.status, runs.ref/refs, prompts.render, emit, console, and standard JavaScript only. Workflows get async state.get(key) and state.set(key, JSONValue) through their automatic or explicit mission; mission:false workflows do not have a state global. Scripts cannot access filesystem, shell, arbitrary Pi tools, or host globals.
-+• SINGLE CHILD: { agent:"worker", task:"..." }. This structured form starts exactly one direct child with its own transcript and controls. Top-level fields such as model, context, cwd, worktree, output, budgets, acceptance, and async apply to that child. Do not combine agent/task with action or workflowScript.
-+• WORKFLOW SCRIPT: use only to coordinate two or more named children with distinct tasks. Use stable-key runs.run for sequential phases and runs.all for parallel children; ordinary JavaScript provides sequence, branching, filtering, retries, and aggregation. workflowScript is an ordinary JavaScript statement body, so use an explicit return for a useful result. For task text with Markdown fences or shell blocks, build quoted lines instead of nesting raw template literals: \`const task=["Run:","\`\`\`bash","npm test","\`\`\`"].join("\\n")\`. Scripts start asynchronously by default; pass async:false only for a small foreground run. Same-repo foreground workflows default to a live in-chat card; set chatProgress to auto, off, or live-card to control that projection. Workflow-level child controls default onto each runs.run launch, and explicit child fields override them. Use await prompts.render("package:name" | "user:name" | "project:name", vars?) for reusable plain task text, then pass the result explicitly as task. Use {action:"children.list"} to list up to 10 completed retained children from this parent session, then continue one with runs.run(key, {resume:"run-id", task:"follow-up"}); resume and agent are mutually exclusive, resume keeps the stored agent/model/tool contract, workflow resumes wait for completed output, and loops must continue from each latest returned runId. For repository mutation lanes, set worktree:true on the workflow or individual runs.run/runs.all item for managed isolation; each parallel child gets a separate worktree and handoff artifact. A workflow usageBudget is enforced once across the workflow. Available globals are runs.run, runs.all, runs.status, runs.ref/refs, prompts.render, emit, console, and standard JavaScript only. Workflows get async state.get(key) and state.set(key, JSONValue) through their automatic or explicit mission; mission:false workflows do not have a state global. Scripts cannot access filesystem, shell, arbitrary Pi tools, or host globals.
- • Sequential example: { workflowScript: "const a = await runs.run('analyze', {agent:'agent-a', task:'Analyze the request'}); return (await runs.run('plan', {agent:'agent-b', task:'Plan from: '+a.output})).output" }
- • Parallel example: { workflowScript: "const [a,b] = await runs.all([{key:'correctness',agent:'agent-a',task:'Review correctness'},{key:'tests',agent:'agent-b',task:'Review tests'}]); return {correctness:a.output,tests:b.output}" }
- • Optional context is "fresh" or "fork". timeoutMs/maxRuntimeMs apply to foreground and async workflows; foreground workflows default to 30 minutes and async workflows have no default timeout. Omit acceptance for reviewer/read-only calls; evidence levels end at verified, and acceptance.review.required requests independent writer review.
-@@ -38,8 +38,8 @@
- 
- EXECUTE:
- • Call { action:"list" } first and use only executable/non-disabled agents.
--• SINGLE {agent:"worker",task:"..."} starts exactly one child through the workflow runtime. Workflow-level fields remain child defaults. Do not combine agent/task with action or workflowScript.
--• SCRIPT {workflowScript:"return runs.run('main', {agent:'worker', task:'...'})"}. Use stable-key runs.run for one child and runs.all for parallel work. Use await prompts.render("package:name" | "user:name" | "project:name", vars?) for reusable task text and pass it explicitly to runs.run. Use {action:"children.list"} for the last 10 retained children in this parent session, then runs.run(key,{resume:"run-id",task:"follow-up"}) to continue one with its stored contract; workflow resumes wait for completion and loops continue from the latest returned runId. Workflows get async state.get/state.set through their automatic or explicit mission; mission:false does not. Scripts are ordinary JavaScript statement bodies; use explicit return for a useful result. For task text with Markdown fences or shell blocks, build quoted lines instead of nesting raw template literals: \`const task=["Run:","\`\`\`bash","npm test","\`\`\`"].join("\\n")\`. Use JavaScript for sequence, branching, retries, and aggregation. For repository mutation lanes, use worktree:true on the workflow or runs.run/runs.all item for managed isolation. Scripts start async by default; async:false is the foreground escape hatch and auto-enables a same-repo live chat card unless chatProgress is off.
-+• SINGLE {agent:"worker",task:"..."} starts exactly one direct child with its own transcript and controls. Top-level fields apply to that child. Do not combine agent/task with action or workflowScript.
-+• SCRIPT coordinates two or more named children with distinct tasks. Use stable-key runs.run for sequential phases and runs.all for parallel work. Use await prompts.render("package:name" | "user:name" | "project:name", vars?) for reusable task text and pass it explicitly to runs.run. Use {action:"children.list"} for the last 10 retained children in this parent session, then runs.run(key,{resume:"run-id",task:"follow-up"}) to continue one with its stored contract; workflow resumes wait for completion and loops continue from the latest returned runId. Workflows get async state.get/state.set through their automatic or explicit mission; mission:false does not. Scripts are ordinary JavaScript statement bodies; use explicit return for a useful result. For task text with Markdown fences or shell blocks, build quoted lines instead of nesting raw template literals: \`const task=["Run:","\`\`\`bash","npm test","\`\`\`"].join("\\n")\`. Use JavaScript for sequence, branching, retries, and aggregation. For repository mutation lanes, use worktree:true on the workflow or runs.run/runs.all item for managed isolation. Scripts start async by default; async:false is the foreground escape hatch and auto-enables a same-repo live chat card unless chatProgress is off.
- • Example: {workflowScript:"const [a,b]=await runs.all([{key:'a',agent:'agent-a',task:'Implement A',worktree:true},{key:'b',agent:'agent-b',task:'Implement B',worktree:true}]); return [a.output,b.output]"}
- • context can be fresh or fork. timeoutMs/maxRuntimeMs apply to foreground and async workflows; foreground workflows default to 30 minutes and async workflows have no default timeout. Omit acceptance for reviewer/read-only calls.
- 
+diff --git a/src/shared/utils.ts b/src/shared/utils.ts
+index f3170000a87b8bc80e271f7ff2168f56e842638c..c1dcd86170accaca6b44ea6ce490bbadfca36fd5 100644
+--- a/src/shared/utils.ts
++++ b/src/shared/utils.ts
+@@ -355,7 +355,7 @@ function compactCompletedProgress(progress: AgentProgress): AgentProgress {
+ 		agent: progress.agent,
+ 		status: progress.status,
+ 		activityState: progress.activityState,
+-		task: "[prompt redacted]",
++		task: progress.task,
+ 		skills: progress.skills,
+ 		toolCount: progress.toolCount,
+ 		tokens: progress.tokens,
+@@ -429,7 +429,7 @@ export function compactForegroundResult(result: SingleResult): SingleResult {
+ 	const toolCalls = result.toolCalls?.length ? result.toolCalls : extractToolCallSummaries(result.messages);
+ 	return {
+ 		...result,
+-		task: "[prompt redacted]",
++		task: result.task,
+ 		messages: undefined,
+ 		progress: undefined,
+ 		toolCalls: toolCalls.length ? toolCalls : undefined,

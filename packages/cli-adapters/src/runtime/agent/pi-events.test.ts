@@ -288,6 +288,40 @@ describe("pi file-change events", () => {
     })
   })
 
+  it("keeps a detached foreground receipt live until authoritative completion", () => {
+    expect(piSubagentProgress({
+      type: "tool_execution_end",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      result: {
+        content: [{ type: "text", text: "Detached for intercom coordination." }],
+        details: {
+          mode: "single",
+          runId: "run-1",
+          results: [{
+            index: 0,
+            agent: "reviewer",
+            task: "Review the checkout flow",
+            detached: true,
+            sessionFile: "/sessions/reviewer.jsonl"
+          }]
+        }
+      },
+      isError: false
+    } as never)).toEqual({
+      runId: "run-1",
+      mode: "single",
+      settled: false,
+      children: [expect.objectContaining({
+        index: 0,
+        agent: "reviewer",
+        task: "Review the checkout flow",
+        status: "detached",
+        sessionFile: "/sessions/reviewer.jsonl"
+      })]
+    })
+  })
+
   it("projects an async spawn acknowledgment that carries no progress array", () => {
     // Real pi-subagents async output: `{mode, runId, asyncId, asyncDir,
     // results: []}` — no `progress` key. This must decode to an empty-children
@@ -458,33 +492,33 @@ describe("pi file-change events", () => {
   })
 
   it("projects exact supervisor attention from native custom messages", () => {
-    expect(piSupervisorAttention({
-      type: "message_end",
-      message: {
-        role: "custom",
-        customType: "subagent_supervisor_request",
-        content: "Choose an API",
-        display: true,
-        details: {
-          id: "attention-1",
-          reason: "need_decision",
-          expectsReply: true,
-          runId: "run-1",
-          agent: "worker",
-          childIndex: 0
-        },
-        timestamp: 1
-      }
-    })).toEqual({
-      requestId: "attention-1",
-      reason: "need_decision",
-      message: "Choose an API",
-      runId: "run-1",
-      agent: "worker",
-      childIndex: 0,
-      requestedAt: 1,
-      deadlineAt: null
-    })
+    const message = {
+      role: "custom",
+      customType: "subagent_supervisor_request",
+      content: "Choose an API",
+      display: true,
+      details: {
+        id: "attention-1",
+        reason: "need_decision",
+        expectsReply: true,
+        runId: "run-1",
+        agent: "worker",
+        childIndex: 0
+      },
+      timestamp: 1
+    } as const
+    for (const type of ["message_start", "message_end"] as const) {
+      expect(piSupervisorAttention({ type, message })).toEqual({
+        requestId: "attention-1",
+        reason: "need_decision",
+        message: "Choose an API",
+        runId: "run-1",
+        agent: "worker",
+        childIndex: 0,
+        requestedAt: 1,
+        deadlineAt: null
+      })
+    }
   })
 
   it("keeps valid diff evidence when unrelated result content is malformed", () => {

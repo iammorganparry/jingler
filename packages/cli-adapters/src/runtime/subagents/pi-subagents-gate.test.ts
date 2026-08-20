@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { createJiti } from "jiti"
 import { describe, expect, it } from "vitest"
@@ -22,13 +23,34 @@ interface ToolDescriptionModule {
   readonly COMPACT_SUBAGENT_TOOL_DESCRIPTION: string
 }
 
+interface ForegroundExecutionModule {
+  readonly isBlockingSupervisorToolCall: (
+    toolName: string | undefined,
+    args: Record<string, unknown>
+  ) => boolean
+}
+
+interface ChainAppendModule {
+  readonly statusStepDescription: (task: string | undefined) => string | undefined
+}
+
 const jiti = createJiti(import.meta.url)
+const packageSource = (...path: string[]): string =>
+  join(dirname(PI_SUBAGENTS_EXTENSION_PATH), "src", ...path)
 const extensionSource = (file: string): string =>
-  join(dirname(PI_SUBAGENTS_EXTENSION_PATH), "src", "extension", file)
+  packageSource("extension", file)
 const loadModule = (): Promise<PublicExecutionModule> =>
   jiti.import<PublicExecutionModule>(extensionSource("public-execution.ts"))
 const loadToolDescription = (): Promise<ToolDescriptionModule> =>
   jiti.import<ToolDescriptionModule>(extensionSource("tool-description.ts"))
+const loadForegroundExecution = (): Promise<ForegroundExecutionModule> =>
+  jiti.import<ForegroundExecutionModule>(
+    packageSource("runs", "foreground", "execution.ts")
+  )
+const loadChainAppend = (): Promise<ChainAppendModule> =>
+  jiti.import<ChainAppendModule>(
+    packageSource("runs", "background", "chain-append.ts")
+  )
 
 describe("patched pi-subagents single-child workflow gate", () => {
   it("rejects a workflowScript that wraps exactly one child", async () => {
@@ -83,6 +105,60 @@ describe("patched pi-subagents single-child workflow gate", () => {
       params: { agent: "reviewer", ...childOptions }
     })
     if (result.ok) expect(result.params).not.toHaveProperty("workflowScript")
+  })
+
+  it("detaches only blocking supervisor calls", async () => {
+    const { isBlockingSupervisorToolCall } = await loadForegroundExecution()
+
+    expect(isBlockingSupervisorToolCall("contact_supervisor", {
+      reason: "need_decision"
+    })).toBe(true)
+    expect(isBlockingSupervisorToolCall("contact_supervisor", {
+      reason: "interview_request"
+    })).toBe(true)
+    expect(isBlockingSupervisorToolCall("intercom", { action: "ask" })).toBe(true)
+    expect(isBlockingSupervisorToolCall("contact_supervisor", {
+      reason: "progress_update"
+    })).toBe(false)
+    expect(isBlockingSupervisorToolCall("intercom", { action: "send" })).toBe(false)
+  })
+
+  it("keeps supervisor polling active after the transient UI context settles", async () => {
+    const source = await readFile(
+      packageSource("intercom", "native-supervisor-channel.ts"),
+      "utf8"
+    )
+    expect(source).toContain("state.lastUiContext ?? undefined")
+    expect(source).not.toContain("if (!ctx) return;")
+    expect(source).toContain("rememberedSessionId ?? state.currentSessionId")
+    expect(source).toContain("currentContextSessionId(state, ctx) ?? rememberedSessionId")
+    const extension = await readFile(extensionSource("index.ts"), "utf8")
+    expect(extension).toContain("state.lastUiContext = ctx")
+    expect(extension).toContain("supervisorChannel.start()")
+  })
+
+  it("keeps child prompts visible in progress and persisted artifacts", async () => {
+    const task = "Review the checkout flow\nwith the current acceptance criteria"
+    const { statusStepDescription } = await loadChainAppend()
+    expect(statusStepDescription(task)).toBe(
+      "Review the checkout flow with the current acceptance criteria"
+    )
+
+    const sources = await Promise.all([
+      packageSource("runs", "foreground", "execution.ts"),
+      packageSource("runs", "background", "subagent-runner.ts"),
+      packageSource("runs", "background", "async-execution.ts"),
+      packageSource("runs", "background", "chain-append.ts")
+    ].map((path) => readFile(path, "utf8")))
+    for (const source of sources) {
+      expect(source).not.toContain("live Prompt Audit only")
+      expect(source).not.toContain("PROMPT_REDACTED")
+    }
+    const sharedUtils = await readFile(packageSource("shared", "utils.ts"), "utf8")
+    expect(sharedUtils).not.toContain('task: "[prompt redacted]"')
+    expect(sharedUtils).toContain("task: progress.task")
+    expect(sharedUtils).toContain("task: result.task")
+    expect(sources[0]).toContain("receipt.sessionFile = options.sessionFile")
   })
 
   it("advertises a direct single child and real multi-child workflows", async () => {

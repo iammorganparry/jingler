@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
@@ -19,6 +20,11 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
 const FIRST_AGENT = /Survey the tab bar/
 const SECOND_AGENT = /Audit the theme tokens/
 const DIRECT_AGENT = /Inspect direct delegation/
+const SUPERVISOR_REVIEW_TASK = "Review the checkout flow against its acceptance criteria."
+const SUPERVISOR_CHILD_WRAPPER = fileURLToPath(
+  new URL("./pi-supervisor-child.mjs", import.meta.url)
+)
+const REVIEWER_REPLY_PLACEHOLDER = /Reply to reviewer/i
 
 test("Fleet stays composer-adjacent while subagents run and the operator steers Main", async ({
   launchApp
@@ -89,6 +95,54 @@ test("one direct child remains inspectable while the operator steers Main", asyn
   await expect(window.getByText("Direct child reported back.")).toBeVisible({ timeout: 15_000 })
   await expect(fleet).toContainText("0 active · 1 total")
   await expect(fleet.locator('[data-testid^="fleet-workflow-"]')).toHaveCount(0)
+})
+
+test("a reviewer exposes its prompt and detaches from Main without the watcher delay", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions,
+    e2eEnv: { JINGLER_SUBAGENT_WRAPPER_PATH: SUPERVISOR_CHILD_WRAPPER }
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[supervisor-subagent]] review checkout")
+  await composer.press("Enter")
+
+  // The fixture does not create the filesystem supervisor request for eight
+  // seconds. Main becoming idle inside five seconds proves the child detached
+  // from the blocking tool-start event rather than the watcher fallback.
+  await expect(window.getByText(
+    "Reviewer detached promptly and is waiting for supervisor input."
+  )).toBeVisible({ timeout: 5_000 })
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
+
+  const fleet = window.getByTestId("fleet-drawer")
+  const reviewer = fleet.getByRole("button", { name: new RegExp(SUPERVISOR_REVIEW_TASK) })
+  await expect(reviewer).toBeVisible()
+  await reviewer.click()
+  const transcript = window.getByTestId("fleet-agent-transcript")
+  await expect(transcript).toContainText(SUPERVISOR_REVIEW_TASK)
+  await expect(transcript).not.toContainText("[prompt redacted]")
+  await expect(transcript).toContainText("## Acceptance Contract")
+
+  await expect(fleet).toContainText(
+    "Should I include accessibility behavior in this review?",
+    { timeout: 20_000 }
+  )
+  const reply = window.getByPlaceholder(REVIEWER_REPLY_PLACEHOLDER)
+  await expect(reply).toBeVisible()
+  await reply.fill("Include accessibility behavior.")
+  await reply.press("Enter")
+
+  await expect(fleet).toContainText(
+    "reply request delivered by pi-subagents",
+    { timeout: 5_000 }
+  )
+  await expect(fleet).not.toContainText("rejected")
 })
 
 test("global Stop reaps every held Fleet child and restores the idle composer", async ({

@@ -6,8 +6,8 @@ Jingler ships `pi-subagents` with its managed Pi runtime and presents delegated 
 
 - Expand or collapse **Fleet** without changing the conversation. Drag its upper divider to resize it.
 - Select **Main** for the parent transcript and composer. Select a child for that child's full, read-only Pi session; Fleet remains visible so Main is always one click away.
-- Read each child's hierarchy, task, model, status, current tool, token/time usage, attention request, and emitted artifacts.
-- Steer a running child, queue a follow-up, interrupt or stop it, resume a paused child, or answer a supervisor request. Jingler waits for the extension's exact acknowledgement before presenting the result.
+- Read each child's hierarchy, complete effective prompt, model, status, current tool, token/time usage, attention request, and emitted artifacts. Effective prompts—including runtime acceptance additions—are retained in progress, result, input, transcript, and metadata artifacts for operator audit.
+- Steer a running child, queue a follow-up, interrupt or stop it, resume a paused child, or answer a supervisor request. Blocking decision/interview requests detach immediately so Main can respond; non-blocking progress updates remain attached. Jingler waits for the extension's exact acknowledgement before presenting the result.
 - Background children remain visible after the parent turn settles. Missing processes are reconciled to `unknown`, never left falsely running.
 
 ## Agent launch contract
@@ -45,7 +45,7 @@ Desktop and paired-device distributions include the same pinned Pi CLI, `pi-suba
 
 ## Lifecycle and recovery
 
-The extension remains lifecycle authority. Parent turn completion removes only turn-local subscriptions: Jingler retains the Pi session, broker, credentials, controls, transcripts, and polling while any child remains active, then atomically removes both its resumable-path and internal-session aliases. A continued turn reuses that retained session. Fleet snapshot, transcript, and control lookup is additionally bound to the owning Jingler session and chat, preventing a valid parent identifier from crossing conversation boundaries.
+The extension remains lifecycle authority. Parent turn completion removes only turn-local subscriptions: Jingler retains the Pi session, broker, credentials, controls, transcripts, and polling while any child remains active, then atomically removes both its resumable-path and internal-session aliases. A continued turn reuses that retained session. Supervisor delivery retains the last verified Pi session UUID, so an idle parent still receives a child request even after its transient UI context settles. Fleet snapshot, transcript, and control lookup is additionally bound to the owning Jingler session and chat, preventing a valid parent identifier from crossing conversation boundaries.
 
 Jingler projects versioned events into a typed run tree and periodically reconciles the extension's status RPC independently of the parent turn stream. The newest evidenced parent owns the projection; replay is partitioned to it, and per-node clocks/tombstones reject duplicate, stale, reordered, cyclic, foreign-session, and malformed mutations. Normalized compatibility agents and the independent adversarial reviewer are adapted into this same Fleet surface rather than restored as a second tab bar.
 

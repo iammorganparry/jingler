@@ -140,12 +140,13 @@ describe("PiSubagentLifecycleAdapter", () => {
     const sessionFile = manager.getSessionFile()
     if (!sessionFile) throw new Error("Expected a child session file")
     const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
       parentPiSessionId: parent,
       trustedSessionRoots: [root],
       controlJournal: null,
-      emit: () => undefined,
+      emit: (event) => emitted.push(event),
       now: () => 10
     })
     adapter.start()
@@ -227,6 +228,17 @@ describe("PiSubagentLifecycleAdapter", () => {
         }]
       })
 
+      expect(emitted.findLast((event) =>
+        event._tag === "Upsert" &&
+        event.node.runId === "child-run" &&
+        event.node.status === "completed"
+      )).toMatchObject({
+        node: {
+          parentId: null,
+          task: "Inspect",
+          sessionFile
+        }
+      })
       expect(adapter.snapshot().nodes).toEqual([])
       adapter.stop()
       await expect(adapter.transcript("child-run")).resolves.toEqual(
@@ -498,6 +510,47 @@ describe("PiSubagentLifecycleAdapter", () => {
     })
 
     expect(adapter.snapshot().nodes).toEqual([])
+    adapter.stop()
+  })
+
+  it("projects native supervisor attention directly from the extension event bus", () => {
+    const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      controlJournal: null,
+      emit: (event) => emitted.push(event),
+      now: () => 30
+    })
+    adapter.start()
+    const attention = {
+      requestId: "attention-1",
+      runId: "run-1",
+      childIndex: 0,
+      agent: "reviewer",
+      reason: "need_decision",
+      message: "Include accessibility behavior?",
+      requestedAt: 20,
+      deadlineAt: 120
+    }
+    events.emit("pi-intercom:detach-request", attention)
+    events.emit("pi-intercom:detach-request", attention)
+
+    expect(adapter.snapshot().nodes).toEqual([
+      expect.objectContaining({
+        subagentId: "run-1:step:0",
+        status: "needs-attention",
+        currentTool: "contact_supervisor",
+        attention: expect.objectContaining({
+          requestId: "attention-1",
+          message: "Include accessibility behavior?"
+        })
+      })
+    ])
+    expect(emitted.filter((event) =>
+      event._tag === "Upsert" && event.eventId === "attention:attention-1"
+    )).toHaveLength(1)
     adapter.stop()
   })
 

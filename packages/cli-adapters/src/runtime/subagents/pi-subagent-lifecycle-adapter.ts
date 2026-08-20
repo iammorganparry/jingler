@@ -43,6 +43,7 @@ const ASYNC_STARTED_EVENT = "subagent:async-started"
 const ASYNC_COMPLETE_EVENT = "subagent:async-complete"
 const FOREGROUND_COMPLETE_EVENT = "subagent:foreground-complete"
 const PROCESS_TERMINAL_EVENT = "subagent:process-terminal"
+const SUPERVISOR_ATTENTION_EVENT = "pi-intercom:detach-request"
 const RPC_TIMEOUT_MS = 5_000
 /**
  * How long a non-terminal workflow header may sit unknown to both the harness
@@ -180,6 +181,16 @@ const ProcessTerminal = Schema.Struct({
   runId: Schema.String,
   state: Schema.Literal("pending", "observed", "unknown", "not-started"),
   observedAt: Schema.optional(Schema.Number)
+})
+const SupervisorAttentionEvent = Schema.Struct({
+  requestId: Schema.String,
+  runId: Schema.String,
+  agent: Schema.String,
+  childIndex: Schema.Number,
+  reason: Schema.Literal("need_decision", "interview_request"),
+  message: Schema.String,
+  requestedAt: Schema.Number,
+  deadlineAt: Schema.NullOr(Schema.Number)
 })
 
 const emptyUsage = (): SubagentFleetUsage => ({
@@ -372,7 +383,10 @@ export class PiSubagentLifecycleAdapter {
       this.#events.on(ASYNC_STARTED_EVENT, (payload) => this.#onAsyncStarted(payload)),
       this.#events.on(ASYNC_COMPLETE_EVENT, (payload) => this.#onCompletion(payload, true)),
       this.#events.on(FOREGROUND_COMPLETE_EVENT, (payload) => this.#onForegroundComplete(payload)),
-      this.#events.on(PROCESS_TERMINAL_EVENT, (payload) => this.#onProcessTerminal(payload))
+      this.#events.on(PROCESS_TERMINAL_EVENT, (payload) => this.#onProcessTerminal(payload)),
+      this.#events.on(SUPERVISOR_ATTENTION_EVENT, (payload) =>
+        this.#onSupervisorAttention(payload)
+      )
     ]))
   }
 
@@ -607,11 +621,19 @@ export class PiSubagentLifecycleAdapter {
     }
   }
 
+  #onSupervisorAttention(payload: unknown): void {
+    const input = Option.getOrUndefined(
+      Schema.decodeUnknownOption(SupervisorAttentionEvent)(payload)
+    )
+    if (input) this.attention(input)
+  }
+
   attention(input: PiSubagentSupervisorAttentionInput): void {
     const now = this.#now()
     const subagentId = `${input.runId}:step:${input.childIndex}`
     const context = this.#state().tree
     const existing = context.nodes.find((node) => node.subagentId === subagentId)
+    if (existing?.attention?.requestId === input.requestId) return
     const parentId = subagentFleetNodeId(this.#parentPiSessionId, input.runId)
     this.#publish({
       _tag: "Upsert",
@@ -1214,6 +1236,9 @@ export class PiSubagentLifecycleAdapter {
   }): void {
     const index = input.child.index ?? input.position
     const subagentId = input.child.runId ?? `${input.completion.runId}:step:${index}`
+    const existing = this.#state().tree.nodes.find(
+      (node) => node.subagentId === subagentId
+    )
     this.#publish({
       _tag: "Upsert",
       version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -1222,11 +1247,11 @@ export class PiSubagentLifecycleAdapter {
       node: {
         ...this.#identity(subagentId, input.completion.runId),
         runId: subagentId,
-        parentId: input.rootId,
+        parentId: existing === undefined ? input.rootId : existing.parentId,
         parentPiSessionId: this.#parentPiSessionId,
-        agent: input.child.agent ?? `step-${index + 1}`,
-        task: input.child.task ?? input.start?.goal ?? input.start?.task ?? "Delegated work",
-        model: input.child.model ?? null,
+        agent: input.child.agent ?? existing?.agent ?? `step-${index + 1}`,
+        task: input.child.task ?? existing?.task ?? input.start?.goal ?? input.start?.task ?? "Delegated work",
+        model: input.child.model ?? existing?.model ?? null,
         status: statusFrom(input.child),
         phase: input.child.phase ?? null,
         terminal: {
@@ -1240,9 +1265,9 @@ export class PiSubagentLifecycleAdapter {
           retryable: false
         },
         background: input.background,
-        sessionFile: input.child.sessionPath ?? input.child.sessionFile ?? null,
+        sessionFile: input.child.sessionPath ?? input.child.sessionFile ?? existing?.sessionFile ?? null,
         currentTool: null,
-        startedAt: input.startedAt,
+        startedAt: existing?.startedAt ?? input.startedAt,
         updatedAt: input.now,
         completedAt: input.now,
         usage: usageFor(input.child.usage),
