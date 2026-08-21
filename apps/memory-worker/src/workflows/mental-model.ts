@@ -52,25 +52,38 @@ export const refreshMentalModel = (
     const text = `${observation.key} ${observation.text}`.toLocaleLowerCase("en-US")
     return terms.some((term) => text.includes(term))
   })
-  const selected = relevant.length === 0 ? scoped : relevant
+  const selected = relevant
   const maxCharacters = definition.maxTokens * 4
-  let content = selected
-    .map((observation) => `- ${observation.text}`)
-    .join("\n")
-  if (content.length > maxCharacters) content = content.slice(0, maxCharacters)
+  const contentParts: string[] = []
+  const evidenceObservationIds: string[] = []
+  let remaining = maxCharacters
+  for (const observation of selected) {
+    if (remaining <= 0) break
+    const separator = contentParts.length === 0 ? "" : "\n"
+    const bullet = `${separator}- ${observation.text}`
+    const represented = bullet.slice(0, remaining)
+    if (represented.trim().length === 0) break
+    contentParts.push(represented)
+    evidenceObservationIds.push(observation.id)
+    remaining -= represented.length
+    if (represented.length < bullet.length) break
+  }
+  const content = contentParts.join("")
   const version = history
     .filter((revision) => revision.modelId === definition.id)
     .reduce((maximum, revision) => Math.max(maximum, revision.version), 0) + 1
   return {
     id: `mental-model-revision:${stableContentHash([
       definition.id,
+      String(definition.definitionVersion),
       String(version),
-      ...selected.map((observation) => observation.id)
+      ...evidenceObservationIds
     ].join("\u0000"))}`,
     modelId: definition.id,
     version,
+    definitionVersion: definition.definitionVersion,
     content,
-    evidenceObservationIds: selected.map((observation) => observation.id).sort(),
+    evidenceObservationIds: [...evidenceObservationIds].sort(),
     createdAt
   }
 }

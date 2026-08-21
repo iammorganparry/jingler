@@ -176,6 +176,7 @@ export const MemoryMentalModelRevision = Schema.Struct({
   id: MemoryId,
   modelId: MemoryId,
   version: MemoryRevisionNumber,
+  definitionVersion: Schema.optionalWith(MemoryRevisionNumber, { default: () => 1 }),
   content: Schema.String,
   evidenceObservationIds: Schema.Array(MemoryId),
   createdAt: Schema.String

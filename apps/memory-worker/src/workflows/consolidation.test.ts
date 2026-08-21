@@ -31,6 +31,28 @@ describe("observation consolidation", () => {
     expect(currentObservations([first, second], project)).toEqual([second])
   })
 
+  it("returns the current observation unchanged when evidence is replayed", () => {
+    const first = consolidateObservation([], {
+      scope: project,
+      key: "retry-policy",
+      text: "Retries use bounded jitter.",
+      evidenceId: "revision:retry:1",
+      confidence: 0.7,
+      createdAt: "2026-08-20T09:00:00.000Z"
+    })
+    const replay = consolidateObservation([first], {
+      scope: project,
+      key: "retry-policy",
+      text: "A retried request must not rewrite history.",
+      evidenceId: "revision:retry:1",
+      confidence: 1,
+      createdAt: "2026-08-21T09:00:00.000Z"
+    })
+
+    expect(replay).toBe(first)
+    expect(replay.version).toBe(1)
+  })
+
   it("never combines evidence across scopes", () => {
     const projectA = consolidateObservation([], {
       scope: project,

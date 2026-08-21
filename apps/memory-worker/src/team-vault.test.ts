@@ -378,12 +378,61 @@ describe("TeamVault", () => {
       confidence: 1,
       createdAt: "2026-08-21T10:00:00.000Z"
     }))
+    const replayed = await run(vault.consolidateObservation({
+      scope,
+      key: "retry",
+      text: "A request replay must not replace the current observation.",
+      evidenceId: "revision:retry:2",
+      confidence: 1,
+      createdAt: "2026-08-21T11:00:00.000Z"
+    }))
 
     const models = await run(vault.listMentalModels())
     expect(models.models).toHaveLength(1)
     expect(models.revisions.map(({ version }) => version)).toEqual([1, 2])
+    expect(replayed.version).toBe(2)
+    expect((await run(vault.snapshot())).observations).toHaveLength(2)
     expect(models.revisions[1]?.content).toContain("shared bounded-jitter helper")
     expect(models.revisions[1]?.evidenceObservationIds).toHaveLength(1)
+  })
+
+  it("does not pair a redefined mental model with an older definition revision", async () => {
+    const vault = await run(
+      TeamVault.create("org-model-redefinition", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    const scope = { kind: "project" as const, id: "project-a" }
+    const first = await run(vault.defineMentalModel({
+      id: "model:guidance",
+      name: "Retry guidance",
+      scope,
+      sourceQuery: "retry",
+      maxTokens: 100,
+      refreshAfterConsolidation: true,
+      publication: "published",
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }))
+    await run(vault.consolidateObservation({
+      scope,
+      key: "retry",
+      text: "Retry with bounded jitter.",
+      evidenceId: "revision:retry:1",
+      confidence: 1,
+      createdAt: "2026-08-20T10:00:00.000Z"
+    }))
+    const beforeRedefinition = await run(vault.reflect("retry", 5))
+    expect(beforeRedefinition.text).toContain("bounded jitter")
+
+    const redefined = await run(vault.defineMentalModel({
+      ...first,
+      name: "Deployment guidance",
+      sourceQuery: "deployment",
+      createdAt: "2026-08-21T09:00:00.000Z"
+    }))
+    const stale = await run(vault.reflect("deployment", 5))
+
+    expect(redefined.definitionVersion).toBe(2)
+    expect(stale.text).not.toContain("bounded jitter")
+    expect(stale.basedOn.mentalModels).toEqual([])
   })
 
   it("reflects from cited accepted evidence without creating source evidence", async () => {

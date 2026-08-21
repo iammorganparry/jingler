@@ -31,6 +31,7 @@ export const consolidateObservation = (
       candidate.key === evidence.key && sameScope(candidate.scope, evidence.scope)
     )
     .sort((left, right) => right.version - left.version)[0]
+  if (previous?.evidenceIds.includes(evidence.evidenceId) === true) return previous
   const evidenceIds = [...new Set([
     ...(previous?.evidenceIds ?? []),
     evidence.evidenceId

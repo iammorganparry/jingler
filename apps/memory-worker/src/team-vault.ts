@@ -1719,6 +1719,9 @@ export class TeamVault {
     return this.serialized(Effect.gen(this, function* () {
       const current = yield* this.state.load()
       const observation = consolidateObservation(current.observations, evidence)
+      if (current.observations.some((candidate) => candidate.id === observation.id)) {
+        return observation
+      }
       const observations = uniqueById([...current.observations, observation])
       const refreshed = current.mentalModels
         .filter((model) =>
@@ -2107,6 +2110,8 @@ export class TeamVault {
       const snapshot = yield* this.state.load()
       const latestModelRevisions = new Map<string, MemoryMentalModelRevision>()
       for (const revision of snapshot.mentalModelRevisions) {
+        const model = snapshot.mentalModels.find((candidate) => candidate.id === revision.modelId)
+        if (model === undefined || revision.definitionVersion !== model.definitionVersion) continue
         const previous = latestModelRevisions.get(revision.modelId)
         if (previous === undefined || revision.version > previous.version) {
           latestModelRevisions.set(revision.modelId, revision)
@@ -2116,7 +2121,7 @@ export class TeamVault {
       const models = snapshot.mentalModels.flatMap((model) => {
         if (model.publication !== "published") return []
         const revision = latestModelRevisions.get(model.id)
-        if (revision === undefined) return []
+        if (revision === undefined || revision.content.trim().length === 0) return []
         const searchable = `${model.name} ${model.sourceQuery} ${revision.content}`
           .toLocaleLowerCase("en-US")
         return terms.some((term) => searchable.includes(term)) ? [{ model, revision }] : []
