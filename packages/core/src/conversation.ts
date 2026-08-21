@@ -55,7 +55,16 @@ export const ToolCall = Schema.Struct({
    * empty transcript, so requiring it would silently erase the history of every
    * existing session the moment it was opened.
    */
-  output: Schema.optional(Schema.String)
+  output: Schema.optional(Schema.String),
+  /**
+   * True when the renderer stripped this card's heavy payloads (`output`, diff
+   * previews) to bound live-transcript memory. Display-only state: the full
+   * record is still on disk and comes back whole through `TranscriptStore`.
+   * Optional for the same decode-compatibility reason as `output` — and because
+   * a compacted card must never be PERSISTED (main owns the durable transcript
+   * and never sets this), absence is the durable-record shape.
+   */
+  compacted: Schema.optional(Schema.Boolean)
 })
 export type ToolCall = Schema.Schema.Type<typeof ToolCall>
 

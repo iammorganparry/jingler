@@ -157,6 +157,18 @@ export const ToolStopContext = createContext<(() => void) | null>(null)
 const isStoppableTool = (displayName: string): boolean =>
   /^(bash|shell|terminal|command)/i.test(displayName)
 
+/**
+ * What an opened card with nothing to print says. A compacted card HAD output;
+ * claiming "No output." would be a lie about the tool rather than about what
+ * we kept.
+ */
+const emptyBodyNote = (tool: ToolCallModel): string => {
+  if (tool.status === "running") return "Running…"
+  return tool.compacted === true
+    ? "Output released from memory — the full record is in the session transcript."
+    : "No output."
+}
+
 function ToolCardView({ tool }: { tool: ToolCallModel }) {
   const stopTool = useContext(ToolStopContext)
   const [expanded, setExpanded] = useState(false)
@@ -200,7 +212,7 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
           )}
           {tool.output === undefined ? (
             <div className="px-3 pb-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] text-dim">
-              {tool.status === "running" ? "Running…" : "No output."}
+              {emptyBodyNote(tool)}
             </div>
           ) : (
             <pre className="max-h-[320px] overflow-auto border-t border-line/60 px-3 py-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] leading-[1.5] text-muted-foreground">

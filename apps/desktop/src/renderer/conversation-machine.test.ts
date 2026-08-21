@@ -23,6 +23,7 @@ import {
   CONVERSATION_LOAD_TIMEOUT_MS,
   conversationMachine
 } from "./conversation-machine.js"
+import { KEEP_RECENT_TOOL_PARTS } from "./transcript-compaction.js"
 
 /**
  * The renderer's conversation flow is a deterministic XState chart. Its only
@@ -46,6 +47,9 @@ const h = vi.hoisted(() => ({
   resumeCalls: [] as Array<{ sessionId: string; planId: string; revision: number | undefined }>,
   diffValue: "diff-0",
   diffCalls: 0,
+  // Lets a test hold `refreshingDiff` open, to observe what happens INSIDE the
+  // settled-turn boundary (the entry trim) before the queued dequeue fires.
+  diffGate: Promise.resolve() as Promise<void>,
   filesValue: [] as ReadonlyArray<string>,
   filesCalls: 0,
   statusWrites: [] as Array<string>,
@@ -119,6 +123,7 @@ vi.mock("./rpc-client.js", () => ({
     },
     sessionsDiff: async () => {
       h.diffCalls += 1
+      await h.diffGate
       return h.diffValue
     },
     agentRun: (
@@ -269,6 +274,7 @@ beforeEach(() => {
   h.agentRunCalls.length = 0
   h.diffValue = "diff-0"
   h.diffCalls = 0
+  h.diffGate = Promise.resolve()
   h.filesValue = []
   h.filesCalls = 0
   h.statusWrites.length = 0
@@ -2608,6 +2614,92 @@ describe("conversationMachine — stop", () => {
 
     await waitFor(actor, (s) => s.matches(idle))
     expect(actor.getSnapshot().context.messages.at(-1)!.streaming).toBe(false)
+    actor.stop()
+  })
+})
+
+/**
+ * The two memory bounds on a live transcript: per-message compaction (a single
+ * turn cannot accumulate unbounded tool payloads) and re-windowing at the
+ * queued-turn boundary (a session that settles straight into its next turn —
+ * never visiting `awaitingInput` — still gets its head dropped). Both exist
+ * because a running actor is never evictable: whatever it retains, it retains
+ * for as long as the operator keeps it busy.
+ */
+describe("conversationMachine — live transcript memory bounds", () => {
+  it("compacts settled tool cards past the recent window within one turn", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "go" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    for (let i = 0; i < KEEP_RECENT_TOOL_PARTS + 2; i++) {
+      emit({ _tag: "ToolStart", id: `t${i}`, name: "Bash", target: `cmd ${i}` })
+      emit({
+        _tag: "ToolEnd",
+        id: `t${i}`,
+        status: "success",
+        meta: null,
+        diff: null,
+        preview: null,
+        output: `out ${i}`
+      })
+    }
+
+    const cards = actor
+      .getSnapshot()
+      .context.messages.at(-1)!
+      .parts.flatMap((p) => (p._tag === "Tool" ? [p.tool] : []))
+    expect(cards).toHaveLength(KEEP_RECENT_TOOL_PARTS + 2)
+    // The two oldest fell out of the window: payloads gone, header intact.
+    for (const old of cards.slice(0, 2)) {
+      expect(old.compacted).toBe(true)
+      expect(old.output).toBeUndefined()
+      expect(old.target).not.toBeNull()
+    }
+    // Everything still in the window is whole.
+    for (const recent of cards.slice(2)) {
+      expect(recent.compacted).toBeUndefined()
+      expect(recent.output).toBeDefined()
+    }
+    actor.stop()
+  })
+
+  it("re-windows an over-cap transcript at the queued-turn boundary, without touching the dequeued turn", async () => {
+    // 500 messages on disk; page them ALL in so the live array is over the cap.
+    h.transcript = Array.from({ length: 500 }, (_, i) =>
+      userMessage(`d_${i}`, `m${i}`, "2026-07-25T00:00:00.000Z")
+    )
+    let releaseDiff = () => {}
+    h.diffGate = new Promise<void>((resolve) => {
+      releaseDiff = resolve
+    })
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "LOAD_OLDER" })
+    await waitFor(actor, (s) => s.context.messages.length === 400)
+    actor.send({ type: "LOAD_OLDER" })
+    await waitFor(actor, (s) => s.context.messages.length === 500)
+
+    actor.send({ type: "SEND", text: "first" })
+    await waitFor(actor, (s) => s.matches("running"))
+    actor.send({ type: "SEND", text: "queued next" })
+
+    // The turn settles into `refreshingDiff` (held open by the diff gate); its
+    // entry trim re-reads the disk tail and swaps it in while we are STILL
+    // there — the queued turn has not started.
+    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+    await waitFor(actor, (s) => s.matches("refreshingDiff"))
+    await waitFor(actor, (s) => s.context.messages.length === 200, { timeout: 3000 })
+    expect(actor.getSnapshot().context.messages[0]!.id).toBe("d_300")
+    expect(actor.getSnapshot().context.hasMoreHistory).toBe(true)
+    expect(actor.getSnapshot().context.historyCursor).toBe("v1:300")
+
+    // Releasing the diff dequeues the held send onto the TRIMMED tail.
+    releaseDiff()
+    await waitFor(actor, (s) => s.matches("running"), { timeout: 3000 })
+    expect(actor.getSnapshot().context.messages.length).toBe(202)
+    expect(h.agentRunCalls).toHaveLength(2)
     actor.stop()
   })
 })

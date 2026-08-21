@@ -68,6 +68,7 @@ import {
   stopChild
 } from "xstate"
 import { rpc } from "./rpc-client.js"
+import { compactMessageParts, compactMessages } from "./transcript-compaction.js"
 import { publishSessionUpdate } from "./session-updates.js"
 import { settleStoppedFleet } from "./subagent-fleet-machine.js"
 
@@ -409,11 +410,14 @@ const HISTORY_PAGE_SIZE = 200
 /**
  * When the resident live array is re-windowed from disk.
  *
- * A settled turn's messages are never dropped in flight — `foldEvent` keeps
- * every `ToolEnd`'s full output, diff and preview forever — so a session whose
+ * A settled turn's messages are never dropped in flight, so a session whose
  * actor stays alive (the residency cap keeps a busy background session running)
- * grows without bound. Past this cap the tail is re-read from disk and the head
- * dropped; see `trimmedTailState` and `awaitingInput`'s `requestHistoryTrim`.
+ * grows without bound in message COUNT — bytes-per-message are separately
+ * bounded by `transcript-compaction.ts`. Past this cap the tail is re-read from
+ * disk and the head dropped; see `trimmedTailState` and `requestHistoryTrim`,
+ * fired from both settled turn boundaries (`awaitingInput` and
+ * `refreshingDiff`, the latter covering back-to-back queued turns that never
+ * go idle).
  *
  * 2× the page size, not 1×: an ordinary back-and-forth must never trip it, so
  * the trim fires only on genuinely long-lived sessions, and the operator keeps a
@@ -1608,7 +1612,17 @@ export const conversationMachine = setup({
             context.planDraftPresentationNonce + (first ? 1 : 0)
         }
       }
-      const messages = patchLast(context.messages, (last) => applyStreamEvent(last, e))
+      const folded = patchLast(context.messages, (last) => applyStreamEvent(last, e))
+      // A tool boundary is the one moment a card can leave the recent window,
+      // so it is the only event worth paying a parts walk for. Without this a
+      // multi-hour turn accumulates every settled card's output and previews on
+      // ONE message — a shape no message-count trim can ever reach — and the
+      // actor holding it is never evictable while running. See
+      // `transcript-compaction.ts` for what compaction keeps.
+      const messages =
+        e._tag === "ToolEnd"
+          ? patchLast(folded, (last) => compactMessageParts(last))
+          : folded
       // A finished/failed turn KEEPS its sub-agents (their tabs stay readable) —
       // any still marked "working" (e.g. an interrupted run, or a sub-agent whose
       // `task_notification` never arrived) settle to "done" so no tab shows a live
@@ -1682,7 +1696,7 @@ export const conversationMachine = setup({
             )
           : context.messages
       return {
-        messages: [...projected.messages, ...existing],
+        messages: [...compactMessages(projected.messages), ...existing],
         hasMoreHistory: event.hasMore,
         historyCursor: event.cursor,
         loadingHistory: false
@@ -1716,14 +1730,18 @@ export const conversationMachine = setup({
     },
     applyTrimmedTail: assign(({ context, event }) => {
       if (event.type !== "HISTORY_TRIMMED") return {}
-      // Only ever swaps the array SMALLER, and only from idle (this action is
-      // reachable only in `awaitingInput`, so `messages` holds no streaming turn).
-      // Re-check the cap so a reply that raced the array back under the window is a
-      // no-op, and the history load so its cursor is never stranded.
+      // Only ever swaps the array SMALLER, and only at a settled turn boundary
+      // (this action is reachable in `awaitingInput` and `refreshingDiff`, both
+      // entered after the terminal event folded — so `messages` holds no
+      // streaming turn, and main has persisted the whole settled turn before
+      // forwarding it). Re-check the cap so a reply that raced the array back
+      // under the window is a no-op, and the history load so its cursor is
+      // never stranded.
       if (context.loadingHistory || !shouldTrimLiveHistory(context.messages.length)) {
         return {}
       }
-      return trimmedTailState(event.messages, event.hasMore, event.cursor, context.sharedPlan)
+      const state = trimmedTailState(event.messages, event.hasMore, event.cursor, context.sharedPlan)
+      return { ...state, messages: compactMessages(state.messages) }
     }),
     /**
      * Ask the harness to kill ONE sub-agent. Fire-and-forget, and with NO
@@ -2332,7 +2350,10 @@ export const conversationMachine = setup({
             target: "running",
             actions: [
               assign(({ event }) => ({
-                messages: event.output.transcript,
+                // Compacted on the way in: a giant on-disk turn re-decoded
+                // whole would restore the exact heap the live compaction
+                // bounds. Same on every other disk→live path.
+                messages: compactMessages(event.output.transcript),
                 sharedPlanChatId: event.output.sharedPlanChatId,
                 sharedPlan: event.output.sharedPlan,
                 hasMoreHistory: event.output.hasMore,
@@ -2345,7 +2366,7 @@ export const conversationMachine = setup({
           {
             target: "awaitingInput",
             actions: assign(({ event }) => ({
-              messages: event.output.transcript,
+              messages: compactMessages(event.output.transcript),
               sharedPlanChatId: event.output.sharedPlanChatId,
               sharedPlan: event.output.sharedPlan,
               hasMoreHistory: event.output.hasMore,
@@ -2366,9 +2387,10 @@ export const conversationMachine = setup({
     },
     awaitingInput: {
       // Nothing is running here — this is the one place the session's persisted
-      // status can be recorded truthfully, and the only turn boundary at which the
-      // live array may be re-windowed (no streaming message to disturb, and the
-      // queued-turn path targets `running` instead, bypassing this entry).
+      // status can be recorded truthfully. The live array may be re-windowed
+      // here (no streaming message to disturb); the queued-turn path bypasses
+      // this entry, so `refreshingDiff` fires the same trim for sessions that
+      // settle straight into their next turn.
       //
       // Re-windowing here does not yank the transcript: a turn settles with the
       // view pinned to the bottom (its own stream scrolled there), the re-read tail
@@ -2611,6 +2633,17 @@ export const conversationMachine = setup({
     // After a turn ends, re-read the worktree diff so the Changes rail reflects
     // whatever the agent actually edited.
     refreshingDiff: {
+      // The OTHER settled turn boundary, and the only one a perpetually-busy
+      // session ever visits: a queue that never drains routes every settle
+      // through here straight back to `running`, bypassing `awaitingInput` —
+      // which used to mean the live array was never re-windowed and grew one
+      // whole turn per dequeue for as long as the operator kept feeding it.
+      // The terminal event has folded (transition actions run before entry) and
+      // main persists the settled turn before emitting it, so the same
+      // disk-tail swap `awaitingInput` performs is sound here; a reply that
+      // arrives after the next turn has moved us to `running` is dropped
+      // there, exactly as before.
+      entry: "requestHistoryTrim",
       invoke: {
         src: "refreshDiff",
         input: ({ context }) => ({ session: context.session }),
@@ -2646,6 +2679,11 @@ export const conversationMachine = setup({
         // The turn already ended — just jump the picked message to the head so the
         // pending dequeue (on refresh settle) runs it next.
         SEND_NOW: { actions: "promoteQueued" },
+        // The re-read tail from this state's own entry trim. Guarded inside the
+        // action (cap re-check, in-flight history load) exactly as in
+        // `awaitingInput`; if the diff settles first and a queued turn moves us
+        // to `running`, the reply is unhandled there and dropped — safe.
+        HISTORY_TRIMMED: { actions: "applyTrimmedTail" },
         // The most likely landing spot for a late steer reply: the turn's `Done`
         // moved us here while the RPC was still in flight. See `settleLateSteer`.
         STEER_RESULT: { actions: "settleLateSteer" },
