@@ -25,6 +25,7 @@ import {
   makeAgentRuntimeTitleGenerator,
   makeOffloadCommandRouter,
   EnvironmentService,
+  ExplanationStore,
   RemoteSessionService,
   routeSessionOperation,
   GitHubApi,
@@ -867,6 +868,19 @@ const planMutationConflict = (message: string): PlanConflictError =>
     latestRevision: 0,
     latest: null,
   });
+
+/** `Explanation.watch` handler, shared with the RPC integration test. */
+export const explanationWatch = (sessionId: string) =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (session === null || !session.worktreePath) return Stream.empty;
+      const store = yield* ExplanationStore;
+      return store.watch(session.worktreePath, session.id);
+    }),
+  );
 
 /** `Plan.watch` handler, shared with the RPC integration test. */
 export const planWatch = (sessionId: string) =>
@@ -5199,8 +5213,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         // runner's maps for the app's lifetime.
         yield* runner.forgetChat(chat.id);
       }
-      if (session?.worktreePath)
+      if (session?.worktreePath) {
         yield* PlanStore.removeAll(session.worktreePath);
+        yield* ExplanationStore.removeAll(session.worktreePath);
+      }
       yield* ReviewStore.clear(sessionId);
     }),
   "Sessions.createChat": ({ sessionId }) =>
@@ -5242,6 +5258,11 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           chatId,
           updated.activeChatId,
         );
+        yield* ExplanationStore.rehome(
+          session.worktreePath,
+          sessionId,
+          updated.activeChatId,
+        ).pipe(Effect.ignore);
       }
       return updated;
     }).pipe(
@@ -5950,6 +5971,17 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.files": ({ sessionId }) => githubFiles(sessionId),
   "Github.diff": ({ sessionId }) => githubDiff(sessionId),
   "Github.detectPr": ({ sessionId }) => githubDetectPr(sessionId),
+  "Explanation.current": ({ sessionId }) =>
+    SessionStore.get(sessionId).pipe(
+      Effect.flatMap((session) =>
+        session.worktreePath
+          ? ExplanationStore.read(session.worktreePath, session.id)
+          : Effect.succeed(null),
+      ),
+      Effect.orElseSucceed(() => null),
+    ),
+  "Explanation.watch": ({ sessionId }) =>
+    interruptOnPageGone(explanationWatch(sessionId)),
   "Plan.current": ({ sessionId }) =>
     SessionStore.get(sessionId).pipe(
       Effect.flatMap((session) =>
@@ -6597,6 +6629,7 @@ export type RpcServerRequirements =
   | ContextManager
   | DialogService
   | EnvironmentService
+  | ExplanationStore
   | FileSystem.FileSystem
   | GitHubApi
   | GitHubAuth

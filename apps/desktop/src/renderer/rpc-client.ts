@@ -25,6 +25,7 @@ import type {
   CreateSessionInput,
   ExecutionMode,
   Environment,
+  ExplanationDocument,
   PairSshEnvironmentInput,
   SshHost,
   ExternalInstructionIdentity,
@@ -1308,6 +1309,27 @@ export const rpc = {
    * nothing is running — it just stays quiet until a review starts. Returns the
    * unsubscribe.
    */
+  explanationCurrent: (sessionId: string): Promise<ExplanationDocument | null> =>
+    run((c) => c.Explanation.current({ sessionId })),
+  explanationWatch: (
+    sessionId: string,
+    onDocument: (document: ExplanationDocument | null) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = coreRuntime.runFork(
+        client.Explanation.watch({ sessionId }).pipe(
+          Stream.runForEach((document) => Effect.sync(() => onDocument(document)))
+        )
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   planCurrent: (sessionId: string): Promise<PlanDocument | null> =>
     run((c) => c.Plan.current({ sessionId })),
   planStartDraft: (sessionId: string): Promise<PlanDocument> =>

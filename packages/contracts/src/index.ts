@@ -43,6 +43,7 @@ import {
   PluginSettingsSnapshot,
   ExecutionMode,
   Environment,
+  ExplanationDocument,
   EnvironmentDiscovery,
   PairSshEnvironmentInput,
   SshHost,
@@ -1799,6 +1800,19 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * returns that review without spawning an agent, unless `force`. That is what
    * lets the auto-review trigger fire off a poll loop safely.
    */
+  /** The latest focused visual explanation for this session. */
+  Rpc.make("Explanation.current", {
+    success: Schema.NullOr(ExplanationDocument),
+    payload: { sessionId: Schema.String }
+  }),
+
+  /** Stream replacement revisions of the session's focused explanation. */
+  Rpc.make("Explanation.watch", {
+    success: Schema.NullOr(ExplanationDocument),
+    stream: true,
+    payload: { sessionId: Schema.String }
+  }),
+
   /** The canonical PRD MDX document shared by every chat in this session. */
   Rpc.make("Plan.current", {
     success: Schema.NullOr(PlanDocument),

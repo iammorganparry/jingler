@@ -21,6 +21,7 @@ import {
   InMemorySecretStoreLive,
   MemoryService,
   makeAgentResourceService,
+  ExplanationStore,
   PlanStore,
   PluginAuth,
   PluginHost,
@@ -81,6 +82,7 @@ import {
   transcriptForFork,
   chooseReposDir,
   awaitRelayAcknowledgement,
+  explanationWatch,
   completeDurableGitHubFeedbackReplay,
   assetList,
   assetRead,
@@ -760,9 +762,29 @@ describe("RPC handlers", () => {
     const services = Layer.mergeAll(
       SessionStore.Default,
       PlanStore.Default,
+      ExplanationStore.Default,
     ).pipe(Layer.provideMerge(base));
     const result = await Effect.runPromise(
       Effect.gen(function* () {
+        const explanationFiber = yield* explanationWatch("session-plan-thread").pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.fork,
+        );
+        yield* Effect.sleep("25 millis");
+        const explanation = yield* ExplanationStore.publish(
+          worktreePath,
+          "session-plan-thread",
+          "chat-plan-thread",
+          {
+            title: "Thread flow",
+            summary: "The explanation RPC watches the canonical artifact.",
+            sections: [],
+          },
+        );
+        const watchedExplanation = Chunk.toReadonlyArray(
+          yield* Fiber.join(explanationFiber),
+        )[0];
         const plan = yield* PlanStore.promoteDocument(worktreePath, {
           sessionId: "session-plan-thread",
           producingChatId: "chat-plan-thread",
@@ -858,7 +880,16 @@ describe("RPC handlers", () => {
             messageId,
           }),
         );
-        return { appended, delivered, resolved, stale, retrySent, watched };
+        return {
+          appended,
+          delivered,
+          resolved,
+          stale,
+          retrySent,
+          watched,
+          explanation,
+          watchedExplanation,
+        };
       }).pipe(Effect.provide(services)),
     );
 
@@ -873,6 +904,8 @@ describe("RPC handlers", () => {
       result.delivered.plan.annotations[0]?.messages[1]?.deliveryState,
     ).toBe("sent");
     expect(result.resolved.plan.annotations[0]?.status).toBe("resolved");
+    expect(result.explanation.revision).toBe(1);
+    expect(result.watchedExplanation).toEqual(result.explanation);
     expect(result.watched?.revision).toBe(result.appended.revision);
     expect(result.watched?.plan.annotations[0]?.messages[1]?.body).toBe(
       "Verified.",
