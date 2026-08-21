@@ -178,8 +178,47 @@ test("pi receives accepted memory and automatically retains its visible settled 
     )).toBe(true)
     await expect.poll(() => sourceIngestRequests(fake.memoryRequests).length).toBe(1)
     expect(fake.memorySnapshot("org-e2e").sourceCount).toBe(1)
-
+    await expect.poll(() => fake.memorySnapshot("org-e2e").acceptedPageIds)
+      .toContain("shared-learning")
     await app.app.close()
+
+    const teammateRequestStart = fake.memoryRequests.length
+    const teammate = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "default", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    const teammateComposer = teammate.window.getByPlaceholder("Message the agent…")
+    await teammateComposer.fill("How should refund rate limiting work?")
+    await teammateComposer.press("Enter")
+    await expect(teammate.window.getByText(COMPLETED_PI_REPLY)).toBeVisible({ timeout: 30_000 })
+    expect(fake.memoryRequests.slice(teammateRequestStart).some(
+      (request) =>
+        request.mcpName === "memory_read" &&
+        request.toolArguments?.pageId === "shared-learning"
+    )).toBe(true)
+    await teammate.app.close()
+
+    const outsiderStart = fake.memoryRequests.length
+    const outsider = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "default", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-other" } }
+    })
+    const outsiderComposer = outsider.window.getByPlaceholder("Message the agent…")
+    await outsiderComposer.fill("How should refund rate limiting work?")
+    await outsiderComposer.press("Enter")
+    await expect(outsider.window.getByText(COMPLETED_PI_REPLY)).toBeVisible({ timeout: 30_000 })
+    expect(fake.memoryRequests.slice(outsiderStart).some(
+      (request) => request.toolArguments?.pageId === "shared-learning"
+    )).toBe(false)
+    await outsider.app.close()
   } finally {
     await fake.close()
   }

@@ -254,7 +254,10 @@ export const makePiAgentRuntimeLive = (
         return Effect.all({
           managedMcp: importedMcp.resolveForTarget(spec.targetCapabilities.targetId),
           managedFiles: managedResources.enabledForTarget(spec.targetCapabilities.targetId),
-          plugins: pluginSetup
+          plugins: pluginSetup,
+          memoryLifecycle: Option.isSome(memory) && memory.value.diagnostics !== undefined
+            ? memory.value.diagnostics()
+            : Effect.succeed({ queuedRetentions: 0, retryingRetentions: 0 })
         }).pipe(
           Effect.mapError((cause) =>
             new AgentRuntimeError({
@@ -263,7 +266,12 @@ export const makePiAgentRuntimeLive = (
               cause
             })
           ),
-          Effect.flatMap(({ managedMcp, managedFiles, plugins }) => createJinglerTools({
+          Effect.flatMap(({
+            managedMcp,
+            managedFiles,
+            plugins,
+            memoryLifecycle
+          }) => createJinglerTools({
             context,
             cwd: spec.cwd,
             workspace,
@@ -287,6 +295,12 @@ export const makePiAgentRuntimeLive = (
                 : { ...current, imported: undefined }
             },
             registryOptions: {
+              memoryLifecycle: () => ({
+                attachmentStatus: context.memoryAttachmentStatus ?? "disabled",
+                ...(Option.isSome(memory) && memory.value.diagnosticsSnapshot !== undefined
+                  ? memory.value.diagnosticsSnapshot()
+                  : memoryLifecycle)
+              }),
               ...(Option.isSome(memory)
                 ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }
                 : {}),

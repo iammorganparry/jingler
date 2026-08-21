@@ -133,6 +133,11 @@ export interface ToolMemoryHooks {
 }
 
 export interface ToolRegistryOptions {
+  readonly memoryLifecycle?: () => {
+    readonly attachmentStatus: "disabled" | "available" | "failed"
+    readonly queuedRetentions: number
+    readonly retryingRetentions: number
+  }
   readonly writeArtifact?: (toolId: string, content: string) => Promise<ToolArtifactReference>
   readonly observer?: ToolExecutionObserver
   readonly memory?: ToolMemoryHooks
@@ -415,13 +420,22 @@ export class ToolRegistry {
     readonly proposals: number
     readonly workflowPolls: number
     readonly failureCandidates: number
+    readonly attachmentStatus: "disabled" | "available" | "failed"
+    readonly queuedRetentions: number
+    readonly retryingRetentions: number
   } {
+    const lifecycle = this.#options.memoryLifecycle?.() ?? {
+      attachmentStatus: "disabled" as const,
+      queuedRetentions: 0,
+      retryingRetentions: 0
+    }
     return {
       mutatingExecutions: this.#mutatingExecutions,
       advisories: this.#memoryAdvisories,
       proposals: this.#memoryProposals,
       workflowPolls: this.#memoryWorkflowPolls,
-      failureCandidates: this.toolMemoryFailures().length
+      failureCandidates: this.toolMemoryFailures().length,
+      ...lifecycle
     }
   }
 

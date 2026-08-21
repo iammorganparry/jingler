@@ -791,6 +791,9 @@ describe("MemoryService automatic retention", () => {
     ) as ReadonlyArray<{ readonly attempts: number }>
     expect(outbox).toHaveLength(1)
     expect(outbox[0]?.attempts).toBe(1)
+    expect(await Effect.runPromise(
+      service.diagnostics().pipe(Effect.provide(layer))
+    )).toEqual({ queuedRetentions: 1, retryingRetentions: 1 })
   })
 })
 
@@ -870,6 +873,10 @@ describe("MemoryService retention recovery", () => {
     expect(JSON.parse(
       readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
     )).toEqual([])
+    expect(service.diagnosticsSnapshot()).toEqual({
+      queuedRetentions: 0,
+      retryingRetentions: 0
+    })
   })
 
   it("discards a pre-upgrade capture after organization access is revoked", async () => {

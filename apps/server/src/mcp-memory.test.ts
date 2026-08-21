@@ -168,8 +168,10 @@ describe("standard MCP client compatibility", () => {
       "pageId, revisionId, sourceIds, and citationIds"
     )
     expect(MEMORY_MCP_INSTRUCTIONS).toContain(
-      "On conflict, re-read and re-propose against the current revision"
+      "resolve conflicts against the current revision"
     )
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_retain")
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_reflect")
     expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_workflow_status")
   })
 
@@ -552,6 +554,48 @@ describe("stateless MCP 2026-07-28", () => {
         }
       }
     })
+  })
+
+  it("maps explicit retain, recall, and reflect to scoped memory operations", async () => {
+    const { client, requests } = collectingClient()
+    const dependencies = dependenciesFor(client)
+    const grant = issue("org-paid", ["read", "propose"]).grant
+
+    for (const [name, argumentsValue] of [
+      ["memory_retain", {
+        content: "Retries use bounded jitter.",
+        documentId: "retry-guide",
+        context: "project conventions",
+        metadata: { project: "widget" }
+      }],
+      ["memory_recall", { query: "retry conventions", limit: 5 }],
+      ["memory_reflect", { query: "How should retries work?", limit: 4 }]
+    ] as const) {
+      const response = await handleMemoryMcpRequest(
+        requestFor("tools/call", grant, {
+          params: { name, arguments: argumentsValue }
+        }),
+        dependencies
+      )
+      expect(response.status).toBe(200)
+    }
+
+    expect(requests[0]).toMatchObject({
+      method: "POST",
+      path: "/internal/memory/sources",
+      body: {
+        source: { kind: "manual", title: "project conventions" },
+        content: expect.stringContaining("Metadata: {\"project\":\"widget\"}")
+      }
+    })
+    expect(String((requests[0]?.body as { source?: { id?: string } })?.source?.id))
+      .toMatch(/^source:retain-/u)
+    expect(requests[1]?.path).toBe(
+      "/internal/memory/search?q=retry%20conventions&limit=5"
+    )
+    expect(requests[2]?.path).toBe(
+      "/internal/memory/reflect?q=How%20should%20retries%20work%3F&limit=4"
+    )
   })
 
   it("filters tools by grant privileges", async () => {

@@ -461,6 +461,11 @@ const dispatchVaultQuery = (
       const occurredAt = url.searchParams.get("occurredAt") ?? new Date().toISOString()
       return jsonResponse(yield* vault.search(query, positiveLimit(url), occurredAt))
     }
+    if (isRoute(request, route, "GET", "reflect")) {
+      const query = url.searchParams.get("q") ?? ""
+      const occurredAt = url.searchParams.get("occurredAt") ?? new Date().toISOString()
+      return jsonResponse(yield* vault.reflect(query, positiveLimit(url), occurredAt))
+    }
     if (isRoute(request, route, "GET", "navigation")) {
       return jsonResponse(yield* vault.navigation())
     }

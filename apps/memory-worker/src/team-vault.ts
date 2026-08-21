@@ -75,6 +75,21 @@ import {
   type MentalModelDefinitionInput
 } from "./workflows/mental-model.js"
 
+export interface VaultReflectResponse {
+  readonly text: string
+  readonly basedOn: {
+    readonly pages: ReadonlyArray<{
+      readonly pageId: string
+      readonly revisionId: string
+      readonly citationIds: ReadonlyArray<string>
+    }>
+    readonly mentalModels: ReadonlyArray<{
+      readonly modelId: string
+      readonly revisionId: string
+    }>
+  }
+}
+
 export interface VaultSuggestionsResponse {
   readonly version: 1
   readonly policy: SuggestionPolicy
@@ -838,6 +853,51 @@ const revisionCreatedEvent = (revision: StoredRevisionRecord): MemoryAuditEvent 
   details: { revision: String(revision.revision), contentHash: revision.contentHash }
 })
 
+const publishedKnowledge = (
+  current: VaultSnapshot,
+  pages: ReadonlyArray<MemoryPage>,
+  revisions: ReadonlyArray<StoredRevisionRecord>,
+  organizationId: string,
+  createdAt: string
+): Pick<VaultSnapshot, "observations" | "mentalModelRevisions"> => {
+  let observations = [...current.observations]
+  const pageById = new Map(pages.map((page) => [page.id, page]))
+  for (const revision of revisions) {
+    const page = pageById.get(revision.pageId)
+    if (page === undefined) continue
+    observations.push(consolidateObservation(observations, {
+      scope: { kind: "organization", id: organizationId },
+      key: page.id,
+      text: page.body,
+      evidenceId: revision.id,
+      confidence: 1,
+      createdAt
+    }))
+  }
+  observations = [...observations].sort((left, right) => compareText(left.id, right.id))
+  const refreshed = current.mentalModels
+    .filter((model) =>
+      model.refreshAfterConsolidation &&
+      model.scope.kind === "organization" &&
+      model.scope.id === organizationId
+    )
+    .map((model) =>
+      refreshMentalModel(
+        model,
+        currentObservations(observations, model.scope),
+        current.mentalModelRevisions,
+        createdAt
+      )
+    )
+  return {
+    observations,
+    mentalModelRevisions: uniqueById([
+      ...current.mentalModelRevisions,
+      ...refreshed
+    ])
+  }
+}
+
 export class TeamVault {
   /**
    * Serializes every mutation. A permit-1 semaphore preserves the previous
@@ -1033,12 +1093,20 @@ export class TeamVault {
         pageCreatedEvent(candidate.id, stored.id, input.actorId, input.createdAt),
         revisionCreatedEvent(stored)
       ])
+      const knowledge = publishedKnowledge(
+        current,
+        pages,
+        [stored],
+        this.organizationId,
+        input.createdAt
+      )
       const next = yield* this.persist(
         current,
         {
           ...current,
           heads: [...current.heads, head].sort((left, right) => compareText(left.pageId, right.pageId)),
           revisions: uniqueById([...current.revisions, stored]),
+          ...knowledge,
           events
         },
         pages
@@ -1320,6 +1388,13 @@ export class TeamVault {
           }
         }
       })
+      const knowledge = publishedKnowledge(
+        current,
+        prepared.candidatePages,
+        storedRevisions,
+        this.organizationId,
+        acceptedAt
+      )
       yield* this.persist(
         current,
         {
@@ -1334,6 +1409,7 @@ export class TeamVault {
           proposalSets: current.proposalSets.map((candidate) =>
             candidate.id === proposalSet.id ? { ...candidate, status: "accepted" } : candidate
           ),
+          ...knowledge,
           events: uniqueById([
             ...current.events,
             ...createdHeads.map((head) =>
@@ -2017,6 +2093,57 @@ export class TeamVault {
           embeddingModel,
           ...(pageId === undefined ? {} : { pageId })
         })
+      }
+    })
+  }
+
+  reflect(
+    query: string,
+    limit = 8,
+    occurredAt = new Date().toISOString()
+  ): Effect.Effect<VaultReflectResponse, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const recalled = yield* this.search(query, Math.max(1, Math.min(20, limit)), occurredAt)
+      const snapshot = yield* this.state.load()
+      const latestModelRevisions = new Map<string, MemoryMentalModelRevision>()
+      for (const revision of snapshot.mentalModelRevisions) {
+        const previous = latestModelRevisions.get(revision.modelId)
+        if (previous === undefined || revision.version > previous.version) {
+          latestModelRevisions.set(revision.modelId, revision)
+        }
+      }
+      const terms = query.toLocaleLowerCase("en-US").split(/\s+/u).filter(Boolean)
+      const models = snapshot.mentalModels.flatMap((model) => {
+        if (model.publication !== "published") return []
+        const revision = latestModelRevisions.get(model.id)
+        if (revision === undefined) return []
+        const searchable = `${model.name} ${model.sourceQuery} ${revision.content}`
+          .toLocaleLowerCase("en-US")
+        return terms.some((term) => searchable.includes(term)) ? [{ model, revision }] : []
+      })
+      const lines = [
+        ...models.map(({ model, revision }) =>
+          `Mental model ${model.name}: ${revision.content}`
+        ),
+        ...recalled.results.map((result) =>
+          `${result.title}: ${result.snippet}`
+        )
+      ]
+      return {
+        text: lines.length === 0
+          ? "No accepted memory evidence matched this reflection."
+          : lines.join("\n\n"),
+        basedOn: {
+          pages: recalled.results.map((result) => ({
+            pageId: result.pageId,
+            revisionId: result.revisionId,
+            citationIds: result.citationIds
+          })),
+          mentalModels: models.map(({ model, revision }) => ({
+            modelId: model.id,
+            revisionId: revision.id
+          }))
+        }
       }
     })
   }

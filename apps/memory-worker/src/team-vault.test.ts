@@ -386,6 +386,40 @@ describe("TeamVault", () => {
     expect(models.revisions[1]?.evidenceObservationIds).toHaveLength(1)
   })
 
+  it("reflects from cited accepted evidence without creating source evidence", async () => {
+    const vault = await run(
+      TeamVault.create("org-reflect", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    await run(vault.ingestSource(source, "Retries use bounded jitter."))
+    await run(vault.ingestAcceptedPage({
+      revisionId: "revision:retry:1",
+      markdown: serializeMemoryMarkdown({
+        ...page(1, "# Retry policy\n\nRetries use bounded jitter. [@runbook-citation]\n"),
+        id: "retry-policy",
+        path: "retry-policy.md",
+        title: "Retry policy"
+      }),
+      actorId: "agent",
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }))
+    const before = await run(vault.snapshot())
+    const reflected = await run(vault.reflect(
+      "bounded jitter",
+      5,
+      "2026-08-20T10:00:00.000Z"
+    ))
+    const after = await run(vault.snapshot())
+
+    expect(reflected.text).toContain("Retries use bounded jitter")
+    expect(reflected.basedOn.pages).toEqual([{
+      pageId: "retry-policy",
+      revisionId: "revision:retry:1",
+      citationIds: ["runbook-citation"]
+    }])
+    expect(after.sources).toEqual(before.sources)
+    expect(after.observations).toEqual(before.observations)
+  })
+
   it("exports accepted Markdown verbatim in an Obsidian vault layout", async () => {
     const vault = await run(TeamVault.create("org-export", new InMemoryVaultState(), new InMemoryR2Bucket()))
     const markdown = serializeMemoryMarkdown({

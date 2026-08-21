@@ -133,6 +133,9 @@ export const MemoryRetrievalSummary = Schema.Struct({
 export type MemoryRetrievalSummary = Schema.Schema.Type<typeof MemoryRetrievalSummary>
 
 export const MemoryMcpToolName = Schema.Literal(
+  "memory_retain",
+  "memory_recall",
+  "memory_reflect",
   "memory_search",
   "memory_read",
   "memory_navigation",

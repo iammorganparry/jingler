@@ -29,7 +29,13 @@ const connection: ProviderConnection = {
 }
 
 const registry = (): ToolRegistry => {
-  const result = new ToolRegistry()
+  const result = new ToolRegistry({
+    memoryLifecycle: () => ({
+      attachmentStatus: "failed",
+      queuedRetentions: 2,
+      retryingRetentions: 1
+    })
+  })
   result.register({
     id: "workspace_write",
     version: "1",
@@ -122,7 +128,10 @@ describe("runtime diagnostic observer", () => {
         advisories: 0,
         proposals: 0,
         workflowPolls: 0,
-        failureCandidates: 0
+        failureCandidates: 0,
+        attachmentStatus: "failed",
+        queuedRetentions: 2,
+        retryingRetentions: 1
       },
       terminalCause: "done",
       mutations: [{ callId: "call-1", toolId: "workspace_write", status: "settled", fileChangeSetIds: ["changes-1"] }]

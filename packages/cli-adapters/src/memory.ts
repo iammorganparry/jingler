@@ -190,6 +190,8 @@ export interface MemoryServiceShape {
   ) => Effect.Effect<boolean, never, MemoryServiceEnvironment>
   /** Flush locally queued retention jobs without discarding transient failures. */
   readonly recoverCaptures: () => Effect.Effect<MemoryCaptureRecoveryResult | null, never, MemoryServiceEnvironment>
+  readonly diagnostics: () => Effect.Effect<MemoryLifecycleDiagnostics, never, MemoryServiceEnvironment>
+  readonly diagnosticsSnapshot: () => MemoryLifecycleDiagnostics
   /** Resolve renderer-safe eligibility; the grant itself remains in this service. */
   readonly access: () => Effect.Effect<MemoryUiAccess | null, never, MemoryServiceEnvironment>
   /** Perform one stateless MCP tool call without exposing request credentials. */
@@ -263,6 +265,7 @@ interface MemoryRuntime {
   readonly outboxLock: Effect.Semaphore
   /** Serializes automatic and user-triggered recovery drains. */
   readonly drainLock: Effect.Semaphore
+  readonly lifecycle: { queuedRetentions: number; retryingRetentions: number }
 }
 
 interface CachedMemoryAttachment {
@@ -282,6 +285,11 @@ interface MemoryCaptureJob {
   readonly attempts: number
   /** Unix seconds the job was first enqueued. */
   readonly firstSeenAt: number
+}
+
+export interface MemoryLifecycleDiagnostics {
+  readonly queuedRetentions: number
+  readonly retryingRetentions: number
 }
 
 export interface MemoryCaptureRecoveryResult {
@@ -960,6 +968,11 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
         yield* writeOutbox(next)
       }))
     }
+    const remaining = yield* runtime.outboxLock.withPermits(1)(readOutbox)
+    yield* Effect.sync(() => Object.assign(runtime.lifecycle, {
+      queuedRetentions: remaining.length,
+      retryingRetentions: remaining.filter((job) => job.attempts > 0).length
+    }))
     return {
       queuedBefore: jobs.length,
       delivered: sent.size,
@@ -993,7 +1006,8 @@ export const makeMemoryService = (
     attachmentRefreshes: new Set<string>(),
     recallCache: new Map<string, RecallCacheEntry>(),
     outboxLock: Effect.unsafeMakeSemaphore(1),
-    drainLock: Effect.unsafeMakeSemaphore(1)
+    drainLock: Effect.unsafeMakeSemaphore(1),
+    lifecycle: { queuedRetentions: 0, retryingRetentions: 0 }
   }
   const attachment = (query?: string, recallScope?: string) =>
     selectedMemory.pipe(
@@ -1061,7 +1075,13 @@ export const makeMemoryService = (
         }).pipe(
           Effect.tap((outcome) =>
             outcome === "stored"
-              ? drainCaptureOutbox(runtime, selection.token).pipe(Effect.forkDaemon)
+              ? Effect.sync(() => {
+                  runtime.lifecycle.queuedRetentions += 1
+                }).pipe(
+                  Effect.zipRight(
+                    drainCaptureOutbox(runtime, selection.token).pipe(Effect.forkDaemon)
+                  )
+                )
               : Effect.void
           ),
           Effect.map((outcome) => outcome === "stored")
@@ -1129,6 +1149,17 @@ export const makeMemoryService = (
       )
     )
 
+  const diagnostics = () =>
+    runtime.outboxLock.withPermits(1)(readOutbox).pipe(
+      Effect.map((jobs) => ({
+        queuedRetentions: jobs.length,
+        retryingRetentions: jobs.filter((job) => job.attempts > 0).length
+      })),
+      Effect.tap((snapshot) => Effect.sync(() => Object.assign(runtime.lifecycle, snapshot))),
+      Effect.orElseSucceed(() => ({ ...runtime.lifecycle }))
+    )
+  const diagnosticsSnapshot = (): MemoryLifecycleDiagnostics => ({ ...runtime.lifecycle })
+
   const uiRequest = (input: MemoryUiRequest) =>
     selectedMemory.pipe(
       Effect.flatMap((selection) => {
@@ -1160,6 +1191,8 @@ export const makeMemoryService = (
     attachment,
     retainSettledTurn,
     recoverCaptures,
+    diagnostics,
+    diagnosticsSnapshot,
     access,
     uiRequest,
     suggestions

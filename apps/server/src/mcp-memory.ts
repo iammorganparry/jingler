@@ -77,6 +77,65 @@ const getRequest = (
 
 const tools: ReadonlyArray<ToolDefinition> = [
   defineTool({
+    name: "memory_retain",
+    description: "Retain explicit durable content for compiler extraction.",
+    privilege: "propose"
+  }, Schema.Struct({
+    content: NonEmptyString,
+    documentId: NonEmptyString,
+    context: Schema.optional(NonEmptyString),
+    metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String }))
+  }), (args, claims, requestId) => {
+    const retainedContent = [
+      ...(args.context === undefined ? [] : [`Context: ${args.context}`]),
+      ...(args.metadata === undefined
+        ? []
+        : [`Metadata: ${JSON.stringify(args.metadata)}`]),
+      args.content
+    ].join("\n\n")
+    const identity = createHash("sha256")
+      .update([claims.subject, args.documentId, retainedContent].join("\u0000"))
+      .digest("hex")
+    const sourceId = `source:retain-${identity}`
+    return {
+      organizationId: claims.organizationId,
+      requestId,
+      method: "POST",
+      path: "/internal/memory/sources",
+      body: {
+        source: {
+          id: sourceId,
+          kind: "manual",
+          title: args.context ?? `Retained document ${args.documentId}`,
+          uri: `jingler://memory-retain/${encodeURIComponent(args.documentId)}`,
+          retrievedAt: new Date().toISOString(),
+          contentHash: createHash("sha256").update(retainedContent).digest("hex")
+        },
+        content: retainedContent
+      }
+    }
+  }),
+  defineTool({
+    name: "memory_recall",
+    description: "Recall ranked accepted memory using hybrid retrieval.",
+    privilege: "read"
+  }, Schema.Struct({ query: NonEmptyString, limit: Schema.optional(limit(100)) }),
+  (args, claims, requestId) => getRequest(
+    claims,
+    requestId,
+    `/internal/memory/search?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 20}`
+  )),
+  defineTool({
+    name: "memory_reflect",
+    description: "Synthesize a cited, non-retaining answer from accepted memory.",
+    privilege: "read"
+  }, Schema.Struct({ query: NonEmptyString, limit: Schema.optional(limit(20)) }),
+  (args, claims, requestId) => getRequest(
+    claims,
+    requestId,
+    `/internal/memory/reflect?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 8}`
+  )),
+  defineTool({
     name: "memory_dashboard",
     description: "Read the pre-aggregated private team-memory dashboard.",
     privilege: "read"
@@ -512,7 +571,7 @@ const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
  * deliberately augments, rather than replaces, this portable MCP contract.
  */
 export const MEMORY_MCP_INSTRUCTIONS =
-  "Recall first: memory_search, then memory_read pages used; ground claims with pageId, revisionId, sourceIds, and citationIds. Before finishing substantive work, silently select up to three durable decisions, preferences, gotchas, connections, or findings. Exclude progress, ephemeral facts, secrets, personal data. Dedupe; memory_propose. On conflict, re-read and re-propose against the current revision. Poll workflowId with memory_workflow_status until terminal. Stateless: never reuse sessions or cookies."
+  "Recall with memory_recall, then memory_read used pages; cite pageId, revisionId, sourceIds, and citationIds. Use memory_reflect only for synthesis and never treat its output as source evidence. Retain explicit durable sources with memory_retain. For page changes: dedupe, memory_propose, resolve conflicts against the current revision, and poll workflowId with memory_workflow_status. Exclude progress, secrets, and personal data. Stateless: never reuse sessions or cookies."
 
 /**
  * Serve a STANDARD MCP client — the harnesses' native codex / opencode / Claude

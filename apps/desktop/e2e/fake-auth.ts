@@ -1223,6 +1223,13 @@ export const startFakeAuthServer = async (
           ) {
             state.proposals.push(capturedProposal(sourceId));
           }
+          // Production compiler workflows auto-publish retained conversation
+          // sources. Mirror that asynchronous result in the deterministic fake.
+          if (!state.pages.has("shared-learning")) {
+            for (const page of acceptedLearningPages(sourceId)) {
+              state.pages.set(page.id, page);
+            }
+          }
         }
         return json(201, {
           source: { ...source, id: sourceId },
