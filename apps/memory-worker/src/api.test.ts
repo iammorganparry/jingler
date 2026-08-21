@@ -553,6 +553,63 @@ describe("memory Worker internal API", () => {
     expect(creates).toBe(1)
   })
 
+  it("exposes scoped observations and versioned mental-model history", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret"
+    }
+    const scope = { kind: "project", id: "project-a" }
+
+    const model = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/mental-models", {
+        id: "model:conventions",
+        name: "Project conventions",
+        scope,
+        sourceQuery: "retry conventions",
+        maxTokens: 100,
+        refreshAfterConsolidation: true,
+        publication: "published",
+        createdAt: "2026-08-20T09:00:00.000Z"
+      }),
+      env
+    )
+    const observation = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/observations", {
+        scope,
+        key: "retry",
+        text: "Use bounded retry jitter.",
+        evidenceId: "revision:retry:1",
+        confidence: 1,
+        createdAt: "2026-08-20T10:00:00.000Z"
+      }),
+      env
+    )
+    const observations = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/observations"),
+      env
+    )
+    const models = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/mental-models"),
+      env
+    )
+
+    expect(model.status).toBe(201)
+    expect(observation.status).toBe(201)
+    expect(await jsonBody(observations)).toMatchObject({
+      observations: [{ key: "retry", evidenceIds: ["revision:retry:1"] }]
+    })
+    expect(await jsonBody(models)).toMatchObject({
+      models: [{ id: "model:conventions", definitionVersion: 1 }],
+      revisions: [{ modelId: "model:conventions", version: 1 }]
+    })
+    expect(await jsonBody(await handleMemoryWorkerRequest(
+      getRequest("org-b", "/internal/memory/observations"),
+      env
+    ))).toEqual({ observations: [] })
+  })
+
   it("does not report a compiler workflow when instance creation actually failed", async () => {
     const bucket = new InMemoryR2Bucket()
     const env: MemoryWorkerEnv = {

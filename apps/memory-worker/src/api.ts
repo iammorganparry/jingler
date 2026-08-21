@@ -1,5 +1,6 @@
 import { MemoryAcceptedPageRequest, MemoryRetrievalSummary } from "@jingler/core"
 import {
+  MemoryKnowledgeScope,
   MemorySource,
   SUGGESTION_POLICY_DEFAULT,
   canonicalJson,
@@ -51,6 +52,28 @@ const SourceResponse = Schema.Struct({
   contentHash: Schema.String,
   contentKey: Schema.String
 })
+
+const ObservationRequest = Schema.Struct({
+  scope: MemoryKnowledgeScope,
+  key: NonEmptyString,
+  text: NonEmptyString,
+  evidenceId: NonEmptyString,
+  confidence: Schema.Number.pipe(Schema.between(0, 1)),
+  createdAt: NonEmptyString
+})
+
+const MentalModelRequest = Schema.Struct({
+  id: NonEmptyString,
+  name: NonEmptyString,
+  scope: MemoryKnowledgeScope,
+  sourceQuery: NonEmptyString,
+  maxTokens: Schema.Int.pipe(Schema.between(1, 32_000)),
+  refreshAfterConsolidation: Schema.Boolean,
+  publication: Schema.Literal("draft", "published", "deprecated"),
+  createdAt: NonEmptyString
+})
+
+const MentalModelRefreshRequest = Schema.Struct({ createdAt: NonEmptyString })
 
 const proposalRequestFields = {
   id: NonEmptyString,
@@ -279,6 +302,41 @@ const dispatchSourceRequest = (
     return notFoundResponse()
   })
 
+const dispatchKnowledgeRequest = (
+  request: Request,
+  route: ReadonlyArray<string>,
+  vault: TeamVault
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
+    if (isRoute(request, route, "POST", "observations")) {
+      return jsonResponse(
+        yield* vault.consolidateObservation(
+          yield* decodeBody(request, ObservationRequest)
+        ),
+        201
+      )
+    }
+    if (isRoute(request, route, "GET", "observations")) {
+      return jsonResponse({ observations: yield* vault.listObservations() })
+    }
+    if (isRoute(request, route, "POST", "mental-models")) {
+      return jsonResponse(
+        yield* vault.defineMentalModel(yield* decodeBody(request, MentalModelRequest)),
+        201
+      )
+    }
+    if (
+      isRoute(request, route, "POST", "mental-models", route[1] ?? "", "refresh")
+    ) {
+      const body = yield* decodeBody(request, MentalModelRefreshRequest)
+      return jsonResponse(yield* vault.refreshMentalModel(route[1] ?? "", body.createdAt))
+    }
+    if (isRoute(request, route, "GET", "mental-models")) {
+      return jsonResponse(yield* vault.listMentalModels())
+    }
+    return notFoundResponse()
+  })
+
 const dispatchProposalSetRequest = (
   request: Request,
   route: ReadonlyArray<string>,
@@ -486,6 +544,8 @@ const dispatchVaultRequest = (
   return Match.value(route[0]).pipe(
     Match.when("pages", () => dispatchPageRequest(request, route, vault)),
     Match.when("sources", () => dispatchSourceRequest(request, route, vault)),
+    Match.when("observations", () => dispatchKnowledgeRequest(request, route, vault)),
+    Match.when("mental-models", () => dispatchKnowledgeRequest(request, route, vault)),
     Match.when("proposal-sets", () => dispatchProposalSetRequest(request, route, vault)),
     Match.when("proposals", () => dispatchProposalRequest(request, route, vault)),
     Match.orElse(() => dispatchVaultQuery(request, route, url, vault))

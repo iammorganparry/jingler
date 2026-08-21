@@ -140,11 +140,58 @@ export const MemoryAuditEvent = Schema.Struct({
 })
 export type MemoryAuditEvent = Schema.Schema.Type<typeof MemoryAuditEvent>
 
+export const MemoryKnowledgeScope = Schema.Struct({
+  kind: Schema.Literal("organization", "project", "user"),
+  id: MemoryId
+})
+export type MemoryKnowledgeScope = Schema.Schema.Type<typeof MemoryKnowledgeScope>
+
+export const MemoryObservation = Schema.Struct({
+  id: MemoryId,
+  key: MemoryId,
+  scope: MemoryKnowledgeScope,
+  text: Schema.String.pipe(Schema.minLength(1)),
+  evidenceIds: Schema.Array(MemoryId),
+  version: MemoryRevisionNumber,
+  supersedesId: Schema.optional(MemoryId),
+  confidence: Schema.Number.pipe(Schema.between(0, 1)),
+  createdAt: Schema.String
+})
+export type MemoryObservation = Schema.Schema.Type<typeof MemoryObservation>
+
+export const MemoryMentalModel = Schema.Struct({
+  id: MemoryId,
+  name: Schema.String.pipe(Schema.minLength(1)),
+  scope: MemoryKnowledgeScope,
+  sourceQuery: Schema.String.pipe(Schema.minLength(1)),
+  maxTokens: Schema.Int.pipe(Schema.between(1, 32_000)),
+  refreshAfterConsolidation: Schema.Boolean,
+  publication: Schema.Literal("draft", "published", "deprecated"),
+  definitionVersion: MemoryRevisionNumber,
+  createdAt: Schema.String
+})
+export type MemoryMentalModel = Schema.Schema.Type<typeof MemoryMentalModel>
+
+export const MemoryMentalModelRevision = Schema.Struct({
+  id: MemoryId,
+  modelId: MemoryId,
+  version: MemoryRevisionNumber,
+  content: Schema.String,
+  evidenceObservationIds: Schema.Array(MemoryId),
+  createdAt: Schema.String
+})
+export type MemoryMentalModelRevision = Schema.Schema.Type<
+  typeof MemoryMentalModelRevision
+>
+
 export const MemoryRepository = Schema.Struct({
   pages: Schema.Array(MemoryPage),
   sources: Schema.Array(MemorySource),
   revisions: Schema.Array(MemoryRevision),
   proposals: Schema.Array(MemoryProposal),
+  observations: Schema.Array(MemoryObservation),
+  mentalModels: Schema.Array(MemoryMentalModel),
+  mentalModelRevisions: Schema.Array(MemoryMentalModelRevision),
   roles: Schema.Array(MemoryRole),
   auditEvents: Schema.Array(MemoryAuditEvent)
 })

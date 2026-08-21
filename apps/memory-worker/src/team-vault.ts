@@ -4,6 +4,9 @@ import {
 } from "@jingler/core"
 import {
   MemoryAuditEvent as MemoryAuditEventSchema,
+  MemoryMentalModel as MemoryMentalModelSchema,
+  MemoryMentalModelRevision as MemoryMentalModelRevisionSchema,
+  MemoryObservation as MemoryObservationSchema,
   MemoryProposal as MemoryProposalSchema,
   MemorySource as MemorySourceSchema,
   assertMemoryValid,
@@ -16,6 +19,9 @@ import {
   serializeMemoryMarkdown,
   SUGGESTION_POLICY_DEFAULT,
   type MemoryAuditEvent,
+  type MemoryMentalModel,
+  type MemoryMentalModelRevision,
+  type MemoryObservation,
   type MemoryPage,
   type MemoryProposal,
   type MemorySource,
@@ -58,6 +64,16 @@ import {
 } from "./search.js"
 import { combineSuggestions } from "./suggestions.js"
 import type { TurbopufferNeighbor, TurbopufferVectorLayer } from "./turbopuffer.js"
+import {
+  consolidateObservation,
+  currentObservations,
+  type ObservationEvidence
+} from "./workflows/consolidation.js"
+import {
+  defineMentalModel,
+  refreshMentalModel,
+  type MentalModelDefinitionInput
+} from "./workflows/mental-model.js"
 
 export interface VaultSuggestionsResponse {
   readonly version: 1
@@ -85,6 +101,9 @@ export interface VaultSnapshot {
   readonly sources: ReadonlyArray<StoredSourceRecord>
   readonly proposals: ReadonlyArray<MemoryProposal>
   readonly proposalSets: ReadonlyArray<VaultProposalSet>
+  readonly observations: ReadonlyArray<MemoryObservation>
+  readonly mentalModels: ReadonlyArray<MemoryMentalModel>
+  readonly mentalModelRevisions: ReadonlyArray<MemoryMentalModelRevision>
   readonly events: ReadonlyArray<MemoryAuditEvent>
   readonly retrievals: ReadonlyArray<RetrievalMetric>
   readonly sessionRetrievals: ReadonlyArray<SessionRetrievalMetric>
@@ -302,6 +321,12 @@ const VaultSnapshotSchema = Schema.Struct({
   sources: Schema.Array(StoredSourceRecordSchema),
   proposals: Schema.Array(MemoryProposalSchema),
   proposalSets: Schema.optionalWith(Schema.Array(VaultProposalSetSchema), { default: () => [] }),
+  observations: Schema.optionalWith(Schema.Array(MemoryObservationSchema), { default: () => [] }),
+  mentalModels: Schema.optionalWith(Schema.Array(MemoryMentalModelSchema), { default: () => [] }),
+  mentalModelRevisions: Schema.optionalWith(
+    Schema.Array(MemoryMentalModelRevisionSchema),
+    { default: () => [] }
+  ),
   events: Schema.Array(MemoryAuditEventSchema),
   retrievals: Schema.Array(RetrievalMetricSchema),
   sessionRetrievals: Schema.optionalWith(Schema.Array(SessionRetrievalMetricSchema), {
@@ -312,6 +337,12 @@ const VaultSnapshotSchema = Schema.Struct({
 const VaultHistorySchema = Schema.Struct({
   proposals: Schema.Array(MemoryProposalSchema),
   proposalSets: Schema.Array(VaultProposalSetSchema),
+  observations: Schema.optionalWith(Schema.Array(MemoryObservationSchema), { default: () => [] }),
+  mentalModels: Schema.optionalWith(Schema.Array(MemoryMentalModelSchema), { default: () => [] }),
+  mentalModelRevisions: Schema.optionalWith(
+    Schema.Array(MemoryMentalModelRevisionSchema),
+    { default: () => [] }
+  ),
   events: Schema.Array(MemoryAuditEventSchema),
   retrievals: Schema.Array(RetrievalMetricSchema),
   sessionRetrievals: Schema.Array(SessionRetrievalMetricSchema)
@@ -326,6 +357,9 @@ const emptySnapshot = (): VaultSnapshot => ({
   sources: [],
   proposals: [],
   proposalSets: [],
+  observations: [],
+  mentalModels: [],
+  mentalModelRevisions: [],
   events: [],
   retrievals: [],
   sessionRetrievals: []
@@ -342,6 +376,9 @@ const snapshotJson = (snapshot: VaultSnapshot): string => canonicalJson(snapshot
 const historyFor = (snapshot: VaultSnapshot): VaultHistory => ({
   proposals: snapshot.proposals,
   proposalSets: snapshot.proposalSets,
+  observations: snapshot.observations,
+  mentalModels: snapshot.mentalModels,
+  mentalModelRevisions: snapshot.mentalModelRevisions,
   events: snapshot.events,
   retrievals: snapshot.retrievals,
   sessionRetrievals: snapshot.sessionRetrievals
@@ -1600,6 +1637,137 @@ export class TeamVault {
     )
   }
 
+  consolidateObservation(
+    evidence: ObservationEvidence
+  ): Effect.Effect<MemoryObservation, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
+      const observation = consolidateObservation(current.observations, evidence)
+      const observations = uniqueById([...current.observations, observation])
+      const refreshed = current.mentalModels
+        .filter((model) =>
+          model.refreshAfterConsolidation &&
+          model.scope.kind === observation.scope.kind &&
+          model.scope.id === observation.scope.id
+        )
+        .map((model) =>
+          refreshMentalModel(
+            model,
+            currentObservations(observations, model.scope),
+            current.mentalModelRevisions,
+            evidence.createdAt
+          )
+        )
+      const pages = yield* this.loadPages(current)
+      yield* this.persist(
+        current,
+        {
+          ...current,
+          observations,
+          mentalModelRevisions: uniqueById([
+            ...current.mentalModelRevisions,
+            ...refreshed
+          ])
+        },
+        pages
+      )
+      return observation
+    }))
+  }
+
+  listObservations(
+    scope?: MemoryObservation["scope"]
+  ): Effect.Effect<ReadonlyArray<MemoryObservation>, MemoryVaultError> {
+    return Effect.map(this.state.load(), (snapshot) =>
+      (scope === undefined
+        ? snapshot.observations
+        : currentObservations(snapshot.observations, scope)
+      ).slice(-500)
+    )
+  }
+
+  defineMentalModel(
+    input: MentalModelDefinitionInput
+  ): Effect.Effect<MemoryMentalModel, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
+      const previous = current.mentalModels.find((model) => model.id === input.id)
+      if (
+        previous !== undefined &&
+        (previous.scope.kind !== input.scope.kind || previous.scope.id !== input.scope.id)
+      ) {
+        return yield* new MemoryVaultError({
+          code: "conflict",
+          message: `mental model ${input.id} cannot change scope`,
+          status: 409
+        })
+      }
+      const model = defineMentalModel(input, previous)
+      const pages = yield* this.loadPages(current)
+      yield* this.persist(
+        current,
+        { ...current, mentalModels: uniqueById([
+          ...current.mentalModels.filter((candidate) => candidate.id !== model.id),
+          model
+        ]) },
+        pages
+      )
+      return model
+    }))
+  }
+
+  refreshMentalModel(
+    modelId: string,
+    createdAt: string
+  ): Effect.Effect<MemoryMentalModelRevision, MemoryVaultError> {
+    return this.serialized(Effect.gen(this, function* () {
+      const current = yield* this.state.load()
+      const model = current.mentalModels.find((candidate) => candidate.id === modelId)
+      if (model === undefined) {
+        return yield* new MemoryVaultError({
+          code: "not_found",
+          message: `mental model ${modelId} was not found`,
+          status: 404
+        })
+      }
+      const revision = refreshMentalModel(
+        model,
+        currentObservations(current.observations, model.scope),
+        current.mentalModelRevisions,
+        createdAt
+      )
+      const pages = yield* this.loadPages(current)
+      yield* this.persist(
+        current,
+        {
+          ...current,
+          mentalModelRevisions: uniqueById([
+            ...current.mentalModelRevisions,
+            revision
+          ])
+        },
+        pages
+      )
+      return revision
+    }))
+  }
+
+  listMentalModels(): Effect.Effect<{
+    readonly models: ReadonlyArray<MemoryMentalModel>
+    readonly revisions: ReadonlyArray<MemoryMentalModelRevision>
+  }, MemoryVaultError> {
+    return Effect.map(this.state.load(), (snapshot) => ({
+      models: [...snapshot.mentalModels]
+        .sort((left, right) => compareText(left.id, right.id))
+        .slice(-200),
+      revisions: [...snapshot.mentalModelRevisions]
+        .sort((left, right) =>
+          compareText(left.modelId, right.modelId) || left.version - right.version
+        )
+        .slice(-500)
+    }))
+  }
+
   search(query: string, limit = 20, occurredAt = new Date().toISOString()): Effect.Effect<VaultSearchResponse, MemoryVaultError> {
     return Effect.gen(this, function* () {
       const startedAt = performance.now()
@@ -1976,6 +2144,9 @@ export class TeamVault {
           sources,
           proposals: retainedProposals,
           proposalSets: retainedProposalSets,
+          observations: history.observations,
+          mentalModels: history.mentalModels,
+          mentalModelRevisions: history.mentalModelRevisions,
           events,
           retrievals,
           sessionRetrievals: history.sessionRetrievals
