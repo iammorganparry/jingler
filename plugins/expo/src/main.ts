@@ -9,34 +9,20 @@ import type {
   AgentToolExecutionContext,
   HostContext
 } from "@jingler/plugin-sdk/host"
-import type { ExpoSessionInput } from "./contracts.js"
+import * as v from "valibot"
+import { decodeExpoCommandInput } from "./contracts.js"
 import {
+  AutomationSelectorSchema,
+  AutomationTimeoutSchema,
   ExpoAutomationController,
-  type AutomationAction,
-  type AutomationSelector
+  decodeAutomationAction,
+  type AutomationAction
 } from "./automation.js"
 import {
   ExpoPreviewController,
   type ExpoRuntimeDependencies,
   type ManagedProcess
 } from "./runtime.js"
-
-const inputOf = (value: unknown): ExpoSessionInput => {
-  if (typeof value !== "object" || value === null) {
-    throw new Error("The Expo command requires a session.")
-  }
-  const candidate = value as { sessionId?: unknown; worktreePath?: unknown }
-  if (typeof candidate.sessionId !== "string" || candidate.sessionId.length === 0) {
-    throw new Error("The Expo command requires a valid session id.")
-  }
-  if (candidate.worktreePath !== undefined && typeof candidate.worktreePath !== "string") {
-    throw new Error("The Expo command received an invalid worktree path.")
-  }
-  return {
-    sessionId: candidate.sessionId,
-    ...(candidate.worktreePath ? { worktreePath: candidate.worktreePath } : {})
-  }
-}
 
 const spawnExpo: ExpoRuntimeDependencies["spawn"] = async (
   executable,
@@ -55,6 +41,7 @@ const spawnExpo: ExpoRuntimeDependencies["spawn"] = async (
   child.stderr.setEncoding("utf8")
   child.stdout.on("data", listeners.output)
   child.stderr.on("data", listeners.output)
+  child.stdin.on("error", () => undefined)
   child.on("exit", listeners.exit)
 
   await new Promise<void>((resolve, reject) => {
@@ -63,7 +50,9 @@ const spawnExpo: ExpoRuntimeDependencies["spawn"] = async (
   })
 
   return {
-    write: (input) => child.stdin.write(input),
+    write: (input) => new Promise((resolve, reject) => {
+      child.stdin.write(input, (error) => error ? reject(error) : resolve())
+    }),
     terminate: async () => {
       if (child.exitCode !== null || child.signalCode !== null) return
       const signalGroup = (signal: NodeJS.Signals) => {
@@ -90,7 +79,14 @@ const spawnExpo: ExpoRuntimeDependencies["spawn"] = async (
 
 const AUTOMATION_PROJECT_PATH = "../automation/ExpoAutomation.xcodeproj"
 
-const sessionInput = (context: AgentToolExecutionContext): ExpoSessionInput => ({
+type Preview = Pick<
+  ExpoPreviewController,
+  "dispose" | "frame" | "inspect" | "openSimulator" | "reload" | "start" | "status" | "stop"
+>
+type AutomationRunner = Pick<ExpoAutomationController, "run">
+type Automation = Pick<ExpoAutomationController, "dispose" | "run">
+
+const sessionInput = (context: AgentToolExecutionContext) => ({
   sessionId: context.session.id,
   worktreePath: context.session.repository.path
 })
@@ -100,7 +96,7 @@ const ensureActive = (context: AgentToolExecutionContext): void => {
 }
 
 export const expoAgentTools = (
-  controller: ExpoPreviewController
+  controller: Preview
 ): readonly AgentToolDefinition[] => {
   const tool = (
     definition: Omit<AgentToolDefinition, "timeoutMs" | "outputBudget" | "cancellable">
@@ -110,7 +106,10 @@ export const expoAgentTools = (
     outputBudget: 8_000,
     cancellable: true
   })
-  const noInput = { type: "object" as const, additionalProperties: false }
+  const noInput = {
+    type: "object",
+    additionalProperties: false
+  } satisfies AgentToolDefinition["inputSchema"]
   return [
     tool({
       id: "expo_preview_status",
@@ -181,16 +180,24 @@ const selectorSchema = {
   additionalProperties: false
 }
 
-const automationInput = (value: unknown): Record<string, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Expo automation requires an input object.")
-  }
-  return value as Record<string, unknown>
-}
+const decodeWaitInput = v.parser(v.object({
+  selector: AutomationSelectorSchema,
+  timeout: v.optional(AutomationTimeoutSchema)
+}))
+const decodeSelectorInput = v.parser(v.object({ selector: AutomationSelectorSchema }))
+const decodeTypeInput = v.parser(v.object({
+  selector: AutomationSelectorSchema,
+  text: v.string(),
+  replace: v.optional(v.boolean())
+}))
+const decodeSwipeInput = v.parser(v.object({
+  direction: v.picklist(["up", "down", "left", "right"])
+}))
+const decodeButtonInput = v.parser(v.object({ button: v.literal("home") }))
 
 export const expoAutomationTools = (
-  controller: ExpoPreviewController,
-  automation: ExpoAutomationController
+  controller: Preview,
+  automation: AutomationRunner
 ): readonly AgentToolDefinition[] => {
   const run = async (
     action: AutomationAction,
@@ -207,7 +214,7 @@ export const expoAutomationTools = (
     }
     return automation.run(
       action,
-      input.worktreePath!,
+      input.worktreePath,
       status.simulator.udid,
       context.signal
     )
@@ -241,14 +248,10 @@ export const expoAutomationTools = (
         required: ["selector"],
         additionalProperties: false
       },
-      execute: (value, context) => {
-        const input = automationInput(value)
-        return run({
-          kind: "wait",
-          selector: input.selector as AutomationSelector,
-          ...(typeof input.timeout === "number" ? { timeout: input.timeout } : {})
-        }, context)
-      }
+      execute: (value, context) => run(
+        decodeAutomationAction({ kind: "wait", ...decodeWaitInput(value) }),
+        context
+      )
     }),
     definition({
       id: "expo_preview_tap",
@@ -259,10 +262,10 @@ export const expoAutomationTools = (
         required: ["selector"],
         additionalProperties: false
       },
-      execute: (value, context) => run({
-        kind: "tap",
-        selector: automationInput(value).selector as AutomationSelector
-      }, context)
+      execute: (value, context) => run(
+        decodeAutomationAction({ kind: "tap", ...decodeSelectorInput(value) }),
+        context
+      )
     }),
     definition({
       id: "expo_preview_type",
@@ -277,15 +280,10 @@ export const expoAutomationTools = (
         required: ["selector", "text"],
         additionalProperties: false
       },
-      execute: (value, context) => {
-        const input = automationInput(value)
-        return run({
-          kind: "type",
-          selector: input.selector as AutomationSelector,
-          text: input.text as string,
-          ...(input.replace === true ? { replace: true } : {})
-        }, context)
-      }
+      execute: (value, context) => run(
+        decodeAutomationAction({ kind: "type", ...decodeTypeInput(value) }),
+        context
+      )
     }),
     definition({
       id: "expo_preview_swipe",
@@ -296,10 +294,10 @@ export const expoAutomationTools = (
         required: ["direction"],
         additionalProperties: false
       },
-      execute: (value, context) => run({
-        kind: "swipe",
-        direction: automationInput(value).direction as "up" | "down" | "left" | "right"
-      }, context)
+      execute: (value, context) => run(
+        decodeAutomationAction({ kind: "swipe", ...decodeSwipeInput(value) }),
+        context
+      )
     }),
     definition({
       id: "expo_preview_press_button",
@@ -310,33 +308,46 @@ export const expoAutomationTools = (
         required: ["button"],
         additionalProperties: false
       },
-      execute: (_value, context) => run({ kind: "button", button: "home" }, context)
+      execute: (value, context) => run(
+        decodeAutomationAction({ kind: "button", ...decodeButtonInput(value) }),
+        context
+      )
     })
   ]
 }
 
+const trustedSessionInput = async (
+  sessions: HostContext["sessions"],
+  value: Parameters<typeof decodeExpoCommandInput>[0]
+) => {
+  const requested = decodeExpoCommandInput(value)
+  const session = await sessions.get(requested.sessionId)
+  if (!session?.worktreePath) {
+    throw new Error("The Expo command requires an open session with a worktree.")
+  }
+  return { sessionId: session.id, worktreePath: session.worktreePath }
+}
+
 export const registerExpo = (
-  ctx: HostContext,
-  controller: ExpoPreviewController,
-  automation?: ExpoAutomationController
+  ctx: Pick<HostContext, "agentTools" | "commands" | "subscriptions" | "log" | "sessions">,
+  controller: Preview,
+  automation?: Automation
 ): void => {
+  const input = (value: Parameters<typeof decodeExpoCommandInput>[0]) =>
+    trustedSessionInput(ctx.sessions, value)
   const commands = [
-    ctx.commands.register("expo.inspect", (value) => controller.inspect(inputOf(value))),
-    ctx.commands.register("expo.start", (value) => controller.start(inputOf(value))),
-    ctx.commands.register("expo.status", (value) => controller.status(inputOf(value))),
-    ctx.commands.register("expo.frame", (value) => controller.frame(inputOf(value))),
-    ctx.commands.register("expo.reload", (value) => controller.reload(inputOf(value))),
-    ctx.commands.register("expo.stop", (value) => controller.stop(inputOf(value))),
+    ctx.commands.register("expo.inspect", async (value) => controller.inspect(await input(value))),
+    ctx.commands.register("expo.start", async (value) => controller.start(await input(value))),
+    ctx.commands.register("expo.status", async (value) => controller.status(await input(value))),
+    ctx.commands.register("expo.frame", async (value) => controller.frame(await input(value))),
+    ctx.commands.register("expo.reload", async (value) => controller.reload(await input(value))),
+    ctx.commands.register("expo.stop", async (value) => controller.stop(await input(value))),
     ctx.commands.register("expo.open-simulator", () => controller.openSimulator())
   ]
+  const tools = [...expoAgentTools(controller)]
+  if (automation) tools.push(...expoAutomationTools(controller, automation))
   ctx.subscriptions.push(
-    ctx.agentTools.registerToolset({
-      id: "expo.ios-preview",
-      tools: [
-        ...expoAgentTools(controller),
-        ...(automation ? expoAutomationTools(controller, automation) : [])
-      ]
-    }),
+    ctx.agentTools.registerToolset({ id: "expo.ios-preview", tools }),
     ...commands,
     {
       dispose: () => {

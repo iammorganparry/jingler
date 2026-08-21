@@ -5,25 +5,30 @@ import type {
 } from "@jingler/plugin-sdk/host"
 import { describe, expect, it, vi } from "vitest"
 import { expoAgentTools, expoAutomationTools, registerExpo } from "./main.js"
-import type { ExpoAutomationController } from "./automation.js"
-import type { ExpoPreviewController } from "./runtime.js"
+
+type CommandHandler = Parameters<HostContext["commands"]["register"]>[1]
 
 const controller = () => ({
   inspect: vi.fn(async () => ({ ready: true })),
-  start: vi.fn(async (input) => ({ ready: true, phase: "starting", logs: [], sessionId: input.sessionId })),
+  start: vi.fn(async (input) => ({
+    ready: true,
+    phase: "starting" as const,
+    logs: [],
+    sessionId: input.sessionId
+  })),
   status: vi.fn(async (input) => ({
     ready: true,
-    phase: "running",
+    phase: "running" as const,
     logs: [],
     sessionId: input.sessionId,
     simulator: { udid: "sim-1", name: "iPhone 16", state: "Booted" }
   })),
   frame: vi.fn(),
-  reload: vi.fn(async () => ({ ready: true, phase: "running", logs: [] })),
-  stop: vi.fn(async () => ({ ready: true, phase: "stopped", logs: [] })),
+  reload: vi.fn(async () => ({ ready: true, phase: "running" as const, logs: [] })),
+  stop: vi.fn(async () => ({ ready: true, phase: "stopped" as const, logs: [] })),
   openSimulator: vi.fn(async () => undefined),
   dispose: vi.fn(async () => undefined)
-}) as unknown as ExpoPreviewController
+} satisfies Parameters<typeof expoAgentTools>[0])
 
 const executionContext = (signal = new AbortController().signal): AgentToolExecutionContext => ({
   signal,
@@ -33,15 +38,16 @@ const executionContext = (signal = new AbortController().signal): AgentToolExecu
   }
 })
 
-const tool = (tools: readonly ReturnType<typeof expoAgentTools>[number][], id: string) => {
+const tool = (tools: AgentToolset["tools"], id: string) => {
   const found = tools.find((candidate) => candidate.id === id)
   if (!found) throw new Error(`missing tool ${id}`)
   return found
 }
 
-describe("Expo native agent tools", () => {
-  it("registers one manifest-backed native toolset", () => {
+describe("Expo tool registration", () => {
+  it("registers one manifest-backed native toolset", async () => {
     const registered: AgentToolset[] = []
+    const handlers = new Map<string, CommandHandler>()
     const subscriptions: Array<{ dispose(): void }> = []
     const context = {
       agentTools: {
@@ -50,12 +56,28 @@ describe("Expo native agent tools", () => {
           return { dispose: () => undefined }
         }
       },
-      commands: { register: () => ({ dispose: () => undefined }) },
+      commands: {
+        register: (id: string, handler: CommandHandler) => {
+          handlers.set(id, handler)
+          return { dispose: () => undefined }
+        }
+      },
+      sessions: {
+        get: vi.fn(async () => ({
+          id: "session-1",
+          repo: "acme/mobile",
+          branch: "feat/mobile",
+          title: "Mobile",
+          prNumber: null,
+          worktreePath: "/trusted/mobile"
+        }))
+      },
       subscriptions,
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-    } as unknown as HostContext
+    } satisfies Parameters<typeof registerExpo>[0]
 
-    registerExpo(context, controller())
+    const preview = controller()
+    registerExpo(context, preview)
 
     expect(registered).toHaveLength(1)
     expect(registered[0]?.id).toBe("expo.ios-preview")
@@ -67,8 +89,20 @@ describe("Expo native agent tools", () => {
       "expo_preview_open_simulator"
     ])
     expect(subscriptions).toHaveLength(9)
-  })
 
+    await handlers.get("expo.start")?.({
+      sessionId: "session-1",
+      worktreePath: "/forged/mobile"
+    })
+    expect(context.sessions.get).toHaveBeenCalledWith("session-1")
+    expect(preview.start).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      worktreePath: "/trusted/mobile"
+    })
+  })
+})
+
+describe("Expo native agent tools", () => {
   it("routes lifecycle calls with trusted session context, not model input", async () => {
     const preview = controller()
     const tools = expoAgentTools(preview)
@@ -87,8 +121,8 @@ describe("Expo native agent tools", () => {
   it("routes semantic automation to the owned booted simulator", async () => {
     const preview = controller()
     const automation = {
-      run: vi.fn(async () => ({ ok: true, kind: "tap", value: "tapped" }))
-    } as unknown as ExpoAutomationController
+      run: vi.fn(async () => ({ ok: true as const, kind: "tap", value: "tapped" }))
+    } satisfies Parameters<typeof expoAutomationTools>[1]
     const tools = expoAutomationTools(preview, automation)
 
     await tool(tools, "expo_preview_tap").execute(
@@ -104,7 +138,7 @@ describe("Expo native agent tools", () => {
     )
   })
 
-  it("exposes bounded metadata and refuses an already cancelled call", async () => {
+  it("exposes bounded metadata and refuses an already cancelled call", () => {
     const preview = controller()
     const tools = expoAgentTools(preview)
     expect(tools).toEqual(expect.arrayContaining([

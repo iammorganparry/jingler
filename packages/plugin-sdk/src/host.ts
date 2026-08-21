@@ -37,6 +37,7 @@ export type {
   Activate,
   Deactivate,
   HostContext,
+  HostSessions,
   HostAgentTools,
   AgentToolDefinition,
   AgentToolExecutionContext,

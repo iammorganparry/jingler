@@ -1,3 +1,4 @@
+import * as v from "valibot"
 import type {
   ExpoFrame,
   ExpoReadiness,
@@ -18,7 +19,7 @@ export interface ProcessListeners {
 }
 
 export interface ManagedProcess {
-  readonly write: (input: string) => void
+  readonly write: (input: string) => Promise<void>
   readonly terminate: () => Promise<void>
 }
 
@@ -41,17 +42,18 @@ export interface ExpoRuntimeDependencies {
   readonly now: () => number
 }
 
-interface SimctlDevice {
-  readonly udid?: unknown
-  readonly name?: unknown
-  readonly state?: unknown
-  readonly isAvailable?: unknown
-}
+const SimctlDeviceSchema = v.object({
+  udid: v.string(),
+  name: v.string(),
+  state: v.string(),
+  isAvailable: v.optional(v.boolean())
+})
+const SimctlPayloadSchema = v.object({
+  devices: v.record(v.string(), v.array(SimctlDeviceSchema))
+})
+const decodeSimctlPayload = v.parser(SimctlPayloadSchema)
 
-interface SimctlListPayload {
-  readonly devices?: Readonly<Record<string, readonly SimctlDevice[]>>
-}
-
+const TRAILING_SLASH = /\/$/u
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g")
 const READY_OUTPUT = /(?:Metro waiting|Waiting on|Opening (?:the app )?on iOS|exp:\/\/)/i
 const MAX_LOG_LINES = 100
@@ -62,31 +64,15 @@ const cleanLine = (line: string, worktreePath?: string): string => {
 }
 
 export const parseSimulatorDevices = (json: string): readonly SimulatorDevice[] => {
-  let value: SimctlListPayload
   try {
-    value = JSON.parse(json) as SimctlListPayload
+    const { devices } = decodeSimctlPayload(JSON.parse(json))
+    return Object.values(devices)
+      .flat()
+      .filter(({ isAvailable }) => isAvailable !== false)
+      .map(({ udid, name, state }) => ({ udid, name, state }))
   } catch {
     throw new Error("Xcode returned invalid Simulator device data.")
   }
-  const runtimes = value.devices
-  if (typeof runtimes !== "object" || runtimes === null) {
-    throw new Error("Xcode returned invalid Simulator device data.")
-  }
-  const devices: SimulatorDevice[] = []
-  for (const runtimeDevices of Object.values(runtimes)) {
-    if (!Array.isArray(runtimeDevices)) continue
-    for (const raw of runtimeDevices as SimctlDevice[]) {
-      if (
-        raw.isAvailable !== false &&
-        typeof raw.udid === "string" &&
-        typeof raw.name === "string" &&
-        typeof raw.state === "string"
-      ) {
-        devices.push({ udid: raw.udid, name: raw.name, state: raw.state })
-      }
-    }
-  }
-  return devices
 }
 
 const failure = (reason: string): ExpoReadiness => ({ ready: false, reason })
@@ -97,12 +83,24 @@ export class ExpoPreviewController {
   private owner: ExpoSessionInput | null = null
   private logs: string[] = []
   private error: string | undefined
-  private captureInFlight: Promise<ExpoFrame> | null = null
+  private simulator: SimulatorDevice | null = null
+  private generation = 0
+  private lifecycle = Promise.resolve()
+  private captureInFlight: {
+    readonly generation: number
+    readonly promise: Promise<ExpoFrame>
+  } | null = null
 
   constructor(private readonly deps: ExpoRuntimeDependencies) {}
 
+  private transition<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.lifecycle.then(operation, operation)
+    this.lifecycle = result.then(() => undefined, () => undefined)
+    return result
+  }
+
   private expoBinary(worktreePath: string): string {
-    return `${worktreePath.replace(/\/$/u, "")}/node_modules/.bin/expo`
+    return `${worktreePath.replace(TRAILING_SLASH, "")}/node_modules/.bin/expo`
   }
 
   private async devices(): Promise<readonly SimulatorDevice[]> {
@@ -136,7 +134,13 @@ export class ExpoPreviewController {
       if (devices.length === 0) {
         return failure("No available iOS Simulator runtime was found in Xcode.")
       }
-      return { ready: true, simulator: devices.find((device) => device.state === "Booted") }
+      const booted = devices.filter((device) => device.state === "Booted")
+      if (booted.length > 1) {
+        return failure(
+          "More than one iOS Simulator is booted. Shut down all but the preview target and retry."
+        )
+      }
+      return booted[0] ? { ready: true, simulator: booted[0] } : { ready: true }
     } catch (cause) {
       return failure(cause instanceof Error ? cause.message : String(cause))
     }
@@ -152,7 +156,11 @@ export class ExpoPreviewController {
     }
   }
 
-  async start(input: ExpoSessionInput): Promise<ExpoStatus> {
+  start(input: ExpoSessionInput): Promise<ExpoStatus> {
+    return this.transition(() => this.startTransition(input))
+  }
+
+  private async startTransition(input: ExpoSessionInput): Promise<ExpoStatus> {
     if (this.process) {
       if (this.owner?.sessionId === input.sessionId) return await this.status(input)
       throw new Error("Another session already owns the Expo iOS preview. Stop it before starting this one.")
@@ -162,18 +170,25 @@ export class ExpoPreviewController {
       throw new Error(readiness.reason ?? "Expo iOS Preview is not ready.")
     }
 
+    const generation = ++this.generation
     this.owner = input
+    this.simulator = readiness.simulator ?? null
     this.phase = "starting"
     this.logs = []
     this.error = undefined
+    let exited = false
     try {
-      this.process = await this.deps.spawn(
+      const process = await this.deps.spawn(
         this.expoBinary(input.worktreePath),
         ["start", "--ios"],
         input.worktreePath,
         {
-          output: (chunk) => this.appendOutput(chunk),
+          output: (chunk) => {
+            if (generation === this.generation) this.appendOutput(chunk)
+          },
           exit: (code, signal) => {
+            exited = true
+            if (generation !== this.generation) return
             this.process = null
             if (this.phase === "stopped") return
             if (code === 0) {
@@ -186,10 +201,18 @@ export class ExpoPreviewController {
           }
         }
       )
+      if (generation !== this.generation) {
+        await process.terminate()
+      } else if (!exited) {
+        this.process = process
+      }
     } catch (cause) {
-      this.phase = "failed"
-      this.error = cause instanceof Error ? cause.message : String(cause)
-      this.owner = null
+      if (generation === this.generation) {
+        this.phase = "failed"
+        this.error = cause instanceof Error ? cause.message : String(cause)
+        this.owner = null
+        this.simulator = null
+      }
       throw cause
     }
     return await this.status(input)
@@ -197,19 +220,25 @@ export class ExpoPreviewController {
 
   async status(input: ExpoSessionInput): Promise<ExpoStatus> {
     const readiness = await this.inspect(input)
-    const ownsPreview = this.owner?.sessionId === input.sessionId
-    return {
-      ...readiness,
-      phase: ownsPreview ? this.phase : "idle",
-      ...(ownsPreview ? { sessionId: input.sessionId, logs: [...this.logs] } : { logs: [] }),
-      ...(ownsPreview && this.error ? { error: this.error } : {})
+    if (this.owner?.sessionId !== input.sessionId) {
+      return { ...readiness, phase: "idle", logs: [] }
     }
+    const activeReadiness = this.simulator
+      ? { ...readiness, simulator: this.simulator }
+      : readiness
+    const status: ExpoStatus = {
+      ...activeReadiness,
+      phase: this.phase,
+      sessionId: input.sessionId,
+      logs: [...this.logs]
+    }
+    return this.error ? { ...status, error: this.error } : status
   }
 
   async reload(input: ExpoSessionInput): Promise<ExpoStatus> {
     this.assertOwner(input)
     if (!this.process) throw new Error("The Expo preview is not running.")
-    this.process.write("r\n")
+    await this.process.write("r\n")
     this.appendOutput("Reload requested from Jingler.")
     return await this.status(input)
   }
@@ -223,41 +252,66 @@ export class ExpoPreviewController {
     if (!this.process || (this.phase !== "starting" && this.phase !== "running")) {
       throw new Error("The Expo preview is not running.")
     }
-    if (this.captureInFlight) return await this.captureInFlight
-    const capture = this.captureFrame()
-    this.captureInFlight = capture
+    const generation = this.generation
+    if (this.captureInFlight?.generation === generation) {
+      return await this.captureInFlight.promise
+    }
+    const promise = this.captureFrame(generation)
+    this.captureInFlight = { generation, promise }
     try {
-      return await capture
+      return await promise
     } finally {
-      if (this.captureInFlight === capture) this.captureInFlight = null
+      if (this.captureInFlight?.promise === promise) this.captureInFlight = null
     }
   }
 
-  private async captureFrame(): Promise<ExpoFrame> {
-    const device = (await this.devices()).find((candidate) => candidate.state === "Booted")
-    if (!device) throw new Error("Expo is still waiting for an iOS Simulator to boot.")
+  private async captureFrame(generation: number): Promise<ExpoFrame> {
+    let device = this.simulator
+    if (!device) {
+      const booted = (await this.devices()).filter((candidate) => candidate.state === "Booted")
+      if (booted.length !== 1) {
+        throw new Error(
+          booted.length === 0
+            ? "Expo is still waiting for an iOS Simulator to boot."
+            : "More than one iOS Simulator is booted; the Expo preview target is ambiguous."
+        )
+      }
+      device = booted[0]!
+      if (generation === this.generation) this.simulator = device
+    }
     const pngBase64 = await this.deps.capture(device.udid)
+    if (generation !== this.generation) {
+      throw new Error("The Expo preview changed while its frame was being captured.")
+    }
     if (!pngBase64) throw new Error("The iOS Simulator returned an empty screenshot.")
-    if (this.phase === "starting") this.phase = "running"
     return { pngBase64, capturedAt: this.deps.now(), device }
   }
 
-  async stop(input: ExpoSessionInput): Promise<ExpoStatus> {
-    this.assertOwner(input)
-    this.phase = "stopped"
-    const process = this.process
-    this.process = null
-    await process?.terminate()
-    return await this.status(input)
+  stop(input: ExpoSessionInput): Promise<ExpoStatus> {
+    return this.transition(async () => {
+      this.assertOwner(input)
+      this.invalidatePreview()
+      await this.process?.terminate()
+      this.process = null
+      return await this.status(input)
+    })
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    return this.transition(async () => {
+      this.invalidatePreview()
+      const process = this.process
+      this.process = null
+      this.owner = null
+      await process?.terminate()
+    })
+  }
+
+  private invalidatePreview(): void {
+    this.generation += 1
     this.phase = "stopped"
-    const process = this.process
-    this.process = null
-    this.owner = null
+    this.simulator = null
     this.captureInFlight = null
-    await process?.terminate()
   }
 
   private assertOwner(input: ExpoSessionInput): void {

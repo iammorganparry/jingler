@@ -133,11 +133,10 @@ interface PreviewModel {
   readonly retry: () => Promise<void>
 }
 
-function usePreviewModel(session: SessionSnapshot): PreviewModel {
-  const host = useHost()
+function usePreviewModel(session: SessionSnapshot, host: HostBridge): PreviewModel {
   const input = useMemo<ExpoSessionInput>(
-    () => ({ sessionId: session.id, worktreePath: session.worktreePath }),
-    [session.id, session.worktreePath]
+    () => ({ sessionId: session.id }),
+    [session.id]
   )
   const [status, setStatus] = useState<ExpoStatus | null>(null)
   const [frame, setFrame] = useState<ExpoFrame | null>(null)
@@ -236,6 +235,11 @@ function SetupState({ model }: { readonly model: PreviewModel }) {
             ? "Start the local Expo CLI and mirror its default iOS Simulator here. Interaction stays in Simulator."
             : status.reason}
         </p>
+        {model.error && (
+          <p role="alert" className="mt-3 text-[12px] leading-relaxed text-red">
+            {model.error}
+          </p>
+        )}
         <button
           type="button"
           disabled={busy}
@@ -327,8 +331,14 @@ function ExpoOutput({ model }: { readonly model: PreviewModel }) {
   )
 }
 
-export function ExpoTab({ session }: TabProps) {
-  const model = usePreviewModel(session)
+export function ExpoTabView({
+  session,
+  host
+}: {
+  readonly session: SessionSnapshot
+  readonly host: HostBridge
+}) {
+  const model = usePreviewModel(session, host)
   if (!model.status && !model.error) {
     return <div className="flex flex-1 items-center justify-center bg-editor text-dim"><Spinner size={20} /></div>
   }
@@ -338,6 +348,10 @@ export function ExpoTab({ session }: TabProps) {
   const active = model.status.phase === "starting" || model.status.phase === "running"
   if (!active && model.status.phase !== "failed") return <SetupState model={model} />
   return <div className="flex min-h-0 flex-1 flex-col bg-editor"><PreviewToolbar model={model} /><PreviewCanvas model={model} /><ExpoOutput model={model} /></div>
+}
+
+export function ExpoTab({ session }: TabProps) {
+  return <ExpoTabView session={session} host={useHost()} />
 }
 
 export default definePlugin(manifest, { views: { "expo.preview": ExpoTab } })

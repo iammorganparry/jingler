@@ -133,6 +133,8 @@ export interface HostContext {
    * UI half sees through {@link usePluginStorage}.
    */
   readonly storage: PluginStorage
+  /** Resolve renderer-supplied session ids back to main-owned snapshots. */
+  readonly sessions: HostSessions
   /** Read-only access to this plugin's manifest-declared secure settings. */
   readonly settings: HostSettings
   /** Register this plugin's manifest-declared issue providers. */
@@ -175,6 +177,11 @@ export interface HostContext {
  * writes secrets through Settings, the renderer sees only configured state,
  * and the owning host resolves one declared id at the moment it needs it.
  */
+export interface HostSessions {
+  /** Return the current main-owned snapshot, or undefined after the session closes. */
+  get(sessionId: string): Promise<SessionSnapshot | undefined>
+}
+
 export interface HostSettings {
   /** Return one manifest-declared static secret setting. */
   getSecret(settingId: string): Promise<string | undefined>

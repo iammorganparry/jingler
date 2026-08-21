@@ -5,6 +5,7 @@ import {
   jinglerPluginBuild
 } from "@jingler/plugin-sdk/vite"
 
+// SAFETY: jinglerPluginBuild returns Vite's build block; its public declaration is intentionally generic.
 const build = jinglerPluginBuild({ ui: "src/ui.tsx", main: "src/main.ts" }) as BuildOptions
 
 export default defineConfig({

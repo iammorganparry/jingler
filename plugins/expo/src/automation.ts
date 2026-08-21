@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import * as v from "valibot"
 
 export interface AutomationCommandResult {
   readonly code: number
@@ -19,24 +20,78 @@ export type AutomationCommandRunner = (
   options: AutomationCommandOptions
 ) => Promise<AutomationCommandResult>
 
-export interface AutomationSelector {
-  readonly identifier?: string
-  readonly label?: string
-  readonly text?: string
-}
+export const AutomationSelectorSchema = v.pipe(
+  v.object({
+    identifier: v.optional(v.pipe(v.string(), v.nonEmpty())),
+    label: v.optional(v.pipe(v.string(), v.nonEmpty())),
+    text: v.optional(v.pipe(v.string(), v.nonEmpty()))
+  }),
+  v.check(
+    (selector) => [selector.identifier, selector.label, selector.text]
+      .filter((value) => value !== undefined).length === 1,
+    "Provide exactly one non-empty identifier, label, or text selector."
+  )
+)
 
-export type AutomationAction =
-  | { readonly kind: "describe" }
-  | { readonly kind: "wait" | "tap"; readonly selector: AutomationSelector; readonly timeout?: number }
-  | { readonly kind: "type"; readonly selector: AutomationSelector; readonly text: string; readonly replace?: boolean; readonly timeout?: number }
-  | { readonly kind: "swipe"; readonly direction: "up" | "down" | "left" | "right" }
-  | { readonly kind: "button"; readonly button: "home" }
+export const AutomationTimeoutSchema = v.pipe(
+  v.number(),
+  v.minValue(0.1),
+  v.maxValue(30)
+)
+const AutomationActionSchema = v.variant("kind", [
+  v.object({ kind: v.literal("describe") }),
+  v.object({
+    kind: v.literal("wait"),
+    selector: AutomationSelectorSchema,
+    timeout: v.optional(AutomationTimeoutSchema)
+  }),
+  v.object({
+    kind: v.literal("tap"),
+    selector: AutomationSelectorSchema,
+    timeout: v.optional(AutomationTimeoutSchema)
+  }),
+  v.object({
+    kind: v.literal("type"),
+    selector: AutomationSelectorSchema,
+    text: v.string(),
+    replace: v.optional(v.boolean()),
+    timeout: v.optional(AutomationTimeoutSchema)
+  }),
+  v.object({
+    kind: v.literal("swipe"),
+    direction: v.picklist(["up", "down", "left", "right"])
+  }),
+  v.object({
+    kind: v.literal("button"),
+    button: v.literal("home")
+  })
+])
+export type AutomationAction = v.InferOutput<typeof AutomationActionSchema>
+export const decodeAutomationAction = v.parser(AutomationActionSchema)
 
-export interface AutomationResult {
-  readonly ok: true
-  readonly kind: string
-  readonly value: string | null
-}
+const SuccessfulResultSchema = v.object({
+  ok: v.literal(true),
+  kind: v.string(),
+  value: v.nullable(v.string())
+})
+const DriverResultSchema = v.variant("ok", [
+  SuccessfulResultSchema,
+  v.object({
+    ok: v.literal(false),
+    kind: v.string(),
+    error: v.string()
+  })
+])
+const decodeDriverResult = v.parser(DriverResultSchema)
+type DriverResult = v.InferOutput<typeof DriverResultSchema>
+export type AutomationResult = v.InferOutput<typeof SuccessfulResultSchema>
+
+const ExpoConfigSchema = v.object({
+  ios: v.optional(v.object({
+    bundleIdentifier: v.optional(v.pipe(v.string(), v.nonEmpty()))
+  }))
+})
+const decodeExpoConfig = v.parser(ExpoConfigSchema)
 
 export interface ExpoAutomationOptions {
   readonly projectPath: string
@@ -47,10 +102,8 @@ export interface ExpoAutomationOptions {
 
 const MAX_OUTPUT = 1_000_000
 const MARKER = /JINGLER_EXPO_RESULT:([A-Za-z0-9+/=]+)/u
+const TRAILING_SLASH = /\/$/u
 const EXPO_GO_BUNDLE_ID = "host.exp.Exponent"
-
-const messageOf = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause)
 
 const abortMessage = (signal: AbortSignal): string =>
   signal.reason === "timeout" ? "Expo automation timed out." : "Expo automation was cancelled."
@@ -106,75 +159,19 @@ export const spawnAutomationCommand: AutomationCommandRunner = (
   })
 })
 
-const selectorKeys = (selector: AutomationSelector): readonly string[] =>
-  [selector.identifier, selector.label, selector.text].filter(
-    (value): value is string => typeof value === "string" && value.trim().length > 0
-  )
-
-export const validateAutomationAction = (value: unknown): AutomationAction => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Expo automation requires an action object.")
-  }
-  const action = value as Record<string, unknown>
-  if (action.kind === "describe") return { kind: "describe" }
-  if (action.kind === "swipe") {
-    if (!["up", "down", "left", "right"].includes(String(action.direction))) {
-      throw new Error("Swipe direction must be up, down, left, or right.")
-    }
-    return {
-      kind: "swipe",
-      direction: action.direction as "up" | "down" | "left" | "right"
-    }
-  }
-  if (action.kind === "button") {
-    if (action.button !== "home") throw new Error("Only the home button is supported.")
-    return { kind: "button", button: "home" }
-  }
-  if (action.kind !== "wait" && action.kind !== "tap" && action.kind !== "type") {
-    throw new Error("Unknown Expo automation action.")
-  }
-  const selector = action.selector as AutomationSelector | undefined
-  if (!selector || selectorKeys(selector).length !== 1) {
-    throw new Error("Provide exactly one non-empty identifier, label, or text selector.")
-  }
-  const timeout = typeof action.timeout === "number"
-    ? Math.min(Math.max(action.timeout, 0.1), 30)
-    : undefined
-  if (action.kind === "type") {
-    if (typeof action.text !== "string") throw new Error("Type requires text.")
-    return {
-      kind: "type",
-      selector,
-      text: action.text,
-      ...(action.replace === true ? { replace: true } : {}),
-      ...(timeout === undefined ? {} : { timeout })
-    }
-  }
-  return {
-    kind: action.kind,
-    selector,
-    ...(timeout === undefined ? {} : { timeout })
-  }
-}
-
 export const parseAutomationResult = (output: string): AutomationResult => {
   const encoded = MARKER.exec(output)?.[1]
   if (!encoded) throw new Error("XCTest returned no Expo automation result.")
-  let value: unknown
+  let result: DriverResult
   try {
-    value = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"))
+    result = decodeDriverResult(
+      JSON.parse(Buffer.from(encoded, "base64").toString("utf8"))
+    )
   } catch {
     throw new Error("XCTest returned an invalid Expo automation result.")
   }
-  if (typeof value !== "object" || value === null) {
-    throw new Error("XCTest returned an invalid Expo automation result.")
-  }
-  const result = value as Record<string, unknown>
-  if (result.ok !== true) throw new Error(typeof result.error === "string" ? result.error : "Expo automation failed.")
-  if (typeof result.kind !== "string" || !(typeof result.value === "string" || result.value === null)) {
-    throw new Error("XCTest returned an invalid Expo automation result.")
-  }
-  return { ok: true, kind: result.kind, value: result.value }
+  if (!result.ok) throw new Error(result.error)
+  return result
 }
 
 export const resolveExpoBundleIdentifier = async (
@@ -182,7 +179,7 @@ export const resolveExpoBundleIdentifier = async (
   signal: AbortSignal,
   runCommand: AutomationCommandRunner = spawnAutomationCommand
 ): Promise<string> => {
-  const expo = `${worktreePath.replace(/\/$/u, "")}/node_modules/.bin/expo`
+  const expo = `${worktreePath.replace(TRAILING_SLASH, "")}/node_modules/.bin/expo`
   try {
     const result = await runCommand(expo, ["config", "--json"], {
       cwd: worktreePath,
@@ -190,34 +187,31 @@ export const resolveExpoBundleIdentifier = async (
       timeoutMs: 30_000
     })
     if (result.code === 0) {
-      const config = JSON.parse(result.stdout) as { ios?: { bundleIdentifier?: unknown } }
-      if (typeof config.ios?.bundleIdentifier === "string" && config.ios.bundleIdentifier) {
-        return config.ios.bundleIdentifier
-      }
+      const config = decodeExpoConfig(JSON.parse(result.stdout))
+      if (config.ios?.bundleIdentifier) return config.ios.bundleIdentifier
     }
   } catch (cause) {
     if (signal.aborted) throw new Error(abortMessage(signal))
-    if (messageOf(cause).includes("cancelled")) throw cause
+    if (cause instanceof Error && cause.message.includes("cancelled")) throw cause
   }
   return EXPO_GO_BUNDLE_ID
 }
 
 export class ExpoAutomationController {
-  private tail: Promise<void> = Promise.resolve()
+  private tail = Promise.resolve()
   private built = false
-  private readonly runCommand: AutomationCommandRunner
+  private readonly runCommand
 
   constructor(private readonly options: ExpoAutomationOptions) {
     this.runCommand = options.runCommand ?? spawnAutomationCommand
   }
 
   run(
-    actionValue: unknown,
+    action: AutomationAction,
     worktreePath: string,
     simulatorUdid: string,
     signal: AbortSignal
   ): Promise<AutomationResult> {
-    const action = validateAutomationAction(actionValue)
     const task = this.tail.then(() => this.execute(action, worktreePath, simulatorUdid, signal))
     this.tail = task.then(() => undefined, () => undefined)
     return task
@@ -247,11 +241,12 @@ export class ExpoAutomationController {
         "build-for-testing",
         "CODE_SIGNING_ALLOWED=NO"
       ], { signal, timeoutMs: 120_000 })
-      if (build.code !== 0) throw new Error(build.stderr.trim() || "XCTest automation driver failed to build.")
+      if (build.code !== 0) {
+        throw new Error(build.stderr.trim() || "XCTest automation driver failed to build.")
+      }
       this.built = true
     }
     const bundleId = await resolveExpoBundleIdentifier(worktreePath, signal, this.runCommand)
-    const encodedAction = Buffer.from(JSON.stringify(action)).toString("base64")
     const result = await this.runCommand("xcodebuild", [
       ...args,
       "test-without-building",
@@ -260,18 +255,19 @@ export class ExpoAutomationController {
       signal,
       timeoutMs: 60_000,
       env: {
-        JINGLER_EXPO_ACTION: encodedAction,
+        JINGLER_EXPO_ACTION: Buffer.from(JSON.stringify(action)).toString("base64"),
         JINGLER_EXPO_BUNDLE_ID: bundleId
       }
     })
-    const output = `${result.stdout}\n${result.stderr}`
     try {
-      return parseAutomationResult(output)
+      return parseAutomationResult(`${result.stdout}\n${result.stderr}`)
     } catch (cause) {
-      if (result.code === 0) throw cause
-      throw new Error(messageOf(cause) === "XCTest returned no Expo automation result."
-        ? result.stderr.trim() || "Expo automation failed."
-        : messageOf(cause))
+      if (result.code === 0 || !(cause instanceof Error)) throw cause
+      throw new Error(
+        cause.message === "XCTest returned no Expo automation result."
+          ? result.stderr.trim() || "Expo automation failed."
+          : cause.message
+      )
     }
   }
 

@@ -36,7 +36,7 @@ interface Harness {
 const harness = (overrides: Partial<ExpoRuntimeDependencies> = {}): Harness => {
   let processListeners: ProcessListeners | undefined
   const process: ManagedProcess = {
-    write: vi.fn(),
+    write: vi.fn(async () => undefined),
     terminate: vi.fn(async () => {})
   }
   const deps: ExpoRuntimeDependencies = {
@@ -95,6 +95,25 @@ describe("ExpoPreviewController prerequisites", () => {
     expect(h.deps.spawn).not.toHaveBeenCalled()
   })
 
+  it("rejects an ambiguous set of booted simulators", async () => {
+    const ambiguous = JSON.stringify({
+      devices: {
+        ios: [
+          { udid: "sim-1", name: "iPhone 16", state: "Booted", isAvailable: true },
+          { udid: "sim-2", name: "iPhone SE", state: "Booted", isAvailable: true }
+        ]
+      }
+    })
+    const h = harness({
+      exec: vi.fn(async () => ({ code: 0, stdout: ambiguous, stderr: "" }))
+    })
+
+    await expect(h.controller.inspect(SESSION)).resolves.toMatchObject({
+      ready: false,
+      reason: expect.stringContaining("More than one")
+    })
+  })
+
   it("turns an xcrun failure into Xcode setup guidance", async () => {
     const h = harness({
       exec: vi.fn(async () => ({ code: 1, stdout: "", stderr: "xcrun: error" }))
@@ -141,6 +160,14 @@ describe("ExpoPreviewController lifecycle", () => {
     expect(stopped.phase).toBe("stopped")
   })
 
+  it("reports stdin failures when Expo closes during reload", async () => {
+    const h = harness()
+    await h.controller.start(SESSION)
+    vi.mocked(h.process.write).mockRejectedValueOnce(new Error("write EPIPE"))
+
+    await expect(h.controller.reload(SESSION)).rejects.toThrow("EPIPE")
+  })
+
   it("refuses a second session while the simulator preview is owned", async () => {
     const h = harness()
     await h.controller.start(SESSION)
@@ -166,6 +193,47 @@ describe("ExpoPreviewController lifecycle", () => {
     expect((await h.controller.status(SESSION)).phase).toBe("idle")
   })
 
+  it("serializes concurrent starts so only one process is launched", async () => {
+    const h = harness()
+
+    await Promise.all([h.controller.start(SESSION), h.controller.start(SESSION)])
+
+    expect(h.deps.spawn).toHaveBeenCalledOnce()
+  })
+
+  it("terminates a process when stop arrives while spawn is pending", async () => {
+    let release: ((process: ManagedProcess) => void) | undefined
+    const h = harness({
+      spawn: vi.fn((_executable, _args, _cwd, listeners) => {
+        return new Promise<ManagedProcess>((resolve) => {
+          release = resolve
+          Object.assign(h, { listeners: () => listeners })
+        })
+      })
+    })
+    const started = h.controller.start(SESSION)
+    await vi.waitFor(() => expect(h.deps.spawn).toHaveBeenCalledOnce())
+    const stopped = h.controller.stop(SESSION)
+    release?.(h.process)
+
+    await started
+    await stopped
+    expect(h.process.terminate).toHaveBeenCalledOnce()
+  })
+
+  it("ignores exit callbacks from a stopped generation", async () => {
+    const h = harness()
+    await h.controller.start(SESSION)
+    const oldListeners = h.listeners()
+    await h.controller.stop(SESSION)
+    const second = { sessionId: "session-2", worktreePath: "/repo/two" }
+    await h.controller.start(second)
+
+    oldListeners.exit(7, null)
+
+    expect((await h.controller.status(second)).phase).toBe("starting")
+  })
+
   it("records an unexpected process exit and cleans up on dispose", async () => {
     const h = harness()
     await h.controller.start(SESSION)
@@ -182,7 +250,7 @@ describe("ExpoPreviewController lifecycle", () => {
 })
 
 describe("ExpoPreviewController frames", () => {
-  it("captures the booted simulator and promotes startup to running", async () => {
+  it("captures the selected simulator without treating a screenshot as Expo readiness", async () => {
     const h = harness()
     await h.controller.start(SESSION)
     await expect(h.controller.frame(SESSION)).resolves.toEqual({
@@ -191,7 +259,27 @@ describe("ExpoPreviewController frames", () => {
       device: { udid: "booted-1", name: "iPhone 16", state: "Booted" }
     })
     expect(h.deps.capture).toHaveBeenCalledWith("booted-1")
-    expect((await h.controller.status(SESSION)).phase).toBe("running")
+    expect((await h.controller.status(SESSION)).phase).toBe("starting")
+  })
+
+  it("does not reuse a stale capture after stop and owner replacement", async () => {
+    let releaseFirst: ((value: string) => void) | undefined
+    const capture = vi.fn()
+      .mockImplementationOnce(() => new Promise<string>((resolve) => { releaseFirst = resolve }))
+      .mockResolvedValueOnce(PNG_BASE64)
+    const h = harness({ capture })
+    await h.controller.start(SESSION)
+    const stale = h.controller.frame(SESSION)
+    await vi.waitFor(() => expect(capture).toHaveBeenCalledOnce())
+    await h.controller.stop(SESSION)
+    const second = { sessionId: "session-2", worktreePath: "/repo/two" }
+    await h.controller.start(second)
+    const staleResult = expect(stale).rejects.toThrow("preview changed")
+    releaseFirst?.(PNG_BASE64)
+
+    await staleResult
+    await expect(h.controller.frame(second)).resolves.toMatchObject({ pngBase64: PNG_BASE64 })
+    expect(capture).toHaveBeenCalledTimes(2)
   })
 
   it("coalesces overlapping screenshot requests", async () => {

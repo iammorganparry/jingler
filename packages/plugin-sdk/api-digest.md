@@ -353,6 +353,7 @@ Export `activate` from your `main` entry. Called when an activation event fires.
 interface HostContext {
   readonly pluginId: string
   readonly storage: PluginStorage
+  readonly sessions: HostSessions
   readonly settings: HostSettings
   readonly authentication: Authentication
   readonly commands: HostCommands
@@ -373,6 +374,17 @@ order, on deactivate.
 There is no `ctx.http`. The host half is Node — use global `fetch`. `exec` is
 preferred over `node:child_process` so the host can observe it and, in an
 untrusted repo, refuse it.
+
+### `HostSessions`
+
+```ts
+interface HostSessions {
+  get(sessionId: string): Promise<SessionSnapshot | undefined>
+}
+```
+
+Resolves a renderer-supplied id back to main-owned session state. Use this before
+executing a worktree path received through a plugin command.
 
 ### `HostSettings`
 
