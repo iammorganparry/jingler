@@ -793,7 +793,11 @@ describe("MemoryService automatic retention", () => {
     expect(outbox[0]?.attempts).toBe(1)
     expect(await Effect.runPromise(
       service.diagnostics().pipe(Effect.provide(layer))
-    )).toEqual({ queuedRetentions: 1, retryingRetentions: 1 })
+    )).toEqual({
+      attachmentStatus: "disabled",
+      queuedRetentions: 1,
+      retryingRetentions: 1
+    })
   })
 })
 
@@ -874,6 +878,7 @@ describe("MemoryService retention recovery", () => {
       readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
     )).toEqual([])
     expect(service.diagnosticsSnapshot()).toEqual({
+      attachmentStatus: "disabled",
       queuedRetentions: 0,
       retryingRetentions: 0
     })

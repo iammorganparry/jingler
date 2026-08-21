@@ -598,6 +598,26 @@ describe("stateless MCP 2026-07-28", () => {
     )
   })
 
+  it("rejects credential-shaped explicit retain before source ingestion", async () => {
+    const { client, requests } = collectingClient()
+    const response = await handleMemoryMcpRequest(
+      requestFor("tools/call", issue().grant, {
+        params: {
+          name: "memory_retain",
+          arguments: {
+            content: "api_key=sk-test-never-publish",
+            documentId: "unsafe"
+          }
+        }
+      }),
+      dependenciesFor(client)
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ error: { code: -32602 } })
+    expect(requests).toEqual([])
+  })
+
   it("filters tools by grant privileges", async () => {
     const { client } = collectingClient()
     const memberResponse = await handleMemoryMcpRequest(

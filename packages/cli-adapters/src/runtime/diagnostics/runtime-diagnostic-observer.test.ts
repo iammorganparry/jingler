@@ -28,14 +28,18 @@ const connection: ProviderConnection = {
   updatedAt: "2026-08-10T00:00:00.000Z"
 }
 
-const registry = (): ToolRegistry => {
-  const result = new ToolRegistry({
-    memoryLifecycle: () => ({
-      attachmentStatus: "failed",
-      queuedRetentions: 2,
-      retryingRetentions: 1
-    })
-  })
+const registry = (
+  lifecycle: {
+    attachmentStatus: "disabled" | "available" | "failed"
+    queuedRetentions: number
+    retryingRetentions: number
+  } = {
+    attachmentStatus: "failed",
+    queuedRetentions: 2,
+    retryingRetentions: 1
+  }
+): ToolRegistry => {
+  const result = new ToolRegistry({ memoryLifecycle: () => lifecycle })
   result.register({
     id: "workspace_write",
     version: "1",
@@ -84,7 +88,7 @@ const events: ReadonlyArray<StreamEvent> = [
       { _tag: "Done", costUsd: 0, tokens: 4 }
 ]
 
-const observer = () => makeRuntimeDiagnosticObserver({
+const observer = (toolRegistry = registry()) => makeRuntimeDiagnosticObserver({
   runId: "run-1",
   sessionId: "session-1",
   connection,
@@ -103,7 +107,7 @@ const observer = () => makeRuntimeDiagnosticObserver({
     }],
     activeTools: ["workspace_write"]
   },
-  registry: registry(),
+  registry: toolRegistry,
   now: () => new Date("2026-08-10T00:00:00.000Z")
 })
 
@@ -137,5 +141,24 @@ describe("runtime diagnostic observer", () => {
       mutations: [{ callId: "call-1", toolId: "workspace_write", status: "settled", fileChangeSetIds: ["changes-1"] }]
     })
     expect(JSON.stringify(result)).not.toContain("secret")
+  })
+
+  it("keeps post-turn retention queue state live after Done is recorded", () => {
+    const lifecycle = {
+      attachmentStatus: "available" as const,
+      queuedRetentions: 0,
+      retryingRetentions: 0
+    }
+    const diagnosticObserver = observer(registry(lifecycle))
+    const done = diagnosticObserver.observe({ _tag: "Done", costUsd: 0, tokens: 1 })
+
+    lifecycle.queuedRetentions = 1
+    lifecycle.retryingRetentions = 1
+
+    expect(done.memory).toMatchObject({
+      attachmentStatus: "available",
+      queuedRetentions: 1,
+      retryingRetentions: 1
+    })
   })
 })

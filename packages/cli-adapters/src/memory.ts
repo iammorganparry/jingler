@@ -265,7 +265,11 @@ interface MemoryRuntime {
   readonly outboxLock: Effect.Semaphore
   /** Serializes automatic and user-triggered recovery drains. */
   readonly drainLock: Effect.Semaphore
-  readonly lifecycle: { queuedRetentions: number; retryingRetentions: number }
+  readonly lifecycle: {
+    attachmentStatus: "disabled" | "available" | "failed"
+    queuedRetentions: number
+    retryingRetentions: number
+  }
 }
 
 interface CachedMemoryAttachment {
@@ -288,6 +292,7 @@ interface MemoryCaptureJob {
 }
 
 export interface MemoryLifecycleDiagnostics {
+  readonly attachmentStatus: "disabled" | "available" | "failed"
   readonly queuedRetentions: number
   readonly retryingRetentions: number
 }
@@ -1007,15 +1012,26 @@ export const makeMemoryService = (
     recallCache: new Map<string, RecallCacheEntry>(),
     outboxLock: Effect.unsafeMakeSemaphore(1),
     drainLock: Effect.unsafeMakeSemaphore(1),
-    lifecycle: { queuedRetentions: 0, retryingRetentions: 0 }
+    lifecycle: {
+      attachmentStatus: "disabled",
+      queuedRetentions: 0,
+      retryingRetentions: 0
+    }
   }
   const attachment = (query?: string, recallScope?: string) =>
     selectedMemory.pipe(
       Effect.flatMap((selection) => {
-        if (selection === null) return Effect.succeed(null)
+        if (selection === null) {
+          runtime.lifecycle.attachmentStatus = "disabled"
+          return Effect.succeed(null)
+        }
         return cachedAttachment(runtime, selection).pipe(
           Effect.flatMap((cached) => {
-            if (cached === null) return Effect.succeed(null)
+            if (cached === null) {
+              runtime.lifecycle.attachmentStatus = "failed"
+              return Effect.succeed(null)
+            }
+            runtime.lifecycle.attachmentStatus = "available"
             const trimmedQuery = redactMemoryText(query ?? "")
               .trim()
               .slice(0, MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS)
@@ -1152,13 +1168,14 @@ export const makeMemoryService = (
   const diagnostics = () =>
     runtime.outboxLock.withPermits(1)(readOutbox).pipe(
       Effect.map((jobs) => ({
+        attachmentStatus: runtime.lifecycle.attachmentStatus,
         queuedRetentions: jobs.length,
         retryingRetentions: jobs.filter((job) => job.attempts > 0).length
       })),
       Effect.tap((snapshot) => Effect.sync(() => Object.assign(runtime.lifecycle, snapshot))),
       Effect.orElseSucceed(() => ({ ...runtime.lifecycle }))
     )
-  const diagnosticsSnapshot = (): MemoryLifecycleDiagnostics => ({ ...runtime.lifecycle })
+  const diagnosticsSnapshot = (): MemoryLifecycleDiagnostics => runtime.lifecycle
 
   const uiRequest = (input: MemoryUiRequest) =>
     selectedMemory.pipe(

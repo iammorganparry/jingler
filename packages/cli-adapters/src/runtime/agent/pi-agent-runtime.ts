@@ -376,6 +376,12 @@ class PiSessionRegistry {
           message: `pi session is already active: ${spec.piSessionId}`
         }))
       }
+      if (retained.handle.modelId !== String(spec.modelId)) {
+        return Effect.fail(new AgentRuntimeError({
+          reason: "runtime",
+          message: "Cannot resume a retained Pi session with a different model"
+        }))
+      }
       // PI locks tools and prompt resources when the session is created. Reuse
       // is safe only while that capability shape is unchanged. Rebuild against
       // the SAME session file when role, mode, target resources, or MCP source
@@ -385,12 +391,6 @@ class PiSessionRegistry {
         return Effect.promise(() => this.#dispose(retained)).pipe(
           Effect.flatMap(() => this.#create(spec, context))
         )
-      }
-      if (retained.handle.modelId !== String(spec.modelId)) {
-        return Effect.fail(new AgentRuntimeError({
-          reason: "runtime",
-          message: "Cannot resume a retained Pi session with a different model"
-        }))
       }
       if (retained.reapTimer !== null) clearTimeout(retained.reapTimer)
       retained.reapTimer = null

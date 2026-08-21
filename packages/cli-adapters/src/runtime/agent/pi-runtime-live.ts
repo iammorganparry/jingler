@@ -257,7 +257,11 @@ export const makePiAgentRuntimeLive = (
           plugins: pluginSetup,
           memoryLifecycle: Option.isSome(memory) && memory.value.diagnostics !== undefined
             ? memory.value.diagnostics()
-            : Effect.succeed({ queuedRetentions: 0, retryingRetentions: 0 })
+            : Effect.succeed({
+                attachmentStatus: "disabled" as const,
+                queuedRetentions: 0,
+                retryingRetentions: 0
+              })
         }).pipe(
           Effect.mapError((cause) =>
             new AgentRuntimeError({
@@ -295,12 +299,16 @@ export const makePiAgentRuntimeLive = (
                 : { ...current, imported: undefined }
             },
             registryOptions: {
-              memoryLifecycle: () => ({
-                attachmentStatus: context.memoryAttachmentStatus ?? "disabled",
-                ...(Option.isSome(memory) && memory.value.diagnosticsSnapshot !== undefined
+              memoryLifecycle: () => {
+                const snapshot = Option.isSome(memory) &&
+                  memory.value.diagnosticsSnapshot !== undefined
                   ? memory.value.diagnosticsSnapshot()
-                  : memoryLifecycle)
-              }),
+                  : memoryLifecycle
+                return Object.assign(snapshot, {
+                  attachmentStatus:
+                    context.memoryAttachmentStatus ?? snapshot.attachmentStatus
+                })
+              },
               ...(Option.isSome(memory)
                 ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }
                 : {}),

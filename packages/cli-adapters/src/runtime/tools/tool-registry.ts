@@ -429,14 +429,13 @@ export class ToolRegistry {
       queuedRetentions: 0,
       retryingRetentions: 0
     }
-    return {
+    return Object.assign(lifecycle, {
       mutatingExecutions: this.#mutatingExecutions,
       advisories: this.#memoryAdvisories,
       proposals: this.#memoryProposals,
       workflowPolls: this.#memoryWorkflowPolls,
-      failureCandidates: this.toolMemoryFailures().length,
-      ...lifecycle
-    }
+      failureCandidates: this.toolMemoryFailures().length
+    })
   }
 
   memoryReflectionPrompt(role: AgentRole): string | null {

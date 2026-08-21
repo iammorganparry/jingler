@@ -718,6 +718,23 @@ describe("PiAgentRuntime", () => {
       spec,
       { ...context, mcp: { browser } }
     )))
+    const rejectedModelChange = await Effect.runPromise(Stream.runCollect(runtime.run(
+      {
+        ...spec,
+        runId: "run-model-change",
+        modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus"),
+        prompt: "memory recovered with another model",
+        piSessionId: "/sessions/parent.jsonl"
+      },
+      { ...context, mcp: { browser, memory } }
+    )))
+    expect([...rejectedModelChange].at(-1)).toMatchObject({
+      _tag: "Failed",
+      message: "Cannot resume a retained Pi session with a different model"
+    })
+    expect(create).toHaveBeenCalledOnce()
+    expect(handles[0]?.dispose).not.toHaveBeenCalled()
+
     await Effect.runPromise(Stream.runCollect(runtime.run(
       { ...spec, runId: "run-2", prompt: "memory recovered", piSessionId: "/sessions/parent.jsonl" },
       { ...context, mcp: { browser, memory } }

@@ -9,6 +9,7 @@ import {
   type MemoryPrivilege
 } from "@jingler/core"
 import { createHash, randomUUID } from "node:crypto"
+import { findCredentialShapedContent } from "@jingler/memory"
 import { Effect, JSONSchema, Match, Schema } from "effect"
 import type { JsonValue, MemoryClient, MemoryClientRequest } from "./memory-client.js"
 
@@ -54,7 +55,7 @@ const defineTool = <Arguments, Encoded>(
     args: Arguments,
     claims: MemoryGrantClaims,
     requestId: string
-  ) => MemoryClientRequest
+  ) => MemoryClientRequest | null
 ): ToolDefinition => ({
   ...definition,
   inputSchema: JSONSchema.make(argumentsSchema),
@@ -75,17 +76,20 @@ const getRequest = (
   path
 })
 
+const ExplicitRetainArguments = Schema.Struct({
+  content: NonEmptyString,
+  documentId: NonEmptyString,
+  context: Schema.optional(NonEmptyString),
+  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String }))
+})
+
 const tools: ReadonlyArray<ToolDefinition> = [
   defineTool({
     name: "memory_retain",
     description: "Retain explicit durable content for compiler extraction.",
     privilege: "propose"
-  }, Schema.Struct({
-    content: NonEmptyString,
-    documentId: NonEmptyString,
-    context: Schema.optional(NonEmptyString),
-    metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String }))
-  }), (args, claims, requestId) => {
+  }, ExplicitRetainArguments, (args, claims, requestId) => {
+    if (findCredentialShapedContent(JSON.stringify(args)).length > 0) return null
     const retainedContent = [
       ...(args.context === undefined ? [] : [`Context: ${args.context}`]),
       ...(args.metadata === undefined
