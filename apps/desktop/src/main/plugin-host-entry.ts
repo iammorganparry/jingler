@@ -43,7 +43,8 @@ import type {
   IssueGetRequest,
   IssueListRequest,
   IssueProvider,
-  PluginStorage
+  PluginStorage,
+  SessionSnapshot
 } from "@jingler/plugin-sdk/host"
 
 /** The parent port, present because this only ever runs as a utilityProcess. */
@@ -134,6 +135,12 @@ const storageFor = (pluginId: string): PluginStorage => ({
 
 const buildContext = (plugin: LivePlugin): HostContext => ({
   pluginId: plugin.pluginId,
+  sessions: {
+    get: (sessionId) =>
+      ask<SessionSnapshot | null>(plugin.pluginId, "sessions.get", { sessionId }).then(
+        (session) => session ?? undefined
+      )
+  },
   storage: storageFor(plugin.pluginId),
   settings: {
     getSecret: (settingId: string) =>

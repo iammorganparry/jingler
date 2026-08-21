@@ -200,6 +200,9 @@ expectTypeOf<SessionActions["removeIssue"]>().toEqualTypeOf<
 
 expectTypeOf<HostContext>().not.toBeAny()
 expectTypeOf<HostContext["storage"]>().toEqualTypeOf<PluginStorage>()
+expectTypeOf<HostContext["sessions"]["get"]>().toEqualTypeOf<
+  (sessionId: string) => Promise<SessionSnapshot | undefined>
+>()
 expectTypeOf<HostContext["settings"]["getSecret"]>().toEqualTypeOf<
   (settingId: string) => Promise<string | undefined>
 >()

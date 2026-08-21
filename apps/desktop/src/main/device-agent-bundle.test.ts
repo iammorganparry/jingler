@@ -26,6 +26,16 @@ describe("device agent bundle path", () => {
     ).toBe("/repo/apps/device-agent/dist/jingler-device-runtime.tgz")
   })
 
+  it("packages the Expo plugin and its XCTest automation project", () => {
+    const builderConfig = readFileSync(
+      join(import.meta.dirname, "../../electron-builder.yml"),
+      "utf8"
+    )
+    expect(builderConfig).toContain("from: ../../plugins/expo")
+    expect(builderConfig).toContain("to: plugins/expo")
+    expect(builderConfig).toContain("- automation/**")
+  })
+
   it("builds bundled plugins and the device agent before starting the desktop dev server", () => {
     const packageJson = JSON.parse(
       readFileSync(join(import.meta.dirname, "../../package.json"), "utf8")

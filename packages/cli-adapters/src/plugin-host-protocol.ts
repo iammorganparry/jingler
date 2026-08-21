@@ -216,6 +216,7 @@ export type HostOp =
   | "storage.set"
   | "storage.delete"
   | "storage.keys"
+  | "sessions.get"
   | "settings.getSecret"
   | "settings.getProfileSecret"
   | "settings.setProfileSecret"

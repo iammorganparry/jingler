@@ -17,6 +17,7 @@ import {
   PluginAuth,
   PluginRegistry,
   PluginHost,
+  SessionStore,
   PluginHostRuntime,
   type ConsentPrompt,
   type HostProcess,
@@ -49,6 +50,14 @@ export const installPluginHost = (
     storageSet: (pluginId: string, key: string, value: unknown) => Promise<void>
     storageDelete: (pluginId: string, key: string) => Promise<void>
     storageKeys: (pluginId: string) => Promise<ReadonlyArray<string>>
+    getWorkspaceSession: (sessionId: string) => Promise<{
+      id: string
+      repo: string
+      branch: string
+      title: string
+      prNumber: number | null
+      worktreePath?: string
+    } | null>
     getSecret: (pluginId: string, settingId: string) => Promise<string | null>
     getProfileSecret: (pluginId: string, collectionId: string, profileId: string) => Promise<string | null>
     setProfileSecret: (pluginId: string, collectionId: string, profileId: string, value: string) => Promise<void>
@@ -77,6 +86,24 @@ export const installPluginHost = (
       storageDelete: (pluginId, key) =>
         appRuntime.runPromise(pluginStorageDelete(pluginId, key)),
       storageKeys: (pluginId) => appRuntime.runPromise(pluginStorageKeys(pluginId)),
+      getWorkspaceSession: (sessionId) =>
+        appRuntime.runPromise(
+          SessionStore.get(sessionId).pipe(
+            Effect.map((session) => {
+              const snapshot = {
+                id: session.id,
+                repo: session.repo,
+                branch: session.branch,
+                title: session.title,
+                prNumber: session.prNumber ?? null
+              }
+              return session.worktreePath
+                ? { ...snapshot, worktreePath: session.worktreePath }
+                : snapshot
+            }),
+            Effect.catchAll(() => Effect.succeed(null))
+          )
+        ),
       getSecret: (pluginId, settingId) =>
         appRuntime.runPromise(pluginSecretGetForHost(pluginId, settingId)),
       getProfileSecret: (pluginId, collectionId, profileId) =>

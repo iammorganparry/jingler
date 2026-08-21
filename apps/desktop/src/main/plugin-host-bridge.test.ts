@@ -10,6 +10,7 @@ const setup = (
     storageSet: async () => undefined,
     storageDelete: async () => undefined,
     storageKeys: async () => [],
+    getWorkspaceSession: async () => null,
     getSecret,
     getProfileSecret: async () => null,
     setProfileSecret: async () => undefined,
@@ -17,6 +18,37 @@ const setup = (
     defaultCwd: () => undefined,
     getSession: async () => null
   })
+
+describe("plugin host session bridge", () => {
+  it("resolves a renderer session id through main-owned state", async () => {
+    const getWorkspaceSession = vi.fn(async () => ({
+      id: "session-1",
+      repo: "acme/mobile",
+      branch: "feat/mobile",
+      title: "Mobile",
+      prNumber: null,
+      worktreePath: "/trusted/mobile"
+    }))
+    const handle = makeHostRequestHandler({
+      storageGet: async () => null,
+      storageSet: async () => undefined,
+      storageDelete: async () => undefined,
+      storageKeys: async () => [],
+      getWorkspaceSession,
+      getSecret: async () => null,
+      getProfileSecret: async () => null,
+      setProfileSecret: async () => undefined,
+      deleteProfileSecret: async () => undefined,
+      defaultCwd: () => undefined,
+      getSession: async () => null
+    })
+
+    const reply = await handle("expo", "sessions.get", { sessionId: "session-1" })
+
+    expect(getWorkspaceSession).toHaveBeenCalledWith("session-1")
+    expect(reply).toMatchObject({ ok: true, value: { worktreePath: "/trusted/mobile" } })
+  })
+})
 
 describe("plugin host settings bridge", () => {
   it("resolves a secret in the requesting plugin's namespace", async () => {
@@ -52,6 +84,7 @@ describe("plugin host settings bridge", () => {
       storageSet: async () => undefined,
       storageDelete: async () => undefined,
       storageKeys: async () => [],
+      getWorkspaceSession: async () => null,
       getSecret: async () => null,
       getProfileSecret: async () => null,
       setProfileSecret,
