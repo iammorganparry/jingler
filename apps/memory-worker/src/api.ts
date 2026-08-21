@@ -38,6 +38,9 @@ import {
 } from "./turbopuffer.js"
 
 const NonEmptyString = Schema.String.pipe(Schema.minLength(1))
+const TrimmedNonEmptyString = NonEmptyString.pipe(
+  Schema.filter((value) => value.trim().length > 0)
+)
 
 const SourceRequest = Schema.Struct({
   source: MemorySource,
@@ -56,7 +59,7 @@ const SourceResponse = Schema.Struct({
 const ObservationRequest = Schema.Struct({
   scope: MemoryKnowledgeScope,
   key: NonEmptyString,
-  text: NonEmptyString,
+  text: TrimmedNonEmptyString,
   evidenceId: NonEmptyString,
   confidence: Schema.Number.pipe(Schema.between(0, 1)),
   createdAt: NonEmptyString

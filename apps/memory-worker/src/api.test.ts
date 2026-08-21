@@ -575,6 +575,17 @@ describe("memory Worker internal API", () => {
       }),
       env
     )
+    const whitespaceObservation = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/observations", {
+        scope,
+        key: "invalid",
+        text: "   ",
+        evidenceId: "revision:invalid:1",
+        confidence: 1,
+        createdAt: "2026-08-20T09:30:00.000Z"
+      }),
+      env
+    )
     const observation = await handleMemoryWorkerRequest(
       jsonRequest("org-a", "/internal/memory/observations", {
         scope,
@@ -636,6 +647,7 @@ describe("memory Worker internal API", () => {
     )
 
     expect(model.status).toBe(201)
+    expect(whitespaceObservation.status).toBe(400)
     expect(observation.status).toBe(201)
     expect(missingScope.status).toBe(400)
     expect(missingReflectScope.status).toBe(400)
