@@ -18,6 +18,8 @@ export * from "./compiler-prompt.js"
 export * from "./proposals.js"
 export * from "./reconciliation.js"
 export * from "./workflows/compiler.js"
+export * from "./workflows/consolidation.js"
+export * from "./workflows/mental-model.js"
 export * from "./workflows/lint.js"
 export * from "./workflows/vector-ingest.js"
 

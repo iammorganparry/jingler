@@ -5,6 +5,7 @@ import { ConfigService } from "./config.js"
 import {
   MemoryService,
   type MemoryAttachment,
+  type MemoryLifecycleDiagnostics,
   type MemoryServiceEnvironment
 } from "./memory.js"
 import { composeTurnPrompt, leadsWithCommand } from "./turn-prompt.js"
@@ -15,6 +16,8 @@ export interface MemoryAttachmentServiceShape {
     query?: string,
     recallScope?: string
   ) => Effect.Effect<MemoryAttachment | null>
+  readonly diagnostics?: () => Effect.Effect<MemoryLifecycleDiagnostics>
+  readonly diagnosticsSnapshot?: () => MemoryLifecycleDiagnostics
 }
 
 export class MemoryAttachmentService extends Context.Tag("@jingler/MemoryAttachmentService")<
@@ -40,7 +43,9 @@ export const MemoryAttachmentServiceLive = Layer.effect(
         Effect.orElseSucceed(() => false)
       ),
       attachment: (query, recallScope) =>
-        memory.attachment(query, recallScope).pipe(Effect.provide(environment))
+        memory.attachment(query, recallScope).pipe(Effect.provide(environment)),
+      diagnostics: () => memory.diagnostics().pipe(Effect.provide(environment)),
+      diagnosticsSnapshot: memory.diagnosticsSnapshot
     })
   })
 )

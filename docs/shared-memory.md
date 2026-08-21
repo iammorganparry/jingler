@@ -1,10 +1,12 @@
 # Shared team memory operations
 
-Shared Memory is an opt-in paid-team feature that turns agent-owned durable
-learning proposals and other sources into a cited Markdown wiki. Factual agent
-proposals publish automatically; stale revisions conflict rather than overwrite
-accepted memory. The desktop talks to the public Next.js endpoint; only Next.js
-can reach the private Cloudflare vault.
+Shared Memory is an opt-in paid-team feature that automatically retains
+successful top-level PI turns and compiles durable learning into a cited Markdown
+wiki. Agents can also call explicit retain, recall, and reflect tools. Accepted
+pages consolidate into evidence-backed observations and refresh versioned mental
+models; stale revisions conflict rather than overwrite accepted memory. The
+desktop talks to the public Next.js endpoint; only Next.js can reach the private
+Cloudflare vault.
 
 ```text
 Claude / Codex / OpenCode + Memory UI
@@ -25,10 +27,10 @@ Claude / Codex / OpenCode + Memory UI
 R2 accepted Markdown is the single recovery source of truth. Every other store —
 the Durable Object's SQLite/FTS5, the graph, analytics, and the turbopuffer
 vector namespace — is a rebuildable projection. The turbopuffer layer is
-**advisory only**: it powers the inspector's "related pages" suggestions and is
-never consulted by lexical search, the reproducible graph, or any export hash.
-Absent a turbopuffer key, suggestions degrade to deterministic lexical
-relatedness.
+**advisory only**: it contributes semantic candidates to hybrid recall and powers
+the inspector's related-page suggestions, but never changes accepted evidence,
+the reproducible graph, or export hashes. Without vector credentials, recall and
+suggestions degrade to deterministic lexical/graph/temporal retrieval.
 
 ## Rollout
 
@@ -52,16 +54,22 @@ changed. Desktop workspaces also retain their own `memory.enabled` preference.
 ## PI agent runtime contract
 
 Memory is attached by Jingler before a PI run for conversation, plan,
-plan-execution, review, and background roles. Review is recall-only;
-context-digest runs are excluded. Attachment and lookup failures are fail-open
-and appear in Runtime diagnostics as `jingler-memory` health rather than
-silently removing other PI tools.
+plan-execution, review, and background roles. Review is recall-only. Retained PI
+sessions rebuild their locked resources when memory availability changes, while
+URL/header rotation reuses the session through live attachment resolution.
+Attachment and lookup failures are fail-open and appear in Runtime diagnostics
+with attachment state plus queued/retrying retention counts.
 
 Before an eligible non-command-led turn, Jingler derives a redacted query from
-the operator text plus repository and branch identity. It performs at most one
-lexical search and three accepted-page reads, then injects at most one bounded
-`<recalled-memories>` block containing page, revision, source, and citation IDs.
-Local checkout paths are never part of the query.
+the operator text, the last three visible turns, and repository/branch identity.
+Recall fuses lexical/index, wikilink/backlink, semantic ANN, and temporal recency
+signals. It reads at most three accepted pages and injects one evidence block
+with an approximate 2K-token text budget plus stable page, revision, source, and
+citation IDs. Failed recall retries; successful empty/unchanged recall is cached
+for 60 seconds, then searched again so newly published evidence can appear.
+Semantic-only ANN candidates must clear a finite similarity threshold. The
+latest accepted evidence block is also supplied to context compaction. Local
+checkout paths are never part of the query.
 
 Execute-risk tool calls have a second, run-scoped recall boundary. Shell calls
 use only the tool ID and normalized binary/subcommand; arguments, paths, and
@@ -71,12 +79,24 @@ model must review, revise, or retry before the tool can execute. Lookup timeout
 or failure remains fail-open. Failed tool calls contribute only the newest three
 redacted, bounded candidates to end-of-turn reflection.
 
-A mutating turn with memory enabled and no proposal receives one hidden
-reflection nudge before PI settles. The agent may call `memory_propose` and poll
-`memory_workflow_status` to a terminal result; reflection prose is not shown to
-the operator. Jingler does **not** upload raw settled transcripts in current
-releases. Legacy capture outboxes are recovery-only. Narration-only compiler
-sources terminate as `no_durable_learning` without creating a proposal or page.
+Every successful top-level turn durably queues one deterministic conversation
+source before the UI sees completion. Retention contains only canonical visible
+user and assistant text: system/developer prompts, recalled memory, hidden
+reflection, tool payloads, credentials, machine-local paths, and child-agent
+reasoning are structurally excluded or redacted. Delivery retries autonomously
+from the local outbox with bounded exponential backoff, and compiler workflow
+identity is stable across replay.
+
+A mutating turn with memory enabled and no explicit proposal may still receive a
+hidden reflection nudge. `memory_retain` stores explicit source material;
+`memory_recall` returns hybrid ranked evidence; `memory_reflect` requires an
+explicit organization/project/user knowledge scope and returns a cited,
+non-retaining synthesis under one combined result and text budget. User scope
+must match the calling grant subject. Project-scoped reflection is rejected until
+grants carry authoritative project memberships. `memory_propose` remains the
+curated page update path.
+Accepted publications create scoped, supersedable observations and refresh
+published mental models that opt into refresh-after-consolidation.
 
 ## Cloudflare Worker configuration
 
@@ -235,9 +255,10 @@ organization's namespace directly through turbopuffer (namespace
 `jingler-memory--<url-encoded-organization-id>`); the next suggestions request
 rebuilds it from R2.
 
-Losing the vector namespace never affects accepted memory: lexical search, the
-graph, analytics, and exports are computed without it, and suggestions fall back
-to deterministic lexical relatedness until the namespace is repopulated. The
+Losing the vector namespace never affects accepted memory: hybrid recall falls
+back to lexical/graph/temporal candidates, analytics and exports remain intact,
+and suggestions fall back to deterministic lexical relatedness until the
+namespace is repopulated. The
 namespace holds only an explicit embedding vector and flat retrieval attributes —
 never a full page body or even the snippet — so it is not part of the vault
 export.

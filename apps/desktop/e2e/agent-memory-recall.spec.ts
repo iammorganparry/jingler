@@ -133,7 +133,7 @@ test("pi recalls, applies a tool advisory, publishes, and shares a learning with
   }
 })
 
-test("pi receives accepted memory without raw settled-turn capture", async ({ launchApp }) => {
+test("pi receives accepted memory and automatically retains its visible settled turn", async ({ launchApp }) => {
   const fake = await startFakeAuthServer()
   try {
     const app = await launchApp({
@@ -176,8 +176,87 @@ test("pi receives accepted memory without raw settled-turn capture", async ({ la
         request.mcpMethod === null &&
         request.mcpName === null
     )).toBe(true)
-    expect(sourceIngestRequests(fake.memoryRequests)).toEqual([])
+    await expect.poll(() => sourceIngestRequests(fake.memoryRequests).length).toBe(1)
+    expect(fake.memorySnapshot("org-e2e").sourceCount).toBe(1)
+    await expect.poll(() => fake.memorySnapshot("org-e2e").acceptedPageIds)
+      .toContain("shared-learning")
+    await app.app.close()
 
+    const teammateRequestStart = fake.memoryRequests.length
+    const teammate = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "default", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    const teammateComposer = teammate.window.getByPlaceholder("Message the agent…")
+    await teammateComposer.fill("How should refund rate limiting work?")
+    await teammateComposer.press("Enter")
+    await expect(teammate.window.getByText(COMPLETED_PI_REPLY)).toBeVisible({ timeout: 30_000 })
+    expect(fake.memoryRequests.slice(teammateRequestStart).some(
+      (request) =>
+        request.mcpName === "memory_read" &&
+        request.toolArguments?.pageId === "shared-learning"
+    )).toBe(true)
+    await teammate.app.close()
+
+    const outsiderStart = fake.memoryRequests.length
+    const outsider = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "default", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-other" } }
+    })
+    const outsiderComposer = outsider.window.getByPlaceholder("Message the agent…")
+    await outsiderComposer.fill("How should refund rate limiting work?")
+    await outsiderComposer.press("Enter")
+    await expect(outsider.window.getByText(COMPLETED_PI_REPLY)).toBeVisible({ timeout: 30_000 })
+    expect(fake.memoryRequests.slice(outsiderStart).some(
+      (request) => request.toolArguments?.pageId === "shared-learning"
+    )).toBe(false)
+    await outsider.app.close()
+  } finally {
+    await fake.close()
+  }
+})
+
+test("a retained pi conversation gains memory tools when the attachment recovers", async ({
+  launchApp
+}) => {
+  const fake = await startFakeAuthServer()
+  try {
+    fake.setMemoryAvailable(false)
+    const app = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "memory-recovery", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    const composer = app.window.getByPlaceholder("Message the agent…")
+    await composer.fill("[[memory-recovery-hold]] Work without memory for this turn.")
+    await composer.press("Enter")
+    await expect(
+      app.window.getByText("Completed the offline turn while a child remains active.")
+    ).toBeVisible({ timeout: 30_000 })
+
+    fake.setMemoryAvailable(true)
+    await composer.fill("[[memory-recovery-search]] Confirm the recovered memory catalog.")
+    await composer.press("Enter")
+    await expect(
+      app.window.getByText("Memory tools recovered without restarting the conversation.")
+    ).toBeVisible({ timeout: 30_000 })
+
+    expect(fake.memoryRequests.some(
+      (request) =>
+        request.toolName === "memory_search" &&
+        request.toolArguments?.query === "recovered-tool-catalog"
+    )).toBe(true)
     await app.app.close()
   } finally {
     await fake.close()

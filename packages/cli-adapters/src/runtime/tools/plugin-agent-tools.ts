@@ -108,6 +108,16 @@ export interface PluginAgentToolRegistrationFailure {
   readonly message: string
 }
 
+export interface PreparedPluginAgentToolset {
+  readonly source: PluginAgentToolsetSource
+  readonly descriptors: ReadonlyArray<PluginAgentToolDescriptor>
+}
+
+export interface PreparedPluginAgentTools {
+  readonly toolsets: ReadonlyArray<PreparedPluginAgentToolset>
+  readonly failures: ReadonlyArray<PluginAgentToolRegistrationFailure>
+}
+
 /** Enabled manifest toolsets, without importing any plugin host entry. */
 export const enabledPluginAgentToolsets = (
   plugins: ReadonlyArray<LoadedPlugin>
@@ -170,22 +180,47 @@ const registerDescriptor = (
  * Failures are isolated per toolset: one broken third-party plugin must not
  * remove Jingler's own tools or another plugin's healthy toolset from the run.
  */
-export const registerPluginAgentTools = async (
-  registry: ToolRegistry,
+export const preparePluginAgentTools = async (
   host: PluginHostRuntime,
-  sources: ReadonlyArray<PluginAgentToolsetSource>,
-  context: PluginAgentToolSessionContext
-): Promise<ReadonlyArray<PluginAgentToolRegistrationFailure>> => {
-  const failures: Array<PluginAgentToolRegistrationFailure> = []
+  sources: ReadonlyArray<PluginAgentToolsetSource>
+): Promise<PreparedPluginAgentTools> => {
+  const toolsets: PreparedPluginAgentToolset[] = []
+  const failures: PluginAgentToolRegistrationFailure[] = []
   for (const source of sources) {
     try {
       const descriptors = await host.loadAgentToolset(source.plugin, source.toolsetId)
       const ids = new Set<string>()
       for (const descriptor of descriptors) {
-        if (ids.has(descriptor.id) || !registry.canRegister(descriptor.id)) {
-          throw new Error(`agent tool id "${descriptor.id}" is already registered`)
+        if (ids.has(descriptor.id)) {
+          throw new Error(`agent tool id "${descriptor.id}" is duplicated`)
         }
         ids.add(descriptor.id)
+      }
+      toolsets.push({ source, descriptors })
+    } catch (cause) {
+      failures.push({
+        pluginId: source.plugin.manifest.id,
+        toolsetId: source.toolsetId,
+        message: messageOf(cause)
+      })
+    }
+  }
+  return { toolsets, failures }
+}
+
+export const registerPreparedPluginAgentTools = (
+  registry: ToolRegistry,
+  host: PluginHostRuntime,
+  prepared: PreparedPluginAgentTools,
+  context: PluginAgentToolSessionContext
+): ReadonlyArray<PluginAgentToolRegistrationFailure> => {
+  const failures = [...prepared.failures]
+  for (const { source, descriptors } of prepared.toolsets) {
+    try {
+      for (const descriptor of descriptors) {
+        if (!registry.canRegister(descriptor.id)) {
+          throw new Error(`agent tool id "${descriptor.id}" is already registered`)
+        }
       }
       for (const descriptor of descriptors) {
         registerDescriptor(registry, host, source, descriptor, context)
@@ -200,3 +235,16 @@ export const registerPluginAgentTools = async (
   }
   return failures
 }
+
+export const registerPluginAgentTools = async (
+  registry: ToolRegistry,
+  host: PluginHostRuntime,
+  sources: ReadonlyArray<PluginAgentToolsetSource>,
+  context: PluginAgentToolSessionContext
+): Promise<ReadonlyArray<PluginAgentToolRegistrationFailure>> =>
+  registerPreparedPluginAgentTools(
+    registry,
+    host,
+    await preparePluginAgentTools(host, sources),
+    context
+  )

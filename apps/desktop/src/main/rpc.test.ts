@@ -2265,7 +2265,18 @@ describe("memoryExport", () => {
       MemoryService,
       MemoryService.make({
         attachment: () => Effect.succeed(null),
+        retainSettledTurn: () => Effect.succeed(false),
         recoverCaptures: () => Effect.succeed(null),
+        diagnostics: () => Effect.succeed({
+          attachmentStatus: "disabled",
+          queuedRetentions: 0,
+          retryingRetentions: 0
+        }),
+        diagnosticsSnapshot: () => ({
+          attachmentStatus: "disabled",
+          queuedRetentions: 0,
+          retryingRetentions: 0
+        }),
         access: () => Effect.succeed(null),
         uiRequest: () => {
           onUiRequest();

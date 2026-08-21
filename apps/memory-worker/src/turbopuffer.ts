@@ -495,6 +495,19 @@ export class TurbopufferVectorLayer {
     })
   }
 
+  /** Semantic candidates for an arbitrary recall query in this organization. */
+  search(
+    query: string,
+    topK: number
+  ): Effect.Effect<ReadonlyArray<TurbopufferQueryHit>> {
+    return Effect.gen(this, function* () {
+      const [vector] = yield* Effect.promise(() => this.embedder.embed([query.slice(0, 4_000)]))
+      return yield* Effect.promise(() =>
+        this.client.query(this.namespace, vector ?? [], Math.max(1, topK))
+      )
+    })
+  }
+
   /** Nearest-neighbour relatedness for one page (self-hit excluded). */
   relatedness(page: MemoryPage, topK: number): Effect.Effect<ReadonlyArray<TurbopufferNeighbor>> {
     return Effect.gen(this, function* () {

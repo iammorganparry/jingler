@@ -9,6 +9,7 @@ import {
   type MemoryPrivilege
 } from "@jingler/core"
 import { createHash, randomUUID } from "node:crypto"
+import { findCredentialShapedContent, MemoryKnowledgeScope } from "@jingler/memory"
 import { Effect, JSONSchema, Match, Schema } from "effect"
 import type { JsonValue, MemoryClient, MemoryClientRequest } from "./memory-client.js"
 
@@ -54,7 +55,7 @@ const defineTool = <Arguments, Encoded>(
     args: Arguments,
     claims: MemoryGrantClaims,
     requestId: string
-  ) => MemoryClientRequest
+  ) => MemoryClientRequest | null
 ): ToolDefinition => ({
   ...definition,
   inputSchema: JSONSchema.make(argumentsSchema),
@@ -75,7 +76,89 @@ const getRequest = (
   path
 })
 
+const ExplicitRetainArguments = Schema.Struct({
+  content: NonEmptyString,
+  documentId: NonEmptyString,
+  context: Schema.optional(NonEmptyString),
+  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String }))
+})
+
+const authorizedScopeQuery = (
+  scope: Schema.Schema.Type<typeof MemoryKnowledgeScope>,
+  claims: MemoryGrantClaims
+): string | null => {
+  if (scope.kind === "organization" && scope.id !== claims.organizationId) return null
+  if (scope.kind === "user" && scope.id !== claims.subject) return null
+  // Grants do not yet carry project memberships, so accepting an arbitrary
+  // project id would turn requested-scope filtering into an authorization bypass.
+  if (scope.kind === "project") return null
+  return `scopeKind=${encodeURIComponent(scope.kind)}&scopeId=${encodeURIComponent(scope.id)}`
+}
+
 const tools: ReadonlyArray<ToolDefinition> = [
+  defineTool({
+    name: "memory_retain",
+    description: "Retain explicit durable content for compiler extraction.",
+    privilege: "propose"
+  }, ExplicitRetainArguments, (args, claims, requestId) => {
+    if (findCredentialShapedContent(JSON.stringify(args)).length > 0) return null
+    const retainedContent = [
+      ...(args.context === undefined ? [] : [`Context: ${args.context}`]),
+      ...(args.metadata === undefined
+        ? []
+        : [`Metadata: ${JSON.stringify(args.metadata)}`]),
+      args.content
+    ].join("\n\n")
+    const identity = createHash("sha256")
+      .update([claims.subject, args.documentId, retainedContent].join("\u0000"))
+      .digest("hex")
+    const sourceId = `source:retain-${identity}`
+    return {
+      organizationId: claims.organizationId,
+      requestId,
+      method: "POST",
+      path: "/internal/memory/sources",
+      body: {
+        source: {
+          id: sourceId,
+          kind: "manual",
+          title: args.context ?? `Retained document ${args.documentId}`,
+          uri: `jingler://memory-retain/${encodeURIComponent(args.documentId)}`,
+          retrievedAt: new Date().toISOString(),
+          contentHash: createHash("sha256").update(retainedContent).digest("hex")
+        },
+        content: retainedContent
+      }
+    }
+  }),
+  defineTool({
+    name: "memory_recall",
+    description: "Recall ranked accepted memory using hybrid retrieval.",
+    privilege: "read"
+  }, Schema.Struct({ query: NonEmptyString, limit: Schema.optional(limit(100)) }),
+  (args, claims, requestId) => getRequest(
+    claims,
+    requestId,
+    `/internal/memory/search?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 20}`
+  )),
+  defineTool({
+    name: "memory_reflect",
+    description: "Synthesize a cited, non-retaining answer from accepted memory.",
+    privilege: "read"
+  }, Schema.Struct({
+    query: NonEmptyString,
+    scope: MemoryKnowledgeScope,
+    limit: Schema.optional(limit(20))
+  }), (args, claims, requestId) => {
+    const scope = authorizedScopeQuery(args.scope, claims)
+    return scope === null
+      ? null
+      : getRequest(
+          claims,
+          requestId,
+          `/internal/memory/reflect?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 8}&${scope}`
+        )
+  }),
   defineTool({
     name: "memory_dashboard",
     description: "Read the pre-aggregated private team-memory dashboard.",
@@ -512,7 +595,7 @@ const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
  * deliberately augments, rather than replaces, this portable MCP contract.
  */
 export const MEMORY_MCP_INSTRUCTIONS =
-  "Recall first: memory_search, then memory_read pages used; ground claims with pageId, revisionId, sourceIds, and citationIds. Before finishing substantive work, silently select up to three durable decisions, preferences, gotchas, connections, or findings. Exclude progress, ephemeral facts, secrets, personal data. Dedupe; memory_propose. On conflict, re-read and re-propose against the current revision. Poll workflowId with memory_workflow_status until terminal. Stateless: never reuse sessions or cookies."
+  "Recall with memory_recall, then memory_read used pages; cite pageId, revisionId, sourceIds, and citationIds. Use memory_reflect with an explicit knowledge scope only for synthesis and never treat its output as source evidence. Retain explicit durable sources with memory_retain. For page changes: dedupe, memory_propose, resolve conflicts against the current revision, and poll workflowId with memory_workflow_status. Exclude progress, secrets, and personal data. Stateless: never reuse sessions or cookies."
 
 /**
  * Serve a STANDARD MCP client — the harnesses' native codex / opencode / Claude

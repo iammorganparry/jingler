@@ -690,6 +690,158 @@ describe("PiAgentRuntime", () => {
     childActive = false
   })
 
+  it("rebuilds a retained session when memory tool availability changes", async () => {
+    const fleet = { childActive: true }
+    const handles: PiSessionHandle[] = []
+    const createdContexts: AgentRuntimeContext[] = []
+    const create = vi.fn((_spec: PiRunSpec, created: AgentRuntimeContext) => {
+      const handle = settlingHandle(fleet)
+      handles.push(handle)
+      createdContexts.push(created)
+      return Effect.succeed(handle)
+    })
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
+    )
+    const browser = {
+      name: "jingler-browser",
+      url: "http://127.0.0.1:1111/mcp",
+      headers: {}
+    }
+    const memory = {
+      name: "jingler-memory",
+      url: "http://127.0.0.1:2222/mcp",
+      headers: {}
+    }
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      spec,
+      { ...context, mcp: { browser } }
+    )))
+    const rejectedModelChange = await Effect.runPromise(Stream.runCollect(runtime.run(
+      {
+        ...spec,
+        runId: "run-model-change",
+        modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus"),
+        prompt: "memory recovered with another model",
+        piSessionId: "/sessions/parent.jsonl"
+      },
+      { ...context, mcp: { browser, memory } }
+    )))
+    expect([...rejectedModelChange].at(-1)).toMatchObject({
+      _tag: "Failed",
+      message: "Cannot resume a retained Pi session with a different model"
+    })
+    expect(create).toHaveBeenCalledOnce()
+    expect(handles[0]?.dispose).not.toHaveBeenCalled()
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      { ...spec, runId: "run-2", prompt: "memory recovered", piSessionId: "/sessions/parent.jsonl" },
+      { ...context, mcp: { browser, memory } }
+    )))
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(handles[0]?.dispose).toHaveBeenCalledOnce()
+    expect(createdContexts[1]?.mcp?.memory?.name).toBe("jingler-memory")
+    expect(create.mock.calls[1]?.[0].piSessionId).toBe("/sessions/parent.jsonl")
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      { ...spec, runId: "run-3", prompt: "memory disabled", piSessionId: "/sessions/parent.jsonl" },
+      { ...context, mcp: { browser } }
+    )))
+
+    expect(create).toHaveBeenCalledTimes(3)
+    expect(handles[1]?.dispose).toHaveBeenCalledOnce()
+    expect(createdContexts[2]?.mcp?.memory).toBeUndefined()
+    fleet.childActive = false
+  })
+
+  it("rebuilds a retained session when a dynamically resolved catalog changes", async () => {
+    const fleet = { childActive: true }
+    let catalog = "managed-mcp:alpha"
+    const handles: PiSessionHandle[] = []
+    const create = vi.fn(() => {
+      const handle = settlingHandle(fleet)
+      handles.push(handle)
+      return Effect.succeed(handle)
+    })
+    const lockedCapabilityFingerprint = vi.fn(() => Effect.succeed(catalog))
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime(
+        { create, lockedCapabilityFingerprint },
+        { retainedSessionPollMs: 10 }
+      )
+    )
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      { ...spec, runId: "run-2", prompt: "unchanged", piSessionId: "/sessions/parent.jsonl" },
+      context
+    )))
+    expect(create).toHaveBeenCalledOnce()
+
+    catalog = "managed-mcp:replacement"
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      { ...spec, runId: "run-3", prompt: "catalog changed", piSessionId: "/sessions/parent.jsonl" },
+      context
+    )))
+
+    expect(lockedCapabilityFingerprint).toHaveBeenCalledTimes(3)
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(handles[0]?.dispose).toHaveBeenCalledOnce()
+    fleet.childActive = false
+  })
+
+  it("keeps a retained session when only MCP endpoint details rotate", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    let createdContext: AgentRuntimeContext | null = null
+    const fleet = { childActive: true }
+    const handle: PiSessionHandle = {
+      ...settlingHandle(fleet),
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt: async () => {
+        listener?.({ type: "agent_settled" })
+      }
+    }
+    const create = vi.fn((_spec: PiRunSpec, created: AgentRuntimeContext) => {
+      createdContext = created
+      return Effect.succeed(handle)
+    })
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
+    )
+    const attachments = (port: number) => ({
+      browser: {
+        name: "jingler-browser",
+        url: `http://127.0.0.1:${port}/browser`,
+        headers: { authorization: `Bearer browser-${port}` }
+      },
+      memory: {
+        name: "jingler-memory",
+        url: `http://127.0.0.1:${port}/memory`,
+        headers: { authorization: `Bearer memory-${port}` }
+      }
+    })
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      spec,
+      { ...context, mcp: attachments(1111) }
+    )))
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      { ...spec, runId: "run-2", prompt: "continue", piSessionId: "/sessions/parent.jsonl" },
+      { ...context, mcp: attachments(2222) }
+    )))
+
+    expect(create).toHaveBeenCalledOnce()
+    expect(handle.dispose).not.toHaveBeenCalled()
+    expect(createdContext!.mcp?.memory && "url" in createdContext!.mcp.memory
+      ? createdContext!.mcp.memory.url
+      : null).toBe("http://127.0.0.1:2222/memory")
+    fleet.childActive = false
+  })
 
   it("rebuilds a retained session when the turn role changes, reusing its session file", async () => {
     // Tools and prompt resources are locked per role at session creation. A

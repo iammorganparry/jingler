@@ -567,7 +567,7 @@ describe("AgentRunner team memory", () => {
     makeInMemorySecretStore("jingler-user-token")
   )
 
-  it("injects bounded agent reflection and never captures the raw settled turn", async () => {
+  it("injects bounded reflection and retains only the redacted visible settled turn", async () => {
     const requests: Request[] = []
     installMemoryFetch(requests)
     const captured: AgentTurnSpec[] = []
@@ -631,7 +631,22 @@ describe("AgentRunner team memory", () => {
     } | undefined
     expect(searchBody?.params?.arguments?.query).toContain("Project: widget")
     expect(searchBody?.params?.arguments?.query).toContain("Branch: chore/test")
-    expect(requests.some((request) => request.url.endsWith("/api/memory/sources"))).toBe(false)
+    await vi.waitFor(() => expect(
+      requests.some((request) => request.url.endsWith("/api/memory/sources"))
+    ).toBe(true))
+    const sourceRequest = requests.find((request) =>
+      request.url.endsWith("/api/memory/sources")
+    )
+    const sourceBody = await sourceRequest?.clone().json() as {
+      content?: string
+      source?: { id?: string }
+    } | undefined
+    expect(sourceBody?.source?.id).toMatch(/^session-digest:/u)
+    expect(sourceBody?.content).toContain("Repository: widget")
+    expect(sourceBody?.content).toContain("api_key=[REDACTED]")
+    expect(sourceBody?.content).not.toContain("private-value")
+    expect(sourceBody?.content).not.toContain("memory_navigation")
+    expect(sourceBody?.content).not.toContain("memory-grant-value")
     expect(JSON.stringify(transcript)).not.toContain("memory-grant-value")
     expect(JSON.stringify(transcript)).not.toContain("jingler-user-token")
     expect(readFileSync(join(temp.root, "sessions.json"), "utf8")).not.toContain(

@@ -44,8 +44,12 @@ export const RuntimeDiagnosticSnapshot = Schema.Struct({
     advisories: Schema.Number,
     proposals: Schema.Number,
     workflowPolls: Schema.Number,
-    failureCandidates: Schema.Number
+    failureCandidates: Schema.Number,
+    attachmentStatus: Schema.Literal("disabled", "available", "failed"),
+    queuedRetentions: Schema.Number,
+    retryingRetentions: Schema.Number
   })),
+
   terminalCause: Schema.NullOr(Schema.String),
   updatedAt: Schema.String
 })

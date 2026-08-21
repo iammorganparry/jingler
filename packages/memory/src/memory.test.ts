@@ -5,6 +5,7 @@ import {
   MemoryGraphEdge,
   MemoryMarkdownParseError,
   MemoryProposal,
+  MemoryRepository,
   MemoryRevision,
   MemoryRole,
   MemorySource,
@@ -198,6 +199,21 @@ describe("memory schemas", () => {
         details: { reason: "initial fixture" }
       }).type
     ).toBe("revision.created")
+  })
+
+  it("decodes repositories written before observations and mental models existed", () => {
+    const repository = Schema.decodeUnknownSync(MemoryRepository)({
+      pages: [],
+      sources: [],
+      revisions: [],
+      proposals: [],
+      roles: [],
+      auditEvents: []
+    })
+
+    expect(repository.observations).toEqual([])
+    expect(repository.mentalModels).toEqual([])
+    expect(repository.mentalModelRevisions).toEqual([])
   })
 })
 

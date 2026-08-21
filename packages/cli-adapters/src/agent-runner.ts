@@ -87,7 +87,10 @@ import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
-import { memoryRecallQuery } from "./memory-recall.js"
+import {
+  memoryRecallQuery,
+  recentMemoryRecallTurns
+} from "./memory-recall.js"
 import { attachMemoryToSessionSpec } from "./memory-session.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
@@ -1072,9 +1075,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             memoryRecallQuery({
               operatorText,
               repo: session.repo,
-              branch: session.branch
+              branch: session.branch,
+              recentTurns: recentMemoryRecallTurns(priorMessages)
             }),
             `${sessionId}:${chatId}`
+          )
+          yield* ContextManager.rememberMemoryContext(
+            chatId,
+            memoryAttachment?.instructions ?? null
           )
           const mcp = {
             memory: null,
@@ -1735,6 +1743,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (event._tag === "Done") {
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
+                const assistantText = next.parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* memoryService.retainSettledTurn({
+                  sessionId,
+                  chatId,
+                  turnId: next.id,
+                  repository: session.repo,
+                  userText: operatorText,
+                  assistantText,
+                  settledAt: new Date().toISOString()
+                }).pipe(Effect.ignore)
               }
               yield* out.offer(event)
               // After the tool card lands, reconcile plan progress off a successful edit.

@@ -10,6 +10,7 @@ import {
   MemoryService,
   MemoryServiceLive,
   redactMemoryText,
+  renderRecalledMemories,
   type MemoryServiceShape
 } from "./memory.js"
 import type {
@@ -335,6 +336,11 @@ describe("MemoryService stateless attachment", () => {
         service.attachment("How do refunds work?", "session-1:chat-1")
       ).pipe(Effect.provide(configuredLayer()))
     )
+    const sameQueryAgain = await Effect.runPromise(
+      withEnabledMemory(
+        service.attachment("How do refunds work?", "session-1:chat-1")
+      ).pipe(Effect.provide(configuredLayer()))
+    )
     const separateConversation = await Effect.runPromise(
       withEnabledMemory(
         service.attachment("How do refunds work?", "session-2:chat-1")
@@ -346,6 +352,7 @@ describe("MemoryService stateless attachment", () => {
     expect(attachment?.instructions).toContain('"revisionId": "revision:page-one:1"')
     expect(attachment?.instructions).not.toContain("page-four")
     expect(repeated?.instructions).not.toContain("Accepted body for page-one")
+    expect(sameQueryAgain?.instructions).not.toContain("Accepted body for page-one")
     expect(separateConversation?.instructions).toContain("Accepted body for page-one")
 
     const calls = requests.filter(
@@ -369,6 +376,121 @@ describe("MemoryService stateless attachment", () => {
     }
     expect(searchBody.params.arguments.query).toContain("api_key=[REDACTED]")
     expect(searchBody.params.arguments.query).not.toContain("secret-should-not-egress")
+  })
+
+  it("retries a failed recall but caches a successful empty result", async () => {
+    let searches = 0
+    let failNextSearch = true
+    const service = makeMemoryService({
+      fetch: async (input, init) => {
+        const request = requestOf(input, init)
+        if (request.url.endsWith("/api/memory/grant")) {
+          return Response.json(grantResponse("recall-retry"))
+        }
+        const body = await request.clone().json() as {
+          method?: string
+          params?: { name?: string }
+        }
+        if (body.method === "server/discover") return discoveryResponse()
+        searches += 1
+        if (failNextSearch) {
+          failNextSearch = false
+          return Response.json({ error: "offline" }, { status: 503 })
+        }
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "empty-search",
+          result: {
+            resultType: "complete",
+            structuredContent: { data: { results: [] } }
+          }
+        })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+    const recall = () => withEnabledMemory(
+      service.attachment("same query", "session-retry:chat-1")
+    ).pipe(Effect.provide(configuredLayer()))
+
+    const failed = await Effect.runPromise(recall())
+    const empty = await Effect.runPromise(recall())
+    const cachedEmpty = await Effect.runPromise(recall())
+
+    expect(failed?.instructions).not.toContain("Initial recall completed")
+    expect(empty?.instructions).toContain("no accepted matches")
+    expect(cachedEmpty?.instructions).not.toContain("Initial recall completed")
+    expect(searches).toBe(2)
+  })
+
+  it("refreshes an unchanged query after the recall cache freshness window", async () => {
+    let now = NOW_SECONDS
+    let searches = 0
+    const service = makeMemoryService({
+      fetch: async (input, init) => {
+        const request = requestOf(input, init)
+        if (request.url.endsWith("/api/memory/grant")) {
+          return Response.json(grantResponse("recall-freshness"))
+        }
+        const body = await request.clone().json() as {
+          method?: string
+          params?: { name?: string }
+        }
+        if (body.method === "server/discover") return discoveryResponse()
+        if (body.params?.name === "memory_search") {
+          searches += 1
+          return Response.json({
+            jsonrpc: "2.0",
+            id: "search",
+            result: {
+              resultType: "complete",
+              structuredContent: {
+                data: {
+                  results: searches === 1
+                    ? []
+                    : [{ pageId: "new-page", revisionId: "revision:new-page:1" }]
+                }
+              }
+            }
+          })
+        }
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "read",
+          result: {
+            resultType: "complete",
+            structuredContent: {
+              data: {
+                page: {
+                  id: "new-page",
+                  title: "New page",
+                  body: "Accepted body for new-page"
+                },
+                revision: { id: "revision:new-page:1" },
+                sourceIds: ["source:new-page"],
+                citationIds: ["citation:new-page"]
+              }
+            }
+          }
+        })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => now
+    })
+    const recall = () => withEnabledMemory(
+      service.attachment("stable question", "session-freshness:chat-1")
+    ).pipe(Effect.provide(configuredLayer()))
+
+    const empty = await Effect.runPromise(recall())
+    now += 30
+    const cached = await Effect.runPromise(recall())
+    now += 31
+    const refreshed = await Effect.runPromise(recall())
+
+    expect(empty?.instructions).toContain("no accepted matches")
+    expect(cached?.instructions).not.toContain("new-page")
+    expect(refreshed?.instructions).toContain("Accepted body for new-page")
+    expect(searches).toBe(2)
   })
 
   it("reissues an expired-at-use grant and retries discovery without session state", async () => {
@@ -652,7 +774,132 @@ const writeLegacyCaptureOutbox = (
   )
 }
 
-describe("MemoryService legacy capture recovery", () => {
+describe("MemoryService automatic retention", () => {
+  const retainedTurn = {
+    sessionId: "session-1",
+    chatId: "chat-1",
+    turnId: "assistant-1",
+    repository: "widget",
+    userText: "Authorization: Bearer user-secret",
+    assistantText: "Reused api_key=assistant-secret in ~/src/helper.ts",
+    settledAt: "2026-08-20T09:00:00.000Z"
+  }
+
+  it("delivers one deterministic redacted conversation source", async () => {
+    const requests: Request[] = []
+    const service = makeMemoryService({
+      fetch: async (input, init) => {
+        const request = requestOf(input, init)
+        requests.push(request)
+        return request.url.endsWith("/api/memory/grant")
+          ? Response.json(grantResponse("retain"))
+          : Response.json({ workflowId: "compiler-retained" }, { status: 201 })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+
+    const queued = await Effect.runPromise(
+      withEnabledMemory(service.retainSettledTurn(retainedTurn)).pipe(
+        Effect.provide(configuredLayer())
+      )
+    )
+    expect(queued).toBe(true)
+    await vi.waitFor(() => expect(
+      requests.some((request) => request.url.endsWith("/api/memory/sources"))
+    ).toBe(true))
+
+    const sourceRequest = requests.find((request) =>
+      request.url.endsWith("/api/memory/sources")
+    )
+    const sourceId = sourceRequest?.headers.get("x-idempotency-key")
+    expect(sourceId).toMatch(/^session-digest:[a-f0-9]{64}$/u)
+    const body = await sourceRequest?.json() as {
+      content?: string
+      source?: { id?: string; kind?: string; uri?: string }
+    } | undefined
+    expect(body).toMatchObject({
+      source: {
+        id: sourceId,
+        kind: "conversation",
+        uri: `jingler://session-digest/${sourceId?.slice("session-digest:".length)}`
+      },
+      content: expect.stringContaining("Authorization: [REDACTED]")
+    })
+    expect(body?.content).toContain("api_key=[REDACTED]")
+    expect(body?.content).not.toContain("user-secret")
+    expect(body?.content).not.toContain("assistant-secret")
+  })
+
+  it("autonomously retries a transient delivery without another service call", async () => {
+    let sourceRequests = 0
+    const service = makeMemoryService({
+      fetch: async (input) => {
+        if (String(input).endsWith("/api/memory/grant")) {
+          return Response.json(grantResponse("autonomous-retry"))
+        }
+        sourceRequests += 1
+        return sourceRequests === 1
+          ? Response.json({ error: "offline" }, { status: 503 })
+          : Response.json({ workflowId: "compiler-retried" }, { status: 201 })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS,
+      captureRetryDelayMs: () => 5
+    })
+    const layer = configuredLayer()
+
+    await Effect.runPromise(
+      withEnabledMemory(service.retainSettledTurn(retainedTurn)).pipe(Effect.provide(layer))
+    )
+
+    await vi.waitFor(() => expect(sourceRequests).toBe(2))
+    await vi.waitFor(async () => expect(
+      await Effect.runPromise(service.diagnostics().pipe(Effect.provide(layer)))
+    ).toMatchObject({ queuedRetentions: 0, retryingRetentions: 0 }))
+  })
+
+  it("deduplicates a queued turn and retains it after transient delivery failure", async () => {
+    let sourceRequests = 0
+    const service = makeMemoryService({
+      fetch: async (input) => {
+        if (String(input).endsWith("/api/memory/grant")) {
+          return Response.json(grantResponse("retry"))
+        }
+        sourceRequests += 1
+        return Response.json({ error: "offline" }, { status: 503 })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+    const layer = configuredLayer()
+
+    const first = await Effect.runPromise(
+      withEnabledMemory(service.retainSettledTurn(retainedTurn)).pipe(Effect.provide(layer))
+    )
+    await vi.waitFor(() => expect(sourceRequests).toBe(1))
+    const duplicate = await Effect.runPromise(
+      withEnabledMemory(service.retainSettledTurn(retainedTurn)).pipe(Effect.provide(layer))
+    )
+
+    expect(first).toBe(true)
+    expect(duplicate).toBe(false)
+    const outbox = JSON.parse(
+      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
+    ) as ReadonlyArray<{ readonly attempts: number }>
+    expect(outbox).toHaveLength(1)
+    expect(outbox[0]?.attempts).toBe(1)
+    expect(await Effect.runPromise(
+      service.diagnostics().pipe(Effect.provide(layer))
+    )).toEqual({
+      attachmentStatus: "disabled",
+      queuedRetentions: 1,
+      retryingRetentions: 1
+    })
+  })
+})
+
+describe("MemoryService retention recovery", () => {
   it("retains transient pre-upgrade captures without an attempt-count deletion boundary", async () => {
     writeLegacyCaptureOutbox()
     const fetchImplementation: typeof fetch = async (input) =>
@@ -728,6 +975,11 @@ describe("MemoryService legacy capture recovery", () => {
     expect(JSON.parse(
       readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
     )).toEqual([])
+    expect(service.diagnosticsSnapshot()).toEqual({
+      attachmentStatus: "disabled",
+      queuedRetentions: 0,
+      retryingRetentions: 0
+    })
   })
 
   it("discards a pre-upgrade capture after organization access is revoked", async () => {
@@ -752,6 +1004,29 @@ describe("MemoryService legacy capture recovery", () => {
     expect(JSON.parse(
       readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
     )).toEqual([])
+  })
+})
+
+describe("automatic recall evidence budget", () => {
+  it("keeps stable provenance while bounding recalled page text", () => {
+    const pages = ["one", "two", "three"].map((id) => ({
+      page: {
+        id: `page-${id}`,
+        title: `Page ${id}`,
+        body: id.repeat(4_000)
+      },
+      revision: { id: `revision:page-${id}:1` },
+      sourceIds: [`source:page-${id}`],
+      citationIds: [`citation:page-${id}`]
+    }))
+
+    const rendered = renderRecalledMemories(pages)
+
+    expect(rendered).toContain('"pageId": "page-one"')
+    expect(rendered).toContain('"revisionId": "revision:page-two:1"')
+    expect(rendered).toContain('"sourceIds"')
+    expect(rendered).toContain('"citationIds"')
+    expect(rendered).not.toContain('"pageId": "page-three"')
   })
 })
 

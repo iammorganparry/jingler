@@ -99,6 +99,9 @@ const projectedCommit = (sql: RecordingSqlStorage) => {
         sources: [],
         proposals: [],
         proposalSets: [],
+        observations: [],
+        mentalModels: [],
+        mentalModelRevisions: [],
         events: [],
         retrievals: [],
         sessionRetrievals: []
@@ -269,6 +272,316 @@ describe("TeamVault", () => {
     expect(navigation.indexMarkdown).toContain("pageId: target")
   })
 
+  it("fuses semantic candidates with temporal scoring", () => {
+    const older = {
+      ...page(1, "# Older\n\nUnrelated lexical text.\n"),
+      id: "older",
+      path: "older.md",
+      title: "Older",
+      citations: [],
+      metadata: { citationPolicy: "none" }
+    }
+    const recent = {
+      ...older,
+      id: "recent",
+      path: "recent.md",
+      title: "Recent"
+    }
+    const results = searchAcceptedPages(
+      [older, recent],
+      "semantic-only query",
+      new Map([
+        ["older", "revision-older"],
+        ["recent", "revision-recent"]
+      ]),
+      10,
+      {
+        semanticScores: new Map([
+          ["older", 0.8],
+          ["recent", 0.8]
+        ]),
+        acceptedAtByPageId: new Map([
+          ["older", "2026-01-01T00:00:00.000Z"],
+          ["recent", "2026-08-19T00:00:00.000Z"]
+        ]),
+        queryTimestamp: "2026-08-20T00:00:00.000Z"
+      }
+    ).results
+
+    expect(results.map(({ pageId }) => pageId)).toEqual(["recent", "older"])
+    expect(results.every(({ matchKinds }) => matchKinds.includes("semantic"))).toBe(true)
+  })
+
+  it("rejects non-finite and below-threshold semantic-only candidates", () => {
+    const pages = ["negative", "zero", "nan", "low", "accepted"].map((id) => ({
+      ...page(1, `# ${id}\n\nNo lexical overlap.\n`),
+      id,
+      path: `${id}.md`,
+      title: id,
+      citations: [],
+      metadata: { citationPolicy: "none" as const }
+    }))
+    const revisions = new Map(pages.map(({ id }) => [id, `revision:${id}`]))
+    const result = searchAcceptedPages(pages, "semantic-only query", revisions, 10, {
+      semanticScores: new Map([
+        ["negative", -0.5],
+        ["zero", 0],
+        ["nan", Number.NaN],
+        ["low", 0.249],
+        ["accepted", 0.25]
+      ])
+    })
+
+    expect(result.results.map(({ pageId }) => pageId)).toEqual(["accepted"])
+    expect(result.results[0]?.matchKinds).toContain("semantic")
+  })
+
+  it("persists scoped observation history and returns only current scope heads", async () => {
+    const vault = await run(
+      TeamVault.create("org-observations", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    const projectA = { kind: "project" as const, id: "project-a" }
+    const first = await run(vault.consolidateObservation({
+      scope: projectA,
+      key: "retry",
+      text: "Use bounded jitter.",
+      evidenceId: "revision:retry:1",
+      confidence: 0.7,
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }))
+    const second = await run(vault.consolidateObservation({
+      scope: projectA,
+      key: "retry",
+      text: "Use the shared bounded-jitter helper.",
+      evidenceId: "revision:retry:2",
+      confidence: 0.9,
+      createdAt: "2026-08-21T09:00:00.000Z"
+    }))
+    await run(vault.consolidateObservation({
+      scope: { kind: "project", id: "project-b" },
+      key: "retry",
+      text: "Project B uses fixed delay.",
+      evidenceId: "revision:project-b:1",
+      confidence: 1,
+      createdAt: "2026-08-21T09:00:00.000Z"
+    }))
+
+    expect(second.supersedesId).toBe(first.id)
+    expect(await run(vault.listObservations(projectA))).toEqual([second])
+    expect((await run(vault.snapshot())).observations).toHaveLength(3)
+  })
+
+  it("refreshes versioned mental models after same-scope consolidation", async () => {
+    const vault = await run(
+      TeamVault.create("org-models", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    const scope = { kind: "project" as const, id: "project-a" }
+    await run(vault.defineMentalModel({
+      id: "model:conventions",
+      name: "Project conventions",
+      scope,
+      sourceQuery: "retry conventions",
+      maxTokens: 100,
+      refreshAfterConsolidation: true,
+      publication: "published",
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }))
+    await run(vault.consolidateObservation({
+      scope,
+      key: "retry",
+      text: "Use bounded jitter.",
+      evidenceId: "revision:retry:1",
+      confidence: 1,
+      createdAt: "2026-08-20T10:00:00.000Z"
+    }))
+    await run(vault.consolidateObservation({
+      scope,
+      key: "retry",
+      text: "Use the shared bounded-jitter helper.",
+      evidenceId: "revision:retry:2",
+      confidence: 1,
+      createdAt: "2026-08-21T10:00:00.000Z"
+    }))
+    const replayed = await run(vault.consolidateObservation({
+      scope,
+      key: "retry",
+      text: "A request replay must not replace the current observation.",
+      evidenceId: "revision:retry:2",
+      confidence: 1,
+      createdAt: "2026-08-21T11:00:00.000Z"
+    }))
+
+    const models = await run(vault.listMentalModels())
+    expect(models.models).toHaveLength(1)
+    expect(models.revisions.map(({ version }) => version)).toEqual([1, 2])
+    expect(replayed.version).toBe(2)
+    expect((await run(vault.snapshot())).observations).toHaveLength(2)
+    expect(models.revisions[1]?.content).toContain("shared bounded-jitter helper")
+    expect(models.revisions[1]?.evidenceObservationIds).toHaveLength(1)
+  })
+
+  it("keeps definition and explicit refresh replays idempotent", async () => {
+    const vault = await run(
+      TeamVault.create("org-model-replay", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    const input = {
+      id: "model:replay",
+      name: "Replay guidance",
+      scope: { kind: "project" as const, id: "project-a" },
+      sourceQuery: "retry",
+      maxTokens: 100,
+      refreshAfterConsolidation: false,
+      publication: "published" as const,
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }
+    const firstDefinition = await run(vault.defineMentalModel(input))
+    const replayedDefinition = await run(vault.defineMentalModel({
+      ...input,
+      createdAt: "2026-08-21T09:00:00.000Z"
+    }))
+    await run(vault.consolidateObservation({
+      scope: input.scope,
+      key: "retry",
+      text: "Use bounded retry jitter.",
+      evidenceId: "revision:retry:1",
+      confidence: 1,
+      createdAt: "2026-08-20T10:00:00.000Z"
+    }))
+    const firstRevision = await run(vault.refreshMentalModel(
+      input.id,
+      "2026-08-20T11:00:00.000Z"
+    ))
+    const replayedRevision = await run(vault.refreshMentalModel(
+      input.id,
+      "2026-08-21T11:00:00.000Z"
+    ))
+    const history = await run(vault.listMentalModels())
+
+    expect(replayedDefinition).toEqual(firstDefinition)
+    expect(replayedDefinition.definitionVersion).toBe(1)
+    expect(replayedRevision).toEqual(firstRevision)
+    expect(history.revisions).toHaveLength(1)
+  })
+
+  it("does not pair a redefined mental model with an older definition revision", async () => {
+    const vault = await run(
+      TeamVault.create("org-model-redefinition", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    const scope = { kind: "project" as const, id: "project-a" }
+    const first = await run(vault.defineMentalModel({
+      id: "model:guidance",
+      name: "Retry guidance",
+      scope,
+      sourceQuery: "retry",
+      maxTokens: 100,
+      refreshAfterConsolidation: true,
+      publication: "published",
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }))
+    await run(vault.consolidateObservation({
+      scope,
+      key: "retry",
+      text: "Retry with bounded jitter.",
+      evidenceId: "revision:retry:1",
+      confidence: 1,
+      createdAt: "2026-08-20T10:00:00.000Z"
+    }))
+    const beforeRedefinition = await run(vault.reflect("retry", scope, 5))
+    expect(beforeRedefinition.text).toContain("bounded jitter")
+
+    const redefined = await run(vault.defineMentalModel({
+      ...first,
+      name: "Deployment guidance",
+      sourceQuery: "deployment",
+      createdAt: "2026-08-21T09:00:00.000Z"
+    }))
+    const stale = await run(vault.reflect("deployment", scope, 5))
+
+    expect(redefined.definitionVersion).toBe(2)
+    expect(stale.text).not.toContain("bounded jitter")
+    expect(stale.basedOn.mentalModels).toEqual([])
+  })
+
+  it("scopes and jointly bounds reflected mental models", async () => {
+    const vault = await run(
+      TeamVault.create("org-scoped-reflect", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    const projectA = { kind: "project" as const, id: "project-a" }
+    const projectB = { kind: "project" as const, id: "project-b" }
+    for (const [id, scope] of [["a", projectA], ["b", projectA], ["foreign", projectB]] as const) {
+      await run(vault.defineMentalModel({
+        id: `model:${id}`,
+        name: `Common guidance ${id}`,
+        scope,
+        sourceQuery: "common",
+        maxTokens: 4_000,
+        refreshAfterConsolidation: true,
+        publication: "published",
+        createdAt: "2026-08-20T09:00:00.000Z"
+      }))
+    }
+    await run(vault.consolidateObservation({
+      scope: projectA,
+      key: "common",
+      text: "Project A common guidance.",
+      evidenceId: "revision:a:1",
+      confidence: 1,
+      createdAt: "2026-08-20T10:00:00.000Z"
+    }))
+    await run(vault.consolidateObservation({
+      scope: projectB,
+      key: "common",
+      text: "Project B private common guidance.",
+      evidenceId: "revision:b:1",
+      confidence: 1,
+      createdAt: "2026-08-20T10:00:00.000Z"
+    }))
+
+    const reflected = await run(vault.reflect("common", projectA, 1))
+
+    expect(reflected.text).toContain("Project A")
+    expect(reflected.text).not.toContain("Project B")
+    expect(reflected.text.length).toBeLessThanOrEqual(12_000)
+    expect(
+      reflected.basedOn.pages.length + reflected.basedOn.mentalModels.length
+    ).toBe(1)
+  })
+
+  it("reflects from cited accepted evidence without creating source evidence", async () => {
+    const vault = await run(
+      TeamVault.create("org-reflect", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    await run(vault.ingestSource(source, "Retries use bounded jitter."))
+    await run(vault.ingestAcceptedPage({
+      revisionId: "revision:retry:1",
+      markdown: serializeMemoryMarkdown({
+        ...page(1, "# Retry policy\n\nRetries use bounded jitter. [@runbook-citation]\n"),
+        id: "retry-policy",
+        path: "retry-policy.md",
+        title: "Retry policy"
+      }),
+      actorId: "agent",
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }))
+    const before = await run(vault.snapshot())
+    const reflected = await run(vault.reflect(
+      "bounded jitter",
+      { kind: "organization", id: "org-reflect" },
+      5,
+      "2026-08-20T10:00:00.000Z"
+    ))
+    const after = await run(vault.snapshot())
+
+    expect(reflected.text).toContain("Retries use bounded jitter")
+    expect(reflected.basedOn.pages).toEqual([{
+      pageId: "retry-policy",
+      revisionId: "revision:retry:1",
+      citationIds: ["runbook-citation"]
+    }])
+    expect(after.sources).toEqual(before.sources)
+    expect(after.observations).toEqual(before.observations)
+  })
+
   it("exports accepted Markdown verbatim in an Obsidian vault layout", async () => {
     const vault = await run(TeamVault.create("org-export", new InMemoryVaultState(), new InMemoryR2Bucket()))
     const markdown = serializeMemoryMarkdown({
@@ -310,6 +623,9 @@ describe("TeamVault", () => {
         sources: [],
         proposals: [],
         proposalSets: [],
+        observations: [],
+        mentalModels: [],
+        mentalModelRevisions: [],
         events: [],
         retrievals: [],
         sessionRetrievals: []

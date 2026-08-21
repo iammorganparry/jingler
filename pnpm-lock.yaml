@@ -364,6 +364,9 @@ importers:
       '@jingler/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@jingler/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@react-email/components':
         specifier: ^1.0.12
         version: 1.0.12(react-dom@19.2.7(react@19.2.7))(react@19.2.7)

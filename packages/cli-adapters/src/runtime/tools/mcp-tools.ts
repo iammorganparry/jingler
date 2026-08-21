@@ -87,6 +87,30 @@ export interface JinglerMcpAttachments {
   readonly imported?: ReadonlyArray<RuntimeMcpServer>
 }
 
+const serverCapabilityIdentity = (server: RuntimeMcpServer): string =>
+  `${server.name}:${server.transport ?? "http"}`
+
+/**
+ * Identify the MCP tool catalogs locked into a PI session without including
+ * rotating URLs, headers, credentials, or other connection details.
+ */
+export const mcpCapabilityFingerprint = (
+  attachments?: JinglerMcpAttachments
+): string => JSON.stringify([
+  ...(attachments?.browser
+    ? [`browser:${serverCapabilityIdentity(attachments.browser)}`]
+    : []),
+  ...(attachments?.memory
+    ? [`memory:${serverCapabilityIdentity(attachments.memory)}`]
+    : []),
+  ...(attachments?.openConnector
+    ? [`openConnector:${serverCapabilityIdentity(attachments.openConnector)}`]
+    : []),
+  ...(attachments?.imported ?? [])
+    .map((server) => `imported:${serverCapabilityIdentity(server)}`)
+    .sort()
+])
+
 /** Assign source risks centrally; remote annotations cannot weaken these policies. */
 export const jinglerMcpSources = (
   attachments: JinglerMcpAttachments,

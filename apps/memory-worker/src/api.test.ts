@@ -501,6 +501,184 @@ describe("memory Worker internal API", () => {
     expect(waiting.result.proposalId).toBe(`proposal:${workflowId}`)
   })
 
+  it("reuses one compiler workflow when a retained source is replayed", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const instances = new Map<string, WorkflowInstanceLike>()
+    let creates = 0
+    const compiler: WorkflowBindingLike<{ readonly workflowId: string }> = {
+      create: async ({ id }) => {
+        creates += 1
+        const instance = { id, status: async () => ({ status: "queued" }) }
+        instances.set(id, instance)
+        return instance
+      },
+      get: async (id) => {
+        const instance = instances.get(id)
+        if (instance === undefined) throw new Error("not found")
+        return instance
+      }
+    }
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret",
+      MEMORY_COMPILER: compiler
+    }
+    const retainedSource = {
+      source: {
+        id: "session-digest:stable-turn",
+        kind: "conversation",
+        title: "Settled Jingler agent session",
+        retrievedAt: "2026-08-20T09:00:00.000Z"
+      },
+      content: "User input:\nKeep retries bounded.\n\nAssistant outcome:\nReused shared backoff.",
+      retrieval: { searches: 0, reads: 0, navigation: 0, graphReads: 0, proposals: 0 }
+    }
+
+    const first = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/sources", retainedSource),
+      env
+    )
+    const replay = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/sources", retainedSource),
+      env
+    )
+    const firstBody = await jsonBody(first) as { readonly workflowId?: string }
+    const replayBody = await jsonBody(replay) as { readonly workflowId?: string }
+
+    expect(first.status).toBe(201)
+    expect(replay.status).toBe(201)
+    expect(replayBody.workflowId).toBe(firstBody.workflowId)
+    expect(firstBody.workflowId?.startsWith("compiler-")).toBe(true)
+    expect(creates).toBe(1)
+  })
+
+  it("exposes scoped observations and versioned mental-model history", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const env: MemoryWorkerEnv = {
+      MEMORY_R2: bucket,
+      MEMORY_VAULTS: new TestVaultNamespace(bucket),
+      MEMORY_SERVICE_SECRET: "current-secret"
+    }
+    const scope = { kind: "project", id: "project-a" }
+
+    const model = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/mental-models", {
+        id: "model:conventions",
+        name: "Project conventions",
+        scope,
+        sourceQuery: "retry conventions",
+        maxTokens: 100,
+        refreshAfterConsolidation: true,
+        publication: "published",
+        createdAt: "2026-08-20T09:00:00.000Z"
+      }),
+      env
+    )
+    const whitespaceObservation = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/observations", {
+        scope,
+        key: "invalid",
+        text: "   ",
+        evidenceId: "revision:invalid:1",
+        confidence: 1,
+        createdAt: "2026-08-20T09:30:00.000Z"
+      }),
+      env
+    )
+    const observation = await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/observations", {
+        scope,
+        key: "retry",
+        text: "Use bounded retry jitter.",
+        evidenceId: "revision:retry:1",
+        confidence: 1,
+        createdAt: "2026-08-20T10:00:00.000Z"
+      }),
+      env
+    )
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/observations", {
+        scope,
+        key: "retry",
+        text: "Use the shared bounded retry helper.",
+        evidenceId: "revision:retry:2",
+        confidence: 1,
+        createdAt: "2026-08-20T11:00:00.000Z"
+      }),
+      env
+    )
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/observations", {
+        scope: { kind: "project", id: "project-b" },
+        key: "retry",
+        text: "Project B uses fixed retries.",
+        evidenceId: "revision:project-b:1",
+        confidence: 1,
+        createdAt: "2026-08-20T11:00:00.000Z"
+      }),
+      env
+    )
+    const missingScope = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/observations"),
+      env
+    )
+    const observations = await handleMemoryWorkerRequest(
+      getRequest(
+        "org-a",
+        "/internal/memory/observations?scopeKind=project&scopeId=project-a"
+      ),
+      env
+    )
+    const models = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/mental-models"),
+      env
+    )
+    const missingReflectScope = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/reflect?q=retry"),
+      env
+    )
+    const reflected = await handleMemoryWorkerRequest(
+      getRequest(
+        "org-a",
+        "/internal/memory/reflect?q=retry&limit=1&scopeKind=project&scopeId=project-a"
+      ),
+      env
+    )
+
+    expect(model.status).toBe(201)
+    expect(whitespaceObservation.status).toBe(400)
+    expect(observation.status).toBe(201)
+    expect(missingScope.status).toBe(400)
+    expect(missingReflectScope.status).toBe(400)
+    expect(reflected.status).toBe(200)
+    expect(await jsonBody(reflected)).toMatchObject({
+      basedOn: { mentalModels: [expect.objectContaining({ modelId: "model:conventions" })] }
+    })
+    expect(await jsonBody(observations)).toMatchObject({
+      observations: [{
+        key: "retry",
+        text: "Use the shared bounded retry helper.",
+        evidenceIds: ["revision:retry:1", "revision:retry:2"],
+        version: 2
+      }]
+    })
+    expect(await jsonBody(models)).toMatchObject({
+      models: [{ id: "model:conventions", definitionVersion: 1 }],
+      revisions: [
+        { modelId: "model:conventions", version: 1 },
+        { modelId: "model:conventions", version: 2 }
+      ]
+    })
+    expect(await jsonBody(await handleMemoryWorkerRequest(
+      getRequest(
+        "org-b",
+        "/internal/memory/observations?scopeKind=project&scopeId=project-a"
+      ),
+      env
+    ))).toEqual({ observations: [] })
+  })
+
   it("does not report a compiler workflow when instance creation actually failed", async () => {
     const bucket = new InMemoryR2Bucket()
     const env: MemoryWorkerEnv = {
