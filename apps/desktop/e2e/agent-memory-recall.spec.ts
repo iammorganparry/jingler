@@ -184,6 +184,45 @@ test("pi receives accepted memory without raw settled-turn capture", async ({ la
   }
 })
 
+test("a retained pi conversation gains memory tools when the attachment recovers", async ({
+  launchApp
+}) => {
+  const fake = await startFakeAuthServer()
+  try {
+    fake.setMemoryAvailable(false)
+    const app = await launchApp({
+      authServer: fake,
+      configured: true,
+      withRepo: true,
+      piFixture: { scenarioId: "memory-recovery", authRoute: "api-key" },
+      sessions: ({ repoPath }) => seededSession(repoPath),
+      config: { memory: { enabled: true, organizationId: "org-e2e" } }
+    })
+    const composer = app.window.getByPlaceholder("Message the agent…")
+    await composer.fill("[[memory-recovery-hold]] Work without memory for this turn.")
+    await composer.press("Enter")
+    await expect(
+      app.window.getByText("Completed the offline turn while a child remains active.")
+    ).toBeVisible({ timeout: 30_000 })
+
+    fake.setMemoryAvailable(true)
+    await composer.fill("[[memory-recovery-search]] Confirm the recovered memory catalog.")
+    await composer.press("Enter")
+    await expect(
+      app.window.getByText("Memory tools recovered without restarting the conversation.")
+    ).toBeVisible({ timeout: 30_000 })
+
+    expect(fake.memoryRequests.some(
+      (request) =>
+        request.toolName === "memory_search" &&
+        request.toolArguments?.query === "recovered-tool-catalog"
+    )).toBe(true)
+    await app.app.close()
+  } finally {
+    await fake.close()
+  }
+})
+
 test("an unavailable memory MCP does not abort Jingler's real pi tools", async ({
   launchApp
 }) => {

@@ -418,6 +418,30 @@ const memoryResponse = (
   return fauxAssistantMessage("Memory proposal workflow completed through pi.")
 }
 
+const memoryRecoveryResponse = (
+  context: PiContext
+): ReturnType<typeof fauxAssistantMessage> => {
+  const prompt = latestOperatorText(context)
+  const lastMessage = context.messages.at(-1)
+  if (prompt.includes("[[memory-recovery-hold]]")) {
+    return lastMessage?.role === "toolResult" &&
+      lastMessage.toolName === E2E_HELD_SUBAGENTS_TOOL
+      ? fauxAssistantMessage("Completed the offline turn while a child remains active.")
+      : callTool(E2E_HELD_SUBAGENTS_TOOL, { phase: "direct-start" }, "memory-recovery-hold")
+  }
+  if (prompt.includes("[[memory-recovery-search]]")) {
+    return lastMessage?.role === "toolResult" &&
+      lastMessage.toolName === "mcp__jingler-memory__memory_search"
+      ? fauxAssistantMessage("Memory tools recovered without restarting the conversation.")
+      : callTool(
+          "mcp__jingler-memory__memory_search",
+          { query: "recovered-tool-catalog", limit: 5 },
+          "memory-recovery-search"
+        )
+  }
+  return fauxAssistantMessage("Completed through deterministic pi.")
+}
+
 const memoryLifecycleResponse = (
   context: PiContext
 ): ReturnType<typeof fauxAssistantMessage> => {
@@ -784,6 +808,8 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
       ]
     case "memory-lifecycle":
       return Array.from({ length: 8 }, () => memoryLifecycleResponse)
+    case "memory-recovery":
+      return Array.from({ length: 8 }, () => memoryRecoveryResponse)
     case "memory-recall":
       return [
         fauxAssistantMessage(

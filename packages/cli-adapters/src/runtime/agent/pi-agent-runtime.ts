@@ -11,6 +11,7 @@ import {
 } from "@jingler/core"
 import { Effect, Option, Queue, Schema, Stream } from "effect"
 import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
+import { mcpCapabilityFingerprint } from "../tools/mcp-tools.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
@@ -280,12 +281,24 @@ interface ArchivedPiTranscript {
   readonly read: PiSessionHandle["subagentTranscript"]
 }
 
+const lockedCapabilityFingerprint = (
+  spec: PiRunSpec,
+  context: AgentRuntimeContext
+): string => JSON.stringify({
+  role: spec.role,
+  mode: spec.mode,
+  targetId: spec.targetCapabilities.targetId,
+  toolIds: [...spec.targetCapabilities.toolIds].sort(),
+  resourceIds: [...spec.targetCapabilities.resourceIds].sort(),
+  mcp: mcpCapabilityFingerprint(context.mcp)
+})
+
 interface RetainedPiSession {
   readonly handle: PiSessionHandle
   readonly sessionId: string
   readonly chatId: string
-  /** The role the session's locked resources were built for — see `acquire`. */
-  readonly role: PiRunSpec["role"]
+  /** Tool and prompt capability shape locked when this PI session was built. */
+  readonly capabilityFingerprint: string
   readonly aliases: ReadonlySet<string>
   /** The turn context every session-lifetime closure delegates to — see `rebindableContext`. */
   readonly contextHolder: { current: AgentRuntimeContext }
@@ -363,15 +376,12 @@ class PiSessionRegistry {
           message: `pi session is already active: ${spec.piSessionId}`
         }))
       }
-      // Tools and prompt resources are LOCKED per role at session creation
-      // (`createResources` builds them from spec.role). Reusing a retained
-      // session across a role change ran plan-execution turns caged in the
-      // plan role's read-only toolset — no edit or command tools, so an
-      // approved plan could never be implemented. Dispose the stale record
-      // and rebuild: the factory reopens the SAME pi session file
-      // (`spec.piSessionId` with no seed), so model context carries over
-      // while the locked resources are rebuilt for the new role.
-      if (retained.role !== spec.role) {
+      // PI locks tools and prompt resources when the session is created. Reuse
+      // is safe only while that capability shape is unchanged. Rebuild against
+      // the SAME session file when role, mode, target resources, or MCP source
+      // availability changes so transcript context survives while the catalog
+      // is rediscovered. Rotating endpoint details are deliberately excluded.
+      if (retained.capabilityFingerprint !== lockedCapabilityFingerprint(spec, context)) {
         return Effect.promise(() => this.#dispose(retained)).pipe(
           Effect.flatMap(() => this.#create(spec, context))
         )
@@ -406,7 +416,7 @@ class PiSessionRegistry {
           handle,
           sessionId: spec.sessionId,
           chatId: spec.chatId,
-          role: spec.role,
+          capabilityFingerprint: lockedCapabilityFingerprint(spec, context),
           aliases,
           contextHolder,
           activeTurns: 1,
