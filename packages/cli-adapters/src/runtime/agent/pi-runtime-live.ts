@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { join } from "node:path"
 import type { ManagedResource, PiRunSpec } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
@@ -60,6 +61,13 @@ import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
 
 const connectionFailure = (message: string, cause?: unknown) =>
   new AgentRuntimeError({ reason: "authentication", message, cause })
+
+const managedSecretDigest = (values: Readonly<Record<string, string>>): string =>
+  createHash("sha256")
+    .update(JSON.stringify(Object.entries(values).sort(([left], [right]) =>
+      left.localeCompare(right)
+    )))
+    .digest("hex")
 
 export interface PluginToolSuccessfulResult
   extends Omit<ToolSuccessfulResult, "origin"> {
@@ -263,14 +271,16 @@ export const makePiAgentRuntimeLive = (
                 transport: server.transport,
                 command: server.command,
                 args: server.args,
-                environmentKeys: Object.keys(server.env).sort()
+                environmentKeys: Object.keys(server.env).sort(),
+                environmentDigest: managedSecretDigest(server.env)
               }
             : {
                 id: server.id,
                 name: server.name,
                 transport: server.transport,
                 url: server.url,
-                headerKeys: Object.keys(server.headers).sort()
+                headerKeys: Object.keys(server.headers).sort(),
+                headerDigest: managedSecretDigest(server.headers)
               }).sort((left, right) => String(left.id).localeCompare(String(right.id))),
           managedFiles: managedFiles.map((resource) => ({
             id: resource.id,
@@ -286,6 +296,7 @@ export const makePiAgentRuntimeLive = (
               version: source.plugin.manifest.version,
               toolsetId: source.toolsetId,
               id: descriptor.id,
+              description: descriptor.description,
               risk: descriptor.risk,
               inputSchema: descriptor.inputSchema,
               timeoutMs: descriptor.timeoutMs,
