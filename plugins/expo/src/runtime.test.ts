@@ -149,6 +149,23 @@ describe("ExpoPreviewController lifecycle", () => {
     ).rejects.toThrow("Another session already owns")
   })
 
+  it("releases ownership after stop and bounds retained output", async () => {
+    const h = harness()
+    await h.controller.start(SESSION)
+    for (let index = 0; index < 110; index += 1) {
+      h.listeners().output(`/repo/app/log-${index}\n`)
+    }
+    expect((await h.controller.status(SESSION)).logs).toHaveLength(100)
+
+    await h.controller.stop(SESSION)
+    const second = { sessionId: "session-2", worktreePath: "/repo/two" }
+    await expect(h.controller.start(second)).resolves.toMatchObject({
+      phase: "starting",
+      sessionId: "session-2"
+    })
+    expect((await h.controller.status(SESSION)).phase).toBe("idle")
+  })
+
   it("records an unexpected process exit and cleans up on dispose", async () => {
     const h = harness()
     await h.controller.start(SESSION)
