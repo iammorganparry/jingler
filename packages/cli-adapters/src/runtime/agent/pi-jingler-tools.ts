@@ -1,4 +1,5 @@
 import {
+  ExplanationPayload,
   PlanPrd,
   QuestionRequest,
   WebSearchError,
@@ -84,6 +85,17 @@ export const createJinglerControlTools = (
       },
       roles: ["conversation", "plan", "plan-execution"],
       execute: () => Effect.runPromise(context.discardPlan?.() ?? Effect.void)
+    })
+  )
+  registry.register(
+    controlTool({
+      id: "jingler_publish_explanation",
+      description:
+        "Publish a focused visual explanation in the session's Explanation view.",
+      input: Schema.Struct({ explanation: ExplanationPayload }),
+      roles: ["conversation", "plan", "plan-execution"],
+      execute: ({ explanation }) =>
+        Effect.runPromise(context.publishExplanation?.(explanation) ?? Effect.void)
     })
   )
   registry.register(

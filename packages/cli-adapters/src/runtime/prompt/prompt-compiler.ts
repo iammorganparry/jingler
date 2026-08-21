@@ -97,6 +97,11 @@ const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray
           "Use jingler_submit_plan for a structured plan that needs operator review — and, while an approved plan is executing, to submit the complete amended plan (mid-execution amendments apply immediately). Do not substitute prose for the control action."
         ]
       : []),
+    ...(ids.has("jingler_publish_explanation")
+      ? [
+          "Infer when the operator wants a technical topic explained, compared, traced, or visualized — including phrases such as ‘show me’ — and publish a focused visual artifact with jingler_publish_explanation. Choose the smallest useful mix of prose, pseudocode or trees in code blocks, tables, and Mermaid. Treat /explain as an explicit hard trigger. Keep short factual answers and incidental uses of the word ‘explain’ in normal chat; do not publish an artifact when a concise reply is clearer."
+        ]
+      : []),
     ...(ids.has("subagent")
       ? [
           "For delegated agent work, use the native subagent tool so runs remain contained and visible in Fleet. Never launch coding CLIs through command_execute as a substitute. Self-implementation stays in the visible Main transcript; never launch a workflow or child named main as its proxy. A single delegated unit is always { agent, task }; workflowScript is reserved for two or more named children with distinct tasks."

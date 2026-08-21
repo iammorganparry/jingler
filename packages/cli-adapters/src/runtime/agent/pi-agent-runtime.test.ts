@@ -636,6 +636,11 @@ describe("PiAgentRuntime", () => {
         await Effect.runPromise(
           toolContext!.askQuestion({ id: "q-1", questions: [] })
         )
+        await Effect.runPromise(toolContext!.publishExplanation?.({
+          title: "Current turn",
+          summary: "The callback follows the retained session.",
+          sections: []
+        }) ?? Effect.void)
         listener?.({ type: "agent_settled" })
       },
       steer: async () => undefined,
@@ -663,11 +668,18 @@ describe("PiAgentRuntime", () => {
 
     const firstAsk = vi.fn(() => Effect.succeed([]))
     const secondAsk = vi.fn(() => Effect.succeed([]))
+    const firstPublish = vi.fn(() => Effect.void)
+    const secondPublish = vi.fn(() => Effect.void)
     const firstMcp = { browser: { name: "jingler-browser", url: "http://127.0.0.1:1111/mcp", headers: {} } }
     const secondMcp = { browser: { name: "jingler-browser", url: "http://127.0.0.1:2222/mcp", headers: {} } }
     await Effect.runPromise(
       Stream.runCollect(
-        runtime.run(spec, { ...context, askQuestion: firstAsk, mcp: firstMcp })
+        runtime.run(spec, {
+          ...context,
+          askQuestion: firstAsk,
+          publishExplanation: firstPublish,
+          mcp: firstMcp
+        })
       )
     )
     expect(firstAsk).toHaveBeenCalledOnce()
@@ -677,13 +689,20 @@ describe("PiAgentRuntime", () => {
       Stream.runCollect(
         runtime.run(
           { ...spec, runId: "run-2", prompt: "continue", piSessionId: "/sessions/parent.jsonl" },
-          { ...context, askQuestion: secondAsk, mcp: secondMcp }
+          {
+            ...context,
+            askQuestion: secondAsk,
+            publishExplanation: secondPublish,
+            mcp: secondMcp
+          }
         )
       )
     )
     expect(create).toHaveBeenCalledOnce()
     expect(firstAsk).toHaveBeenCalledOnce()
     expect(secondAsk).toHaveBeenCalledOnce()
+    expect(firstPublish).toHaveBeenCalledOnce()
+    expect(secondPublish).toHaveBeenCalledOnce()
     // Per-run attachments (the browser lease) must read through to the
     // CURRENT turn — a snapshot of turn 1's lease is a dead endpoint.
     expect(toolContext!.mcp).toBe(secondMcp)

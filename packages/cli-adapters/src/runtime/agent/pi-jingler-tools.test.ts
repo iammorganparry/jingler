@@ -1,4 +1,4 @@
-import { defaultPlan, WebSearchError } from "@jingler/core"
+import { defaultPlan, type ExplanationPayload, WebSearchError } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
@@ -268,6 +268,49 @@ describe("Jingler plan discard tool", () => {
       })
     )
     expect(result.status).toBe("success")
+  })
+})
+
+describe("Jingler explanation tool containment", () => {
+  it("publishes a typed explanation from the main conversation", async () => {
+    const publishExplanation = vi.fn(() => Effect.void)
+    const registry = createJinglerControlTools(runtimeContext({ publishExplanation }))
+    const explanation: ExplanationPayload = {
+      title: "Request flow",
+      summary: "One typed path.",
+      sections: [{
+        id: "flow",
+        title: "Flow",
+        blocks: [{ kind: "code", id: "tree", language: "text", code: "user\n  agent\n    view" }]
+      }]
+    }
+    const result = await Effect.runPromise(registry.execute({
+      id: "jingler_publish_explanation",
+      arguments: { explanation },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(result.status).toBe("success")
+    expect(publishExplanation).toHaveBeenCalledWith(explanation)
+  })
+
+  it("rejects unsupported explanation blocks before publishing", async () => {
+    const publishExplanation = vi.fn(() => Effect.void)
+    const registry = createJinglerControlTools(runtimeContext({ publishExplanation }))
+    const result = await Effect.runPromise(registry.execute({
+      id: "jingler_publish_explanation",
+      arguments: {
+        explanation: {
+          title: "Unsafe",
+          summary: "No arbitrary HTML.",
+          sections: [{ id: "unsafe", title: "Unsafe", blocks: [{ kind: "html", id: "x", source: "<script />" }] }]
+        }
+      },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(result.status).toBe("error")
+    expect(publishExplanation).not.toHaveBeenCalled()
   })
 })
 

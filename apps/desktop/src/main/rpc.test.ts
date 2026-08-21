@@ -948,6 +948,11 @@ describe("RPC handlers", () => {
       // it never conjures a command the harness doesn't have. `/plan`, `/test`
       // and `/commit` used to be served from a hardcoded list; none are real.
       expect(Array.isArray(skills)).toBe(true);
+      expect(skills).toContainEqual({
+        name: "/explain",
+        description: "Publish a focused visual explanation of the current technical topic.",
+        source: "skill",
+      });
       expect(skills.map((s) => s.name)).not.toContain("/plan");
       expect(skills.map((s) => s.name)).not.toContain("/test");
       expect(skills.map((s) => s.name)).not.toContain("/commit");
@@ -989,11 +994,18 @@ describe("RPC handlers", () => {
         ),
       );
 
-      expect(skills).toEqual([{
-        name: "/review",
-        description: "Review current changes",
-        source: "command",
-      }]);
+      expect(skills).toEqual([
+        {
+          name: "/explain",
+          description: "Publish a focused visual explanation of the current technical topic.",
+          source: "skill",
+        },
+        {
+          name: "/review",
+          description: "Review current changes",
+          source: "command",
+        },
+      ]);
     });
   });
 

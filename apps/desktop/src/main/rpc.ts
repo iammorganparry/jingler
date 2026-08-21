@@ -687,7 +687,13 @@ export const chooseReposDir = () =>
     return yield* ConfigService.setReposDir(dir);
   }).pipe(Effect.orElseSucceed(() => null));
 
-/** Managed skills and prompts are the only file-backed composer command source. */
+const BUILTIN_SKILLS = [{
+  name: "/explain",
+  description: "Publish a focused visual explanation of the current technical topic.",
+  source: "skill" as const
+}]
+
+/** Product-owned skills plus enabled managed skills and prompts. */
 export const skillsList = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId).pipe(
@@ -697,8 +703,8 @@ export const skillsList = (sessionId: string) =>
     const resources = yield* service
       .enabledForTarget(session?.environmentId ?? "desktop")
       .pipe(Effect.orElseSucceed(() => []));
-    return resources.flatMap((resource) =>
-      resource.kind === "mcp"
+    const managed = resources.flatMap((resource) =>
+      resource.kind === "mcp" || BUILTIN_SKILLS.some(({ name }) => name === `/${resource.id}`)
         ? []
         : [
             {
@@ -711,6 +717,7 @@ export const skillsList = (sessionId: string) =>
             },
           ],
     );
+    return [...BUILTIN_SKILLS, ...managed];
   });
 
 /**

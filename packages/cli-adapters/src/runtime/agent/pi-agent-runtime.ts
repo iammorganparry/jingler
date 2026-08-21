@@ -349,6 +349,8 @@ const rebindableContext = (
   canUseTool: (request) => holder.current.canUseTool(request),
   askQuestion: (request) => holder.current.askQuestion(request),
   saveDraftPlan: (plan) => holder.current.saveDraftPlan(plan),
+  publishExplanation: (explanation) =>
+    holder.current.publishExplanation?.(explanation) ?? Effect.void,
   discardPlan: () => holder.current.discardPlan?.() ?? Effect.void,
   proposePlan: (plan) => holder.current.proposePlan(plan)
 })
