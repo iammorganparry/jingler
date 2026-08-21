@@ -154,7 +154,7 @@ describe("SubagentCapabilityBroker", () => {
       execute: () => Promise.resolve("ok")
     })
     registry.register({
-      id: "jingler_submit_plan",
+      id: "jingler_publish_explanation",
       version: "1",
       description: "Parent-only control",
       input: Schema.Struct({}),
@@ -181,7 +181,7 @@ describe("SubagentCapabilityBroker", () => {
       status: "success",
       value: { inspected: "ok" }
     })
-    const parentOnly = await call(capabilities, { toolId: "jingler_submit_plan" })
+    const parentOnly = await call(capabilities, { toolId: "jingler_publish_explanation" })
     expect(parentOnly.status).toBe(403)
     await expect(parentOnly.json()).resolves.toEqual({ error: "forbidden-tool" })
   })

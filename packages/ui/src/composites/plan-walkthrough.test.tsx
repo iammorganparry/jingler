@@ -8,7 +8,16 @@ afterEach(cleanup)
 
 const plan: PlanPrd = {
   title: "PRD: Walkthrough",
-  sections: [],
+  sections: [{
+    id: "tradeoffs",
+    title: "Trade-offs",
+    blocks: [{
+      kind: "table",
+      id: "runtime-tradeoffs",
+      headers: ["Choice", "Effect"],
+      rows: [["Boundary", "Provider-neutral callers"]]
+    }]
+  }],
   stages: [{
     id: "stage-runtime",
     title: "Add the runtime boundary",
@@ -39,6 +48,8 @@ describe("PlanGuide", () => {
 
     const section = screen.getByRole("region", { name: "Guide for Add the runtime boundary" })
     expect(section.getAttribute("data-stage")).toBe("stage-runtime")
+    expect(globalThis.document.querySelectorAll("[data-visual-blocks]")).toHaveLength(2)
+    expect(screen.getByRole("table")).toBeTruthy()
     expect(screen.getByText("This keeps callers provider-neutral.")).toBeTruthy()
     expect(screen.getByText("await runtime.execute(input)")).toBeTruthy()
     expect(screen.getByText("Before")).toBeTruthy()

@@ -4,6 +4,7 @@ import type {
   Attachment,
   ContentPart,
   ExecutionMode,
+  ExplanationPayload,
   ExternalInstructionIdentity,
   GateDecision,
   Message,
@@ -97,6 +98,7 @@ import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { PlanStore } from "./plan-store.js"
+import { ExplanationStore } from "./explanation-store.js"
 import { resolveAnnotations } from "./plan-mutations.js"
 import {
   appendSteeredReply,
@@ -303,9 +305,10 @@ type PromptEnv =
  * paused run.
  */
 export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRunner", {
-  dependencies: [MemoryServiceLive],
+  dependencies: [MemoryServiceLive, ExplanationStore.Default],
   effect: Effect.gen(function* () {
     const memoryService = yield* MemoryService
+    const explanationStore = yield* ExplanationStore
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
     /** Human-in-the-loop state, and the rule that decides what needs approval. */
     const approvals = yield* makeApprovals
@@ -2046,6 +2049,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   )
                 )
 
+          const publishExplanation = (explanation: ExplanationPayload) =>
+            worktreePath.length === 0
+              ? Effect.void
+              : explanationStore.publish(
+                  worktreePath,
+                  sessionId,
+                  chatId,
+                  explanation
+                ).pipe(Effect.provide(env), Effect.asVoid)
+
           // Discard the canonical plan document so the NEXT submission takes the
           // fresh-proposal path (new plan id, approval gate) instead of amending
           // the discarded one. Clears this run's execution/settle plan refs; the
@@ -2166,6 +2179,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             askQuestion,
             proposePlan,
             saveDraftPlan,
+            publishExplanation,
             discardPlan,
             registerBackgroundStop,
             registerTurnSteer

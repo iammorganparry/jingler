@@ -98,6 +98,8 @@ export interface SessionConversationProps {
     session: Session,
     ctx: { readonly onSelectConversation: () => void }
   ) => ReactNode
+  /** Render the latest focused visual explanation. */
+  renderExplanation?: (session: Session) => ReactNode
   /** Render the browser inside its owning session pane. */
   renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
@@ -117,6 +119,7 @@ export interface SessionConversationProps {
   ) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
+  explanationSessions?: ReadonlySet<string>
   /**
    * Show the empty state instead of the grid. The HOST owns this rule — it is
    * not re-derived here. `JinglerApp` sets it when the grid is entirely empty
@@ -305,6 +308,7 @@ export function SessionConversation(props: SessionConversationProps) {
               <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
             }
             renderConversation={props.renderConversation}
+            renderExplanation={props.renderExplanation}
             renderFiles={props.renderFiles}
             renderBrowser={props.renderBrowser}
             onOpenFile={props.onOpenFile}
@@ -314,6 +318,7 @@ export function SessionConversation(props: SessionConversationProps) {
             onToggleBrowser={props.onToggleBrowser}
             isBrowserActive={props.isBrowserActive}
             planSessions={props.planSessions}
+            explanationSessions={props.explanationSessions}
             liveActivity={props.liveActivity}
             liveDiff={props.liveDiff}
             onOpenSettings={props.onOpenGithubSettings ?? props.onOpenSettings}

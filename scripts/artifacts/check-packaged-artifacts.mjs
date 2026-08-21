@@ -35,6 +35,14 @@ const requiredDeviceEntries = [
   "./jingler-device.mjs",
   "./runtime-assets/pi-subagent-wrapper.mjs",
   "./runtime-assets/jingler-child-tools.mjs",
+  "./node_modules/@dietrichgebert/ponytail/package.json",
+  "./node_modules/@dietrichgebert/ponytail/pi-extension/index.js",
+  "./node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md",
+  "./node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md",
+  "./node_modules/@dietrichgebert/ponytail/skills/ponytail-audit/SKILL.md",
+  "./node_modules/@dietrichgebert/ponytail/skills/ponytail-debt/SKILL.md",
+  "./node_modules/@dietrichgebert/ponytail/skills/ponytail-gain/SKILL.md",
+  "./node_modules/@dietrichgebert/ponytail/skills/ponytail-help/SKILL.md",
   "./node_modules/pi-subagents/index.ts",
   "./node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
 ]

@@ -6,6 +6,7 @@ import {
   defaultPiChildLauncherConfig,
   preparePiChildLauncher
 } from "./pi-child-launcher.js"
+import { PONYTAIL_EXTENSION_PATH } from "../resources/ponytail-resources.js"
 
 const require = createRequire(import.meta.url)
 export const PI_SUBAGENTS_EXTENSION_PATH = require.resolve("pi-subagents")
@@ -108,7 +109,7 @@ const rewriteAgentProfile = (
   .replace(/^inheritProjectContext:.*$/m, "inheritProjectContext: false")
   .replace(
     /^---\n/u,
-    `---\nextensions: ${JSON.stringify(childToolsPath)}\n`
+    `---\nextensions: ${childToolsPath}, ${PONYTAIL_EXTENSION_PATH}\n`
   )
 
 /**

@@ -46,5 +46,14 @@ describe("locked pi resources", () => {
 
     await Effect.runPromise(assertLockedPiResources(loader, "Jingler owns this prompt"))
     expect(loader.getSystemPrompt()).toBe("Jingler owns this prompt")
+    expect(loader.getExtensions().extensions).toHaveLength(2)
+    expect(loader.getSkills().skills.map(({ name }) => name).sort()).toEqual([
+      "ponytail",
+      "ponytail-audit",
+      "ponytail-debt",
+      "ponytail-gain",
+      "ponytail-help",
+      "ponytail-review"
+    ])
   })
 })

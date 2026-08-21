@@ -1,15 +1,14 @@
 import {
-  type PlanCallPathDiff,
-  type PlanCallPathFrame,
   type PlanPrd,
   toPlanArchitectureView,
   toPlanStepViews
 } from "@jingler/core"
-import { ArrowLeft, ArrowRight, GitCompareArrows } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
 import { useMemo } from "react"
 import { cn } from "../lib/cn.js"
 import { MermaidDiagram } from "../components/mermaid-diagram.js"
-import { PlanBlocks } from "./plan-doc/plan-blocks.js"
+import { VisualBlocks } from "./visual-blocks.js"
+import { VisualCallPathDiff } from "./visual-call-path.js"
 
 export interface PlanGuideProps {
   readonly prd: PlanPrd
@@ -17,50 +16,6 @@ export interface PlanGuideProps {
   readonly onOpenStep?: (stageId: string) => void
   readonly className?: string
   readonly revisingStageId?: string | null
-}
-
-function CallFrame({ frame }: { frame: PlanCallPathFrame }) {
-  return (
-    <span className="inline-flex min-w-0 flex-col rounded-md border border-line bg-surface/50 px-2 py-1.5">
-      <span className="font-mono text-[11px] font-medium text-text-bright">{frame.symbol}</span>
-      {frame.path && (
-        <span className="max-w-48 truncate font-mono text-[9.5px] text-muted-foreground">
-          {frame.path}
-        </span>
-      )}
-    </span>
-  )
-}
-
-function CallPath({ label, frames }: { label: string; frames: ReadonlyArray<PlanCallPathFrame> }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
-        {label}
-      </span>
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        {frames.map((frame, index) => (
-          <div key={`${frame.symbol}-${index}`} className="contents">
-            {index > 0 && <ArrowRight className="size-3 flex-none text-dim" />}
-            <CallFrame frame={frame} />
-          </div>
-        ))}
-        {frames.length === 0 && <span className="text-[11px] text-dim">No call path</span>}
-      </div>
-    </div>
-  )
-}
-
-function CallPathDiff({ diff }: { diff: PlanCallPathDiff }) {
-  return (
-    <section aria-label="Call path diff" className="flex flex-col gap-3 rounded-md border border-line bg-editor/40 p-3">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-text-bright">
-        <GitCompareArrows className="size-3.5 text-blue" /> Call path change
-      </div>
-      <CallPath label="Before" frames={diff.before} />
-      <CallPath label="After" frames={diff.after} />
-    </section>
-  )
 }
 
 /** Cohesive implementation guide: document context plus stage rationale, call paths, and diagrams. */
@@ -95,7 +50,7 @@ export function PlanGuide({ prd, selectedStageId, onOpenStep, className, revisin
       {sections.map((section) => (
         <section key={section.id} data-plan-section={section.id} className="flex flex-col gap-2 px-1 py-1">
           <h2 className="m-0 text-[13px] font-semibold text-text-bright">{section.title}</h2>
-          <PlanBlocks blocks={section.blocks} className="sb-md text-[13px] leading-[1.65] text-text-body" />
+          <VisualBlocks blocks={section.blocks} className="sb-md text-[13px] leading-[1.65] text-text-body" />
         </section>
       ))}
 
@@ -150,7 +105,7 @@ export function PlanGuide({ prd, selectedStageId, onOpenStep, className, revisin
 
             {(walkthrough.length > 0 || step.approach.length > 0 || step.notes.length > 0) && (
               <div className="flex flex-col gap-3 border-t border-hairline pt-3">
-                <PlanBlocks blocks={[...walkthrough, ...step.notes]} className="sb-md text-[12.5px] leading-[1.7] text-text-body" />
+                <VisualBlocks blocks={[...walkthrough, ...step.notes]} className="sb-md text-[12.5px] leading-[1.7] text-text-body" />
                 {walkthrough.length === 0 && step.approach.length > 0 && (
                   <ol className="m-0 pl-5 text-[12.5px] leading-[1.7] text-text-body">
                     {step.approach.map((item) => <li key={item}>{item}</li>)}
@@ -159,7 +114,7 @@ export function PlanGuide({ prd, selectedStageId, onOpenStep, className, revisin
               </div>
             )}
 
-            {step.callPathDiff && <CallPathDiff diff={step.callPathDiff} />}
+            {step.callPathDiff && <VisualCallPathDiff diff={step.callPathDiff} />}
 
             {diagrams.map((diagram) => (
               <div key={diagram.id} role="img" aria-label={`Diagram ${diagram.id}`} className="overflow-hidden rounded-md border border-line bg-surface/40 px-3 py-2">

@@ -21,6 +21,7 @@ import {
   InMemorySecretStoreLive,
   MemoryService,
   makeAgentResourceService,
+  ExplanationStore,
   PlanStore,
   PluginAuth,
   PluginHost,
@@ -81,6 +82,7 @@ import {
   transcriptForFork,
   chooseReposDir,
   awaitRelayAcknowledgement,
+  explanationWatch,
   completeDurableGitHubFeedbackReplay,
   assetList,
   assetRead,
@@ -760,9 +762,30 @@ describe("RPC handlers", () => {
     const services = Layer.mergeAll(
       SessionStore.Default,
       PlanStore.Default,
+      ExplanationStore.Default,
     ).pipe(Layer.provideMerge(base));
     const result = await Effect.runPromise(
       Effect.gen(function* () {
+        const explanationFiber = yield* explanationWatch("session-plan-thread").pipe(
+          Stream.filter((document) => document !== null),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.fork,
+        );
+        yield* Effect.sleep("25 millis");
+        const explanation = yield* ExplanationStore.publish(
+          worktreePath,
+          "session-plan-thread",
+          "chat-plan-thread",
+          {
+            title: "Thread flow",
+            summary: "The explanation RPC watches the canonical artifact.",
+            sections: [],
+          },
+        );
+        const watchedExplanation = Chunk.toReadonlyArray(
+          yield* Fiber.join(explanationFiber),
+        )[0];
         const plan = yield* PlanStore.promoteDocument(worktreePath, {
           sessionId: "session-plan-thread",
           producingChatId: "chat-plan-thread",
@@ -858,7 +881,16 @@ describe("RPC handlers", () => {
             messageId,
           }),
         );
-        return { appended, delivered, resolved, stale, retrySent, watched };
+        return {
+          appended,
+          delivered,
+          resolved,
+          stale,
+          retrySent,
+          watched,
+          explanation,
+          watchedExplanation,
+        };
       }).pipe(Effect.provide(services)),
     );
 
@@ -873,6 +905,8 @@ describe("RPC handlers", () => {
       result.delivered.plan.annotations[0]?.messages[1]?.deliveryState,
     ).toBe("sent");
     expect(result.resolved.plan.annotations[0]?.status).toBe("resolved");
+    expect(result.explanation.revision).toBe(1);
+    expect(result.watchedExplanation).toEqual(result.explanation);
     expect(result.watched?.revision).toBe(result.appended.revision);
     expect(result.watched?.plan.annotations[0]?.messages[1]?.body).toBe(
       "Verified.",
@@ -948,6 +982,16 @@ describe("RPC handlers", () => {
       // it never conjures a command the harness doesn't have. `/plan`, `/test`
       // and `/commit` used to be served from a hardcoded list; none are real.
       expect(Array.isArray(skills)).toBe(true);
+      expect(skills).toContainEqual({
+        name: "/explain",
+        description: "Publish a focused visual explanation of the current technical topic.",
+        source: "skill",
+      });
+      expect(skills).toContainEqual({
+        name: "/ponytail",
+        description: "Set Ponytail mode: lite, full, ultra, off, status, or default <mode>.",
+        source: "command",
+      });
       expect(skills.map((s) => s.name)).not.toContain("/plan");
       expect(skills.map((s) => s.name)).not.toContain("/test");
       expect(skills.map((s) => s.name)).not.toContain("/commit");
@@ -989,11 +1033,20 @@ describe("RPC handlers", () => {
         ),
       );
 
-      expect(skills).toEqual([{
+      expect(skills).toContainEqual({
         name: "/review",
         description: "Review current changes",
         source: "command",
-      }]);
+      });
+      expect(skills.map(({ name }) => name)).toEqual(expect.arrayContaining([
+        "/explain",
+        "/ponytail",
+        "/ponytail-review",
+        "/ponytail-audit",
+        "/ponytail-debt",
+        "/ponytail-gain",
+        "/ponytail-help",
+      ]));
     });
   });
 

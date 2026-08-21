@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { resolveSubagentLaunchContract } from "pi-subagents/preflight"
 import { afterEach, describe, expect, it } from "vitest"
+import { PONYTAIL_EXTENSION_PATH } from "../resources/ponytail-resources.js"
 import {
   JINGLER_SUBAGENT_AGENT_NAMES,
   materializePiSubagentProfiles
@@ -65,7 +66,10 @@ describe("managed pi-subagent profiles", () => {
     expect(scout.contract.inheritSkills).toBe(false)
     expect(scout.contract.tools.fanoutAuthorized).toBe(false)
     expect(scout.contract.tools.disableAmbientExtensions).toBe(true)
-    expect(scout.contract.tools.configuredExtensions).toEqual([childTools])
+    expect(scout.contract.tools.configuredExtensions).toEqual([
+      childTools,
+      PONYTAIL_EXTENSION_PATH
+    ])
     expect(scout.contract.tools.requestedBuiltin).toEqual(["contact_supervisor"])
     expect(fanout.contract.tools.fanoutAuthorized).toBe(true)
     expect(fanout.contract.tools.requestedBuiltin).toEqual([
@@ -95,6 +99,8 @@ describe("managed pi-subagent profiles", () => {
 
     expect(result).toMatchObject({ ok: false, code: "restricted_agent" })
     expect(await readFile(join(root, "agents", "worker.md"), "utf8"))
-      .toContain(`extensions: ${JSON.stringify(childTools)}`)
+      .toContain(`extensions: ${childTools}, `)
+    expect(await readFile(join(root, "agents", "worker.md"), "utf8"))
+      .toContain(PONYTAIL_EXTENSION_PATH)
   })
 })

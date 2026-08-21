@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { Effect } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   JINGLER_SUBAGENT_CHILD_TOOLS,
   JINGLER_SUBAGENT_CREDENTIAL_ROOT,
@@ -29,12 +29,18 @@ const names = [
   JINGLER_SUBAGENT_CHILD_TOOLS
 ] as const
 const original = Object.fromEntries(names.map((name) => [name, process.env[name]]))
-afterEach(async () => {
+const restoreEnvironment = () => {
   for (const name of names) {
     const value = original[name]
     if (value === undefined) delete process.env[name]
     else process.env[name] = value
   }
+}
+beforeEach(() => {
+  for (const name of names) delete process.env[name]
+})
+afterEach(async () => {
+  restoreEnvironment()
   await Promise.all(roots.splice(0).map((root) =>
     rm(root, { recursive: true, force: true })
   ))

@@ -32,6 +32,7 @@ import {
 } from "@jingler/core";
 import {
   ConfirmDialog,
+  ExplanationView,
   MemoryAnalytics,
   MemoryBrowser,
   MemoryDashboard,
@@ -58,6 +59,10 @@ import {
 import { appMachine } from "./app-machine.js";
 import { authMachine } from "./auth-machine.js";
 import { ConversationPane } from "./conversation-pane.js";
+import {
+  useExplanationDocument,
+  useExplanationSessions,
+} from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionChatTabs } from "./session-chat-tabs.js";
 import { PullRequestPane } from "./pull-request-pane.js";
@@ -343,6 +348,18 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
  * queries/effects run behind the sign-in wall. Receives the signed-in `user` and
  * `onSignOut` to drive the sidebar account menu.
  */
+function ExplanationPane({ sessionId }: { readonly sessionId: string }) {
+  const explanation = useExplanationDocument(sessionId)
+  return (
+    <ExplanationView
+      document={explanation.document}
+      loading={explanation.loading}
+      error={explanation.error}
+      onRetry={explanation.retry}
+    />
+  )
+}
+
 function AuthedApp({
   user,
   onSignOut,
@@ -432,6 +449,7 @@ function AuthedApp({
   const liveActivity = useSessionActivities();
   const liveDiff = useSessionDiffs();
   const planSessions = usePlanSessions();
+  const explanationSessions = useExplanationSessions(sessions);
   const termDock = useTerminalDock();
   const browserDock = usePreviewDock();
   const sessionsLoaded = state.matches("ready");
@@ -1769,6 +1787,10 @@ function AuthedApp({
           setPendingDelete(sessions.find((s) => s.id === id) ?? null)
         }
         planSessions={planSessions}
+        explanationSessions={explanationSessions}
+        renderExplanation={(session: Session) => (
+          <ExplanationPane sessionId={session.id} />
+        )}
         renderConversation={(session: Session, view, ctx) => (
           <ConversationPane
             session={session}

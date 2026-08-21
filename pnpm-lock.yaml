@@ -74,6 +74,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@dietrichgebert/ponytail':
+        specifier: 4.9.0
+        version: 4.9.0
       '@earendil-works/pi-ai':
         specifier: 0.84.1
         version: 0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
@@ -216,6 +219,9 @@ importers:
 
   apps/device-agent:
     dependencies:
+      '@dietrichgebert/ponytail':
+        specifier: 4.9.0
+        version: 4.9.0
       '@earendil-works/pi-ai':
         specifier: 0.84.1
         version: 0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
@@ -437,6 +443,9 @@ importers:
 
   packages/cli-adapters:
     dependencies:
+      '@dietrichgebert/ponytail':
+        specifier: 4.9.0
+        version: 4.9.0
       '@earendil-works/pi-ai':
         specifier: 0.84.1
         version: 0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
@@ -1532,6 +1541,9 @@ packages:
   '@develar/schema-utils@2.6.5':
     resolution: {integrity: sha512-0cp4PsWQ/9avqTVMCtZ+GirikIA36ikvjtHweU4/j8yLtgObI0+JUPhYFScgwlteveGB1rt3Cm8UhN04XayDig==}
     engines: {node: '>= 8.9.0'}
+
+  '@dietrichgebert/ponytail@4.9.0':
+    resolution: {integrity: sha512-OSdybtBZ3uDd5m/+zyz4h8/+BVBR9nGFhqTDmQkQb1v7k4Vfc1qql78naY64UjocdBPqR94htZEkKu2wpKTJaw==}
 
   '@dimforge/rapier3d-compat@0.12.0':
     resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
@@ -10221,6 +10233,8 @@ snapshots:
     dependencies:
       ajv: 6.15.0
       ajv-keywords: 3.5.2(ajv@6.15.0)
+
+  '@dietrichgebert/ponytail@4.9.0': {}
 
   '@dimforge/rapier3d-compat@0.12.0': {}
 

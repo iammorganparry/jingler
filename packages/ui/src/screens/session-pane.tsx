@@ -144,6 +144,8 @@ export interface SessionPaneProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  /** Render the latest focused visual explanation. */
+  renderExplanation?: (session: Session) => ReactNode
   /** Render the session-native repository browser and editor. */
   renderFiles?: (
     session: Session,
@@ -181,6 +183,8 @@ export interface SessionPaneProps {
   isBrowserActive?: (sessionId: string) => boolean
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
+  /** Session ids with a published focused visual explanation. */
+  explanationSessions?: ReadonlySet<string>
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
@@ -284,6 +288,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   const [draftPlanSessionId, setDraftPlanSessionId] = useState<string | null>(null)
   const paneWidth = usePaneWidth().width
   const hasPlan = props.planSessions?.has(props.session.id) ?? false
+  const hasExplanation = props.explanationSessions?.has(props.session.id) ?? false
   const supportsAuxiliarySplit =
     paneWidth === 0 || paneWidth >= SESSION_AUXILIARY_SPLIT_BREAKPOINT
   const [auxiliaryRatio, setAuxiliaryRatio] = useState(initialSessionAuxiliaryRatio)
@@ -440,6 +445,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   const tabCtx: TabContext = {
     session: active,
     hasPlan,
+    hasExplanation,
     diff: props.liveDiff?.[active.id] ?? null
   }
   const connectGithub = props.onOpenSettings ?? (() => {})
@@ -492,6 +498,7 @@ function SessionPaneBody(props: SessionPaneProps) {
           paneCtx
         )
       },
+      explanation: (session) => props.renderExplanation?.(session),
       pullRequest: (session, ctx) =>
         props.renderPullRequest?.(session, {
           onConnectGithub: ctx.onConnectGithub

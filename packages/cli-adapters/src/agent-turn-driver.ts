@@ -1,5 +1,6 @@
 import type {
   Attachment,
+  ExplanationPayload,
   PermissionMode,
   PiRunSpec,
   Plan,
@@ -137,6 +138,8 @@ export interface AgentContext {
    * absent (`ctx.saveDraftPlan?.(source)`).
    */
   readonly saveDraftPlan?: SaveDraftPlan
+  /** Publish a durable visual explanation for the current session. */
+  readonly publishExplanation?: (explanation: ExplanationPayload) => Effect.Effect<void, Error>
   /**
    * Discard the canonical plan so the next submission proposes fresh instead of
    * amending. Optional for the same reason as `saveDraftPlan`.

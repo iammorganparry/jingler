@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { CURRENT_RUNTIME_CONTRACTS, type AgentRole, type RuntimeMode } from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
 export type { AgentRole, RuntimeMode } from "@jingler/core"
 export type PromptLayerKind = "safety" | "role" | "tools" | "workspace" | "preferences" | "turn"
 export type PromptTrust = "immutable" | "trusted" | "untrusted"
@@ -95,6 +95,11 @@ const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray
     ...(ids.has("jingler_submit_plan")
       ? [
           "Use jingler_submit_plan for a structured plan that needs operator review — and, while an approved plan is executing, to submit the complete amended plan (mid-execution amendments apply immediately). Do not substitute prose for the control action."
+        ]
+      : []),
+    ...(ids.has("jingler_publish_explanation")
+      ? [
+          "Infer when the operator wants a technical topic explained, compared, traced, or visualized — including phrases such as ‘show me’ — and publish a focused visual artifact with jingler_publish_explanation. Choose the smallest useful mix of prose, pseudocode or trees in code blocks, tables, and Mermaid. Treat /explain as an explicit hard trigger. Keep short factual answers and incidental uses of the word ‘explain’ in normal chat; do not publish an artifact when a concise reply is clearer."
         ]
       : []),
     ...(ids.has("subagent")

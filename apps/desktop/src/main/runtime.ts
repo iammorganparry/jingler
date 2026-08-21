@@ -27,6 +27,7 @@ import {
   makePiAgentRuntimeLive,
   PiAgentRuntimeLive,
   PlanStore,
+  ExplanationStore,
   PluginRegistry,
   PluginHost,
   PluginAuth,
@@ -87,6 +88,7 @@ const StoreLayers = Layer.mergeAll(
   TranscriptStore.Default,
   BackgroundTaskStore.Default,
   PlanStore.Default,
+  ExplanationStore.Default,
   ReviewStore.Default
 )
 
