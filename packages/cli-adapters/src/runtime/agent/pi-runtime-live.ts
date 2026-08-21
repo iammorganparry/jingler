@@ -206,6 +206,55 @@ export const makePiAgentRuntimeLive = (
         artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
         sessionId: spec.piSessionId ?? spec.runId
       }),
+      lockedCapabilityFingerprint: (spec) => Effect.all({
+        managedMcp: importedMcp.resolveForTarget(spec.targetCapabilities.targetId),
+        managedFiles: managedResources.enabledForTarget(spec.targetCapabilities.targetId),
+        pluginCatalog: pluginRegistry.list().pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path),
+          Effect.provideService(AppPaths, paths),
+          Effect.provideService(ConfigService, config)
+        )
+      }).pipe(
+        Effect.map(({ managedMcp, managedFiles, pluginCatalog }) => JSON.stringify({
+          managedMcp: managedMcp.map((server) => server.transport === "stdio"
+            ? {
+                id: server.id,
+                name: server.name,
+                transport: server.transport,
+                command: server.command,
+                args: server.args,
+                environmentKeys: Object.keys(server.env).sort()
+              }
+            : {
+                id: server.id,
+                name: server.name,
+                transport: server.transport,
+                url: server.url,
+                headerKeys: Object.keys(server.headers).sort()
+              }).sort((left, right) => String(left.id).localeCompare(String(right.id))),
+          managedFiles: managedFiles.map((resource) => ({
+            id: resource.id,
+            kind: resource.kind,
+            name: resource.name,
+            description: resource.kind === "mcp" ? "" : resource.description,
+            managedPath: resource.kind === "mcp" ? "" : resource.managedPath,
+            byteLength: resource.kind === "mcp" ? 0 : resource.byteLength
+          })).sort((left, right) => String(left.id).localeCompare(String(right.id))),
+          plugins: enabledPluginAgentToolsets(pluginCatalog.plugins).map((source) => ({
+            pluginId: source.plugin.manifest.id,
+            version: source.plugin.manifest.version,
+            toolsetId: source.toolsetId
+          })).sort((left, right) =>
+            `${left.pluginId}:${left.toolsetId}`.localeCompare(`${right.pluginId}:${right.toolsetId}`)
+          )
+        })),
+        Effect.mapError((cause) => new AgentRuntimeError({
+          reason: "runtime",
+          message: cause.message,
+          cause
+        }))
+      ),
       createToolRegistry: (spec, context, tracker) => {
         Effect.runFork(
           offload.primeSession(spec.cwd, spec.sessionId).pipe(Effect.ignore)

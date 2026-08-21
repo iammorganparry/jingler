@@ -121,6 +121,7 @@ export interface PiSessionFactoryOptions {
     context: AgentRuntimeContext,
     tracker: FileChangeTracker | undefined
   ) => Effect.Effect<ToolRegistry, AgentRuntimeError>
+  readonly lockedCapabilityFingerprint?: PiSessionFactory["lockedCapabilityFingerprint"]
   readonly promptTokenBudget?: number
   readonly terminalTracker?: FileChangeTracker | ((spec: PiRunSpec) => FileChangeTracker)
   /** Internal extension point for deterministic providers; production leaves it unset. */
@@ -620,6 +621,9 @@ const createSessionHandle = (
 
 /** Construct the real embedded pi session from Jingler-owned contracts only. */
 export const makePiSessionFactory = (options: PiSessionFactoryOptions): PiSessionFactory => ({
+  ...(options.lockedCapabilityFingerprint === undefined
+    ? {}
+    : { lockedCapabilityFingerprint: options.lockedCapabilityFingerprint }),
   create: (spec, context: AgentRuntimeContext) => {
     const tracker =
       typeof options.terminalTracker === "function"

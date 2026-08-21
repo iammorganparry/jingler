@@ -1208,6 +1208,29 @@ describe("chat-scoped context", () => {
     expect(snap.phase).not.toBe("unknown")
   })
 
+  it("uses the chat context key for accepted memory during compaction", async () => {
+    const rec = recorder()
+    await run(
+      Effect.gen(function* () {
+        yield* seedChat()
+        const messages = yield* TranscriptStore.list(SESSION)
+        yield* Effect.forEach(messages, (message) => TranscriptStore.append(CHAT, message))
+        yield* ContextManager.bindContext(CHAT, SESSION)
+        yield* ContextManager.rememberMemoryContext(
+          CHAT,
+          "<recalled-memories>Chat-scoped accepted evidence.</recalled-memories>"
+        )
+        yield* ContextManager.compactNow(CHAT, { waitForReady: true })
+        yield* ContextManager.applyWhenReady(CHAT)
+      }),
+      recordingAdapter(GOOD_REPLY, rec)
+    )
+
+    expect(rec.specs[0]?.sessionId).toBe(SESSION)
+    expect(rec.specs[0]?.chatId).toBe(CHAT)
+    expect(rec.specs[0]?.prompt).toContain("Chat-scoped accepted evidence.")
+  })
+
   it("reports an unknown window for a chat it was never told the owner of", async () => {
     // The negative control, and the exact shape of the bug: with no binding there
     // is no session to read settings from, and the manager says so rather than

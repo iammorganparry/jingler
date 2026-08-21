@@ -756,6 +756,42 @@ describe("PiAgentRuntime", () => {
     fleet.childActive = false
   })
 
+  it("rebuilds a retained session when a dynamically resolved catalog changes", async () => {
+    const fleet = { childActive: true }
+    let catalog = "managed-mcp:alpha"
+    const handles: PiSessionHandle[] = []
+    const create = vi.fn(() => {
+      const handle = settlingHandle(fleet)
+      handles.push(handle)
+      return Effect.succeed(handle)
+    })
+    const lockedCapabilityFingerprint = vi.fn(() => Effect.succeed(catalog))
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime(
+        { create, lockedCapabilityFingerprint },
+        { retainedSessionPollMs: 10 }
+      )
+    )
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      { ...spec, runId: "run-2", prompt: "unchanged", piSessionId: "/sessions/parent.jsonl" },
+      context
+    )))
+    expect(create).toHaveBeenCalledOnce()
+
+    catalog = "managed-mcp:replacement"
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      { ...spec, runId: "run-3", prompt: "catalog changed", piSessionId: "/sessions/parent.jsonl" },
+      context
+    )))
+
+    expect(lockedCapabilityFingerprint).toHaveBeenCalledTimes(3)
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(handles[0]?.dispose).toHaveBeenCalledOnce()
+    fleet.childActive = false
+  })
+
   it("keeps a retained session when only MCP endpoint details rotate", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     let createdContext: AgentRuntimeContext | null = null

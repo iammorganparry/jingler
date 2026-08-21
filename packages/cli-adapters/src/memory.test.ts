@@ -423,6 +423,76 @@ describe("MemoryService stateless attachment", () => {
     expect(searches).toBe(2)
   })
 
+  it("refreshes an unchanged query after the recall cache freshness window", async () => {
+    let now = NOW_SECONDS
+    let searches = 0
+    const service = makeMemoryService({
+      fetch: async (input, init) => {
+        const request = requestOf(input, init)
+        if (request.url.endsWith("/api/memory/grant")) {
+          return Response.json(grantResponse("recall-freshness"))
+        }
+        const body = await request.clone().json() as {
+          method?: string
+          params?: { name?: string }
+        }
+        if (body.method === "server/discover") return discoveryResponse()
+        if (body.params?.name === "memory_search") {
+          searches += 1
+          return Response.json({
+            jsonrpc: "2.0",
+            id: "search",
+            result: {
+              resultType: "complete",
+              structuredContent: {
+                data: {
+                  results: searches === 1
+                    ? []
+                    : [{ pageId: "new-page", revisionId: "revision:new-page:1" }]
+                }
+              }
+            }
+          })
+        }
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "read",
+          result: {
+            resultType: "complete",
+            structuredContent: {
+              data: {
+                page: {
+                  id: "new-page",
+                  title: "New page",
+                  body: "Accepted body for new-page"
+                },
+                revision: { id: "revision:new-page:1" },
+                sourceIds: ["source:new-page"],
+                citationIds: ["citation:new-page"]
+              }
+            }
+          }
+        })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => now
+    })
+    const recall = () => withEnabledMemory(
+      service.attachment("stable question", "session-freshness:chat-1")
+    ).pipe(Effect.provide(configuredLayer()))
+
+    const empty = await Effect.runPromise(recall())
+    now += 30
+    const cached = await Effect.runPromise(recall())
+    now += 31
+    const refreshed = await Effect.runPromise(recall())
+
+    expect(empty?.instructions).toContain("no accepted matches")
+    expect(cached?.instructions).not.toContain("new-page")
+    expect(refreshed?.instructions).toContain("Accepted body for new-page")
+    expect(searches).toBe(2)
+  })
+
   it("reissues an expired-at-use grant and retries discovery without session state", async () => {
     const requests: Request[] = []
     let grants = 0
@@ -759,6 +829,34 @@ describe("MemoryService automatic retention", () => {
     expect(body?.content).toContain("api_key=[REDACTED]")
     expect(body?.content).not.toContain("user-secret")
     expect(body?.content).not.toContain("assistant-secret")
+  })
+
+  it("autonomously retries a transient delivery without another service call", async () => {
+    let sourceRequests = 0
+    const service = makeMemoryService({
+      fetch: async (input) => {
+        if (String(input).endsWith("/api/memory/grant")) {
+          return Response.json(grantResponse("autonomous-retry"))
+        }
+        sourceRequests += 1
+        return sourceRequests === 1
+          ? Response.json({ error: "offline" }, { status: 503 })
+          : Response.json({ workflowId: "compiler-retried" }, { status: 201 })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS,
+      captureRetryDelayMs: () => 5
+    })
+    const layer = configuredLayer()
+
+    await Effect.runPromise(
+      withEnabledMemory(service.retainSettledTurn(retainedTurn)).pipe(Effect.provide(layer))
+    )
+
+    await vi.waitFor(() => expect(sourceRequests).toBe(2))
+    await vi.waitFor(async () => expect(
+      await Effect.runPromise(service.diagnostics().pipe(Effect.provide(layer)))
+    ).toMatchObject({ queuedRetentions: 0, retryingRetentions: 0 }))
   })
 
   it("deduplicates a queued turn and retains it after transient delivery failure", async () => {

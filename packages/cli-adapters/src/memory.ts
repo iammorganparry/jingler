@@ -54,6 +54,9 @@ const MAX_RECALLED_PAGE_CHARACTERS = 4_000
 /** Approximate 2K-token text budget, independent of provenance metadata. */
 const MAX_RECALLED_TEXT_CHARACTERS = 8_000
 const MAX_RECALL_SCOPES = 128
+const AUTOMATIC_RECALL_CACHE_TTL_SECONDS = 60
+const CAPTURE_RETRY_BASE_DELAY_MS = 1_000
+const CAPTURE_RETRY_MAX_DELAY_MS = 60_000
 // Reuse a minted grant until it is within this many seconds of expiry, so the
 // clock skew / in-flight-request window still leaves a valid grant. The 401
 // eviction path (below) covers server-side revocation and expiry races.
@@ -112,12 +115,14 @@ interface AutomaticRecall {
   readonly queryFingerprint: string
   readonly searchFingerprint: string
   readonly evidenceFingerprint: string
+  readonly searchedAtSeconds: number
 }
 
 interface RecallCacheEntry {
   readonly queryFingerprint: string
   readonly searchFingerprint: string
   readonly evidenceFingerprint: string
+  readonly searchedAtSeconds: number
 }
 
 const recalledBody = (body: string): string =>
@@ -239,6 +244,8 @@ export interface MemoryServiceOptions {
   readonly captureTimeoutMs?: number
   /** Timeout for interactive UI reads; defaults to UI_REQUEST_TIMEOUT_MS. */
   readonly uiTimeoutMs?: number
+  /** Deterministic retry-delay seam for outbox recovery tests. */
+  readonly captureRetryDelayMs?: (attempt: number) => number
   /** App-lifetime loopback proxy; omitted by pure unit-test service instances. */
   readonly proxy?: MemoryMcpProxy
 }
@@ -250,6 +257,7 @@ interface MemoryRuntime {
   readonly timeoutMs: number
   readonly captureTimeoutMs: number
   readonly uiTimeoutMs: number
+  readonly captureRetryDelayMs: (attempt: number) => number
   readonly proxy: MemoryMcpProxy | undefined
   /** One reusable grant per organization; never leaves the main process. */
   readonly grantCache: Map<string, MemoryGrantResponse>
@@ -265,6 +273,7 @@ interface MemoryRuntime {
   readonly outboxLock: Effect.Semaphore
   /** Serializes automatic and user-triggered recovery drains. */
   readonly drainLock: Effect.Semaphore
+  retryScheduled: boolean
   readonly lifecycle: {
     attachmentStatus: "disabled" | "available" | "failed"
     queuedRetentions: number
@@ -628,7 +637,8 @@ const automaticRecall = (
         instructions: "",
         queryFingerprint,
         searchFingerprint,
-        evidenceFingerprint: previous.evidenceFingerprint
+        evidenceFingerprint: previous.evidenceFingerprint,
+        searchedAtSeconds: runtime.nowSeconds()
       }
     }
 
@@ -664,7 +674,8 @@ const automaticRecall = (
           : renderRecalledMemories(pages),
       queryFingerprint,
       searchFingerprint,
-      evidenceFingerprint
+      evidenceFingerprint,
+      searchedAtSeconds: runtime.nowSeconds()
     }
   })
 
@@ -677,7 +688,8 @@ const rememberRecall = (
   runtime.recallCache.set(scope, {
     queryFingerprint: recall.queryFingerprint,
     searchFingerprint: recall.searchFingerprint,
-    evidenceFingerprint: recall.evidenceFingerprint
+    evidenceFingerprint: recall.evidenceFingerprint,
+    searchedAtSeconds: recall.searchedAtSeconds
   })
   if (runtime.recallCache.size <= MAX_RECALL_SCOPES) return
   const oldest = runtime.recallCache.keys().next().value
@@ -910,7 +922,7 @@ const enqueueCapture = (
     })
   ).pipe(Effect.orElseSucceed(() => "failed" as const))
 
-const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
+const drainCaptureOutboxOnce = (runtime: MemoryRuntime, token: string) =>
   runtime.drainLock.withPermits(1)(Effect.gen(function* () {
     // Snapshot under the outbox lock, then release it during network delivery
     // so a settling turn can enqueue without waiting for remote round-trips.
@@ -993,6 +1005,45 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
     lastFailureStatus: 0
   })))
 
+const scheduledCaptureRetries = (
+  runtime: MemoryRuntime,
+  token: string,
+  attempt = 1
+): Effect.Effect<void, never, FileSystem.FileSystem | AppPaths> =>
+  Effect.sleep(`${Math.max(0, runtime.captureRetryDelayMs(attempt))} millis`).pipe(
+    Effect.zipRight(drainCaptureOutboxOnce(runtime, token)),
+    Effect.flatMap((result) => result.retained > 0
+      ? Effect.suspend(() => scheduledCaptureRetries(runtime, token, attempt + 1))
+      : Effect.void)
+  )
+
+const scheduleCaptureRetry = (
+  runtime: MemoryRuntime,
+  token: string
+): Effect.Effect<void, never, FileSystem.FileSystem | AppPaths> =>
+  Effect.sync(() => {
+    if (runtime.retryScheduled) return false
+    runtime.retryScheduled = true
+    return true
+  }).pipe(
+    Effect.flatMap((scheduled) => scheduled
+      ? scheduledCaptureRetries(runtime, token).pipe(
+          Effect.ensuring(Effect.sync(() => {
+            runtime.retryScheduled = false
+          })),
+          Effect.forkDaemon,
+          Effect.asVoid
+        )
+      : Effect.void)
+  )
+
+const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
+  drainCaptureOutboxOnce(runtime, token).pipe(
+    Effect.tap((result) => result.retained > 0
+      ? scheduleCaptureRetry(runtime, token)
+      : Effect.void)
+  )
+
 export const makeMemoryService = (
   options: MemoryServiceOptions = {}
 ): MemoryServiceShape => {
@@ -1003,6 +1054,10 @@ export const makeMemoryService = (
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     captureTimeoutMs: options.captureTimeoutMs ?? CAPTURE_TIMEOUT_MS,
     uiTimeoutMs: options.uiTimeoutMs ?? UI_REQUEST_TIMEOUT_MS,
+    captureRetryDelayMs: options.captureRetryDelayMs ?? ((attempt) => Math.min(
+      CAPTURE_RETRY_MAX_DELAY_MS,
+      CAPTURE_RETRY_BASE_DELAY_MS * (2 ** Math.min(10, Math.max(0, attempt - 1)))
+    )),
     proxy: options.proxy,
     grantCache: new Map<string, MemoryGrantResponse>(),
     grantLock: Effect.unsafeMakeSemaphore(1),
@@ -1012,6 +1067,7 @@ export const makeMemoryService = (
     recallCache: new Map<string, RecallCacheEntry>(),
     outboxLock: Effect.unsafeMakeSemaphore(1),
     drainLock: Effect.unsafeMakeSemaphore(1),
+    retryScheduled: false,
     lifecycle: {
       attachmentStatus: "disabled",
       queuedRetentions: 0,
@@ -1042,7 +1098,11 @@ export const makeMemoryService = (
             const previous = cacheScope === undefined
               ? undefined
               : runtime.recallCache.get(cacheScope)
-            if (previous?.queryFingerprint === sha256(trimmedQuery)) {
+            if (
+              previous?.queryFingerprint === sha256(trimmedQuery) &&
+              runtime.nowSeconds() - previous.searchedAtSeconds <
+                AUTOMATIC_RECALL_CACHE_TTL_SECONDS
+            ) {
               return Effect.succeed(cached.attachment)
             }
             return automaticRecall(

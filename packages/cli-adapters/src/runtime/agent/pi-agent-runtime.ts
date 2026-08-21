@@ -50,6 +50,11 @@ export interface PiSessionFactory {
     spec: PiRunSpec,
     context: AgentRuntimeContext
   ) => Effect.Effect<PiSessionHandle, AgentRuntimeError>
+  /** Secret-free identity for catalogs resolved outside the static run spec. */
+  readonly lockedCapabilityFingerprint?: (
+    spec: PiRunSpec,
+    context: AgentRuntimeContext
+  ) => Effect.Effect<string, AgentRuntimeError>
 }
 
 interface EventSink {
@@ -283,14 +288,16 @@ interface ArchivedPiTranscript {
 
 const lockedCapabilityFingerprint = (
   spec: PiRunSpec,
-  context: AgentRuntimeContext
+  context: AgentRuntimeContext,
+  dynamicCatalog = ""
 ): string => JSON.stringify({
   role: spec.role,
   mode: spec.mode,
   targetId: spec.targetCapabilities.targetId,
   toolIds: [...spec.targetCapabilities.toolIds].sort(),
   resourceIds: [...spec.targetCapabilities.resourceIds].sort(),
-  mcp: mcpCapabilityFingerprint(context.mcp)
+  mcp: mcpCapabilityFingerprint(context.mcp),
+  dynamicCatalog
 })
 
 interface RetainedPiSession {
@@ -360,6 +367,22 @@ class PiSessionRegistry {
     spec: PiRunSpec,
     context: AgentRuntimeContext
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
+    const dynamicCatalog = this.factory.lockedCapabilityFingerprint?.(spec, context) ??
+      Effect.succeed("")
+    return dynamicCatalog.pipe(
+      Effect.flatMap((dynamic) => this.#acquire(
+        spec,
+        context,
+        lockedCapabilityFingerprint(spec, context, dynamic)
+      ))
+    )
+  }
+
+  #acquire(
+    spec: PiRunSpec,
+    context: AgentRuntimeContext,
+    capabilityFingerprint: string
+  ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
     const retained = spec.piSessionId === null
       ? undefined
       : this.#aliases.get(spec.piSessionId)
@@ -387,9 +410,9 @@ class PiSessionRegistry {
       // the SAME session file when role, mode, target resources, or MCP source
       // availability changes so transcript context survives while the catalog
       // is rediscovered. Rotating endpoint details are deliberately excluded.
-      if (retained.capabilityFingerprint !== lockedCapabilityFingerprint(spec, context)) {
+      if (retained.capabilityFingerprint !== capabilityFingerprint) {
         return Effect.promise(() => this.#dispose(retained)).pipe(
-          Effect.flatMap(() => this.#create(spec, context))
+          Effect.flatMap(() => this.#create(spec, context, capabilityFingerprint))
         )
       }
       if (retained.reapTimer !== null) clearTimeout(retained.reapTimer)
@@ -401,12 +424,13 @@ class PiSessionRegistry {
       retained.contextHolder.current = context
       return Effect.succeed(retained)
     }
-    return this.#create(spec, context)
+    return this.#create(spec, context, capabilityFingerprint)
   }
 
   #create(
     spec: PiRunSpec,
-    context: AgentRuntimeContext
+    context: AgentRuntimeContext,
+    capabilityFingerprint: string
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
     const contextHolder = { current: context }
     return this.factory.create(spec, rebindableContext(contextHolder)).pipe(
@@ -416,7 +440,7 @@ class PiSessionRegistry {
           handle,
           sessionId: spec.sessionId,
           chatId: spec.chatId,
-          capabilityFingerprint: lockedCapabilityFingerprint(spec, context),
+          capabilityFingerprint,
           aliases,
           contextHolder,
           activeTurns: 1,
