@@ -96,6 +96,59 @@ describe("mental models", () => {
     expect(revision.content).not.toContain("second")
   })
 
+  it("does not cite a later observation when only its bullet marker fits", () => {
+    const definition = defineMentalModel({
+      id: "model:marker-budget",
+      name: "Marker budget",
+      scope,
+      sourceQuery: "retry",
+      maxTokens: 2,
+      refreshAfterConsolidation: false,
+      publication: "published",
+      createdAt: "2026-08-20T09:00:00.000Z"
+    })
+    const revision = refreshMentalModel(definition, [
+      observation("retry-first", "abc"),
+      observation("retry-later", "later")
+    ], [], "2026-08-20T10:00:00.000Z")
+
+    expect(revision.content).toBe("- abc")
+    expect(revision.evidenceObservationIds).toEqual(["retry-first"])
+  })
+
+  it("returns existing definitions and revisions for identical replay", () => {
+    const input = {
+      id: "model:replay",
+      name: "Replay model",
+      scope,
+      sourceQuery: "retry",
+      maxTokens: 100,
+      refreshAfterConsolidation: false,
+      publication: "published" as const,
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }
+    const definition = defineMentalModel(input)
+    const replayedDefinition = defineMentalModel(
+      { ...input, createdAt: "2026-08-21T09:00:00.000Z" },
+      definition
+    )
+    const first = refreshMentalModel(
+      definition,
+      [observation("retry", "Use bounded retry jitter.")],
+      [],
+      "2026-08-20T10:00:00.000Z"
+    )
+    const replayedRevision = refreshMentalModel(
+      definition,
+      [observation("retry", "Use bounded retry jitter.")],
+      [first],
+      "2026-08-21T10:00:00.000Z"
+    )
+
+    expect(replayedDefinition).toBe(definition)
+    expect(replayedRevision).toBe(first)
+  })
+
   it("increments a definition without changing its immutable scope", () => {
     const first = defineMentalModel({
       id: "model:preferences",

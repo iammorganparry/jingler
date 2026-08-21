@@ -571,7 +571,7 @@ describe("stateless MCP 2026-07-28", () => {
       ["memory_recall", { query: "retry conventions", limit: 5 }],
       ["memory_reflect", {
         query: "How should retries work?",
-        scope: { kind: "project", id: "project-widget" },
+        scope: { kind: "organization", id: "org-paid" },
         limit: 4
       }]
     ] as const) {
@@ -598,7 +598,7 @@ describe("stateless MCP 2026-07-28", () => {
       "/internal/memory/search?q=retry%20conventions&limit=5"
     )
     expect(requests[2]?.path).toBe(
-      "/internal/memory/reflect?q=How%20should%20retries%20work%3F&limit=4&scopeKind=project&scopeId=project-widget"
+      "/internal/memory/reflect?q=How%20should%20retries%20work%3F&limit=4&scopeKind=organization&scopeId=org-paid"
     )
   })
 
@@ -609,7 +609,8 @@ describe("stateless MCP 2026-07-28", () => {
     const argumentsValues = [
       { query: "retry" },
       { query: "retry", scope: { kind: "user", id: "another-user" } },
-      { query: "retry", scope: { kind: "organization", id: "another-org" } }
+      { query: "retry", scope: { kind: "organization", id: "another-org" } },
+      { query: "retry", scope: { kind: "project", id: "unverifiable-project" } }
     ]
 
     for (const argumentsValue of argumentsValues) {

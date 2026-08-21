@@ -89,6 +89,9 @@ const authorizedScopeQuery = (
 ): string | null => {
   if (scope.kind === "organization" && scope.id !== claims.organizationId) return null
   if (scope.kind === "user" && scope.id !== claims.subject) return null
+  // Grants do not yet carry project memberships, so accepting an arbitrary
+  // project id would turn requested-scope filtering into an authorization bypass.
+  if (scope.kind === "project") return null
   return `scopeKind=${encodeURIComponent(scope.kind)}&scopeId=${encodeURIComponent(scope.id)}`
 }
 

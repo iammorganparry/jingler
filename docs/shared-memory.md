@@ -92,8 +92,9 @@ hidden reflection nudge. `memory_retain` stores explicit source material;
 `memory_recall` returns hybrid ranked evidence; `memory_reflect` requires an
 explicit organization/project/user knowledge scope and returns a cited,
 non-retaining synthesis under one combined result and text budget. User scope
-must match the calling grant subject; project scope is retrieval isolation within
-the organization grant. `memory_propose` remains the curated page update path.
+must match the calling grant subject. Project-scoped reflection is rejected until
+grants carry authoritative project memberships. `memory_propose` remains the
+curated page update path.
 Accepted publications create scoped, supersedable observations and refresh
 published mental models that opt into refresh-after-consolidation.
 

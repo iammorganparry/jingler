@@ -1785,6 +1785,7 @@ export class TeamVault {
         })
       }
       const model = defineMentalModel(input, previous)
+      if (model === previous) return model
       const pages = yield* this.loadPages(current)
       yield* this.persist(
         current,
@@ -1818,6 +1819,9 @@ export class TeamVault {
         current.mentalModelRevisions,
         createdAt
       )
+      if (current.mentalModelRevisions.some((candidate) => candidate.id === revision.id)) {
+        return revision
+      }
       const pages = yield* this.loadPages(current)
       yield* this.persist(
         current,

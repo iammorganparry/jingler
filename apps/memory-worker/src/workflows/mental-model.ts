@@ -30,11 +30,24 @@ export interface MentalModelDefinitionInput {
 export const defineMentalModel = (
   input: MentalModelDefinitionInput,
   previous?: MemoryMentalModel
-): MemoryMentalModel => ({
-  ...input,
-  maxTokens: Math.max(1, Math.min(32_000, Math.floor(input.maxTokens))),
-  definitionVersion: (previous?.definitionVersion ?? 0) + 1
-})
+): MemoryMentalModel => {
+  const maxTokens = Math.max(1, Math.min(32_000, Math.floor(input.maxTokens)))
+  if (
+    previous !== undefined &&
+    previous.name === input.name &&
+    previous.scope.kind === input.scope.kind &&
+    previous.scope.id === input.scope.id &&
+    previous.sourceQuery === input.sourceQuery &&
+    previous.maxTokens === maxTokens &&
+    previous.refreshAfterConsolidation === input.refreshAfterConsolidation &&
+    previous.publication === input.publication
+  ) return previous
+  return {
+    ...input,
+    maxTokens,
+    definitionVersion: (previous?.definitionVersion ?? 0) + 1
+  }
+}
 
 /** Build a bounded, evidence-linked model revision from same-scope observations. */
 export const refreshMentalModel = (
@@ -58,17 +71,31 @@ export const refreshMentalModel = (
   const evidenceObservationIds: string[] = []
   let remaining = maxCharacters
   for (const observation of selected) {
-    if (remaining <= 0) break
     const separator = contentParts.length === 0 ? "" : "\n"
-    const bullet = `${separator}- ${observation.text}`
-    const represented = bullet.slice(0, remaining)
-    if (represented.trim().length === 0) break
-    contentParts.push(represented)
+    const available = remaining - separator.length
+    if (available <= 2) break
+    const bullet = `- ${observation.text}`
+    const represented = bullet.slice(0, available)
+    if (represented.slice(2).trim().length === 0) break
+    contentParts.push(`${separator}${represented}`)
     evidenceObservationIds.push(observation.id)
-    remaining -= represented.length
+    remaining -= separator.length + represented.length
     if (represented.length < bullet.length) break
   }
   const content = contentParts.join("")
+  const sortedEvidenceObservationIds = [...evidenceObservationIds].sort()
+  const replay = [...history]
+    .filter((revision) =>
+      revision.modelId === definition.id &&
+      revision.definitionVersion === definition.definitionVersion &&
+      revision.content === content &&
+      revision.evidenceObservationIds.length === sortedEvidenceObservationIds.length &&
+      revision.evidenceObservationIds.every(
+        (observationId, index) => observationId === sortedEvidenceObservationIds[index]
+      )
+    )
+    .sort((left, right) => right.version - left.version)[0]
+  if (replay !== undefined) return replay
   const version = history
     .filter((revision) => revision.modelId === definition.id)
     .reduce((maximum, revision) => Math.max(maximum, revision.version), 0) + 1
@@ -77,13 +104,13 @@ export const refreshMentalModel = (
       definition.id,
       String(definition.definitionVersion),
       String(version),
-      ...evidenceObservationIds
+      ...sortedEvidenceObservationIds
     ].join("\u0000"))}`,
     modelId: definition.id,
     version,
     definitionVersion: definition.definitionVersion,
     content,
-    evidenceObservationIds: [...evidenceObservationIds].sort(),
+    evidenceObservationIds: sortedEvidenceObservationIds,
     createdAt
   }
 }

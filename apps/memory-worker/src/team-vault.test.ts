@@ -420,6 +420,49 @@ describe("TeamVault", () => {
     expect(models.revisions[1]?.evidenceObservationIds).toHaveLength(1)
   })
 
+  it("keeps definition and explicit refresh replays idempotent", async () => {
+    const vault = await run(
+      TeamVault.create("org-model-replay", new InMemoryVaultState(), new InMemoryR2Bucket())
+    )
+    const input = {
+      id: "model:replay",
+      name: "Replay guidance",
+      scope: { kind: "project" as const, id: "project-a" },
+      sourceQuery: "retry",
+      maxTokens: 100,
+      refreshAfterConsolidation: false,
+      publication: "published" as const,
+      createdAt: "2026-08-20T09:00:00.000Z"
+    }
+    const firstDefinition = await run(vault.defineMentalModel(input))
+    const replayedDefinition = await run(vault.defineMentalModel({
+      ...input,
+      createdAt: "2026-08-21T09:00:00.000Z"
+    }))
+    await run(vault.consolidateObservation({
+      scope: input.scope,
+      key: "retry",
+      text: "Use bounded retry jitter.",
+      evidenceId: "revision:retry:1",
+      confidence: 1,
+      createdAt: "2026-08-20T10:00:00.000Z"
+    }))
+    const firstRevision = await run(vault.refreshMentalModel(
+      input.id,
+      "2026-08-20T11:00:00.000Z"
+    ))
+    const replayedRevision = await run(vault.refreshMentalModel(
+      input.id,
+      "2026-08-21T11:00:00.000Z"
+    ))
+    const history = await run(vault.listMentalModels())
+
+    expect(replayedDefinition).toEqual(firstDefinition)
+    expect(replayedDefinition.definitionVersion).toBe(1)
+    expect(replayedRevision).toEqual(firstRevision)
+    expect(history.revisions).toHaveLength(1)
+  })
+
   it("does not pair a redefined mental model with an older definition revision", async () => {
     const vault = await run(
       TeamVault.create("org-model-redefinition", new InMemoryVaultState(), new InMemoryR2Bucket())

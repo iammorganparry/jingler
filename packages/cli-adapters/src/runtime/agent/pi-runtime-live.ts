@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import type { PiRunSpec } from "@jingler/core"
+import type { ManagedResource, PiRunSpec } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
@@ -7,7 +7,7 @@ import { ConfigService } from "../../config.js"
 import { EnvironmentService } from "../../environment.js"
 import { SecretStore } from "../../secret-store.js"
 import { MemoryAttachmentService } from "../../memory-session.js"
-import { PluginHost } from "../../plugin-host.js"
+import { PluginHost, type PluginHostRuntime } from "../../plugin-host.js"
 import { PluginRegistry } from "../../plugins.js"
 import { SessionStore } from "../../sessions.js"
 import { makeOffloadCommandRouterWithOwnedDevice } from "../../offload-command-router.js"
@@ -25,13 +25,18 @@ import {
 } from "../../web-search.js"
 import { ProviderConnections } from "../providers/provider-connections.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
-import { ImportedMcpService } from "../resources/imported-mcp-service.js"
+import {
+  ImportedMcpService,
+  type ResolvedManagedMcp
+} from "../resources/imported-mcp-service.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import {
   enabledPluginAgentToolsets,
   persistPluginIssueReferences,
-  registerPluginAgentTools
+  preparePluginAgentTools,
+  registerPreparedPluginAgentTools,
+  type PreparedPluginAgentTools
 } from "../tools/plugin-agent-tools.js"
 import type {
   PluginToolOrigin,
@@ -79,6 +84,15 @@ export interface PiAgentRuntimeLiveOptions {
     readonly spec: PiRunSpec
     readonly context: AgentRuntimeContext
   }) => Effect.Effect<void>
+}
+
+interface PreparedLockedCatalog {
+  readonly managedMcp: ReadonlyArray<ResolvedManagedMcp>
+  readonly managedFiles: ReadonlyArray<ManagedResource>
+  readonly plugins: {
+    readonly host: PluginHostRuntime
+    readonly prepared: PreparedPluginAgentTools
+  } | null
 }
 
 /** Composition for the embedded pi runtime and Jingler-owned tools. */
@@ -144,6 +158,7 @@ export const makePiAgentRuntimeLive = (
       )
     )
 
+    const preparedCatalogs = new Map<string, PreparedLockedCatalog>()
     const factory = makePiSessionFactory({
       agentDir: paths.managedResourcesDir,
       sessionsDir: paths.piSessionsDir,
@@ -206,17 +221,41 @@ export const makePiAgentRuntimeLive = (
         artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
         sessionId: spec.piSessionId ?? spec.runId
       }),
-      lockedCapabilityFingerprint: (spec) => Effect.all({
-        managedMcp: importedMcp.resolveForTarget(spec.targetCapabilities.targetId),
-        managedFiles: managedResources.enabledForTarget(spec.targetCapabilities.targetId),
-        pluginCatalog: pluginRegistry.list().pipe(
-          Effect.provideService(FileSystem.FileSystem, fs),
-          Effect.provideService(Path.Path, path),
-          Effect.provideService(AppPaths, paths),
-          Effect.provideService(ConfigService, config)
+      lockedCapabilityFingerprint: (spec) => Effect.gen(function* () {
+        const managedMcp = yield* importedMcp.resolveForTarget(
+          spec.targetCapabilities.targetId
         )
-      }).pipe(
-        Effect.map(({ managedMcp, managedFiles, pluginCatalog }) => JSON.stringify({
+        const managedFiles = yield* managedResources.enabledForTarget(
+          spec.targetCapabilities.targetId
+        )
+        const plugins = yield* Effect.all({
+          catalog: pluginRegistry.list().pipe(
+            Effect.provideService(FileSystem.FileSystem, fs),
+            Effect.provideService(Path.Path, path),
+            Effect.provideService(AppPaths, paths),
+            Effect.provideService(ConfigService, config)
+          ),
+          host: pluginHost.get()
+        }).pipe(
+          Effect.flatMap(({ catalog, host }) => Effect.promise(async () => ({
+            host,
+            prepared: await preparePluginAgentTools(
+              host,
+              enabledPluginAgentToolsets(catalog.plugins)
+            )
+          }))),
+          // Plugin tools are additive. Catalog, host, or descriptor failure must
+          // never remove Jingler's built-in tools from an otherwise healthy run.
+          Effect.orElseSucceed(() => null)
+        )
+        const prepared = { managedMcp, managedFiles, plugins }
+        preparedCatalogs.set(spec.runId, prepared)
+        while (preparedCatalogs.size > 64) {
+          const oldest = preparedCatalogs.keys().next().value
+          if (oldest === undefined) break
+          preparedCatalogs.delete(oldest)
+        }
+        return JSON.stringify({
           managedMcp: managedMcp.map((server) => server.transport === "stdio"
             ? {
                 id: server.id,
@@ -241,14 +280,26 @@ export const makePiAgentRuntimeLive = (
             managedPath: resource.kind === "mcp" ? "" : resource.managedPath,
             byteLength: resource.kind === "mcp" ? 0 : resource.byteLength
           })).sort((left, right) => String(left.id).localeCompare(String(right.id))),
-          plugins: enabledPluginAgentToolsets(pluginCatalog.plugins).map((source) => ({
-            pluginId: source.plugin.manifest.id,
-            version: source.plugin.manifest.version,
-            toolsetId: source.toolsetId
-          })).sort((left, right) =>
-            `${left.pluginId}:${left.toolsetId}`.localeCompare(`${right.pluginId}:${right.toolsetId}`)
-          )
-        })),
+          plugins: plugins?.prepared.toolsets.flatMap(({ source, descriptors }) =>
+            descriptors.map((descriptor) => ({
+              pluginId: source.plugin.manifest.id,
+              version: source.plugin.manifest.version,
+              toolsetId: source.toolsetId,
+              id: descriptor.id,
+              risk: descriptor.risk,
+              inputSchema: descriptor.inputSchema,
+              timeoutMs: descriptor.timeoutMs,
+              outputBudget: descriptor.outputBudget,
+              cancellable: descriptor.cancellable,
+              idempotency: descriptor.idempotency
+            }))
+          ).sort((left, right) =>
+            `${left.pluginId}:${left.toolsetId}:${left.id}`.localeCompare(
+              `${right.pluginId}:${right.toolsetId}:${right.id}`
+            )
+          ) ?? []
+        })
+      }).pipe(
         Effect.mapError((cause) => new AgentRuntimeError({
           reason: "runtime",
           message: cause.message,
@@ -256,6 +307,8 @@ export const makePiAgentRuntimeLive = (
         }))
       ),
       createToolRegistry: (spec, context, tracker) => {
+        const preparedCatalog = preparedCatalogs.get(spec.runId)
+        preparedCatalogs.delete(spec.runId)
         Effect.runFork(
           offload.primeSession(spec.cwd, spec.sessionId).pipe(Effect.ignore)
         )
@@ -267,27 +320,42 @@ export const makePiAgentRuntimeLive = (
               )
             : webSearch.value
           : undefined
+        const preparedPlugins = preparedCatalog === undefined
+          ? Effect.all({
+              catalog: pluginRegistry.list().pipe(
+                Effect.provideService(FileSystem.FileSystem, fs),
+                Effect.provideService(Path.Path, path),
+                Effect.provideService(AppPaths, paths),
+                Effect.provideService(ConfigService, config)
+              ),
+              host: pluginHost.get()
+            }).pipe(
+              Effect.flatMap(({ catalog, host }) => Effect.promise(async () => ({
+                host,
+                prepared: await preparePluginAgentTools(
+                  host,
+                  enabledPluginAgentToolsets(catalog.plugins)
+                )
+              }))),
+              Effect.orElseSucceed(() => null)
+            )
+          : Effect.succeed(preparedCatalog.plugins)
         const pluginSetup = Effect.all({
-          catalog: pluginRegistry.list().pipe(
-            Effect.provideService(FileSystem.FileSystem, fs),
-            Effect.provideService(Path.Path, path),
-            Effect.provideService(AppPaths, paths),
-            Effect.provideService(ConfigService, config)
-          ),
-          host: pluginHost.get(),
+          plugins: preparedPlugins,
           session: sessionStore.get(spec.sessionId).pipe(
             Effect.provideService(FileSystem.FileSystem, fs),
             Effect.provideService(AppPaths, paths)
           )
         }).pipe(
-          Effect.map(({ catalog, host, session }) => ({
-            host,
-            sources: enabledPluginAgentToolsets(catalog.plugins),
-            context: {
-              id: session.id,
-              repository: { name: session.repo, path: spec.cwd }
-            }
-          })),
+          Effect.map(({ plugins, session }) => plugins === null
+            ? null
+            : {
+                ...plugins,
+                context: {
+                  id: session.id,
+                  repository: { name: session.repo, path: spec.cwd }
+                }
+              }),
           // Plugin tools are additive. A missing/dead host must not remove
           // Jingler's built-in tools from an otherwise healthy run.
           Effect.orElseSucceed(() => null)
@@ -301,8 +369,12 @@ export const makePiAgentRuntimeLive = (
           )
         }
         return Effect.all({
-          managedMcp: importedMcp.resolveForTarget(spec.targetCapabilities.targetId),
-          managedFiles: managedResources.enabledForTarget(spec.targetCapabilities.targetId),
+          managedMcp: preparedCatalog === undefined
+            ? importedMcp.resolveForTarget(spec.targetCapabilities.targetId)
+            : Effect.succeed(preparedCatalog.managedMcp),
+          managedFiles: preparedCatalog === undefined
+            ? managedResources.enabledForTarget(spec.targetCapabilities.targetId)
+            : Effect.succeed(preparedCatalog.managedFiles),
           plugins: pluginSetup,
           memoryLifecycle: Option.isSome(memory) && memory.value.diagnostics !== undefined
             ? memory.value.diagnostics()
@@ -414,11 +486,11 @@ export const makePiAgentRuntimeLive = (
             Effect.tap((registry) =>
               plugins === null
                 ? Effect.void
-                : Effect.promise(() =>
-                    registerPluginAgentTools(
+                : Effect.sync(() =>
+                    registerPreparedPluginAgentTools(
                       registry,
                       plugins.host,
-                      plugins.sources,
+                      plugins.prepared,
                       plugins.context
                     )
                   ).pipe(Effect.asVoid)
