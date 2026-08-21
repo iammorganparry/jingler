@@ -3,6 +3,8 @@ import type { ReactNode } from "react"
 import { MermaidDiagram } from "../components/mermaid-diagram.js"
 import { Markdown } from "../components/markdown.js"
 
+const positionalKey = (index: number, value: string): string => `${index}:${value}`
+
 const renderBlock = (block: VisualBlock): ReactNode => {
   switch (block.kind) {
     case "prose":
@@ -17,9 +19,9 @@ const renderBlock = (block: VisualBlock): ReactNode => {
       )
     case "list":
       return block.ordered ? (
-        <ol>{block.items.map((item) => <li key={item}><Markdown>{item}</Markdown></li>)}</ol>
+        <ol>{block.items.map((item, index) => <li key={positionalKey(index, item)}><Markdown>{item}</Markdown></li>)}</ol>
       ) : (
-        <ul>{block.items.map((item) => <li key={item}><Markdown>{item}</Markdown></li>)}</ul>
+        <ul>{block.items.map((item, index) => <li key={positionalKey(index, item)}><Markdown>{item}</Markdown></li>)}</ul>
       )
     case "code":
       return <pre className="sb-plan-code"><code>{block.code}</code></pre>
@@ -27,12 +29,12 @@ const renderBlock = (block: VisualBlock): ReactNode => {
       return (
         <div className="overflow-x-auto">
           <table>
-            <thead><tr>{block.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead>
+            <thead><tr>{block.headers.map((header, index) => <th key={positionalKey(index, header)}>{header}</th>)}</tr></thead>
             <tbody>
-              {block.rows.map((row) => (
-                <tr key={row.join("\u001f")}>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={positionalKey(rowIndex, row.join("\u001f"))}>
                   {row.map((cell, cellIndex) => (
-                    <td key={`${block.headers[cellIndex] ?? "cell"}:${cell}`}>{cell}</td>
+                    <td key={positionalKey(cellIndex, cell)}>{cell}</td>
                   ))}
                 </tr>
               ))}

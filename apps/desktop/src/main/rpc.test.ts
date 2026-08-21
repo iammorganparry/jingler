@@ -767,6 +767,7 @@ describe("RPC handlers", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const explanationFiber = yield* explanationWatch("session-plan-thread").pipe(
+          Stream.filter((document) => document !== null),
           Stream.take(1),
           Stream.runCollect,
           Effect.fork,

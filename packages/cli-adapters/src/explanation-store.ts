@@ -47,29 +47,29 @@ export class ExplanationStore extends Effect.Service<ExplanationStore>()(
         })
 
       const currentFileFor = (
-        worktreePath: string
+        worktreePath: string,
+        sessionId: string
       ): Effect.Effect<string, never, ExplanationStoreEnv> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
-          return path.join(yield* dirFor(worktreePath), "current-explanation.json")
+          const suffix = createHash("sha256").update(sessionId).digest("hex").slice(0, 12)
+          return path.join(yield* dirFor(worktreePath), `explanation-${suffix}.json`)
         })
 
       const readUnlocked = (
         worktreePath: string,
-        sessionId?: string
+        sessionId: string
       ): Effect.Effect<ExplanationDocument | null, never, ExplanationStoreEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          const file = yield* currentFileFor(worktreePath)
+          const file = yield* currentFileFor(worktreePath, sessionId)
           if (!(yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false)))) return null
           const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""))
           const document = asDocument(raw)
-          return document !== null && (sessionId === undefined || document.sessionId === sessionId)
-            ? document
-            : null
+          return document?.sessionId === sessionId ? document : null
         })
 
-      const read = (worktreePath: string, sessionId?: string) =>
+      const read = (worktreePath: string, sessionId: string) =>
         lock.withPermits(1)(readUnlocked(worktreePath, sessionId))
 
       const writeUnlocked = (
@@ -81,7 +81,7 @@ export class ExplanationStore extends Effect.Service<ExplanationStore>()(
           if (decoded._tag === "Left") return yield* Effect.fail(new Error("Invalid explanation document"))
           const fs = yield* FileSystem.FileSystem
           const dir = yield* dirFor(worktreePath)
-          const file = yield* currentFileFor(worktreePath)
+          const file = yield* currentFileFor(worktreePath, document.sessionId)
           const temp = `${file}.${document.revision}.tmp`
           yield* fs.makeDirectory(dir, { recursive: true })
           yield* fs.writeFileString(temp, JSON.stringify(encodeDocument(decoded.right), null, 2))
@@ -137,7 +137,7 @@ export class ExplanationStore extends Effect.Service<ExplanationStore>()(
           const fs = yield* FileSystem.FileSystem
           const document = yield* read(worktreePath, sessionId)
           if (document !== null) return Option.some<ExplanationDocument | null>(document)
-          const file = yield* currentFileFor(worktreePath)
+          const file = yield* currentFileFor(worktreePath, sessionId)
           const exists = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => true))
           return exists ? Option.none() : Option.some<ExplanationDocument | null>(null)
         })
@@ -162,15 +162,17 @@ export class ExplanationStore extends Effect.Service<ExplanationStore>()(
           )
           return Stream.make<[ExplanationDocument | null]>(baseline).pipe(
             Stream.concat(changes.pipe(Stream.merge(polling), Stream.filterMap((value) => value))),
-            Stream.changesWith((left, right) => emissionKey(left) === emissionKey(right)),
-            Stream.drop(1)
+            Stream.changesWith((left, right) => emissionKey(left) === emissionKey(right))
           )
         }))
 
-      const removeAll = (worktreePath: string): Effect.Effect<void, never, ExplanationStoreEnv> =>
+      const removeAll = (
+        worktreePath: string,
+        sessionId: string
+      ): Effect.Effect<void, never, ExplanationStoreEnv> =>
         lock.withPermits(1)(Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          const file = yield* currentFileFor(worktreePath)
+          const file = yield* currentFileFor(worktreePath, sessionId)
           yield* fs.remove(file).pipe(Effect.ignore)
         }))
 

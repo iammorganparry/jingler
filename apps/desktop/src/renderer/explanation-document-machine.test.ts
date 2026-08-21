@@ -39,6 +39,30 @@ describe("explanationDocumentMachine", () => {
     actor.stop()
   })
 
+  it("keeps a watched revision that arrives while the initial load is pending", async () => {
+    let resolveLoad: (value: ExplanationDocument | null) => void = () => {}
+    const pending = new Promise<ExplanationDocument | null>((resolve) => { resolveLoad = resolve })
+    let remote: (value: ExplanationDocument | null) => void = () => {}
+    let subscribed = false
+    const actor = createActor(explanationDocumentMachine, {
+      input: {
+        sessionId: "session-1",
+        load: () => pending,
+        subscribe: (listener) => {
+          remote = listener
+          subscribed = true
+          return () => {}
+        }
+      }
+    }).start()
+    await vi.waitFor(() => expect(subscribed).toBe(true))
+    remote(document(2, "Watched"))
+    resolveLoad(document(1, "Loaded stale"))
+    await settled(actor)
+    expect(actor.getSnapshot().context.document).toMatchObject({ revision: 2, title: "Watched" })
+    actor.stop()
+  })
+
   it("recovers from load errors through retry", async () => {
     let attempts = 0
     const actor = createActor(explanationDocumentMachine, {

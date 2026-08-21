@@ -1,6 +1,9 @@
 import type { PlanCallPathDiff, PlanCallPathFrame } from "@jingler/core"
 import { ArrowRight, GitCompareArrows } from "lucide-react"
 
+const frameKey = (frame: PlanCallPathFrame, index: number): string =>
+  `${index}:${frame.symbol}:${frame.path ?? ""}`
+
 function CallFrame({ frame }: { readonly frame: PlanCallPathFrame }) {
   return (
     <span className="inline-flex min-w-0 flex-col rounded-md border border-line bg-surface/50 px-2 py-1.5">
@@ -18,7 +21,7 @@ function CallPath({ label, frames }: { readonly label: string; readonly frames: 
       <span className="text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">{label}</span>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         {frames.map((frame, index) => (
-          <div key={`${frame.symbol}:${frame.path ?? ""}`} className="contents">
+          <div key={frameKey(frame, index)} className="contents">
             {index > 0 && <ArrowRight className="size-3 flex-none text-dim" />}
             <CallFrame frame={frame} />
           </div>

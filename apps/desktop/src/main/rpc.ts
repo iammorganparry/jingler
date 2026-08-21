@@ -5247,7 +5247,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }
       if (session?.worktreePath) {
         yield* PlanStore.removeAll(session.worktreePath);
-        yield* ExplanationStore.removeAll(session.worktreePath);
+        yield* ExplanationStore.removeAll(session.worktreePath, session.id);
       }
       yield* ReviewStore.clear(sessionId);
     }),

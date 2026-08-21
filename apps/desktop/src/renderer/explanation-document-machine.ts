@@ -48,10 +48,15 @@ export const explanationDocumentMachine = setup({
       )
   },
   actions: {
-    loaded: assign((_, params: { readonly document: ExplanationDocument | null }) => ({
-      document: params.document,
-      error: null
-    })),
+    loaded: assign(({ context }, params: { readonly document: ExplanationDocument | null }) => {
+      const loaded = params.document
+      const current = context.document
+      if (
+        current !== null &&
+        (loaded === null || loaded.id !== current.id || loaded.revision < current.revision)
+      ) return { error: null }
+      return { document: loaded, error: null }
+    }),
     applyRemote: assign(({ event }) =>
       event.type === "REMOTE" ? { document: event.document, error: null } : {}
     ),
@@ -67,6 +72,9 @@ export const explanationDocumentMachine = setup({
   },
   states: {
     loading: {
+      on: {
+        REMOTE: { guard: "remoteAdvances", actions: "applyRemote" }
+      },
       invoke: {
         src: "loadDocument",
         input: ({ context }) => ({ load: context.load }),

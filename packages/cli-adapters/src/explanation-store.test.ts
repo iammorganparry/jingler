@@ -41,24 +41,28 @@ describe("ExplanationStore", () => {
     expect(second.title).toBe("Second")
   })
 
-  it("notifies watchers of a new revision", async () => {
+  it("emits the baseline and notifies watchers of a new revision", async () => {
     const watched = await run(Effect.gen(function* () {
       const store = yield* ExplanationStore
-      const fiber = yield* Stream.runCollect(store.watch(WT, "session-1").pipe(Stream.take(1))).pipe(Effect.fork)
+      yield* store.publish(WT, "session-1", "chat-1", payload("Baseline"))
+      const fiber = yield* Stream.runCollect(store.watch(WT, "session-1").pipe(Stream.take(2))).pipe(Effect.fork)
       yield* Effect.sleep("25 millis")
       yield* store.publish(WT, "session-1", "chat-1", payload("Watched"))
       return yield* Fiber.join(fiber)
     }))
-    expect(Chunk.toReadonlyArray(watched)[0]).toMatchObject({ title: "Watched", revision: 1 })
+    expect(Chunk.toReadonlyArray(watched)).toMatchObject([
+      { title: "Baseline", revision: 1 },
+      { title: "Watched", revision: 2 }
+    ])
   })
 
-  it("isolates worktree namespaces and removes only the selected artifact", async () => {
-    const other = "/tmp/another/project/session"
+  it("isolates sessions sharing one worktree and removes only the selected artifact", async () => {
     await run(ExplanationStore.publish(WT, "session-1", "chat-1", payload("First")))
-    await run(ExplanationStore.publish(other, "session-2", "chat-2", payload("Other")))
-    expect(await run(ExplanationStore.read(WT, "session-2"))).toBeNull()
-    await run(ExplanationStore.removeAll(WT))
+    await run(ExplanationStore.publish(WT, "session-2", "chat-2", payload("Other")))
+    expect(await run(ExplanationStore.read(WT, "session-1"))).toMatchObject({ title: "First" })
+    expect(await run(ExplanationStore.read(WT, "session-2"))).toMatchObject({ title: "Other" })
+    await run(ExplanationStore.removeAll(WT, "session-1"))
     expect(await run(ExplanationStore.read(WT, "session-1"))).toBeNull()
-    expect(await run(ExplanationStore.read(other, "session-2"))).toMatchObject({ title: "Other" })
+    expect(await run(ExplanationStore.read(WT, "session-2"))).toMatchObject({ title: "Other" })
   })
 })
