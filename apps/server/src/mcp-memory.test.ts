@@ -569,7 +569,11 @@ describe("stateless MCP 2026-07-28", () => {
         metadata: { project: "widget" }
       }],
       ["memory_recall", { query: "retry conventions", limit: 5 }],
-      ["memory_reflect", { query: "How should retries work?", limit: 4 }]
+      ["memory_reflect", {
+        query: "How should retries work?",
+        scope: { kind: "project", id: "project-widget" },
+        limit: 4
+      }]
     ] as const) {
       const response = await handleMemoryMcpRequest(
         requestFor("tools/call", grant, {
@@ -594,8 +598,31 @@ describe("stateless MCP 2026-07-28", () => {
       "/internal/memory/search?q=retry%20conventions&limit=5"
     )
     expect(requests[2]?.path).toBe(
-      "/internal/memory/reflect?q=How%20should%20retries%20work%3F&limit=4"
+      "/internal/memory/reflect?q=How%20should%20retries%20work%3F&limit=4&scopeKind=project&scopeId=project-widget"
     )
+  })
+
+  it("requires an authorized knowledge scope for reflection", async () => {
+    const { client, requests } = collectingClient()
+    const dependencies = dependenciesFor(client)
+    const grant = issue().grant
+    const argumentsValues = [
+      { query: "retry" },
+      { query: "retry", scope: { kind: "user", id: "another-user" } },
+      { query: "retry", scope: { kind: "organization", id: "another-org" } }
+    ]
+
+    for (const argumentsValue of argumentsValues) {
+      const response = await handleMemoryMcpRequest(
+        requestFor("tools/call", grant, {
+          params: { name: "memory_reflect", arguments: argumentsValue }
+        }),
+        dependencies
+      )
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ error: { code: -32602 } })
+    }
+    expect(requests).toEqual([])
   })
 
   it("rejects credential-shaped explicit retain before source ingestion", async () => {

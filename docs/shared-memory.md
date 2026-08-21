@@ -65,8 +65,10 @@ the operator text, the last three visible turns, and repository/branch identity.
 Recall fuses lexical/index, wikilink/backlink, semantic ANN, and temporal recency
 signals. It reads at most three accepted pages and injects one evidence block
 with an approximate 2K-token text budget plus stable page, revision, source, and
-citation IDs. Failed recall retries; successful empty/unchanged recall is cached.
-The latest accepted evidence block is also supplied to context compaction. Local
+citation IDs. Failed recall retries; successful empty/unchanged recall is cached
+for 60 seconds, then searched again so newly published evidence can appear.
+Semantic-only ANN candidates must clear a finite similarity threshold. The
+latest accepted evidence block is also supplied to context compaction. Local
 checkout paths are never part of the query.
 
 Execute-risk tool calls have a second, run-scoped recall boundary. Shell calls
@@ -81,13 +83,17 @@ Every successful top-level turn durably queues one deterministic conversation
 source before the UI sees completion. Retention contains only canonical visible
 user and assistant text: system/developer prompts, recalled memory, hidden
 reflection, tool payloads, credentials, machine-local paths, and child-agent
-reasoning are structurally excluded or redacted. Delivery retries from the local
-outbox and compiler workflow identity is stable across replay.
+reasoning are structurally excluded or redacted. Delivery retries autonomously
+from the local outbox with bounded exponential backoff, and compiler workflow
+identity is stable across replay.
 
 A mutating turn with memory enabled and no explicit proposal may still receive a
 hidden reflection nudge. `memory_retain` stores explicit source material;
-`memory_recall` returns hybrid ranked evidence; `memory_reflect` returns a cited,
-non-retaining synthesis. `memory_propose` remains the curated page update path.
+`memory_recall` returns hybrid ranked evidence; `memory_reflect` requires an
+explicit organization/project/user knowledge scope and returns a cited,
+non-retaining synthesis under one combined result and text budget. User scope
+must match the calling grant subject; project scope is retrieval isolation within
+the organization grant. `memory_propose` remains the curated page update path.
 Accepted publications create scoped, supersedable observations and refresh
 published mental models that opt into refresh-after-consolidation.
 

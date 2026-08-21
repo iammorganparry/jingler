@@ -192,6 +192,21 @@ const positiveLimit = (url: URL, key = "limit"): number | undefined => {
   return Math.floor(value)
 }
 
+const knowledgeScope = (url: URL): Schema.Schema.Type<typeof MemoryKnowledgeScope> => {
+  const decoded = Schema.decodeUnknownEither(MemoryKnowledgeScope)({
+    kind: url.searchParams.get("scopeKind"),
+    id: url.searchParams.get("scopeId")
+  })
+  if (Either.isLeft(decoded)) {
+    throw new MemoryVaultError({
+      code: "invalid",
+      message: "scopeKind and scopeId must identify a valid knowledge scope",
+      status: 400
+    })
+  }
+  return decoded.right
+}
+
 const nonNegativeCursor = (url: URL): number | undefined => {
   const raw = url.searchParams.get("cursor")
   if (raw === null) return
@@ -305,6 +320,7 @@ const dispatchSourceRequest = (
 const dispatchKnowledgeRequest = (
   request: Request,
   route: ReadonlyArray<string>,
+  url: URL,
   vault: TeamVault
 ): Effect.Effect<Response, MemoryVaultError> =>
   Effect.gen(function* () {
@@ -317,7 +333,9 @@ const dispatchKnowledgeRequest = (
       )
     }
     if (isRoute(request, route, "GET", "observations")) {
-      return jsonResponse({ observations: yield* vault.listObservations() })
+      return jsonResponse({
+        observations: yield* vault.listObservations(knowledgeScope(url))
+      })
     }
     if (isRoute(request, route, "POST", "mental-models")) {
       return jsonResponse(
@@ -464,7 +482,12 @@ const dispatchVaultQuery = (
     if (isRoute(request, route, "GET", "reflect")) {
       const query = url.searchParams.get("q") ?? ""
       const occurredAt = url.searchParams.get("occurredAt") ?? new Date().toISOString()
-      return jsonResponse(yield* vault.reflect(query, positiveLimit(url), occurredAt))
+      return jsonResponse(yield* vault.reflect(
+        query,
+        knowledgeScope(url),
+        positiveLimit(url),
+        occurredAt
+      ))
     }
     if (isRoute(request, route, "GET", "navigation")) {
       return jsonResponse(yield* vault.navigation())
@@ -549,8 +572,8 @@ const dispatchVaultRequest = (
   return Match.value(route[0]).pipe(
     Match.when("pages", () => dispatchPageRequest(request, route, vault)),
     Match.when("sources", () => dispatchSourceRequest(request, route, vault)),
-    Match.when("observations", () => dispatchKnowledgeRequest(request, route, vault)),
-    Match.when("mental-models", () => dispatchKnowledgeRequest(request, route, vault)),
+    Match.when("observations", () => dispatchKnowledgeRequest(request, route, url, vault)),
+    Match.when("mental-models", () => dispatchKnowledgeRequest(request, route, url, vault)),
     Match.when("proposal-sets", () => dispatchProposalSetRequest(request, route, vault)),
     Match.when("proposals", () => dispatchProposalRequest(request, route, vault)),
     Match.orElse(() => dispatchVaultQuery(request, route, url, vault))

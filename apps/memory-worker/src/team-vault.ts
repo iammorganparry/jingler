@@ -19,6 +19,7 @@ import {
   serializeMemoryMarkdown,
   SUGGESTION_POLICY_DEFAULT,
   type MemoryAuditEvent,
+  type MemoryKnowledgeScope,
   type MemoryMentalModel,
   type MemoryMentalModelRevision,
   type MemoryObservation,
@@ -58,6 +59,7 @@ import {
 } from "./r2-store.js"
 import {
   buildSearchProjection,
+  MIN_SEARCH_SEMANTIC_SIMILARITY,
   searchAcceptedPages,
   type SearchProjection,
   type VaultSearchResponse
@@ -765,6 +767,7 @@ const uniqueById = <Value extends { readonly id: string }>(
 }
 
 const MAX_SESSION_RETRIEVALS = 4_096
+const MAX_REFLECTION_CHARACTERS = 12_000
 
 const boundedSessionRetrievals = (
   values: ReadonlyArray<SessionRetrievalMetric>
@@ -1861,7 +1864,12 @@ export class TeamVault {
             Effect.catchAllCause(() => Effect.succeed([]))
           )
       const semanticScores = new Map(
-        semanticHits.map((hit) => [hit.id, hit.similarity])
+        semanticHits.flatMap((hit) =>
+          Number.isFinite(hit.similarity) &&
+            hit.similarity >= MIN_SEARCH_SEMANTIC_SIMILARITY
+            ? [[hit.id, Math.min(1, hit.similarity)] as const]
+            : []
+        )
       )
       const candidatePageIds = lexicalCandidateIds === undefined
         ? undefined
@@ -2102,52 +2110,99 @@ export class TeamVault {
 
   reflect(
     query: string,
+    scope: MemoryKnowledgeScope,
     limit = 8,
     occurredAt = new Date().toISOString()
   ): Effect.Effect<VaultReflectResponse, MemoryVaultError> {
     return Effect.gen(this, function* () {
-      const recalled = yield* this.search(query, Math.max(1, Math.min(20, limit)), occurredAt)
+      const boundedLimit = Math.max(1, Math.min(20, limit))
+      const recalled = yield* this.search(
+        query,
+        Math.min(20, Math.max(boundedLimit * 2, boundedLimit)),
+        occurredAt
+      )
       const snapshot = yield* this.state.load()
+      const scopedModels = snapshot.mentalModels.filter((model) =>
+        model.scope.kind === scope.kind && model.scope.id === scope.id
+      )
       const latestModelRevisions = new Map<string, MemoryMentalModelRevision>()
       for (const revision of snapshot.mentalModelRevisions) {
-        const model = snapshot.mentalModels.find((candidate) => candidate.id === revision.modelId)
+        const model = scopedModels.find((candidate) => candidate.id === revision.modelId)
         if (model === undefined || revision.definitionVersion !== model.definitionVersion) continue
+        const evidenceIsScoped = revision.evidenceObservationIds.every((observationId) => {
+          const observation = snapshot.observations.find((candidate) => candidate.id === observationId)
+          return observation !== undefined &&
+            observation.scope.kind === scope.kind && observation.scope.id === scope.id
+        })
+        if (!evidenceIsScoped) continue
         const previous = latestModelRevisions.get(revision.modelId)
         if (previous === undefined || revision.version > previous.version) {
           latestModelRevisions.set(revision.modelId, revision)
         }
       }
-      const terms = query.toLocaleLowerCase("en-US").split(/\s+/u).filter(Boolean)
-      const models = snapshot.mentalModels.flatMap((model) => {
+      const terms = [...new Set(
+        query.toLocaleLowerCase("en-US").split(/\s+/u).filter(Boolean)
+      )]
+      const modelCandidates = scopedModels.flatMap((model) => {
         if (model.publication !== "published") return []
         const revision = latestModelRevisions.get(model.id)
         if (revision === undefined || revision.content.trim().length === 0) return []
         const searchable = `${model.name} ${model.sourceQuery} ${revision.content}`
           .toLocaleLowerCase("en-US")
-        return terms.some((term) => searchable.includes(term)) ? [{ model, revision }] : []
+        const coverage = terms.filter((term) => searchable.includes(term)).length
+        return coverage === 0 ? [] : [{
+          kind: "model" as const,
+          score: coverage * 100,
+          id: model.id,
+          text: `Mental model ${model.name}: ${revision.content}`,
+          model,
+          revision
+        }]
       })
-      const lines = [
-        ...models.map(({ model, revision }) =>
-          `Mental model ${model.name}: ${revision.content}`
-        ),
-        ...recalled.results.map((result) =>
-          `${result.title}: ${result.snippet}`
+      const pageCandidates = recalled.results.map((result) => ({
+        kind: "page" as const,
+        score: result.score,
+        id: result.pageId,
+        text: `${result.title}: ${result.snippet}`,
+        result
+      }))
+      const candidates = [...modelCandidates, ...pageCandidates]
+        .sort((left, right) =>
+          right.score - left.score || compareText(left.id, right.id)
         )
-      ]
+        .slice(0, boundedLimit)
+      const selected: typeof candidates = []
+      const lines: string[] = []
+      let remainingCharacters = MAX_REFLECTION_CHARACTERS
+      for (const candidate of candidates) {
+        const separatorCharacters = lines.length === 0 ? 0 : 2
+        const availableCharacters = remainingCharacters - separatorCharacters
+        if (availableCharacters <= 0) break
+        const represented = candidate.text.slice(0, availableCharacters)
+        if (represented.trim().length === 0) break
+        selected.push(candidate)
+        lines.push(represented)
+        remainingCharacters -= represented.length + separatorCharacters
+        if (represented.length < candidate.text.length) break
+      }
       return {
         text: lines.length === 0
           ? "No accepted memory evidence matched this reflection."
           : lines.join("\n\n"),
         basedOn: {
-          pages: recalled.results.map((result) => ({
-            pageId: result.pageId,
-            revisionId: result.revisionId,
-            citationIds: result.citationIds
-          })),
-          mentalModels: models.map(({ model, revision }) => ({
-            modelId: model.id,
-            revisionId: revision.id
-          }))
+          pages: selected.flatMap((candidate) => candidate.kind === "page"
+            ? [{
+                pageId: candidate.result.pageId,
+                revisionId: candidate.result.revisionId,
+                citationIds: candidate.result.citationIds
+              }]
+            : []),
+          mentalModels: selected.flatMap((candidate) => candidate.kind === "model"
+            ? [{
+                modelId: candidate.model.id,
+                revisionId: candidate.revision.id
+              }]
+            : [])
         }
       }
     })

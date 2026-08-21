@@ -586,26 +586,83 @@ describe("memory Worker internal API", () => {
       }),
       env
     )
-    const observations = await handleMemoryWorkerRequest(
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/observations", {
+        scope,
+        key: "retry",
+        text: "Use the shared bounded retry helper.",
+        evidenceId: "revision:retry:2",
+        confidence: 1,
+        createdAt: "2026-08-20T11:00:00.000Z"
+      }),
+      env
+    )
+    await handleMemoryWorkerRequest(
+      jsonRequest("org-a", "/internal/memory/observations", {
+        scope: { kind: "project", id: "project-b" },
+        key: "retry",
+        text: "Project B uses fixed retries.",
+        evidenceId: "revision:project-b:1",
+        confidence: 1,
+        createdAt: "2026-08-20T11:00:00.000Z"
+      }),
+      env
+    )
+    const missingScope = await handleMemoryWorkerRequest(
       getRequest("org-a", "/internal/memory/observations"),
+      env
+    )
+    const observations = await handleMemoryWorkerRequest(
+      getRequest(
+        "org-a",
+        "/internal/memory/observations?scopeKind=project&scopeId=project-a"
+      ),
       env
     )
     const models = await handleMemoryWorkerRequest(
       getRequest("org-a", "/internal/memory/mental-models"),
       env
     )
+    const missingReflectScope = await handleMemoryWorkerRequest(
+      getRequest("org-a", "/internal/memory/reflect?q=retry"),
+      env
+    )
+    const reflected = await handleMemoryWorkerRequest(
+      getRequest(
+        "org-a",
+        "/internal/memory/reflect?q=retry&limit=1&scopeKind=project&scopeId=project-a"
+      ),
+      env
+    )
 
     expect(model.status).toBe(201)
     expect(observation.status).toBe(201)
+    expect(missingScope.status).toBe(400)
+    expect(missingReflectScope.status).toBe(400)
+    expect(reflected.status).toBe(200)
+    expect(await jsonBody(reflected)).toMatchObject({
+      basedOn: { mentalModels: [expect.objectContaining({ modelId: "model:conventions" })] }
+    })
     expect(await jsonBody(observations)).toMatchObject({
-      observations: [{ key: "retry", evidenceIds: ["revision:retry:1"] }]
+      observations: [{
+        key: "retry",
+        text: "Use the shared bounded retry helper.",
+        evidenceIds: ["revision:retry:1", "revision:retry:2"],
+        version: 2
+      }]
     })
     expect(await jsonBody(models)).toMatchObject({
       models: [{ id: "model:conventions", definitionVersion: 1 }],
-      revisions: [{ modelId: "model:conventions", version: 1 }]
+      revisions: [
+        { modelId: "model:conventions", version: 1 },
+        { modelId: "model:conventions", version: 2 }
+      ]
     })
     expect(await jsonBody(await handleMemoryWorkerRequest(
-      getRequest("org-b", "/internal/memory/observations"),
+      getRequest(
+        "org-b",
+        "/internal/memory/observations?scopeKind=project&scopeId=project-a"
+      ),
       env
     ))).toEqual({ observations: [] })
   })

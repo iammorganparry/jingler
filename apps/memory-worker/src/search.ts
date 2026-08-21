@@ -112,6 +112,13 @@ const backlinkMatchesFor = (
   return matches
 }
 
+export const MIN_SEARCH_SEMANTIC_SIMILARITY = 0.25
+
+const acceptedSemanticScore = (score: number | undefined): number | undefined =>
+  score !== undefined && Number.isFinite(score) && score >= MIN_SEARCH_SEMANTIC_SIMILARITY
+    ? Math.min(1, score)
+    : undefined
+
 export interface SearchAcceptedPagesOptions {
   readonly candidatePageIds?: ReadonlySet<string>
   readonly semanticScores?: ReadonlyMap<string, number>
@@ -137,7 +144,7 @@ const resultScore = (
   else if (includesQuery(page.title, query)) score += 40
   if (normalize(page.id) === query || normalize(page.path) === query) score += 80
   score += page.tags.filter((tag) => includesQuery(tag, query)).length * 5
-  score += (options.semanticScores?.get(page.id) ?? 0) * 60
+  score += (acceptedSemanticScore(options.semanticScores?.get(page.id)) ?? 0) * 60
   score += recencyScore(
     options.acceptedAtByPageId?.get(page.id),
     options.queryTimestamp
@@ -161,7 +168,9 @@ export const searchAcceptedPages = (
     )
     .map((page): VaultSearchResult | null => {
       const matchKinds = [...matchKindsFor(page, query, backlinkMatches)]
-      if (options.semanticScores?.has(page.id)) matchKinds.push("semantic")
+      if (acceptedSemanticScore(options.semanticScores?.get(page.id)) !== undefined) {
+        matchKinds.push("semantic")
+      }
       const revisionId = revisionIdByPageId.get(page.id)
       if (matchKinds.length === 0 || revisionId === undefined) return null
       return {

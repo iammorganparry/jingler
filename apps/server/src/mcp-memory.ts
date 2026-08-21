@@ -9,7 +9,7 @@ import {
   type MemoryPrivilege
 } from "@jingler/core"
 import { createHash, randomUUID } from "node:crypto"
-import { findCredentialShapedContent } from "@jingler/memory"
+import { findCredentialShapedContent, MemoryKnowledgeScope } from "@jingler/memory"
 import { Effect, JSONSchema, Match, Schema } from "effect"
 import type { JsonValue, MemoryClient, MemoryClientRequest } from "./memory-client.js"
 
@@ -83,6 +83,15 @@ const ExplicitRetainArguments = Schema.Struct({
   metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String }))
 })
 
+const authorizedScopeQuery = (
+  scope: Schema.Schema.Type<typeof MemoryKnowledgeScope>,
+  claims: MemoryGrantClaims
+): string | null => {
+  if (scope.kind === "organization" && scope.id !== claims.organizationId) return null
+  if (scope.kind === "user" && scope.id !== claims.subject) return null
+  return `scopeKind=${encodeURIComponent(scope.kind)}&scopeId=${encodeURIComponent(scope.id)}`
+}
+
 const tools: ReadonlyArray<ToolDefinition> = [
   defineTool({
     name: "memory_retain",
@@ -133,12 +142,20 @@ const tools: ReadonlyArray<ToolDefinition> = [
     name: "memory_reflect",
     description: "Synthesize a cited, non-retaining answer from accepted memory.",
     privilege: "read"
-  }, Schema.Struct({ query: NonEmptyString, limit: Schema.optional(limit(20)) }),
-  (args, claims, requestId) => getRequest(
-    claims,
-    requestId,
-    `/internal/memory/reflect?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 8}`
-  )),
+  }, Schema.Struct({
+    query: NonEmptyString,
+    scope: MemoryKnowledgeScope,
+    limit: Schema.optional(limit(20))
+  }), (args, claims, requestId) => {
+    const scope = authorizedScopeQuery(args.scope, claims)
+    return scope === null
+      ? null
+      : getRequest(
+          claims,
+          requestId,
+          `/internal/memory/reflect?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 8}&${scope}`
+        )
+  }),
   defineTool({
     name: "memory_dashboard",
     description: "Read the pre-aggregated private team-memory dashboard.",
@@ -575,7 +592,7 @@ const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
  * deliberately augments, rather than replaces, this portable MCP contract.
  */
 export const MEMORY_MCP_INSTRUCTIONS =
-  "Recall with memory_recall, then memory_read used pages; cite pageId, revisionId, sourceIds, and citationIds. Use memory_reflect only for synthesis and never treat its output as source evidence. Retain explicit durable sources with memory_retain. For page changes: dedupe, memory_propose, resolve conflicts against the current revision, and poll workflowId with memory_workflow_status. Exclude progress, secrets, and personal data. Stateless: never reuse sessions or cookies."
+  "Recall with memory_recall, then memory_read used pages; cite pageId, revisionId, sourceIds, and citationIds. Use memory_reflect with an explicit knowledge scope only for synthesis and never treat its output as source evidence. Retain explicit durable sources with memory_retain. For page changes: dedupe, memory_propose, resolve conflicts against the current revision, and poll workflowId with memory_workflow_status. Exclude progress, secrets, and personal data. Stateless: never reuse sessions or cookies."
 
 /**
  * Serve a STANDARD MCP client — the harnesses' native codex / opencode / Claude
