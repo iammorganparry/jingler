@@ -59,7 +59,10 @@ import {
 import { appMachine } from "./app-machine.js";
 import { authMachine } from "./auth-machine.js";
 import { ConversationPane } from "./conversation-pane.js";
-import { useExplanationDocument } from "./use-explanation-document.js";
+import {
+  useExplanationDocument,
+  useExplanationSessions,
+} from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionChatTabs } from "./session-chat-tabs.js";
 import { PullRequestPane } from "./pull-request-pane.js";
@@ -355,34 +358,6 @@ function ExplanationPane({ sessionId }: { readonly sessionId: string }) {
       onRetry={explanation.retry}
     />
   )
-}
-
-function useExplanationSessions(sessions: ReadonlyArray<Session>): ReadonlySet<string> {
-  const [present, setPresent] = useState<ReadonlySet<string>>(() => new Set())
-  const sessionKey = sessions.map(({ id }) => id).join("\n")
-  useEffect(() => {
-    let active = true
-    const update = (sessionId: string, exists: boolean) => {
-      if (!active) return
-      setPresent((current) => {
-        const next = new Set(current)
-        if (exists) next.add(sessionId)
-        else next.delete(sessionId)
-        return next
-      })
-    }
-    const stops = sessions.map((session) => {
-      void rpc.explanationCurrent(session.id)
-        .then((document) => update(session.id, document !== null))
-        .catch(() => {})
-      return rpc.explanationWatch(session.id, (document) => update(session.id, document !== null))
-    })
-    return () => {
-      active = false
-      for (const stop of stops) stop()
-    }
-  }, [sessionKey])
-  return present
 }
 
 function AuthedApp({

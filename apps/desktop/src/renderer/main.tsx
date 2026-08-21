@@ -10,6 +10,7 @@ import "./index.css"
 import "./plugin-runtime.js"
 import { App } from "./App.js"
 import { queryClient } from "./query-client.js"
+import { installExplanationQueryBridge } from "./use-explanation-document.js"
 import { installPlanDocumentFlushHandler } from "./plan-document-registry.js"
 
 /**
@@ -36,6 +37,7 @@ if (bootThemeCss) {
 }
 
 installPlanDocumentFlushHandler()
+installExplanationQueryBridge(queryClient)
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
