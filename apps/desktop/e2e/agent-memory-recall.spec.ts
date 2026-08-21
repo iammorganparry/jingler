@@ -133,7 +133,7 @@ test("pi recalls, applies a tool advisory, publishes, and shares a learning with
   }
 })
 
-test("pi receives accepted memory without raw settled-turn capture", async ({ launchApp }) => {
+test("pi receives accepted memory and automatically retains its visible settled turn", async ({ launchApp }) => {
   const fake = await startFakeAuthServer()
   try {
     const app = await launchApp({
@@ -176,7 +176,8 @@ test("pi receives accepted memory without raw settled-turn capture", async ({ la
         request.mcpMethod === null &&
         request.mcpName === null
     )).toBe(true)
-    expect(sourceIngestRequests(fake.memoryRequests)).toEqual([])
+    await expect.poll(() => sourceIngestRequests(fake.memoryRequests).length).toBe(1)
+    expect(fake.memorySnapshot("org-e2e").sourceCount).toBe(1)
 
     await app.app.close()
   } finally {

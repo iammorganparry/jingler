@@ -1735,6 +1735,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (event._tag === "Done") {
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
                 yield* finalizePlanVerification()
+                const assistantText = next.parts
+                  .filter((part) => part._tag === "Text")
+                  .map((part) => part.text)
+                  .join("\n")
+                yield* memoryService.retainSettledTurn({
+                  sessionId,
+                  chatId,
+                  turnId: next.id,
+                  repository: session.repo,
+                  userText: operatorText,
+                  assistantText,
+                  settledAt: new Date().toISOString()
+                }).pipe(Effect.ignore)
               }
               yield* out.offer(event)
               // After the tool card lands, reconcile plan progress off a successful edit.

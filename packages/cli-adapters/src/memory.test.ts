@@ -652,7 +652,97 @@ const writeLegacyCaptureOutbox = (
   )
 }
 
-describe("MemoryService legacy capture recovery", () => {
+describe("MemoryService automatic retention", () => {
+  const retainedTurn = {
+    sessionId: "session-1",
+    chatId: "chat-1",
+    turnId: "assistant-1",
+    repository: "widget",
+    userText: "Authorization: Bearer user-secret",
+    assistantText: "Reused api_key=assistant-secret in ~/src/helper.ts",
+    settledAt: "2026-08-20T09:00:00.000Z"
+  }
+
+  it("delivers one deterministic redacted conversation source", async () => {
+    const requests: Request[] = []
+    const service = makeMemoryService({
+      fetch: async (input, init) => {
+        const request = requestOf(input, init)
+        requests.push(request)
+        return request.url.endsWith("/api/memory/grant")
+          ? Response.json(grantResponse("retain"))
+          : Response.json({ workflowId: "compiler-retained" }, { status: 201 })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+
+    const queued = await Effect.runPromise(
+      withEnabledMemory(service.retainSettledTurn(retainedTurn)).pipe(
+        Effect.provide(configuredLayer())
+      )
+    )
+    expect(queued).toBe(true)
+    await vi.waitFor(() => expect(
+      requests.some((request) => request.url.endsWith("/api/memory/sources"))
+    ).toBe(true))
+
+    const sourceRequest = requests.find((request) =>
+      request.url.endsWith("/api/memory/sources")
+    )
+    const sourceId = sourceRequest?.headers.get("x-idempotency-key")
+    expect(sourceId).toMatch(/^session-digest:[a-f0-9]{64}$/u)
+    const body = await sourceRequest?.json() as {
+      content?: string
+      source?: { id?: string; kind?: string; uri?: string }
+    } | undefined
+    expect(body).toMatchObject({
+      source: {
+        id: sourceId,
+        kind: "conversation",
+        uri: `jingler://session-digest/${sourceId?.slice("session-digest:".length)}`
+      },
+      content: expect.stringContaining("Authorization: [REDACTED]")
+    })
+    expect(body?.content).toContain("api_key=[REDACTED]")
+    expect(body?.content).not.toContain("user-secret")
+    expect(body?.content).not.toContain("assistant-secret")
+  })
+
+  it("deduplicates a queued turn and retains it after transient delivery failure", async () => {
+    let sourceRequests = 0
+    const service = makeMemoryService({
+      fetch: async (input) => {
+        if (String(input).endsWith("/api/memory/grant")) {
+          return Response.json(grantResponse("retry"))
+        }
+        sourceRequests += 1
+        return Response.json({ error: "offline" }, { status: 503 })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+    const layer = configuredLayer()
+
+    const first = await Effect.runPromise(
+      withEnabledMemory(service.retainSettledTurn(retainedTurn)).pipe(Effect.provide(layer))
+    )
+    await vi.waitFor(() => expect(sourceRequests).toBe(1))
+    const duplicate = await Effect.runPromise(
+      withEnabledMemory(service.retainSettledTurn(retainedTurn)).pipe(Effect.provide(layer))
+    )
+
+    expect(first).toBe(true)
+    expect(duplicate).toBe(false)
+    const outbox = JSON.parse(
+      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
+    ) as ReadonlyArray<{ readonly attempts: number }>
+    expect(outbox).toHaveLength(1)
+    expect(outbox[0]?.attempts).toBe(1)
+  })
+})
+
+describe("MemoryService retention recovery", () => {
   it("retains transient pre-upgrade captures without an attempt-count deletion boundary", async () => {
     writeLegacyCaptureOutbox()
     const fetchImplementation: typeof fetch = async (input) =>

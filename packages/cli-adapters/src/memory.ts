@@ -29,6 +29,11 @@ import {
   type MemoryMcpProxyError
 } from "./memory-mcp-proxy.js"
 import { memoryPrompt } from "./memory-prompt.js"
+import {
+  memoryRetentionContent,
+  memoryRetentionIdentity,
+  type MemoryRetentionInput
+} from "./memory-retain.js"
 import { SecretStore } from "./secret-store.js"
 
 const MEMORY_SERVER_NAME = "jingler-memory"
@@ -158,7 +163,11 @@ export interface MemoryServiceShape {
     /** Stable conversation boundary used to avoid reinjecting unchanged pages. */
     recallScope?: string
   ) => Effect.Effect<MemoryAttachment | null, never, MemoryServiceEnvironment>
-  /** Flush capture jobs left by versions that recorded raw settled turns. */
+  /** Durably queue one canonical visible top-level turn for memory compilation. */
+  readonly retainSettledTurn: (
+    input: MemoryRetentionInput
+  ) => Effect.Effect<boolean, never, MemoryServiceEnvironment>
+  /** Flush locally queued retention jobs without discarding transient failures. */
   readonly recoverCaptures: () => Effect.Effect<MemoryCaptureRecoveryResult | null, never, MemoryServiceEnvironment>
   /** Resolve renderer-safe eligibility; the grant itself remains in this service. */
   readonly access: () => Effect.Effect<MemoryUiAccess | null, never, MemoryServiceEnvironment>
@@ -229,6 +238,8 @@ interface MemoryRuntime {
   readonly attachmentRefreshes: Set<string>
   /** Last accepted recall working set per active conversation. */
   readonly recallCache: Map<string, RecallCacheEntry>
+  /** Protects atomic outbox read-modify-write while network delivery stays unlocked. */
+  readonly outboxLock: Effect.Semaphore
   /** Serializes automatic and user-triggered recovery drains. */
   readonly drainLock: Effect.Semaphore
 }
@@ -846,12 +857,26 @@ const writeOutbox = (jobs: ReadonlyArray<MemoryCaptureJob>) =>
     yield* fs.rename(temporary, file)
   })
 
+type EnqueueOutcome = "stored" | "duplicate" | "failed"
+
+const enqueueCapture = (
+  runtime: MemoryRuntime,
+  job: MemoryCaptureJob
+): Effect.Effect<EnqueueOutcome, never, FileSystem.FileSystem | AppPaths> =>
+  runtime.outboxLock.withPermits(1)(
+    Effect.gen(function* () {
+      const jobs = yield* readOutbox
+      if (jobs.some((candidate) => candidate.id === job.id)) return "duplicate" as const
+      yield* writeOutbox([...jobs, job])
+      return "stored" as const
+    })
+  ).pipe(Effect.orElseSucceed(() => "failed" as const))
+
 const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
   runtime.drainLock.withPermits(1)(Effect.gen(function* () {
-    // New releases never enqueue raw settled turns. This path exists only to
-    // flush durable jobs written by older versions before the capture hook was
-    // removed, and the drain lock serializes every remaining reader/writer.
-    const jobs = yield* readOutbox
+    // Snapshot under the outbox lock, then release it during network delivery
+    // so a settling turn can enqueue without waiting for remote round-trips.
+    const jobs = yield* runtime.outboxLock.withPermits(1)(readOutbox)
     const now = runtime.nowSeconds()
     // Delivered ids to remove, permanently-dead ids to drop, and the bumped
     // attempt counts for ids that should be retried later.
@@ -890,22 +915,25 @@ const drainCaptureOutbox = (runtime: MemoryRuntime, token: string) =>
         retried.set(job.id, Math.min(Number.MAX_SAFE_INTEGER, job.attempts + 1))
       }
     }
-    // Rewrite only when a legacy job changed state. Transient failures remain
-    // durable regardless of their diagnostic attempt count.
+    // Re-read under the lock so jobs enqueued during delivery are preserved.
+    // Transient failures remain durable regardless of attempt count.
     if (sent.size > 0 || dropped.size > 0 || retried.size > 0) {
-      const next = jobs
-        .filter((candidate) => !(sent.has(candidate.id) || dropped.has(candidate.id)))
-        .map((candidate) => {
-          const attempts = retried.get(candidate.id)
-          return attempts === undefined
-            ? candidate
-            : {
-                ...candidate,
-                attempts,
-                firstSeenAt: candidate.firstSeenAt > 0 ? candidate.firstSeenAt : now
-              }
-        })
-      yield* writeOutbox(next)
+      yield* runtime.outboxLock.withPermits(1)(Effect.gen(function* () {
+        const current = yield* readOutbox
+        const next = current
+          .filter((candidate) => !(sent.has(candidate.id) || dropped.has(candidate.id)))
+          .map((candidate) => {
+            const attempts = retried.get(candidate.id)
+            return attempts === undefined
+              ? candidate
+              : {
+                  ...candidate,
+                  attempts,
+                  firstSeenAt: candidate.firstSeenAt > 0 ? candidate.firstSeenAt : now
+                }
+          })
+        yield* writeOutbox(next)
+      }))
     }
     return {
       queuedBefore: jobs.length,
@@ -939,6 +967,7 @@ export const makeMemoryService = (
     attachmentLock: Effect.unsafeMakeSemaphore(1),
     attachmentRefreshes: new Set<string>(),
     recallCache: new Map<string, RecallCacheEntry>(),
+    outboxLock: Effect.unsafeMakeSemaphore(1),
     drainLock: Effect.unsafeMakeSemaphore(1)
   }
   const attachment = (query?: string, recallScope?: string) =>
@@ -979,6 +1008,38 @@ export const makeMemoryService = (
         )
       })
     )
+  const retainSettledTurn = (input: MemoryRetentionInput) =>
+    selectedMemory.pipe(
+      Effect.flatMap((selection) => {
+        if (selection === null) return Effect.succeed(false)
+        const id = `session-digest:${sha256(
+          `${selection.organizationId}\u0000${memoryRetentionIdentity(input)}`
+        )}`
+        return enqueueCapture(runtime, {
+          id,
+          organizationId: selection.organizationId,
+          settledAt: input.settledAt,
+          content: memoryRetentionContent(input, redactMemoryText),
+          retrieval: {
+            searches: 0,
+            reads: 0,
+            navigation: 0,
+            graphReads: 0,
+            proposals: 0
+          },
+          attempts: 0,
+          firstSeenAt: runtime.nowSeconds()
+        }).pipe(
+          Effect.tap((outcome) =>
+            outcome === "stored"
+              ? drainCaptureOutbox(runtime, selection.token).pipe(Effect.forkDaemon)
+              : Effect.void
+          ),
+          Effect.map((outcome) => outcome === "stored")
+        )
+      })
+    )
+
   const access = () =>
     Effect.all([memoryToken, ConfigService.get().pipe(Effect.orElseSucceed(() => null))]).pipe(
       Effect.flatMap(([token, config]) => {
@@ -1066,7 +1127,14 @@ export const makeMemoryService = (
       }
     })
 
-  return { attachment, recoverCaptures, access, uiRequest, suggestions }
+  return {
+    attachment,
+    retainSettledTurn,
+    recoverCaptures,
+    access,
+    uiRequest,
+    suggestions
+  }
 }
 
 export class MemoryService extends Effect.Service<MemoryService>()("@jingler/MemoryService", {
