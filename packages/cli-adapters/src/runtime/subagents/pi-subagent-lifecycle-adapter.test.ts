@@ -29,6 +29,35 @@ describe("fleet identity cleanup", () => {
     expect(cleanTaskLabel("")).toBe("Active delegated work")
     expect(cleanTaskLabel("Map the signals pipeline")).toBe("Map the signals pipeline")
   })
+
+  it("unwraps a wrapForkTask prompt down to its actual task sentence", () => {
+    const wrapped =
+      "You are a delegated subagent running from a fork of the parent session. " +
+      "Your sole job is to execute the task below.\n\nTask:\n" +
+      "Map the smallest end-to-end architecture for the Explanation artifact.\n\n" +
+      "---\n\n**Output:** Return the complete artifact in your final response.\n\n" +
+      "## Acceptance Contract\nCriteria: - criterion-1"
+    expect(cleanTaskLabel(wrapped)).toBe(
+      "Map the smallest end-to-end architecture for the Explanation artifact."
+    )
+  })
+
+  it("bounds a runaway label at a word boundary instead of painting a document", () => {
+    const label = cleanTaskLabel(`Audit ${"the renderer state machines ".repeat(20)}`)
+    expect(label.length).toBeLessThanOrEqual(141)
+    expect(label.endsWith("…")).toBe(true)
+    expect(label.startsWith("Audit the renderer")).toBe(true)
+  })
+
+  it("keeps a mid-sentence 'Task:' that is part of a real label", () => {
+    expect(cleanTaskLabel("Fix the Task: manager tooltip")).toBe("Fix the Task: manager tooltip")
+  })
+
+  it("collapses a multi-line task into the one line a card can show", () => {
+    expect(cleanTaskLabel("Survey auth.\nThen report findings.")).toBe(
+      "Survey auth. Then report findings."
+    )
+  })
 })
 
 const parent = "parent-session"

@@ -558,7 +558,7 @@ export class PiSubagentLifecycleAdapter {
           parentId: existing?.parentId ?? childParentId,
           parentPiSessionId: this.#parentPiSessionId,
           agent: child.agent,
-          task: child.task,
+          task: cleanTaskLabel(child.task),
           model: child.model ?? existing?.model ?? null,
           status,
           terminal: status === "completed" || status === "failed"
@@ -1111,7 +1111,7 @@ export class PiSubagentLifecycleAdapter {
           : null,
         parentPiSessionId: this.#parentPiSessionId,
         agent: started.agent ?? started.agents?.join(" + ") ?? started.mode ?? "subagent",
-        task: started.goal ?? started.task ?? "Delegated work",
+        task: cleanTaskLabel(started.goal ?? started.task),
         model: null,
         status: "running",
         background: true,
@@ -1152,7 +1152,7 @@ export class PiSubagentLifecycleAdapter {
         parentId: existingRoot?.parentId ?? null,
         parentPiSessionId: this.#parentPiSessionId,
         agent: completion.agent ?? start?.agent ?? "subagent",
-        task: start?.goal ?? start?.task ?? completion.summary ?? "Delegated work",
+        task: cleanTaskLabel(start?.goal ?? start?.task ?? completion.summary),
         model: null,
         status: rootStatus,
         terminal: {
@@ -1250,7 +1250,9 @@ export class PiSubagentLifecycleAdapter {
         parentId: existing === undefined ? input.rootId : existing.parentId,
         parentPiSessionId: this.#parentPiSessionId,
         agent: input.child.agent ?? existing?.agent ?? `step-${index + 1}`,
-        task: input.child.task ?? existing?.task ?? input.start?.goal ?? input.start?.task ?? "Delegated work",
+        task: cleanTaskLabel(
+          input.child.task ?? existing?.task ?? input.start?.goal ?? input.start?.task
+        ),
         model: input.child.model ?? existing?.model ?? null,
         status: statusFrom(input.child),
         phase: input.child.phase ?? null,

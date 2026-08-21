@@ -28,14 +28,52 @@ export const cleanAgentLabel = (agent: string): string =>
   COLLAPSE_TOKENS.has(agent.trim().toLowerCase()) ? "Subagent" : agent
 
 /**
- * Strip the vendor's "run <key>" task noise (e.g. "run review-followup") — a
- * degenerate label with no information — while keeping a real task description.
+ * The vendor reports a child's task as the FULL prompt it launched with —
+ * `wrapForkTask` prefixes the fork preamble ("You are a delegated subagent…")
+ * and callers append output/acceptance contracts — so treating that field as a
+ * display label paints a whole system prompt across the fleet card and pane
+ * header. The real task sits after the wrapper's `Task:` line and before the
+ * first block of contract boilerplate.
+ */
+const WRAPPED_TASK_MARKER = /(?:^|\n)\s*Task:\s*\n?/
+/** Where prompt boilerplate resumes after the task: a rule, an Output/heading block, or criteria. */
+const BOILERPLATE_SEAM = /\n\s*(?:---|\*\*Output|##\s|Criteria:)/
+
+/**
+ * A label, not a document: nodes render in one-line card/header slots, and
+ * anything longer than this is prompt text, not a task description.
+ */
+const MAX_TASK_LABEL_CHARS = 140
+
+const TRAILING_PARTIAL_WORD = /\s+\S*$/
+const ANY_WHITESPACE_RUN = /\s+/g
+
+const capLabel = (label: string): string => {
+  if (label.length <= MAX_TASK_LABEL_CHARS) return label
+  const hard = label.slice(0, MAX_TASK_LABEL_CHARS)
+  const atWord = hard.replace(TRAILING_PARTIAL_WORD, "")
+  // A pathological single "word" longer than the whole budget keeps the hard
+  // cut; otherwise break at the last word boundary.
+  return `${atWord.length > 40 ? atWord : hard}…`
+}
+
+/**
+ * Fold whatever the vendor called a "task" into an honest one-line label:
+ * strip the "run <key>" noise (a degenerate label with no information), unwrap
+ * a `wrapForkTask`-style prompt down to its actual task sentence, drop trailing
+ * contract boilerplate, and bound the length. A genuinely short description
+ * passes through untouched.
  */
 export const cleanTaskLabel = (task: string | undefined): string => {
   const trimmed = task?.trim() ?? ""
-  return trimmed === "" || /^run\s+\S+$/i.test(trimmed)
-    ? "Active delegated work"
-    : trimmed
+  if (trimmed === "" || /^run\s+\S+$/i.test(trimmed)) return "Active delegated work"
+  const marker = WRAPPED_TASK_MARKER.exec(trimmed)
+  const body = marker ? trimmed.slice(marker.index + marker[0].length) : trimmed
+  const seam = BOILERPLATE_SEAM.exec(body)
+  const oneLine = (seam ? body.slice(0, seam.index) : body)
+    .replace(ANY_WHITESPACE_RUN, " ")
+    .trim()
+  return oneLine === "" ? "Active delegated work" : capLabel(oneLine)
 }
 
 const DurableStep = Schema.Struct({
