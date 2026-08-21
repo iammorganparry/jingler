@@ -190,9 +190,12 @@ export const MemoryRepository = Schema.Struct({
   sources: Schema.Array(MemorySource),
   revisions: Schema.Array(MemoryRevision),
   proposals: Schema.Array(MemoryProposal),
-  observations: Schema.Array(MemoryObservation),
-  mentalModels: Schema.Array(MemoryMentalModel),
-  mentalModelRevisions: Schema.Array(MemoryMentalModelRevision),
+  observations: Schema.optionalWith(Schema.Array(MemoryObservation), { default: () => [] }),
+  mentalModels: Schema.optionalWith(Schema.Array(MemoryMentalModel), { default: () => [] }),
+  mentalModelRevisions: Schema.optionalWith(
+    Schema.Array(MemoryMentalModelRevision),
+    { default: () => [] }
+  ),
   roles: Schema.Array(MemoryRole),
   auditEvents: Schema.Array(MemoryAuditEvent)
 })
