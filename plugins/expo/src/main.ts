@@ -88,6 +88,8 @@ const spawnExpo: ExpoRuntimeDependencies["spawn"] = async (
   }
 }
 
+const AUTOMATION_PROJECT_PATH = "../automation/ExpoAutomation.xcodeproj"
+
 const sessionInput = (context: AgentToolExecutionContext): ExpoSessionInput => ({
   sessionId: context.session.id,
   worktreePath: context.session.repository.path
@@ -350,7 +352,9 @@ export const registerExpo = (
 export const activate: Activate = async (ctx) => {
   const derivedDataPath = await mkdtemp(join(tmpdir(), "jingler-expo-xctest-"))
   const automation = new ExpoAutomationController({
-    projectPath: fileURLToPath(new URL("../automation/ExpoAutomation.xcodeproj", import.meta.url)),
+    projectPath: fileURLToPath(
+      new URL(/* @vite-ignore */ AUTOMATION_PROJECT_PATH, import.meta.url)
+    ),
     derivedDataPath,
     removeDerivedData: () => rm(derivedDataPath, { recursive: true, force: true })
   })
