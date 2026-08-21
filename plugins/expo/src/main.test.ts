@@ -4,13 +4,20 @@ import type {
   HostContext
 } from "@jingler/plugin-sdk/host"
 import { describe, expect, it, vi } from "vitest"
-import { expoAgentTools, registerExpo } from "./main.js"
+import { expoAgentTools, expoAutomationTools, registerExpo } from "./main.js"
+import type { ExpoAutomationController } from "./automation.js"
 import type { ExpoPreviewController } from "./runtime.js"
 
 const controller = () => ({
   inspect: vi.fn(async () => ({ ready: true })),
   start: vi.fn(async (input) => ({ ready: true, phase: "starting", logs: [], sessionId: input.sessionId })),
-  status: vi.fn(async (input) => ({ ready: true, phase: "running", logs: [], sessionId: input.sessionId })),
+  status: vi.fn(async (input) => ({
+    ready: true,
+    phase: "running",
+    logs: [],
+    sessionId: input.sessionId,
+    simulator: { udid: "sim-1", name: "iPhone 16", state: "Booted" }
+  })),
   frame: vi.fn(),
   reload: vi.fn(async () => ({ ready: true, phase: "running", logs: [] })),
   stop: vi.fn(async () => ({ ready: true, phase: "stopped", logs: [] })),
@@ -75,6 +82,26 @@ describe("Expo native agent tools", () => {
       sessionId: "session-1",
       worktreePath: "/trusted/mobile"
     })
+  })
+
+  it("routes semantic automation to the owned booted simulator", async () => {
+    const preview = controller()
+    const automation = {
+      run: vi.fn(async () => ({ ok: true, kind: "tap", value: "tapped" }))
+    } as unknown as ExpoAutomationController
+    const tools = expoAutomationTools(preview, automation)
+
+    await tool(tools, "expo_preview_tap").execute(
+      { selector: { identifier: "save" } },
+      executionContext()
+    )
+
+    expect(automation.run).toHaveBeenCalledWith(
+      { kind: "tap", selector: { identifier: "save" } },
+      "/trusted/mobile",
+      "sim-1",
+      expect.any(AbortSignal)
+    )
   })
 
   it("exposes bounded metadata and refuses an already cancelled call", async () => {

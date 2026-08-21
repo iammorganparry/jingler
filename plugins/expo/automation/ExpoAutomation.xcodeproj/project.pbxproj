@@ -1,0 +1,29 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		A10000000000000000000001 = {isa = PBXBuildFile; fileRef = A10000000000000000000002; };
+		A10000000000000000000003 = {isa = PBXBuildFile; fileRef = A10000000000000000000004; };
+		A10000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpoAutomationUITests.swift; sourceTree = "<group>"; };
+		A10000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		A10000000000000000000005 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ExpoAutomationUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000006 = {isa = PBXGroup; children = (A10000000000000000000007, A10000000000000000000008, A10000000000000000000009); sourceTree = "<group>"; };
+		A10000000000000000000007 = {isa = PBXGroup; children = (A10000000000000000000002); path = ExpoAutomationUITests; sourceTree = "<group>"; };
+		A10000000000000000000008 = {isa = PBXGroup; children = (A10000000000000000000004); name = Frameworks; sourceTree = "<group>"; };
+		A10000000000000000000009 = {isa = PBXGroup; children = (A10000000000000000000005); name = Products; sourceTree = "<group>"; };
+		A1000000000000000000000A = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001); runOnlyForDeploymentPostprocessing = 0; };
+		A1000000000000000000000B = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000003); runOnlyForDeploymentPostprocessing = 0; };
+		A1000000000000000000000C = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A1000000000000000000000D = {isa = PBXNativeTarget; buildConfigurationList = A1000000000000000000000E; buildPhases = (A1000000000000000000000A, A1000000000000000000000B, A1000000000000000000000C); buildRules = (); dependencies = (); name = ExpoAutomationUITests; productName = ExpoAutomationUITests; productReference = A10000000000000000000005; productType = "com.apple.product-type.bundle.ui-testing"; };
+		A1000000000000000000000F = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 1540; LastUpgradeCheck = 1540; TargetAttributes = {A1000000000000000000000D = {CreatedOnToolsVersion = 15.4; }; }; }; buildConfigurationList = A10000000000000000000010; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = A10000000000000000000006; productRefGroup = A10000000000000000000009; projectDirPath = ""; projectRoot = ""; targets = (A1000000000000000000000D); };
+		A10000000000000000000011 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; }; name = Debug; };
+		A10000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; }; name = Release; };
+		A10000000000000000000013 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = app.jingler.expo.automation; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = ""; }; name = Debug; };
+		A10000000000000000000014 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = app.jingler.expo.automation; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = ""; }; name = Release; };
+		A1000000000000000000000E = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000013, A10000000000000000000014); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A10000000000000000000010 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000011, A10000000000000000000012); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+	};
+	rootObject = A1000000000000000000000F;
+}

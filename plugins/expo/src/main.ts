@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import type {
   Activate,
   AgentToolDefinition,
@@ -9,6 +10,11 @@ import type {
   HostContext
 } from "@jingler/plugin-sdk/host"
 import type { ExpoSessionInput } from "./contracts.js"
+import {
+  ExpoAutomationController,
+  type AutomationAction,
+  type AutomationSelector
+} from "./automation.js"
 import {
   ExpoPreviewController,
   type ExpoRuntimeDependencies,
@@ -163,7 +169,155 @@ export const expoAgentTools = (
   ]
 }
 
-export const registerExpo = (ctx: HostContext, controller: ExpoPreviewController): void => {
+const selectorSchema = {
+  type: "object",
+  properties: {
+    identifier: { type: "string" },
+    label: { type: "string" },
+    text: { type: "string" }
+  },
+  additionalProperties: false
+}
+
+const automationInput = (value: unknown): Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Expo automation requires an input object.")
+  }
+  return value as Record<string, unknown>
+}
+
+export const expoAutomationTools = (
+  controller: ExpoPreviewController,
+  automation: ExpoAutomationController
+): readonly AgentToolDefinition[] => {
+  const run = async (
+    action: AutomationAction,
+    context: AgentToolExecutionContext
+  ) => {
+    ensureActive(context)
+    const input = sessionInput(context)
+    const status = await controller.status(input)
+    if (
+      (status.phase !== "starting" && status.phase !== "running") ||
+      status.simulator?.state !== "Booted"
+    ) {
+      throw new Error("Start this session's Expo preview and wait for its iOS Simulator before automating it.")
+    }
+    return automation.run(
+      action,
+      input.worktreePath!,
+      status.simulator.udid,
+      context.signal
+    )
+  }
+  const definition = (
+    value: Omit<AgentToolDefinition, "risk" | "idempotency" | "timeoutMs" | "outputBudget" | "cancellable">
+  ): AgentToolDefinition => ({
+    ...value,
+    risk: "execute",
+    idempotency: "keyed",
+    timeoutMs: 180_000,
+    outputBudget: 24_000,
+    cancellable: true
+  })
+  return [
+    definition({
+      id: "expo_preview_describe_ui",
+      description: "Return the current Expo app's bounded accessibility hierarchy from iOS Simulator.",
+      inputSchema: { type: "object", additionalProperties: false },
+      execute: (_value, context) => run({ kind: "describe" }, context)
+    }),
+    definition({
+      id: "expo_preview_wait_for",
+      description: "Wait for exactly one accessibility element selected by identifier, label, or visible text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          selector: selectorSchema,
+          timeout: { type: "number", minimum: 0.1, maximum: 30 }
+        },
+        required: ["selector"],
+        additionalProperties: false
+      },
+      execute: (value, context) => {
+        const input = automationInput(value)
+        return run({
+          kind: "wait",
+          selector: input.selector as AutomationSelector,
+          ...(typeof input.timeout === "number" ? { timeout: input.timeout } : {})
+        }, context)
+      }
+    }),
+    definition({
+      id: "expo_preview_tap",
+      description: "Tap exactly one accessibility element selected by identifier, label, or visible text.",
+      inputSchema: {
+        type: "object",
+        properties: { selector: selectorSchema },
+        required: ["selector"],
+        additionalProperties: false
+      },
+      execute: (value, context) => run({
+        kind: "tap",
+        selector: automationInput(value).selector as AutomationSelector
+      }, context)
+    }),
+    definition({
+      id: "expo_preview_type",
+      description: "Focus one semantic accessibility element and type text, optionally replacing its current value.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          selector: selectorSchema,
+          text: { type: "string" },
+          replace: { type: "boolean" }
+        },
+        required: ["selector", "text"],
+        additionalProperties: false
+      },
+      execute: (value, context) => {
+        const input = automationInput(value)
+        return run({
+          kind: "type",
+          selector: input.selector as AutomationSelector,
+          text: input.text as string,
+          ...(input.replace === true ? { replace: true } : {})
+        }, context)
+      }
+    }),
+    definition({
+      id: "expo_preview_swipe",
+      description: "Swipe the Expo app up, down, left, or right in iOS Simulator.",
+      inputSchema: {
+        type: "object",
+        properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] } },
+        required: ["direction"],
+        additionalProperties: false
+      },
+      execute: (value, context) => run({
+        kind: "swipe",
+        direction: automationInput(value).direction as "up" | "down" | "left" | "right"
+      }, context)
+    }),
+    definition({
+      id: "expo_preview_press_button",
+      description: "Press a supported simulated device button. The first release supports Home.",
+      inputSchema: {
+        type: "object",
+        properties: { button: { type: "string", enum: ["home"] } },
+        required: ["button"],
+        additionalProperties: false
+      },
+      execute: (_value, context) => run({ kind: "button", button: "home" }, context)
+    })
+  ]
+}
+
+export const registerExpo = (
+  ctx: HostContext,
+  controller: ExpoPreviewController,
+  automation?: ExpoAutomationController
+): void => {
   const commands = [
     ctx.commands.register("expo.inspect", (value) => controller.inspect(inputOf(value))),
     ctx.commands.register("expo.start", (value) => controller.start(inputOf(value))),
@@ -174,11 +328,17 @@ export const registerExpo = (ctx: HostContext, controller: ExpoPreviewController
     ctx.commands.register("expo.open-simulator", () => controller.openSimulator())
   ]
   ctx.subscriptions.push(
-    ctx.agentTools.registerToolset({ id: "expo.ios-preview", tools: expoAgentTools(controller) }),
+    ctx.agentTools.registerToolset({
+      id: "expo.ios-preview",
+      tools: [
+        ...expoAgentTools(controller),
+        ...(automation ? expoAutomationTools(controller, automation) : [])
+      ]
+    }),
     ...commands,
     {
       dispose: () => {
-        controller.dispose().catch((cause: unknown) => {
+        Promise.all([controller.dispose(), automation?.dispose()]).catch((cause: unknown) => {
           ctx.log.warn(`Expo cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}`)
         })
       }
@@ -187,7 +347,13 @@ export const registerExpo = (ctx: HostContext, controller: ExpoPreviewController
   ctx.log.info("Expo iOS Preview ready")
 }
 
-export const activate: Activate = (ctx) => {
+export const activate: Activate = async (ctx) => {
+  const derivedDataPath = await mkdtemp(join(tmpdir(), "jingler-expo-xctest-"))
+  const automation = new ExpoAutomationController({
+    projectPath: fileURLToPath(new URL("../automation/ExpoAutomation.xcodeproj", import.meta.url)),
+    derivedDataPath,
+    removeDerivedData: () => rm(derivedDataPath, { recursive: true, force: true })
+  })
   const capture: ExpoRuntimeDependencies["capture"] = async (udid) => {
     const directory = await mkdtemp(join(tmpdir(), "jingler-expo-"))
     const screenshot = join(directory, "simulator.png")
@@ -228,5 +394,5 @@ export const activate: Activate = (ctx) => {
     now: Date.now
   })
 
-  registerExpo(ctx, controller)
+  registerExpo(ctx, controller, automation)
 }
