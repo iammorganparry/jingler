@@ -2,7 +2,7 @@ import type { ExplanationDocument } from "@jingler/core"
 import { Sparkles } from "lucide-react"
 import type { ReactNode } from "react"
 import { Button } from "../components/button.js"
-import { PlanBlocks } from "../composites/plan-doc/plan-blocks.js"
+import { VisualBlocks } from "../composites/visual-blocks.js"
 
 export interface ExplanationViewProps {
   readonly document: ExplanationDocument | null
@@ -43,7 +43,7 @@ export function ExplanationView({
         {document.sections.map((section) => (
           <section key={section.id} aria-label={section.title} className="flex flex-col gap-2 rounded-lg border border-hairline bg-panel px-4 py-4">
             <h2 className="m-0 text-[14px] font-semibold text-text-bright">{section.title}</h2>
-            <PlanBlocks blocks={section.blocks} className="sb-md text-[13px] leading-[1.7] text-text-body" />
+            <VisualBlocks blocks={section.blocks} className="sb-md text-[13px] leading-[1.7] text-text-body" />
           </section>
         ))}
       </article>

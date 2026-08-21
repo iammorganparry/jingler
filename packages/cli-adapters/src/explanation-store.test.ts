@@ -1,8 +1,8 @@
-import { FileSystem, Path } from "@effect/platform"
+import type { FileSystem, Path } from "@effect/platform"
 import type { ExplanationPayload } from "@jingler/core"
 import { Chunk, Effect, Fiber, Layer, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { AppPaths } from "./app-paths.js"
+import type { AppPaths } from "./app-paths.js"
 import { ExplanationStore } from "./explanation-store.js"
 import { withTempRoot } from "./test-support.js"
 

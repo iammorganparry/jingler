@@ -30,6 +30,7 @@ export class ExplanationStore extends Effect.Service<ExplanationStore>()(
   "@jingler/ExplanationStore",
   {
     accessors: true,
+    // biome-ignore lint/complexity/noExcessiveLinesPerFunction: one closure intentionally owns the shared atomic-write lock.
     sync: () => {
       const lock = Effect.unsafeMakeSemaphore(1)
 

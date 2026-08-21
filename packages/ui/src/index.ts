@@ -133,6 +133,8 @@ export * from "./composites/plan-steps/plan-step-card.js"
 export * from "./composites/plan-architecture.js"
 export * from "./composites/plan-walkthrough.js"
 export * from "./composites/plan-guide.js"
+export * from "./composites/visual-blocks.js"
+export * from "./composites/visual-call-path.js"
 export * from "./composites/plan-workflow.js"
 // Read-only sanitized HTML plan document view
 export * from "./composites/plan-doc/plan-blocks.js"

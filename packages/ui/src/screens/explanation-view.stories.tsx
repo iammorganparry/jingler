@@ -152,6 +152,6 @@ export const Empty: Story = {
   render: () => <Frame document={null} />
 }
 
-export const Error: Story = {
+export const ErrorState: Story = {
   render: () => <Frame document={null} error="Could not load the latest explanation." />
 }

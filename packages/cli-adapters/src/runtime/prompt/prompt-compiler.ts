@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { CURRENT_RUNTIME_CONTRACTS, type AgentRole, type RuntimeMode } from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
 export type { AgentRole, RuntimeMode } from "@jingler/core"
 export type PromptLayerKind = "safety" | "role" | "tools" | "workspace" | "preferences" | "turn"
 export type PromptTrust = "immutable" | "trusted" | "untrusted"

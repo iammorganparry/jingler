@@ -41,7 +41,7 @@ describe("explanation document schemas", () => {
     invalid.sections[0]!.blocks.push({
       kind: "html",
       id: "unsafe",
-      source: "<script>alert(1)</script>"
+      source: "unsupported"
     } as never)
     expect(Either.isLeft(Schema.decodeUnknownEither(ExplanationPayload)(invalid))).toBe(true)
   })
