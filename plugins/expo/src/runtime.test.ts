@@ -139,7 +139,7 @@ describe("ExpoPreviewController lifecycle", () => {
     )
 
     h.listeners().output(
-      `${ESCAPE}[32mMetro waiting on exp://localhost:8081${ESCAPE}[0m\n/repo/app/App.tsx`
+      `${ESCAPE}[32mMetro waiting on exp://localhost:8081${ESCAPE}[0m\n/repo/app/App.tsx\n`
     )
     const running = await h.controller.status(SESSION)
     expect(running.phase).toBe("running")
@@ -147,6 +147,22 @@ describe("ExpoPreviewController lifecycle", () => {
       "Metro waiting on exp://localhost:8081",
       "<worktree>/App.tsx"
     ])
+    await h.controller.status(SESSION)
+    expect(h.deps.exec).toHaveBeenCalledOnce()
+  })
+
+  it("buffers split process lines before readiness checks and path redaction", async () => {
+    const h = harness()
+    await h.controller.start(SESSION)
+
+    h.listeners().output("Metro wait")
+    h.listeners().output("ing on exp://localhost:8081\n/repo/")
+    h.listeners().output("app/App.tsx\n")
+
+    await expect(h.controller.status(SESSION)).resolves.toMatchObject({
+      phase: "running",
+      logs: ["Metro waiting on exp://localhost:8081", "<worktree>/App.tsx"]
+    })
   })
 
   it("reloads over stdin and stops only the owned process", async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   ExternalLink,
   Play,
@@ -138,6 +138,12 @@ function usePreviewModel(session: SessionSnapshot, host: HostBridge): PreviewMod
     () => ({ sessionId: session.id }),
     [session.id]
   )
+  const sessionRef = useRef(session.id)
+  const generation = useRef(0)
+  if (sessionRef.current !== session.id) {
+    sessionRef.current = session.id
+    generation.current += 1
+  }
   const [status, setStatus] = useState<ExpoStatus | null>(null)
   const [frame, setFrame] = useState<ExpoFrame | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -147,31 +153,33 @@ function usePreviewModel(session: SessionSnapshot, host: HostBridge): PreviewMod
     setFrame(null)
     setFrameError(null)
   }, [])
-  const refresh = useCallback(async () => {
-    setStatus(await host.invoke<ExpoStatus>("expo.status", input))
-  }, [host, input])
+  const refresh = useCallback(
+    () => host.invoke<ExpoStatus>("expo.status", input),
+    [host, input]
+  )
 
   useInitialStatus(host, input, setStatus, setError, resetFrame)
   useStatusPolling(host, input, status, setStatus, setError)
   useFramePolling(host, input, status, setStatus, setFrame, setFrameError)
 
-  const run = useCallback(async (operation: () => Promise<void>) => {
+  const run = useCallback(async <T,>(operation: () => Promise<T>) => {
+    const current = generation.current
     setBusy(true)
     setError(null)
     try {
-      await operation()
+      return await operation()
     } catch (cause) {
-      setError(messageOf(cause))
+      if (current === generation.current) setError(messageOf(cause))
+      return undefined
     } finally {
-      setBusy(false)
+      if (current === generation.current) setBusy(false)
     }
   }, [])
   const command = useCallback(
     async (id: string, update = false) => {
-      await run(async () => {
-        const result = await host.invoke<ExpoStatus>(id, input)
-        if (update) setStatus(result)
-      })
+      const current = generation.current
+      const result = await run(() => host.invoke<ExpoStatus>(id, input))
+      if (update && result && current === generation.current) setStatus(result)
     },
     [host, input, run]
   )
@@ -191,7 +199,11 @@ function usePreviewModel(session: SessionSnapshot, host: HostBridge): PreviewMod
     },
     reload: () => command("expo.reload"),
     openSimulator: () => command("expo.open-simulator"),
-    retry: () => run(refresh)
+    retry: async () => {
+      const current = generation.current
+      const result = await run(refresh)
+      if (result && current === generation.current) setStatus(result)
+    }
   }
 }
 

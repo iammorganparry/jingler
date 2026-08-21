@@ -92,6 +92,28 @@ describe("ExpoTab setup states", () => {
     expect(screen.getByRole("button", { name: "Start iOS Preview" })).toBeTruthy()
   })
 
+  it("ignores a command result from the previously rendered session", async () => {
+    let release: ((status: ExpoStatus) => void) | undefined
+    invoke.mockImplementation((command: string, input?: { sessionId?: string }) => {
+      if (command === "expo.status") return Promise.resolve(ready)
+      if (command === "expo.start" && input?.sessionId === "session-1") {
+        return new Promise<ExpoStatus>((resolve) => { release = resolve })
+      }
+      return Promise.reject(new Error(`Unexpected command ${command}`))
+    })
+    const view = render(<ExpoTabView host={host} session={session} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Start iOS Preview" }))
+    view.rerender(
+      <ExpoTabView host={host} session={{ ...session, id: "session-2", worktreePath: "/repo/two" }} />
+    )
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("expo.status", { sessionId: "session-2" }))
+
+    release?.(running)
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start iOS Preview" })).toBeTruthy())
+    expect(screen.queryByRole("img")).toBeNull()
+  })
+
   it("starts the preview from the ready state and disables the action in flight", async () => {
     let release: ((status: ExpoStatus) => void) | undefined
     invoke.mockImplementation((command: string) => {

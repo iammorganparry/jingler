@@ -83,6 +83,7 @@ export class ExpoPreviewController {
   private owner: ExpoSessionInput | null = null
   private logs: string[] = []
   private error: string | undefined
+  private readiness: ExpoReadiness | null = null
   private simulator: SimulatorDevice | null = null
   private generation = 0
   private lifecycle = Promise.resolve()
@@ -146,14 +147,14 @@ export class ExpoPreviewController {
     }
   }
 
-  private appendOutput(chunk: string): void {
-    for (const line of chunk.split("\n")) {
-      const cleaned = cleanLine(line, this.owner?.worktreePath)
-      if (cleaned.length === 0) continue
-      this.logs.push(cleaned)
-      if (this.logs.length > MAX_LOG_LINES) this.logs.splice(0, this.logs.length - MAX_LOG_LINES)
-      if (this.phase === "starting" && READY_OUTPUT.test(cleaned)) this.phase = "running"
+  private appendLine(line: string): void {
+    const cleaned = cleanLine(line, this.owner?.worktreePath)
+    if (cleaned.length === 0) return
+    this.logs.push(cleaned)
+    if (this.logs.length > MAX_LOG_LINES) {
+      this.logs.splice(0, this.logs.length - MAX_LOG_LINES)
     }
+    if (this.phase === "starting" && READY_OUTPUT.test(cleaned)) this.phase = "running"
   }
 
   start(input: ExpoSessionInput): Promise<ExpoStatus> {
@@ -172,11 +173,13 @@ export class ExpoPreviewController {
 
     const generation = ++this.generation
     this.owner = input
+    this.readiness = readiness
     this.simulator = readiness.simulator ?? null
     this.phase = "starting"
     this.logs = []
     this.error = undefined
     let exited = false
+    let outputRemainder = ""
     try {
       const process = await this.deps.spawn(
         this.expoBinary(input.worktreePath),
@@ -184,11 +187,16 @@ export class ExpoPreviewController {
         input.worktreePath,
         {
           output: (chunk) => {
-            if (generation === this.generation) this.appendOutput(chunk)
+            if (generation !== this.generation) return
+            const lines = `${outputRemainder}${chunk}`.split("\n")
+            outputRemainder = lines.pop() ?? ""
+            for (const line of lines) this.appendLine(line)
           },
           exit: (code, signal) => {
             exited = true
             if (generation !== this.generation) return
+            this.appendLine(outputRemainder)
+            outputRemainder = ""
             this.process = null
             if (this.phase === "stopped") return
             if (code === 0) {
@@ -211,6 +219,7 @@ export class ExpoPreviewController {
         this.phase = "failed"
         this.error = cause instanceof Error ? cause.message : String(cause)
         this.owner = null
+        this.readiness = null
         this.simulator = null
       }
       throw cause
@@ -219,13 +228,13 @@ export class ExpoPreviewController {
   }
 
   async status(input: ExpoSessionInput): Promise<ExpoStatus> {
-    const readiness = await this.inspect(input)
-    if (this.owner?.sessionId !== input.sessionId) {
+    if (this.owner?.sessionId !== input.sessionId || !this.readiness) {
+      const readiness = await this.inspect(input)
       return { ...readiness, phase: "idle", logs: [] }
     }
     const activeReadiness = this.simulator
-      ? { ...readiness, simulator: this.simulator }
-      : readiness
+      ? { ...this.readiness, simulator: this.simulator }
+      : this.readiness
     const status: ExpoStatus = {
       ...activeReadiness,
       phase: this.phase,
@@ -239,7 +248,7 @@ export class ExpoPreviewController {
     this.assertOwner(input)
     if (!this.process) throw new Error("The Expo preview is not running.")
     await this.process.write("r\n")
-    this.appendOutput("Reload requested from Jingler.")
+    this.appendLine("Reload requested from Jingler.")
     return await this.status(input)
   }
 
@@ -303,6 +312,7 @@ export class ExpoPreviewController {
       const process = this.process
       this.process = null
       this.owner = null
+      this.readiness = null
       await process?.terminate()
     })
   }
