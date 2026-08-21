@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     name: Lint, typecheck & unit tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, jingler]
     steps:
       - uses: actions/checkout@v4
 
@@ -57,7 +57,7 @@ jobs:
 
   electron:
     name: Electron package gates
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, macOS, ARM64, jingler]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -70,9 +70,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build unpacked desktop artifact
         run: pnpm --filter @jingler/desktop dist
+      - name: Locate packaged resources
+        run: |
+          resources="$(find apps/desktop/release -type d -path '*/Jingler.app/Contents/Resources' -print -quit)"
+          test -n "$resources"
+          echo "JINGLER_DESKTOP_ASAR=$resources/app.asar" >> "$GITHUB_ENV"
+          echo "JINGLER_DESKTOP_RESOURCES=$resources" >> "$GITHUB_ENV"
+          echo "JINGLER_DEVICE_BUNDLE=$resources/device-agent/jingler-device-runtime.tgz" >> "$GITHUB_ENV"
       - name: Inspect desktop and device artifacts
-        env:
-          JINGLER_DESKTOP_ASAR: apps/desktop/release/linux-unpacked/resources/app.asar
-          JINGLER_DESKTOP_RESOURCES: apps/desktop/release/linux-unpacked/resources
-          JINGLER_DEVICE_BUNDLE: apps/desktop/release/linux-unpacked/resources/device-agent/jingler-device-runtime.tgz
         run: pnpm artifacts:check
