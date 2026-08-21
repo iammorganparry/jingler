@@ -16,10 +16,10 @@ describe("PromptCompiler", () => {
       tools: [tool],
       tokenBudget: 2_000
     })
-    // Three role-kind sections: the role policy, the engineering principles,
-    // and the conversation-only collaboration contract.
+    // Four role-kind sections: the role policy, the engineering principles,
+    // the voice, and the conversation-only collaboration contract.
     expect(result.manifest.sections.map((section) => section.kind)).toEqual([
-      "safety", "role", "role", "role", "tools", "workspace", "preferences", "turn"
+      "safety", "role", "role", "role", "role", "tools", "workspace", "preferences", "turn"
     ])
   })
 
@@ -111,6 +111,31 @@ describe("PromptCompiler", () => {
     expect(result.text).not.toContain("When you delegate a stage to a sub-agent")
   })
 
+  it("gives every operator-facing role the plain-spoken voice, but not format-bound roles", () => {
+    for (const role of ["conversation", "plan", "plan-execution", "review", "background"] as const) {
+      const result = new PromptCompiler().compile({
+        layers: runtimeInvariantLayers(role, "read-only"),
+        tools: [tool],
+        tokenBudget: 2_000
+      })
+      expect(result.text).toContain("Voice — how you talk")
+      expect(result.text).toContain("No corporate jargon")
+      expect(result.text).toContain("No architecture word-dressing")
+      expect(result.text).toContain("Casual is not vague")
+    }
+
+    // A title is a label and a digest is a faithful artifact — neither is
+    // conversation, so neither carries a conversational persona.
+    for (const role of ["title", "context-digest"] as const) {
+      const result = new PromptCompiler().compile({
+        layers: runtimeInvariantLayers(role, "read-only"),
+        tools: [tool],
+        tokenBudget: 2_000
+      })
+      expect(result.text).not.toContain("Voice — how you talk")
+    }
+  })
+
   it("holds conversation agents to the collaboration contract, but not approved-plan executors", () => {
     const conversation = new PromptCompiler().compile({
       layers: runtimeInvariantLayers("conversation", "ask"),
@@ -138,7 +163,9 @@ describe("PromptCompiler", () => {
     const result = new PromptCompiler().compile({
       layers: [...runtimeInvariantLayers("conversation", "ask"), optional],
       tools: [tool],
-      tokenBudget: 900
+      // Enough for every required layer (incl. the voice), tight enough that
+      // the 4,000-char optional turn context MUST be cut to fit.
+      tokenBudget: 1_300
     })
     expect(result.manifest.sections.find((section) => section.id === "turn.large")?.truncated).toBe(true)
     expect(result.manifest.sections.map((section) => section.kind)).toEqual(expect.arrayContaining(["safety", "role", "tools"]))
