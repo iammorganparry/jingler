@@ -1,4 +1,3 @@
-import { join } from "node:path"
 import type {
   ExpoFrame,
   ExpoReadiness,
@@ -103,7 +102,7 @@ export class ExpoPreviewController {
   constructor(private readonly deps: ExpoRuntimeDependencies) {}
 
   private expoBinary(worktreePath: string): string {
-    return join(worktreePath, "node_modules", ".bin", "expo")
+    return `${worktreePath.replace(/\/$/u, "")}/node_modules/.bin/expo`
   }
 
   private async devices(): Promise<readonly SimulatorDevice[]> {

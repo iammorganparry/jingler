@@ -1,8 +1,19 @@
-import { defineConfig } from "vite"
+import { defineConfig, type BuildOptions } from "vite"
 import react from "@vitejs/plugin-react"
-import { jinglerPluginBuild } from "@jingler/plugin-sdk/vite"
+import {
+  JINGLER_EXTERNALS,
+  jinglerPluginBuild
+} from "@jingler/plugin-sdk/vite"
+
+const build = jinglerPluginBuild({ ui: "src/ui.tsx", main: "src/main.ts" }) as BuildOptions
 
 export default defineConfig({
   plugins: [react()],
-  build: jinglerPluginBuild({ ui: "src/ui.tsx", main: "src/main.ts" })
+  build: {
+    ...build,
+    rollupOptions: {
+      ...build.rollupOptions,
+      external: [...JINGLER_EXTERNALS, /^node:/u]
+    }
+  }
 })

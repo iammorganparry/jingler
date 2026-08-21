@@ -2,7 +2,12 @@ import { spawn } from "node:child_process"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Activate } from "@jingler/plugin-sdk/host"
+import type {
+  Activate,
+  AgentToolDefinition,
+  AgentToolExecutionContext,
+  HostContext
+} from "@jingler/plugin-sdk/host"
 import type { ExpoSessionInput } from "./contracts.js"
 import {
   ExpoPreviewController,
@@ -77,6 +82,111 @@ const spawnExpo: ExpoRuntimeDependencies["spawn"] = async (
   }
 }
 
+const sessionInput = (context: AgentToolExecutionContext): ExpoSessionInput => ({
+  sessionId: context.session.id,
+  worktreePath: context.session.repository.path
+})
+
+const ensureActive = (context: AgentToolExecutionContext): void => {
+  if (context.signal.aborted) throw new Error("Expo preview action was cancelled.")
+}
+
+export const expoAgentTools = (
+  controller: ExpoPreviewController
+): readonly AgentToolDefinition[] => {
+  const tool = (
+    definition: Omit<AgentToolDefinition, "timeoutMs" | "outputBudget" | "cancellable">
+  ): AgentToolDefinition => ({
+    ...definition,
+    timeoutMs: 30_000,
+    outputBudget: 8_000,
+    cancellable: true
+  })
+  const noInput = { type: "object" as const, additionalProperties: false }
+  return [
+    tool({
+      id: "expo_preview_status",
+      description: "Inspect Expo and iOS Simulator readiness and return the current preview status.",
+      inputSchema: noInput,
+      risk: "read",
+      idempotency: "safe",
+      execute: (_input, context) => {
+        ensureActive(context)
+        return controller.status(sessionInput(context))
+      }
+    }),
+    tool({
+      id: "expo_preview_open",
+      description: "Start the current worktree's Expo app in iOS Simulator and mount it in Jingler's Expo tab.",
+      inputSchema: noInput,
+      risk: "execute",
+      idempotency: "keyed",
+      execute: (_input, context) => {
+        ensureActive(context)
+        return controller.start(sessionInput(context))
+      }
+    }),
+    tool({
+      id: "expo_preview_reload",
+      description: "Request a reload of the current session's running Expo app.",
+      inputSchema: noInput,
+      risk: "execute",
+      idempotency: "keyed",
+      execute: (_input, context) => {
+        ensureActive(context)
+        return controller.reload(sessionInput(context))
+      }
+    }),
+    tool({
+      id: "expo_preview_stop",
+      description: "Stop the Expo preview owned by the current session.",
+      inputSchema: noInput,
+      risk: "execute",
+      idempotency: "keyed",
+      execute: (_input, context) => {
+        ensureActive(context)
+        return controller.stop(sessionInput(context))
+      }
+    }),
+    tool({
+      id: "expo_preview_open_simulator",
+      description: "Bring Apple's iOS Simulator application to the foreground.",
+      inputSchema: noInput,
+      risk: "execute",
+      idempotency: "safe",
+      execute: async (_input, context) => {
+        ensureActive(context)
+        await controller.openSimulator()
+        return { opened: true }
+      }
+    })
+  ]
+}
+
+export const registerExpo = (ctx: HostContext, controller: ExpoPreviewController): void => {
+  const commands = [
+    ctx.commands.register("expo.inspect", (value) => controller.inspect(inputOf(value))),
+    ctx.commands.register("expo.start", (value) => controller.start(inputOf(value))),
+    ctx.commands.register("expo.status", (value) => controller.status(inputOf(value))),
+    ctx.commands.register("expo.frame", (value) => controller.frame(inputOf(value))),
+    ctx.commands.register("expo.reload", (value) => controller.reload(inputOf(value))),
+    ctx.commands.register("expo.stop", (value) => controller.stop(inputOf(value))),
+    ctx.commands.register("expo.open-simulator", () => controller.openSimulator())
+  ]
+  ctx.subscriptions.push(
+    ctx.agentTools.registerToolset({ id: "expo.ios-preview", tools: expoAgentTools(controller) }),
+    ...commands,
+    {
+      dispose: () => {
+        controller.dispose().catch((cause: unknown) => {
+          ctx.log.warn(`Expo cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+        })
+      }
+    }
+  )
+  ctx.log.info("Expo iOS Preview ready")
+}
+
 export const activate: Activate = (ctx) => {
   const capture: ExpoRuntimeDependencies["capture"] = async (udid) => {
     const directory = await mkdtemp(join(tmpdir(), "jingler-expo-"))
@@ -118,21 +228,5 @@ export const activate: Activate = (ctx) => {
     now: Date.now
   })
 
-  const commands = [
-    ctx.commands.register("expo.inspect", (value) => controller.inspect(inputOf(value))),
-    ctx.commands.register("expo.start", (value) => controller.start(inputOf(value))),
-    ctx.commands.register("expo.status", (value) => controller.status(inputOf(value))),
-    ctx.commands.register("expo.frame", (value) => controller.frame(inputOf(value))),
-    ctx.commands.register("expo.reload", (value) => controller.reload(inputOf(value))),
-    ctx.commands.register("expo.stop", (value) => controller.stop(inputOf(value))),
-    ctx.commands.register("expo.open-simulator", () => controller.openSimulator())
-  ]
-  ctx.subscriptions.push(...commands, {
-    dispose: () => {
-      controller.dispose().catch((cause: unknown) => {
-        ctx.log.warn(`Expo cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}`)
-      })
-    }
-  })
-  ctx.log.info("Expo iOS Preview ready")
+  registerExpo(ctx, controller)
 }

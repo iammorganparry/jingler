@@ -18,6 +18,13 @@ export const manifest = defineManifest({
         when: "hasWorktree"
       }
     ],
+    agentToolsets: [
+      {
+        id: "expo.ios-preview",
+        label: "Expo iOS preview",
+        description: "Open and control the current worktree's Expo app in iOS Simulator."
+      }
+    ],
     commands: [
       { id: "expo.inspect", title: "Check iOS preview requirements", category: "Expo" },
       { id: "expo.start", title: "Start iOS preview", category: "Expo" },
