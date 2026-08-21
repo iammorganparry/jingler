@@ -26,10 +26,14 @@ const BUILTINS = builtinTabContributions({
 
 const idsFor = (
   s: Session,
-  opts: { hasPlan?: boolean; extra?: ReadonlyArray<TabContribution> } = {}
+  opts: { hasPlan?: boolean; hasExplanation?: boolean; extra?: ReadonlyArray<TabContribution> } = {}
 ) =>
   visibleTabs(
-    { session: s, hasPlan: opts.hasPlan ?? false },
+    {
+      session: s,
+      hasPlan: opts.hasPlan ?? false,
+      hasExplanation: opts.hasExplanation ?? false
+    },
     [...BUILTINS, ...(opts.extra ?? [])]
   ).map((c) => c.id)
 
@@ -99,6 +103,12 @@ describe("visibleTabs", () => {
     expect(idsFor(s, { hasPlan: false })).toContain("plan")
     expect(idsFor(s, { hasPlan: true })).toContain("plan")
     expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("plan")
+  })
+
+  it("shows Explanation only when a published artifact is present", () => {
+    const s = session({ id: "a" })
+    expect(idsFor(s, { hasExplanation: false })).not.toContain("explanation")
+    expect(idsFor(s, { hasExplanation: true })).toContain("explanation")
   })
 
   it("shows Files only for worktree-backed sessions", () => {
@@ -404,6 +414,20 @@ describe("session browser tab", () => {
 })
 
 describe("mount groups", () => {
+  it("navigates to Explanation", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        explanationSessions={new Set(["a"])}
+        renderConversation={() => <span>conversation body</span>}
+        renderExplanation={() => <span>explanation body</span>}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
+    expect(screen.getByText("explanation body")).toBeTruthy()
+    expect(screen.getByRole("separator", { name: "Resize Explanation" })).toBeTruthy()
+  })
+
   it("opens Plan Review beside chat when the pane is roomy", () => {
     render(
       <SessionPane

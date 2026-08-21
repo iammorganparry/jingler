@@ -35,6 +35,7 @@ import {
   GitCompareArrows,
   GitPullRequest,
   MessagesSquare,
+  Sparkles,
   Waypoints,
   Workflow
 } from "lucide-react"
@@ -56,6 +57,7 @@ export const BUILTIN_TAB = {
   files: "files",
   browser: "browser",
   issue: "issue",
+  explanation: "explanation",
   plan: "plan",
   pr: "pr",
   review: "review",
@@ -100,6 +102,8 @@ export interface TabContext {
   readonly session: Session
   /** Whether this session has a plan worth reviewing. */
   readonly hasPlan: boolean
+  /** Whether this session has a published visual explanation. */
+  readonly hasExplanation?: boolean
   /** Live worktree diff totals for this session, if known. */
   readonly diff?: DiffStat | null
 }
@@ -240,6 +244,12 @@ export const BUILTIN_TAB_META: Record<
   // which claims the same order so the migration is invisible to anyone who was
   // already using it.
   issue: { label: "Issue", icon: CircleDot, order: 10 },
+  explanation: {
+    label: "Explanation",
+    icon: Sparkles,
+    order: 18,
+    blurb: "A focused visual explanation of the current technical topic."
+  },
   plan: {
     label: "Plan Review",
     icon: Waypoints,
@@ -291,6 +301,7 @@ export interface BuiltinTabRenderers {
     session: Session,
     ctx: TabRenderContext
   ) => ReactNode
+  readonly explanation?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly files?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly browser?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly pullRequest?: (session: Session, ctx: TabRenderContext) => ReactNode
@@ -342,6 +353,13 @@ export const builtinTabContributions = (
       when: () => renderers.browser !== undefined,
       render: (session, ctx) =>
         renderers.browser?.(session, ctx) ?? renderers.stub("browser")
+    },
+    {
+      id: BUILTIN_TAB.explanation,
+      ...meta.explanation,
+      when: ({ hasExplanation }) => hasExplanation === true,
+      render: (session, ctx) =>
+        renderers.explanation?.(session, ctx) ?? renderers.stub("explanation")
     },
     {
       id: BUILTIN_TAB.plan,

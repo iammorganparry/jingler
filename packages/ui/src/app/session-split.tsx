@@ -33,6 +33,7 @@ export interface SessionSplitProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  renderExplanation?: (session: Session) => ReactNode
   /** Render one pane's session-native repository browser and editor. */
   renderFiles?: (
     session: Session,
@@ -60,6 +61,7 @@ export interface SessionSplitProps {
   onToggleBrowser?: (sessionId: string) => void
   isBrowserActive?: (sessionId: string) => boolean
   planSessions?: ReadonlySet<string>
+  explanationSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>
   liveDiff?: Record<string, DiffStat>
   onOpenSettings?: () => void
@@ -135,6 +137,7 @@ export function SessionSplit(props: SessionSplitProps) {
         session={session}
         initialTab={activeTabs[session.id]}
         renderConversation={props.renderConversation}
+        renderExplanation={props.renderExplanation}
         renderFiles={props.renderFiles}
         renderBrowser={props.renderBrowser}
         onOpenFile={props.onOpenFile}
@@ -144,6 +147,7 @@ export function SessionSplit(props: SessionSplitProps) {
         onToggleBrowser={props.onToggleBrowser}
         isBrowserActive={props.isBrowserActive}
         planSessions={props.planSessions}
+        explanationSessions={props.explanationSessions}
         liveActivity={props.liveActivity}
         liveDiff={props.liveDiff}
         onOpenSettings={props.onOpenSettings}

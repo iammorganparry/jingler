@@ -204,6 +204,7 @@ export * from "./app/jingler-app.js"
 // Screens
 export * from "./screens/session-conversation.js"
 export * from "./screens/plan-review.js"
+export * from "./screens/explanation-view.js"
 export * from "./screens/empty-conversation.js"
 export * from "./screens/component-library.js"
 export * from "./screens/stub-screen.js"

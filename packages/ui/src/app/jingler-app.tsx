@@ -323,6 +323,8 @@ export interface JinglerAppProps {
     view: "conversation" | "plan" | "split",
     ctx: ConversationPaneCtx
   ) => ReactNode
+  /** Render the latest focused visual explanation. */
+  renderExplanation?: (session: Session) => ReactNode
   /** Render the session-native repository browser and editor. */
   renderFiles?: (
     session: Session,
@@ -356,6 +358,7 @@ export interface JinglerAppProps {
   ) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
+  explanationSessions?: ReadonlySet<string>
   /** Load branch names for a repo (New Session base picker). */
   loadBranches?: (repoPath: string, environmentId?: string) => Promise<ReadonlyArray<string>>
   environments?: ReadonlyArray<Environment>
@@ -506,11 +509,13 @@ export function JinglerApp({
   onVisibleSessionsChange,
   patch = SEED_PATCH,
   renderConversation,
+  renderExplanation,
   renderFiles,
   onOpenFile,
   renderFileQuickOpen,
   renderChatTabs,
   planSessions,
+  explanationSessions,
   loadBranches = noBranches,
   environments = [],
   loadEnvironmentDiscovery,
@@ -1012,6 +1017,7 @@ export function JinglerApp({
       const tabCtx: TabContext = {
         session: active,
         hasPlan: planSessions?.has(active.id) ?? false,
+        hasExplanation: explanationSessions?.has(active.id) ?? false,
         diff: liveDiff?.[active.id] ?? null
       }
       for (const tab of visibleTabs(tabCtx, [
@@ -1067,6 +1073,7 @@ export function JinglerApp({
     providerConnections,
     onSignOut,
     planSessions,
+    explanationSessions,
     liveDiff,
     tabContributions,
     pluginCommands,
@@ -1187,11 +1194,13 @@ export function JinglerApp({
         onRestoreSession={onRestoreSession}
         onDeleteSession={onDeleteSession}
         renderConversation={renderConversation}
+        renderExplanation={renderExplanation}
         renderFiles={renderFiles}
         renderBrowser={renderBrowser}
         onOpenFile={onOpenFile}
         renderChatTabs={renderChatTabs}
         planSessions={planSessions}
+        explanationSessions={explanationSessions}
         showEmpty={showEmpty}
         patch={patch}
         liveActivity={liveActivity}
