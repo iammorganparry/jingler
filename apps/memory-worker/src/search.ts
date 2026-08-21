@@ -9,7 +9,12 @@ import {
   type MemoryPage
 } from "@jingler/memory"
 
-export type SearchMatchKind = "fulltext" | "index" | "wikilink" | "backlink"
+export type SearchMatchKind =
+  | "fulltext"
+  | "index"
+  | "wikilink"
+  | "backlink"
+  | "semantic"
 
 export interface VaultSearchResult {
   readonly pageId: string
@@ -107,13 +112,37 @@ const backlinkMatchesFor = (
   return matches
 }
 
-const resultScore = (page: MemoryPage, query: string, kinds: ReadonlyArray<SearchMatchKind>): number => {
+export interface SearchAcceptedPagesOptions {
+  readonly candidatePageIds?: ReadonlySet<string>
+  readonly semanticScores?: ReadonlyMap<string, number>
+  readonly acceptedAtByPageId?: ReadonlyMap<string, string>
+  readonly queryTimestamp?: string
+}
+
+const recencyScore = (acceptedAt: string | undefined, queryTimestamp: string | undefined): number => {
+  if (acceptedAt === undefined || queryTimestamp === undefined) return 0
+  const ageDays = (Date.parse(queryTimestamp) - Date.parse(acceptedAt)) / 86_400_000
+  if (!Number.isFinite(ageDays) || ageDays < 0) return 0
+  return Math.max(0, 10 - Math.min(10, ageDays / 3))
+}
+
+const resultScore = (
+  page: MemoryPage,
+  query: string,
+  kinds: ReadonlyArray<SearchMatchKind>,
+  options: SearchAcceptedPagesOptions
+): number => {
   let score = kinds.length * 10
   if (normalize(page.title) === query) score += 100
   else if (includesQuery(page.title, query)) score += 40
   if (normalize(page.id) === query || normalize(page.path) === query) score += 80
   score += page.tags.filter((tag) => includesQuery(tag, query)).length * 5
-  return score
+  score += (options.semanticScores?.get(page.id) ?? 0) * 60
+  score += recencyScore(
+    options.acceptedAtByPageId?.get(page.id),
+    options.queryTimestamp
+  )
+  return Math.round(score * 1_000_000) / 1_000_000
 }
 
 export const searchAcceptedPages = (
@@ -121,15 +150,18 @@ export const searchAcceptedPages = (
   rawQuery: string,
   revisionIdByPageId: ReadonlyMap<string, string>,
   limit = 20,
-  candidatePageIds?: ReadonlySet<string>
+  options: SearchAcceptedPagesOptions = {}
 ): VaultSearchResponse => {
   const query = normalize(rawQuery)
   if (query === "") return { query: rawQuery, results: [], total: 0 }
   const backlinkMatches = backlinkMatchesFor(pages, query)
   const results = pages
-    .filter((page) => candidatePageIds === undefined || candidatePageIds.has(page.id))
+    .filter((page) =>
+      options.candidatePageIds === undefined || options.candidatePageIds.has(page.id)
+    )
     .map((page): VaultSearchResult | null => {
-      const matchKinds = matchKindsFor(page, query, backlinkMatches)
+      const matchKinds = [...matchKindsFor(page, query, backlinkMatches)]
+      if (options.semanticScores?.has(page.id)) matchKinds.push("semantic")
       const revisionId = revisionIdByPageId.get(page.id)
       if (matchKinds.length === 0 || revisionId === undefined) return null
       return {
@@ -143,7 +175,7 @@ export const searchAcceptedPages = (
         ),
         matchKinds,
         snippet: snippetFor(page.body, query),
-        score: resultScore(page, query, matchKinds)
+        score: resultScore(page, query, matchKinds, options)
       }
     })
     .filter((result): result is VaultSearchResult => result !== null)

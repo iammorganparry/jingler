@@ -87,7 +87,10 @@ import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
-import { memoryRecallQuery } from "./memory-recall.js"
+import {
+  memoryRecallQuery,
+  recentMemoryRecallTurns
+} from "./memory-recall.js"
 import { attachMemoryToSessionSpec } from "./memory-session.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
@@ -1072,9 +1075,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             memoryRecallQuery({
               operatorText,
               repo: session.repo,
-              branch: session.branch
+              branch: session.branch,
+              recentTurns: recentMemoryRecallTurns(priorMessages)
             }),
             `${sessionId}:${chatId}`
+          )
+          yield* ContextManager.rememberMemoryContext(
+            chatId,
+            memoryAttachment?.instructions ?? null
           )
           const mcp = {
             memory: null,

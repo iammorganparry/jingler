@@ -130,6 +130,18 @@ describe("turbopuffer vector layer", () => {
     expect(compostRank).toBeLessThan(networkRank)
   })
 
+  it("returns organization-scoped semantic candidates for a recall query", async () => {
+    const client = new InMemoryTurbopufferClient()
+    const layer = new TurbopufferVectorLayer(client, "org-1")
+    await run(layer.syncAcceptedPages([gardenA, gardenB, network]))
+
+    const hits = await run(layer.search("raised garden beds with compost", 2))
+
+    expect(hits).toHaveLength(2)
+    expect(hits[0]?.id).toBe("garden")
+    expect(hits.every(({ similarity }) => similarity >= 0 && similarity <= 1)).toBe(true)
+  })
+
   it("08.3 re-embeds only when page content changes", async () => {
     const client = new RecordingTurbopufferClient()
     const layer = new TurbopufferVectorLayer(client, "org-1")

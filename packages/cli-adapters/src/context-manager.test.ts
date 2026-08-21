@@ -889,6 +889,30 @@ describe("the mid-flow hold", () => {
 })
 
 describe("ContextManager.compactNow", () => {
+  it("adds the latest accepted recall block to pre-compaction context", async () => {
+    const rec = recorder()
+    await run(
+      Effect.gen(function* () {
+        yield* seed()
+        yield* ContextManager.rememberMemoryContext(
+          SESSION,
+          [
+            "<team-memory>policy</team-memory>",
+            "<recalled-memories>Accepted retry decision.</recalled-memories>"
+          ].join("\n")
+        )
+        yield* ContextManager.compactNow(SESSION, { waitForReady: true })
+        yield* ContextManager.applyWhenReady(SESSION)
+      }),
+      recordingAdapter(GOOD_REPLY, rec)
+    )
+
+    expect(rec.specs[0]?.prompt).toContain(
+      "<recalled-memories>Accepted retry decision.</recalled-memories>"
+    )
+    expect(rec.specs[0]?.prompt).not.toContain("<team-memory>policy</team-memory>")
+  })
+
   it("waits for an in-flight recovery digest before the next turn resumes", async () => {
     const rec = recorder()
     const digest = await run(

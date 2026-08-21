@@ -269,6 +269,46 @@ describe("TeamVault", () => {
     expect(navigation.indexMarkdown).toContain("pageId: target")
   })
 
+  it("fuses semantic candidates with temporal scoring", () => {
+    const older = {
+      ...page(1, "# Older\n\nUnrelated lexical text.\n"),
+      id: "older",
+      path: "older.md",
+      title: "Older",
+      citations: [],
+      metadata: { citationPolicy: "none" }
+    }
+    const recent = {
+      ...older,
+      id: "recent",
+      path: "recent.md",
+      title: "Recent"
+    }
+    const results = searchAcceptedPages(
+      [older, recent],
+      "semantic-only query",
+      new Map([
+        ["older", "revision-older"],
+        ["recent", "revision-recent"]
+      ]),
+      10,
+      {
+        semanticScores: new Map([
+          ["older", 0.8],
+          ["recent", 0.8]
+        ]),
+        acceptedAtByPageId: new Map([
+          ["older", "2026-01-01T00:00:00.000Z"],
+          ["recent", "2026-08-19T00:00:00.000Z"]
+        ]),
+        queryTimestamp: "2026-08-20T00:00:00.000Z"
+      }
+    ).results
+
+    expect(results.map(({ pageId }) => pageId)).toEqual(["recent", "older"])
+    expect(results.every(({ matchKinds }) => matchKinds.includes("semantic"))).toBe(true)
+  })
+
   it("exports accepted Markdown verbatim in an Obsidian vault layout", async () => {
     const vault = await run(TeamVault.create("org-export", new InMemoryVaultState(), new InMemoryR2Bucket()))
     const markdown = serializeMemoryMarkdown({

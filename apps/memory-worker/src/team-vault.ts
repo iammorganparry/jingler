@@ -1604,12 +1604,35 @@ export class TeamVault {
     return Effect.gen(this, function* () {
       const startedAt = performance.now()
       const snapshot = yield* this.state.load()
-      const candidatePageIds = yield* this.state.searchPageIds(query, Math.max(limit * 4, 100))
+      const lexicalCandidateIds = yield* this.state.searchPageIds(
+        query,
+        Math.max(limit * 4, 100)
+      )
+      const semanticHits = this.vectorLayer === undefined
+        ? []
+        : yield* this.vectorLayer.search(query, Math.max(limit * 4, 40)).pipe(
+            Effect.catchAllCause(() => Effect.succeed([]))
+          )
+      const semanticScores = new Map(
+        semanticHits.map((hit) => [hit.id, hit.similarity])
+      )
+      const candidatePageIds = lexicalCandidateIds === undefined
+        ? undefined
+        : [...new Set([...lexicalCandidateIds, ...semanticScores.keys()])]
       const pages = yield* this.loadPages(snapshot, candidatePageIds)
       const revisionIdByPageId = new Map(
         snapshot.heads.map((head) => [head.pageId, head.revisionId])
       )
-      const response = searchAcceptedPages(pages, query, revisionIdByPageId, limit)
+      const response = searchAcceptedPages(pages, query, revisionIdByPageId, limit, {
+        ...(candidatePageIds === undefined
+          ? {}
+          : { candidatePageIds: new Set(candidatePageIds) }),
+        semanticScores,
+        acceptedAtByPageId: new Map(
+          acceptedLog(snapshot).map((entry) => [entry.pageId, entry.occurredAt])
+        ),
+        queryTimestamp: occurredAt
+      })
       const metric: RetrievalMetric = {
         id: `retrieval:${crypto.randomUUID()}`,
         occurredAt,

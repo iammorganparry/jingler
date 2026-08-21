@@ -10,6 +10,7 @@ import {
   MemoryService,
   MemoryServiceLive,
   redactMemoryText,
+  renderRecalledMemories,
   type MemoryServiceShape
 } from "./memory.js"
 import type {
@@ -335,6 +336,11 @@ describe("MemoryService stateless attachment", () => {
         service.attachment("How do refunds work?", "session-1:chat-1")
       ).pipe(Effect.provide(configuredLayer()))
     )
+    const sameQueryAgain = await Effect.runPromise(
+      withEnabledMemory(
+        service.attachment("How do refunds work?", "session-1:chat-1")
+      ).pipe(Effect.provide(configuredLayer()))
+    )
     const separateConversation = await Effect.runPromise(
       withEnabledMemory(
         service.attachment("How do refunds work?", "session-2:chat-1")
@@ -346,6 +352,7 @@ describe("MemoryService stateless attachment", () => {
     expect(attachment?.instructions).toContain('"revisionId": "revision:page-one:1"')
     expect(attachment?.instructions).not.toContain("page-four")
     expect(repeated?.instructions).not.toContain("Accepted body for page-one")
+    expect(sameQueryAgain?.instructions).not.toContain("Accepted body for page-one")
     expect(separateConversation?.instructions).toContain("Accepted body for page-one")
 
     const calls = requests.filter(
@@ -369,6 +376,51 @@ describe("MemoryService stateless attachment", () => {
     }
     expect(searchBody.params.arguments.query).toContain("api_key=[REDACTED]")
     expect(searchBody.params.arguments.query).not.toContain("secret-should-not-egress")
+  })
+
+  it("retries a failed recall but caches a successful empty result", async () => {
+    let searches = 0
+    let failNextSearch = true
+    const service = makeMemoryService({
+      fetch: async (input, init) => {
+        const request = requestOf(input, init)
+        if (request.url.endsWith("/api/memory/grant")) {
+          return Response.json(grantResponse("recall-retry"))
+        }
+        const body = await request.clone().json() as {
+          method?: string
+          params?: { name?: string }
+        }
+        if (body.method === "server/discover") return discoveryResponse()
+        searches += 1
+        if (failNextSearch) {
+          failNextSearch = false
+          return Response.json({ error: "offline" }, { status: 503 })
+        }
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "empty-search",
+          result: {
+            resultType: "complete",
+            structuredContent: { data: { results: [] } }
+          }
+        })
+      },
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS
+    })
+    const recall = () => withEnabledMemory(
+      service.attachment("same query", "session-retry:chat-1")
+    ).pipe(Effect.provide(configuredLayer()))
+
+    const failed = await Effect.runPromise(recall())
+    const empty = await Effect.runPromise(recall())
+    const cachedEmpty = await Effect.runPromise(recall())
+
+    expect(failed?.instructions).not.toContain("Initial recall completed")
+    expect(empty?.instructions).toContain("no accepted matches")
+    expect(cachedEmpty?.instructions).not.toContain("Initial recall completed")
+    expect(searches).toBe(2)
   })
 
   it("reissues an expired-at-use grant and retries discovery without session state", async () => {
@@ -842,6 +894,29 @@ describe("MemoryService retention recovery", () => {
     expect(JSON.parse(
       readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
     )).toEqual([])
+  })
+})
+
+describe("automatic recall evidence budget", () => {
+  it("keeps stable provenance while bounding recalled page text", () => {
+    const pages = ["one", "two", "three"].map((id) => ({
+      page: {
+        id: `page-${id}`,
+        title: `Page ${id}`,
+        body: id.repeat(4_000)
+      },
+      revision: { id: `revision:page-${id}:1` },
+      sourceIds: [`source:page-${id}`],
+      citationIds: [`citation:page-${id}`]
+    }))
+
+    const rendered = renderRecalledMemories(pages)
+
+    expect(rendered).toContain('"pageId": "page-one"')
+    expect(rendered).toContain('"revisionId": "revision:page-two:1"')
+    expect(rendered).toContain('"sourceIds"')
+    expect(rendered).toContain('"citationIds"')
+    expect(rendered).not.toContain('"pageId": "page-three"')
   })
 })
 
