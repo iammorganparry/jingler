@@ -6,6 +6,16 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import { Data, Effect } from "effect"
 import { PI_SUBAGENTS_EXTENSION_PATH } from "../subagents/pi-subagents-bootstrap.js"
+import {
+  PONYTAIL_EXTENSION_PATH,
+  PONYTAIL_SKILLS_PATH
+} from "../resources/ponytail-resources.js"
+export { PONYTAIL_EXTENSION_PATH, PONYTAIL_SKILLS_PATH } from "../resources/ponytail-resources.js"
+
+const ALLOWED_EXTENSION_PATHS = new Set([
+  PI_SUBAGENTS_EXTENSION_PATH,
+  PONYTAIL_EXTENSION_PATH
+])
 
 export class PiResourceError extends Data.TaggedError("PiResourceError")<{
   readonly message: string
@@ -41,8 +51,8 @@ export const createLockedPiResources = (
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        additionalExtensionPaths: [PI_SUBAGENTS_EXTENSION_PATH],
-        additionalSkillPaths: [],
+        additionalExtensionPaths: [PI_SUBAGENTS_EXTENSION_PATH, PONYTAIL_EXTENSION_PATH],
+        additionalSkillPaths: [PONYTAIL_SKILLS_PATH],
         additionalPromptTemplatePaths: [],
         additionalThemePaths: [],
         extensionFactories: [],
@@ -50,11 +60,14 @@ export const createLockedPiResources = (
         appendSystemPromptOverride: () => [],
         extensionsOverride: (base) => ({
           ...base,
-          extensions: base.extensions.filter(
-            (extension) => extension.resolvedPath === PI_SUBAGENTS_EXTENSION_PATH
+          extensions: base.extensions.filter((extension) =>
+            ALLOWED_EXTENSION_PATHS.has(extension.resolvedPath)
           )
         }),
-        skillsOverride: () => ({ skills: [], diagnostics: [] }),
+        skillsOverride: (base) => ({
+          ...base,
+          skills: base.skills.filter((skill) => skill.filePath.startsWith(PONYTAIL_SKILLS_PATH))
+        }),
         promptsOverride: () => ({ prompts: [], diagnostics: [] }),
         themesOverride: () => ({ themes: [], diagnostics: [] }),
         agentsFilesOverride: () => ({ agentsFiles: [] })
@@ -78,12 +91,17 @@ export const assertLockedPiResources = (
     ["appended prompt", loader.getAppendSystemPrompt().length === 0],
     [
       "extension",
-      loader.getExtensions().extensions.length === 1 &&
-        loader.getExtensions().extensions[0]?.resolvedPath ===
-          PI_SUBAGENTS_EXTENSION_PATH &&
+      loader.getExtensions().extensions.length === ALLOWED_EXTENSION_PATHS.size &&
+        loader.getExtensions().extensions.every((extension) =>
+          ALLOWED_EXTENSION_PATHS.has(extension.resolvedPath)
+        ) &&
         loader.getExtensions().errors.length === 0
     ],
-    ["skill", loader.getSkills().skills.length === 0],
+    [
+      "skill",
+      loader.getSkills().skills.length === 6 &&
+        loader.getSkills().skills.every((skill) => skill.filePath.startsWith(PONYTAIL_SKILLS_PATH))
+    ],
     ["prompt template", loader.getPrompts().prompts.length === 0],
     ["theme", loader.getThemes().themes.length === 0],
     ["context file", loader.getAgentsFiles().agentsFiles.length === 0]

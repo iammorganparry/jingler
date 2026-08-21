@@ -151,11 +151,14 @@ describe("pi session creation", () => {
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([
       "jingler_ask_question",
       "jingler_discard_plan",
+      "jingler_publish_explanation",
       "jingler_submit_plan"
     ])
-    expect(received?.resourceLoader?.getExtensions().extensions).toEqual([
-      expect.objectContaining({ path: expect.stringContaining("pi-subagents") })
-    ])
+    expect(received?.resourceLoader?.getExtensions().extensions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: expect.stringContaining("pi-subagents") }),
+      expect.objectContaining({ path: expect.stringContaining("ponytail") })
+    ]))
+    expect(received?.resourceLoader?.getSkills().skills.map(({ name }) => name)).toContain("ponytail")
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
       "Jingler's embedded engineering agent"
     )

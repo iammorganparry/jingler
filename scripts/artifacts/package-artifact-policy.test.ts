@@ -14,9 +14,10 @@ const piBundle = [
 ].join("\n")
 
 describe("package artifact policy", () => {
-  it("accepts pi-only desktop and device runtime artifacts", () => {
+  it("accepts Pi and Ponytail desktop and device runtime artifacts", () => {
     expect(auditDeviceBundle(piBundle)).toEqual([])
     expect(auditDesktopArchive([
+      "/node_modules/@dietrichgebert/ponytail/package.json",
       "/node_modules/@earendil-works/pi-ai/package.json",
       "/node_modules/@earendil-works/pi-coding-agent/package.json",
       "/node_modules/pi-subagents/package.json",
@@ -28,6 +29,7 @@ describe("package artifact policy", () => {
     expect(auditDeviceBundle(`${piBundle}\nnode_modules/@openai/codex-sdk/index.js`))
       .toContain("device bundle contains @openai/codex-sdk")
     expect(auditDesktopArchive([
+      "/node_modules/@dietrichgebert/ponytail/package.json",
       "/node_modules/@earendil-works/pi-ai/package.json",
       "/node_modules/@earendil-works/pi-coding-agent/package.json",
       "/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
@@ -38,8 +40,9 @@ describe("package artifact policy", () => {
     ]))
   })
 
-  it("requires pi and forbids legacy SDKs in runtime manifests", () => {
+  it("requires Pi and Ponytail and forbids legacy SDKs in runtime manifests", () => {
     expect(auditRuntimeDependencies({ dependencies: {
+      "@dietrichgebert/ponytail": "4.9.0",
       "@earendil-works/pi-ai": "0.84.1",
       "@earendil-works/pi-coding-agent": "0.84.1",
       "pi-subagents": "0.49.0",

@@ -55,6 +55,7 @@
     "eval:pi:release-manifest": "tsx evals/certification/run-release-certifications.ts"
   },
   "dependencies": {
+    "@dietrichgebert/ponytail": "4.9.0",
     "@earendil-works/pi-ai": "0.84.1",
     "@earendil-works/pi-coding-agent": "0.84.1",
     "@effect/platform": "^0.96.2",

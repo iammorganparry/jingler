@@ -688,11 +688,43 @@ export const chooseReposDir = () =>
     return yield* ConfigService.setReposDir(dir);
   }).pipe(Effect.orElseSucceed(() => null));
 
-const BUILTIN_SKILLS = [{
-  name: "/explain",
-  description: "Publish a focused visual explanation of the current technical topic.",
-  source: "skill" as const
-}]
+const BUILTIN_SKILLS = [
+  {
+    name: "/explain",
+    description: "Publish a focused visual explanation of the current technical topic.",
+    source: "skill" as const,
+  },
+  {
+    name: "/ponytail",
+    description: "Set Ponytail mode: lite, full, ultra, off, status, or default <mode>.",
+    source: "command" as const,
+  },
+  {
+    name: "/ponytail-review",
+    description: "Review a diff exclusively for removable over-engineering.",
+    source: "skill" as const,
+  },
+  {
+    name: "/ponytail-audit",
+    description: "Audit the repository for code and dependencies that can be removed.",
+    source: "skill" as const,
+  },
+  {
+    name: "/ponytail-debt",
+    description: "List deliberate Ponytail shortcuts and their upgrade triggers.",
+    source: "skill" as const,
+  },
+  {
+    name: "/ponytail-gain",
+    description: "Show Ponytail's published benchmark impact scoreboard.",
+    source: "skill" as const,
+  },
+  {
+    name: "/ponytail-help",
+    description: "Show Ponytail levels, skills, commands, and deactivation help.",
+    source: "skill" as const,
+  },
+]
 
 /** Product-owned skills plus enabled managed skills and prompts. */
 export const skillsList = (sessionId: string) =>

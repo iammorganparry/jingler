@@ -35,6 +35,8 @@ const requiredDeviceEntries = [
   "./jingler-device.mjs",
   "./runtime-assets/pi-subagent-wrapper.mjs",
   "./runtime-assets/jingler-child-tools.mjs",
+  "./node_modules/@dietrichgebert/ponytail/package.json",
+  "./node_modules/@dietrichgebert/ponytail/pi-extension/index.js",
   "./node_modules/pi-subagents/index.ts",
   "./node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
 ]

@@ -48,6 +48,7 @@ await cp(
 )
 
 const packageRoots = [
+  "@dietrichgebert/ponytail",
   "pi-subagents",
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",

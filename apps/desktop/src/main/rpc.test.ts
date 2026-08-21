@@ -986,6 +986,11 @@ describe("RPC handlers", () => {
         description: "Publish a focused visual explanation of the current technical topic.",
         source: "skill",
       });
+      expect(skills).toContainEqual({
+        name: "/ponytail",
+        description: "Set Ponytail mode: lite, full, ultra, off, status, or default <mode>.",
+        source: "command",
+      });
       expect(skills.map((s) => s.name)).not.toContain("/plan");
       expect(skills.map((s) => s.name)).not.toContain("/test");
       expect(skills.map((s) => s.name)).not.toContain("/commit");
@@ -1027,18 +1032,20 @@ describe("RPC handlers", () => {
         ),
       );
 
-      expect(skills).toEqual([
-        {
-          name: "/explain",
-          description: "Publish a focused visual explanation of the current technical topic.",
-          source: "skill",
-        },
-        {
-          name: "/review",
-          description: "Review current changes",
-          source: "command",
-        },
-      ]);
+      expect(skills).toContainEqual({
+        name: "/review",
+        description: "Review current changes",
+        source: "command",
+      });
+      expect(skills.map(({ name }) => name)).toEqual(expect.arrayContaining([
+        "/explain",
+        "/ponytail",
+        "/ponytail-review",
+        "/ponytail-audit",
+        "/ponytail-debt",
+        "/ponytail-gain",
+        "/ponytail-help",
+      ]));
     });
   });
 
