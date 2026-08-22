@@ -10,7 +10,7 @@ import type {
   DebugInput,
   DebugViewSnapshot
 } from "./contracts.js"
-import { resolveProgram, selectAttachAdapter, selectLaunchAdapter } from "./dap/config.js"
+import { resolveAdapter, resolveProgram, selectLaunchAdapter } from "./dap/config.js"
 import { DapSession } from "./dap/session.js"
 import type { DapScope, DapVariable, JsonObject } from "./dap/types.js"
 
@@ -129,10 +129,7 @@ export class DebugController {
       return state.session.snapshot()
     }
     if (input.action === "attach") {
-      if (input.pid === undefined && input.port === undefined && input.adapter === undefined) {
-        throw new Error("debug attach requires pid, port, or an adapter with attach defaults.")
-      }
-      const adapter = selectAttachAdapter(cwd, input.adapter)
+      const adapter = resolveAdapter(cwd, required(input.adapter, "adapter"))
       await state.session?.dispose()
       state.session = null
       state.session = await DapSession.attach({

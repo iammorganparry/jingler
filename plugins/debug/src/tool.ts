@@ -18,7 +18,7 @@ const properties = {
 
 export const debugAgentTool = (controller: DebugController): AgentToolDefinition => ({
   id: "debug",
-  description: "Drive one DAP debugger session. Prefer this over shell commands for runtime state, breakpoints, stepping, variables, or thread inspection. Only one active debugger per Jingler session; program is a path, not a shell command.",
+  description: "Drive one DAP debugger session. Prefer this over shell commands for runtime state, breakpoints, stepping, variables, or thread inspection. Only one active debugger per Jingler session; program is a path, not a shell command; attach requires an explicit adapter.",
   inputSchema: { type: "object", properties, required: ["action"], additionalProperties: false },
   risk: "execute",
   idempotency: "unsafe",

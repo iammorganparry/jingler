@@ -14,7 +14,7 @@ import type {
 
 const CONTENT_LENGTH = /(?:^|\r\n)Content-Length:\s*(\d+)/iu
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024
-const DAP_PORT_ARGUMENT = String.raw`\${port}`
+const DAP_PORT_ARGUMENT = ["$", "{port}"].join("")
 
 const frame = (message: DapMessage): string => {
   const body = JSON.stringify(message)
@@ -133,7 +133,6 @@ export class DapClient {
   #sequence = 0
   #buffer = Buffer.alloc(0)
   #disposed = false
-  readonly #debuggees = new Set<ChildProcess>()
 
   private constructor(transport: DapTransport) {
     this.#transport = transport
@@ -151,6 +150,7 @@ export class DapClient {
     transport.process.on("exit", (code) => {
       this.#emit({ seq: 0, type: "event", event: "terminated", body: { exitCode: code ?? undefined } })
       this.#failPending(new Error("Debug adapter exited."))
+      this.dispose().catch(() => {})
     })
   }
 
@@ -221,8 +221,6 @@ export class DapClient {
     if (this.#disposed) return
     this.#disposed = true
     this.#failPending(new Error("Debug adapter was closed."))
-    await Promise.all([...this.#debuggees].map(killTree))
-    this.#debuggees.clear()
     await this.#transport.dispose()
   }
 
@@ -236,31 +234,6 @@ export class DapClient {
       entry.reject(cause)
     }
     this.#pending.clear()
-  }
-
-  async #runInTerminal(request: DapRequest): Promise<void> {
-    const args = request.arguments?.args
-    if (!(Array.isArray(args) && args.every((value): value is string => typeof value === "string")) || args.length === 0) {
-      throw new Error("runInTerminal requires a command argument list.")
-    }
-    const cwd = typeof request.arguments?.cwd === "string" ? request.arguments.cwd : process.cwd()
-    const requestedEnv = request.arguments?.env
-    const env = requestedEnv && typeof requestedEnv === "object" && !Array.isArray(requestedEnv)
-      ? Object.fromEntries(Object.entries(requestedEnv).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
-      : {}
-    const child = spawn(args[0]!, args.slice(1), {
-      cwd,
-      detached: true,
-      stdio: "ignore",
-      env: { ...process.env, ...env }
-    })
-    await Promise.race([
-      once(child, "spawn"),
-      once(child, "error").then(([cause]) => Promise.reject(cause))
-    ])
-    this.#debuggees.add(child)
-    child.once("exit", () => this.#debuggees.delete(child))
-    await this.respond(request, true, { processId: child.pid })
   }
 
   #read(chunk: Buffer): void {
@@ -292,13 +265,7 @@ export class DapClient {
         this.#emit(message as DapEvent)
       } else if (message.type === "request") {
         const request = message as DapRequest
-        if (request.command === "runInTerminal") {
-          this.#runInTerminal(request).catch((cause: unknown) => {
-            this.respond(request, false, {}, cause instanceof Error ? cause.message : String(cause)).catch(() => {})
-          })
-        } else {
-          this.respond(request, false, {}, `Unsupported reverse request: ${request.command}`).catch(() => {})
-        }
+        this.respond(request, false, {}, `Unsupported reverse request: ${request.command}`).catch(() => {})
       }
     }
   }

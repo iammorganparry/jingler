@@ -48,6 +48,7 @@ export class DapSession {
   #exitCode?: number
   #configurationDone = false
   #configurationPromise?: Promise<void>
+  #stopRefresh?: { readonly sequence: number; readonly promise: Promise<void> }
   #listeners = new Set<() => void>()
   #eventWaiters = new Set<(event: DapEvent) => void>()
 
@@ -81,8 +82,10 @@ export class DapSession {
         cwd: input.cwd,
         args: [...(input.args ?? [])]
       }, input.signal)
-      session.#status = "running"
-      session.#notify()
+      if (session.#status === "starting") {
+        session.#status = "running"
+        session.#notify()
+      }
       return session
     } catch (cause) {
       await client.dispose()
@@ -109,8 +112,10 @@ export class DapSession {
         ...(input.port === undefined ? {} : { port: input.port }),
         ...(input.host === undefined ? {} : { host: input.host })
       }, input.signal)
-      session.#status = "running"
-      session.#notify()
+      if (session.#status === "starting") {
+        session.#status = "running"
+        session.#notify()
+      }
       return session
     } catch (cause) {
       await client.dispose()
@@ -194,16 +199,19 @@ export class DapSession {
     await this.#configuration(signal)
     const threadId = this.#threadId ?? (await this.threads(signal))[0]?.id
     if (threadId === undefined) throw new Error("No debug thread is available.")
-    this.#status = "running"
-    this.#frame = undefined
-    this.#stackFrames = []
-    this.#notify()
+    const stopSequence = this.#stopSequence
     const waiter = new AbortController()
     const cancelWait = () => waiter.abort()
     signal?.addEventListener("abort", cancelWait, { once: true })
     const stopped = this.#waitFor(["stopped", "terminated", "exited"], timeoutMs, waiter.signal)
     try {
       await this.#client.request(kind, { threadId }, signal)
+      if (this.#status === "stopped" && this.#stopSequence === stopSequence) {
+        this.#status = "running"
+        this.#frame = undefined
+        this.#stackFrames = []
+        this.#notify()
+      }
       await stopped
     } catch (cause) {
       waiter.abort()
@@ -214,7 +222,7 @@ export class DapSession {
     }
     const outcome = this.snapshot()
     if (outcome.status === "stopped" && outcome.frame === undefined) {
-      await this.#refreshStop()
+      await this.#queueStopRefresh()
     }
     return this.snapshot()
   }
@@ -240,19 +248,25 @@ export class DapSession {
   }
 
   async threads(signal?: AbortSignal): Promise<readonly DapThread[]> {
-    const body = await this.#client.request("threads", {}, signal)
-    this.#threads = array<DapThread>(body.threads)
-    this.#notify()
-    return this.#threads
+    const stopSequence = this.#stopSequence
+    const threads = array<DapThread>((await this.#client.request("threads", {}, signal)).threads)
+    if (this.#stopSequence === stopSequence) {
+      this.#threads = threads
+      this.#notify()
+    }
+    return threads
   }
 
   async stackTrace(threadId = this.#threadId, levels?: number, signal?: AbortSignal): Promise<readonly DapStackFrame[]> {
     if (threadId === undefined) throw new Error("No stopped thread is available.")
-    const body = await this.#client.request("stackTrace", { threadId, ...(levels === undefined ? {} : { levels }) }, signal)
-    this.#stackFrames = array<DapStackFrame>(body.stackFrames)
-    this.#frame = this.#stackFrames[0]
-    this.#notify()
-    return this.#stackFrames
+    const stopSequence = this.#stopSequence
+    const frames = array<DapStackFrame>((await this.#client.request("stackTrace", { threadId, ...(levels === undefined ? {} : { levels }) }, signal)).stackFrames)
+    if (this.#status === "stopped" && this.#stopSequence === stopSequence && this.#threadId === threadId) {
+      this.#stackFrames = frames
+      this.#frame = frames[0]
+      this.#notify()
+    }
+    return frames
   }
 
   async scopes(frameId = this.#frame?.id, signal?: AbortSignal): Promise<readonly DapScope[]> {
@@ -293,7 +307,6 @@ export class DapSession {
       pathFormat: "path",
       linesStartAt1: true,
       columnsStartAt1: true,
-      supportsRunInTerminalRequest: true,
       supportsVariableType: true,
       supportsMemoryReferences: true
     }, signal)
@@ -303,7 +316,7 @@ export class DapSession {
   async #configuration(signal?: AbortSignal): Promise<void> {
     if (this.#configurationDone) return
     this.#configurationPromise ??= (async () => {
-      if (this.#capabilities.supportsConfigurationDoneRequest !== false) {
+      if (this.#capabilities.supportsConfigurationDoneRequest === true) {
         await this.#client.request("configurationDone", {}, signal)
       }
       this.#configurationDone = true
@@ -351,7 +364,7 @@ export class DapSession {
       this.#stopSequence += 1
       this.#stopReason = text(body.reason)
       this.#threadId = num(body.threadId)
-      this.#refreshStop().catch(() => {})
+      this.#queueStopRefresh().catch(() => {})
     } else if (event.event === "continued") {
       this.#status = "running"
       this.#frame = undefined
@@ -364,11 +377,28 @@ export class DapSession {
     this.#notify()
   }
 
-  async #refreshStop(): Promise<void> {
+  #queueStopRefresh(): Promise<void> {
+    const sequence = this.#stopSequence
+    if (this.#stopRefresh?.sequence === sequence) return this.#stopRefresh.promise
+    const threadId = this.#threadId
+    const promise = this.#refreshStop(sequence, threadId)
+    this.#stopRefresh = { sequence, promise }
+    return promise
+  }
+
+  async #refreshStop(sequence: number, threadId: number | undefined): Promise<void> {
     try {
-      const threads = await this.threads()
-      if (this.#threadId === undefined) this.#threadId = threads[0]?.id
-      if (this.#threadId !== undefined) await this.stackTrace(this.#threadId)
+      const threads = array<DapThread>((await this.#client.request("threads")).threads)
+      const selectedThreadId = threadId ?? threads[0]?.id
+      const stackFrames = selectedThreadId === undefined
+        ? []
+        : array<DapStackFrame>((await this.#client.request("stackTrace", { threadId: selectedThreadId })).stackFrames)
+      if (this.#status !== "stopped" || this.#stopSequence !== sequence || this.#threadId !== threadId) return
+      this.#threads = threads
+      this.#threadId = selectedThreadId
+      this.#stackFrames = stackFrames
+      this.#frame = stackFrames[0]
+      this.#notify()
     } catch {
       // The stopped snapshot remains useful even if an adapter races shutdown.
     }

@@ -116,13 +116,5 @@ export const selectLaunchAdapter = (cwd: string, program: string, requested?: st
   return resolveAdapter(cwd, chosen[0])
 }
 
-export const selectAttachAdapter = (cwd: string, requested?: string): DapResolvedAdapter => {
-  if (requested) return resolveAdapter(cwd, requested)
-  for (const name of ["debugpy", "gdb", "lldb-dap", ...Object.keys(adapterConfigs(cwd))]) {
-    try { return resolveAdapter(cwd, name) } catch { /* try next */ }
-  }
-  throw new Error("No debug adapter is installed. Configure .jingler/dap.json.")
-}
-
 export const resolveProgram = (cwd: string, program: string): string => isAbsolute(program) ? program : resolve(cwd, program)
 export const projectRoot = (path: string): string => dirname(path)
