@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   planTaskProgressRecords,
   planTaskProtocolTokens,
+  renderPlanTaskProgressMarker,
   stripPlanTaskProgressProtocol
 } from "./plan-task-protocol.js"
 
@@ -32,6 +33,15 @@ describe("plan task protocol", () => {
         status: "in-progress"
       }
     ])
+  })
+
+  it("round-trips rendered markers through the parser, with and without fingerprints", () => {
+    const records = [
+      { stageId: "stage-1", stageFingerprint: "abc123", taskId: "t1", status: "completed" as const },
+      { stageId: "stage-2", stageFingerprint: "", taskId: "t3", status: "in-progress" as const }
+    ]
+    const text = records.map(renderPlanTaskProgressMarker).join("\n")
+    expect(planTaskProgressRecords(text)).toEqual(records)
   })
 
   it("splits prose around markers and strips them from visible text", () => {

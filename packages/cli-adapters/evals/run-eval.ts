@@ -13,15 +13,31 @@ import {
   runLiveMatrix
 } from "./live/live-matrix.js"
 import { redactErrorMessage, redactReport, scoreScenario } from "./pi-eval.js"
-import { CORE_PI_SCENARIOS, scenarioById } from "./pi-scenarios.js"
-import { runDeterministicScenario } from "./deterministic-runtime.js"
+import { CORE_PI_SCENARIOS, HARNESS_PI_SCENARIOS, SELECTION_PI_SCENARIOS, scenarioById } from "./pi-scenarios.js"
+import {
+  runDeterministicHarnessScenario,
+  runDeterministicScenario
+} from "./deterministic-runtime.js"
 import { AtomicJsonFile } from "../src/runtime/persistence/atomic-json-file.js"
 
 const deterministicTraces = (): Promise<ReadonlyArray<EvalTrace>> =>
   Effect.runPromise(
     Effect.forEach(
-      CORE_PI_SCENARIOS,
-      (scenario) => Effect.promise(() => runDeterministicScenario(scenario.id)),
+      [
+        ...CORE_PI_SCENARIOS.map((scenario) => ({
+          id: scenario.id,
+          run: runDeterministicScenario
+        })),
+        ...SELECTION_PI_SCENARIOS.map((scenario) => ({
+          id: scenario.id,
+          run: runDeterministicScenario
+        })),
+        ...HARNESS_PI_SCENARIOS.map((scenario) => ({
+          id: scenario.id,
+          run: runDeterministicHarnessScenario
+        }))
+      ],
+      (scenario) => Effect.promise(() => scenario.run(scenario.id)),
       { concurrency: 1 }
     )
   )
@@ -35,9 +51,13 @@ const secretValues = (): ReadonlyArray<string> =>
 const markdown = (mode: string, results: ReadonlyArray<EvalResult>): string => [
   `# Jingler pi ${mode} evaluation`,
   "",
-  "| Scenario | Status | Duration |",
-  "| --- | --- | ---: |",
-  ...results.map((result) => `| ${result.scenarioId} | ${result.status} | ${result.durationMs}ms |`),
+  "| Scenario | Status | Score | Duration |",
+  "| --- | --- | ---: | ---: |",
+  ...results.map((result) =>
+    `| ${result.scenarioId} | ${result.status} | ${
+      result.score === undefined ? "—" : result.score.toFixed(2)
+    } | ${result.durationMs}ms |`
+  ),
   ""
 ].join("\n")
 
@@ -87,7 +107,13 @@ const traces = mode === "deterministic"
         const provenance = process.env.JINGLER_EVAL_REVIEWED === "1"
           ? "reviewed-release" as const
           : "local" as const
-        const live = await Effect.runPromise(runLiveMatrix(targets, provenance)).catch((cause) => {
+        const samplesEnv = process.env.JINGLER_EVAL_PLAN_SAMPLES
+        const liveHarness = samplesEnv === undefined
+          ? {}
+          : { samples: Schema.decodeUnknownSync(Schema.NumberFromString)(samplesEnv) }
+        const live = await Effect.runPromise(
+          runLiveMatrix(targets, provenance, { liveHarness })
+        ).catch((cause) => {
           const failure = cause instanceof Error ? cause : new Error("Live evaluation failed")
           throw new Error(
             redactErrorMessage(failure, [...secretValues(), ...liveCredentialValues])
@@ -97,11 +123,19 @@ const traces = mode === "deterministic"
         return live.flatMap((result) => result.traces)
       })()
 
-const results = traces.map((trace) => {
-  const scenario = scenarioById(trace.scenarioId)
-  if (scenario === null) throw new Error(`unknown scenario: ${trace.scenarioId}`)
-  return scoreScenario(scenario, trace)
-})
+/**
+ * Live results come from the certification aggregates: the harness scenarios
+ * are pass@k, so scoring their raw sample traces here would fail the whole
+ * run on one flaky sample the majority already absorbed. Deterministic and
+ * replay traces are single-shot and score directly.
+ */
+const results = mode === "live"
+  ? certifications.flatMap((certification) => certification.results)
+  : traces.map((trace) => {
+      const scenario = scenarioById(trace.scenarioId)
+      if (scenario === null) throw new Error(`unknown scenario: ${trace.scenarioId}`)
+      return scoreScenario(scenario, trace)
+    })
 const maxCostUsd = process.env.JINGLER_EVAL_MAX_COST_USD
   ? Schema.decodeUnknownSync(Schema.NumberFromString)(process.env.JINGLER_EVAL_MAX_COST_USD)
   : null

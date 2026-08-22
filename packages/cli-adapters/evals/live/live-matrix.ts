@@ -9,6 +9,7 @@ import { InMemoryProviderCredentialStore } from "../../src/runtime/auth/credenti
 import type { AuthBrokerOptions } from "../../src/runtime/auth/auth-broker.js"
 import {
   evaluateProviderModelBehavior,
+  type LiveHarnessOptions,
   type VerifyProviderModelBehaviorInput
 } from "../../src/runtime/certification/model-verifier.js"
 import type { EvalTrace } from "../behavior-contract.js"
@@ -126,6 +127,7 @@ export const runLiveTarget = (
       credentials: InMemoryProviderCredentialStore,
       scenarioId: string
     ) => Effect.Effect<EvalTrace>
+    readonly liveHarness?: LiveHarnessOptions
   } = {}
 ): Effect.Effect<LiveTargetResult, LiveEvalError> =>
   Effect.gen(function* () {
@@ -146,7 +148,8 @@ export const runLiveTarget = (
       modelId: target.modelId,
       provenance,
       ...(options.probe === undefined ? {} : { probe: options.probe }),
-      ...(runScenario === undefined ? {} : { runScenario })
+      ...(runScenario === undefined ? {} : { runScenario }),
+      ...(options.liveHarness === undefined ? {} : { liveHarness: options.liveHarness })
     }).pipe(
       Effect.mapError((cause) => new LiveEvalError({
         message: cause.message,
@@ -157,8 +160,16 @@ export const runLiveTarget = (
 
 export const runLiveMatrix = (
   targets: LiveEvalMatrix,
-  provenance: ModelCertification["provenance"]
+  provenance: ModelCertification["provenance"],
+  options: { readonly liveHarness?: LiveHarnessOptions } = {}
 ): Effect.Effect<ReadonlyArray<LiveTargetResult>, LiveEvalError> =>
-  Effect.forEach(targets, (target) => runLiveTarget(target, provenance), {
-    concurrency: 1
-  })
+  Effect.forEach(
+    targets,
+    (target) =>
+      runLiveTarget(target, provenance, {
+        // The matrix is the production entrypoint, so live behavior evals run
+        // by default here; the per-target seam stays opt-in for tests.
+        liveHarness: options.liveHarness ?? {}
+      }),
+    { concurrency: 1 }
+  )

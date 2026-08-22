@@ -8,8 +8,13 @@ import {
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { InMemoryProviderCredentialStore } from "../src/runtime/auth/credential-store.js"
-import { scriptedPiScenarioResponses } from "../src/runtime/certification/pi-scenario-fixture.js"
+import {
+  evalSeedPlan,
+  PLAN_EXECUTION_PROMPT,
+  scriptedPiScenarioResponses
+} from "../src/runtime/certification/pi-scenario-fixture.js"
 import { runPiScenario } from "../src/runtime/certification/pi-scenario-runner.js"
+import { runHarnessScenario } from "../src/runtime/certification/harness-scenario-runner.js"
 import {
   FakePiProvider
 } from "./fixtures/fake-pi-provider.js"
@@ -85,6 +90,27 @@ export const runDeterministicScenario = async (scenarioId: string) => {
         targetId: "desktop"
       }
     },
+    configureModelRuntime: (runtime) => fake.install(runtime)
+  })
+}
+
+/**
+ * Deterministic full-harness run: same faux provider, but through
+ * `AgentRunner` so plan checkpoint persistence is the real code path.
+ */
+export const runDeterministicHarnessScenario = async (scenarioId: string) => {
+  const fake = new FakePiProvider()
+  fake.setResponses(scriptedPiScenarioResponses(scenarioId))
+  const connection = connectionFor(fake, "api-key")
+  const credentials = await credentialsFor(connection, "api-key")
+  return runHarnessScenario({
+    scenarioId,
+    prompt: PLAN_EXECUTION_PROMPT,
+    connection,
+    credentials,
+    agentDir: DETERMINISTIC_AGENT_DIR,
+    modelId: `${fake.providerId}/${fake.modelId}`,
+    seedPlan: evalSeedPlan(),
     configureModelRuntime: (runtime) => fake.install(runtime)
   })
 }

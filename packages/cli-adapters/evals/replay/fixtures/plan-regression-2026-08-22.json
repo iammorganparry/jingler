@@ -1,0 +1,1262 @@
+[
+  {
+    "scenarioId": "plan.task-status-replay",
+    "observations": [
+      {
+        "kind": "event",
+        "tag": "Started"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_list_files",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "web_search",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "subagent",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "subagent_wait",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "subagent",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "jingler_submit_plan",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "event",
+        "tag": "PlanProposed"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "jingler_submit_plan",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "jingler_submit_plan",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "jingler_submit_plan",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_read_file",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_read_file",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_read_file",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "subagent",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "subagent",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "command_execute",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_edit",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "tool-call",
+        "tool": "workspace_write",
+        "risk": "unrecorded"
+      },
+      {
+        "kind": "event",
+        "tag": "Done"
+      }
+    ],
+    "durationMs": 1,
+    "tokens": 0,
+    "costUsd": 0,
+    "versions": {
+      "behavior": "5",
+      "authentication": "3",
+      "prompt": "2",
+      "tools": "4",
+      "diff": "1",
+      "policy": "1",
+      "capabilities": "3",
+      "piSdk": "0.84.1"
+    }
+  }
+]

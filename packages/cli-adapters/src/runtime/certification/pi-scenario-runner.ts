@@ -47,6 +47,16 @@ const promptFor = (scenarioId: string): string => {
       return "List managed resources, load managed-skill and managed-prompt by id, then call mcp__managed__write_file. Call each exactly once, then finish."
     case "structured.question-plan":
       return "Ask the structured question Continue?, then submit a one-step plan after it is answered."
+    case "memory.propose-on-gotcha":
+      return [
+        "You just discovered a durable operational gotcha: the fixture build silently fails unless FOO=1 is exported.",
+        "Record it with the attached memory tools: call mcp__jingler-memory__memory_propose once, then poll mcp__jingler-memory__memory_workflow_status until it reports a terminal state, then finish."
+      ].join(" ")
+    case "mcp.select-correct-tool":
+      return [
+        "You just discovered a durable operational gotcha: the fixture build silently fails unless FOO=1 is exported.",
+        "Persist that learning durably using the appropriate attached MCP tool, then finish without calling any other MCP tool."
+      ].join(" ")
     default:
       return "Reply with OK without calling a tool."
   }
@@ -181,7 +191,84 @@ const managedResourceRegistry = async (
   return registry
 }
 
-const observeStreamEvent = (
+/**
+ * Two attached MCP servers for the tool-SELECTION scenarios: the memory server
+ * the task calls for, and a plausible distractor. The workflow-status tool
+ * reports "pending" on its first poll and "accepted" after, so the polling
+ * contract (propose → poll to a terminal state) is observable, not scripted
+ * into a single call.
+ */
+const selectionToolResult = (name: string, statusPoll: number) => {
+  const text =
+    name === "memory_workflow_status"
+      ? JSON.stringify({
+          workflowId: "wf-1",
+          state: statusPoll === 1 ? "pending" : "accepted"
+        })
+      : name === "memory_propose"
+        ? JSON.stringify({ workflowId: "wf-1" })
+        : "ok"
+  return { content: [{ type: "text" as const, text }] }
+}
+
+const selectionRegistry = async (
+  root: string,
+  observations: Array<EvalObservation>,
+  tracker: FileChangeTracker
+): Promise<ToolRegistry> => {
+  const registry = new ToolRegistry({
+    observer: createMutationObserver({
+      cwd: root,
+      runId: "eval-selection-run",
+      sessionId: "eval-session",
+      chatId: "eval-chat",
+      tracker,
+      journal: new RunJournal({ file: join(root, ".jingler", "selection-run.json") })
+    })
+  })
+  let statusPolls = 0
+  const client = (serverName: string, tools: ReadonlyArray<string>) => {
+    const factory: McpToolClientFactory = () => {
+      observations.push({ kind: "resource", name: serverName, state: "opened" })
+      return Effect.succeed({
+        listTools: () =>
+          Effect.succeed({
+            tools: tools.map((name) => ({
+              name,
+              inputSchema: { type: "object", additionalProperties: true }
+            }))
+          }),
+        callTool: (name: string) =>
+          Effect.sync(() => {
+            observations.push({
+              kind: "tool-effect",
+              tool: `mcp__${serverName}__${name}`
+            })
+            if (name === "memory_workflow_status") statusPolls += 1
+            return selectionToolResult(name, statusPolls)
+          }),
+        close: Effect.sync(() => {
+          observations.push({ kind: "resource", name: serverName, state: "closed" })
+        })
+      })
+    }
+    return factory
+  }
+  const mount = (serverName: string, tools: ReadonlyArray<string>) =>
+    Effect.runPromise(registerMcpTools(
+      registry,
+      [{
+        server: { name: serverName, url: `https://${serverName}.invalid/mcp`, headers: {} },
+        risk: "execute"
+      }],
+      client(serverName, tools)
+    ))
+  await mount("jingler-memory", ["memory_propose", "memory_workflow_status"])
+  await mount("scratch", ["write_file"])
+  return registry
+}
+
+export const observeStreamEvent = (
   event: StreamEvent,
   registry: ToolRegistry | undefined
 ): ReadonlyArray<EvalObservation> => {
@@ -219,6 +306,10 @@ const registryFor = async (
     if (!tracker) throw new Error("managed-resource scenario requires file-change tracking")
     return managedResourceRegistry(root, observations, tracker)
   }
+  if (scenarioId === "memory.propose-on-gotcha" || scenarioId === "mcp.select-correct-tool") {
+    if (!tracker) throw new Error("selection scenario requires file-change tracking")
+    return selectionRegistry(root, observations, tracker)
+  }
   if (scenarioId !== "permission.denied-edit" && scenarioId !== "diff.create-edit-delete-rename") {
     return
   }
@@ -229,7 +320,9 @@ const registryFor = async (
 const scenarioMutatesWorkspace = (scenarioId: string): boolean =>
   scenarioId === "permission.denied-edit" ||
   scenarioId === "diff.create-edit-delete-rename" ||
-  scenarioId === "capability.managed-resources"
+  scenarioId === "capability.managed-resources" ||
+  scenarioId === "memory.propose-on-gotcha" ||
+  scenarioId === "mcp.select-correct-tool"
 
 const specFor = (input: {
   readonly scenarioId: string

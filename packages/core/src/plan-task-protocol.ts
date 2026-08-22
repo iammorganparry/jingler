@@ -29,6 +29,23 @@ const recordOf = (match: RegExpExecArray): PlanTaskProgressRecord => ({
   status: match[4]! as PersistedPlanTaskStatus
 })
 
+/**
+ * Render one checkpoint marker in the exact grammar `planTaskProgressRecords`
+ * parses. Fixtures and prompts build markers through this so a grammar change
+ * cannot silently strand them on the old shape.
+ */
+export const renderPlanTaskProgressMarker = (
+  record: PlanTaskProgressRecord
+): string =>
+  [
+    `PLAN_TASK stage=${record.stageId}`,
+    ...(record.stageFingerprint.length > 0
+      ? [`fingerprint=${record.stageFingerprint}`]
+      : []),
+    `task=${record.taskId}`,
+    `status=${record.status}`
+  ].join(" ")
+
 /** Parse complete checkpoint records even when providers concatenate them. */
 export const planTaskProgressRecords = (
   text: string

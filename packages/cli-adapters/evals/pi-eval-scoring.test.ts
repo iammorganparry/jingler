@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest"
 import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
 import type { EvalObservation, EvalTrace } from "./behavior-contract.js"
 import {
+  planMarkerDropped,
+  planTaskStatus,
+  planTaskStatusObserved
+} from "./behavior-contract.js"
+import {
   scoreScenario,
   assertReportRedacted,
   redactErrorMessage,
@@ -86,6 +91,71 @@ describe("pi behavior scoring", () => {
     expect(result.status).toBe("failed")
   })
 
+})
+
+describe("partial-credit scoring, plan matchers and redaction", () => {
+  it("scores partial credit as the satisfied fraction of matcher checks", () => {
+    const full = scoreScenario(
+      scenario("diff.create-edit-delete-rename"),
+      trace("diff.create-edit-delete-rename", [
+        { kind: "file-change", status: "A", path: "src/new.ts", oldPath: null },
+        { kind: "event", tag: "Done" }
+      ])
+    )
+    // 5 required checks, 3 missing → 2/5.
+    expect(full.score).toBeCloseTo(2 / 5)
+    expect(full.status).toBe("failed")
+  })
+
+  it("zeroes the score on a hard failure regardless of matcher outcomes", () => {
+    const result = scoreScenario(
+      scenario("lifecycle.complete"),
+      trace("lifecycle.complete", [
+        { kind: "event", tag: "Started" },
+        { kind: "event", tag: "Done" },
+        { kind: "event", tag: "Done" }
+      ])
+    )
+    expect(result.failures).toContain("expected exactly one terminal event")
+    expect(result.score).toBe(0)
+  })
+
+  it("passes below-perfect scores only when the scenario sets passScore", () => {
+    const relaxed = {
+      ...scenario("diff.create-edit-delete-rename"),
+      passScore: 0.4
+    }
+    const result = scoreScenario(
+      relaxed,
+      trace("diff.create-edit-delete-rename", [
+        { kind: "file-change", status: "A", path: "src/new.ts", oldPath: null },
+        { kind: "file-change", status: "M", path: "src/edit.ts", oldPath: null },
+        { kind: "event", tag: "Done" }
+      ])
+    )
+    expect(result.score).toBeCloseTo(3 / 5)
+    expect(result.status).toBe("passed")
+    expect(result.failures).not.toHaveLength(0)
+  })
+
+  it("matches persisted plan-task statuses and dropped markers", () => {
+    const observations: ReadonlyArray<EvalObservation> = [
+      { kind: "plan-task-status", stageId: "01", taskId: "01.a", status: "completed" },
+      { kind: "plan-task-status", stageId: "01", taskId: "01.b", status: "pending" },
+      { kind: "plan-marker-dropped", reason: "Plan task marker names unknown stage 99; dropped." },
+      { kind: "event", tag: "Done" }
+    ]
+    expect(planTaskStatus("01", "01.a", "completed").matches(observations[0]!)).toBe(true)
+    expect(planTaskStatus("01", "01.a", "in-progress").matches(observations[0]!)).toBe(false)
+    expect(planTaskStatusObserved("01", "01.b").matches(observations[1]!)).toBe(true)
+    expect(planMarkerDropped("unknown stage 99").matches(observations[2]!)).toBe(true)
+    expect(planMarkerDropped("unknown task").matches(observations[2]!)).toBe(false)
+    expect(planMarkerDropped().matches(observations[2]!)).toBe(true)
+  })
+
+})
+
+describe("report redaction", () => {
   it("fails when a secret or source patch enters a report", () => {
     const secret = "sk-secret-value"
     expect(assertReportRedacted(`token=${secret}`, [secret])).toEqual(["report contains a configured secret"])

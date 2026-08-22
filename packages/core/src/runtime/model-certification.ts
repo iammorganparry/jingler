@@ -68,6 +68,13 @@ export const EvalResult = Schema.Struct({
   scenarioId: Schema.String,
   status: EvalResultStatus,
   failures: Schema.Array(Schema.String),
+  /**
+   * Fraction of the scenario's matcher checks that held (0..1). Absent on
+   * results persisted before partial-credit scoring existed. Hard failures
+   * (wrong scenario id, version mismatch, timeout, terminal-event violations)
+   * force 0 regardless of matcher outcomes.
+   */
+  score: Schema.optional(Schema.Number),
   durationMs: Schema.Number,
   tokens: Schema.Number,
   costUsd: Schema.Number

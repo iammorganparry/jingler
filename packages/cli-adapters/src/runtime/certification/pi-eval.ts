@@ -34,28 +34,41 @@ export const scoreScenario = (
   scenario: EvalScenario,
   trace: EvalTrace
 ): EvalResult => {
-  const failures: Array<string> = []
-  if (trace.scenarioId !== scenario.id) failures.push("scenario id mismatch")
-  failures.push(...versionFailures(scenario.requiredVersions, trace.versions))
-  if (trace.durationMs > scenario.timeoutMs) failures.push("scenario timed out")
-
-  failures.push(...matcherFailures(scenario, trace))
+  // Hard failures: the trace is not a valid attempt at this scenario, so no
+  // matcher outcome can redeem it — partial credit applies to matchers only.
+  const hardFailures: Array<string> = []
+  if (trace.scenarioId !== scenario.id) hardFailures.push("scenario id mismatch")
+  hardFailures.push(...versionFailures(scenario.requiredVersions, trace.versions))
+  if (trace.durationMs > scenario.timeoutMs) hardFailures.push("scenario timed out")
 
   const terminals = trace.observations.filter(
     (observation) =>
       observation.kind === "event" &&
       ["Done", "Failed", "Interrupted"].includes(observation.tag)
   )
-  if (terminals.length !== 1) failures.push("expected exactly one terminal event")
+  if (terminals.length !== 1) hardFailures.push("expected exactly one terminal event")
+
+  // One failure string per check, so the count is also the miss count.
+  const matcherMisses = matcherFailures(scenario, trace)
+  const matcherChecks =
+    scenario.required.length + scenario.forbidden.length + scenario.ordering.length
+  const score =
+    hardFailures.length > 0
+      ? 0
+      : matcherChecks === 0
+        ? 1
+        : (matcherChecks - matcherMisses.length) / matcherChecks
+  const failures = [...hardFailures, ...matcherMisses]
 
   return {
     scenarioId: scenario.id,
     status: trace.durationMs > scenario.timeoutMs
       ? "timed-out"
-      : failures.length === 0
+      : hardFailures.length === 0 && score >= (scenario.passScore ?? 1)
         ? "passed"
         : "failed",
     failures,
+    score,
     durationMs: trace.durationMs,
     tokens: trace.tokens,
     costUsd: trace.costUsd
