@@ -62,6 +62,9 @@ export function TerminalDockView({ session, visible, onToggle, side, onSideChang
         <XtermView
           key={id}
           terminalId={id}
+          // Only the visible cell holds a GPU context; hidden tabs (and the
+          // whole dock while toggled away) fall back to the DOM renderer.
+          active={visible && id === activeId}
           onExit={(code) => {
             markExited(id, code)
             setLastExit(code)

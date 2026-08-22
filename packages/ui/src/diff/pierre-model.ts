@@ -71,6 +71,33 @@ export const canonicalPierrePath = (input: string): string => {
   return directory ? `${path}/` : path
 }
 
+/**
+ * Above this many characters a file renders as plain text instead of being
+ * tokenized. Shiki's per-file AST is many times the source size and the
+ * worker pool's LRU is bounded by ENTRY COUNT, not bytes — a handful of
+ * lockfile-sized files otherwise pin gigabytes of hast in the renderer.
+ * Well under the 5MB open guard on purpose: files between the two still
+ * open and diff, just without highlighting.
+ */
+export const PIERRE_HIGHLIGHT_MAX_CHARS = 384 * 1024
+
+/**
+ * Same bound for patch-parsed files, expressed in lines (patches carry line
+ * arrays, not a contents string). ~384KB of typical source.
+ */
+export const PIERRE_HIGHLIGHT_MAX_LINES = 8000
+
+/**
+ * `"text"` short-circuits the whole highlight path: `isFilePlainText` /
+ * `isDiffPlainText` are checked before a worker task is submitted, so an
+ * oversized file never produces (or caches) a Shiki AST at all.
+ */
+const boundedLang = (
+  size: number,
+  limit: number,
+  language: SupportedLanguages | undefined
+): SupportedLanguages | undefined => (size > limit ? "text" : language)
+
 /** Content-derived worker cache key. It changes whenever any supplied part changes. */
 export const pierreCacheKey = (
   kind: "file" | "diff" | "patch",
@@ -92,10 +119,11 @@ export const createPierreFileContents = ({
   revision
 }: JinglerFileSnapshot): FileContents => {
   const path = canonicalPierrePath(inputPath)
+  const lang = boundedLang(contents.length, PIERRE_HIGHLIGHT_MAX_CHARS, language)
   return {
     name: path,
     contents,
-    ...(language === undefined ? {} : { lang: language }),
+    ...(lang === undefined ? {} : { lang }),
     cacheKey: pierreCacheKey("file", path, language, revision, contents)
   }
 }
@@ -163,6 +191,16 @@ interface EmptyDiffOptions {
   readonly cacheKey: string
 }
 
+const diffLang = (
+  change: JinglerFileChange,
+  normalized: NormalizedPierreChange
+): SupportedLanguages | undefined =>
+  boundedLang(
+    normalized.before.length + normalized.after.length,
+    PIERRE_HIGHLIGHT_MAX_CHARS,
+    change.language
+  )
+
 const emptyDiff = ({
   change,
   normalized,
@@ -172,7 +210,10 @@ const emptyDiff = ({
   ...(normalized.previousPath === undefined
     ? {}
     : { prevName: normalized.previousPath }),
-  ...(change.language === undefined ? {} : { lang: change.language }),
+  ...((): { lang?: SupportedLanguages } => {
+    const lang = diffLang(change, normalized)
+    return lang === undefined ? {} : { lang }
+  })(),
   type: changeType(change, normalized.before, normalized.after),
   hunks: [],
   splitLineCount: 0,
@@ -189,16 +230,19 @@ const emptyDiff = ({
  */
 export const createPierreFileDiff = (change: JinglerFileChange): FileDiffMetadata => {
   const normalized = normalizeChange(change)
+  // Gate on the COMBINED size: the diff's AST covers both sides, so two
+  // just-under-threshold sides are still one oversized tokenization.
+  const lang = diffLang(change, normalized)
   const oldFile = createPierreFileContents({
     path: normalized.oldName === "/dev/null" ? "dev/null" : normalized.oldName,
     contents: normalized.before,
-    language: change.language,
+    ...(lang === undefined ? {} : { language: lang }),
     revision: change.beforeRevision
   })
   const newFile = createPierreFileContents({
     path: normalized.newName === "/dev/null" ? "dev/null" : normalized.newName,
     contents: normalized.after,
-    language: change.language,
+    ...(lang === undefined ? {} : { language: lang }),
     revision: change.afterRevision
   })
   oldFile.name = normalized.oldName
@@ -226,7 +270,7 @@ export const createPierreFileDiff = (change: JinglerFileChange): FileDiffMetadat
     ...(normalized.previousPath === undefined
       ? {}
       : { prevName: normalized.previousPath }),
-    ...(change.language === undefined ? {} : { lang: change.language }),
+    ...(lang === undefined ? {} : { lang }),
     type: changeType(change, normalized.before, normalized.after),
     cacheKey
   }
@@ -234,7 +278,16 @@ export const createPierreFileDiff = (change: JinglerFileChange): FileDiffMetadat
 
 const patchFiles = (patch: string): FileDiffMetadata[] => {
   const cachePrefix = pierreCacheKey("patch", patch)
-  return parsePatchFiles(patch, cachePrefix, true).flatMap((parsed) => parsed.files)
+  return parsePatchFiles(patch, cachePrefix, true).flatMap((parsed) =>
+    parsed.files.map((file) =>
+      // The same size gate as `createPierreFileDiff`, in the units a parsed
+      // patch actually carries. Without it one lockfile hunk set tokenizes
+      // into a multi-MB AST that the count-bounded worker LRU keeps resident.
+      file.unifiedLineCount > PIERRE_HIGHLIGHT_MAX_LINES
+        ? { ...file, lang: "text" as const }
+        : file
+    )
+  )
 }
 
 /** Parse exactly one file from a unified or Git patch. */

@@ -280,6 +280,15 @@ const forget = (key: string): void => {
   const chatId = key.slice(separator + 1)
   publishChatActivity(sessionId, chatId, null)
   clearAgentFileActivityChat(sessionId, chatId)
+  // The shared-plan dedupe body is session-keyed, so it outlives any one chat
+  // actor — but once the session's LAST actor is gone nothing can broadcast,
+  // and holding the serialized plan until session deletion is a slow leak.
+  // Worst case of dropping it: one redundant broadcast when the session is
+  // next opened.
+  const stillResident = [...registry.keys()].some((k) =>
+    k.startsWith(`${sessionId}:`)
+  )
+  if (!stillResident) sharedPlanBodies.delete(sessionId)
 }
 
 /**

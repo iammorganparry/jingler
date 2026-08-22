@@ -145,7 +145,13 @@ function ResolvedPierreProvider({
   tokens,
   workers = true,
   workerCount = defaultWorkerCount(),
-  workerCacheSize = 160,
+  // Bounds the worker pool's TWO AST LRUs (file + diff) by ENTRY COUNT — the
+  // only knob @pierre/diffs exposes. Each entry is a full Shiki hast tree,
+  // often several MB, so the count is effectively a byte budget: 64 entries of
+  // typical source stays in the low hundreds of MB where 160 could reach
+  // gigabytes. Oversized files never enter the cache at all — see
+  // PIERRE_HIGHLIGHT_MAX_CHARS in pierre-model.ts.
+  workerCacheSize = 64,
   languages = [],
   onWorkerError
 }: ResolvedPierreProviderProps) {

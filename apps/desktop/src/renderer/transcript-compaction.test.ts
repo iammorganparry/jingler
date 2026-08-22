@@ -2,7 +2,9 @@ import type { Message, StreamEvent } from "@jingler/core"
 import { applyStreamEvent, assistantMessage } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import {
+  KEEP_RECENT_TEXT_PARTS,
   KEEP_RECENT_TOOL_PARTS,
+  MAX_TEXT_PART_CHARS,
   compactMessageParts,
   compactMessages
 } from "./transcript-compaction.js"
@@ -153,5 +155,87 @@ describe("compactMessages", () => {
     expect(
       tools(next[1]!).filter((t) => t.compacted === true)
     ).toHaveLength(KEEP_RECENT_TOOL_PARTS)
+  })
+})
+
+const thinking = (text: string): StreamEvent => ({
+  _tag: "Thinking",
+  text,
+  seconds: 1,
+  done: true
+})
+const assistant = (text: string): StreamEvent => ({ _tag: "Assistant", text })
+const bigText = "x".repeat(MAX_TEXT_PART_CHARS + 4096)
+
+/** `n` distinct text-ish parts (alternating done Thinking / Text), each huge. */
+const messageWithTexts = (n: number): Message =>
+  fold(
+    Array.from({ length: n }, (_, i) =>
+      i % 2 === 0 ? thinking(bigText) : assistant(bigText)
+    )
+  )
+
+const texts = (m: Message): ReadonlyArray<string> =>
+  m.parts.flatMap((p) =>
+    p._tag === "Text" || p._tag === "Thinking" ? [p.text] : []
+  )
+
+describe("text/thinking elision", () => {
+  it("is an identity (same reference) below the keep window", () => {
+    const msg = messageWithTexts(KEEP_RECENT_TEXT_PARTS)
+    expect(compactMessageParts(msg)).toBe(msg)
+  })
+
+  it("elides oversized parts older than the window, keeps the recent ones whole", () => {
+    const msg = messageWithTexts(KEEP_RECENT_TEXT_PARTS + 3)
+    const next = texts(compactMessageParts(msg))
+
+    for (const old of next.slice(0, 3)) {
+      expect(old.length).toBeLessThan(bigText.length)
+      expect(old.startsWith("x".repeat(MAX_TEXT_PART_CHARS))).toBe(true)
+      expect(old).toContain("released from memory")
+    }
+    for (const recent of next.slice(3)) {
+      expect(recent).toBe(bigText)
+    }
+  })
+
+  it("never touches small parts, even outside the window", () => {
+    const msg = fold([
+      ...Array.from({ length: KEEP_RECENT_TEXT_PARTS + 2 }, (_, i) =>
+        i % 2 === 0 ? thinking("short thought") : assistant("short reply")
+      )
+    ])
+    expect(compactMessageParts(msg)).toBe(msg)
+  })
+
+  it("is idempotent — an elided part is never cut again", () => {
+    const once = compactMessageParts(messageWithTexts(KEEP_RECENT_TEXT_PARTS + 2))
+    expect(compactMessageParts(once)).toBe(once)
+  })
+
+})
+
+describe("text/thinking elision windows", () => {
+  it("preserves thinking metadata through elision", () => {
+    const msg = messageWithTexts(KEEP_RECENT_TEXT_PARTS + 1)
+    const part = compactMessageParts(msg).parts[0]!
+    expect(part._tag).toBe("Thinking")
+    if (part._tag === "Thinking") {
+      expect(part.seconds).toBe(1)
+    }
+  })
+
+  it("counts its window independently of the tool window", () => {
+    // A tool-heavy message whose single huge text part is the OLDEST part:
+    // tools within their window stay whole while the text window (also within
+    // bounds: only one text part) keeps the text whole too.
+    const msg = fold([
+      thinking(bigText),
+      ...Array.from({ length: KEEP_RECENT_TOOL_PARTS }, (_, i) => i).flatMap(
+        (i) => [toolStart(`t_${i}`), toolEnd(`t_${i}`)]
+      )
+    ])
+    expect(compactMessageParts(msg)).toBe(msg)
   })
 })

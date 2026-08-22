@@ -69,6 +69,14 @@ import {
 } from "xstate"
 import { rpc } from "./rpc-client.js"
 import { compactMessageParts, compactMessages } from "./transcript-compaction.js"
+
+/**
+ * Force a compaction pass after this many folded stream events even if no
+ * `ToolEnd` arrived. Compaction is reference-preserving and idempotent, so a
+ * due pass that finds nothing to release is nearly free; the counter only
+ * bounds how many deltas can accumulate unexamined.
+ */
+const COMPACT_EVERY_N_FOLDS = 300
 import { publishSessionUpdate } from "./session-updates.js"
 import { settleStoppedFleet } from "./subagent-fleet-machine.js"
 
@@ -216,6 +224,14 @@ export interface ConversationContext {
   /** Bounded first-class pi-subagents lifecycle feed for the per-chat Fleet actor. */
   readonly subagentFleetEvents: ReadonlyArray<SubagentFleetEvent>
   readonly subagentControlOutcomes: ReadonlyArray<SubagentFleetControlOutcome>
+  /**
+   * Stream events folded since the last compaction pass. Compaction normally
+   * runs at `ToolEnd`, but a turn that streams long reasoning (Thinking deltas
+   * merge into ONE part) or one long tool's deltas can go arbitrarily long
+   * without a ToolEnd — this counter forces a pass every
+   * `COMPACT_EVERY_N_FOLDS` events so a never-settling turn stays bounded.
+   */
+  readonly foldsSinceCompaction: number
   /**
    * When set, the running turn is a stale-plan re-drive (`Agent.resumePlan`) for
    * this plan id rather than a normal `Agent.run`; cleared when the next normal
@@ -1529,7 +1545,23 @@ export const conversationMachine = setup({
       }
       // Sub-agent-scoped events drive the watch-only tabs, not the main turn.
       if (isSubagentEvent(e)) {
-        return { subagents: applySubagentEvent(context.subagents, e) }
+        const next = applySubagentEvent(context.subagents, e)
+        // Sub-agent rolling messages accrue the same heavy tool payloads as the
+        // main turn but were invisible to compaction — a fleet-heavy turn held
+        // every sub-agent's full outputs for the whole run. Compact them at the
+        // same boundary the main path uses (a tool card leaving the window, or
+        // the sub-agent settling), never per delta: `compactMessageParts` is
+        // reference-preserving, so idle sub-agents keep identity and the tabs'
+        // render comparators still short-circuit.
+        if (e._tag !== "ToolEnd" && e._tag !== "SubagentEnded") {
+          return { subagents: next }
+        }
+        return {
+          subagents: next.map((s) => {
+            const compacted = compactMessageParts(s.message)
+            return compacted === s.message ? s : { ...s, message: compacted }
+          })
+        }
       }
       // This is the latest context size, not a high-water mark. Compaction can
       // legitimately make it smaller during a run.
@@ -1613,16 +1645,20 @@ export const conversationMachine = setup({
         }
       }
       const folded = patchLast(context.messages, (last) => applyStreamEvent(last, e))
-      // A tool boundary is the one moment a card can leave the recent window,
-      // so it is the only event worth paying a parts walk for. Without this a
-      // multi-hour turn accumulates every settled card's output and previews on
-      // ONE message — a shape no message-count trim can ever reach — and the
-      // actor holding it is never evictable while running. See
+      // A tool boundary is the moment a card can leave the recent window, so it
+      // always triggers a parts walk. Without this a multi-hour turn
+      // accumulates every settled card's output and previews on ONE message — a
+      // shape no message-count trim can ever reach — and the actor holding it
+      // is never evictable while running. The fold counter backstops turns
+      // with no tool boundaries at all (pure reasoning, one long tool's
+      // deltas), which otherwise never compact mid-turn. See
       // `transcript-compaction.ts` for what compaction keeps.
-      const messages =
-        e._tag === "ToolEnd"
-          ? patchLast(folded, (last) => compactMessageParts(last))
-          : folded
+      const foldCount = context.foldsSinceCompaction + 1
+      const compactDue = e._tag === "ToolEnd" || foldCount >= COMPACT_EVERY_N_FOLDS
+      const foldsSinceCompaction = compactDue ? 0 : foldCount
+      const messages = compactDue
+        ? patchLast(folded, (last) => compactMessageParts(last))
+        : folded
       // A finished/failed turn KEEPS its sub-agents (their tabs stay readable) —
       // any still marked "working" (e.g. an interrupted run, or a sub-agent whose
       // `task_notification` never arrived) settle to "done" so no tab shows a live
@@ -1647,6 +1683,7 @@ export const conversationMachine = setup({
       if (e._tag === "Done") {
         return {
           messages,
+          foldsSinceCompaction,
           subagents: settled,
           runStartedAt: null,
           lastOutcome: "done" as const,
@@ -1658,6 +1695,7 @@ export const conversationMachine = setup({
       if (e._tag === "Failed") {
         return {
           messages,
+          foldsSinceCompaction,
           subagents: settled,
           runStartedAt: null,
           lastOutcome: "failed" as const,
@@ -1666,7 +1704,7 @@ export const conversationMachine = setup({
           pendingExternalAcceptances: []
         }
       }
-      return { messages }
+      return { messages, foldsSinceCompaction }
     }),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
     settleStoppedFleet: assign(({ context }) => ({
@@ -2274,6 +2312,7 @@ export const conversationMachine = setup({
       subagents: [],
       subagentFleetEvents: [],
       subagentControlOutcomes: [],
+      foldsSinceCompaction: 0,
       resumePlanId: null,
       resumePlanRevision: null,
       planActionError: null,

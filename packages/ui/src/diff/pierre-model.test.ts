@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+  PIERRE_HIGHLIGHT_MAX_CHARS,
+  PIERRE_HIGHLIGHT_MAX_LINES,
   canonicalPierrePath,
   createPierreCodeViewItem,
   createPierreCodeViewItemsFromPatch,
@@ -187,5 +189,74 @@ describe("Pierre file and patch models", () => {
       { path: "gone.ts", status: "deleted" },
       { path: "moved.ts", status: "renamed" }
     ])
+  })
+})
+
+const oversized = "a".repeat(PIERRE_HIGHLIGHT_MAX_CHARS + 1)
+
+describe("Pierre highlight size gate", () => {
+  it("forces plain text for an oversized file, keeps the language under it", () => {
+    const small = createPierreFileContents({
+      path: "src/small.ts",
+      contents: "export const one = 1\n",
+      language: "typescript"
+    })
+    expect(small.lang).toBe("typescript")
+
+    const huge = createPierreFileContents({
+      path: "src/huge.ts",
+      contents: oversized,
+      language: "typescript"
+    })
+    expect(huge.lang).toBe("text")
+  })
+
+  it("forces plain text even when no language was supplied (name inference)", () => {
+    // Without an explicit lang the highlighter infers one from the file name,
+    // so an oversized file must carry lang:"text" explicitly.
+    const huge = createPierreFileContents({ path: "src/huge.ts", contents: oversized })
+    expect(huge.lang).toBe("text")
+  })
+
+  it("gates a diff on the combined size of both sides", () => {
+    const half = "b".repeat(Math.ceil(PIERRE_HIGHLIGHT_MAX_CHARS / 2) + 1)
+    const diff = createPierreFileDiff({
+      status: "modified",
+      path: "src/huge.ts",
+      before: half,
+      after: `${half}!`,
+      language: "typescript"
+    })
+    expect(diff.lang).toBe("text")
+
+    const smallDiff = createPierreFileDiff({
+      status: "modified",
+      path: "src/small.ts",
+      before: "one\n",
+      after: "two\n",
+      language: "typescript"
+    })
+    expect(smallDiff.lang).toBe("typescript")
+  })
+
+})
+
+describe("Pierre patch highlight size gate", () => {
+  it("gates patch-parsed files by line count", () => {
+    const lines = Array.from(
+      { length: PIERRE_HIGHLIGHT_MAX_LINES + 1 },
+      (_, i) => `+line ${i}`
+    )
+    const patch = [
+      "diff --git a/big.ts b/big.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/big.ts",
+      `@@ -0,0 +1,${lines.length} @@`,
+      ...lines,
+      ""
+    ].join("\n")
+    const file = createPierreFileDiffFromPatch(patch)
+    expect(file.lang).toBe("text")
   })
 })

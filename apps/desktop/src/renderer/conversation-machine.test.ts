@@ -23,7 +23,11 @@ import {
   CONVERSATION_LOAD_TIMEOUT_MS,
   conversationMachine
 } from "./conversation-machine.js"
-import { KEEP_RECENT_TOOL_PARTS } from "./transcript-compaction.js"
+import {
+  KEEP_RECENT_TEXT_PARTS,
+  KEEP_RECENT_TOOL_PARTS,
+  MAX_TEXT_PART_CHARS
+} from "./transcript-compaction.js"
 
 /**
  * The renderer's conversation flow is a deterministic XState chart. Its only
@@ -2700,6 +2704,102 @@ describe("conversationMachine — live transcript memory bounds", () => {
     await waitFor(actor, (s) => s.matches("running"), { timeout: 3000 })
     expect(actor.getSnapshot().context.messages.length).toBe(202)
     expect(h.agentRunCalls).toHaveLength(2)
+    actor.stop()
+  })
+})
+
+describe("conversationMachine — sub-agent transcript memory bounds", () => {
+  it("compacts a sub-agent's settled tool cards past the recent window", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "fan out" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({ _tag: "SubagentStarted", id: "task_1", name: "Explore", description: "map", parentId: null })
+    for (let i = 0; i < KEEP_RECENT_TOOL_PARTS + 2; i++) {
+      emit({ _tag: "ToolStart", id: `st${i}`, name: "Bash", target: `cmd ${i}`, agentId: "task_1" })
+      emit({
+        _tag: "ToolEnd",
+        id: `st${i}`,
+        status: "success",
+        meta: null,
+        diff: null,
+        preview: null,
+        output: `out ${i}`,
+        agentId: "task_1"
+      })
+    }
+
+    const sub = actor.getSnapshot().context.subagents[0]!
+    const cards = sub.message.parts.flatMap((p) => (p._tag === "Tool" ? [p.tool] : []))
+    expect(cards).toHaveLength(KEEP_RECENT_TOOL_PARTS + 2)
+    for (const old of cards.slice(0, 2)) {
+      expect(old.compacted).toBe(true)
+      expect(old.output).toBeUndefined()
+    }
+    for (const recent of cards.slice(2)) {
+      expect(recent.compacted).toBeUndefined()
+      expect(recent.output).toBeDefined()
+    }
+    actor.stop()
+  })
+
+})
+
+describe("conversationMachine — sub-agent compaction at SubagentEnded", () => {
+  it("compacts on SubagentEnded and keeps an untouched sub-agent's reference", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "fan out" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    emit({ _tag: "SubagentStarted", id: "task_1", name: "A", description: "a", parentId: null })
+    emit({ _tag: "SubagentStarted", id: "task_2", name: "B", description: "b", parentId: null })
+    // task_1 accumulates past the window WITHOUT tool boundaries of its own:
+    // interleaved done-thinking blocks large enough to elide.
+    const big = "x".repeat(MAX_TEXT_PART_CHARS + 100)
+    for (let i = 0; i < KEEP_RECENT_TEXT_PARTS + 2; i++) {
+      emit({ _tag: "Thinking", text: big, seconds: 1, done: true, agentId: "task_1" })
+      emit({ _tag: "Assistant", text: "…", agentId: "task_1" })
+    }
+    const before2 = actor.getSnapshot().context.subagents.find((s) => s.id === "task_2")!
+
+    emit({ _tag: "SubagentEnded", id: "task_1", status: "done" })
+
+    const after = actor.getSnapshot().context.subagents
+    const ended = after.find((s) => s.id === "task_1")!
+    const firstText = ended.message.parts.find((p) => p._tag === "Thinking")!
+    expect(firstText._tag === "Thinking" && firstText.text).toContain("released from memory")
+    // task_2 held nothing heavy — settling task_1 must not rebuild it.
+    expect(after.find((s) => s.id === "task_2")!.message).toBe(before2.message)
+    actor.stop()
+  })
+})
+
+describe("conversationMachine — mid-turn compaction with no tool boundary", () => {
+  it("bounds a turn of pure reasoning after enough folded events", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "think hard" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    // Alternate done-thinking / text so each event closes a part and opens a
+    // new one — many distinct oversized parts, and never a ToolEnd.
+    const big = "y".repeat(MAX_TEXT_PART_CHARS + 100)
+    for (let i = 0; i < 320; i++) {
+      if (i % 2 === 0) emit({ _tag: "Thinking", text: big, seconds: 1, done: true })
+      else emit({ _tag: "Assistant", text: big })
+    }
+
+    const last = actor.getSnapshot().context.messages.at(-1)!
+    const texts = last.parts.flatMap((p) =>
+      p._tag === "Text" || p._tag === "Thinking" ? [p.text] : []
+    )
+    expect(texts.length).toBeGreaterThan(KEEP_RECENT_TEXT_PARTS)
+    // Old parts were elided mid-turn — no ToolEnd ever arrived.
+    expect(texts[0]).toContain("released from memory")
+    // The recent window is whole.
+    expect(texts.at(-2)).toBe(big)
     actor.stop()
   })
 })

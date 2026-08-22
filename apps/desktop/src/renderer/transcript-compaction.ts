@@ -22,6 +22,11 @@ import type { ContentPart, Message, ToolCall } from "@jingler/core"
  * only expanded-body content: `output`, the card-level `preview`, and each
  * `FileChange.preview`. `compacted: true` lets the card say so instead of
  * claiming "No output."
+ *
+ * Text/Thinking parts are bounded on their own axis: past a recent window,
+ * an oversized part keeps a readable prefix plus an in-text elision note (no
+ * schema change — the note renders as ordinary markdown, and the full text
+ * comes back on any whole-array re-read, same as tool cards).
  */
 
 /**
@@ -34,6 +39,42 @@ import type { ContentPart, Message, ToolCall } from "@jingler/core"
  * turn they carry.
  */
 export const KEEP_RECENT_TOOL_PARTS = 24
+
+/**
+ * How many of a message's most recent Text/Thinking parts keep their full
+ * text. Tool cards have their own window above; reasoning-heavy turns grow on
+ * a different axis — extended thinking streams megabytes of `Thinking.text`
+ * that `holdsHeavyPayload` never looked at — so the two windows are counted
+ * independently.
+ */
+export const KEEP_RECENT_TEXT_PARTS = 8
+
+/**
+ * Past the recent-text window, a Text/Thinking part longer than this keeps
+ * only this many leading UTF-16 code units plus an elision note. Sized so any
+ * humanly-readable reasoning block survives whole; only runaway blocks are
+ * cut.
+ */
+export const MAX_TEXT_PART_CHARS = 16 * 1024
+
+/**
+ * The fixed tail of the elision note. Detection key for idempotency: a part
+ * ending in this was already elided and must not be cut again (re-slicing
+ * would drop the note and stack a new one). Plain text on purpose — it lands
+ * inside rendered markdown.
+ */
+const ELIDED_TEXT_SUFFIX =
+  "released from memory — full text is in the session transcript]"
+
+const elideText = (text: string): string => {
+  const released = text.length - MAX_TEXT_PART_CHARS
+  const kb = Math.max(1, Math.round(released / 1024))
+  return `${text.slice(0, MAX_TEXT_PART_CHARS)}\n\n[… ${kb}KB ${ELIDED_TEXT_SUFFIX}`
+}
+
+/** Whether eliding this Text/Thinking part would actually release anything. */
+const holdsHeavyText = (text: string): boolean =>
+  text.length > MAX_TEXT_PART_CHARS && !text.endsWith(ELIDED_TEXT_SUFFIX)
 
 /** Whether compacting this card would actually release anything. */
 const holdsHeavyPayload = (tool: ToolCall): boolean =>
@@ -72,26 +113,46 @@ const compactToolCall = (tool: ToolCall): ToolCall => {
  */
 export const compactMessageParts = (
   msg: Message,
-  keepRecentTools: number = KEEP_RECENT_TOOL_PARTS
+  keepRecentTools: number = KEEP_RECENT_TOOL_PARTS,
+  keepRecentTexts: number = KEEP_RECENT_TEXT_PARTS
 ): Message => {
-  // Index of the keep-window's oldest tool part; tools strictly before it are
-  // out of the window. A message with fewer tools than the window has nothing
-  // old enough to compact.
-  const cutoff = ((): number => {
-    if (keepRecentTools <= 0) return msg.parts.length
+  // Index of a keep-window's oldest part of the counted kind; parts of that
+  // kind strictly before it are out of the window. A message with fewer such
+  // parts than the window has nothing old enough to compact. The two windows
+  // are independent axes: a tool-heavy turn and a reasoning-heavy turn are
+  // each bounded on their own. The rolling (still-streaming) part is always
+  // the message's LAST part, so with a window of at least one it can never be
+  // elided mid-delta.
+  const cutoffOf = (counts: (p: ContentPart) => boolean, keep: number): number => {
+    if (keep <= 0) return msg.parts.length
     let seen = 0
     for (let i = msg.parts.length - 1; i >= 0; i--) {
-      if (msg.parts[i]!._tag === "Tool" && ++seen === keepRecentTools) return i
+      if (counts(msg.parts[i]!) && ++seen === keep) return i
     }
     return -1
-  })()
-  if (cutoff <= 0) return msg
+  }
+  const toolCutoff = cutoffOf((p) => p._tag === "Tool", keepRecentTools)
+  const textCutoff = cutoffOf(
+    (p) => p._tag === "Text" || p._tag === "Thinking",
+    keepRecentTexts
+  )
+  if (toolCutoff <= 0 && textCutoff <= 0) return msg
 
   let changed = false
   const parts = msg.parts.map((p, i): ContentPart => {
-    if (i >= cutoff || p._tag !== "Tool" || !holdsHeavyPayload(p.tool)) return p
-    changed = true
-    return { _tag: "Tool", tool: compactToolCall(p.tool) }
+    if (i < toolCutoff && p._tag === "Tool" && holdsHeavyPayload(p.tool)) {
+      changed = true
+      return { _tag: "Tool", tool: compactToolCall(p.tool) }
+    }
+    if (
+      i < textCutoff &&
+      (p._tag === "Text" || p._tag === "Thinking") &&
+      holdsHeavyText(p.text)
+    ) {
+      changed = true
+      return { ...p, text: elideText(p.text) }
+    }
+    return p
   })
   return changed ? { ...msg, parts } : msg
 }

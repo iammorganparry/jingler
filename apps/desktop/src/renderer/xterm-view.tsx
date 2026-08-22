@@ -2,7 +2,8 @@
  * XtermView — one live xterm.js cell bound to one PTY (by `terminalId`).
  *
  * Performance choices:
- *  - **WebGL renderer** (GPU) when available, DOM fallback otherwise.
+ *  - **WebGL renderer** (GPU) while `active`, DOM fallback otherwise — hidden
+ *    tabs release their GPU context instead of pinning one apiece.
  *  - **Bounded scrollback** (5000 lines) caps renderer memory.
  *  - Output arrives already *coalesced* from the main process, so `term.write`
  *    is called at most ~60×/sec/terminal regardless of raw throughput.
@@ -12,7 +13,7 @@
  * subscription, ResizeObserver) is torn down on unmount — no leaks. Detaching
  * does NOT kill the PTY; it keeps running in main and is re-attachable.
  */
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useThemeTokens } from "@jingler/ui"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
@@ -31,11 +32,19 @@ import { rpc } from "./rpc-client.js"
 
 export interface XtermViewProps {
   terminalId: string
+  /**
+   * Whether this cell is the one the operator can currently see. Hidden cells
+   * stay fully mounted (scrollback, PTY attachment, DOM) but release their
+   * WebGL context — each context holds a GPU allocation and browsers cap the
+   * number of live ones, so N open tabs must not pin N contexts for the whole
+   * session. Defaults to true for callers without a tab strip.
+   */
+  active?: boolean
   /** Called with the exit code when the shell process ends. */
   onExit?: (code: number) => void
 }
 
-export function XtermView({ terminalId, onExit }: XtermViewProps) {
+export function XtermView({ terminalId, active = true, onExit }: XtermViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // Keep the latest onExit without re-running the (expensive) mount effect.
   const onExitRef = useRef(onExit)
@@ -53,7 +62,9 @@ export function XtermView({ terminalId, onExit }: XtermViewProps) {
    */
   const themeRef = useRef(palette)
   themeRef.current = palette
-  const termRef = useRef<Terminal | null>(null)
+  // State, not a ref: the WebGL and theme effects below must re-run when the
+  // mount effect rebuilds the Terminal, and a ref mutation cannot tell them.
+  const [term, setTerm] = useState<Terminal | null>(null)
 
   useEffect(() => {
     const el = containerRef.current
@@ -73,23 +84,12 @@ export function XtermView({ terminalId, onExit }: XtermViewProps) {
       theme: { ...themeRef.current }
     })
 
-    termRef.current = term
+    setTerm(term)
 
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon((_event, uri) => void window.jingler.openExternal(uri)))
     term.open(el)
-
-    // GPU rendering when the context is available; silently fall back to DOM.
-    let webgl: WebglAddon | null = null
-    try {
-      const addon = new WebglAddon()
-      addon.onContextLoss(() => addon.dispose())
-      term.loadAddon(addon)
-      webgl = addon
-    } catch {
-      webgl = null
-    }
 
     fit.fit()
 
@@ -131,17 +131,36 @@ export function XtermView({ terminalId, onExit }: XtermViewProps) {
       resizeObserver.disconnect()
       inputSub.dispose()
       detach()
-      webgl?.dispose()
       term.dispose()
-      termRef.current = null
+      setTerm(null)
     }
   }, [terminalId])
+
+  // GPU rendering only while visible; hidden cells drop back to the DOM
+  // renderer (they are not painting anyway) so their context is released.
+  // `term` in the deps re-attaches the addon when a remount rebuilds the
+  // Terminal instance.
+  useEffect(() => {
+    if (term === null || !active) return
+    // Context creation can fail (headless, exhausted contexts) — silently keep
+    // the DOM renderer, exactly as the old mount-time path did.
+    let addon: WebglAddon | null = null
+    try {
+      const webgl = new WebglAddon()
+      webgl.onContextLoss(() => webgl.dispose())
+      term.loadAddon(webgl)
+      addon = webgl
+    } catch {
+      addon = null
+    }
+    return () => addon?.dispose()
+  }, [active, term])
 
   // Repaint an already-running terminal in place: no remount, no lost
   // scrollback, no dropped PTY.
   useEffect(() => {
-    if (termRef.current) termRef.current.options.theme = { ...palette }
-  }, [palette])
+    if (term !== null) term.options.theme = { ...palette }
+  }, [palette, term])
 
   return <div ref={containerRef} className="h-full w-full" />
 }
