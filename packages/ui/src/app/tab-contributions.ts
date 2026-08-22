@@ -35,7 +35,7 @@ import {
   GitCompareArrows,
   GitPullRequest,
   MessagesSquare,
-  Sparkles,
+  NotebookPen,
   Waypoints,
   Workflow
 } from "lucide-react"
@@ -246,7 +246,7 @@ export const BUILTIN_TAB_META: Record<
   issue: { label: "Issue", icon: CircleDot, order: 10 },
   explanation: {
     label: "Explanation",
-    icon: Sparkles,
+    icon: NotebookPen,
     order: 18,
     blurb: "A focused visual explanation of the current technical topic."
   },
