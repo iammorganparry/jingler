@@ -138,6 +138,7 @@ export interface SessionConversationProps {
   repoOwners?: Readonly<Record<string, string>>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
+  debugStopSequences?: Readonly<Record<string, number>>
   /** Open the New Session view. */
   onNewSession?: () => void
   /** The signed-in user, shown in the sidebar footer account menu. */
@@ -321,6 +322,7 @@ export function SessionConversation(props: SessionConversationProps) {
             explanationSessions={props.explanationSessions}
             liveActivity={props.liveActivity}
             liveDiff={props.liveDiff}
+            debugStopSequences={props.debugStopSequences}
             onOpenSettings={props.onOpenGithubSettings ?? props.onOpenSettings}
             onOpenProviderSettings={props.onOpenProviderSettings ?? props.onOpenSettings}
             renderPullRequest={props.renderPullRequest}

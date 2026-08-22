@@ -114,12 +114,14 @@ import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
 import {
   PluginProvider,
+  usePluginCatalog,
   usePluginCommands,
   useIssueProviders,
   usePluginPanes,
   usePluginTabs,
 } from "./plugin-registry.js";
 import { usePlugins } from "./use-plugins.js";
+import { useDebugSessions } from "./debug-session.js";
 import { useMemory } from "./use-memory.js";
 import { repositoryAccess } from "./github-connection-machine.js";
 import { useGitHubConnection } from "./use-github-connection.js";
@@ -387,6 +389,16 @@ function AuthedApp({
   const pluginCommands = usePluginCommands();
   const issueProviders = useIssueProviders();
   const plugins = usePlugins();
+  const pluginCatalog = usePluginCatalog();
+  const debugEnabled = pluginCatalog?.plugins.some((plugin) => plugin.enabled && plugin.manifest.id === "debug") ?? false;
+  const debugSessions = useDebugSessions(sessions.map((session) => session.id), debugEnabled);
+  const debugStopSequences = useMemo(() => Object.fromEntries(
+    Object.entries(debugSessions).flatMap(([sessionId, snapshot]) =>
+      snapshot.session?.status === "stopped" && snapshot.session.stopSequence
+        ? [[sessionId, snapshot.session.stopSequence]]
+        : []
+    )
+  ), [debugSessions]);
   const memory = useMemory();
 
   // The conversation machine persists a session's settled status by itself, with
@@ -1788,6 +1800,7 @@ function AuthedApp({
         }
         planSessions={planSessions}
         explanationSessions={explanationSessions}
+        debugStopSequences={debugStopSequences}
         renderExplanation={(session: Session) => (
           <ExplanationPane sessionId={session.id} />
         )}
@@ -1814,6 +1827,7 @@ function AuthedApp({
         renderFiles={(session, ctx) => (
           <FileBrowserView
             session={session}
+            debugSnapshot={debugSessions[session.id]}
             onSendReference={(reference) => {
               addDraftCodeReference(session.activeChatId, reference);
               ctx.onSelectConversation();

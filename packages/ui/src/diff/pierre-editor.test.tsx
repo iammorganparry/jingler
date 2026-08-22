@@ -45,6 +45,8 @@ interface MockCodeViewProps {
       readonly paddingBottom: number
       readonly gap: number
     }
+    readonly onTokenEnter?: (...args: never[]) => void
+    readonly onTokenLeave?: (...args: never[]) => void
   }
   readonly renderCodeViewFooter?: () => ReactNode
 }
@@ -103,6 +105,8 @@ describe("PierreEditor", () => {
     const onChange = vi.fn()
     const onComplete = vi.fn()
     const onSelectionChange = vi.fn()
+    const onTokenEnter = vi.fn()
+    const onTokenLeave = vi.fn()
 
     render(
       <PierreProvider tokens={toTokens(jinglerDark)} workers={false}>
@@ -120,6 +124,8 @@ describe("PierreEditor", () => {
             endSide: "new"
           }}
           onSelectionChange={onSelectionChange}
+          onTokenEnter={onTokenEnter}
+          onTokenLeave={onTokenLeave}
         />
       </PierreProvider>
     )
@@ -133,6 +139,8 @@ describe("PierreEditor", () => {
       paddingBottom: 64,
       gap: 8
     })
+    expect(props.options?.onTokenEnter).toBe(onTokenEnter)
+    expect(props.options?.onTokenLeave).toBe(onTokenLeave)
     expect(
       document.querySelector("[data-jingler-pierre-code-view-footer]")
     ).not.toBeNull()

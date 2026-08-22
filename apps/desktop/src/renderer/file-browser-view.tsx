@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import type { AssetPayload, Session } from "@jingler/core"
+import type { AssetPayload, DebugViewSnapshot, Session } from "@jingler/core"
 import {
   AssetBrowser,
   AssetCanvas,
@@ -18,7 +18,7 @@ import {
 } from "@jingler/ui"
 import type { PierreAnnotationMetadata } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
-import { FileWarning, MessageSquarePlus, MousePointer2 } from "lucide-react"
+import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, FileWarning, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
@@ -28,13 +28,17 @@ import {
   normalizeAgentFileTarget,
   useAgentFileActivity
 } from "./agent-file-activity.js"
+import { useDebugSessionModel, type DebugSessionModel } from "./debug-session.js"
 import {
   agentFollowDiffSelection,
   captureDiffCodeReference
 } from "./file-diff-context.js"
 
+const DEBUG_HOVER_IDENTIFIER = /^[A-Za-z_$][\w$]*$/u
+
 export interface FileBrowserViewProps {
   readonly session: Session
+  readonly debugSnapshot?: DebugViewSnapshot
   readonly onSendReference?: (reference: CodeReference) => void
   readonly onSendComment?: (body: string, reference: CodeReference) => void
 }
@@ -72,10 +76,18 @@ export function FileBrowserQuickOpen({
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
 export function FileBrowserView({
   session,
+  debugSnapshot,
   onSendReference,
   onSendComment
 }: FileBrowserViewProps) {
   const browser = useFileBrowser(session.id, session.worktreePath)
+  const debug = useDebugSessionModel(session.id, debugSnapshot)
+  const debugFrame = debug.snapshot.session?.status === "stopped"
+    ? (debug.snapshot.session.frame ?? null)
+    : null
+  const debugPath = debugFrame?.source?.path
+    ? normalizeAgentFileTarget(debugFrame.source.path, session.worktreePath)
+    : null
   const agentFileActivity = useAgentFileActivity(session.id, session.activeChatId)
   const rootRef = useRef<HTMLDivElement>(null)
   const selectionPathRef = useRef(browser.selectedPath)
@@ -141,6 +153,11 @@ export function FileBrowserView({
     browser.followEnabled,
     normalizedAgentTarget
   ])
+
+  useEffect(() => {
+    if (debugPath === null || browser.selectedPath === debugPath) return
+    browser.open(debugPath)
+  }, [browser.open, browser.selectedPath, debugPath])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -222,17 +239,25 @@ export function FileBrowserView({
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}
         renderCanvas={(nativeAvailable) => (
-          <FileCanvas
-            sessionId={session.id}
-            browser={browser}
-            nativeAvailable={nativeAvailable}
-            selection={selection}
-            onSelectionChange={setSelection}
-            onSendReference={onSendReference}
-            onSendComment={onSendComment}
-            canSendSelection={canSendSelection}
-            onSendSelection={sendSelectionToChat}
-          />
+          <div className="flex h-full min-h-0 min-w-0">
+            <div className="min-w-0 flex-1">
+              <FileCanvas
+                sessionId={session.id}
+                browser={browser}
+                nativeAvailable={nativeAvailable}
+                selection={selection}
+                onSelectionChange={setSelection}
+                onSendReference={onSendReference}
+                onSendComment={onSendComment}
+                canSendSelection={canSendSelection}
+                onSendSelection={sendSelectionToChat}
+                debug={debug}
+                debugLine={debugPath === browser.selectedPath ? (debugFrame?.line ?? null) : null}
+                debugRevision={debug.snapshot.session?.stopSequence ?? 0}
+              />
+            </div>
+            {debug.snapshot.session !== null ? <DebugPanel model={debug} /> : null}
+          </div>
         )}
       />
     </div>
@@ -248,7 +273,10 @@ function FileCanvas({
   onSendReference,
   onSendComment,
   canSendSelection,
-  onSendSelection
+  onSendSelection,
+  debug,
+  debugLine,
+  debugRevision
 }: {
   readonly sessionId: string
   readonly browser: FileBrowserController
@@ -261,6 +289,9 @@ function FileCanvas({
     | undefined
   readonly canSendSelection: boolean
   readonly onSendSelection: () => void
+  readonly debug: DebugSessionModel
+  readonly debugLine: number | null
+  readonly debugRevision: number
 }) {
   const payload = browser.payload
   const fileDiff = useMemo(() => {
@@ -453,6 +484,9 @@ function FileCanvas({
         browser={browser}
         selection={selection}
         onSelectionChange={onSelectionChange}
+        debug={debug}
+        debugLine={debugLine}
+        debugRevision={debugRevision}
       />
     </SelectionContextMenu>
   )
@@ -569,14 +603,24 @@ function TextFileEditor({
   initialDraft,
   browser,
   selection,
-  onSelectionChange
+  onSelectionChange,
+  debug,
+  debugLine,
+  debugRevision
 }: {
   readonly payload: Extract<AssetPayload, { readonly text: string }>
   readonly initialDraft: string
   readonly browser: FileBrowserController
   readonly selection: JinglerLineSelection | null
   readonly onSelectionChange: (selection: JinglerLineSelection | null) => void
+  readonly debug: DebugSessionModel
+  readonly debugLine: number | null
+  readonly debugRevision: number
 }) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hoverGeneration = useRef(0)
+  const [hover, setHover] = useState<{ x: number; y: number; expression: string; value?: string; type?: string } | null>(null)
   const [items] = useState(() => {
     const file = createPierreFileContents({
       path: payload.path,
@@ -594,8 +638,56 @@ function TextFileEditor({
   })
   const item = items[0]!
 
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const mark = () => {
+      for (const row of root.querySelectorAll<HTMLElement>("[data-debug-current-line]")) {
+        row.removeAttribute("data-debug-current-line")
+      }
+      if (debugLine === null) return
+      for (const row of root.querySelectorAll<HTMLElement>(`[data-line="${debugLine}"]`)) {
+        row.setAttribute("data-debug-current-line", "true")
+      }
+    }
+    mark()
+    const observer = new MutationObserver(mark)
+    observer.observe(root, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [debugLine])
+
+  const leaveToken = useCallback(() => {
+    hoverGeneration.current += 1
+    if (hoverTimer.current) clearTimeout(hoverTimer.current)
+    hoverTimer.current = null
+    setHover(null)
+  }, [])
+  useEffect(() => () => {
+    hoverGeneration.current += 1
+    if (hoverTimer.current) clearTimeout(hoverTimer.current)
+  }, [])
+  useEffect(() => {
+    if (debugLine === null) leaveToken()
+  }, [debugLine, leaveToken])
+  const enterToken = useCallback((token: { tokenText: string; tokenElement: HTMLElement }) => {
+    leaveToken()
+    const expression = token.tokenText.trim()
+    if (!DEBUG_HOVER_IDENTIFIER.test(expression) || debugLine === null) return
+    const generation = ++hoverGeneration.current
+    const bounds = token.tokenElement.getBoundingClientRect()
+    setHover({ x: bounds.left, y: bounds.bottom + 6, expression })
+    hoverTimer.current = setTimeout(() => {
+      debug.hover({ expression, frameId: debug.snapshot.session?.frame?.id }).then((result) => {
+        if (hoverGeneration.current !== generation) return
+        setHover({ x: bounds.left, y: bounds.bottom + 6, expression, value: result.result, type: result.type })
+      }).catch(() => {
+        if (hoverGeneration.current === generation) setHover(null)
+      })
+    }, 250)
+  }, [debug, debugLine, leaveToken])
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-canvas">
+    <div ref={rootRef} className="relative flex h-full min-h-0 flex-col bg-canvas [&_[data-debug-current-line]]:bg-yellow/15 [&_[data-debug-current-line]]:shadow-[inset_3px_0_var(--sb-yellow)]">
       {browser.status === "conflict" ? (
         <Callout tone="red" className="m-2 flex-none">
           <div className="flex flex-wrap items-center gap-2">
@@ -623,14 +715,96 @@ function TextFileEditor({
         onSelectionChange={onSelectionChange}
         onChange={({ contents }) => browser.edit(contents)}
         onComplete={({ contents }) => browser.edit(contents)}
+        scrollRequest={debugLine === null ? undefined : {
+          path: payload.path,
+          revision: debugRevision,
+          range: { path: payload.path, side: "new", endSide: "new", startLine: debugLine, endLine: debugLine },
+          behavior: "smooth-auto"
+        }}
+        onTokenEnter={enterToken}
+        onTokenLeave={leaveToken}
         options={{
           lineNumbers: true,
           stickyHeader: false,
           disableFileHeader: true
         }}
       />
+      {hover ? (
+        <div
+          role="tooltip"
+          className="fixed z-50 max-w-80 rounded border border-line bg-panel px-2.5 py-2 font-mono text-[11px] text-text shadow-lg"
+          style={{ left: hover.x, top: hover.y }}
+        >
+          <div className="font-semibold text-text-bright">{hover.expression}</div>
+          <div className="mt-1 break-all">{hover.value ?? "Evaluating…"}</div>
+          {hover.type ? <div className="mt-1 text-dim">{hover.type}</div> : null}
+        </div>
+      ) : null}
     </div>
   )
+}
+
+function DebugPanel({ model }: { readonly model: DebugSessionModel }) {
+  const [open, setOpen] = useState(true)
+  const snapshot = model.snapshot
+  const session = snapshot.session
+  if (!session) return null
+  const controls = [
+    { action: "pause" as const, label: "Pause", icon: CirclePause, disabled: session.status !== "running" },
+    { action: "continue" as const, label: "Continue", icon: CirclePlay, disabled: session.status !== "stopped" },
+    { action: "step_over" as const, label: "Step over", icon: StepForward, disabled: session.status !== "stopped" },
+    { action: "step_in" as const, label: "Step in", icon: StepForward, disabled: session.status !== "stopped" },
+    { action: "step_out" as const, label: "Step out", icon: StepForward, disabled: session.status !== "stopped" },
+    { action: "terminate" as const, label: "Terminate", icon: Square, disabled: session.status === "terminated" }
+  ]
+  return (
+    <aside aria-label="Debugger" className="flex w-72 flex-none flex-col border-l border-line bg-panel text-[11px] text-text">
+      <button type="button" className="flex h-9 items-center gap-2 border-b border-line px-2 text-left font-medium" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        {open ? <ChevronDown className="size-3" aria-hidden /> : <ChevronRight className="size-3" aria-hidden />}
+        <Bug className="size-3.5 text-yellow" aria-hidden />
+        <span className="flex-1">Debug · {session.status}</span>
+      </button>
+      {open ? (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div className="flex gap-1 border-b border-line p-2">
+            {controls.map(({ action, label, icon: Icon, disabled }) => (
+              <button key={action} type="button" aria-label={label} title={label} disabled={disabled} onClick={() => { model.control(action).catch(() => {}) }} className="rounded border border-line p-1.5 hover:text-text-bright disabled:opacity-35">
+                <Icon className="size-3.5" aria-hidden />
+              </button>
+            ))}
+          </div>
+          <DebugSection title="Location">
+            <div className="font-mono break-all">{session.frame?.source?.path ?? "No source"}{session.frame ? `:${session.frame.line}` : ""}</div>
+            {session.stopReason ? <div className="mt-1 text-dim">{session.stopReason}</div> : null}
+          </DebugSection>
+          <DebugSection title="Call stack">
+            {session.stackFrames.length === 0 ? <span className="text-dim">No frames</span> : session.stackFrames.map((frame) => (
+              <div key={frame.id} className="mb-1 font-mono"><span className="text-text-bright">{frame.name}</span><br /><span className="text-dim">{frame.source?.path ?? "unknown"}:{frame.line}</span></div>
+            ))}
+          </DebugSection>
+          <DebugSection title="Variables">
+            {snapshot.scopes.flatMap((scope) => snapshot.variables[scope.variablesReference] ?? []).length === 0 ? <span className="text-dim">No variables</span> : snapshot.scopes.map((scope) => (
+              <div key={scope.variablesReference} className="mb-2"><div className="mb-1 font-medium text-text-bright">{scope.name}</div>{(snapshot.variables[scope.variablesReference] ?? []).map((variable) => (
+                <div key={`${scope.variablesReference}:${variable.name}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-2 font-mono"><span className="truncate">{variable.name}</span><span className="truncate text-blue" title={variable.value}>{variable.value}</span></div>
+              ))}</div>
+            ))}
+          </DebugSection>
+          <DebugSection title="Breakpoints">
+            {Object.entries(session.breakpoints).flatMap(([file, values]) => values.map((point, index) => <div key={`${file}:${point.id ?? index}`} className="truncate font-mono" title={file}>{file}:{point.line ?? "?"}</div>))}
+          </DebugSection>
+          <DebugSection title="Output"><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all text-[10px]">{session.output || "No output"}</pre></DebugSection>
+          <DebugSection title="Agent actions">
+            {snapshot.actions.slice(-20).reverse().map((action) => <div key={action.id} className="mb-1"><span className={action.status === "error" ? "text-red" : action.status === "running" ? "text-yellow" : "text-green"}>{action.status}</span> <span className="font-mono">{action.summary}</span></div>)}
+          </DebugSection>
+          {snapshot.error ? <div role="alert" className="m-2 rounded border border-red/40 bg-red/10 p-2 text-red">{snapshot.error}</div> : null}
+        </div>
+      ) : null}
+    </aside>
+  )
+}
+
+function DebugSection({ title, children }: { readonly title: string; readonly children: ReactNode }) {
+  return <section className="border-b border-line p-2"><h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-dim">{title}</h3>{children}</section>
 }
 
 function FileNotice({
