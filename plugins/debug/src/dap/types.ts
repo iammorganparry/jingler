@@ -1,5 +1,14 @@
 /* oxlint-disable anti-slop/no-unsafe-dictionary-type -- DAP custom requests intentionally carry adapter-defined JSON fields. */
 import type { ChildProcessWithoutNullStreams } from "node:child_process"
+import type {
+  DebugBreakpointView,
+  DebugFrameView,
+  DebugScopeView,
+  DebugSessionView,
+  DebugSourceView,
+  DebugThreadView,
+  DebugVariableView
+} from "@jingler/core"
 
 export type JsonObject = Record<string, unknown>
 
@@ -40,31 +49,12 @@ export interface DapRequest extends DapMessage {
   readonly arguments?: JsonObject
 }
 
-export interface DapSource { readonly name?: string; readonly path?: string; readonly sourceReference?: number }
-export interface DapStackFrame {
-  readonly id: number
-  readonly name: string
-  readonly source?: DapSource
-  readonly line: number
-  readonly column: number
-  readonly instructionPointerReference?: string
-}
-export interface DapThread { readonly id: number; readonly name: string }
-export interface DapScope {
-  readonly name: string
-  readonly variablesReference: number
-  readonly expensive: boolean
-  readonly presentationHint?: string
-}
-export interface DapVariable {
-  readonly name: string
-  readonly value: string
-  readonly type?: string
-  readonly variablesReference: number
-  readonly evaluateName?: string
-  readonly memoryReference?: string
-}
-export interface DapBreakpoint { readonly id?: number; readonly verified?: boolean; readonly line?: number; readonly message?: string }
+export interface DapSource extends DebugSourceView { readonly sourceReference?: number }
+export interface DapStackFrame extends Omit<DebugFrameView, "source"> { readonly source?: DapSource }
+export type DapThread = DebugThreadView
+export type DapScope = DebugScopeView
+export type DapVariable = DebugVariableView
+export type DapBreakpoint = DebugBreakpointView
 export interface DapCapabilities extends JsonObject {
   readonly supportsConfigurationDoneRequest?: boolean
   readonly supportsTerminateRequest?: boolean
@@ -78,23 +68,8 @@ export interface DapCapabilities extends JsonObject {
   readonly supportsLoadedSourcesRequest?: boolean
 }
 
-export type DapStatus = "starting" | "running" | "stopped" | "terminated" | "error"
-export interface DapSessionSnapshot {
-  readonly id: string
-  readonly adapter: string
-  readonly cwd: string
-  readonly program?: string
-  readonly status: DapStatus
-  readonly stopReason?: string
-  readonly stopSequence?: number
-  readonly threadId?: number
-  readonly frame?: DapStackFrame
-  readonly threads: readonly DapThread[]
-  readonly stackFrames: readonly DapStackFrame[]
-  readonly breakpoints: Readonly<Record<string, readonly DapBreakpoint[]>>
-  readonly output: string
-  readonly exitCode?: number
-}
+export type DapStatus = DebugSessionView["status"]
+export type DapSessionSnapshot = DebugSessionView
 
 export interface DapTransport {
   readonly process: ChildProcessWithoutNullStreams

@@ -9,13 +9,28 @@ const EMPTY: DebugViewSnapshot = { active: false, session: null, scopes: [], var
 
 export const useDebugSessions = (
   sessionIds: readonly string[],
-  enabled: boolean
+  visibleSessionIds: readonly string[],
+  enabled: boolean,
+  wakeKey = ""
 ): Readonly<Record<string, DebugViewSnapshot>> => {
   const [snapshots, setSnapshots] = useState<Readonly<Record<string, DebugViewSnapshot>>>({})
-  const key = sessionIds.join("\0")
-  const ids = useMemo(() => key === "" ? [] : key.split("\0"), [key])
+  const activeIds = useRef<ReadonlySet<string>>(new Set())
+  const sessionKey = sessionIds.join("\0")
+  const visibleKey = visibleSessionIds.join("\0")
+  const ids = useMemo(() => sessionKey === "" ? [] : sessionKey.split("\0"), [sessionKey])
+  const visibleIds = useMemo(() => visibleKey === "" ? [] : visibleKey.split("\0"), [visibleKey])
+  // wakeKey is a signal: changed agent activity retries visible inactive sessions.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the signal intentionally has no value-level use
   useEffect(() => {
-    if (!enabled || ids.length === 0) {
+    if (!enabled) {
+      activeIds.current = new Set()
+      setSnapshots({})
+      return
+    }
+    const existing = new Set(ids)
+    const visible = new Set(visibleIds)
+    const polling = [...new Set([...visibleIds, ...[...activeIds.current].filter((id) => existing.has(id))])]
+    if (polling.length === 0) {
       setSnapshots({})
       return
     }
@@ -23,7 +38,7 @@ export const useDebugSessions = (
     let timer: ReturnType<typeof setTimeout> | undefined
     const bridge = pluginBridge("debug")
     const poll = async () => {
-      const entries = await Promise.all(ids.map(async (sessionId) => {
+      const entries = await Promise.all(polling.map(async (sessionId) => {
         try {
           return [sessionId, await bridge.invoke<DebugViewSnapshot>("debug.snapshot", { sessionId })] as const
         } catch {
@@ -31,11 +46,9 @@ export const useDebugSessions = (
         }
       }))
       if (!cancelled) {
-        setSnapshots((current) => {
-          const next = Object.fromEntries(entries)
-          return JSON.stringify(current) === JSON.stringify(next) ? current : next
-        })
-        timer = setTimeout(poll, INTERVAL_MS)
+        activeIds.current = new Set(entries.filter(([, snapshot]) => snapshot.active).map(([sessionId]) => sessionId))
+        setSnapshots(Object.fromEntries(entries.filter(([sessionId, snapshot]) => visible.has(sessionId) || snapshot.active)))
+        if (activeIds.current.size > 0) timer = setTimeout(poll, INTERVAL_MS)
       }
     }
     poll().catch(() => {})
@@ -43,7 +56,7 @@ export const useDebugSessions = (
       cancelled = true
       clearTimeout(timer)
     }
-  }, [enabled, ids])
+  }, [enabled, ids, visibleIds, wakeKey])
   return snapshots
 }
 

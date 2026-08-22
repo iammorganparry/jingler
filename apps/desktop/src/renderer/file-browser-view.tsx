@@ -34,7 +34,7 @@ import {
   captureDiffCodeReference
 } from "./file-diff-context.js"
 
-const DEBUG_HOVER_IDENTIFIER = /^[A-Za-z_$][\w$]*$/u
+const DEBUG_HOVER_IDENTIFIER = /^[\p{ID_Start}_$][\p{ID_Continue}_$\u200C\u200D]*$/u
 
 export interface FileBrowserViewProps {
   readonly session: Session
@@ -88,8 +88,12 @@ export function FileBrowserView({
   const debugPath = debugFrame?.source?.path
     ? normalizeAgentFileTarget(debugFrame.source.path, session.worktreePath)
     : null
+  const debugStopKey = debug.snapshot.session?.status === "stopped"
+    ? `${debug.snapshot.session.id}:${debug.snapshot.session.stopSequence ?? 0}`
+    : null
   const agentFileActivity = useAgentFileActivity(session.id, session.activeChatId)
   const rootRef = useRef<HTMLDivElement>(null)
+  const followedDebugStop = useRef<string | null>(null)
   const selectionPathRef = useRef(browser.selectedPath)
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
 
@@ -155,9 +159,10 @@ export function FileBrowserView({
   ])
 
   useEffect(() => {
-    if (debugPath === null || browser.selectedPath === debugPath) return
-    browser.open(debugPath)
-  }, [browser.open, browser.selectedPath, debugPath])
+    if (debugPath === null || debugStopKey === null || followedDebugStop.current === debugStopKey) return
+    followedDebugStop.current = debugStopKey
+    if (browser.selectedPath !== debugPath) browser.open(debugPath)
+  }, [browser.open, browser.selectedPath, debugPath, debugStopKey])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

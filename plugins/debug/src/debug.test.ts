@@ -4,9 +4,9 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { AgentToolExecutionContext } from "@jingler/plugin-sdk/host"
 import { afterEach, describe, expect, it } from "vitest"
-import { DEBUG_ACTIONS, type DebugInput } from "./contracts.js"
+import { DEBUG_ACTIONS, decodeDebugHover, decodeDebugInput, type DebugInput } from "./contracts.js"
 import { DebugController } from "./controller.js"
-import { adapterConfigs } from "./dap/config.js"
+import { adapterConfigs, selectLaunchAdapter } from "./dap/config.js"
 import { DapSession } from "./dap/session.js"
 import type { DapResolvedAdapter } from "./dap/types.js"
 
@@ -44,6 +44,43 @@ const launchFake = async (): Promise<{ root: string; program: string; session: D
   await waitFor(() => session.snapshot().status === "stopped" && session.snapshot().frame !== undefined)
   return { root, program, session }
 }
+
+describe("adapter selection", () => {
+  it("ranks adapters using wildcard root markers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-debug-config-"))
+    await mkdir(join(root, ".jingler"))
+    await writeFile(join(root, "example.sln"), "")
+    await writeFile(join(root, ".jingler", "dap.json"), JSON.stringify({ adapters: {
+      fallback: { command: process.execPath, fileTypes: [".dll"], rootMarkers: [] },
+      dotnet: { command: process.execPath, fileTypes: [".dll"], rootMarkers: ["*.sln"] }
+    } }))
+
+    expect(selectLaunchAdapter(root, "example.dll").name).toBe("dotnet")
+  })
+})
+
+describe("debug input contracts", () => {
+  it.each([
+    ["line", 0], ["frame_id", 1.5], ["scope_id", 0], ["variable_ref", -1],
+    ["pid", 1.5], ["port", 65_536], ["levels", -1], ["instruction_count", 1.5],
+    ["instruction_count", 65_537], ["instruction_offset", 0.5], ["count", 1.5], ["count", 65_537],
+    ["offset", Number.MAX_SAFE_INTEGER + 1], ["start_module", -1], ["module_count", 1.5],
+    ["module_count", 65_537], ["timeout", 301]
+  ])("rejects invalid %s values", (field, value) => {
+    expect(() => decodeDebugInput({ action: "threads", [field]: value })).toThrow()
+  })
+
+  it("accepts valid boundary values", () => {
+    expect(decodeDebugInput({
+      action: "modules", line: 1, frame_id: -1, scope_id: 1, variable_ref: 1,
+      pid: 1, port: 65_535, levels: 0, instruction_count: 65_536,
+      instruction_offset: -1, count: 65_536, offset: -1,
+      start_module: 0, module_count: 0, timeout: 300
+    })).toBeTruthy()
+    expect(decodeDebugHover({ sessionId: "session", expression: "value", frameId: -1 })).toBeTruthy()
+    expect(() => decodeDebugHover({ sessionId: "session", expression: "value", frameId: 0.5 })).toThrow()
+  })
+})
 
 describe("DAP session", () => {
   it("launches, inspects, steps, evaluates, and terminates", async () => {
@@ -128,6 +165,7 @@ describe("Debug controller", () => {
     const first = await controller.snapshot("one")
     expect(first.session).not.toBeNull()
     expect(first.variables[20]?.[0]?.value).toBe("3")
+    expect(await controller.hover({ sessionId: "one", expression: "π" })).toMatchObject({ result: "unknown" })
     await controller.control({ sessionId: "one", action: "step_over" })
     expect((await controller.snapshot("one")).variables[20]?.[0]?.value).toBe("4")
     await controller.control({ sessionId: "one", action: "step_over" })

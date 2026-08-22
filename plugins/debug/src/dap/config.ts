@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/no-conditional-empty-object-spread -- Adapter JSON/YAML is an external config boundary normalized immediately below. */
-import { accessSync, constants, existsSync, readFileSync } from "node:fs"
+import { accessSync, constants, existsSync, readFileSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { delimiter, dirname, extname, isAbsolute, join, resolve } from "node:path"
 import { parse as parseYaml } from "yaml"
@@ -98,6 +98,16 @@ export const resolveAdapter = (cwd: string, name: string): DapResolvedAdapter =>
   return { ...config, name, commandPath }
 }
 
+const rootMarkerExists = (cwd: string, marker: string): boolean => {
+  if (!marker.startsWith("*.")) return existsSync(join(cwd, marker))
+  try {
+    const suffix = marker.slice(1).toLowerCase()
+    return readdirSync(cwd).some((name) => name.toLowerCase().endsWith(suffix))
+  } catch {
+    return false
+  }
+}
+
 export const selectLaunchAdapter = (cwd: string, program: string, requested?: string): DapResolvedAdapter => {
   if (requested) return resolveAdapter(cwd, requested)
   const extension = extname(program).toLowerCase()
@@ -108,7 +118,7 @@ export const selectLaunchAdapter = (cwd: string, program: string, requested?: st
       const leftExt = left.fileTypes.includes(extension) ? 1 : 0
       const rightExt = right.fileTypes.includes(extension) ? 1 : 0
       if (leftExt !== rightExt) return rightExt - leftExt
-      const marker = (config: DapAdapterConfig) => config.rootMarkers.some((name) => existsSync(join(cwd, name))) ? 1 : 0
+      const marker = (config: DapAdapterConfig) => config.rootMarkers.some((name) => rootMarkerExists(cwd, name)) ? 1 : 0
       return marker(right) - marker(left)
     })
   const chosen = ranked[0]

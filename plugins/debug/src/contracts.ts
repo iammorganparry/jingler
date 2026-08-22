@@ -1,4 +1,4 @@
-import { array, boolean, number, object, optional, parser, picklist, record, string, unknown } from "valibot"
+import { array, boolean, maxValue, minValue, number, object, optional, parser, picklist, pipe, record, safeInteger, string, unknown } from "valibot"
 import type { JsonObject } from "./dap/types.js"
 
 export type { DebugViewSnapshot } from "@jingler/core"
@@ -71,7 +71,10 @@ export interface DebugHover extends DebugRoute {
 }
 
 const optionalString = optional(string())
-const optionalNumber = optional(number())
+const safeIntegerNumber = pipe(number(), safeInteger())
+const positiveInteger = pipe(number(), safeInteger(), minValue(1))
+const nonNegativeInteger = pipe(number(), safeInteger(), minValue(0))
+const boundedCount = pipe(number(), safeInteger(), minValue(0), maxValue(65_536))
 const debugInputSchema = object({
   action: picklist(DEBUG_ACTIONS),
   program: optionalString,
@@ -79,36 +82,36 @@ const debugInputSchema = object({
   adapter: optionalString,
   cwd: optionalString,
   file: optionalString,
-  line: optionalNumber,
+  line: optional(positiveInteger),
   function: optionalString,
   name: optionalString,
   condition: optionalString,
   hit_condition: optionalString,
   expression: optionalString,
   context: optionalString,
-  frame_id: optionalNumber,
-  scope_id: optionalNumber,
-  variable_ref: optionalNumber,
-  pid: optionalNumber,
-  port: optionalNumber,
+  frame_id: optional(safeIntegerNumber),
+  scope_id: optional(positiveInteger),
+  variable_ref: optional(positiveInteger),
+  pid: optional(positiveInteger),
+  port: optional(pipe(number(), safeInteger(), minValue(1), maxValue(65_535))),
   host: optionalString,
-  levels: optionalNumber,
+  levels: optional(pipe(number(), safeInteger(), minValue(0), maxValue(65_536))),
   memory_reference: optionalString,
   instruction_reference: optionalString,
-  instruction_count: optionalNumber,
-  instruction_offset: optionalNumber,
-  count: optionalNumber,
+  instruction_count: optional(boundedCount),
+  instruction_offset: optional(safeIntegerNumber),
+  count: optional(boundedCount),
   data: optionalString,
   data_id: optionalString,
   access_type: optional(picklist(["read", "write", "readWrite"])),
   command: optionalString,
   arguments: optional(record(string(), unknown())),
-  offset: optionalNumber,
+  offset: optional(safeIntegerNumber),
   resolve_symbols: optional(boolean()),
   allow_partial: optional(boolean()),
-  start_module: optionalNumber,
-  module_count: optionalNumber,
-  timeout: optionalNumber
+  start_module: optional(nonNegativeInteger),
+  module_count: optional(pipe(number(), safeInteger(), minValue(0), maxValue(65_536))),
+  timeout: optional(pipe(number(), minValue(1), maxValue(300)))
 })
 
 export const decodeDebugInput = parser(debugInputSchema)
@@ -120,5 +123,5 @@ export const decodeDebugControl = parser(object({
 export const decodeDebugHover = parser(object({
   sessionId: string(),
   expression: string(),
-  frameId: optional(number())
+  frameId: optional(safeIntegerNumber)
 }))

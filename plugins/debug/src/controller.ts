@@ -15,7 +15,7 @@ import { DapSession } from "./dap/session.js"
 import type { DapScope, DapVariable, JsonObject } from "./dap/types.js"
 
 const MAX_ACTIONS = 100
-const HOVER_EXPRESSION = /^[A-Za-z_$][\w$]*$/u
+const HOVER_EXPRESSION = /^[\p{ID_Start}_$][\p{ID_Continue}_$\u200C\u200D]*$/u
 const message = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause)
 const required = <T>(value: T | undefined, name: string): T => {
   if (value === undefined || value === "") throw new Error(`debug ${name} is required.`)
