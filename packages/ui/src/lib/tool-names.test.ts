@@ -6,6 +6,7 @@ describe("toolDisplayName", () => {
     expect(toolDisplayName("workspace_read_file")).toBe("Read")
     expect(toolDisplayName("read")).toBe("Read")
     expect(toolDisplayName("command_execute")).toBe("Bash")
+    expect(toolDisplayName("debug")).toBe("Debug")
   })
 
   it("names the in-app browser tools", () => {

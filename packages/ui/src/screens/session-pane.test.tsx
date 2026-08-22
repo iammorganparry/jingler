@@ -192,6 +192,23 @@ describe("visibleTabs", () => {
  * so querying by it is both what a screen-reader user does and the only spelling
  * that is stable across tiers.
  */
+describe("debug source following", () => {
+  it("opens Files for every new debugger stop sequence", () => {
+    const props = {
+      session: session({ id: "debug", worktreePath: "/repo" }),
+      renderConversation: () => <div>transcript</div>,
+      renderFiles: () => <div>debug source</div>
+    }
+    const view = render(<SessionPane {...props} debugStopSequence={0} />)
+    expect(screen.getByText("transcript")).toBeTruthy()
+    view.rerender(<SessionPane {...props} debugStopSequence={1} />)
+    expect(screen.getByText("debug source")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Conversation" }))
+    view.rerender(<SessionPane {...props} debugStopSequence={2} />)
+    expect(screen.getByText("debug source")).toBeTruthy()
+  })
+})
+
 describe("plugin tab contributions", () => {
   it("renders a plugin tab body through the same path as a built-in", () => {
     render(

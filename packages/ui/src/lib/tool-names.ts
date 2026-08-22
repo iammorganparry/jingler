@@ -26,6 +26,7 @@ const CANONICAL_TOOL_NAMES: Readonly<Record<string, string>> = {
   // Execution
   command_execute: "Bash",
   bash: "Bash",
+  debug: "Debug",
   // Native pi-subagents fleet tools
   subagent: "Subagent",
   subagent_wait: "Wait for subagents",

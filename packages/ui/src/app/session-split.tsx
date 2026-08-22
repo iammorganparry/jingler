@@ -64,6 +64,7 @@ export interface SessionSplitProps {
   explanationSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>
   liveDiff?: Record<string, DiffStat>
+  debugStopSequences?: Readonly<Record<string, number>>
   onOpenSettings?: () => void
   onOpenProviderSettings?: () => void
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
@@ -150,6 +151,7 @@ export function SessionSplit(props: SessionSplitProps) {
         explanationSessions={props.explanationSessions}
         liveActivity={props.liveActivity}
         liveDiff={props.liveDiff}
+        debugStopSequence={props.debugStopSequences?.[session.id] ?? 0}
         onOpenSettings={props.onOpenSettings}
         onOpenProviderSettings={props.onOpenProviderSettings}
         // Identity only where it disambiguates: a group of one needs no chip,

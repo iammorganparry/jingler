@@ -114,12 +114,14 @@ import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
 import {
   PluginProvider,
+  usePluginCatalog,
   usePluginCommands,
   useIssueProviders,
   usePluginPanes,
   usePluginTabs,
 } from "./plugin-registry.js";
 import { usePlugins } from "./use-plugins.js";
+import { useDebugSessions } from "./debug-session.js";
 import { useMemory } from "./use-memory.js";
 import { repositoryAccess } from "./github-connection-machine.js";
 import { useGitHubConnection } from "./use-github-connection.js";
@@ -387,6 +389,30 @@ function AuthedApp({
   const pluginCommands = usePluginCommands();
   const issueProviders = useIssueProviders();
   const plugins = usePlugins();
+  const pluginCatalog = usePluginCatalog();
+  const liveActivity = useSessionActivities();
+  const debugEnabled = pluginCatalog?.plugins.some((plugin) => plugin.enabled && plugin.manifest.id === "debug") ?? false;
+  const [visibleDebugSessionIds, setVisibleDebugSessionIds] = useState<ReadonlySet<string>>(new Set());
+  const debugSessionIds = sessions.map((session) => session.id);
+  const visibleDebugIds = debugSessionIds.filter((id) => visibleDebugSessionIds.has(id));
+  const signalledDebugIds = debugSessionIds.filter((id) => liveActivity[id] !== undefined);
+  const debugWakeKey = signalledDebugIds.map((id) => {
+    const activity = liveActivity[id];
+    return `${id}\0${activity?.verb ?? ""}\0${activity?.target ?? ""}\0${activity?.startedAt ?? ""}`;
+  }).join("\0");
+  const debugSessions = useDebugSessions(
+    visibleDebugIds,
+    signalledDebugIds,
+    debugEnabled,
+    debugWakeKey,
+  );
+  const debugStopSequences = useMemo(() => Object.fromEntries(
+    Object.entries(debugSessions).flatMap(([sessionId, snapshot]) =>
+      snapshot.session?.status === "stopped" && snapshot.session.stopSequence
+        ? [[sessionId, snapshot.session.stopSequence]]
+        : []
+    )
+  ), [debugSessions]);
   const memory = useMemory();
 
   // The conversation machine persists a session's settled status by itself, with
@@ -419,7 +445,10 @@ function AuthedApp({
   // Keep the module-level cell the conversation registry reads in sync. It can't
   // use a hook: it outlives every component. See `active-session.ts`.
   const onVisibleSessionsChange = useCallback(
-    (ids: ReadonlySet<string>) => setVisibleSessionIds(ids),
+    (ids: ReadonlySet<string>) => {
+      setVisibleSessionIds(ids);
+      setVisibleDebugSessionIds(ids);
+    },
     [],
   );
 
@@ -445,8 +474,6 @@ function AuthedApp({
     },
     [],
   );
-
-  const liveActivity = useSessionActivities();
   const liveDiff = useSessionDiffs();
   const planSessions = usePlanSessions();
   const explanationSessions = useExplanationSessions(sessions);
@@ -1788,6 +1815,7 @@ function AuthedApp({
         }
         planSessions={planSessions}
         explanationSessions={explanationSessions}
+        debugStopSequences={debugStopSequences}
         renderExplanation={(session: Session) => (
           <ExplanationPane sessionId={session.id} />
         )}
@@ -1814,6 +1842,7 @@ function AuthedApp({
         renderFiles={(session, ctx) => (
           <FileBrowserView
             session={session}
+            debugSnapshot={debugSessions[session.id]}
             onSendReference={(reference) => {
               addDraftCodeReference(session.activeChatId, reference);
               ctx.onSelectConversation();

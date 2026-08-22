@@ -177,6 +177,8 @@ export interface JinglerAppProps {
   prStates?: Record<string, SessionPrStatus>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
+  /** Sessions whose debugger is stopped at a source location. */
+  debugStopSequences?: Readonly<Record<string, number>>
   /** Provider usage snapshot for the Usage & limits modal. */
   usage?: Usage | null
   /** Fetch fresh usage (called when the modal opens); may be async. */
@@ -456,6 +458,7 @@ export function JinglerApp({
   liveActivity,
   prStates,
   liveDiff,
+  debugStopSequences,
   usage,
   onLoadUsage,
   githubConfig,
@@ -1207,6 +1210,7 @@ export function JinglerApp({
         prStates={prStates}
         repoOwners={repoOwners}
         liveDiff={liveDiff}
+        debugStopSequences={debugStopSequences}
         onNewSession={onCreateSession ? openNewSession : undefined}
         user={user}
         onSignOut={onSignOut}

@@ -189,6 +189,8 @@ export interface SessionPaneProps {
   liveActivity?: Record<string, SessionActivity>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
+  /** Opens Files once when this session first stops in the debugger. */
+  debugStopSequence?: number
   /** Open the Settings view — the "connect GitHub" escape hatch on empty states. */
   onOpenSettings?: () => void
   /** Open provider settings for runtime connection recovery. */
@@ -268,6 +270,12 @@ export function SessionPane(props: SessionPaneProps) {
 
 function SessionPaneBody(props: SessionPaneProps) {
   const [tab, setTab] = useState<TabKey>(() => props.initialTab ?? BUILTIN_TAB.conversation)
+  const lastDebugStop = useRef(0)
+  useEffect(() => {
+    const sequence = props.debugStopSequence ?? 0
+    if (sequence > 0 && sequence !== lastDebugStop.current) setTab(BUILTIN_TAB.files)
+    lastDebugStop.current = sequence
+  }, [props.debugStopSequence])
   // A pending deep link into Plan Review (set when the composer dock jumps to
   // a step). One-shot: Plan Review reports its own selection back and we drop it,
   // so a later manual pick isn't overridden by a stale target.

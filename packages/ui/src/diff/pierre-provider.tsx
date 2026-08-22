@@ -9,6 +9,7 @@ import {
   type CodeViewHandle,
   type CodeViewCreateEditorOptions,
   type CodeViewItem,
+  type TokenEventBase,
   type DiffLineAnnotation,
   type FileContents,
   type FileDiffMetadata,
@@ -431,6 +432,8 @@ export interface PierreCodeViewProps extends PierreAccessibleViewProps {
     payload: PierreAnnotationPayload,
     item: CodeViewItem<PierreAnnotationMetadata>
   ) => ReactNode
+  readonly onTokenEnter?: (token: TokenEventBase, event: PointerEvent) => void
+  readonly onTokenLeave?: (token: TokenEventBase, event: PointerEvent) => void
   readonly options?: PierreRenderOptions
 }
 
@@ -534,6 +537,8 @@ export function PierreCodeView({
   onActivePathChange,
   renderHeader,
   renderAnnotation,
+  onTokenEnter,
+  onTokenLeave,
   options
 }: PierreCodeViewProps) {
   return (
@@ -548,6 +553,8 @@ export function PierreCodeView({
       onActivePathChange={onActivePathChange}
       renderHeader={renderHeader}
       renderAnnotation={renderAnnotation}
+      onTokenEnter={onTokenEnter}
+      onTokenLeave={onTokenLeave}
       options={options}
     />
   )
@@ -640,6 +647,8 @@ function PierreCodeViewContent({
   onActivePathChange,
   renderHeader,
   renderAnnotation,
+  onTokenEnter,
+  onTokenLeave,
   options,
   editor
 }: PierreCodeViewContentProps) {
@@ -731,7 +740,9 @@ function PierreCodeViewContent({
           hunkSeparators: options?.hunkSeparators ?? "line-info",
           enableLineSelection: onSelectionChange !== undefined,
           controlledSelection: true,
-          stickyHeaders: options?.stickyHeader ?? true
+          stickyHeaders: options?.stickyHeader ?? true,
+          onTokenEnter,
+          onTokenLeave
         }}
         renderCodeViewFooter={renderCodeViewFooter}
         renderCustomHeader={renderHeader}
