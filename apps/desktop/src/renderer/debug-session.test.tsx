@@ -32,12 +32,12 @@ afterEach(() => {
 describe("debug session bridge", () => {
   it("polls enabled sessions and remains inert when disabled", async () => {
     invoke.mockResolvedValue(stopped)
-    const enabled = renderHook(() => useDebugSessions(["session-1"], ["session-1"], true))
+    const enabled = renderHook(() => useDebugSessions(["session-1"], [], true))
     await waitFor(() => expect(enabled.result.current["session-1"]?.session?.status).toBe("stopped"))
     expect(invoke).toHaveBeenCalledWith("debug.snapshot", { sessionId: "session-1" })
     enabled.unmount()
     invoke.mockClear()
-    const disabled = renderHook(() => useDebugSessions(["session-1"], ["session-1"], false))
+    const disabled = renderHook(() => useDebugSessions(["session-1"], [], false))
     await act(async () => undefined)
     expect(disabled.result.current).toEqual({})
     expect(invoke).not.toHaveBeenCalled()
@@ -47,7 +47,7 @@ describe("debug session bridge", () => {
     vi.useFakeTimers()
     invoke.mockResolvedValue(stopped)
     const hook = renderHook(
-      ({ visible }) => useDebugSessions(["active", "stored"], visible, true),
+      ({ visible }) => useDebugSessions(visible, [], true),
       { initialProps: { visible: ["active"] } }
     )
     await act(() => vi.advanceTimersByTimeAsync(0))
@@ -82,6 +82,39 @@ describe("debug session bridge", () => {
     hook.unmount()
   })
 
+})
+
+describe("debug polling lifecycle", () => {
+  it("drops inactive sessions from a shared active poll loop", async () => {
+    vi.useFakeTimers()
+    const calls = new Map<string, number>()
+    invoke.mockImplementation((_command, { sessionId }: { sessionId: string }) => {
+      const count = (calls.get(sessionId) ?? 0) + 1
+      calls.set(sessionId, count)
+      return Promise.resolve(sessionId === "ended" && count > 1 ? inactive : stopped)
+    })
+    const hook = renderHook(() => useDebugSessions(
+      ["ended", "running"], [], true
+    ))
+
+    await act(() => vi.advanceTimersByTimeAsync(1_400))
+    expect(calls.get("ended")).toBe(2)
+    expect(calls.get("running")).toBe(3)
+    hook.unmount()
+  })
+
+  it("probes a hidden session when its agent activity changes", async () => {
+    vi.useFakeTimers()
+    invoke.mockResolvedValue(stopped)
+    const hook = renderHook(() => useDebugSessions(
+      [], ["hidden"], true, "debug.dap"
+    ))
+
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    expect(invoke).toHaveBeenCalledWith("debug.snapshot", { sessionId: "hidden" })
+    expect(invoke).not.toHaveBeenCalledWith("debug.snapshot", { sessionId: "stored" })
+    hook.unmount()
+  })
 })
 
 describe("debug session model", () => {

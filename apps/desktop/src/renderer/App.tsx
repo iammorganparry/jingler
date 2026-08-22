@@ -395,13 +395,14 @@ function AuthedApp({
   const [visibleDebugSessionIds, setVisibleDebugSessionIds] = useState<ReadonlySet<string>>(new Set());
   const debugSessionIds = sessions.map((session) => session.id);
   const visibleDebugIds = debugSessionIds.filter((id) => visibleDebugSessionIds.has(id));
-  const debugWakeKey = visibleDebugIds.map((id) => {
+  const signalledDebugIds = debugSessionIds.filter((id) => liveActivity[id] !== undefined);
+  const debugWakeKey = signalledDebugIds.map((id) => {
     const activity = liveActivity[id];
     return `${id}\0${activity?.verb ?? ""}\0${activity?.target ?? ""}\0${activity?.startedAt ?? ""}`;
   }).join("\0");
   const debugSessions = useDebugSessions(
-    debugSessionIds,
     visibleDebugIds,
+    signalledDebugIds,
     debugEnabled,
     debugWakeKey,
   );

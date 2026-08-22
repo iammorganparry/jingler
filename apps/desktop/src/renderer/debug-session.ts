@@ -8,17 +8,17 @@ const INTERVAL_MS = 700
 const EMPTY: DebugViewSnapshot = { active: false, session: null, scopes: [], variables: {}, actions: [], error: null }
 
 export const useDebugSessions = (
-  sessionIds: readonly string[],
   visibleSessionIds: readonly string[],
+  signalledSessionIds: readonly string[],
   enabled: boolean,
   wakeKey = ""
 ): Readonly<Record<string, DebugViewSnapshot>> => {
   const [snapshots, setSnapshots] = useState<Readonly<Record<string, DebugViewSnapshot>>>({})
   const activeIds = useRef<ReadonlySet<string>>(new Set())
-  const sessionKey = sessionIds.join("\0")
   const visibleKey = visibleSessionIds.join("\0")
-  const ids = useMemo(() => sessionKey === "" ? [] : sessionKey.split("\0"), [sessionKey])
+  const signalledKey = signalledSessionIds.join("\0")
   const visibleIds = useMemo(() => visibleKey === "" ? [] : visibleKey.split("\0"), [visibleKey])
+  const signalledIds = useMemo(() => signalledKey === "" ? [] : signalledKey.split("\0"), [signalledKey])
   // wakeKey is a signal: changed agent activity retries visible inactive sessions.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the signal intentionally has no value-level use
   useEffect(() => {
@@ -27,9 +27,8 @@ export const useDebugSessions = (
       setSnapshots({})
       return
     }
-    const existing = new Set(ids)
     const visible = new Set(visibleIds)
-    const polling = [...new Set([...visibleIds, ...[...activeIds.current].filter((id) => existing.has(id))])]
+    const polling = [...new Set([...visibleIds, ...signalledIds, ...activeIds.current])]
     if (polling.length === 0) {
       setSnapshots({})
       return
@@ -37,8 +36,9 @@ export const useDebugSessions = (
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const bridge = pluginBridge("debug")
-    const poll = async () => {
-      const entries = await Promise.all(polling.map(async (sessionId) => {
+    const poll = async (sessionIdsToPoll: readonly string[]) => {
+      activeIds.current = new Set(sessionIdsToPoll)
+      const entries = await Promise.all(sessionIdsToPoll.map(async (sessionId) => {
         try {
           return [sessionId, await bridge.invoke<DebugViewSnapshot>("debug.snapshot", { sessionId })] as const
         } catch {
@@ -48,15 +48,17 @@ export const useDebugSessions = (
       if (!cancelled) {
         activeIds.current = new Set(entries.filter(([, snapshot]) => snapshot.active).map(([sessionId]) => sessionId))
         setSnapshots(Object.fromEntries(entries.filter(([sessionId, snapshot]) => visible.has(sessionId) || snapshot.active)))
-        if (activeIds.current.size > 0) timer = setTimeout(poll, INTERVAL_MS)
+        if (activeIds.current.size > 0) {
+          timer = setTimeout(() => poll([...activeIds.current]).catch(() => {}), INTERVAL_MS)
+        }
       }
     }
-    poll().catch(() => {})
+    poll(polling).catch(() => {})
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [enabled, ids, visibleIds, wakeKey])
+  }, [enabled, visibleIds, signalledIds, wakeKey])
   return snapshots
 }
 
