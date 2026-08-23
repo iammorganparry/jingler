@@ -23,7 +23,7 @@ describe("ChatTabBar closed chats", () => {
       />
     )
 
-    expect(screen.queryByRole("button", { name: "Closed chats" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Previous chats" })).toBeNull()
   })
 
   it("reopens a selected chat from the closed-chat menu", () => {
@@ -37,13 +37,55 @@ describe("ChatTabBar closed chats", () => {
       />
     )
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Closed chats" }), {
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Previous chats" }), {
       button: 0,
       ctrlKey: false
     })
     fireEvent.click(screen.getByRole("menuitem", { name: "Reopen Main workspace" }))
 
     expect(handlers.onReopenChat).toHaveBeenCalledWith("chat-1")
+  })
+
+  it("renders live subagents after their parent chat and opens completed agents from History", () => {
+    const onSelectSubagent = vi.fn()
+    const onOpenPreviousSubagent = vi.fn()
+    render(
+      <ChatTabBar
+        chats={[
+          { id: "chat-1", title: "Main" },
+          { id: "chat-2", title: "Other" }
+        ]}
+        activeChatId=""
+        subagentChatId="chat-1"
+        subagents={[{
+          id: "worker-1",
+          title: "worker · Implement tabs",
+          status: "running"
+        }]}
+        activeSubagentId="worker-1"
+        onSelectSubagent={onSelectSubagent}
+        previousSubagents={[{
+          id: "reviewer-1",
+          title: "reviewer · Review tabs"
+        }]}
+        onOpenPreviousSubagent={onOpenPreviousSubagent}
+        {...chatCallbacks()}
+      />
+    )
+
+    const chat = screen.getByTestId("chat-tab-chat-1")
+    const subagent = screen.getByTestId("subagent-tab-worker-1")
+    expect(chat.nextElementSibling).toBe(subagent)
+    expect(subagent.getAttribute("aria-current")).toBe("page")
+    fireEvent.click(subagent)
+    expect(onSelectSubagent).toHaveBeenCalledWith("worker-1")
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Previous chats" }), {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open reviewer · Review tabs" }))
+    expect(onOpenPreviousSubagent).toHaveBeenCalledWith("reviewer-1")
   })
 
   it("collapses chats and files into independently labelled groups", () => {

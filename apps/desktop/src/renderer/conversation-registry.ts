@@ -42,6 +42,11 @@ import type { NotifiableState } from "./notifier.js"
 import { notificationFor } from "./notifier.js"
 import { rpc } from "./rpc-client.js"
 import {
+  clearSubagentTabs,
+  projectSubagentTabs,
+  publishActorSubagentTabs
+} from "./subagent-tab-store.js"
+import {
   clearAgentFileActivityChat,
   clearAgentFileActivitySession,
   publishAgentFileActivity
@@ -195,6 +200,19 @@ const broadcastSharedPlan = (key: string, snap: ConversationSnapshot): void => {
 const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   const session = snap.context.session
   const chatId = snap.context.chatId
+  const legacyAgents = snap.context.reviewer === null
+    ? snap.context.subagents
+    : [...snap.context.subagents, snap.context.reviewer]
+  publishActorSubagentTabs(
+    session.id,
+    projectSubagentTabs({
+      sessionId: session.id,
+      chatId,
+      piSessionId: session.chats.find(({ id }) => id === chatId)?.piSessionId ?? null,
+      events: snap.context.subagentFleetEvents,
+      legacyAgents
+    })
+  )
   const activity = activityFor(snap)
   // Nothing is announced until the transcript has LOADED, and the first loaded
   // snapshot becomes the baseline rather than an edge.
@@ -387,6 +405,7 @@ export const getConversationActor = (
 
 /** Stop + forget a session's actor (call when the session is deleted). */
 export const disposeConversationActor = (sessionId: string): void => {
+  clearSubagentTabs(sessionId)
   for (const key of [...registry.keys()]) {
     if (!key.startsWith(`${sessionId}:`)) continue
     forget(key)

@@ -1,7 +1,7 @@
 import * as ContextMenu from "@radix-ui/react-context-menu"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { useState, type ReactNode } from "react"
-import { ChevronRight, FileStack, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
+import { Fragment, useState, type ReactNode } from "react"
+import { Bot, ChevronRight, FileStack, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -10,6 +10,17 @@ export interface ChatTabItem {
   id: string
   title: string
   running?: boolean
+}
+
+export interface SubagentTabItem {
+  id: string
+  title: string
+  status: "running" | "attention"
+}
+
+export interface PreviousSubagentTabItem {
+  id: string
+  title: string
 }
 
 export interface ChatTabBarProps {
@@ -21,6 +32,12 @@ export interface ChatTabBarProps {
   onRenameChat: (id: string, title: string) => void
   onCloseChat: (id: string) => void
   onReopenChat?: (id: string) => void
+  subagents?: ReadonlyArray<SubagentTabItem>
+  subagentChatId?: string
+  activeSubagentId?: string
+  onSelectSubagent?: (id: string) => void
+  previousSubagents?: ReadonlyArray<PreviousSubagentTabItem>
+  onOpenPreviousSubagent?: (id: string) => void
   /** Session-owned tabs rendered beside chats, before the new-chat action. */
   fileSlot?: ReactNode
   /** Whether the file group owns the currently visible session surface. */
@@ -101,6 +118,12 @@ export function ChatTabBar({
   onRenameChat,
   onCloseChat,
   onReopenChat,
+  subagents = [],
+  subagentChatId,
+  activeSubagentId,
+  onSelectSubagent,
+  previousSubagents = [],
+  onOpenPreviousSubagent,
   fileSlot,
   filesActive = false,
   onCloseAllChats,
@@ -152,8 +175,8 @@ export function ChatTabBar({
         // row of identical dots and no answer to "which one am I typing into".
         const showTitle = width !== null || active || editing === chat.id
         return (
+          <Fragment key={chat.id}>
           <div
-            key={chat.id}
             data-testid={`chat-tab-${chat.id}`}
             className={cn(
               "group flex flex-none items-center rounded-md transition-colors",
@@ -217,6 +240,33 @@ export function ChatTabBar({
               </button>
             )}
           </div>
+          {chat.id === subagentChatId && subagents.map((subagent) => {
+            const selected = subagent.id === activeSubagentId
+            return (
+              <button
+                key={subagent.id}
+                type="button"
+                data-testid={`subagent-tab-${subagent.id}`}
+                aria-current={selected ? "page" : undefined}
+                aria-label={subagent.title}
+                title={subagent.title}
+                onClick={() => onSelectSubagent?.(subagent.id)}
+                className={cn(
+                  "flex flex-none items-center gap-1.5 rounded-md px-2.5 py-1 text-xs outline-none transition-colors",
+                  selected ? "bg-panel text-text-bright" : "text-muted-foreground hover:bg-panel/60 hover:text-text"
+                )}
+              >
+                <StatusDot
+                  tone={subagent.status === "attention" ? "bg-purple" : "bg-yellow"}
+                  pulse
+                  size={7}
+                />
+                <Bot className="size-3 text-purple" />
+                <span className="max-w-[140px] truncate">{subagent.title}</span>
+              </button>
+            )
+          })}
+          </Fragment>
         )
       })}
       {chatsExpanded && <button
@@ -228,13 +278,16 @@ export function ChatTabBar({
       >
         <Plus className="size-3.5" />
       </button>}
-      {chatsExpanded && closedChats.length > 0 && onReopenChat !== undefined && (
+      {chatsExpanded && (
+        (closedChats.length > 0 && onReopenChat !== undefined) ||
+        (previousSubagents.length > 0 && onOpenPreviousSubagent !== undefined)
+      ) && (
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
               type="button"
-              aria-label="Closed chats"
-              title="Closed chats"
+              aria-label="Previous chats"
+              title="Previous chats"
               className="flex flex-none items-center rounded-md px-1.5 py-1.5 text-dim outline-none transition-colors hover:bg-panel hover:text-text"
             >
               <History className="size-3.5" />
@@ -251,11 +304,22 @@ export function ChatTabBar({
                 <DropdownMenu.Item
                   key={chat.id}
                   aria-label={`Reopen ${chat.title}`}
-                  onSelect={() => onReopenChat(chat.id)}
+                  onSelect={() => onReopenChat?.(chat.id)}
                   className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[7px] text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
                 >
                   <RotateCcw className="size-3.5 flex-none text-dim" />
                   <span className="truncate">{chat.title}</span>
+                </DropdownMenu.Item>
+              ))}
+              {previousSubagents.map((subagent) => (
+                <DropdownMenu.Item
+                  key={subagent.id}
+                  aria-label={`Open ${subagent.title}`}
+                  onSelect={() => onOpenPreviousSubagent?.(subagent.id)}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[7px] text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                >
+                  <Bot className="size-3.5 flex-none text-purple" />
+                  <span className="truncate">{subagent.title}</span>
                 </DropdownMenu.Item>
               ))}
             </DropdownMenu.Content>

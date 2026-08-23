@@ -922,9 +922,9 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
  * The adversarial reviewer is a full agent run. Before this it ran completely
  * unobserved — a bare "Reviewing…" spinner for minutes, with its output dropped
  * on the floor. It must now report where it is on the button, and be watchable in
- * the Fleet drawer like any other agent.
+ * a live subagent tab like any other agent.
  */
-test("a running adversarial review reports its phase and appears in Fleet", async ({
+test("a running adversarial review reports its phase and appears as a tab", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -969,7 +969,7 @@ test("a running adversarial review reports its phase and appears in Fleet", asyn
     window.getByRole("button", { name: /Reading the code…|Thinking…|Writing findings…/ })
   ).toBeVisible({ timeout: 20_000 })
 
-  // …and the reviewer is watchable in Fleet, mid-run.
+  // …and the reviewer is watchable from the chat row, mid-run.
   await window.getByTestId("active-chat-tab").first().click()
   await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
 })
@@ -997,8 +997,9 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   })
   await expect(appShell(window)).toBeVisible()
 
-  // The tab is back with the previous run's output readable behind it.
-  const reviewerTab = window.getByRole("button", { name: /Reviewer/ })
+  // The completed reviewer is back in Previous chats with its output readable.
+  await window.getByRole("button", { name: "Previous chats" }).click()
+  const reviewerTab = window.getByRole("menuitem", { name: /Open Reviewer/ })
   await expect(reviewerTab).toBeVisible()
   await reviewerTab.click()
   await expect(window.getByText(/stale token can be reused/)).toBeVisible()

@@ -145,6 +145,43 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
+  it("retains a foreground worker's final report on the transcript-bearing child", () => {
+    const events = createEventBus()
+    const emitted: SubagentFleetEvent[] = []
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentPiSessionId: parent,
+      controlJournal: null,
+      emit: (event) => emitted.push(event),
+      now: () => 10
+    })
+    adapter.start()
+
+    events.emit("subagent:foreground-complete", {
+      id: "child-run",
+      runId: "run-1",
+      sessionId: parent,
+      agent: "worker",
+      success: true,
+      state: "complete",
+      summary: "Implemented the tab lifecycle.\nValidation: 12 tests passed.",
+      timestamp: 20,
+      taskIndex: 0
+    })
+
+    expect(emitted.findLast((event) =>
+      event._tag === "Upsert" && event.node.runId === "child-run"
+    )).toMatchObject({
+      node: {
+        agent: "worker",
+        terminal: {
+          summary: "Implemented the tab lifecycle.\nValidation: 12 tests passed."
+        }
+      }
+    })
+    adapter.stop()
+  })
+
   it("keeps one direct child identity through steering, completion, and transcript", async () => {
     const root = await mkdtemp(join(process.cwd(), ".pi-completed-transcript-"))
     const manager = SessionManager.create(process.cwd(), root)

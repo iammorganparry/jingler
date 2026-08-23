@@ -16,6 +16,10 @@ import { publishSessionUpdate } from "./session-updates.js"
 import { disposeChatActor, rehomeSharedPlan, useChatActivities } from "./conversation-registry.js"
 import { clearDraft } from "./draft-store.js"
 import { useFileBrowser } from "./use-file-browser.js"
+import {
+  selectSubagentTab,
+  useSessionSubagentTabs
+} from "./subagent-tab-store.js"
 
 export function SessionChatTabs({
   session,
@@ -32,6 +36,11 @@ export function SessionChatTabs({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const chatActivities = useChatActivities(session.id)
+  const subagentTabs = useSessionSubagentTabs(session.id)
+  const activeSubagents = subagentTabs.find(({ chatId }) => chatId === activeChat.id)
+  const previousSubagents = subagentTabs.flatMap(({ chatId, completed }) =>
+    completed.map((node) => ({ chatId, node }))
+  )
   const files = useFileBrowser(session.id, session.worktreePath)
 
   const createChat = () => {
@@ -39,8 +48,24 @@ export function SessionChatTabs({
   }
   const selectChat = (chatId: string) => {
     onSelectConversation()
+    selectSubagentTab(session.id, chatId, "main")
     if (chatId === activeChat.id) return
     void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
+  }
+  const selectSubagent = (nodeId: string) => {
+    onSelectConversation()
+    selectSubagentTab(session.id, activeChat.id, nodeId)
+  }
+  const openPreviousSubagent = (nodeId: string) => {
+    const previous = previousSubagents.find(({ node }) => node.id === nodeId)
+    if (previous === undefined) return
+    onSelectConversation()
+    selectSubagentTab(session.id, previous.chatId, nodeId)
+    if (previous.chatId !== activeChat.id) {
+      const closed = session.closedChats?.some(({ id }) => id === previous.chatId) ?? false
+      const open = closed ? rpc.sessionsReopenChat : rpc.sessionsSelectChat
+      void open(session.id, previous.chatId).then(publishSessionUpdate)
+    }
   }
   const renameChat = (chatId: string, title: string) => {
     void rpc.sessionsRenameChat(session.id, chatId, title).then(publishSessionUpdate)
@@ -151,8 +176,25 @@ export function SessionChatTabs({
         id: chat.id,
         title: chat.title ?? `Closed chat ${index + 1}`
       }))}
-      activeChatId={filesActive ? "" : activeChat.id}
+      activeChatId={
+        filesActive || (activeSubagents !== undefined && activeSubagents.selectedId !== "main")
+          ? ""
+          : activeChat.id
+      }
       onSelectChat={selectChat}
+      subagents={(activeSubagents?.active ?? []).map((node) => ({
+        id: node.id,
+        title: `${node.agent} · ${node.task}`,
+        status: node.status === "needs-attention" ? "attention" : "running"
+      }))}
+      subagentChatId={activeChat.id}
+      activeSubagentId={filesActive ? undefined : activeSubagents?.selectedId}
+      onSelectSubagent={selectSubagent}
+      previousSubagents={previousSubagents.map(({ node }) => ({
+        id: node.id,
+        title: `${node.agent} · ${node.task}`
+      }))}
+      onOpenPreviousSubagent={openPreviousSubagent}
       onCreateChat={createChat}
       onRenameChat={renameChat}
       onCloseChat={closeChat}

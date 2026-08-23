@@ -144,6 +144,8 @@ const CompletionChild = Schema.Struct({
   structuredOutputPath: Schema.optional(Schema.String),
   usage: Schema.optional(ResultUsage),
   model: Schema.optional(Schema.String),
+  output: Schema.optional(Schema.String),
+  summary: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
   stopped: Schema.optional(Schema.Boolean),
   interrupted: Schema.optional(Schema.Boolean),
@@ -1262,7 +1264,7 @@ export class PiSubagentLifecycleAdapter {
             : input.child.stopped || input.child.interrupted
               ? "stopped"
               : input.child.success === false ? "failed" : "completed",
-          summary: input.child.error ?? "Subagent child completed",
+          summary: input.child.output ?? input.child.summary ?? input.child.error ?? "Subagent child completed",
           at: input.now,
           retryable: false
         },
@@ -1297,6 +1299,7 @@ export class PiSubagentLifecycleAdapter {
         runId: completion.id,
         agent: completion.agent,
         sessionFile: completion.sessionFile,
+        summary: completion.summary,
         success: completion.success,
         stopped: completion.stopped,
         interrupted: completion.interrupted,

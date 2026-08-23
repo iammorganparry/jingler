@@ -159,12 +159,12 @@ describe("useSubagentFleet reconciliation", () => {
     expect(result.current.nodes).toStrictEqual([])
   })
 
-  it("keeps completed transcript links after active Fleet chrome disappears", async () => {
+  it("keeps completed output after its live tab disappears, even without a session file", async () => {
     mocks.snapshot.mockResolvedValue(snapshot)
     const completed = {
       ...node,
       status: "completed" as const,
-      sessionFile: "/sessions/child.jsonl",
+      sessionFile: null,
       completedAt: 30,
       updatedAt: 30,
       terminal: {
