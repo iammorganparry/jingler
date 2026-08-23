@@ -98,7 +98,7 @@ test("a closed chat can be reopened with its transcript after a real app restart
   await title.press("Enter")
   await first.window.getByRole("button", { name: "New chat" }).click()
   await first.window.getByRole("button", { name: "Close Main workspace" }).click()
-  await expect(first.window.getByRole("button", { name: "Closed chats" })).toBeVisible()
+  await expect(first.window.getByRole("button", { name: "Previous chats" })).toBeVisible()
   await expect(first.window.getByText("The release checklist is ready.")).toHaveCount(0)
   await first.app.close()
 
@@ -110,7 +110,7 @@ test("a closed chat can be reopened with its transcript after a real app restart
   })
 
   await sessionRow(second.window, "Multi-chat lifecycle").click()
-  await second.window.getByRole("button", { name: "Closed chats" }).click()
+  await second.window.getByRole("button", { name: "Previous chats" }).click()
   await second.window.getByRole("menuitem", { name: "Reopen Main workspace" }).click()
   await expect(
     second.window.getByRole("button", { name: "Main workspace", exact: true })

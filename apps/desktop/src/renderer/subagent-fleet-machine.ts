@@ -2,7 +2,6 @@ import {
   SUBAGENT_FLEET_PROTOCOL_VERSION,
   subagentFleetNodeId,
   type Subagent,
-  type SubagentFleetControlOutcome,
   type SubagentFleetEvent,
   type SubagentFleetNode
 } from "@jingler/core"
@@ -14,26 +13,14 @@ import {
 import { assign, setup } from "xstate"
 
 export const MAIN_FLEET_AGENT = "main"
-export const DEFAULT_FLEET_HEIGHT = 184
-export const MIN_FLEET_HEIGHT = 112
-export const MAX_FLEET_HEIGHT = 420
-
 export interface SubagentFleetContext {
   readonly tree: SubagentRunTreeContext
   readonly selectedId: string
-  readonly expanded: boolean
-  readonly height: number
-  readonly pendingRequestId: string | null
-  readonly lastOutcome: SubagentFleetControlOutcome | null
 }
 
 type SubagentFleetUiEvent =
   | { readonly type: "SYNC"; readonly events: ReadonlyArray<SubagentFleetEvent> }
   | { readonly type: "SELECT"; readonly id: string }
-  | { readonly type: "TOGGLE" }
-  | { readonly type: "RESIZE"; readonly height: number }
-  | { readonly type: "CONTROL_STARTED"; readonly requestId: string }
-  | { readonly type: "CONTROL_SETTLED"; readonly outcome: SubagentFleetControlOutcome }
 
 const legacyStatus = (
   status: Subagent["status"]
@@ -150,7 +137,7 @@ const belongsToParent = (
     event.id.startsWith(`${parentPiSessionId}/`)
 }
 
-const projectEvents = (
+export const projectSubagentFleetEvents = (
   parentPiSessionId: string,
   events: ReadonlyArray<SubagentFleetEvent>
 ): SubagentRunTreeContext =>
@@ -171,7 +158,7 @@ export const settleStoppedFleet = (
 ): ReadonlyArray<SubagentFleetEvent> => {
   const parentPiSessionId = parentPiSessionIdFromFleetEvents(events, "")
   if (parentPiSessionId === "") return events
-  const activeNodes = projectEvents(parentPiSessionId, events).nodes.filter((node) =>
+  const activeNodes = projectSubagentFleetEvents(parentPiSessionId, events).nodes.filter((node) =>
     ACTIVE_STATUSES.has(node.status)
   )
   if (activeNodes.length === 0) return events
@@ -212,11 +199,7 @@ export const subagentFleetMachine = setup({
   initial: "ready",
   context: ({ input }) => ({
     tree: emptySubagentRunTree(input.parentPiSessionId),
-    selectedId: MAIN_FLEET_AGENT,
-    expanded: true,
-    height: DEFAULT_FLEET_HEIGHT,
-    pendingRequestId: null,
-    lastOutcome: null
+    selectedId: MAIN_FLEET_AGENT
   }),
   states: {
     ready: {
@@ -227,23 +210,16 @@ export const subagentFleetMachine = setup({
               event.events,
               context.tree.parentPiSessionId
             )
-            const tree = projectEvents(parentPiSessionId, event.events)
+            const tree = projectSubagentFleetEvents(parentPiSessionId, event.events)
             const parentChanged =
               parentPiSessionId !== context.tree.parentPiSessionId
-            const nodeAdded = tree.nodes.some(
-              (node) => !hasNode(context.tree.nodes, node.id)
-            )
             return {
               tree,
-              expanded: context.expanded || nodeAdded,
               selectedId:
                 !parentChanged &&
                 (context.selectedId === MAIN_FLEET_AGENT || hasNode(tree.nodes, context.selectedId))
                   ? context.selectedId
-                  : MAIN_FLEET_AGENT,
-              ...(parentChanged
-                ? { pendingRequestId: null, lastOutcome: null }
-                : {})
+                  : MAIN_FLEET_AGENT
             }
           })
         },
@@ -253,23 +229,6 @@ export const subagentFleetMachine = setup({
               event.id === MAIN_FLEET_AGENT || hasNode(context.tree.nodes, event.id)
                 ? event.id
                 : context.selectedId
-          }))
-        },
-        TOGGLE: {
-          actions: assign(({ context }) => ({ expanded: !context.expanded }))
-        },
-        RESIZE: {
-          actions: assign(({ event }) => ({
-            height: Math.max(MIN_FLEET_HEIGHT, Math.min(MAX_FLEET_HEIGHT, event.height))
-          }))
-        },
-        CONTROL_STARTED: {
-          actions: assign(({ event }) => ({ pendingRequestId: event.requestId }))
-        },
-        CONTROL_SETTLED: {
-          actions: assign(({ event }) => ({
-            pendingRequestId: null,
-            lastOutcome: event.outcome
           }))
         }
       }

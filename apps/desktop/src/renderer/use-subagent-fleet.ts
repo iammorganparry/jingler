@@ -9,6 +9,7 @@ import type {
 } from "@jingler/core"
 import { SUBAGENT_FLEET_PROTOCOL_VERSION } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
+import { completedSubagentNodes } from "./subagent-tab-store.js"
 import {
   MAIN_FLEET_AGENT,
   legacySubagentNodeId,
@@ -26,13 +27,7 @@ export interface SubagentFleetController {
   readonly completedNodes: ReadonlyArray<SubagentFleetNode>
   readonly selectedLegacyAgent: Subagent | null
   readonly legacyAgentFor: (node: SubagentFleetNode) => Subagent | null
-  readonly expanded: boolean
-  readonly height: number
-  readonly pending: boolean
-  readonly lastOutcome: SubagentFleetControlOutcome | null
   readonly select: (id: string) => void
-  readonly toggle: () => void
-  readonly resize: (height: number) => void
   readonly control: (
     node: SubagentFleetNode,
     action: SubagentFleetControlAction,
@@ -152,24 +147,19 @@ export function useSubagentFleet(input: {
     }
   }, [actor, hasFleetSession, input.chatId, input.sessionId, parentPiSessionId])
   const context = useSelector(actor, (snapshot) => snapshot.context)
-  const completedNodes = useMemo(() => {
-    const completed = new Map<string, SubagentFleetNode>()
-    for (const event of input.events) {
-      if (event._tag !== "Upsert") continue
-      const node = event.node
-      if (
-        ["completed", "failed", "stopped"].includes(node.status) &&
-        (node.sessionFile !== null || node.artifacts.length > 0)
-      ) {
-        completed.delete(node.id)
-        completed.set(node.id, node)
-      } else {
-        completed.delete(node.id)
-      }
-    }
-    return [...completed.values()].slice(-8).reverse()
-  }, [input.events])
+  const completedNodes = useMemo(
+    () => completedSubagentNodes(events),
+    [events]
+  )
   const [completedSelection, setCompletedSelection] = useState<string | null>(null)
+  useEffect(() => {
+    const selected = context.tree.nodes.find((node) => node.id === context.selectedId)
+    if (
+      completedSelection === null &&
+      selected !== undefined &&
+      ["completed", "failed", "stopped", "unknown"].includes(selected.status)
+    ) actor.send({ type: "SELECT", id: MAIN_FLEET_AGENT })
+  }, [actor, completedSelection, context.selectedId, context.tree.nodes])
   const completedById = useMemo(
     () => new Map(completedNodes.map((node) => [node.id, node])),
     [completedNodes]
@@ -206,10 +196,6 @@ export function useSubagentFleet(input: {
     selectedLegacyAgent:
       selectedNode === null ? null : legacyAgentFor(selectedNode),
     legacyAgentFor,
-    expanded: context.expanded,
-    height: context.height,
-    pending: context.pendingRequestId !== null,
-    lastOutcome: context.lastOutcome,
     select: (id) => {
       if (completedById.has(id)) {
         setCompletedSelection(id)
@@ -218,11 +204,8 @@ export function useSubagentFleet(input: {
       setCompletedSelection(null)
       actor.send({ type: "SELECT", id })
     },
-    toggle: () => actor.send({ type: "TOGGLE" }),
-    resize: (height) => actor.send({ type: "RESIZE", height }),
     control: async (node, action, message, replyTo) => {
       const requestId = crypto.randomUUID()
-      actor.send({ type: "CONTROL_STARTED", requestId })
       try {
         const outcome = await rpc.agentControlSubagent(input.sessionId, input.chatId, {
           version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -233,7 +216,6 @@ export function useSubagentFleet(input: {
           message: message ?? null,
           replyTo: replyTo ?? null
         })
-        actor.send({ type: "CONTROL_SETTLED", outcome })
         return outcome
       } catch (cause) {
         const outcome: SubagentFleetControlOutcome = {
@@ -249,7 +231,6 @@ export function useSubagentFleet(input: {
           message: cause instanceof Error ? cause.message : "Subagent control failed",
           acknowledgedAt: Date.now()
         }
-        actor.send({ type: "CONTROL_SETTLED", outcome })
         return outcome
       }
     }

@@ -1,7 +1,8 @@
-import { useEffect, useRef, type ReactNode } from "react"
+import { useEffect, useRef } from "react"
 import type {
   Message,
   ProviderId,
+  SubagentFleetControlOutcome,
   SubagentFleetNode,
   SubagentFleetStatus
 } from "@jingler/core"
@@ -15,7 +16,7 @@ const ACTIVE_STATUSES: ReadonlySet<SubagentFleetStatus> = new Set([
   "needs-attention"
 ])
 
-/** Token / duration / tool-call summary, mirroring the Fleet dock's `metric`. */
+/** Token / duration / tool-call summary for the live child view. */
 const liveMetric = (node: SubagentFleetNode): string =>
   [
     node.usage.totalTokens > 0
@@ -69,11 +70,19 @@ function LiveAgentActivity({ node }: { node: SubagentFleetNode }) {
       {metric && (
         <p className="mt-2 font-mono text-[10.5px] text-dim">{metric}</p>
       )}
-      <p className="mt-3 text-[11px] leading-[1.5] text-dim">
-        {active
-          ? "This agent is running. Its full transcript appears here once it records output."
-          : "This agent finished without recording a separate transcript."}
-      </p>
+      {active ? (
+        <p className="mt-3 text-[11px] leading-[1.5] text-dim">
+          This agent is running. Its full transcript appears here once it records output.
+        </p>
+      ) : node.terminal?.summary ? (
+        <div data-testid="subagent-final-output" className="mt-3 whitespace-pre-wrap text-[12px] leading-[1.55] text-text-body">
+          {node.terminal.summary}
+        </div>
+      ) : (
+        <p className="mt-3 text-[11px] leading-[1.5] text-dim">
+          This agent finished without recording output.
+        </p>
+      )}
     </div>
   )
 }
@@ -93,17 +102,19 @@ export interface FleetAgentViewProps {
   readonly providerId?: ProviderId
   readonly loading?: boolean
   readonly error?: string | null
-  readonly fleetSlot?: ReactNode
+  readonly controlOutcome?: SubagentFleetControlOutcome | null
+  readonly onOpenArtifact?: (path: string) => void
 }
 
-/** Full read-only child session, selected from the composer-adjacent Fleet. */
+/** Full read-only child session selected from its chat-row tab. */
 export function FleetAgentView({
   node,
   messages,
   providerId,
   loading = false,
   error = null,
-  fleetSlot
+  controlOutcome = null,
+  onOpenArtifact
 }: FleetAgentViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const nodeId = node?.id ?? null
@@ -124,15 +135,43 @@ export function FleetAgentView({
   }, [messages])
   return (
     <div data-testid="fleet-agent-transcript" className="flex min-h-0 flex-1 flex-col bg-editor">
-      <div className="border-b border-line px-[30px] py-2 text-[11px] text-muted-foreground">
-        <strong className="text-text-bright">{node?.agent ?? "Agent"}</strong>
-        {node && <span> · {node.task}</span>}
+      <div className="flex items-center gap-2 border-b border-line px-[30px] py-2 text-[11px] text-muted-foreground">
+        <div className="min-w-0 flex-1 truncate">
+          <strong className="text-text-bright">{node?.agent ?? "Agent"}</strong>
+          {node && <span> · {node.task}</span>}
+        </div>
+        {node?.artifacts.map((artifact) => (
+          <button
+            key={artifact.path}
+            type="button"
+            onClick={() => onOpenArtifact?.(artifact.path)}
+            className="flex-none rounded border border-line px-1.5 py-0.5 text-[10px] text-blue hover:bg-panel"
+          >
+            {artifact.label ?? artifact.path.split("/").at(-1)}
+          </button>
+        ))}
       </div>
+      {controlOutcome && (
+        <div
+          data-testid="subagent-control-outcome"
+          role={controlOutcome.acknowledged ? "status" : "alert"}
+          className={controlOutcome.acknowledged
+            ? "border-b border-blue/30 bg-blue/[0.06] px-[30px] py-2 text-[11px] text-blue"
+            : "border-b border-red/30 bg-red/[0.06] px-[30px] py-2 text-[11px] text-red"}
+        >
+          {controlOutcome.message}
+        </div>
+      )}
       <div ref={scrollRef} data-testid="fleet-agent-transcript-scroll" className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-[760px] space-y-6">
           {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
           {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
-          {!(loading || error) && messages.length === 0 && (
+          {node?.attention && (
+            <div data-testid="subagent-attention" className="rounded border border-purple/30 bg-purple/[0.06] p-3 text-[12px] text-text-body">
+              {node.attention.message}
+            </div>
+          )}
+          {!loading && messages.length === 0 && (
             // A workflow node is an orchestrator with no pi session of its
             // own — its output lives in the step agents it spawns. Saying
             // "not available yet" for one promised a transcript that could
@@ -161,15 +200,16 @@ export function FleetAgentView({
           {messages.map((message) => (
             <MessageTurn key={message.id} message={message} providerId={providerId} />
           ))}
+          {messages.length > 0 && node?.terminal?.summary && (
+            <section data-testid="subagent-final-output" className="rounded-xl border border-line bg-sunken px-4 py-3.5">
+              <p className="mb-2 text-[10px] uppercase tracking-wide text-dim">Final output</p>
+              <div className="whitespace-pre-wrap text-[12px] leading-[1.55] text-text-body">
+                {node.terminal.summary}
+              </div>
+            </section>
+          )}
         </div>
       </div>
-      {fleetSlot && (
-        <div className="flex-none px-[30px] pb-[18px] pt-[11px]">
-          <div className="mx-auto w-full max-w-[760px] overflow-hidden rounded-2xl border border-line bg-sunken">
-            {fleetSlot}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

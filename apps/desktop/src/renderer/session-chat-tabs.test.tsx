@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
-import type { Session } from "@jingler/core"
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from "@testing-library/react"
+import type { Session, SubagentFleetNode } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { SessionChatTabs } from "./session-chat-tabs.js"
+import {
+  clearSubagentTabs,
+  publishSubagentTabs,
+  useSubagentTabSelection
+} from "./subagent-tab-store.js"
 
 const mocks = vi.hoisted(() => ({
   files: null as FileBrowserController | null
@@ -60,6 +65,43 @@ const session = {
   baseBranch: "main",
   mode: "auto"
 } as Session
+
+const subagentNode = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => ({
+  id: "parent/worker-1",
+  subagentId: "worker-1",
+  orchestrationRunId: "run-1",
+  nodeKind: "agent",
+  registryRevision: 1,
+  childSequence: 1,
+  runId: "worker-1",
+  parentId: null,
+  parentPiSessionId: "parent",
+  agent: "worker",
+  task: "Implement tabs",
+  model: null,
+  status: "running",
+  health: "connected",
+  phase: null,
+  blocking: null,
+  terminal: null,
+  background: false,
+  sessionFile: "/sessions/worker.jsonl",
+  currentTool: null,
+  startedAt: 1,
+  updatedAt: 1,
+  completedAt: null,
+  usage: {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    durationMs: 0,
+    toolCalls: 0
+  },
+  artifacts: [],
+  attention: null,
+  ...over
+})
 
 const controller = (
   over: Partial<FileBrowserController> = {}
@@ -120,7 +162,54 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  clearSubagentTabs(session.id)
   vi.clearAllMocks()
+})
+
+describe("SessionChatTabs subagent tabs", () => {
+  it("selects a live worker tab and moves completed output into Previous chats", () => {
+    const worker = subagentNode()
+    const reviewer = subagentNode({
+      id: "parent/reviewer-1",
+      subagentId: "reviewer-1",
+      runId: "reviewer-1",
+      agent: "reviewer",
+      task: "Review tabs",
+      status: "completed",
+      completedAt: 2,
+      terminal: {
+        reason: "completed",
+        summary: "No findings.",
+        at: 2,
+        retryable: false
+      }
+    })
+    act(() => publishSubagentTabs(session.id, {
+      chatId: "chat-1",
+      active: [worker],
+      completed: [reviewer],
+      selectedId: "main"
+    }))
+    const { onSelectConversation } = renderTabs(false)
+    const selection = renderHook(() => useSubagentTabSelection(session.id))
+
+    fireEvent.click(screen.getByRole("button", { name: "worker · Implement tabs" }))
+    expect(selection.result.current).toMatchObject({
+      chatId: "chat-1",
+      nodeId: worker.id
+    })
+    expect(onSelectConversation).toHaveBeenCalledOnce()
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Previous chats" }), {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open reviewer · Review tabs" }))
+    expect(selection.result.current).toMatchObject({
+      chatId: "chat-1",
+      nodeId: reviewer.id
+    })
+  })
 })
 
 describe("SessionChatTabs file tabs", () => {

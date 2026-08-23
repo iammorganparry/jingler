@@ -12,7 +12,10 @@ import type {
   ExecutionMode,
   Message,
   ProviderCatalog,
-  Session
+  Session,
+  SubagentFleetControlAction,
+  SubagentFleetControlOutcome,
+  SubagentFleetNode
 } from "@jingler/core"
 import { agentFileActivityOf, clampFontScale } from "@jingler/core"
 import {
@@ -23,8 +26,6 @@ import {
   Composer,
   ConversationView,
   FleetAgentView,
-  FleetDrawer,
-  SubagentCompletionLinks,
   PlanReview,
   ResizeHandle,
   RuntimeRecoveryCard,
@@ -47,6 +48,11 @@ import {
 } from "./code-reference.js"
 import { useConversation } from "./use-conversation.js"
 import { MAIN_FLEET_AGENT, useSubagentFleet } from "./use-subagent-fleet.js"
+import {
+  publishSubagentTabs,
+  releaseSubagentTabController,
+  useSubagentTabSelection
+} from "./subagent-tab-store.js"
 import { usePlanDocument } from "./use-plan-document.js"
 import { matchesCanonicalPlan } from "./plan-document-machine.js"
 import {
@@ -663,6 +669,19 @@ export function ConversationPane({
     events: convo.subagentFleetEvents,
     legacyAgents: legacyFleetAgents
   })
+  const [subagentControlOutcome, setSubagentControlOutcome] = useState<
+    SubagentFleetControlOutcome | null
+  >(null)
+  const controlSubagent = (
+    node: SubagentFleetNode,
+    action: SubagentFleetControlAction,
+    message?: string,
+    replyTo?: string
+  ) => fleet.control(node, action, message, replyTo).then((outcome) => {
+    setSubagentControlOutcome(outcome)
+    return outcome
+  })
+  useEffect(() => setSubagentControlOutcome(null), [fleet.selectedNode?.id])
   const childTranscriptQuery = useQuery({
     queryKey: [
       "subagent-transcript",
@@ -732,57 +751,43 @@ export function ConversationPane({
     () => () => publishFleetAgentFileActivity(session.id, null),
     [session.id]
   )
-  const fleetDrawer = (
-    <>
-    <FleetDrawer
-      bare
-      nodes={fleet.nodes}
-      selectedId={fleet.selectedId}
-      expanded={fleet.expanded}
-      height={fleet.height}
-      pending={fleet.pending}
-      outcome={fleet.lastOutcome}
-      embedded
-      onSelect={fleet.select}
-      onToggle={fleet.toggle}
-      onResize={fleet.resize}
-      canControl={(node, action) => {
-        const legacy = fleet.legacyAgentFor(node)
-        if (legacy === null) return true
-        return legacy.status === "working" &&
-          convo.subagents.some(({ id }) => id === legacy.id) &&
-          action === "stop"
-      }}
-      canDismiss={(node) => {
-        const legacy = fleet.legacyAgentFor(node)
-        return legacy !== null &&
-          legacy.status !== "working" &&
-          convo.subagents.some(({ id }) => id === legacy.id)
-      }}
-      onDismiss={(node) => {
-        const legacy = fleet.legacyAgentFor(node)
-        if (legacy !== null) convo.closeSubagent(legacy.id)
-      }}
-      onControl={(node, action, message, replyTo) => {
-        const legacy = fleet.legacyAgentFor(node)
-        if (legacy !== null) {
-          if (action === "stop" && legacy.status === "working") {
-            convo.stopSubagent(legacy.id)
-          }
-          return
-        }
-        fleet.control(node, action, message, replyTo).catch(() => {})
-      }}
-      onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
-    />
-    <SubagentCompletionLinks
-      nodes={fleet.completedNodes}
-      selectedId={fleet.selectedId}
-      onSelect={fleet.select}
-      onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
-    />
-    </>
+  const activeFleetNodes = useMemo(
+    () => fleet.nodes.filter((node) =>
+      node.nodeKind === "agent" &&
+      ["queued", "running", "paused", "needs-attention"].includes(node.status)
+    ),
+    [fleet.nodes]
   )
+  const completedFleetNodes = useMemo(() => {
+    const completed = new Map(fleet.completedNodes.map((node) => [node.id, node]))
+    for (const node of fleet.nodes) {
+      if (
+        node.nodeKind === "agent" &&
+        ["completed", "failed", "stopped", "unknown"].includes(node.status)
+      ) completed.set(node.id, node)
+    }
+    return [...completed.values()].slice(-8).reverse()
+  }, [fleet.completedNodes, fleet.nodes])
+  useEffect(() => {
+    publishSubagentTabs(session.id, {
+      chatId: activeChat.id,
+      active: activeFleetNodes,
+      completed: completedFleetNodes,
+      selectedId: fleet.selectedId
+    })
+  }, [activeChat.id, activeFleetNodes, completedFleetNodes, fleet.selectedId, session.id])
+  useEffect(
+    () => () => releaseSubagentTabController(session.id, activeChat.id),
+    [activeChat.id, session.id]
+  )
+  const subagentTabSelection = useSubagentTabSelection(session.id)
+  const selectFleetRef = useRef(fleet.select)
+  selectFleetRef.current = fleet.select
+  useEffect(() => {
+    if (subagentTabSelection?.chatId === activeChat.id) {
+      selectFleetRef.current(subagentTabSelection.nodeId)
+    }
+  }, [activeChat.id, subagentTabSelection?.chatId, subagentTabSelection?.nodeId, subagentTabSelection?.nonce])
 
   // Live agent status + Plan-tab presence are published by the conversation
   // registry (from the actor's own subscription), so they stay correct even
@@ -1076,9 +1081,7 @@ export function ConversationPane({
         // The child view keeps the REAL composer: same input the operator
         // already lives in, aimed at the selected agent. Model, reasoning,
         // mode, and environment pickers are omitted — those are main-turn
-        // choices — and the composer's follow toggle points at this agent
-        // (selection is what the fleet follow override keys on). The drawer
-        // rides as the composer's topSlot, exactly as in the main view.
+        // choices — and the composer's follow toggle points at this agent.
         <>
           <FleetAgentView
             node={fleet.selectedNode}
@@ -1088,6 +1091,8 @@ export function ConversationPane({
                 : [fleet.selectedLegacyAgent.message]
             }
             providerId={session.providerId}
+            controlOutcome={subagentControlOutcome}
+            onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
             loading={
               fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading
             }
@@ -1126,18 +1131,16 @@ export function ConversationPane({
             onSend={(text) => {
               const node = fleet.selectedNode
               if (node === null || fleet.selectedLegacyAgent !== null) return
-              fleet
-                .control(
-                  node,
-                  node.status === "paused"
-                    ? "resume"
-                    : node.attention
-                      ? "reply"
-                      : "steer",
-                  text,
-                  node.attention?.requestId
-                )
-                .catch(() => {})
+              controlSubagent(
+                node,
+                node.status === "paused"
+                  ? "resume"
+                  : node.attention
+                    ? "reply"
+                    : "steer",
+                text,
+                node.attention?.requestId
+              ).catch(() => {})
             }}
             onStop={() => {
               const node = fleet.selectedNode
@@ -1147,11 +1150,10 @@ export function ConversationPane({
                 if (legacy.status === "working") convo.stopSubagent(legacy.id)
                 return
               }
-              fleet.control(node, "stop").catch(() => {})
+              controlSubagent(node, "stop").catch(() => {})
             }}
             followAgent={fileBrowser.followEnabled}
             onToggleFollowAgent={toggleFollowAgent}
-            topSlot={fleetDrawer}
             autoFocus={paneFocused}
             focusKey={fleet.selectedNode.id}
           />
@@ -1161,12 +1163,6 @@ export function ConversationPane({
       ) : (
         <ConversationView
           messages={convo.messages}
-          fleetSlot={
-            fleet.nodes.length > 0 || fleet.completedNodes.length > 0
-              ? fleetDrawer
-              : undefined
-          }
-          fleetActiveCount={fleet.nodes.length}
           hasMoreHistory={convo.hasMoreHistory}
           loadingHistory={convo.loadingHistory}
           onLoadEarlier={convo.loadOlder}

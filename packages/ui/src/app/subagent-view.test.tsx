@@ -89,6 +89,114 @@ describe("FleetAgentView", () => {
     expect(screen.queryByText(NOT_AVAILABLE)).toBeNull()
   })
 
+  it("shows rejected control delivery", () => {
+    render(
+      <FleetAgentView
+        node={fleetNode()}
+        messages={[]}
+        controlOutcome={{
+          version: 2,
+          requestId: "request-1",
+          runId: "run-1",
+          action: "steer",
+          acknowledged: false,
+          status: "rejected",
+          deliveryStatus: "rejected",
+          sequence: 1,
+          nativeRequestId: null,
+          message: "Agent is no longer running",
+          acknowledgedAt: 30
+        }}
+      />
+    )
+
+    expect(screen.getByRole("alert").textContent).toContain("Agent is no longer running")
+  })
+
+  it("shows supervisor attention above an existing transcript", () => {
+    const message: Message = {
+      id: "child-1",
+      role: "assistant",
+      streaming: false,
+      createdAt: "2026-08-16T11:14:28.000Z",
+      parts: [{ _tag: "Text", text: "Reviewing the code." }]
+    }
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          status: "needs-attention",
+          attention: {
+            requestId: "request-1",
+            reason: "need_decision",
+            message: "Should I include accessibility behavior?",
+            requestedAt: 30,
+            deadlineAt: null
+          }
+        })}
+        messages={[message]}
+      />
+    )
+
+    expect(screen.getByTestId("subagent-attention").textContent).toContain(
+      "Should I include accessibility behavior?"
+    )
+  })
+
+  it("shows final output after a partial transcript", () => {
+    const message: Message = {
+      id: "child-1",
+      role: "assistant",
+      streaming: false,
+      createdAt: "2026-08-16T11:14:28.000Z",
+      parts: [{ _tag: "Text", text: "Inspected the code." }]
+    }
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          status: "completed",
+          currentTool: null,
+          completedAt: 30,
+          terminal: {
+            reason: "completed",
+            summary: "No blockers. Validation passed.",
+            at: 30,
+            retryable: false
+          }
+        })}
+        messages={[message]}
+      />
+    )
+
+    expect(screen.getByText("Inspected the code.")).toBeDefined()
+    expect(screen.getByTestId("subagent-final-output").textContent).toContain(
+      "No blockers. Validation passed."
+    )
+  })
+
+  it("shows a completed worker's final output when no transcript was recorded", () => {
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          agent: "worker",
+          status: "completed",
+          currentTool: null,
+          completedAt: 30,
+          terminal: {
+            reason: "completed",
+            summary: "Implemented the tab lifecycle.\nValidation: 12 tests passed.",
+            at: 30,
+            retryable: false
+          }
+        })}
+        messages={[]}
+      />
+    )
+
+    expect(screen.getByTestId("subagent-final-output").textContent).toContain(
+      "Validation: 12 tests passed."
+    )
+  })
+
   it("still shows the plain fallback when there is no fleet node at all", () => {
     render(<FleetAgentView messages={[]} />)
 

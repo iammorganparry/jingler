@@ -28,7 +28,6 @@ import {
   Server,
   Sparkles,
   Square,
-  Users,
 } from "lucide-react";
 import { cn } from "../lib/cn.js";
 import { downscaleImage } from "../lib/image-downscale.js";
@@ -140,24 +139,22 @@ const activeToken = (value: string, caret: number): MenuState | null => {
 /** Codex invokes skills with `$name`; the palette keeps `/` as its common discovery trigger. */
 const skillInsertion = (skill: Skill): string => skill.name;
 
-/** One tab in the composer's Plan/Fleet drawer strip. */
+/** The Plan drawer tab. */
 function DrawerTab({
   active,
-  tone,
   icon,
   label,
   badge,
   onClick,
 }: {
   active: boolean;
-  tone: "plan" | "fleet";
   icon: ReactNode;
   label: string;
   badge?: string;
   onClick: () => void;
 }) {
-  const accentText = tone === "plan" ? "text-purple" : "text-blue";
-  const accentBar = tone === "plan" ? "bg-purple" : "bg-blue";
+  const accentText = "text-purple";
+  const accentBar = "bg-purple";
   return (
     <button
       type="button"
@@ -231,8 +228,6 @@ export function Composer({
   onCodeReferencesClear,
   planDocument,
   onOpenPlanStage,
-  topSlot,
-  fleetActiveCount,
   className,
 }: {
   skills?: ReadonlyArray<Skill>;
@@ -279,10 +274,6 @@ export function Composer({
   planDocument?: PlanDocument;
   /** Open Plan Review at a selected canonical stage. */
   onOpenPlanStage?: (stageId: string) => void;
-  /** Content integrated into the top of the composer's shared chrome. */
-  topSlot?: ReactNode;
-  /** Active-agent count for the Fleet tab badge (the fleet content is `topSlot`). */
-  fleetActiveCount?: number;
   /** Canonical certified model surface. */
   providerCatalog?: ProviderCatalog | null;
   connectionId?: ProviderConnectionId | null;
@@ -423,16 +414,10 @@ export function Composer({
     onAttachmentsChange?.(resolved);
   };
   const [dragging, setDragging] = useState(false);
-  // The Plan/Fleet drawer: which tab is showing, and whether it's expanded.
-  const [drawerTab, setDrawerTab] = useState<"plan" | "fleet">("plan");
   const [drawerOpen, setDrawerOpen] = useState(true);
   // Extend the Plan tab from the flat task list to the full plan overview
   // (stages with their nested subtasks) inside the drawer.
   const [planExtended, setPlanExtended] = useState(false);
-  // With only one of the two present, that tab is forced active regardless of
-  // the last manual pick, so a lone drawer never renders an empty panel.
-  const drawerActiveTab: "plan" | "fleet" =
-    planDocument && topSlot ? drawerTab : planDocument ? "plan" : "fleet";
   const planDrawerCounts = planDocument ? planTaskCounts(planDocument) : null;
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -639,33 +624,18 @@ export function Composer({
           dragging && "border-cyan/60 bg-cyan/5 shadow-none",
         )}
       >
-        {(planDocument || topSlot) && (
+        {planDocument && (
           <div className="-mx-4 -mt-3.5">
-            {/* One tabbed drawer, not two stacked docks — the tab strip is the
-                header (label, count, collapse) and Plan/Fleet share the space. */}
-            <div role="tablist" aria-label="Plan and Fleet" className="flex items-stretch gap-0.5 border-b border-line px-2.5 pt-1.5">
-              {planDocument && (
-                <DrawerTab
-                  active={drawerActiveTab === "plan"}
-                  tone="plan"
-                  icon={<ListChecks className="size-3.5" />}
-                  label="Plan"
-                  badge={planDrawerCounts ? `${planDrawerCounts.completed}/${planDrawerCounts.total}` : undefined}
-                  onClick={() => setDrawerTab("plan")}
-                />
-              )}
-              {topSlot && (
-                <DrawerTab
-                  active={drawerActiveTab === "fleet"}
-                  tone="fleet"
-                  icon={<Users className="size-3.5" />}
-                  label="Fleet"
-                  badge={fleetActiveCount ? String(fleetActiveCount) : undefined}
-                  onClick={() => setDrawerTab("fleet")}
-                />
-              )}
+            <div role="tablist" aria-label="Plan" className="flex items-stretch gap-0.5 border-b border-line px-2.5 pt-1.5">
+              <DrawerTab
+                active
+                icon={<ListChecks className="size-3.5" />}
+                label="Plan"
+                badge={planDrawerCounts ? `${planDrawerCounts.completed}/${planDrawerCounts.total}` : undefined}
+                onClick={() => setDrawerOpen(true)}
+              />
               <span className="flex-1" />
-              {drawerActiveTab === "plan" && planDocument && drawerOpen && (
+              {drawerOpen && (
                 <button
                   type="button"
                   aria-label={planExtended ? "Collapse plan overview" : "Extend to plan overview"}
@@ -688,10 +658,7 @@ export function Composer({
             </div>
             {drawerOpen && (
               <div className="max-h-[280px] overflow-y-auto">
-                {drawerActiveTab === "plan" && planDocument && (
-                  <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} />
-                )}
-                {drawerActiveTab === "fleet" && topSlot}
+                <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} />
               </div>
             )}
           </div>
@@ -756,7 +723,7 @@ export function Composer({
               ? "Reply, or answer the prompt above…"
               : busy
                 // An explicit placeholder wins even while busy: a composer
-                // aimed at a Fleet agent steers live ("Steer worker…"), and
+                // aimed at a subagent steers live ("Steer worker…"), and
                 // the queue default would promise semantics it doesn't have.
                 ? placeholder ?? "Queue a message while the agent works…"
                 : prompt)

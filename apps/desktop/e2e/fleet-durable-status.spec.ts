@@ -12,7 +12,7 @@ const asyncRoot = join(
   "async-subagent-runs"
 )
 
-test("durable native status appears in the integrated Fleet drawer", async ({
+test("durable native status appears as a live subagent tab", async ({
   launchApp
 }) => {
   test.setTimeout(120_000)
@@ -212,17 +212,9 @@ test("durable native status appears in the integrated Fleet drawer", async ({
     await expect(composer).toBeVisible({ timeout: 30_000 })
     await composer.fill("Confirm the Fleet projection is active.")
     await composer.press("Enter")
-    const fleet = window.getByTestId("fleet-drawer")
-    await expect(fleet).toBeVisible({ timeout: 30_000 })
-    await expect(
-      window.getByTestId("composer").getByTestId("fleet-drawer")
-    ).toBeVisible()
-    await expect(fleet).toContainText("scout")
-    await expect(fleet).toContainText("1 active · 1 total")
-    // The Fleet now lives in the composer's tabbed drawer (no resize handle —
-    // it auto-sizes with a max-height and scrolls).
-
-    await fleet.getByTestId("fleet-agent-child-run").click()
+    const subagentTab = window.getByRole("button", { name: /scout ·/ })
+    await expect(subagentTab).toBeVisible({ timeout: 30_000 })
+    await subagentTab.click()
     const childView = window.getByTestId("fleet-agent-transcript")
     await expect(childView).toBeVisible()
     await expect(childView.getByText("pnpm test")).toBeVisible()
@@ -248,7 +240,7 @@ test("durable native status appears in the integrated Fleet drawer", async ({
 
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     await window.evaluate(() => window.dispatchEvent(new Event("focus")))
-    await expect(fleet).toHaveCount(0, { timeout: 15_000 })
+    await expect(subagentTab).toHaveCount(0, { timeout: 15_000 })
   } finally {
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     rmSync(join(asyncRoot, runId), { recursive: true, force: true })
