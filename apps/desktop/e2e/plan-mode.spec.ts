@@ -3,7 +3,7 @@ import { join } from "node:path"
 import {
   appShell,
   expect,
-  planDirectory,
+  planFile,
   type LaunchedApp,
   type SeedSession,
   test
@@ -52,8 +52,15 @@ const session = (id = "s_enhanced_plan") =>
     ]
   }
 
-const currentPlanPath = (launched: LaunchedApp): string =>
-  join(planDirectory(launched.home, launched.repoPath), "current-plan.json")
+const currentPlanPath = (launched: LaunchedApp): string => {
+  const sessions = JSON.parse(
+    readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
+  )
+  const session = sessions.find((candidate: { worktreePath?: string }) =>
+    candidate.worktreePath === launched.repoPath
+  ) ?? sessions[0]
+  return planFile(launched.home, launched.repoPath, session.id, session.activeChatId)
+}
 
 const readPlan = (launched: LaunchedApp) =>
   JSON.parse(readFileSync(currentPlanPath(launched), "utf8"))
@@ -142,7 +149,9 @@ test("the producing agent amends an approved plan in place without regressing co
       stage.tasks.filter((task) => task.status === "completed").map((task) => task.id)
   )
   expect(completedAfter).toEqual(expect.arrayContaining(completedBefore))
-  await expect(launched.window.getByRole("button", { name: /Approve & implement/ })).toHaveCount(0)
+  await expect(
+    launched.window.getByRole("button", { name: "Approve & implement" })
+  ).toBeVisible()
 })
 
 test("plan mode always uses Jingler's structured Plan", async ({ launchApp }) => {

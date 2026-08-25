@@ -1,9 +1,8 @@
 import { existsSync } from "node:fs"
-import { join } from "node:path"
 import {
   appShell,
   expect,
-  planDirectory,
+  planFile as agentPlanFile,
   type SeedSession,
   test
 } from "./fixtures.js"
@@ -48,9 +47,11 @@ test("a streamed plan opens beside chat, stays read-only, and promotes in place"
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
-  const planFile = join(
-    planDirectory(launched.home, launched.repoPath),
-    "current-plan.json"
+  const planFile = agentPlanFile(
+    launched.home,
+    launched.repoPath,
+    "s_streamed_plan",
+    "c_s_streamed_plan_1"
   )
 
   const composer = window.getByPlaceholder(composerPlaceholder)
@@ -96,9 +97,11 @@ test("later plan drafts respect a split the operator closed", async ({
   })
   const { window } = launched
   await expect(appShell(window)).toBeVisible()
-  const planFile = join(
-    planDirectory(launched.home, launched.repoPath),
-    "current-plan.json"
+  const planFile = agentPlanFile(
+    launched.home,
+    launched.repoPath,
+    "s_plan_split_preference",
+    "c_s_plan_split_preference_1"
   )
   const composer = window.getByPlaceholder(composerPlaceholder)
 
@@ -120,7 +123,7 @@ test("later plan drafts respect a split the operator closed", async ({
   await nextComposer.fill("[[plan]] [[stream-plan]] revise auth")
   await nextComposer.press("Enter")
   await expect(
-    window.getByLabel("Plan approval options").first()
+    window.getByRole("button", { name: "Approve", exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId("plan-split-column")).toHaveCount(0)
 
@@ -164,7 +167,7 @@ test("a closed plan split stays closed after an app restart", async ({
   await nextComposer.press("Enter")
 
   await expect(
-    reopened.window.getByLabel("Plan approval options").first()
+    reopened.window.getByRole("button", { name: "Approve", exact: true }).first()
   ).toBeVisible({ timeout: 20_000 })
   await expect(reopened.window.getByTestId("plan-split-column")).toHaveCount(0)
 })

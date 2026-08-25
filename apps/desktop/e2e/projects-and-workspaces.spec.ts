@@ -6,7 +6,7 @@ import type { Page } from "@playwright/test"
 import {
   appShell,
   expect,
-  planDirectory,
+  planDirectory, planFile,
   sessionRow,
   type SeedSession,
   test
@@ -242,12 +242,12 @@ test("adds a project creates a workspace selects capabilities and completes an e
   await launched.window.getByPlaceholder(/Message .+…/).press("Enter")
   const sessions = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))
   const worktreePath = sessions[0].worktreePath as string
-  const planFile = join(planDirectory(launched.home, worktreePath), "current-plan.json")
-  await expect.poll(() => existsSync(planFile), { timeout: 20_000 }).toBe(true)
+  const savedPlanFile = planFile(launched.home, worktreePath, sessions[0].id, sessions[0].chats[0].id)
+  await expect.poll(() => existsSync(savedPlanFile), { timeout: 20_000 }).toBe(true)
   await launched.window.getByRole("button", { name: "Plan Review" }).first().click()
   await launched.window.getByRole("button", { name: "More plan actions" }).click()
   await launched.window.getByRole("menuitem", { name: "Approve and auto", exact: true }).click()
-  await expect.poll(() => JSON.parse(readFileSync(planFile, "utf8")).status, {
+  await expect.poll(() => JSON.parse(readFileSync(savedPlanFile, "utf8")).status, {
     timeout: 30_000
   }).toBe("done")
 })

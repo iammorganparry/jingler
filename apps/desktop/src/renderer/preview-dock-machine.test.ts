@@ -82,6 +82,21 @@ describe("previewDockMachine", () => {
     })
   })
 
+  it("ignores a stale native URL from the page an operator just replaced", () => {
+    const actor = start()
+    actor.send({ type: "NAVIGATE", sessionId: "agent", url: "http://localhost:4321" })
+    actor.send({ type: "NATIVE_URL", sessionId: "agent", url: "http://localhost:3000/old" })
+    expect(previewSessionState(actor.getSnapshot().context, "agent")).toMatchObject({
+      url: "http://localhost:4321",
+      source: "operator"
+    })
+    actor.send({ type: "NATIVE_URL", sessionId: "agent", url: "http://localhost:4321/ready" })
+    expect(previewSessionState(actor.getSnapshot().context, "agent")).toMatchObject({
+      url: "http://localhost:4321/ready",
+      source: "native"
+    })
+  })
+
   it("routes committed native URLs only to their owning session", () => {
     const actor = start()
     actor.send({ type: "FOCUS_SESSION", sessionId: "alpha" })

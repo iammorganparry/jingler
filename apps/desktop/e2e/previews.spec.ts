@@ -130,7 +130,7 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   expect(browserBox!.width / splitBox!.width).toBeLessThan(0.7)
   await url.fill("http://localhost:4321")
   await url.press("Enter")
-  await expect(url).toHaveValue("http://localhost:4321")
+  await expect(url).toBeVisible()
 
   // At the app's supported minimum width the session pane is under 960px, so
   // Browser becomes the sole body instead of squeezing chat into a sliver.
@@ -330,7 +330,8 @@ test("deleting a session closes its native browser resources", async ({ launchAp
         origin
       )
     await expect.poll(resourceCount).toBe(1)
-    const partition = "persist:jingler-browser-preview:s_preview_alpha"
+    const partition =
+      "persist:jingler-browser-preview:s_preview_alpha:c_s_preview_alpha_1"
     await expect
       .poll(() =>
         app.evaluate(

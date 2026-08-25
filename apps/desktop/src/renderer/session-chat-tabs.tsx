@@ -85,7 +85,10 @@ export function SessionChatTabs({
   }
   const selectChat = (chatId: string) => {
     selectSubagentTab(session.id, chatId, "main")
-    if (chatId === activeChat.id) return
+    if (chatId === activeChat.id) {
+      onSelectConversation()
+      return
+    }
     void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
   }
   const openPreviousSubagent = (nodeId: string) => {
