@@ -1,5 +1,5 @@
 import { Markdown } from "../components/markdown.js"
-import { cn } from "../lib/cn.js"
+import { StreamingResponse } from "./beui/messages.js"
 
 /**
  * Markdown-preserving streaming text. The transport already appends tokens, so
@@ -16,10 +16,10 @@ export function StreamingText({
   className?: string
 }) {
   return (
-    <Markdown
-      className={cn(className, streaming && "jingler-streaming-text")}
-    >
-      {text}
-    </Markdown>
+    <StreamingResponse streaming={streaming} className={className}>
+      <Markdown>
+        {text}
+      </Markdown>
+    </StreamingResponse>
   )
 }

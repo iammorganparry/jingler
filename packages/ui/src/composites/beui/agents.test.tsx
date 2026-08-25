@@ -15,6 +15,9 @@ describe("BeUI agent catalog", () => {
     Object.defineProperties(viewport, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 }, scrollTop: { configurable: true, writable: true, value: 100 } })
     fireEvent.scroll(viewport)
     expect(onFollowChange).toHaveBeenCalledWith(false)
+    expect(screen.getByRole("button", { name: "Jump to latest" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }))
+    expect(onFollowChange).toHaveBeenLastCalledWith(true)
     viewport.scrollTop = 800
     fireEvent.scroll(viewport)
     expect(onFollowChange).toHaveBeenLastCalledWith(true)

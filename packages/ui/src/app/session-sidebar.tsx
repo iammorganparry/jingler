@@ -30,6 +30,7 @@ import { ProviderIcon } from "../components/provider-icon.js"
 import { PersistentSessionTile } from "../composites/persistent-session-tile.js"
 import { SessionRow } from "../composites/session-row.js"
 import { SessionHoverCard } from "../composites/session-hover-card.js"
+import { AISidebarSurface } from "../composites/beui/shell.js"
 import { SplitRow } from "../composites/split-row.js"
 import { displayStatusLabel, displayStatusTone } from "../tokens.js"
 import { UserMenu } from "../composites/user-menu.js"
@@ -360,7 +361,7 @@ function SidebarBody({
   }
 
   return (
-    <div
+    <AISidebarSurface
       ref={bodyRef}
       style={{ width }}
       data-testid="session-sidebar"
@@ -721,7 +722,7 @@ function SidebarBody({
           </span>
         )}
       </div>
-    </div>
+    </AISidebarSurface>
   )
 }
 

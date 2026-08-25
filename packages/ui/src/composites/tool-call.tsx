@@ -4,6 +4,7 @@ import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
 import { FileIcon } from "../components/file-icon.js"
 import { useOpenPath } from "../asset/open-asset-context.js"
+import { ToolResultSurface } from "./beui/work.js"
 
 export type ToolCallStatus = "success" | "running" | "error"
 
@@ -151,9 +152,9 @@ export function ToolCall({
     onToggle && "cursor-pointer text-left transition-colors hover:bg-line/20"
   )
   return (
-    <div
+    <ToolResultSurface
       className={cn(
-        "overflow-hidden rounded-md border",
+        "rounded-md",
         status === "running" && "border-yellow/30",
         status === "error" && "border-red/35 bg-red/[0.05]",
         status === "success" && "border-line",
@@ -190,6 +191,6 @@ export function ToolCall({
         <div className="h-[22px] animate-shine bg-[length:220px_100%] bg-gradient-to-r from-transparent via-hover to-transparent" />
       )}
       {children}
-    </div>
+    </ToolResultSurface>
   )
 }

@@ -1,9 +1,11 @@
-import type { ReactNode } from "react"
+import { type ReactNode, useId } from "react"
+import { LayoutGroup } from "motion/react"
 import { SquareTerminal } from "lucide-react"
 import { ChipMenu } from "../components/chip-menu.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Tooltip } from "../components/tooltip.js"
 import { cn } from "../lib/cn.js"
+import { SharedLayoutIndicator } from "../components/beui/overlays.js"
 import type { TabDescriptor, TabKey } from "./tab-contributions.js"
 
 export interface ViewRailMenuOption {
@@ -40,13 +42,14 @@ function RailTabControl({
   return (
     <span
       className={cn(
-        "relative flex w-8 flex-none flex-col items-center justify-center gap-0.5 rounded-md py-1.5 outline-none transition-colors",
+        "relative z-0 flex w-8 flex-none flex-col items-center justify-center gap-0.5 rounded-md py-1.5 outline-none transition-colors",
         active || menuOpen
-          ? "bg-surface text-blue"
+          ? "text-blue"
           : "text-dim hover:bg-panel hover:text-muted-foreground"
       )}
     >
-      <Icon className="size-4" />
+      {(active || menuOpen) && <SharedLayoutIndicator layoutId="view-rail-active" />}
+      <Icon className="relative size-4" />
       {count !== null && (
         <span
           className={cn(
@@ -89,7 +92,9 @@ export function ViewRail({
   /** Toggle this session's terminal dock; omitted → no terminal button. */
   onToggleTerminal?: () => void
 }) {
+  const layoutId = useId()
   return (
+    <LayoutGroup id={layoutId}>
     <div
       data-testid="view-rail"
       className="flex w-10 flex-none flex-col items-center gap-1 border-l border-hairline bg-sunken py-2"
@@ -167,5 +172,6 @@ export function ViewRail({
         </>
       )}
     </div>
+    </LayoutGroup>
   )
 }

@@ -1,8 +1,11 @@
-import { type ReactNode, useState } from "react"
+import { forwardRef, type ReactNode, useState } from "react"
 import { AnimatePresence, m } from "motion/react"
 import { ChevronRight, File, Folder, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react"
 import { cn } from "../../lib/cn.js"
 import { SPRING } from "../../lib/motion.js"
+
+export const AISidebarSurface = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ children, className, ...props }, ref) => <div ref={ref} data-slot="ai-sidebar" className={cn("bg-panel", className)} {...props}>{children}</div>)
+AISidebarSurface.displayName = "AISidebarSurface"
 
 export interface AISidebarItem { id: string; label: string; type?: "folder" | "file" | "item"; icon?: ReactNode; children?: ReadonlyArray<AISidebarItem>; badge?: ReactNode }
 export function AISidebar({ items, activeId, onSelect, header, footer, defaultCollapsed = false, className }: { items: ReadonlyArray<AISidebarItem>; activeId?: string; onSelect?: (id: string) => void; header?: ReactNode; footer?: ReactNode; defaultCollapsed?: boolean; className?: string }) {

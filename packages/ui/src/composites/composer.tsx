@@ -47,6 +47,7 @@ import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
 import { planTaskCounts, PlanTaskList } from "./plan-progress-dock.js";
+import { PromptInputSurface } from "./beui/work.js";
 import {
   ProviderModelBrowser,
   type ProviderModelSelection,
@@ -597,7 +598,7 @@ export function Composer({
         </div>
       )}
 
-      <div
+      <PromptInputSurface
         // Keep the mode available to tests and integrations without tinting the
         // composer chrome. The selected menu item carries the state.
         data-mode={mode}
@@ -618,7 +619,7 @@ export function Composer({
           void addFiles(files);
         }}
         className={cn(
-          "flex flex-col gap-3 rounded-2xl border border-line bg-sunken px-4 py-3.5 transition-colors",
+          "flex flex-col gap-3 rounded-2xl bg-sunken px-4 py-3.5",
           (paused || disabledReason !== undefined) && "opacity-70",
           // A drag-over is the only temporary coloured border.
           dragging && "border-cyan/60 bg-cyan/5 shadow-none",
@@ -1046,7 +1047,7 @@ export function Composer({
             )}
           </div>
         )}
-      </div>
+      </PromptInputSurface>
     </div>
   );
 }

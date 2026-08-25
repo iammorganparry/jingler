@@ -1,6 +1,8 @@
 import type { Plan, PlanStep, PlanStepStatus } from "@jingler/core"
 import { Check, GitBranch, MessageSquareText } from "lucide-react"
+import { m } from "motion/react"
 import { cn } from "../lib/cn.js"
+import { SPRING } from "../lib/motion.js"
 import { StatusDot } from "../components/status-dot.js"
 
 /**
@@ -66,7 +68,9 @@ function Row({
   const arm = step.kind === "branch-arm"
   const branch = step.kind === "branch"
   return (
-    <button
+    <m.button
+      layout
+      transition={SPRING}
       type="button"
       onClick={() => onSelect?.(step.id)}
       className={cn(
@@ -119,6 +123,6 @@ function Row({
           {comments}
         </span>
       )}
-    </button>
+    </m.button>
   )
 }

@@ -34,18 +34,20 @@ export interface MessageScrollerProps {
   className?: string
   viewportClassName?: string
   contentClassName?: string
-  viewportRef?: Ref<HTMLElement>
-  viewportProps?: Omit<ComponentPropsWithoutRef<"section">, "children" | "className" | "ref">
+  viewportTestId?: string
+  viewportRef?: Ref<HTMLDivElement>
+  viewportProps?: Omit<ComponentPropsWithoutRef<"div">, "children" | "className" | "ref">
 }
 
-export function MessageScroller({ children, followOutput = true, followThreshold = 56, smooth = true, onFollowChange, label = "Conversation", busy, className, viewportClassName, contentClassName, viewportRef: externalRef, viewportProps }: MessageScrollerProps) {
+export function MessageScroller({ children, followOutput = true, followThreshold = 56, smooth = true, onFollowChange, label = "Conversation", busy, className, viewportClassName, contentClassName, viewportTestId, viewportRef: externalRef, viewportProps }: MessageScrollerProps) {
   const reduce = useReducedMotion() ?? false
-  const viewportRef = useRef<HTMLElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const followingRef = useRef(followOutput)
+  const [following, setFollowingState] = useState(followOutput)
   const programmaticRef = useRef(false)
   const timerRef = useRef<number | undefined>(undefined)
-  const setViewportRef = useCallback((node: HTMLElement | null) => {
+  const setViewportRef = useCallback((node: HTMLDivElement | null) => {
     viewportRef.current = node
     if (typeof externalRef === "function") externalRef(node)
     else if (externalRef) externalRef.current = node
@@ -53,6 +55,7 @@ export function MessageScroller({ children, followOutput = true, followThreshold
   const setFollowing = useCallback((next: boolean) => {
     if (followingRef.current === next) return
     followingRef.current = next
+    setFollowingState(next)
     onFollowChange?.(next)
   }, [onFollowChange])
   const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
@@ -66,6 +69,7 @@ export function MessageScroller({ children, followOutput = true, followThreshold
   }, [])
   useLayoutEffect(() => {
     followingRef.current = followOutput
+    setFollowingState(followOutput)
     if (!followOutput) return
     const frame = requestAnimationFrame(() => scrollToEnd("auto"))
     return () => cancelAnimationFrame(frame)
@@ -81,12 +85,12 @@ export function MessageScroller({ children, followOutput = true, followThreshold
   }, [followOutput, reduce, scrollToEnd, smooth])
   useEffect(() => () => window.clearTimeout(timerRef.current), [])
   const { onScroll, onWheel, onTouchStart, onKeyDown, ...rest } = viewportProps ?? {}
-  return <div data-slot="message-scroller" className={cn("relative min-h-0", className)}><section ref={setViewportRef} aria-label={label} aria-busy={busy || undefined} {...rest} onScroll={event => { if (!programmaticRef.current) { const node = event.currentTarget; setFollowing(node.scrollHeight - node.scrollTop - node.clientHeight <= followThreshold) } onScroll?.(event) }} onWheel={event => { programmaticRef.current = false; onWheel?.(event) }} onTouchStart={event => { programmaticRef.current = false; onTouchStart?.(event) }} onKeyDown={event => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) programmaticRef.current = false; onKeyDown?.(event) }} className={cn("h-full overflow-y-auto overscroll-contain", viewportClassName)}><div ref={contentRef} className={contentClassName}>{children}</div></section></div>
+  return <div data-slot="message-scroller" className={cn("relative min-h-0", className)}><div ref={setViewportRef} role="region" aria-label={label} aria-busy={busy || undefined} data-testid={viewportTestId} {...rest} onScroll={event => { if (!programmaticRef.current) { const node = event.currentTarget; setFollowing(node.scrollHeight - node.scrollTop - node.clientHeight <= followThreshold) } onScroll?.(event) }} onWheel={event => { programmaticRef.current = false; if (event.deltaY < 0) setFollowing(false); onWheel?.(event) }} onTouchStart={event => { programmaticRef.current = false; setFollowing(false); onTouchStart?.(event) }} onKeyDown={event => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) { programmaticRef.current = false; setFollowing(false) } onKeyDown?.(event) }} className={cn("h-full overflow-y-auto overscroll-contain", viewportClassName)}><div ref={contentRef} className={contentClassName}>{children}</div></div><AnimatePresence>{!following && <m.button type="button" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }} transition={SPRING} onClick={() => { setFollowing(true); scrollToEnd(reduce || !smooth ? "auto" : "smooth") }} className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-line bg-panel px-3 py-1.5 text-[10.5px] text-text shadow-lg hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring">Jump to latest</m.button>}</AnimatePresence></div>
 }
 
 export function StreamingResponse({ children, streaming = false, sources, onCopy, actions, className }: { children: ReactNode; streaming?: boolean; sources?: ReactNode; onCopy?: () => void; actions?: ReactNode; className?: string }) {
   const [showSources, setShowSources] = useState(false)
-  return <div data-slot="streaming-response" className={cn("group", className)}><div className={cn(streaming && "jingler-streaming-text")}>{children}</div>{!streaming && <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{onCopy && <button type="button" aria-label="Copy response" onClick={onCopy} className="rounded-md p-1 text-dim hover:bg-surface hover:text-text"><Copy className="size-3.5" /></button>}{actions}{sources && <button type="button" aria-expanded={showSources} onClick={() => setShowSources(value => !value)} className="rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:bg-surface hover:text-text">Sources</button>}</div>}<AnimatePresence initial={false}>{showSources && <m.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden"><div className="mt-2 border-t border-line pt-2">{sources}</div></m.div>}</AnimatePresence></div>
+  return <div data-slot="streaming-response" className={cn("group", className)}><div className={cn(streaming && "jingler-streaming-text")}>{children}</div>{!streaming && (onCopy || actions || sources) && <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{onCopy && <button type="button" aria-label="Copy response" onClick={onCopy} className="rounded-md p-1 text-dim hover:bg-surface hover:text-text"><Copy className="size-3.5" /></button>}{actions}{sources && <button type="button" aria-expanded={showSources} onClick={() => setShowSources(value => !value)} className="rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:bg-surface hover:text-text">Sources</button>}</div>}<AnimatePresence initial={false}>{showSources && <m.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING} className="overflow-hidden"><div className="mt-2 border-t border-line pt-2">{sources}</div></m.div>}</AnimatePresence></div>
 }
 
 export interface CitationItem { id: string; label: string; url?: string; excerpt?: string }

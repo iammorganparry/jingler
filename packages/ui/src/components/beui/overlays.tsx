@@ -18,6 +18,10 @@ export function PullToRefresh({ onRefresh, children, threshold = 64, className }
   return <m.div drag={refreshing ? false : "y"} dragConstraints={{ top: 0, bottom: threshold * 1.4 }} dragElastic={0.35} style={{ y }} onDragEnd={async (_, info) => { if (info.offset.y < threshold) return; setRefreshing(true); await onRefresh(); setRefreshing(false); y.set(0) }} className={cn("relative", className)}><m.div aria-live="polite" style={{ opacity }} className="absolute inset-x-0 -top-8 text-center text-[11px] text-muted-foreground">{refreshing ? "Refreshing…" : "Release to refresh"}</m.div>{children}</m.div>
 }
 
+export function SharedLayoutIndicator({ layoutId = "shared-active", className }: { layoutId?: string; className?: string }) {
+  return <m.span layoutId={layoutId} transition={SPRING} className={cn("absolute inset-0 -z-10 rounded-md bg-surface", className)} />
+}
+
 export function SharedLayoutBackground({ items, activeId, onSelect, className }: { items: ReadonlyArray<{ id: string; label: ReactNode }>; activeId?: string; onSelect?: (id: string) => void; className?: string }) {
   const group = useId()
   return <div className={cn("flex gap-1", className)}>{items.map(item => <button key={item.id} type="button" onClick={() => onSelect?.(item.id)} className="relative rounded-md px-2.5 py-1.5 text-[12px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring">{activeId === item.id && <m.span layoutId={`${group}-bg`} transition={SPRING} className="absolute inset-0 -z-10 rounded-md bg-surface" />}{item.label}</button>)}</div>
