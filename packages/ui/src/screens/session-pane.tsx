@@ -175,6 +175,11 @@ export interface SessionPaneProps {
       readonly onSelectFiles: () => void
     }
   ) => ReactNode
+  /** Render children of the selected top-level agent in a second tab row. */
+  renderSubagentTabs?: (
+    session: Session,
+    ctx: { readonly onSelectConversation: () => void }
+  ) => ReactNode
   /** Rename the session from the tab-row title. */
   onRenameSession?: (id: string, title: string) => void
   /** Toggle the embedded browser that belongs to this session. */
@@ -691,6 +696,9 @@ function SessionPaneBody(props: SessionPaneProps) {
         onMovePaneLeft={props.onMovePaneLeft}
         onMovePaneRight={props.onMovePaneRight}
       />
+      {props.renderSubagentTabs?.(active, {
+        onSelectConversation: () => selectTab(BUILTIN_TAB.conversation)
+      })}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

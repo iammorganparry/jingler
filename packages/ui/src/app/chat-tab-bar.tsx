@@ -32,10 +32,6 @@ export interface ChatTabBarProps {
   onRenameChat: (id: string, title: string) => void
   onCloseChat: (id: string) => void
   onReopenChat?: (id: string) => void
-  subagents?: ReadonlyArray<SubagentTabItem>
-  subagentChatId?: string
-  activeSubagentId?: string
-  onSelectSubagent?: (id: string) => void
   previousSubagents?: ReadonlyArray<PreviousSubagentTabItem>
   onOpenPreviousSubagent?: (id: string) => void
   /** Session-owned tabs rendered beside chats, before the new-chat action. */
@@ -118,10 +114,6 @@ export function ChatTabBar({
   onRenameChat,
   onCloseChat,
   onReopenChat,
-  subagents = [],
-  subagentChatId,
-  activeSubagentId,
-  onSelectSubagent,
   previousSubagents = [],
   onOpenPreviousSubagent,
   fileSlot,
@@ -240,32 +232,6 @@ export function ChatTabBar({
               </button>
             )}
           </div>
-          {chat.id === subagentChatId && subagents.map((subagent) => {
-            const selected = subagent.id === activeSubagentId
-            return (
-              <button
-                key={subagent.id}
-                type="button"
-                data-testid={`subagent-tab-${subagent.id}`}
-                aria-current={selected ? "page" : undefined}
-                aria-label={subagent.title}
-                title={subagent.title}
-                onClick={() => onSelectSubagent?.(subagent.id)}
-                className={cn(
-                  "flex flex-none items-center gap-1.5 rounded-md px-2.5 py-1 text-xs outline-none transition-colors",
-                  selected ? "bg-panel text-text-bright" : "text-muted-foreground hover:bg-panel/60 hover:text-text"
-                )}
-              >
-                <StatusDot
-                  tone={subagent.status === "attention" ? "bg-purple" : "bg-yellow"}
-                  pulse
-                  size={7}
-                />
-                <Bot className="size-3 text-purple" />
-                <span className="max-w-[140px] truncate">{subagent.title}</span>
-              </button>
-            )
-          })}
           </Fragment>
         )
       })}

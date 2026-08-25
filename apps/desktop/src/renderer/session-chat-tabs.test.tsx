@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, within } from "@te
 import type { Session, SubagentFleetNode } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FileBrowserController } from "./use-file-browser.js"
-import { SessionChatTabs } from "./session-chat-tabs.js"
+import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js"
 import {
   clearSubagentTabs,
   publishSubagentTabs,
@@ -146,14 +146,18 @@ const controller = (
 const renderTabs = (filesActive = true) => {
   const onSelectConversation = vi.fn()
   const onSelectFiles = vi.fn()
-  render(
+  render(<>
     <SessionChatTabs
       session={session}
       filesActive={filesActive}
       onSelectConversation={onSelectConversation}
       onSelectFiles={onSelectFiles}
     />
-  )
+    <SessionSubagentTabs
+      session={session}
+      onSelectConversation={onSelectConversation}
+    />
+  </>)
   return { onSelectConversation, onSelectFiles }
 }
 
@@ -209,6 +213,44 @@ describe("SessionChatTabs subagent tabs", () => {
       chatId: "chat-1",
       nodeId: reviewer.id
     })
+  })
+
+  it("shows only children of the selected top-level agent", () => {
+    const secondChat = {
+      id: "chat-2",
+      title: "Second",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z"
+    }
+    act(() => {
+      publishSubagentTabs(session.id, {
+        chatId: "chat-1",
+        active: [subagentNode({ id: "worker-a", task: "Agent A task" })],
+        completed: [],
+        selectedId: "main"
+      })
+      publishSubagentTabs(session.id, {
+        chatId: "chat-2",
+        active: [subagentNode({ id: "worker-b", task: "Agent B task" })],
+        completed: [],
+        selectedId: "main"
+      })
+    })
+    const first = { ...session, chats: [...session.chats, secondChat] }
+    const view = render(
+      <SessionSubagentTabs session={first} onSelectConversation={vi.fn()} />
+    )
+    expect(screen.getByRole("button", { name: /Agent A task/ })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Agent B task/ })).toBeNull()
+
+    view.rerender(
+      <SessionSubagentTabs
+        session={{ ...first, activeChatId: "chat-2" }}
+        onSelectConversation={vi.fn()}
+      />
+    )
+    expect(screen.queryByRole("button", { name: /Agent A task/ })).toBeNull()
+    expect(screen.getByRole("button", { name: /Agent B task/ })).toBeTruthy()
   })
 })
 

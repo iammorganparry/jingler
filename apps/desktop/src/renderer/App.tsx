@@ -64,7 +64,7 @@ import {
   useExplanationSessions,
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
-import { SessionChatTabs } from "./session-chat-tabs.js";
+import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js";
 import { PullRequestPane } from "./pull-request-pane.js";
 import { ReviewPane } from "./review-pane.js";
 import { FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
@@ -1871,6 +1871,12 @@ function AuthedApp({
             filesActive={ctx.activeTabId === "files"}
             onSelectConversation={ctx.onSelectConversation}
             onSelectFiles={ctx.onSelectFiles}
+          />
+        )}
+        renderSubagentTabs={(session: Session, ctx) => (
+          <SessionSubagentTabs
+            session={session}
+            onSelectConversation={ctx.onSelectConversation}
           />
         )}
         renderPullRequest={(session, ctx) => {

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ChatTabBar } from "./chat-tab-bar.js"
+import { SubagentTabBar } from "./subagent-tab-bar.js"
 
 afterEach(cleanup)
 
@@ -46,36 +47,26 @@ describe("ChatTabBar closed chats", () => {
     expect(handlers.onReopenChat).toHaveBeenCalledWith("chat-1")
   })
 
-  it("renders live subagents after their parent chat and opens completed agents from History", () => {
+  it("renders live subagents in their own row and completed agents in History", () => {
     const onSelectSubagent = vi.fn()
     const onOpenPreviousSubagent = vi.fn()
-    render(
+    render(<>
       <ChatTabBar
-        chats={[
-          { id: "chat-1", title: "Main" },
-          { id: "chat-2", title: "Other" }
-        ]}
-        activeChatId=""
-        subagentChatId="chat-1"
-        subagents={[{
-          id: "worker-1",
-          title: "worker · Implement tabs",
-          status: "running"
-        }]}
-        activeSubagentId="worker-1"
-        onSelectSubagent={onSelectSubagent}
-        previousSubagents={[{
-          id: "reviewer-1",
-          title: "reviewer · Review tabs"
-        }]}
+        chats={[{ id: "chat-1", title: "Main" }, { id: "chat-2", title: "Other" }]}
+        activeChatId="chat-1"
+        previousSubagents={[{ id: "reviewer-1", title: "reviewer · Review tabs" }]}
         onOpenPreviousSubagent={onOpenPreviousSubagent}
         {...chatCallbacks()}
       />
-    )
+      <SubagentTabBar
+        subagents={[{ id: "worker-1", title: "worker · Implement tabs", status: "running" }]}
+        activeSubagentId="worker-1"
+        onSelectSubagent={onSelectSubagent}
+      />
+    </>)
 
-    const chat = screen.getByTestId("chat-tab-chat-1")
     const subagent = screen.getByTestId("subagent-tab-worker-1")
-    expect(chat.nextElementSibling).toBe(subagent)
+    expect(subagent.closest('[data-testid="subagent-tab-bar"]')).not.toBeNull()
     expect(subagent.getAttribute("aria-current")).toBe("page")
     fireEvent.click(subagent)
     expect(onSelectSubagent).toHaveBeenCalledWith("worker-1")

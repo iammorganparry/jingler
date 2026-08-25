@@ -9,7 +9,7 @@
  * and there is nothing shared to hoist that would be simpler than the calls.
  */
 import type { Session } from "@jingler/core"
-import { ChatTabBar, FileIcon } from "@jingler/ui"
+import { ChatTabBar, FileIcon, SubagentTabBar } from "@jingler/ui"
 import { X } from "lucide-react"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
@@ -20,6 +20,32 @@ import {
   selectSubagentTab,
   useSessionSubagentTabs
 } from "./subagent-tab-store.js"
+
+export function SessionSubagentTabs({
+  session,
+  onSelectConversation
+}: {
+  readonly session: Session
+  readonly onSelectConversation: () => void
+}) {
+  const snapshots = useSessionSubagentTabs(session.id)
+  const active = snapshots.find(({ chatId }) => chatId === session.activeChatId)
+  const subagents = active?.active ?? []
+  return (
+    <SubagentTabBar
+      subagents={subagents.map((node) => ({
+        id: node.id,
+        title: `${node.agent} · ${node.task}`,
+        status: node.status === "needs-attention" ? "attention" : "running"
+      }))}
+      activeSubagentId={active?.selectedId}
+      onSelectSubagent={(nodeId) => {
+        onSelectConversation()
+        selectSubagentTab(session.id, session.activeChatId, nodeId)
+      }}
+    />
+  )
+}
 
 export function SessionChatTabs({
   session,
@@ -50,10 +76,6 @@ export function SessionChatTabs({
     selectSubagentTab(session.id, chatId, "main")
     if (chatId === activeChat.id) return
     void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
-  }
-  const selectSubagent = (nodeId: string) => {
-    onSelectConversation()
-    selectSubagentTab(session.id, activeChat.id, nodeId)
   }
   const openPreviousSubagent = (nodeId: string) => {
     const previous = previousSubagents.find(({ node }) => node.id === nodeId)
@@ -181,14 +203,6 @@ export function SessionChatTabs({
           : activeChat.id
       }
       onSelectChat={selectChat}
-      subagents={(activeSubagents?.active ?? []).map((node) => ({
-        id: node.id,
-        title: `${node.agent} · ${node.task}`,
-        status: node.status === "needs-attention" ? "attention" : "running"
-      }))}
-      subagentChatId={activeChat.id}
-      activeSubagentId={filesActive ? undefined : activeSubagents?.selectedId}
-      onSelectSubagent={selectSubagent}
       previousSubagents={previousSubagents.map(({ node }) => ({
         id: node.id,
         title: `${node.agent} · ${node.task}`

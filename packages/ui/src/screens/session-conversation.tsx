@@ -117,6 +117,11 @@ export interface SessionConversationProps {
       readonly onSelectFiles: () => void
     }
   ) => ReactNode
+  /** Render children of the selected top-level agent in a second tab row. */
+  renderSubagentTabs?: (
+    session: Session,
+    ctx: { readonly onSelectConversation: () => void }
+  ) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   explanationSessions?: ReadonlySet<string>
@@ -315,6 +320,7 @@ export function SessionConversation(props: SessionConversationProps) {
             onOpenFile={props.onOpenFile}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}
+            renderSubagentTabs={props.renderSubagentTabs}
             onRenameSession={props.onRenameSession}
             onToggleBrowser={props.onToggleBrowser}
             isBrowserActive={props.isBrowserActive}
