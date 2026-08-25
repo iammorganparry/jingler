@@ -393,6 +393,16 @@
     transform: rotate(360deg);
   }
 }
+@keyframes beui-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes beui-marquee-y {
+  to {
+    transform: translateY(-50%);
+  }
+}
 @keyframes sb-shake {
   0%,
   100% {
