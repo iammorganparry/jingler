@@ -34,14 +34,9 @@ import { downscaleImage } from "../lib/image-downscale.js";
 import { atLeast, useWidthTier } from "../hooks/width-tier.js";
 import { AttachmentThumb } from "../components/attachment-thumb.js";
 import { Button } from "../components/button.js";
-import { ChipMenu, type ChipOption } from "../components/chip-menu.js";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/beui/select.js";
 import { CodeChip } from "../components/code-chip.js";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../components/dropdown-menu.js";
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from "../components/beui/popover-morph.js";
 import { Pill } from "../components/pill.js";
 import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
@@ -92,7 +87,13 @@ const readAttachment = async (
   return data === "" ? null : { id, name, mediaType: file.type, data };
 };
 
-const MODE_OPTIONS: ReadonlyArray<ChipOption<PermissionMode>> = [
+interface ComposerOption<T extends string> {
+  value: T;
+  label: ReactNode;
+  description?: string;
+}
+
+const MODE_OPTIONS: ReadonlyArray<ComposerOption<PermissionMode>> = [
   { value: "ask", label: "Ask Before Actions" },
   { value: "accept-edits", label: "Accept Edits" },
   { value: "auto", label: "Auto" },
@@ -180,6 +181,39 @@ function DrawerTab({
       )}
       {active && <span className={cn("absolute inset-x-2.5 -bottom-px h-0.5 rounded-t", accentBar)} />}
     </button>
+  );
+}
+
+function ComposerSelect<T extends string>({
+  value,
+  options,
+  onSelect,
+  icon,
+  ariaLabel,
+  disabled = false,
+  className,
+}: {
+  value: T;
+  options: ReadonlyArray<ComposerOption<T>>;
+  onSelect?: (value: T) => void;
+  icon?: ReactNode;
+  ariaLabel?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const current = options.find((option) => option.value === value);
+  return (
+    <Select value={value} onValueChange={(next) => onSelect?.(next as T)} disabled={disabled} className="min-w-0">
+      <SelectTrigger ariaLabel={ariaLabel} className={cn("h-8 w-auto max-w-52 rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-surface focus-visible:ring-2", className)}>
+        <span className="flex min-w-0 items-center gap-1.5">
+          {icon && <span className="grid size-4 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5">{icon}</span>}
+          <span className="truncate text-muted-foreground">{current?.label ?? value}</span>
+        </span>
+      </SelectTrigger>
+      <SelectContent className="right-auto w-52 shadow-none">
+        {options.map((option) => <SelectItem key={option.value} value={option.value} className="py-2"><span className="flex min-w-0 flex-col"><span className="truncate text-sm text-text-bright">{option.label}</span>{option.description && <span className="truncate text-xs leading-4 text-muted-foreground">{option.description}</span>}</span></SelectItem>)}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -332,7 +366,7 @@ export function Composer({
     })),
     { id: "plan" as const, label: "Plan", kind: "plan" as const },
   ];
-  const modeOptions: ReadonlyArray<ChipOption<PermissionMode>> = canonicalModes
+  const modeOptions: ReadonlyArray<ComposerOption<PermissionMode>> = canonicalModes
     .filter((option) => allowPlan || option.kind !== "plan")
     .map((option) => ({
       value: option.id,
@@ -347,7 +381,7 @@ export function Composer({
   const reasoningDefaultLabel = reasoningDefault
     ? `${reasoningDefault[0]!.toUpperCase()}${reasoningDefault.slice(1)} (default)`
     : "Default";
-  const reasoningOptions: ReadonlyArray<ChipOption<ReasoningChoice | "off">> = [
+  const reasoningOptions: ReadonlyArray<ComposerOption<ReasoningChoice | "off">> = [
     { value: "default", label: reasoningDefaultLabel },
     ...(reasoningEfforts.length > 0 &&
     selectedModel?.capabilities.reasoningCanDisable !== false
@@ -381,6 +415,7 @@ export function Composer({
   >([]);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   // Shims, so every call site below reads/writes exactly as it did when this was
   // plain local state — including the `setAttachments(prev => …)` updater form.
@@ -619,8 +654,8 @@ export function Composer({
           void addFiles(files);
         }}
         className={cn(
-          "flex flex-col gap-3 rounded-2xl bg-sunken px-4 py-3.5",
-          (paused || disabledReason !== undefined) && "opacity-70",
+          "relative w-full flex flex-col gap-3 rounded-2xl border-line/80 bg-panel px-4 py-3.5 shadow-none transition-colors focus-within:border-text-bright/25 focus-within:shadow-none",
+          (paused || disabledReason !== undefined) && "opacity-60",
           // A drag-over is the only temporary coloured border.
           dragging && "border-cyan/60 bg-cyan/5 shadow-none",
         )}
@@ -785,45 +820,38 @@ export function Composer({
           second line costs nothing but 26px of height.
         */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1.5 [&>button]:min-h-8">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          <MorphPopover open={actionsOpen} onOpenChange={setActionsOpen}>
+            <MorphPopoverTrigger>
               <button
                 type="button"
                 aria-label="Composer menu"
                 title="Add context"
                 disabled={paused || disabledReason !== undefined}
-                className="flex size-8 flex-none items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex size-8 flex-none items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <Plus size={17} />
+                <span
+                  aria-hidden
+                  style={{ transform: `rotate(${actionsOpen ? 45 : 0}deg)` }}
+                  className="inline-flex transition-transform duration-300 ease-out motion-reduce:duration-0"
+                >
+                  <Plus size={16} />
+                </span>
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="min-w-[220px]">
-                <DropdownMenuItem
-                  onSelect={() => fileInputRef.current?.click()}
-                >
-                  <ImagePlus
-                    size={15}
-                    className="flex-none text-muted-foreground"
-                  />
-                  <span className="flex-1">Add image</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={skills.length === 0}
-                  onSelect={openSkills}
-                >
-                  <Sparkles
-                    size={15}
-                    className="flex-none text-muted-foreground"
-                  />
-                  <span className="flex-1">Skills</span>
-                  {skills.length > 0 && (
-                    <span className="font-mono text-[10.5px] text-dim">
-                      {skills.length}
-                    </span>
-                  )}
-                </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </MorphPopoverTrigger>
+            <MorphPopoverContent side="top" sideOffset={8} align="start" radius={12} className="w-56 p-1.5">
+              <div>
+                <button type="button" onClick={() => { fileInputRef.current?.click(); setActionsOpen(false); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface">
+                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><ImagePlus size={15} /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Add image</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Attach visual context</span></span>
+                </button>
+                <button type="button" disabled={skills.length === 0} onClick={() => { openSkills(); setActionsOpen(false); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface disabled:pointer-events-none disabled:opacity-50">
+                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><Sparkles size={15} /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Skills</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Insert a harness command</span></span>
+                  {skills.length > 0 && <span className="font-mono text-[10.5px] text-dim">{skills.length}</span>}
+                </button>
+              </div>
+            </MorphPopoverContent>
+          </MorphPopover>
           {onToggleFollowAgent !== undefined && (
             <button
               type="button"
@@ -850,59 +878,14 @@ export function Composer({
             </button>
           )}
           {onSetEnvironment && (
-            <ChipMenu
+            <ComposerSelect<string>
               value={environmentId ?? "__local__"}
               options={[
-                {
-                  value: "__local__",
-                  searchText: "Local",
-                  label: (
-                    <span className="inline-flex min-w-0 items-center gap-1.5">
-                      <Monitor
-                        size={13}
-                        className="flex-none"
-                        aria-hidden
-                        data-environment-icon="local"
-                      />
-                      <span className="truncate">Local</span>
-                    </span>
-                  ),
-                },
-                ...environments.map((environment) => ({
-                  value: environment.id,
-                  searchText: `${environment.name} ${environment.state}`,
-                  label: (
-                    <span className="inline-flex min-w-0 items-center gap-1.5">
-                      {environment.kind === "managed" ? (
-                        <Cloud
-                          size={13}
-                          className="flex-none"
-                          aria-hidden
-                          data-environment-icon="cloud"
-                        />
-                      ) : (
-                        <Server
-                          size={13}
-                          className="flex-none"
-                          aria-hidden
-                          data-environment-icon="remote"
-                        />
-                      )}
-                      <span className="truncate">
-                        {environment.name}
-                        {environment.state === "online"
-                          ? ""
-                          : ` · ${environment.state}`}
-                      </span>
-                    </span>
-                  ),
-                })),
+                { value: "__local__", label: <span className="inline-flex min-w-0 items-center gap-1.5"><Monitor size={13} className="flex-none" aria-hidden data-environment-icon="local" /><span className="truncate">Local</span></span> },
+                ...environments.map((environment) => ({ value: environment.id, label: <span className="inline-flex min-w-0 items-center gap-1.5">{environment.kind === "managed" ? <Cloud size={13} className="flex-none" aria-hidden data-environment-icon="cloud" /> : <Server size={13} className="flex-none" aria-hidden data-environment-icon="remote" />}<span className="truncate">{environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}</span></span> }))
               ]}
-              onSelect={(value) =>
-                onSetEnvironment(value === "__local__" ? undefined : value)
-              }
+              onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)}
               disabled={environmentPending}
-              appearance="quiet"
               ariaLabel="Execution environment"
               className="max-w-[150px]"
             />
@@ -916,17 +899,9 @@ export function Composer({
               className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
             />
           )}
-          <ChipMenu
-            value={mode}
-            options={modeOptions}
-            onSelect={onSetMode}
-            appearance="quiet"
-            // Quiet chrome sizes to its current label instead of reserving
-            // permanent toolbar space; cap long modes inside narrow panes.
-            className="max-w-[104px]"
-          />
+          <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
           {(!selectedModel || reasoningEfforts.length > 0) && (
-            <ChipMenu
+            <ComposerSelect
               value={reasoningChoice}
               options={reasoningOptions}
               onSelect={(value) =>
@@ -938,7 +913,6 @@ export function Composer({
                       : { enabled: true, effort: value },
                 )
               }
-              appearance="quiet"
               ariaLabel="Thinking strength"
               icon={
                 <SignalBars

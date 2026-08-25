@@ -2,6 +2,7 @@ export * from "./controls.js"
 export * from "./overlays.js"
 export * from "./feedback.js"
 export * from "./visual.js"
+export * from "./popover-morph.js"
 
 /** Official BeUI Motion registry slugs represented by this themed catalog. */
 export const BEUI_MOTION_COMPONENTS = [

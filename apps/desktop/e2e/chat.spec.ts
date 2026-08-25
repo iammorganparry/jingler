@@ -98,7 +98,7 @@ test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ 
   await expect(row.getByText("Idle", { exact: true })).toHaveCount(0, { timeout: 10_000 })
 
   // The assistant turn is labelled with its selected provider in the eyebrow.
-  await expect(window.getByText("jingler-e2e", { exact: true })).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByTestId("conversation-scroll").getByText("jingler-e2e", { exact: true })).toBeVisible({ timeout: 20_000 })
 
   // Cost/token readouts were removed (a usage widget replaces them later).
   await expect(window.getByText(/\$0\.00/)).toHaveCount(0)
@@ -144,7 +144,7 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.click()
   // Switch to Auto via the composer's mode chip (seeded as accept-edits).
-  await window.getByText("Accept Edits", { exact: true }).click()
+  await window.getByRole("button", { name: "Accept Edits", exact: true }).click()
   await window.getByRole("option", { name: /^Auto\b/ }).click()
 
   await composer.pressSequentially("Add rate limiting.")

@@ -69,7 +69,11 @@ describe("ProviderModelBrowser", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }))
+    expect(screen.getByRole("textbox", { name: "Search models" })).toBeTruthy()
     expect(screen.getByText("Claude Sonnet")).toBeTruthy()
+    expect(screen.getByRole("option", { name: /Claude Sonnet/i }).querySelector("[data-provider-logo]")).toBeTruthy()
+    expect(screen.getByText("200k")).toBeTruthy()
+    expect(screen.queryByText("anthropic/claude-sonnet · local")).toBeNull()
     expect(screen.queryByText("Claude Opus stale")).toBeNull()
     fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet/i }))
     expect(onSelect).toHaveBeenCalledWith({ connectionId, providerId, modelId })

@@ -5,7 +5,8 @@ import type {
   ProviderModelId
 } from "@jingler/core"
 import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
-import { ChipMenu, type ChipGroup } from "../components/chip-menu.js"
+import { Select, SelectContent, SelectItem, SelectSearch, SelectTrigger } from "../components/beui/select.js"
+import { cn } from "../lib/cn.js"
 
 export interface ProviderModelSelection {
   readonly connectionId: ProviderConnectionId
@@ -18,9 +19,18 @@ const selectionKey = (selection: Pick<ProviderModelSelection, "connectionId" | "
 
 interface BrowsableModel extends ProviderModelSelection {
   readonly label: string
-  readonly description: string
   readonly searchText: string
+  readonly contextWindow: number | null
 }
+
+const formatContextSize = (size: number | null): string =>
+  size === null
+    ? "—"
+    : size >= 1_000_000
+      ? `${Number((size / 1_000_000).toFixed(1))}m`
+      : size >= 1_000
+        ? `${Math.round(size / 1_000)}k`
+        : String(size)
 
 /**
  * Every selectable model, grouped by PROVIDER rather than by connection: the
@@ -45,14 +55,16 @@ const browsableModels = (catalog: ProviderCatalog): ReadonlyArray<BrowsableModel
         const identity = `${model.providerId}:${model.id}`
         if (seen.has(identity)) return []
         seen.add(identity)
-        return [{
-          connectionId: connection.id,
-          providerId: model.providerId,
-          modelId: model.id,
-          label: model.label,
-          description: `${model.id} · ${connection.targetId}`,
-          searchText: `${model.label} ${model.id} ${connection.targetId}`
-        }]
+        return [
+          {
+            connectionId: connection.id,
+            providerId: model.providerId,
+            modelId: model.id,
+            label: model.label,
+            searchText: `${model.label} ${model.id} ${connection.targetId}`,
+            contextWindow: model.capabilities.contextWindow
+          }
+        ]
       })
   )
 }
@@ -82,17 +94,16 @@ export function ProviderModelBrowser({
       existing.push(selection)
     }
   }
-  const groups: ReadonlyArray<ChipGroup<string>> = providerOrder.map(
-    (providerId) => ({
-      label: providerLabel(providerId),
-      options: (byProvider.get(providerId) ?? []).map((model) => ({
-        value: selectionKey(model),
-        label: model.label,
-        description: model.description,
-        searchText: model.searchText
-      }))
-    })
-  )
+  const groups = providerOrder.map((providerId) => ({
+    providerId,
+    label: providerLabel(providerId),
+    options: (byProvider.get(providerId) ?? []).map((model) => ({
+      value: selectionKey(model),
+      label: model.label,
+      searchText: model.searchText,
+      contextSize: formatContextSize(model.contextWindow)
+    }))
+  }))
   const value =
     connectionId === null || modelId === null
       ? ""
@@ -106,27 +117,54 @@ export function ProviderModelBrowser({
       : selections.find((selection) => selection.modelId === modelId))
 
   return (
-    <ChipMenu
+    <Select
       value={selected === undefined ? value : selectionKey(selected)}
-      groups={groups}
-      searchable
-      searchPlaceholder="Search models…"
-      emptyLabel="No models available"
       disabled={selections.length === 0}
-      onSelect={(key) => {
+      onValueChange={(key) => {
         const selection = selections.find((candidate) => selectionKey(candidate) === key)
-        if (selection !== undefined) {
+        if (selection)
           onSelect?.({
             connectionId: selection.connectionId,
             providerId: selection.providerId,
             modelId: selection.modelId
           })
-        }
       }}
-      icon={selected ? <ProviderIcon providerId={selected.providerId} size={14} /> : undefined}
-      appearance="quiet"
-      ariaLabel={`Model: ${selected?.label ?? modelId ?? "Choose model"}`}
-      className={className}
-    />
+      className={cn("min-w-0", className)}
+    >
+      <SelectTrigger
+        ariaLabel={`Model: ${selected?.label ?? modelId ?? "Choose model"}`}
+        className="h-8 w-auto min-w-0 rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-surface focus-visible:ring-2"
+      >
+        <span className="truncate text-muted-foreground">{selected?.label ?? modelId ?? "Choose model"}</span>
+      </SelectTrigger>
+      <SelectContent
+        className="right-auto w-72 shadow-none"
+        search={<SelectSearch autoFocus aria-label="Search models" placeholder="Search models…" />}
+      >
+        {groups.map((group) => (
+          <div key={group.label} role="group" aria-label={group.label} className="py-0.5">
+            <div className="px-2.5 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              {group.label}
+            </div>
+            {group.options.map((option) => (
+              <SelectItem
+                key={option.value}
+                value={option.value}
+                textValue={`${option.label} ${option.searchText}`}
+                className="py-2"
+              >
+                <span className="flex min-w-0 flex-1 items-center gap-2">
+                  <span data-provider-logo className="grid size-5 shrink-0 place-items-center">
+                    <ProviderIcon providerId={group.providerId} size={16} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-text-bright">{option.label}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{option.contextSize}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </div>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }

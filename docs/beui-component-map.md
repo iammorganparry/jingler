@@ -4,6 +4,14 @@ Snapshot: 2026-08-25 · Official registry: https://beui.dev/r · Agent guide: ht
 
 Jingler carries the 39 Motion entries as reusable atoms/primitives and the 17 Agent entries as reusable molecules. The 22 BeUI Blocks are deliberately excluded. Imported ideas and adapted source remain MIT licensed; Jingler semantic tokens, existing renderers, and product behavior take precedence.
 
+## Migration style rule
+
+- Preserve each BeUI component's source structure, spacing, radii, typography scale, motion, menu treatment, and interaction states.
+- Substitute only Jingler semantic color tokens and unavoidable local imports. Do not reskin BeUI to resemble the legacy Jingler component it replaces.
+- Jingler keeps ownership of product layout, protocol behavior, provider identity, data flow, accessibility contracts, and reduced-motion support.
+- When product behavior differs, compose around the BeUI component rather than copying the old component's visual treatment into it.
+- Composer uses Prompt Input as its base and the same BeUI Select treatment for model, environment, permission, and reasoning; the model dropdown adds only a compact search field and Jingler model metadata.
+
 ## Dependency policy
 
 - Already installed: Motion 12, React 19, Tailwind 4, Lucide, Shiki, TanStack Virtual, Paper shaders, clsx, and tailwind-merge.

@@ -8,11 +8,7 @@ const ADD_IMAGE_ITEM = /Add image/
 const SKILLS_ITEM = /Skills/
 const MCP_ITEM = /MCP connectors/
 
-const openMenu = () =>
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Composer menu" }), {
-    button: 0,
-    ctrlKey: false
-  })
+const openMenu = () => fireEvent.click(screen.getByRole("button", { name: "Composer menu" }))
 
 describe("Composer tools menu", () => {
   it("shows the session branch in the toolbar", () => {
@@ -22,25 +18,21 @@ describe("Composer tools menu", () => {
   })
 
   it("folds attachments and skills behind one plus button", () => {
-    render(
-      <Composer skills={[{ name: "/deploy", description: "Deploy the app", source: "skill" }]} />
-    )
+    render(<Composer skills={[{ name: "/deploy", description: "Deploy the app", source: "skill" }]} />)
 
     expect(screen.queryByLabelText("Attach an image")).toBeNull()
     openMenu()
-    expect(screen.getByRole("menuitem", { name: ADD_IMAGE_ITEM })).toBeTruthy()
-    expect(screen.getByRole("menuitem", { name: SKILLS_ITEM })).toBeTruthy()
+    expect(screen.getByRole("button", { name: ADD_IMAGE_ITEM })).toBeTruthy()
+    expect(screen.getByRole("button", { name: SKILLS_ITEM })).toBeTruthy()
     // MCP now lives ONLY in Settings › Connectors (OpenConnector), never the composer.
-    expect(screen.queryByRole("menuitem", { name: MCP_ITEM })).toBeNull()
+    expect(screen.queryByRole("button", { name: MCP_ITEM })).toBeNull()
   })
 
   it("opens the existing skill palette from the menu", () => {
-    render(
-      <Composer skills={[{ name: "/deploy", description: "Deploy the app", source: "skill" }]} />
-    )
+    render(<Composer skills={[{ name: "/deploy", description: "Deploy the app", source: "skill" }]} />)
 
     openMenu()
-    fireEvent.click(screen.getByRole("menuitem", { name: SKILLS_ITEM }))
+    fireEvent.click(screen.getByRole("button", { name: SKILLS_ITEM }))
     expect(screen.getByText("/deploy")).toBeTruthy()
   })
 })

@@ -14,11 +14,7 @@ const renderAt = (width: number, props: Partial<React.ComponentProps<typeof Comp
     </WidthTierValue>
   )
 
-const openMenu = () =>
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Composer menu" }), {
-    button: 0,
-    ctrlKey: false
-  })
+const openMenu = () => fireEvent.click(screen.getByRole("button", { name: "Composer menu" }))
 
 describe("Composer at width", () => {
   it("keeps decorative keyboard hints out even when there is room", () => {
@@ -40,7 +36,7 @@ describe("Composer at width", () => {
   it("no longer offers MCP in the menu at any width (it lives in Settings › Connectors)", () => {
     renderAt(450)
     openMenu()
-    expect(screen.queryByRole("menuitem", { name: MCP_ITEM })).toBeNull()
+    expect(screen.queryByRole("button", { name: MCP_ITEM })).toBeNull()
   })
 
   it("keeps the composer menu findable by the same name at any width", () => {
