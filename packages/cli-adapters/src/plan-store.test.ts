@@ -147,6 +147,43 @@ describe("PlanStore canonical document", () => {
     expect((await run(PlanStore.readDocument(WT, "s1", "c2")))?.id).toBe(second.id)
   })
 
+  it("keeps concurrent same-worktree agent writes and discards isolated", async () => {
+    const [first, second] = await run(
+      Effect.all([
+        PlanStore.promoteDocument(WT, {
+          sessionId: "session",
+          producingChatId: "chat-a",
+          id: "plan-a",
+          plan: editIntent(SOURCE, "Agent A"),
+          author: "agent"
+        }),
+        PlanStore.promoteDocument(WT, {
+          sessionId: "session",
+          producingChatId: "chat-b",
+          id: "plan-b",
+          plan: editIntent(SOURCE, "Agent B"),
+          author: "agent"
+        })
+      ], { concurrency: "unbounded" })
+    )
+    await run(
+      Effect.all([
+        PlanStore.updateDocument(WT, {
+          planId: first.id,
+          baseRevision: first.revision,
+          plan: editIntent(first.plan, "Agent A amended"),
+          author: "agent"
+        }),
+        PlanStore.discard(WT, "session", "chat-b")
+      ], { concurrency: "unbounded" })
+    )
+
+    expect((await run(PlanStore.readDocument(WT, "session", "chat-a")))?.plan.stages[0]?.intent)
+      .toBe("Agent A amended")
+    expect(await run(PlanStore.readDocument(WT, "session", "chat-b"))).toBeNull()
+    expect(second.id).toBe("plan-b")
+  })
+
   it("isolates same-basename repositories and deletes only the requested plans", async () => {
     const firstPath = "/tmp/one/widget"
     const secondPath = "/tmp/two/widget"

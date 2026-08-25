@@ -421,6 +421,30 @@ describe("BrowserControlMcpService scoped attachment", () => {
     expect(boundSessions).toStrictEqual(["alpha", "beta"])
   })
 
+  it("grants concurrent leases to different agents in the same session", async () => {
+    const owners: string[] = []
+    const browser: BrowserControlPortShape = {
+      forAgent: (sessionId, chatId) => {
+        owners.push(`${sessionId}:${chatId}`)
+        return stubSessionPort()
+      }
+    }
+    let port = 44_000
+    const leases = await runWithServiceEffect(
+      browser,
+      (service) => Effect.gen(function* () {
+        const alpha = yield* service.acquire("session", "alpha", "run-a")
+        const beta = yield* service.acquire("session", "beta", "run-b")
+        return { alpha, beta }
+      }),
+      { acquireListener: () => Effect.succeed({ port: port++, isAvailable: () => true }) }
+    )
+
+    expect(leases.alpha).not.toBeNull()
+    expect(leases.beta).not.toBeNull()
+    expect(owners).toEqual(["session:alpha", "session:beta"])
+  })
+
   it("revokes a deleted session without disturbing another session", async () => {
     const authorizations = new Map<string, () => string | null>()
     let activeSession = ""
