@@ -129,7 +129,7 @@ test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ 
 
   // Resumed: the gate resolves and the approved command runs to completion.
   await expect(window.getByText("Allowed")).toBeVisible({ timeout: 20_000 })
-  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("Implemented rate limiting and verified 1 passed.")).toBeVisible({ timeout: 20_000 })
 })
 
 test("Auto mode runs the command without pausing for approval", async ({ launchApp }) => {
@@ -151,7 +151,7 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
   await composer.press("Enter")
 
   // The command runs to completion with no gate ever shown.
-  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 25_000 })
+  await expect(window.getByText("Implemented rate limiting and verified 1 passed.")).toBeVisible({ timeout: 25_000 })
   await expect(window.getByText("Approval needed · run a command")).toHaveCount(0)
 })
 
