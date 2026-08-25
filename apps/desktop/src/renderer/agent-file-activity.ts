@@ -118,6 +118,10 @@ export const clearAgentFileActivitySession = (sessionId: string): void => {
   for (const key of activities.keys()) {
     if (!key.startsWith(prefix)) continue
     activities.delete(key)
+    changed = true
+  }
+  for (const key of touchedFiles.keys()) {
+    if (!key.startsWith(prefix)) continue
     touchedFiles.delete(key)
     changed = true
   }

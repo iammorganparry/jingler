@@ -59,7 +59,10 @@ export interface SessionSplitProps {
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
-    ctx: { readonly onSelectConversation: () => void }
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
+    }
   ) => ReactNode
   /** Rename a session from its pane title. */
   onRenameSession?: (id: string, title: string) => void

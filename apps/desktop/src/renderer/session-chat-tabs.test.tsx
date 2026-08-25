@@ -172,6 +172,28 @@ afterEach(() => {
 })
 
 describe("SessionChatTabs subagent tabs", () => {
+  it("does not mark a subagent selected while Files owns the pane", () => {
+    const worker = subagentNode()
+    act(() => publishSubagentTabs(session.id, {
+      chatId: "chat-1",
+      active: [worker],
+      completed: [],
+      selectedId: worker.id
+    }))
+
+    render(
+      <SessionSubagentTabs
+        session={session}
+        filesActive
+        onSelectConversation={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "worker · Implement tabs" }).getAttribute("aria-current")
+    ).toBeNull()
+  })
+
   it("selects a live worker tab and moves completed output into Previous chats", () => {
     const worker = subagentNode()
     const reviewer = subagentNode({

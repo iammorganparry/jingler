@@ -1876,6 +1876,7 @@ function AuthedApp({
         renderSubagentTabs={(session: Session, ctx) => (
           <SessionSubagentTabs
             session={session}
+            filesActive={ctx.activeTabId === "files"}
             onSelectConversation={ctx.onSelectConversation}
           />
         )}

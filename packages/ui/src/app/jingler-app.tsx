@@ -361,7 +361,10 @@ export interface JinglerAppProps {
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
-    ctx: { readonly onSelectConversation: () => void }
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
+    }
   ) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>

@@ -178,7 +178,10 @@ export interface SessionPaneProps {
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
-    ctx: { readonly onSelectConversation: () => void }
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
+    }
   ) => ReactNode
   /** Rename the session from the tab-row title. */
   onRenameSession?: (id: string, title: string) => void
@@ -697,6 +700,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         onMovePaneRight={props.onMovePaneRight}
       />
       {props.renderSubagentTabs?.(active, {
+        activeTabId: activeTab,
         onSelectConversation: () => selectTab(BUILTIN_TAB.conversation)
       })}
 

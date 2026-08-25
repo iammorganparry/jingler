@@ -15,6 +15,7 @@ export function AgentRoster({
   const [target, setTarget] = useState<string | null>(null)
   const [text, setText] = useState("")
   const [status, setStatus] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
   const peers = agents.filter((agent) => agent.chatId !== currentChatId)
   if (peers.length === 0) return null
   return (
@@ -41,17 +42,18 @@ export function AgentRoster({
             {target === agent.chatId && (
               <form className="mt-1.5 flex gap-1" onSubmit={(event) => {
                 event.preventDefault()
-                if (!text.trim()) return
+                if (!text.trim() || sending) return
+                setSending(true)
                 void onMessage(agent.chatId, text.trim()).then((result) => {
                   setStatus(result.status)
                   if (result.status === "delivered") {
                     setText("")
                     setTarget(null)
                   }
-                })
+                }).catch(() => setStatus("failed")).finally(() => setSending(false))
               }}>
-                <input aria-label={`Message to ${agent.title}`} value={text} onChange={(event) => setText(event.target.value)} className="min-w-0 flex-1 rounded border border-line bg-editor px-2 py-1 outline-none" />
-                <button type="submit" className="rounded bg-blue px-2 py-1 text-white">Send</button>
+                <input disabled={sending} aria-label={`Message to ${agent.title}`} value={text} onChange={(event) => setText(event.target.value)} className="min-w-0 flex-1 rounded border border-line bg-editor px-2 py-1 outline-none" />
+                <button disabled={sending} type="submit" className="rounded bg-blue px-2 py-1 text-white disabled:opacity-60">Send</button>
               </form>
             )}
           </div>

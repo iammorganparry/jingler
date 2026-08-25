@@ -24,9 +24,11 @@ import {
 
 export function SessionSubagentTabs({
   session,
+  filesActive = false,
   onSelectConversation
 }: {
   readonly session: Session
+  readonly filesActive?: boolean
   readonly onSelectConversation: () => void
 }) {
   const snapshots = useSessionSubagentTabs(session.id)
@@ -41,7 +43,7 @@ export function SessionSubagentTabs({
         title: `${node.agent} · ${node.task}`,
         status: node.status === "needs-attention" ? "attention" : "running"
       }))}
-      activeSubagentId={active?.selectedId}
+      activeSubagentId={filesActive ? undefined : active?.selectedId}
       onSelectSubagent={(nodeId) => {
         onSelectConversation()
         selectSubagentTab(session.id, session.activeChatId, nodeId)

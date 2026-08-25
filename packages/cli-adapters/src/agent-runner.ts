@@ -2210,8 +2210,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               const currentSession = yield* SessionStore.get(sessionId)
               const running = yield* Ref.get(active)
               const files = yield* Ref.get(touchedFiles)
-              return yield* Effect.forEach(currentSession.chats, (chat) =>
-                Effect.gen(function* () {
+              return yield* Effect.forEach(
+                currentSession.chats.filter((chat) => chat.id !== chatId),
+                (chat) =>
+                  Effect.gen(function* () {
                   const document = currentSession.worktreePath
                     ? yield* PlanStore.readDocument(
                         currentSession.worktreePath,
