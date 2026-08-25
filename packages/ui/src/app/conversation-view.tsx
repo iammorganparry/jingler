@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type {
   Attachment,
   ExecutionMode,
@@ -30,7 +30,7 @@ import { ThinkingOrb } from "../components/loading.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import { MessageTurn, ToolStopContext } from "../composites/message-turn.js"
-import { MessageScroller } from "../composites/beui/messages.js"
+import { createMessageRailPreview, MessageScroller } from "../composites/beui/messages.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
 import { RunStats } from "../composites/run-stats.js"
@@ -290,7 +290,7 @@ export function ConversationView({
   // left edges stay aligned — that alignment is what makes the composer read as
   // the bottom of the same column rather than a separate strip.
   const gutter = atLeast(useWidthTier(), "mid") ? "px-[30px]" : "px-3"
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLElement>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
   // MessageScroller owns live-edge following. Keeping the current decision in
   // state lets history paging pause it without racing the scroller's observer.
@@ -365,6 +365,17 @@ export function ConversationView({
     itemKeyState.current = { messages, keys, next: previousKeys.next }
   }
   const itemKeys = itemKeyState.current.keys
+  const messageRailItems = useMemo(() => messages.map((message, index) => {
+    const text = message.parts.filter(part => part._tag === "Text").map(part => part.text).join(" ")
+    const response = message.role === "user"
+      ? messages.slice(index + 1).find(candidate => candidate.role === "assistant")?.parts.filter(part => part._tag === "Text").map(part => part.text).join(" ") ?? ""
+      : ""
+    return {
+      id: itemKeys[index]!,
+      ...createMessageRailPreview(text, response),
+      ariaLabel: `Go to ${message.role} message ${index + 1} of ${messages.length}`
+    }
+  }), [itemKeys, messages])
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
@@ -375,6 +386,21 @@ export function ConversationView({
     getItemKey: (i) => itemKeys[i]!,
     overscan: 6
   })
+  const virtualItems = virtualizer.getVirtualItems()
+  const viewport = scrollRef.current
+  const activeVirtualItem = viewport && virtualItems.length > 0
+    ? viewport.scrollTop <= 56
+      ? virtualItems[0]
+      : viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 56
+        ? virtualItems.at(-1)
+        : virtualItems.reduce((nearest, item) =>
+            Math.abs(item.start + item.size / 2 - viewport.scrollTop - viewport.clientHeight / 2) <
+            Math.abs(nearest.start + nearest.size / 2 - viewport.scrollTop - viewport.clientHeight / 2)
+              ? item
+              : nearest
+          )
+    : virtualItems[0]
+  const activeRailId = activeVirtualItem ? itemKeys[activeVirtualItem.index] : itemKeys[0]
 
   // Preserve the viewport across a "Load earlier" prepend: capture the scroll
   // metrics at click, then after the older page lands add back exactly the height
@@ -413,6 +439,16 @@ export function ConversationView({
           />
         )}
         <MessageScroller
+          navigation="rail"
+          navigationItems={messageRailItems}
+          navigationActiveId={activeRailId}
+          onNavigationSelect={item => {
+            const index = itemKeys.indexOf(item.id)
+            if (index < 0) return
+            const last = index === messages.length - 1
+            setFollowing(last)
+            virtualizer.scrollToIndex(index, { align: last ? "end" : "center" })
+          }}
           followOutput={following}
           onFollowChange={setFollowing}
           busy={busy}
