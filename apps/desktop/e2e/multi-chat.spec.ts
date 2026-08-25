@@ -80,6 +80,29 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
   await expect(third.window.getByTitle("1. Chat 1")).toHaveAttribute("aria-current", "page")
 })
 
+test("a new chat stays empty while its own transcript loads", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{ ...session, worktreePath: context.repoPath }],
+    transcripts: { s_multi: mainConversation }
+  })
+
+  await sessionRow(launched.window, "Multi-chat lifecycle").click()
+  const priorContent = launched.window.getByText("The release checklist is ready.")
+  await expect(priorContent).toBeVisible()
+  await launched.window.getByRole("button", { name: "New chat" }).click()
+  await expect(launched.window.getByTitle("2. Chat 2")).toHaveAttribute(
+    "aria-current",
+    "page"
+  )
+
+  await Promise.all([250, 500, 1_000, 2_000, 4_000].map(async (delay) => {
+    await launched.window.waitForTimeout(delay)
+    expect(await priorContent.count()).toBe(0)
+  }))
+})
+
 test("a closed chat can be reopened with its transcript after a real app restart", async ({
   launchApp
 }) => {

@@ -1820,7 +1820,11 @@ function AuthedApp({
           <ExplanationPane sessionId={session.id} />
         )}
         renderConversation={(session: Session, view, ctx) => (
+          // The registry keeps each actor alive, but React state must remount per
+          // chat or useSelector can display the previous actor until the new
+          // transcript load emits its first transition.
           <ConversationPane
+            key={`${session.id}:${session.activeChatId}`}
             session={session}
             environments={environmentController.environments}
             providerCatalog={providerCatalog.catalog}

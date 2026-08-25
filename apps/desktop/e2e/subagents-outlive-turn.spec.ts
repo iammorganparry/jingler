@@ -61,6 +61,27 @@ test("live subagents get chat-row tabs and completed output moves to Previous ch
   await expect(window.getByRole("menuitem", { name: /Open .*Audit the theme tokens/ })).toBeVisible()
 })
 
+test("a new chat never renders the previous chat's live subagents", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[held-subagents]] map the UI")
+  await composer.press("Enter")
+  const first = window.getByRole("button", { name: FIRST_AGENT })
+  const second = window.getByRole("button", { name: SECOND_AGENT })
+  await expect(first).toBeVisible({ timeout: 15_000 })
+  await expect(second).toBeVisible()
+
+  await window.getByRole("button", { name: "New chat" }).click()
+  await expect(window.getByTitle("2. Chat 2")).toHaveAttribute("aria-current", "page")
+  await Promise.all([250, 500, 1_000, 2_000, 4_000].map(async (delay) => {
+    await window.waitForTimeout(delay)
+    expect(await first.count()).toBe(0)
+    expect(await second.count()).toBe(0)
+  }))
+})
+
 test("selecting a direct child opens its transcript and the parent chat restores Main", async ({
   launchApp
 }) => {
