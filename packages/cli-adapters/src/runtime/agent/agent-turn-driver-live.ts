@@ -34,6 +34,8 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
   publishExplanation: (explanation: Parameters<NonNullable<AgentContext["publishExplanation"]>>[0]) =>
     context.publishExplanation?.(explanation) ?? Effect.void,
   discardPlan: () => context.discardPlan?.() ?? Effect.void,
+  listPeerAgents: context.listPeerAgents,
+  messagePeerAgent: context.messagePeerAgent,
   proposePlan: (plan: Parameters<AgentContext["proposePlan"]>[0]) =>
     context.proposePlan(plan).pipe(
       Effect.map((decision) =>

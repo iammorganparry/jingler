@@ -9,12 +9,13 @@
  * and there is nothing shared to hoist that would be simpler than the calls.
  */
 import type { Session } from "@jingler/core"
-import { ChatTabBar, FileIcon, SubagentTabBar } from "@jingler/ui"
+import { AgentRoster, ChatTabBar, FileIcon, SubagentTabBar } from "@jingler/ui"
 import { X } from "lucide-react"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
 import { disposeChatActor, rehomeSharedPlan, useChatActivities } from "./conversation-registry.js"
 import { clearDraft } from "./draft-store.js"
+import { useAgentRoster } from "./agent-roster.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import {
   selectSubagentTab,
@@ -31,7 +32,9 @@ export function SessionSubagentTabs({
   const snapshots = useSessionSubagentTabs(session.id)
   const active = snapshots.find(({ chatId }) => chatId === session.activeChatId)
   const subagents = active?.active ?? []
+  const roster = useAgentRoster(session)
   return (
+    <>
     <SubagentTabBar
       subagents={subagents.map((node) => ({
         id: node.id,
@@ -44,6 +47,14 @@ export function SessionSubagentTabs({
         selectSubagentTab(session.id, session.activeChatId, nodeId)
       }}
     />
+    <AgentRoster
+      agents={roster}
+      currentChatId={session.activeChatId}
+      onMessage={(toChatId, text) =>
+        rpc.agentMessagePeer(session.id, session.activeChatId, toChatId, text)
+      }
+    />
+    </>
   )
 }
 

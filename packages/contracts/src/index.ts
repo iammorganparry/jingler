@@ -116,6 +116,7 @@ import {
   SetSessionProviderModelInput,
   VerifyProviderModelInput,
   AgentResourceRpcError,
+  PeerAgentMessageResult,
   ManagedMcpImportInput,
   ManagedMcpServer,
   ManagedResource,
@@ -1296,6 +1297,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * Add input to a live pi turn. Compaction temporarily defers it; providers
    * without steering support report unsupported so the renderer can stop/replay.
    */
+  Rpc.make("Agent.messagePeer", {
+    success: PeerAgentMessageResult,
+    error: GitError,
+    payload: {
+      sessionId: Schema.String,
+      fromChatId: Schema.String,
+      toChatId: Schema.String,
+      text: Schema.String
+    }
+  }),
+
   Rpc.make("Agent.steer", {
     success: Schema.Union(
       Schema.Struct({

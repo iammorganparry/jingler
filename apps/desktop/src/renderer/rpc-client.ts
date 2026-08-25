@@ -924,6 +924,12 @@ export const rpc = {
     request: SubagentFleetControlRequest
   ): Promise<SubagentFleetControlOutcome> =>
     run((c) => c.Agent.controlSubagent({ sessionId, chatId, request })),
+  agentMessagePeer: (
+    sessionId: string,
+    fromChatId: string,
+    toChatId: string,
+    text: string
+  ) => run((c) => c.Agent.messagePeer({ sessionId, fromChatId, toChatId, text })),
   agentSteer: (
     sessionId: string,
     chatId: string,

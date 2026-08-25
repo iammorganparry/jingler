@@ -59,6 +59,35 @@ export const createJinglerControlTools = (
       execute: (request) => Effect.runPromise(context.askQuestion(request))
     })
   )
+  if (context.listPeerAgents !== undefined) {
+    registry.register(
+      controlTool({
+        id: "jingler_list_agents",
+        description: "List peer top-level agents in this session, including their current work and touched files.",
+        input: Schema.Struct({}),
+        providerInputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
+          additionalProperties: false
+        },
+        roles,
+        execute: () => Effect.runPromise(context.listPeerAgents!())
+      })
+    )
+  }
+  if (context.messagePeerAgent !== undefined) {
+    registry.register(
+      controlTool({
+        id: "jingler_message_agent",
+        description: "Send an attributed direct message to another top-level agent in this session.",
+        input: Schema.Struct({ targetChatId: Schema.String, text: Schema.String }),
+        roles,
+        execute: ({ targetChatId, text }) =>
+          Effect.runPromise(context.messagePeerAgent!(targetChatId, text))
+      })
+    )
+  }
   registry.register(
     controlTool({
       id: "jingler_save_draft_plan",

@@ -1,6 +1,8 @@
 import type {
   Attachment,
+  AgentRosterEntry,
   ExplanationPayload,
+  PeerAgentMessageResult,
   PermissionMode,
   PiRunSpec,
   Plan,
@@ -152,6 +154,11 @@ export interface AgentContext {
    * unsupported rather than offering a button that does nothing.
    */
   readonly registerBackgroundStop: (stop: StopBackgroundTask) => Effect.Effect<void>
+  readonly listPeerAgents?: () => Effect.Effect<ReadonlyArray<AgentRosterEntry>>
+  readonly messagePeerAgent?: (
+    targetChatId: string,
+    text: string
+  ) => Effect.Effect<PeerAgentMessageResult>
   /**
    * Publish Codex's live `turn/steer` handle. Passing null marks phases such as
    * native compaction where direct input is temporarily unavailable.

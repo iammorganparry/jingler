@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type {
+  AgentRosterEntry,
   ApprovalGate,
   Attachment,
   ContentPart,
@@ -8,6 +9,7 @@ import type {
   ExternalInstructionIdentity,
   GateDecision,
   Message,
+  PeerAgentMessageResult,
   PermissionMode,
   Plan,
   PlanApprovalResult,
@@ -60,6 +62,7 @@ import {
 } from "./turn-prompt.js"
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
+import { routePeerAgentMessage } from "./peer-agent-coordination.js"
 import { planExecutionNote, planNote } from "./plan-prompt.js"
 import { capturePlanEmission, stripPlanJsonBlock } from "./plan-json.js"
 import {
@@ -326,6 +329,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     const execDefaults = yield* Ref.make(new Map<string, PermissionMode>())
     // chatId → live handles onto the current run, for the out-of-band plan RPCs.
     const active = yield* Ref.make(new Map<string, ActiveRun>())
+    const touchedFiles = yield* Ref.make(new Map<string, ReadonlyArray<string>>())
     // chatId → the fiber running the agent, so `stop` can interrupt it.
     // Interruption is the ONLY thing that reaches the underlying provider turn:
     // the production driver interrupts pi in an `onInterrupt` finalizer. Nothing
@@ -1737,6 +1741,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // Remember an edit's target path so its ToolEnd can tie back to a step.
               if (event._tag === "ToolStart" && isFileMutationTool(event.name) && event.target) {
                 yield* Ref.update(editTargets, (m) => new Map(m).set(event.id, event.target!))
+                const path = normalizePath(event.target).replace(
+                  `${normalizePath(worktreePath).replace(/\/$/, "")}/`,
+                  ""
+                )
+                yield* Ref.update(touchedFiles, (current) => {
+                  const paths = current.get(chatId) ?? []
+                  return paths.includes(path)
+                    ? current
+                    : new Map(current).set(chatId, [...paths, path].slice(-20))
+                })
               }
               // Canonical plan writes must land BEFORE the event is offered.
               // `Done` makes the renderer leave its invoked stream immediately;
@@ -2173,6 +2187,71 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             yield* emit({ _tag: "ContextCompacted", digest, tokensBefore: compactedFrom })
           }
 
+          const listPeerAgents = (): Effect.Effect<ReadonlyArray<AgentRosterEntry>> =>
+            Effect.gen(function* () {
+              const currentSession = yield* SessionStore.get(sessionId)
+              const running = yield* Ref.get(active)
+              const files = yield* Ref.get(touchedFiles)
+              return yield* Effect.forEach(currentSession.chats, (chat) =>
+                Effect.gen(function* () {
+                  const document = currentSession.worktreePath
+                    ? yield* PlanStore.readDocument(
+                        currentSession.worktreePath,
+                        sessionId,
+                        chat.id
+                      )
+                    : null
+                  const stage = document?.plan.stages.find(
+                    (candidate) =>
+                      candidate.tasks?.some((task) => task.status === "in-progress")
+                  )
+                  return {
+                    chatId: chat.id,
+                    title: chat.title ?? "Untitled agent",
+                    status: running.has(chat.id) ? "running" as const : "idle" as const,
+                    task: chat.title,
+                    planStage: stage?.title ?? null,
+                    touchedFiles: [...(files.get(chat.id) ?? [])],
+                    updatedAt: chat.updatedAt
+                  }
+                })
+              )
+            }).pipe(
+              Effect.provide(env),
+              Effect.orElseSucceed(() => [] as ReadonlyArray<AgentRosterEntry>)
+            )
+
+          const messagePeerAgent = (
+            targetChatId: string,
+            text: string
+          ): Effect.Effect<PeerAgentMessageResult> =>
+            SessionStore.get(sessionId).pipe(
+              Effect.flatMap((currentSession) =>
+                routePeerAgentMessage(
+                  currentSession.chats,
+                  chatId,
+                  targetChatId,
+                  text,
+                  (target, attributedText) =>
+                    Ref.get(active).pipe(
+                      Effect.flatMap((runs) => {
+                        const run = runs.get(target)
+                        return run === undefined
+                          ? Effect.succeed(false)
+                          : run.steer(attributedText, []).pipe(
+                              Effect.map((result) => result.status === "accepted")
+                            )
+                      })
+                    )
+                )
+              ),
+              Effect.provide(env),
+              Effect.orElseSucceed(() => ({
+                status: "unavailable" as const,
+                targetChatId
+              }))
+            )
+
           const adapterRun = adapter.run(chatId, spec, {
             emit,
             canUseTool,
@@ -2181,6 +2260,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             saveDraftPlan,
             publishExplanation,
             discardPlan,
+            listPeerAgents,
+            messagePeerAgent,
             registerBackgroundStop,
             registerTurnSteer
           })
@@ -2591,6 +2672,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* approvals.forgetChat(chatId)
         yield* drop(priorModes)
         yield* drop(execDefaults)
+        yield* drop(touchedFiles)
       })
 
     /**

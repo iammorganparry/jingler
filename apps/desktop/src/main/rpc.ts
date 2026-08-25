@@ -70,6 +70,7 @@ import {
   UsageService,
   fetchPiProviderUsage,
   readLocalClaudeCliAccessToken,
+  routePeerAgentMessage,
   adoptableChatIdentities,
   sessionNeedsRuntimeIdentity,
   WorkspaceService,
@@ -5741,6 +5742,25 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     }).pipe(
       Effect.mapError(
         (cause) => new GitError({ message: "Could not control the subagent", cause })
+      )
+    ),
+  "Agent.messagePeer": ({ sessionId, fromChatId, toChatId, text }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      const runner = yield* AgentRunner
+      return yield* routePeerAgentMessage(
+        session.chats,
+        fromChatId,
+        toChatId,
+        text,
+        (target, attributedText) =>
+          runner.steer(sessionId, target, attributedText, []).pipe(
+            Effect.map((result) => result.status === "accepted")
+          )
+      )
+    }).pipe(
+      Effect.mapError((cause) =>
+        new GitError({ message: "Could not message the peer agent", cause })
       )
     ),
   "Agent.steer": ({ sessionId, chatId, text, images }) =>
