@@ -43,14 +43,14 @@ interface JinglerBridge {
    * Fires on every BrowserControl op. Returns an unsubscribe fn.
    */
   readonly onPreviewReveal: (
-    cb: (payload: { readonly sessionId: string; readonly url: string }) => void
+    cb: (payload: { readonly sessionId: string; readonly chatId: string; readonly url: string }) => void
   ) => () => void
   /**
    * Subscribe to committed main-frame URL changes from the embedded browser.
    * Returns an unsubscribe fn.
    */
   readonly onPreviewUrlChanged: (
-    cb: (payload: { readonly sessionId: string; readonly url: string }) => void
+    cb: (payload: { readonly sessionId: string; readonly chatId: string; readonly url: string }) => void
   ) => () => void
   /** Main is waiting to close the window until dirty plan drafts are saved. */
   readonly onPlanFlushRequested: (cb: () => void) => () => void

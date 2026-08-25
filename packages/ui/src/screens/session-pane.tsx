@@ -178,9 +178,9 @@ export interface SessionPaneProps {
   /** Rename the session from the tab-row title. */
   onRenameSession?: (id: string, title: string) => void
   /** Toggle the embedded browser that belongs to this session. */
-  onToggleBrowser?: (sessionId: string) => void
+  onToggleBrowser?: (sessionId: string, chatId: string) => void
   /** Read this session's browser visibility without borrowing focused state. */
-  isBrowserActive?: (sessionId: string) => boolean
+  isBrowserActive?: (sessionId: string, chatId: string) => boolean
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /** Session ids with a published focused visual explanation. */
@@ -307,7 +307,11 @@ function SessionPaneBody(props: SessionPaneProps) {
       previous.sessionId === props.session.id &&
       previous.chatId !== props.session.activeChatId
     ) {
-      setTab(BUILTIN_TAB.conversation)
+      setTab(
+        props.isBrowserActive?.(props.session.id, props.session.activeChatId)
+          ? BUILTIN_TAB.browser
+          : BUILTIN_TAB.conversation
+      )
       setTarget(null)
       setSplit(false)
       setDraftPlanSessionId(null)
@@ -316,7 +320,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       sessionId: props.session.id,
       chatId: props.session.activeChatId
     }
-  }, [props.session.activeChatId, props.session.id])
+  }, [props.isBrowserActive, props.session.activeChatId, props.session.id])
   const hasExplanation = props.explanationSessions?.has(props.session.id) ?? false
   const supportsAuxiliarySplit =
     paneWidth === 0 || paneWidth >= SESSION_AUXILIARY_SPLIT_BREAKPOINT
@@ -416,7 +420,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   }, [tabRequestNonce])
 
   const active = props.session
-  const browserActive = props.isBrowserActive?.(active.id) ?? false
+  const browserActive = props.isBrowserActive?.(active.id, active.activeChatId) ?? false
   const previousBrowserActive = useRef(false)
   useEffect(() => {
     if (browserActive && !previousBrowserActive.current && tab !== BUILTIN_TAB.browser) {
@@ -449,9 +453,9 @@ function SessionPaneBody(props: SessionPaneProps) {
         }
       }
       if (nextTab === BUILTIN_TAB.browser && !browserActive) {
-        props.onToggleBrowser?.(active.id)
+        props.onToggleBrowser?.(active.id, active.activeChatId)
       } else if (nextTab !== BUILTIN_TAB.browser && browserActive) {
-        props.onToggleBrowser?.(active.id)
+        props.onToggleBrowser?.(active.id, active.activeChatId)
       }
       if (nextTab === BUILTIN_TAB.plan) openPlanReview()
       else setTab(nextTab)

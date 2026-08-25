@@ -293,9 +293,9 @@ export interface JinglerAppProps {
   /** Render the embedded browser inside its owning session pane. */
   renderBrowser?: (session: Session) => ReactNode
   /** Toggle the Browser tab belonging to the named session. */
-  onToggleBrowser?: (sessionId: string) => void
+  onToggleBrowser?: (sessionId: string, chatId: string) => void
   /** Whether the named session's Browser tab is currently open. */
-  isBrowserActive?: (sessionId: string) => boolean
+  isBrowserActive?: (sessionId: string, chatId: string) => boolean
   activeSessionId?: string | null
   /**
    * Select a session from OUTSIDE the shell — a notification click, a deep link.
@@ -814,7 +814,7 @@ export function JinglerApp({
         onToggleBrowser
       ) {
         e.preventDefault()
-        onToggleBrowser(active.id)
+        onToggleBrowser(active.id, active.activeChatId)
         return
       }
 
@@ -948,11 +948,11 @@ export function JinglerApp({
         kind: "action",
         // The label names what the chord will DO, not what is currently true —
         // "Browser: on" would leave you working out which way to read it.
-        label: isBrowserActive?.(active.id) ? "Hide Browser" : "Show Browser",
+        label: isBrowserActive?.(active.id, active.activeChatId) ? "Hide Browser" : "Show Browser",
         group: PALETTE_GROUP.actions,
         hint: "⌃⇧B",
         icon: MonitorPlay,
-        run: () => onToggleBrowser(active.id)
+        run: () => onToggleBrowser(active.id, active.activeChatId)
       })
     }
 

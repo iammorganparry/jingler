@@ -63,9 +63,9 @@ export interface SessionConversationProps {
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
   /** Toggle the browser belonging to the named session. */
-  onToggleBrowser?: (sessionId: string) => void
+  onToggleBrowser?: (sessionId: string, chatId: string) => void
   /** Whether the named session's browser is currently visible. */
-  isBrowserActive?: (sessionId: string) => boolean
+  isBrowserActive?: (sessionId: string, chatId: string) => boolean
   /** Promote or demote a session from the persistent tray. */
   onSetSessionPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session from the sidebar quick-actions (undoable). */

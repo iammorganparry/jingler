@@ -1958,11 +1958,11 @@ function AuthedApp({
             onSideChange={termDock.setSide}
           />
         )}
-        isBrowserActive={(sessionId) =>
-          browserDock.forSession(sessionId).visible
+        isBrowserActive={(sessionId, chatId) =>
+          browserDock.forAgent(sessionId, chatId).visible
         }
-        onToggleBrowser={(sessionId) =>
-          browserDock.forSession(sessionId).toggle()
+        onToggleBrowser={(sessionId, chatId) =>
+          browserDock.forAgent(sessionId, chatId).toggle()
         }
         renderBrowser={(session) => (
           <PreviewDockView session={session} dock={browserDock} />

@@ -5227,7 +5227,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         yield* runner.stop(sessionId, chat.id, true);
       }
       yield* browserControl.revoke(sessionId);
-      yield* preview.deleteSession(sessionId);
+      yield* preview.deleteSession(sessionId, chats.map((chat) => chat.id));
       yield* BackgroundTaskStore.clear(sessionId);
       const offload = yield* makeOffloadCommandRouter
       yield* offload.destroySession(sessionId).pipe(Effect.ignore)
@@ -6151,44 +6151,44 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
   // Browser preview — a native WebContentsView over a localhost dev server,
   // driven from the renderer's preview pane (bounds streamed to stay aligned).
-  "BrowserPreview.open": ({ sessionId, url, bounds }) =>
+  "BrowserPreview.open": ({ sessionId, chatId, url, bounds }) =>
     Effect.flatMap(PreviewViewService, (b) =>
-      b.openBrowser(sessionId, url, bounds),
+      b.openBrowser(sessionId, chatId, url, bounds),
     ),
-  "BrowserPreview.setBounds": ({ sessionId, bounds }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.setBounds(sessionId, bounds)),
-  "BrowserPreview.navigate": ({ sessionId, url }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.navigate(sessionId, url)),
-  "BrowserPreview.reload": ({ sessionId }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.reload(sessionId)),
-  "BrowserPreview.setVisible": ({ sessionId, visible }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.setVisible(sessionId, visible)),
+  "BrowserPreview.setBounds": ({ sessionId, chatId, bounds }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.setBounds(sessionId, chatId, bounds)),
+  "BrowserPreview.navigate": ({ sessionId, chatId, url }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.navigate(sessionId, chatId, url)),
+  "BrowserPreview.reload": ({ sessionId, chatId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.reload(sessionId, chatId)),
+  "BrowserPreview.setVisible": ({ sessionId, chatId, visible }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.setVisible(sessionId, chatId, visible)),
   // Browser control — the SAME native view, driven by an agent (via the
   // browser-control MCP) so it can QA a preview URL where the operator watches.
   // Each op reveals the dock inside PreviewViewService.
-  "BrowserControl.navigate": ({ sessionId, url }) =>
+  "BrowserControl.navigate": ({ sessionId, chatId, url }) =>
     Effect.flatMap(PreviewViewService, (b) =>
-      b.controlNavigate(sessionId, url),
+      b.controlNavigate(sessionId, chatId, url),
     ),
-  "BrowserControl.screenshot": ({ sessionId }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlScreenshot(sessionId)),
-  "BrowserControl.click": ({ sessionId, selector }) =>
+  "BrowserControl.screenshot": ({ sessionId, chatId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlScreenshot(sessionId, chatId)),
+  "BrowserControl.click": ({ sessionId, chatId, selector }) =>
     Effect.flatMap(PreviewViewService, (b) =>
-      b.controlClick(sessionId, selector),
+      b.controlClick(sessionId, chatId, selector),
     ),
-  "BrowserControl.type": ({ sessionId, selector, text }) =>
+  "BrowserControl.type": ({ sessionId, chatId, selector, text }) =>
     Effect.flatMap(PreviewViewService, (b) =>
-      b.controlType(sessionId, selector, text),
+      b.controlType(sessionId, chatId, selector, text),
     ),
-  "BrowserControl.readText": ({ sessionId }) =>
-    Effect.flatMap(PreviewViewService, (b) => b.controlReadText(sessionId)),
-  "BrowserControl.evaluate": ({ sessionId, expression }) =>
+  "BrowserControl.readText": ({ sessionId, chatId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.controlReadText(sessionId, chatId)),
+  "BrowserControl.evaluate": ({ sessionId, chatId, expression }) =>
     Effect.flatMap(PreviewViewService, (b) =>
-      b.controlEvaluate(sessionId, expression),
+      b.controlEvaluate(sessionId, chatId, expression),
     ),
-  "BrowserControl.waitForSelector": ({ sessionId, selector, timeoutMs }) =>
+  "BrowserControl.waitForSelector": ({ sessionId, chatId, selector, timeoutMs }) =>
     Effect.flatMap(PreviewViewService, (b) =>
-      b.controlWaitForSelector(sessionId, selector, timeoutMs),
+      b.controlWaitForSelector(sessionId, chatId, selector, timeoutMs),
     ),
 
   "Asset.read": (input) => assetRead(input),

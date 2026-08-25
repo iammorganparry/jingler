@@ -267,6 +267,7 @@ export interface BrowserControlMcpServiceShape {
    */
   readonly acquire: (
     sessionId: string,
+    chatId: string,
     ownerId: string
   ) => Effect.Effect<BrowserControlMcpAttachment | null, never, Scope.Scope>
   /** Immediately revoke an owning session's bearer during deletion. */
@@ -420,32 +421,39 @@ export const makeBrowserControlMcpServiceLayer = (
         options.acquireListener ??
         acquireNodeListener(options.serverFactory ?? nodeServerFactory)
 
+      const leaseKey = (sessionId: string, chatId: string): string =>
+        `${sessionId}\0${chatId}`
+
       const revoke = (sessionId: string): Effect.Effect<void> =>
         Effect.sync(() => {
-          const active = activeLeases.get(sessionId)
-          if (active !== undefined) active.attachment = null
-          activeLeases.delete(sessionId)
+          for (const [key, active] of activeLeases) {
+            if (!key.startsWith(`${sessionId}\0`)) continue
+            active.attachment = null
+            activeLeases.delete(key)
+          }
         })
 
       const acquire = (
         sessionId: string,
+        chatId: string,
         ownerId: string
       ): Effect.Effect<BrowserControlMcpAttachment | null, never, Scope.Scope> =>
         Effect.acquireRelease(
           Effect.gen(function* () {
-            if (activeLeases.has(sessionId)) return null
+            const key = leaseKey(sessionId, chatId)
+            if (activeLeases.has(key)) return null
 
             // Reserve synchronously before listener startup yields, so two runs
             // racing inside one session cannot both bind a lease.
             const state: LeaseState = { attachment: null }
-            activeLeases.set(sessionId, state)
+            activeLeases.set(key, state)
             const listener = yield* acquireListener(
-              browser.forSession(sessionId),
+              browser.forAgent(sessionId, chatId),
               () => state.attachment?.headers[AUTH_HEADER] ?? null,
               options.port ?? 0
             )
             if (!listener.isAvailable()) {
-              activeLeases.delete(sessionId)
+              activeLeases.delete(key)
               return null
             }
             const attachment = yield* createAttachment(listener.port)
@@ -456,16 +464,18 @@ export const makeBrowserControlMcpServiceLayer = (
               Effect.logWarning(
                 `Browser MCP lease for ${ownerId} in ${sessionId} could not be created: ${error.message}`
               ).pipe(
-                Effect.tap(() => revoke(sessionId)),
+                Effect.tap(() =>
+                  Effect.sync(() => activeLeases.delete(leaseKey(sessionId, chatId)))
+                ),
                 Effect.as<AcquiredLease | null>(null)
               )
             )
           ),
           (lease) =>
             Effect.sync(() => {
-              if (lease !== null && activeLeases.get(sessionId) === lease.state) {
+              if (lease !== null && activeLeases.get(leaseKey(sessionId, chatId)) === lease.state) {
                 lease.state.attachment = null
-                activeLeases.delete(sessionId)
+                activeLeases.delete(leaseKey(sessionId, chatId))
               }
             })
         ).pipe(Effect.map((lease) => lease?.attachment ?? null))

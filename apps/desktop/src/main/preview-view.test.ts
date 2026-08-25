@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  browserPartitionForSession,
+  browserPartitionForAgent,
   fileUrlFor,
   isHttpUrl,
   toRect
@@ -51,19 +51,19 @@ describe("toRect", () => {
   })
 })
 
-describe("browserPartitionForSession", () => {
-  it("gives each repository session a stable isolated persistent partition", () => {
-    expect(browserPartitionForSession("session-alpha")).toBe(
-      "persist:jingler-browser-preview:session-alpha"
+describe("browserPartitionForAgent", () => {
+  it("gives each agent a stable isolated persistent partition", () => {
+    expect(browserPartitionForAgent("session-alpha", "chat-a")).toBe(
+      "persist:jingler-browser-preview:session-alpha:chat-a"
     )
-    expect(browserPartitionForSession("session-alpha")).not.toBe(
-      browserPartitionForSession("session-beta")
+    expect(browserPartitionForAgent("session-alpha", "chat-a")).not.toBe(
+      browserPartitionForAgent("session-alpha", "chat-b")
     )
   })
 
   it("encodes session ids instead of letting separators alias partitions", () => {
-    expect(browserPartitionForSession("team/a:b")).toBe(
-      "persist:jingler-browser-preview:team%2Fa%3Ab"
+    expect(browserPartitionForAgent("team/a:b", "chat/c:d")).toBe(
+      "persist:jingler-browser-preview:team%2Fa%3Ab:chat%2Fc%3Ad"
     )
   })
 })

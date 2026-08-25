@@ -13,7 +13,8 @@ export interface PreviewDockViewProps {
 
 export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
   const sessionId = session?.id ?? null
-  const browser = dock.forSession(sessionId)
+  const chatId = session?.activeChatId ?? null
+  const browser = dock.forAgent(sessionId, chatId)
 
   return (
     <PreviewDock
@@ -25,14 +26,15 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
       url={browser.url}
       onNavigate={browser.navigate}
       onReload={() => {
-        if (session !== null) void rpc.browserPreviewReload(session.id)
+        if (session !== null) void rpc.browserPreviewReload(session.id, session.activeChatId)
       }}
       renderBrowser={(active) => (
         <BrowserBody
           // Each session tab owns its own measurement surface and native view.
-          key={sessionId ?? "no-session"}
+          key={sessionId === null || chatId === null ? "no-agent" : `${sessionId}:${chatId}`}
           browser={browser}
           sessionId={sessionId}
+          chatId={chatId}
           nativeWanted={active && sessionId !== null}
         />
       )}
@@ -43,10 +45,12 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
 function BrowserBody({
   browser,
   sessionId,
+  chatId,
   nativeWanted
 }: {
   readonly browser: PreviewDockSessionPrefs
   readonly sessionId: string | null
+  readonly chatId: string | null
   readonly nativeWanted: boolean
 }) {
   const { url } = browser
@@ -64,38 +68,39 @@ function BrowserBody({
   const boundsRef = useNativeViewBounds({
     active: nativeWanted,
     onFirstPaintableRect: (rect) => {
-      if (sessionId !== null) {
-        void rpc.browserPreviewOpen(sessionId, urlRef.current, rect).catch(() => {})
-        loadedUrls.current.set(sessionId, urlRef.current)
+      if (sessionId !== null && chatId !== null) {
+        void rpc.browserPreviewOpen(sessionId, chatId, urlRef.current, rect).catch(() => {})
+        loadedUrls.current.set(`${sessionId}:${chatId}`, urlRef.current)
       }
     },
     onBoundsChanged: (rect) => {
-      if (sessionId !== null) void rpc.browserPreviewSetBounds(sessionId, rect)
+      if (sessionId !== null && chatId !== null) void rpc.browserPreviewSetBounds(sessionId, chatId, rect)
     }
   })
 
   useEffect(() => {
-    if (sessionId === null) return
+    if (sessionId === null || chatId === null) return
     return () => {
-      void rpc.browserPreviewSetVisible(sessionId, false)
+      void rpc.browserPreviewSetVisible(sessionId, chatId, false)
     }
-  }, [sessionId])
+  }, [chatId, sessionId])
 
   useEffect(() => {
-    if (sessionId !== null) void rpc.browserPreviewSetVisible(sessionId, nativeVisible)
-  }, [nativeVisible, sessionId])
+    if (sessionId !== null && chatId !== null) void rpc.browserPreviewSetVisible(sessionId, chatId, nativeVisible)
+  }, [chatId, nativeVisible, sessionId])
 
   useEffect(() => {
     if (
       sessionId === null ||
+      chatId === null ||
       !nativeWanted ||
-      !loadedUrls.current.has(sessionId) ||
-      loadedUrls.current.get(sessionId) === url
+      !loadedUrls.current.has(`${sessionId}:${chatId}`) ||
+      loadedUrls.current.get(`${sessionId}:${chatId}`) === url
     ) return
-    loadedUrls.current.set(sessionId, url)
+    loadedUrls.current.set(`${sessionId}:${chatId}`, url)
     if (browser.source === "native") return
-    if (sessionId !== null) void rpc.browserPreviewNavigate(sessionId, url).catch(() => {})
-  }, [browser.source, nativeWanted, sessionId, url])
+    if (sessionId !== null) void rpc.browserPreviewNavigate(sessionId, chatId, url).catch(() => {})
+  }, [browser.source, chatId, nativeWanted, sessionId, url])
 
   const empty = useMemo(
     () => (

@@ -1063,7 +1063,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // parallel. The scoped lease revokes its bearer when the run ends.
           const browserAttachment = yield* (
             yield* BrowserControlMcpService
-          ).acquire(sessionId, `${sessionId}:${chatId}`)
+          ).acquire(sessionId, chatId, `${sessionId}:${chatId}`)
           // Jingler owns this pre-turn boundary, so recall is deterministic for
           // every harness (including Codex, which has no context-injecting hook).
           // The pure query builder adds stable project identity without the

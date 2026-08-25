@@ -1263,28 +1263,31 @@ export const rpc = {
   /** Show the preview view and load `url` at `bounds` (rejects non-http(s)). */
   browserPreviewOpen: (
     sessionId: string,
+    chatId: string,
     url: string,
     bounds: BrowserBounds
   ): Promise<void> =>
-    run((c) => c.BrowserPreview.open({ sessionId, url, bounds })),
+    run((c) => c.BrowserPreview.open({ sessionId, chatId, url, bounds })),
   /** Keep the native view aligned with the pane's on-screen rect. */
   browserPreviewSetBounds: (
     sessionId: string,
+    chatId: string,
     bounds: BrowserBounds
   ): Promise<void> =>
-    run((c) => c.BrowserPreview.setBounds({ sessionId, bounds })),
+    run((c) => c.BrowserPreview.setBounds({ sessionId, chatId, bounds })),
   /** Navigate the open preview to a new URL (rejects non-http(s)). */
-  browserPreviewNavigate: (sessionId: string, url: string): Promise<void> =>
-    run((c) => c.BrowserPreview.navigate({ sessionId, url })),
+  browserPreviewNavigate: (sessionId: string, chatId: string, url: string): Promise<void> =>
+    run((c) => c.BrowserPreview.navigate({ sessionId, chatId, url })),
   /** Reload the current preview page. */
-  browserPreviewReload: (sessionId: string): Promise<void> =>
-    run((c) => c.BrowserPreview.reload({ sessionId })),
+  browserPreviewReload: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.reload({ sessionId, chatId })),
   /** Hide the native view for a tab switch, keeping its page and history alive. */
   browserPreviewSetVisible: (
     sessionId: string,
+    chatId: string,
     visible: boolean
   ): Promise<void> =>
-    run((c) => c.BrowserPreview.setVisible({ sessionId, visible })),
+    run((c) => c.BrowserPreview.setVisible({ sessionId, chatId, visible })),
   // ── Auth ─────────────────────────────────────────────────────────────────
   /** The current authenticated session, or null when signed out. */
   authGetSession: (): Promise<AuthSession | null> =>

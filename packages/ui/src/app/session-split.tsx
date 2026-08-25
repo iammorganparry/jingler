@@ -58,8 +58,8 @@ export interface SessionSplitProps {
   ) => ReactNode
   /** Rename a session from its pane title. */
   onRenameSession?: (id: string, title: string) => void
-  onToggleBrowser?: (sessionId: string) => void
-  isBrowserActive?: (sessionId: string) => boolean
+  onToggleBrowser?: (sessionId: string, chatId: string) => void
+  isBrowserActive?: (sessionId: string, chatId: string) => boolean
   planSessions?: ReadonlySet<string>
   explanationSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>

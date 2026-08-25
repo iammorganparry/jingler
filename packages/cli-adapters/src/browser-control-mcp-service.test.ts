@@ -42,7 +42,7 @@ const stubSessionPort = (
 const stubPort = (
   over: Partial<BrowserControlSessionPortShape> = {}
 ): BrowserControlPortShape => ({
-  forSession: () => stubSessionPort(over)
+  forAgent: () => stubSessionPort(over)
 })
 
 const runWithServiceEffect = <A>(
@@ -76,7 +76,7 @@ const runWithLease = <A>(
     browser,
     (service) =>
       Effect.gen(function* () {
-        const attachment = yield* service.acquire("session-a", "test-run")
+        const attachment = yield* service.acquire("session-a", "chat-session-a", "test-run")
         return yield* Effect.promise(() => use(attachment))
       }),
     options
@@ -230,7 +230,7 @@ loopbackDescribe("BrowserControlMcpService loopback security", () => {
   it("closes an old session listener when its run scope ends and mints a replacement", async () => {
     await runWithServiceEffect(stubPort(), (service) =>
       Effect.gen(function* () {
-        const first = yield* Effect.scoped(service.acquire("session-a", "first"))
+        const first = yield* Effect.scoped(service.acquire("session-a", "chat-session-a", "first"))
         expect(first).not.toBeNull()
         if (first === null) throw new Error("Browser MCP listener was unavailable")
 
@@ -242,7 +242,7 @@ loopbackDescribe("BrowserControlMcpService loopback security", () => {
         )
         expect(oldListenerClosed).toBe(true)
 
-        const second = yield* service.acquire("session-a", "second")
+        const second = yield* service.acquire("session-a", "chat-session-a", "second")
         expect(second).not.toBeNull()
         if (second === null) throw new Error("Replacement browser lease was unavailable")
         expect(second.headers.Authorization).not.toBe(first.headers.Authorization)
@@ -379,8 +379,8 @@ describe("BrowserControlMcpService scoped attachment", () => {
       stubPort(),
       (service) =>
         Effect.gen(function* () {
-          const first = yield* service.acquire("session-a", "first")
-          const second = yield* service.acquire("session-a", "second")
+          const first = yield* service.acquire("session-a", "chat-session-a", "first")
+          const second = yield* service.acquire("session-a", "chat-session-a", "second")
           return { first, second }
         }),
       { acquireListener }
@@ -393,7 +393,7 @@ describe("BrowserControlMcpService scoped attachment", () => {
   it("grants concurrent leases to different sessions and binds each listener port", async () => {
     const boundSessions: string[] = []
     const browser: BrowserControlPortShape = {
-      forSession: (sessionId) => {
+      forAgent: (sessionId) => {
         boundSessions.push(sessionId)
         return stubSessionPort()
       }
@@ -409,8 +409,8 @@ describe("BrowserControlMcpService scoped attachment", () => {
       browser,
       (service) =>
         Effect.gen(function* () {
-          const alpha = yield* service.acquire("alpha", "alpha-run")
-          const beta = yield* service.acquire("beta", "beta-run")
+          const alpha = yield* service.acquire("alpha", "chat-alpha", "alpha-run")
+          const beta = yield* service.acquire("beta", "chat-beta", "beta-run")
           return { alpha, beta }
         }),
       { acquireListener }
@@ -425,7 +425,7 @@ describe("BrowserControlMcpService scoped attachment", () => {
     const authorizations = new Map<string, () => string | null>()
     let activeSession = ""
     const browser: BrowserControlPortShape = {
-      forSession: (sessionId) => {
+      forAgent: (sessionId) => {
         activeSession = sessionId
         return stubSessionPort()
       }
@@ -439,8 +439,8 @@ describe("BrowserControlMcpService scoped attachment", () => {
       browser,
       (service) =>
         Effect.gen(function* () {
-          yield* service.acquire("alpha", "alpha-run")
-          yield* service.acquire("beta", "beta-run")
+          yield* service.acquire("alpha", "chat-alpha", "alpha-run")
+          yield* service.acquire("beta", "chat-beta", "beta-run")
           expect(authorizations.get("alpha")?.()).toMatch(BEARER_PREFIX)
           expect(authorizations.get("beta")?.()).toMatch(BEARER_PREFIX)
           yield* service.revoke("alpha")
@@ -485,12 +485,12 @@ describe("BrowserControlMcpService startup degradation", () => {
       stubPort(),
       (service) =>
         Effect.gen(function* () {
-          const initial = yield* service.acquire("session-a", "initial")
+          const initial = yield* service.acquire("session-a", "chat-session-a", "initial")
           expect(initial).not.toBeNull()
           if (server === null) throw new Error("Browser MCP server was not created")
 
           server.emit("error", new Error("simulated accept failure"))
-          const afterError = yield* service.acquire("session-b", "after-error")
+          const afterError = yield* service.acquire("session-b", "chat-session-b", "after-error")
           return { afterError }
         }),
       { serverFactory }

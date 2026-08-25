@@ -2378,6 +2378,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     error: BrowserPreviewError,
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       url: Schema.String,
       bounds: BrowserBounds
     }
@@ -2385,18 +2386,18 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 
   /** Reposition/resize the view to track the pane's rect (on layout/scroll). No-op if closed. */
   Rpc.make("BrowserPreview.setBounds", {
-    payload: { sessionId: Schema.String, bounds: BrowserBounds }
+    payload: { sessionId: Schema.String, chatId: Schema.String, bounds: BrowserBounds }
   }),
 
   /** Navigate the open view to a new URL. Fails with `BrowserPreviewError` for non-http(s). */
   Rpc.make("BrowserPreview.navigate", {
     error: BrowserPreviewError,
-    payload: { sessionId: Schema.String, url: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String, url: Schema.String }
   }),
 
   /** Reload the current page. No-op if closed. */
   Rpc.make("BrowserPreview.reload", {
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /**
@@ -2405,7 +2406,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * page, its history and its scroll position with it.
    */
   Rpc.make("BrowserPreview.setVisible", {
-    payload: { sessionId: Schema.String, visible: Schema.Boolean }
+    payload: { sessionId: Schema.String, chatId: Schema.String, visible: Schema.Boolean }
   }),
 
   // ── Browser control (agent QA) ───────────────────────────────────────────────
@@ -2420,20 +2421,20 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Navigate the browser to `url` (http/https only) and reveal the dock. */
   Rpc.make("BrowserControl.navigate", {
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, url: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String, url: Schema.String }
   }),
 
   /** A PNG screenshot of the current page, base64-encoded — the agent's eyes. */
   Rpc.make("BrowserControl.screenshot", {
     success: Schema.Struct({ pngBase64: Schema.String }),
     error: BrowserControlError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /** Click the first element matching `selector`. Fails if nothing matches. */
   Rpc.make("BrowserControl.click", {
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, selector: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String, selector: Schema.String }
   }),
 
   /**
@@ -2444,6 +2445,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     error: BrowserControlError,
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       selector: Schema.String,
       text: Schema.String
     }
@@ -2453,14 +2455,14 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("BrowserControl.readText", {
     success: Schema.Struct({ text: Schema.String }),
     error: BrowserControlError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /** Evaluate `expression` in the page and return its `String(...)` result. */
   Rpc.make("BrowserControl.evaluate", {
     success: Schema.Struct({ result: Schema.String }),
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, expression: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String, expression: Schema.String }
   }),
 
   /** Resolve once `selector` appears in the DOM, or fail after `timeoutMs`. */
@@ -2468,6 +2470,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     error: BrowserControlError,
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       selector: Schema.String,
       timeoutMs: Schema.Number
     }
