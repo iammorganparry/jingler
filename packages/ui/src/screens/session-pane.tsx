@@ -295,7 +295,28 @@ function SessionPaneBody(props: SessionPaneProps) {
   // without making an unrelated session look as though it has a plan.
   const [draftPlanSessionId, setDraftPlanSessionId] = useState<string | null>(null)
   const paneWidth = usePaneWidth().width
-  const hasPlan = props.planSessions?.has(props.session.id) ?? false
+  const hasPlan =
+    props.planSessions?.has(props.session.activeChatId) ?? false
+  const previousOwner = useRef({
+    sessionId: props.session.id,
+    chatId: props.session.activeChatId
+  })
+  useEffect(() => {
+    const previous = previousOwner.current
+    if (
+      previous.sessionId === props.session.id &&
+      previous.chatId !== props.session.activeChatId
+    ) {
+      setTab(BUILTIN_TAB.conversation)
+      setTarget(null)
+      setSplit(false)
+      setDraftPlanSessionId(null)
+    }
+    previousOwner.current = {
+      sessionId: props.session.id,
+      chatId: props.session.activeChatId
+    }
+  }, [props.session.activeChatId, props.session.id])
   const hasExplanation = props.explanationSessions?.has(props.session.id) ?? false
   const supportsAuxiliarySplit =
     paneWidth === 0 || paneWidth >= SESSION_AUXILIARY_SPLIT_BREAKPOINT

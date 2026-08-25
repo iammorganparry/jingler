@@ -215,12 +215,12 @@ export function ConversationPane({
     handledPlanDraftPresentation.current = convo.planDraftPresentationNonce
     if (
       onPlanDraftAvailable !== undefined &&
-      claimPlanAutoPresentation(session.id)
+      claimPlanAutoPresentation(activeChat.id)
     ) {
       onPlanDraftAvailable()
     }
-  }, [convo.planDraftPresentationNonce, onPlanDraftAvailable, session.id])
-  const canonicalPlan = usePlanDocument(session.id)
+  }, [activeChat.id, convo.planDraftPresentationNonce, onPlanDraftAvailable])
+  const canonicalPlan = usePlanDocument(session.id, activeChat.id)
   const canApprovePlan =
     canonicalPlan.canApprove &&
     matchesCanonicalPlan(canonicalPlan.document, convo.plan)
@@ -295,7 +295,7 @@ export function ConversationPane({
       })
       .catch(async () => {
         initialThreadDispatches.current.delete(key)
-        const latest = await rpc.planCurrent(session.id).catch(() => null)
+        const latest = await rpc.planCurrent(session.id, activeChat.id).catch(() => null)
         const stillPending = latest?.plan.annotations
           .find((annotation) => annotation.id === pending.annotation.id)
           ?.messages.find((message) => message.id === pending.message.id)
@@ -826,7 +826,7 @@ export function ConversationPane({
       onDiscard={() => {
         // Deleting the canonical file flows back through Plan.watch as a null
         // emission, which clears the drawer and this overview together.
-        rpc.planDiscard(session.id).catch(() => {})
+        rpc.planDiscard(session.id, activeChat.id).catch(() => {})
       }}
       onComment={(stepId, body) => planId && convo.commentPlanStep(planId, stepId, body)}
       onAddComment={(target, body) => {

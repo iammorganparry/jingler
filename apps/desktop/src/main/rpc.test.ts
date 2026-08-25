@@ -824,7 +824,7 @@ describe("RPC handlers", () => {
           author: "user",
         });
         const annotationId = withThread.plan.annotations[0]!.id;
-        const watchedFiber = yield* planWatch("session-plan-thread").pipe(
+        const watchedFiber = yield* planWatch("session-plan-thread", "chat-plan-thread").pipe(
           Stream.take(1),
           Stream.runCollect,
           Effect.fork,

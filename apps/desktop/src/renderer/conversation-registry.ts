@@ -145,14 +145,13 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
     .filter((activity): activity is SessionActivity => activity !== null)
     .sort((a, b) => activityPriority(b) - activityPriority(a))
   setSessionActivity(sessionId, activities[0] ?? null)
-  setPlanPresent(
-    sessionId,
-    sessionSnapshots.some(
-      (snapshot) =>
-        snapshot.context.planDraft !== null ||
-        latestPlan(snapshot.context.messages) !== null
+  for (const [key, snapshot] of snapshots) {
+    if (!key.startsWith(`${sessionId}:`)) continue
+    setPlanPresent(
+      key.slice(sessionId.length + 1),
+      snapshot.context.planDraft !== null || latestPlan(snapshot.context.messages) !== null
     )
-  )
+  }
   // The diff describes the WORKTREE, which every chat in the session shares —
   // follow the freshest READ, not the most recent publisher. Chats hold their
   // own snapshots of the same diff taken at different times, and last-writer-
@@ -408,18 +407,19 @@ export const disposeConversationActor = (sessionId: string): void => {
   clearSubagentTabs(sessionId)
   for (const key of [...registry.keys()]) {
     if (!key.startsWith(`${sessionId}:`)) continue
+    setPlanPresent(key.slice(sessionId.length + 1), false)
     forget(key)
   }
   delete chatActivities[sessionId]
   clearAgentFileActivitySession(sessionId)
   sharedPlanBodies.delete(sessionId)
   setSessionActivity(sessionId, null)
-  setPlanPresent(sessionId, false)
   clearSessionDiff(sessionId)
 }
 
 export const disposeChatActor = (sessionId: string, chatId: string): void => {
   const key = registryKey(sessionId, chatId)
+  setPlanPresent(chatId, false)
   forget(key)
   clearAgentFileActivityChat(sessionId, chatId)
   publishChatActivity(sessionId, chatId, null)

@@ -915,7 +915,7 @@ export const explanationWatch = (sessionId: string) =>
   );
 
 /** `Plan.watch` handler, shared with the RPC integration test. */
-export const planWatch = (sessionId: string) =>
+export const planWatch = (sessionId: string, chatId: string) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId).pipe(
@@ -926,7 +926,7 @@ export const planWatch = (sessionId: string) =>
       return store.watch(
         session.worktreePath,
         session.id,
-        session.activeChatId,
+        chatId,
       );
     }),
   );
@@ -5284,11 +5284,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const updated = yield* SessionStore.closeChat(sessionId, chatId);
       yield* ContextManager.forget(chatId);
       if (session.worktreePath) {
-        yield* PlanStore.rehomeArtifact(
-          session.worktreePath,
-          sessionId,
-          chatId,
-          updated.activeChatId,
+        yield* PlanStore.discard(session.worktreePath, sessionId, chatId).pipe(
+          Effect.ignore,
         );
         yield* ExplanationStore.rehome(
           session.worktreePath,
@@ -6014,20 +6011,16 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     ),
   "Explanation.watch": ({ sessionId }) =>
     interruptOnPageGone(explanationWatch(sessionId)),
-  "Plan.current": ({ sessionId }) =>
+  "Plan.current": ({ sessionId, chatId }) =>
     SessionStore.get(sessionId).pipe(
       Effect.flatMap((session) =>
         session.worktreePath
-          ? PlanStore.readDocument(
-              session.worktreePath,
-              session.id,
-              session.activeChatId,
-            )
+          ? PlanStore.readDocument(session.worktreePath, session.id, chatId)
           : Effect.succeed(null),
       ),
       Effect.orElseSucceed(() => null),
     ),
-  "Plan.discard": ({ sessionId }) =>
+  "Plan.discard": ({ sessionId, chatId }) =>
     SessionStore.get(sessionId).pipe(
       Effect.catchAll(() =>
         Effect.fail(
@@ -6039,14 +6032,14 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       ),
       Effect.flatMap((session) =>
         session.worktreePath
-          ? PlanStore.discard(session.worktreePath)
+          ? PlanStore.discard(session.worktreePath, session.id, chatId)
           : // Discard is idempotent: a session that never had a plan worktree
             // has nothing to discard.
             Effect.void,
       ),
       Effect.as(null),
     ),
-  "Plan.startDraft": ({ sessionId }) =>
+  "Plan.startDraft": ({ sessionId, chatId }) =>
     SessionStore.get(sessionId).pipe(
       // Collapse a missing session into the RPC's declared error union
       // (SessionNotFoundError is not part of it).
@@ -6063,7 +6056,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
           ? PlanStore.startDraft(
               session.worktreePath,
               session.id,
-              session.activeChatId,
+              chatId,
             )
           : Effect.fail(
               new PlanPersistenceError({
@@ -6073,7 +6066,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
             ),
       ),
     ),
-  "Plan.watch": ({ sessionId }) => interruptOnPageGone(planWatch(sessionId)),
+  "Plan.watch": ({ sessionId, chatId }) =>
+    interruptOnPageGone(planWatch(sessionId, chatId)),
   "Plan.updateDocument": ({ sessionId, planId, baseRevision, plan, author }) =>
     SessionStore.get(sessionId).pipe(
       Effect.map((session) => session.worktreePath),

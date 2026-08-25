@@ -160,21 +160,35 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           return destination
         })
 
+      const ownerFileName = (sessionId: string, producingChatId: string): string =>
+        `current-plan-${createHash("sha256")
+          .update(`${sessionId}\0${producingChatId}`)
+          .digest("hex")
+          .slice(0, 16)}.json`
+
       const currentFileFor = (
-        worktreePath: string
+        worktreePath: string,
+        sessionId?: string,
+        producingChatId?: string
       ): Effect.Effect<string, never, FileSystem.FileSystem | Path.Path | AppPaths> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
-          return path.join(yield* dirFor(worktreePath), "current-plan.json")
+          const name =
+            sessionId === undefined || producingChatId === undefined
+              ? "current-plan.json"
+              : ownerFileName(sessionId, producingChatId)
+          return path.join(yield* dirFor(worktreePath), name)
         })
 
       const fileFor = (
-        worktreePath: string
+        worktreePath: string,
+        sessionId?: string,
+        producingChatId?: string
       ): Effect.Effect<
         string,
         never,
         FileSystem.FileSystem | Path.Path | AppPaths
-      > => currentFileFor(worktreePath)
+      > => currentFileFor(worktreePath, sessionId, producingChatId)
 
       const atomicWrite = (
         worktreePath: string,
@@ -196,7 +210,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           const normalized = decoded._tag === "Right" ? decoded.right : document
           const fs = yield* FileSystem.FileSystem
           const dir = yield* dirFor(worktreePath)
-          const file = yield* currentFileFor(worktreePath)
+          const file = yield* currentFileFor(
+            worktreePath,
+            normalized.sessionId,
+            normalized.producingChatId
+          )
           const temp = `${file}.${normalized.revision}.tmp`
           yield* fs.makeDirectory(dir, { recursive: true })
           yield* fs.writeFileString(temp, serialize(normalized))
@@ -217,12 +235,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           )
         )
 
-      const readCanonical = (
-        worktreePath: string
-      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+      const readFile = (
+        file: string
+      ): Effect.Effect<PlanDocument | null, never, FileSystem.FileSystem> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          const file = yield* currentFileFor(worktreePath)
           if (!(yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false)))) return null
           const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""))
           const document = asDocument(raw)
@@ -232,12 +249,34 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           return document
         })
 
+      const readCanonical = (
+        worktreePath: string,
+        sessionId?: string,
+        producingChatId?: string,
+        planId?: string
+      ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          if (sessionId !== undefined && producingChatId !== undefined) {
+            return yield* readFile(yield* currentFileFor(worktreePath, sessionId, producingChatId))
+          }
+          const dir = yield* dirFor(worktreePath)
+          const entries = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => [] as string[]))
+          for (const entry of entries) {
+            if (!entry.startsWith("current-plan-") || !entry.endsWith(".json")) continue
+            const document = yield* readFile(path.join(dir, entry))
+            if (document !== null && (planId === undefined || document.id === planId)) return document
+          }
+          return planId === undefined ? yield* readFile(yield* currentFileFor(worktreePath)) : null
+        })
+
       const readDocument = (
         worktreePath: string,
-        _sessionId?: string,
-        _producingChatId?: string
+        sessionId?: string,
+        producingChatId?: string
       ): Effect.Effect<PlanDocument | null, never, PlanStoreEnv> =>
-        lock.withPermits(1)(readCanonical(worktreePath))
+        lock.withPermits(1)(readCanonical(worktreePath, sessionId, producingChatId))
 
       /**
        * Create a blank, user-authored draft plan so the operator can start
@@ -255,7 +294,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         PlanStoreEnv
       > =>
         Effect.gen(function* () {
-          const current = yield* readCanonical(worktreePath)
+          const current = yield* readCanonical(worktreePath, sessionId, producingChatId)
           if (current !== null) return current
           return yield* promoteDocument(worktreePath, {
             sessionId,
@@ -285,7 +324,11 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       > =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            const current = yield* readCanonical(worktreePath)
+            const current = yield* readCanonical(
+              worktreePath,
+              input.sessionId,
+              input.producingChatId
+            )
             const amending =
               current !== null &&
               input.basePlanId !== undefined &&
@@ -363,7 +406,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       > =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            const current = yield* readCanonical(worktreePath)
+            const current = yield* readCanonical(worktreePath, undefined, undefined, input.planId)
             if (
               current === null ||
               current.id !== input.planId ||
@@ -431,7 +474,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       > =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            const current = yield* readCanonical(worktreePath)
+            const current = yield* readCanonical(worktreePath, undefined, undefined, planId)
             if (current === null || current.id !== planId) return current
             const change = transform(current.plan, current)
             if (change.plan === null) return current
@@ -500,7 +543,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         }
       ) =>
         Effect.gen(function* () {
-          const current = yield* readCanonical(worktreePath)
+          const current = yield* readCanonical(worktreePath, undefined, undefined, input.planId)
           if (current === null) {
             return yield* new PlanConflictError({
               message: "The canonical plan no longer exists.",
@@ -554,7 +597,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         }
       ) =>
         Effect.gen(function* () {
-          const current = yield* readCanonical(worktreePath)
+          const current = yield* readCanonical(worktreePath, undefined, undefined, input.planId)
           if (current === null) {
             return yield* new PlanConflictError({
               message: "The canonical plan no longer exists.",
@@ -626,7 +669,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         }
       ) =>
         Effect.gen(function* () {
-          const current = yield* readCanonical(worktreePath)
+          const current = yield* readCanonical(worktreePath, undefined, undefined, input.planId)
           if (current === null) {
             return yield* new PlanConflictError({
               message: "The canonical plan no longer exists.",
@@ -675,7 +718,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         }
       ) =>
         Effect.gen(function* () {
-          const current = yield* readCanonical(worktreePath)
+          const current = yield* readCanonical(worktreePath, undefined, undefined, input.planId)
           if (current === null) {
             return yield* new PlanConflictError({
               message: "The canonical plan no longer exists.",
@@ -717,7 +760,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         }
       ) =>
         Effect.gen(function* () {
-          const current = yield* readCanonical(worktreePath)
+          const current = yield* readCanonical(worktreePath, undefined, undefined, input.planId)
           if (current === null) {
             return yield* new PlanConflictError({
               message: "The canonical plan no longer exists.",
@@ -759,7 +802,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
         }
       ) =>
         Effect.gen(function* () {
-          const current = yield* readCanonical(worktreePath)
+          const current = yield* readCanonical(worktreePath, undefined, undefined, input.planId)
           if (current === null) {
             return yield* new PlanConflictError({
               message: "The canonical plan no longer exists.",
@@ -838,7 +881,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       ): Effect.Effect<SessionPlanArtifact | null, never, PlanStoreEnv> =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            const current = yield* readCanonical(worktreePath)
+            const current = yield* readCanonical(worktreePath, sessionId, fromChatId)
             if (
               current === null ||
               current.sessionId !== sessionId ||
@@ -905,8 +948,12 @@ export class PlanStore extends Effect.Service<PlanStore>()(
       ): Effect.Effect<ReadonlyArray<string>, never, PlanStoreEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          const file = yield* currentFileFor(worktreePath)
-          return (yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))) ? [file] : []
+          const path = yield* Path.Path
+          const dir = yield* dirFor(worktreePath)
+          const entries = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => [] as string[]))
+          return entries
+            .filter((entry) => entry.startsWith("current-plan-") && entry.endsWith(".json"))
+            .map((entry) => path.join(dir, entry))
         })
 
       /**
@@ -938,7 +985,7 @@ export class PlanStore extends Effect.Service<PlanStore>()(
           const fs = yield* FileSystem.FileSystem
           const document = yield* readDocument(worktreePath, sessionId, producingChatId)
           if (document !== null) return Option.some<PlanDocument | null>(document)
-          const file = yield* currentFileFor(worktreePath)
+          const file = yield* currentFileFor(worktreePath, sessionId, producingChatId)
           const exists = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => true))
           return exists
             ? Option.none<PlanDocument | null>()
@@ -1001,11 +1048,13 @@ export class PlanStore extends Effect.Service<PlanStore>()(
        * session deletion stays `removeAll`.
        */
       const discard = (
-        worktreePath: string
+        worktreePath: string,
+        sessionId: string,
+        producingChatId: string
       ): Effect.Effect<void, PlanPersistenceError, PlanStoreEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          const file = yield* currentFileFor(worktreePath)
+          const file = yield* currentFileFor(worktreePath, sessionId, producingChatId)
           const exists = yield* fs.exists(file).pipe(Effect.orElseSucceed(() => false))
           if (!exists) return
           yield* fs.remove(file).pipe(

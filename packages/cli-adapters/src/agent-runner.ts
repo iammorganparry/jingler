@@ -2066,7 +2066,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const discardPlan = (): Effect.Effect<void> =>
             worktreePath.length === 0
               ? Effect.void
-              : PlanStore.discard(worktreePath).pipe(
+              : PlanStore.discard(worktreePath, sessionId, chatId).pipe(
                   Effect.provide(env),
                   Effect.ignore,
                   Effect.zipRight(Ref.set(executingPlanId, null)),

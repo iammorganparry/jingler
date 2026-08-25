@@ -9,6 +9,8 @@ export type PlanDocumentActor = ActorRefFrom<typeof planDocumentMachine>
 
 const actors = new Map<string, PlanDocumentActor>()
 
+const ownerKey = (sessionId: string, chatId: string): string => `${sessionId}:${chatId}`
+
 /**
  * How many mounted `usePlanDocument` hooks reference each session's actor. Only
  * the (visible) conversation pane consumes a plan actor, so this reaches zero
@@ -53,33 +55,37 @@ const evictPlanDocumentActors = (keep: string): void => {
  */
 export const getPlanDocumentActor = (
   sessionId: string,
+  chatId: string,
   input: PlanDocumentInput
 ): PlanDocumentActor => {
-  const existing = actors.get(sessionId)
+  const key = ownerKey(sessionId, chatId)
+  const existing = actors.get(key)
   if (existing !== undefined) {
     // Re-insert to move this key to the most-recently-used end (see
     // `evictPlanDocumentActors`): `set` on an existing key leaves its position,
     // so without the delete the policy would read creation order.
-    actors.delete(sessionId)
-    actors.set(sessionId, existing)
+    actors.delete(key)
+    actors.set(key, existing)
     return existing
   }
   const actor = createActor(planDocumentMachine, { input })
   actor.start()
-  actors.set(sessionId, actor)
-  evictPlanDocumentActors(sessionId)
+  actors.set(key, actor)
+  evictPlanDocumentActors(key)
   return actor
 }
 
 /** Ref-count a mounted hook onto its session's actor; released on unmount. */
-export const retainPlanDocumentActor = (sessionId: string): void => {
-  mounts.set(sessionId, (mounts.get(sessionId) ?? 0) + 1)
+export const retainPlanDocumentActor = (sessionId: string, chatId: string): void => {
+  const key = ownerKey(sessionId, chatId)
+  mounts.set(key, (mounts.get(key) ?? 0) + 1)
 }
 
-export const releasePlanDocumentActor = (sessionId: string): void => {
-  const next = (mounts.get(sessionId) ?? 0) - 1
-  if (next <= 0) mounts.delete(sessionId)
-  else mounts.set(sessionId, next)
+export const releasePlanDocumentActor = (sessionId: string, chatId: string): void => {
+  const key = ownerKey(sessionId, chatId)
+  const next = (mounts.get(key) ?? 0) - 1
+  if (next <= 0) mounts.delete(key)
+  else mounts.set(key, next)
 }
 
 /**
@@ -99,11 +105,12 @@ export const flushAllPlanDocuments = (): Promise<void> => Promise.resolve()
 
 /** Stop a session actor only after its session has been permanently removed. */
 export const stopPlanDocument = (sessionId: string): void => {
-  mounts.delete(sessionId)
-  const actor = actors.get(sessionId)
-  if (actor === undefined) return
-  actors.delete(sessionId)
-  actor.stop()
+  for (const [key, actor] of actors) {
+    if (!key.startsWith(`${sessionId}:`)) continue
+    mounts.delete(key)
+    actors.delete(key)
+    actor.stop()
+  }
 }
 
 /** Install the main-process close handshake once, before React mounts. */

@@ -1813,10 +1813,10 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
-  /** The canonical PRD MDX document shared by every chat in this session. */
+  /** The canonical PRD document owned by one top-level agent chat. */
   Rpc.make("Plan.current", {
     success: Schema.NullOr(PlanDocument),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /**
@@ -1828,7 +1828,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Plan.watch", {
     success: Schema.NullOr(PlanDocument),
     stream: true,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /**
@@ -1839,7 +1839,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Plan.discard", {
     success: Schema.Null,
     error: PlanPersistenceError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /**
@@ -1850,7 +1850,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Plan.startDraft", {
     success: PlanDocument,
     error: Schema.Union(PlanValidationError, PlanPersistenceError),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   /** Compare-and-swap the canonical source after safe MDX validation. */

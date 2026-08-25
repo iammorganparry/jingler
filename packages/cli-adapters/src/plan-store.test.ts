@@ -106,13 +106,13 @@ const promote = (plan = SOURCE) =>
   })
 
 describe("PlanStore canonical document", () => {
-  it("uses one stable current-plan.json with protected frontmatter", async () => {
+  it("uses one stable agent-owned plan file with protected frontmatter", async () => {
     const document = await run(promote())
     const files = await run(PlanStore.list(WT))
 
     expect(document.revision).toBe(1)
     expect(files).toHaveLength(1)
-    expect(basename(files[0]!)).toBe("current-plan.json")
+    expect(basename(files[0]!)).toMatch(/^current-plan-[a-f0-9]{16}\.json$/)
     const persisted = JSON.parse(readFileSync(files[0]!, "utf8"))
     expect(persisted.sessionId).toBe("s1")
     // The persisted body is the structured plan DTO, not HTML.
@@ -123,6 +123,28 @@ describe("PlanStore canonical document", () => {
     expect(document.plan.stages[0]?.id).toBe("01")
     expect(document.plan.stages[0]?.acceptance[0]?.id).toBe("01.1")
     expect(planFileName("ignored")).toBe("current-plan")
+  })
+
+
+  it("isolates plans for two chats in one session", async () => {
+    const first = await run(promote())
+    const second = await run(
+      PlanStore.promoteDocument(WT, {
+        sessionId: "s1",
+        producingChatId: "c2",
+        id: "plan-2",
+        plan: editIntent(SOURCE, "Agent two owns this plan."),
+        author: "agent"
+      })
+    )
+
+    expect((await run(PlanStore.readDocument(WT, "s1", "c1")))?.id).toBe(first.id)
+    expect((await run(PlanStore.readDocument(WT, "s1", "c2")))?.id).toBe(second.id)
+    expect(await run(PlanStore.list(WT))).toHaveLength(2)
+
+    await run(PlanStore.discard(WT, "s1", "c1"))
+    expect(await run(PlanStore.readDocument(WT, "s1", "c1"))).toBeNull()
+    expect((await run(PlanStore.readDocument(WT, "s1", "c2")))?.id).toBe(second.id)
   })
 
   it("isolates same-basename repositories and deletes only the requested plans", async () => {
@@ -228,7 +250,7 @@ describe("PlanStore canonical document", () => {
     // silently no-ops. Mirrors the ThemeService.watch test.
     const first = await run(promote())
     expect(first.revision).toBe(1)
-    const file = await run(PlanStore.currentFileFor(WT))
+    const file = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
     const c2 = readFileSync(file, "utf8")
       .replace('"revision": 1', '"revision": 2')
       .replace("One document is authoritative.", "Edited externally.")
@@ -246,7 +268,7 @@ describe("PlanStore canonical document", () => {
     }, 300)
     try {
       const chunk = await run(
-        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT, "s1", "c1"))).pipe(
           Stream.take(1),
           Stream.runCollect
         )
@@ -265,7 +287,7 @@ describe("PlanStore canonical document", () => {
     // forever — emission identity must be the (id, revision) pair.
     const first = await run(promote())
     expect(first.revision).toBe(1)
-    const file = await run(PlanStore.currentFileFor(WT))
+    const file = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
     const replacement = readFileSync(file, "utf8").replace(
       '"id": "plan-1"',
       '"id": "plan-2"'
@@ -279,7 +301,7 @@ describe("PlanStore canonical document", () => {
     }, 300)
     try {
       const chunk = await run(
-        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT, "s1", "c1"))).pipe(
           Stream.take(1),
           Stream.runCollect
         )
@@ -295,13 +317,13 @@ describe("PlanStore canonical document", () => {
   it("discard removes only the canonical file and watch emits the deletion", async () => {
     const first = await run(promote())
     expect(first.revision).toBe(1)
-    const file = await run(PlanStore.currentFileFor(WT))
+    const file = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
     const dir = await run(PlanStore.dirFor(WT))
-    await run(PlanStore.discard(WT))
+    await run(PlanStore.discard(WT, "s1", "c1"))
     expect(existsSync(file)).toBe(false)
     expect(existsSync(dir)).toBe(true)
     // Idempotent: discarding an absent plan succeeds.
-    await run(PlanStore.discard(WT))
+    await run(PlanStore.discard(WT, "s1", "c1"))
 
     // Re-promote so the watcher has a baseline document, then discard while a
     // subscriber is live: the deletion must reach it as a `null` emission. A
@@ -321,7 +343,7 @@ describe("PlanStore canonical document", () => {
     }, 300)
     try {
       const chunk = await run(
-        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT, "s1", "c1"))).pipe(
           Stream.take(1),
           Stream.runCollect
         )
@@ -342,10 +364,10 @@ describe("PlanStore canonical document", () => {
     // discard's null emission (key also null); only CONSECUTIVE duplicates may
     // be suppressed.
     const seeded = await run(promote())
-    const file = await run(PlanStore.currentFileFor(WT))
+    const file = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
     const dir = await run(PlanStore.dirFor(WT))
     const content = readFileSync(file, "utf8")
-    await run(PlanStore.discard(WT))
+    await run(PlanStore.discard(WT, "s1", "c1"))
     expect(existsSync(file)).toBe(false)
     expect(seeded.revision).toBe(1)
 
@@ -365,7 +387,7 @@ describe("PlanStore canonical document", () => {
     }, 300)
     try {
       const chunk = await run(
-        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT, "s1", "c1"))).pipe(
           Stream.take(2),
           Stream.runCollect
         )

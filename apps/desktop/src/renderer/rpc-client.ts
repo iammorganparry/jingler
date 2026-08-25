@@ -1330,12 +1330,12 @@ export const rpc = {
       if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
-  planCurrent: (sessionId: string): Promise<PlanDocument | null> =>
-    run((c) => c.Plan.current({ sessionId })),
-  planStartDraft: (sessionId: string): Promise<PlanDocument> =>
-    run((c) => c.Plan.startDraft({ sessionId })),
-  planDiscard: (sessionId: string): Promise<null> =>
-    run((c) => c.Plan.discard({ sessionId })),
+  planCurrent: (sessionId: string, chatId: string): Promise<PlanDocument | null> =>
+    run((c) => c.Plan.current({ sessionId, chatId })),
+  planStartDraft: (sessionId: string, chatId: string): Promise<PlanDocument> =>
+    run((c) => c.Plan.startDraft({ sessionId, chatId })),
+  planDiscard: (sessionId: string, chatId: string): Promise<null> =>
+    run((c) => c.Plan.discard({ sessionId, chatId })),
   planUpdateDocument: (input: {
     sessionId: string
     planId: string
@@ -1386,6 +1386,7 @@ export const rpc = {
   }): Promise<PlanDocument> => run((c) => c.Plan.setThreadResolved(input)),
   planWatch: (
     sessionId: string,
+    chatId: string,
     onDocument: (document: PlanDocument | null) => void
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
@@ -1393,7 +1394,7 @@ export const rpc = {
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = coreRuntime.runFork(
-        client.Plan.watch({ sessionId }).pipe(
+        client.Plan.watch({ sessionId, chatId }).pipe(
           Stream.runForEach((document) =>
             Effect.sync(() => onDocument(document))
           )

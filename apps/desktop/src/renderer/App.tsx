@@ -858,7 +858,7 @@ function AuthedApp({
     // running across session switches, so it won't be torn down by unmount).
     disposeConversationActor(sessionId);
     disposeFileBrowserActor(sessionId);
-    clearPlanAutoPresentation(sessionId);
+    for (const chatId of chatIds) clearPlanAutoPresentation(chatId);
     stopPlanDocument(sessionId);
     // Same reasoning for the composer draft — it outlives the pane by design, so
     // nothing else would ever collect it (and it's persisted).
