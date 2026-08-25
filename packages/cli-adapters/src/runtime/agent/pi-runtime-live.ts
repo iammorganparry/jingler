@@ -327,7 +327,7 @@ export const makePiAgentRuntimeLive = (
           ? Option.isSome(browserControl) && context.mcp?.browser != null
             ? withWebSearchFallback(
                 webSearch.value,
-                browserWebSearchPort(browserControl.value.forSession(spec.sessionId))
+                browserWebSearchPort(browserControl.value.forAgent(spec.sessionId, spec.chatId))
               )
             : webSearch.value
           : undefined

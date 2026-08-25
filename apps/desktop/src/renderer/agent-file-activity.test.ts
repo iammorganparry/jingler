@@ -3,6 +3,7 @@ import {
   clearAgentFileActivitySession,
   clearAgentFileActivityChat,
   getAgentFileActivity,
+  getAgentTouchedFiles,
   getFleetAgentFileActivity,
   normalizeAgentFileTarget,
   publishAgentFileActivity,
@@ -83,8 +84,11 @@ describe("agent file activity", () => {
     clearAgentFileActivityChat("s1", "c1")
     expect(getAgentFileActivity("s1", "c1")).toBeNull()
     expect(getAgentFileActivity("s1", "c2")).not.toBeNull()
+    publishAgentFileActivity("s1", "c2", null)
+    expect(getAgentTouchedFiles("s1", "c2")).toEqual(["src/b.ts"])
     clearAgentFileActivitySession("s1")
     expect(getAgentFileActivity("s1", "c2")).toBeNull()
+    expect(getAgentTouchedFiles("s1", "c2")).toEqual([])
   })
 })
 

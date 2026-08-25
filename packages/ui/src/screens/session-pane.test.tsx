@@ -449,7 +449,7 @@ describe("mount groups", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
-        planSessions={new Set(["a"])}
+        planSessions={new Set(["c_a_1"])}
         renderConversation={(_session, view) => (
           <span data-testid="plan-presentation">{view}</span>
         )}
@@ -458,6 +458,38 @@ describe("mount groups", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
     expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
+  })
+
+  it("does not carry an open Plan screen into another agent tab", () => {
+    const first = session({
+      id: "a",
+      chats: [
+        { id: "chat-a", title: "Agent A", createdAt: "2026-07-16T00:00:00.000Z", updatedAt: "2026-07-16T00:00:00.000Z" },
+        { id: "chat-b", title: "Agent B", createdAt: "2026-07-16T00:00:00.000Z", updatedAt: "2026-07-16T00:00:00.000Z" }
+      ],
+      activeChatId: "chat-a"
+    })
+    const rendered = render(
+      <SessionPane
+        session={first}
+        planSessions={new Set(["chat-a", "chat-b"])}
+        renderConversation={(_session, view) => (
+          <span data-testid="plan-presentation">{view}</span>
+        )}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
+
+    rendered.rerender(<SessionPane
+      session={{ ...first, activeChatId: "chat-b" }}
+      planSessions={new Set(["chat-a", "chat-b"])}
+      renderConversation={(_session, view) => (
+        <span data-testid="plan-presentation">{view}</span>
+      )}
+    />)
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("conversation")
   })
 
   it("opens empty Plan Review full-width so a roomy pane can start its first plan", () => {
@@ -500,7 +532,7 @@ describe("mount groups", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
-        planSessions={new Set(["a"])}
+        planSessions={new Set(["c_a_1"])}
         renderConversation={(_session, view, ctx) => (
           <div>
             <button onClick={ctx.onPlanDraftAvailable}>stream draft</button>
@@ -521,7 +553,7 @@ describe("mount groups", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
-        planSessions={new Set(["a"])}
+        planSessions={new Set(["c_a_1"])}
         renderConversation={(_session, view) => (
           <span data-testid="plan-presentation">{view}</span>
         )}
@@ -549,7 +581,7 @@ describe("mount groups", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
-        planSessions={new Set(["a"])}
+        planSessions={new Set(["c_a_1"])}
         renderConversation={() => <Body />}
       />
     )
@@ -920,7 +952,7 @@ describe("SessionPane", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
-        planSessions={new Set(["a"])}
+        planSessions={new Set(["c_a_1"])}
         renderConversation={(s, view, ctx) => (
           <div>
             <button onClick={() => ctx.onOpenPlanReview("s_02")}>jump</button>

@@ -4,6 +4,7 @@ import { useMachine } from "@xstate/react"
 import type { DockSide } from "@jingler/ui"
 import {
   previewDockMachine,
+  previewOwnerId,
   previewSessionState,
   type PreviewSessionState
 } from "./preview-dock-machine.js"
@@ -18,10 +19,10 @@ export interface PreviewDockPrefs {
   readonly toggle: () => void
   readonly side: DockSide
   readonly setSide: (side: DockSide) => void
-  readonly focusSession: (sessionId: string | null) => void
+  readonly focusAgent: (sessionId: string | null, chatId: string | null) => void
   readonly removeSession: (sessionId: string) => void
   readonly reconcileSessions: (sessionIds: ReadonlyArray<string>) => void
-  readonly forSession: (sessionId: string | null) => PreviewDockSessionPrefs
+  readonly forAgent: (sessionId: string | null, chatId: string | null) => PreviewDockSessionPrefs
 }
 
 export function usePreviewDock(): PreviewDockPrefs {
@@ -33,8 +34,11 @@ export function usePreviewDock(): PreviewDockPrefs {
     (side: DockSide) => send({ type: "SET_SIDE", side }),
     [send]
   )
-  const focusSession = useCallback(
-    (sessionId: string | null) => send({ type: "FOCUS_SESSION", sessionId }),
+  const focusAgent = useCallback(
+    (sessionId: string | null, chatId: string | null) => send({
+      type: "FOCUS_SESSION",
+      sessionId: sessionId === null || chatId === null ? null : previewOwnerId(sessionId, chatId)
+    }),
     [send]
   )
   const removeSession = useCallback(
@@ -45,16 +49,17 @@ export function usePreviewDock(): PreviewDockPrefs {
     (sessionIds: ReadonlyArray<string>) => send({ type: "RECONCILE_SESSIONS", sessionIds }),
     [send]
   )
-  const forSession = useCallback(
-    (sessionId: string | null): PreviewDockSessionPrefs => {
-      const session = previewSessionState(state.context, sessionId)
+  const forAgent = useCallback(
+    (sessionId: string | null, chatId: string | null): PreviewDockSessionPrefs => {
+      const ownerId = sessionId === null || chatId === null ? null : previewOwnerId(sessionId, chatId)
+      const session = previewSessionState(state.context, ownerId)
       return {
         ...session,
         toggle: () => {
-          if (sessionId !== null) send({ type: "TOGGLE", sessionId })
+          if (ownerId !== null) send({ type: "TOGGLE", sessionId: ownerId })
         },
         navigate: (url) => {
-          if (sessionId !== null) send({ type: "NAVIGATE", sessionId, url })
+          if (ownerId !== null) send({ type: "NAVIGATE", sessionId: ownerId, url })
         }
       }
     },
@@ -62,11 +67,11 @@ export function usePreviewDock(): PreviewDockPrefs {
   )
 
   useEffect(() => {
-    const stopReveal = window.jingler.onPreviewReveal(({ sessionId, url }) => {
-      send({ type: "REVEAL_BROWSER", sessionId, url })
+    const stopReveal = window.jingler.onPreviewReveal(({ sessionId, chatId, url }) => {
+      send({ type: "REVEAL_BROWSER", sessionId: previewOwnerId(sessionId, chatId), url })
     })
-    const stopUrl = window.jingler.onPreviewUrlChanged(({ sessionId, url }) => {
-      send({ type: "NATIVE_URL", sessionId, url })
+    const stopUrl = window.jingler.onPreviewUrlChanged(({ sessionId, chatId, url }) => {
+      send({ type: "NATIVE_URL", sessionId: previewOwnerId(sessionId, chatId), url })
     })
     return () => {
       stopReveal()
@@ -80,15 +85,15 @@ export function usePreviewDock(): PreviewDockPrefs {
       toggle,
       side: state.context.side,
       setSide,
-      focusSession,
+      focusAgent,
       removeSession,
       reconcileSessions,
-      forSession
+      forAgent
     }),
     [
       focused.visible,
-      focusSession,
-      forSession,
+      focusAgent,
+      forAgent,
       reconcileSessions,
       removeSession,
       setSide,

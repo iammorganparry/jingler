@@ -64,7 +64,7 @@ import {
   useExplanationSessions,
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
-import { SessionChatTabs } from "./session-chat-tabs.js";
+import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js";
 import { PullRequestPane } from "./pull-request-pane.js";
 import { ReviewPane } from "./review-pane.js";
 import { FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
@@ -858,7 +858,7 @@ function AuthedApp({
     // running across session switches, so it won't be torn down by unmount).
     disposeConversationActor(sessionId);
     disposeFileBrowserActor(sessionId);
-    clearPlanAutoPresentation(sessionId);
+    for (const chatId of chatIds) clearPlanAutoPresentation(chatId);
     stopPlanDocument(sessionId);
     // Same reasoning for the composer draft — it outlives the pane by design, so
     // nothing else would ever collect it (and it's persisted).
@@ -1873,6 +1873,13 @@ function AuthedApp({
             onSelectFiles={ctx.onSelectFiles}
           />
         )}
+        renderSubagentTabs={(session: Session, ctx) => (
+          <SessionSubagentTabs
+            session={session}
+            filesActive={ctx.activeTabId === "files"}
+            onSelectConversation={ctx.onSelectConversation}
+          />
+        )}
         renderPullRequest={(session, ctx) => {
           const access = accessForSession(session);
           const sessionConnected =
@@ -1958,11 +1965,11 @@ function AuthedApp({
             onSideChange={termDock.setSide}
           />
         )}
-        isBrowserActive={(sessionId) =>
-          browserDock.forSession(sessionId).visible
+        isBrowserActive={(sessionId, chatId) =>
+          browserDock.forAgent(sessionId, chatId).visible
         }
-        onToggleBrowser={(sessionId) =>
-          browserDock.forSession(sessionId).toggle()
+        onToggleBrowser={(sessionId, chatId) =>
+          browserDock.forAgent(sessionId, chatId).toggle()
         }
         renderBrowser={(session) => (
           <PreviewDockView session={session} dock={browserDock} />

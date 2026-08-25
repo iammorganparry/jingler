@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
-  browserPartitionForSession,
+  acceptsPreviewNavigationCommit,
+  browserPartitionForAgent,
   fileUrlFor,
   isHttpUrl,
   toRect
@@ -31,6 +32,22 @@ describe("isHttpUrl", () => {
   })
 })
 
+describe("acceptsPreviewNavigationCommit", () => {
+  const pending = {
+    requestedUrl: "http://localhost:4321",
+    redirects: new Set(["https://login.example/callback"])
+  }
+
+  it("drops an old commit while a replacement navigation is pending", () => {
+    expect(acceptsPreviewNavigationCommit(pending, "http://localhost:3000/old")).toBe(false)
+  })
+
+  it("accepts the request and its server-side redirects", () => {
+    expect(acceptsPreviewNavigationCommit(pending, pending.requestedUrl)).toBe(true)
+    expect(acceptsPreviewNavigationCommit(pending, "https://login.example/callback")).toBe(true)
+  })
+})
+
 describe("toRect", () => {
   it("rounds fractional pixels to integers", () => {
     expect(toRect({ x: 10.4, y: 20.6, width: 100.5, height: 200.2 })).toEqual({
@@ -51,19 +68,19 @@ describe("toRect", () => {
   })
 })
 
-describe("browserPartitionForSession", () => {
-  it("gives each repository session a stable isolated persistent partition", () => {
-    expect(browserPartitionForSession("session-alpha")).toBe(
-      "persist:jingler-browser-preview:session-alpha"
+describe("browserPartitionForAgent", () => {
+  it("gives each agent a stable isolated persistent partition", () => {
+    expect(browserPartitionForAgent("session-alpha", "chat-a")).toBe(
+      "persist:jingler-browser-preview:session-alpha:chat-a"
     )
-    expect(browserPartitionForSession("session-alpha")).not.toBe(
-      browserPartitionForSession("session-beta")
+    expect(browserPartitionForAgent("session-alpha", "chat-a")).not.toBe(
+      browserPartitionForAgent("session-alpha", "chat-b")
     )
   })
 
   it("encodes session ids instead of letting separators alias partitions", () => {
-    expect(browserPartitionForSession("team/a:b")).toBe(
-      "persist:jingler-browser-preview:team%2Fa%3Ab"
+    expect(browserPartitionForAgent("team/a:b", "chat/c:d")).toBe(
+      "persist:jingler-browser-preview:team%2Fa%3Ab:chat%2Fc%3Ad"
     )
   })
 })

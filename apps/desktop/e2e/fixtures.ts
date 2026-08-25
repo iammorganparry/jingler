@@ -60,6 +60,19 @@ export const planDirectory = (home: string, worktreePath: string): string => {
   return join(home, "jingler", ".jingler", `${basename(canonical)}-${suffix}`);
 };
 
+export const planFile = (
+  home: string,
+  worktreePath: string,
+  sessionId: string,
+  chatId: string,
+): string => {
+  const owner = createHash("sha256")
+    .update(`${sessionId}\0${chatId}`)
+    .digest("hex")
+    .slice(0, 16);
+  return join(planDirectory(home, worktreePath), `current-plan-${owner}.json`);
+};
+
 /**
  * Put the sidebar's Status filter on `archived` (or `all`) so archived sessions
  * are listed at all.

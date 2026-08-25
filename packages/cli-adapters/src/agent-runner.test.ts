@@ -64,7 +64,7 @@ const PREVIEW_MCP: BrowserControlMcpAttachment = {
   headers: { Authorization: "Bearer preview-secret" },
   headerEnvironment: { Authorization: "JINGLER_BROWSER_MCP_AUTHORIZATION" }
 }
-const browserAcquireCalls: Array<{ readonly sessionId: string; readonly ownerId: string }> = []
+const browserAcquireCalls: Array<{ readonly sessionId: string; readonly chatId: string; readonly ownerId: string }> = []
 const TEST_RUNTIME = {
   connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("test-connection"),
   providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
@@ -75,9 +75,9 @@ const TEST_RUNTIME = {
 const BrowserControlMcpServiceTest = Layer.succeed(
   BrowserControlMcpService,
   BrowserControlMcpService.of({
-    acquire: (sessionId, ownerId) =>
+    acquire: (sessionId, chatId, ownerId) =>
       Effect.sync(() => {
-        browserAcquireCalls.push({ sessionId, ownerId })
+        browserAcquireCalls.push({ sessionId, chatId, ownerId })
         return PREVIEW_MCP
       }),
     revoke: () => Effect.void
@@ -481,7 +481,7 @@ describe("AgentRunner remote MCP attachments", () => {
     expect(captured).toHaveLength(1)
     expect(captured[0]!.prompt).toContain("<managed-tools>")
     expect(browserAcquireCalls).toStrictEqual([
-      { sessionId: SESSION, ownerId: `${SESSION}:${SESSION}` }
+      { sessionId: SESSION, chatId: SESSION, ownerId: `${SESSION}:${SESSION}` }
     ])
     expect(captured[0]!.mcp).toStrictEqual({
       memory: null,
@@ -1434,6 +1434,8 @@ describe("AgentRunner plan mode", () => {
             const proposed = yield* PlanStore.readDocument(temp.root)
             expect(proposed).not.toBeNull()
             const edited = yield* PlanStore.updateDocument(temp.root, {
+              sessionId: SESSION,
+              producingChatId: SESSION,
               planId: proposed!.id,
               baseRevision: proposed!.revision,
               plan: { ...proposed!.plan, title: `${proposed!.plan.title} (operator edit)` },
@@ -1676,6 +1678,8 @@ describe("AgentRunner plan mode", () => {
           author: "agent"
         })
         yield* PlanStore.updateDocument(temp.root, {
+          sessionId: SESSION,
+          producingChatId: SESSION,
           planId: first.id,
           baseRevision: first.revision,
           plan: mkPlan("PRD: Stale plan", "The newer revision works."),
@@ -1983,7 +1987,7 @@ describe("AgentRunner plan library", () => {
     }
     expect(captured.specs[0]?.prompt).toContain("<managed-tools>")
     expect(captured.specs[1]?.prompt).toContain("<session-context>")
-    expect(captured.specs[1]?.prompt).toContain("current-plan.json")
+    expect(captured.specs[1]?.prompt).toMatch(/current-plan-[a-f0-9]{16}\.json/)
   })
 
   it("preserves the operator's execution mode for direct turns", async () => {
@@ -2372,7 +2376,7 @@ describe("AgentRunner plan library", () => {
           plan: scriptedPlanPrd("s1", 1),
           author: "agent"
         })
-        return yield* PlanStore.currentFileFor(WT)
+        return yield* PlanStore.currentFileFor(WT, "s1", "s1")
       }).pipe(
         Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
       )
@@ -2451,7 +2455,7 @@ describe("AgentRunner plan library", () => {
           plan: scriptedPlanPrd("s1", 1),
           author: "agent"
         })
-        return yield* PlanStore.currentFileFor(WT)
+        return yield* PlanStore.currentFileFor(WT, "s1", "s1")
       }).pipe(
         Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
       )

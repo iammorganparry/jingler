@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createActor } from "xstate"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { previewDockMachine, previewSessionState } from "./preview-dock-machine.js"
+import { previewDockMachine, previewOwnerId, previewSessionState } from "./preview-dock-machine.js"
 
 const store = new Map<string, string>()
 
@@ -24,6 +24,25 @@ afterEach(() => {
 const start = () => createActor(previewDockMachine).start()
 
 describe("previewDockMachine", () => {
+  it("isolates two agents in the same session", () => {
+    const actor = start()
+    const alpha = previewOwnerId("session", "chat-alpha")
+    const beta = previewOwnerId("session", "chat-beta")
+    actor.send({ type: "FOCUS_SESSION", sessionId: alpha })
+    actor.send({ type: "TOGGLE" })
+    actor.send({ type: "NAVIGATE", sessionId: alpha, url: "https://alpha.example" })
+    actor.send({ type: "NAVIGATE", sessionId: beta, url: "https://beta.example" })
+
+    expect(previewSessionState(actor.getSnapshot().context, alpha)).toMatchObject({
+      url: "https://alpha.example",
+      visible: true
+    })
+    expect(previewSessionState(actor.getSnapshot().context, beta)).toMatchObject({
+      url: "https://beta.example",
+      visible: false
+    })
+  })
+
   it("keeps URL and dock visibility independent across focused sessions", () => {
     const actor = start()
     actor.send({ type: "FOCUS_SESSION", sessionId: "alpha" })
@@ -63,6 +82,16 @@ describe("previewDockMachine", () => {
     })
   })
 
+  it("accepts a committed cross-origin redirect after operator navigation", () => {
+    const actor = start()
+    actor.send({ type: "NAVIGATE", sessionId: "agent", url: "http://localhost:4321" })
+    actor.send({ type: "NATIVE_URL", sessionId: "agent", url: "https://login.example/ready" })
+    expect(previewSessionState(actor.getSnapshot().context, "agent")).toMatchObject({
+      url: "https://login.example/ready",
+      source: "native"
+    })
+  })
+
   it("routes committed native URLs only to their owning session", () => {
     const actor = start()
     actor.send({ type: "FOCUS_SESSION", sessionId: "alpha" })
@@ -90,7 +119,7 @@ describe("previewDockMachine", () => {
 
   it("prunes persisted state against the loaded session list", () => {
     store.set(
-      "jingler.browser.sessions.v1",
+      "jingler.browser.agents.v2",
       JSON.stringify({
         current: { url: "https://current.example", visible: true },
         deleted: { url: "https://deleted.example", visible: true }
@@ -108,7 +137,7 @@ describe("previewDockMachine", () => {
       }
     })
     expect(actor.getSnapshot().context.focusedSessionId).toBeNull()
-    expect(JSON.parse(store.get("jingler.browser.sessions.v1") ?? "{}")).toEqual({
+    expect(JSON.parse(store.get("jingler.browser.agents.v2") ?? "{}")).toEqual({
       current: {
         url: "https://current.example",
         visible: true,

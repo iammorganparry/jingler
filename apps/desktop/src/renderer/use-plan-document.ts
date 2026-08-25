@@ -10,57 +10,58 @@ import {
 import { rpc } from "./rpc-client.js"
 
 const listeners = new Map<string, Set<(document: PlanDocument | null) => void>>()
+const ownerKey = (sessionId: string, chatId: string): string => `${sessionId}:${chatId}`
 // One live `Plan.watch` stream per session, shared by all subscribers; the value
 // is its stop handle. Replaces the previous fixed-interval `Plan.current` poll.
 const watchers = new Map<string, () => void>()
 
-const publish = (sessionId: string, document: PlanDocument | null): void => {
-  for (const listener of listeners.get(sessionId) ?? []) listener(document)
+const publish = (sessionId: string, chatId: string, document: PlanDocument | null): void => {
+  for (const listener of listeners.get(ownerKey(sessionId, chatId)) ?? []) listener(document)
 }
 
 const subscribe = (
   sessionId: string,
+  chatId: string,
   listener: (document: PlanDocument | null) => void
 ): (() => void) => {
-  const existing = listeners.get(sessionId) ?? new Set()
+  const key = ownerKey(sessionId, chatId)
+  const existing = listeners.get(key) ?? new Set()
   existing.add(listener)
-  listeners.set(sessionId, existing)
-  if (!watchers.has(sessionId)) {
+  listeners.set(key, existing)
+  if (!watchers.has(key)) {
     // File-watch fires on the agent's writes AND external edits, and on the
     // first write that creates the plan (the watcher is on the directory).
     watchers.set(
-      sessionId,
-      rpc.planWatch(sessionId, (document) => publish(sessionId, document))
+      key,
+      rpc.planWatch(sessionId, chatId, (document) => publish(sessionId, chatId, document))
     )
   }
   return () => {
     existing.delete(listener)
     if (existing.size > 0) return
-    listeners.delete(sessionId)
-    const stop = watchers.get(sessionId)
+    listeners.delete(key)
+    const stop = watchers.get(key)
     if (stop !== undefined) {
       stop()
-      watchers.delete(sessionId)
+      watchers.delete(key)
     }
   }
 }
 
-export function usePlanDocument(sessionId: string) {
+export function usePlanDocument(sessionId: string, chatId: string) {
   const actor = useMemo(
-    () => getPlanDocumentActor(sessionId, {
+    () => getPlanDocumentActor(sessionId, chatId, {
       sessionId,
-      load: () => rpc.planCurrent(sessionId),
-      subscribe: (listener) => {
-        return subscribe(sessionId, listener)
-      }
+      load: () => rpc.planCurrent(sessionId, chatId),
+      subscribe: (listener) => subscribe(sessionId, chatId, listener)
     }),
-    [sessionId]
+    [sessionId, chatId]
   )
   // Pin this session's actor against eviction while the pane consuming it is mounted.
   useEffect(() => {
-    retainPlanDocumentActor(sessionId)
-    return () => releasePlanDocumentActor(sessionId)
-  }, [sessionId])
+    retainPlanDocumentActor(sessionId, chatId)
+    return () => releasePlanDocumentActor(sessionId, chatId)
+  }, [sessionId, chatId])
   // Same no-op-emission filter as `useConversation`: only re-render when the
   // transition actually assigned new context or moved state. This hook feeds
   // `PlanProgressDock`/`PlanReview`, which sit beside the transcript — an
@@ -76,10 +77,10 @@ export function usePlanDocument(sessionId: string) {
   // flows back through Plan.watch; publishing here just surfaces it immediately.
   const startDraft = useCallback(() => {
     void rpc
-      .planStartDraft(sessionId)
-      .then((document) => publish(sessionId, document))
+      .planStartDraft(sessionId, chatId)
+      .then((document) => publish(sessionId, chatId, document))
       .catch(() => {})
-  }, [sessionId])
+  }, [sessionId, chatId])
   // Reload after a load failure; the plan is read-only, so there is no save to
   // retry — only the initial `Plan.current` fetch.
   const retry = useCallback(() => actor.send({ type: "RETRY" }), [actor])

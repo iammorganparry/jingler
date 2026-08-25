@@ -175,12 +175,20 @@ export interface SessionPaneProps {
       readonly onSelectFiles: () => void
     }
   ) => ReactNode
+  /** Render children of the selected top-level agent in a second tab row. */
+  renderSubagentTabs?: (
+    session: Session,
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
+    }
+  ) => ReactNode
   /** Rename the session from the tab-row title. */
   onRenameSession?: (id: string, title: string) => void
   /** Toggle the embedded browser that belongs to this session. */
-  onToggleBrowser?: (sessionId: string) => void
+  onToggleBrowser?: (sessionId: string, chatId: string) => void
   /** Read this session's browser visibility without borrowing focused state. */
-  isBrowserActive?: (sessionId: string) => boolean
+  isBrowserActive?: (sessionId: string, chatId: string) => boolean
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
   planSessions?: ReadonlySet<string>
   /** Session ids with a published focused visual explanation. */
@@ -295,7 +303,32 @@ function SessionPaneBody(props: SessionPaneProps) {
   // without making an unrelated session look as though it has a plan.
   const [draftPlanSessionId, setDraftPlanSessionId] = useState<string | null>(null)
   const paneWidth = usePaneWidth().width
-  const hasPlan = props.planSessions?.has(props.session.id) ?? false
+  const hasPlan =
+    props.planSessions?.has(props.session.activeChatId) ?? false
+  const previousOwner = useRef({
+    sessionId: props.session.id,
+    chatId: props.session.activeChatId
+  })
+  useEffect(() => {
+    const previous = previousOwner.current
+    if (
+      previous.sessionId === props.session.id &&
+      previous.chatId !== props.session.activeChatId
+    ) {
+      setTab(
+        props.isBrowserActive?.(props.session.id, props.session.activeChatId)
+          ? BUILTIN_TAB.browser
+          : BUILTIN_TAB.conversation
+      )
+      setTarget(null)
+      setSplit(false)
+      setDraftPlanSessionId(null)
+    }
+    previousOwner.current = {
+      sessionId: props.session.id,
+      chatId: props.session.activeChatId
+    }
+  }, [props.isBrowserActive, props.session.activeChatId, props.session.id])
   const hasExplanation = props.explanationSessions?.has(props.session.id) ?? false
   const supportsAuxiliarySplit =
     paneWidth === 0 || paneWidth >= SESSION_AUXILIARY_SPLIT_BREAKPOINT
@@ -395,7 +428,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   }, [tabRequestNonce])
 
   const active = props.session
-  const browserActive = props.isBrowserActive?.(active.id) ?? false
+  const browserActive = props.isBrowserActive?.(active.id, active.activeChatId) ?? false
   const previousBrowserActive = useRef(false)
   useEffect(() => {
     if (browserActive && !previousBrowserActive.current && tab !== BUILTIN_TAB.browser) {
@@ -428,9 +461,9 @@ function SessionPaneBody(props: SessionPaneProps) {
         }
       }
       if (nextTab === BUILTIN_TAB.browser && !browserActive) {
-        props.onToggleBrowser?.(active.id)
+        props.onToggleBrowser?.(active.id, active.activeChatId)
       } else if (nextTab !== BUILTIN_TAB.browser && browserActive) {
-        props.onToggleBrowser?.(active.id)
+        props.onToggleBrowser?.(active.id, active.activeChatId)
       }
       if (nextTab === BUILTIN_TAB.plan) openPlanReview()
       else setTab(nextTab)
@@ -666,6 +699,10 @@ function SessionPaneBody(props: SessionPaneProps) {
         onMovePaneLeft={props.onMovePaneLeft}
         onMovePaneRight={props.onMovePaneRight}
       />
+      {props.renderSubagentTabs?.(active, {
+        activeTabId: activeTab,
+        onSelectConversation: () => selectTab(BUILTIN_TAB.conversation)
+      })}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

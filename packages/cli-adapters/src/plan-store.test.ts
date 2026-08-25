@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync
 } from "node:fs"
@@ -35,6 +36,7 @@ const run = <A, E>(
 ) => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(PlanStore.Default, temp.layer))))
 
 const WT = "/tmp/jingler/worktrees/jingler/terminal"
+const OWNER = { sessionId: "s1", producingChatId: "c1" } as const
 const SOURCE: PlanPrd = {
   title: "PRD: Ship safer planning",
   sections: [
@@ -106,13 +108,13 @@ const promote = (plan = SOURCE) =>
   })
 
 describe("PlanStore canonical document", () => {
-  it("uses one stable current-plan.json with protected frontmatter", async () => {
+  it("uses one stable agent-owned plan file with protected frontmatter", async () => {
     const document = await run(promote())
     const files = await run(PlanStore.list(WT))
 
     expect(document.revision).toBe(1)
     expect(files).toHaveLength(1)
-    expect(basename(files[0]!)).toBe("current-plan.json")
+    expect(basename(files[0]!)).toMatch(/^current-plan-[a-f0-9]{16}\.json$/)
     const persisted = JSON.parse(readFileSync(files[0]!, "utf8"))
     expect(persisted.sessionId).toBe("s1")
     // The persisted body is the structured plan DTO, not HTML.
@@ -123,6 +125,130 @@ describe("PlanStore canonical document", () => {
     expect(document.plan.stages[0]?.id).toBe("01")
     expect(document.plan.stages[0]?.acceptance[0]?.id).toBe("01.1")
     expect(planFileName("ignored")).toBe("current-plan")
+  })
+
+
+  it("adopts a matching legacy plan into the agent-owned filename", async () => {
+    const document = await run(promote())
+    const ownerFile = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
+    const legacyFile = await run(PlanStore.currentFileFor(WT))
+    renameSync(ownerFile, legacyFile)
+
+    expect((await run(PlanStore.readDocument(WT, "s1", "c1")))?.id).toBe(document.id)
+    expect(existsSync(ownerFile)).toBe(true)
+    expect(existsSync(legacyFile)).toBe(false)
+  })
+
+  it("isolates plans for two chats in one session", async () => {
+    const first = await run(promote())
+    const second = await run(
+      PlanStore.promoteDocument(WT, {
+        sessionId: "s1",
+        producingChatId: "c2",
+        id: "plan-2",
+        plan: editIntent(SOURCE, "Agent two owns this plan."),
+        author: "agent"
+      })
+    )
+
+    expect((await run(PlanStore.readDocument(WT, "s1", "c1")))?.id).toBe(first.id)
+    expect((await run(PlanStore.readDocument(WT, "s1", "c2")))?.id).toBe(second.id)
+    expect(await run(PlanStore.list(WT))).toHaveLength(2)
+
+    await run(PlanStore.discard(WT, "s1", "c1"))
+    expect(await run(PlanStore.readDocument(WT, "s1", "c1"))).toBeNull()
+    expect((await run(PlanStore.readDocument(WT, "s1", "c2")))?.id).toBe(second.id)
+  })
+
+  it("mutates the exact owner when plan ids collide", async () => {
+    const [first, second] = await run(
+      Effect.all([
+        PlanStore.promoteDocument(WT, {
+          sessionId: "session",
+          producingChatId: "chat-a",
+          id: "duplicate-plan",
+          plan: editIntent(SOURCE, "Agent A"),
+          author: "agent"
+        }),
+        PlanStore.promoteDocument(WT, {
+          sessionId: "session",
+          producingChatId: "chat-b",
+          id: "duplicate-plan",
+          plan: editIntent(SOURCE, "Agent B"),
+          author: "agent"
+        })
+      ], { concurrency: "unbounded" })
+    )
+
+    await run(PlanStore.updateDocument(WT, {
+      sessionId: "session",
+      producingChatId: "chat-b",
+      planId: second.id,
+      baseRevision: second.revision,
+      plan: editIntent(second.plan, "Agent B amended"),
+      author: "agent"
+    }))
+
+    expect((await run(PlanStore.readDocument(WT, "session", "chat-a")))?.plan.stages[0]?.intent)
+      .toBe(first.plan.stages[0]?.intent)
+    expect((await run(PlanStore.readDocument(WT, "session", "chat-b")))?.plan.stages[0]?.intent)
+      .toBe("Agent B amended")
+  })
+
+  it("rejects an owner file whose persisted identity was externally changed", async () => {
+    const document = await run(promote())
+    const ownerFile = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
+    writeFileSync(ownerFile, JSON.stringify({ ...document, producingChatId: "c2" }))
+
+    const result = await run(Effect.either(PlanStore.updateDocument(WT, {
+      ...OWNER,
+      planId: document.id,
+      baseRevision: document.revision,
+      plan: editIntent(document.plan, "Wrong owner"),
+      author: "agent"
+    })))
+
+    expect(Either.isLeft(result)).toBe(true)
+    expect(await run(PlanStore.readDocument(WT, "s1", "c1"))).toBeNull()
+  })
+
+  it("keeps concurrent same-worktree agent writes and discards isolated", async () => {
+    const [first, second] = await run(
+      Effect.all([
+        PlanStore.promoteDocument(WT, {
+          sessionId: "session",
+          producingChatId: "chat-a",
+          id: "plan-a",
+          plan: editIntent(SOURCE, "Agent A"),
+          author: "agent"
+        }),
+        PlanStore.promoteDocument(WT, {
+          sessionId: "session",
+          producingChatId: "chat-b",
+          id: "plan-b",
+          plan: editIntent(SOURCE, "Agent B"),
+          author: "agent"
+        })
+      ], { concurrency: "unbounded" })
+    )
+    await run(
+      Effect.all([
+        PlanStore.updateDocument(WT, {
+          sessionId: "session",
+          producingChatId: "chat-a",
+          planId: first.id,
+          baseRevision: first.revision,
+          plan: editIntent(first.plan, "Agent A amended"),
+          author: "agent"
+        }),
+        PlanStore.discard(WT, "session", "chat-b")
+      ], { concurrency: "unbounded" })
+    )
+
+    expect((await run(PlanStore.readDocument(WT, "session", "chat-a")))?.plan.stages[0]?.intent)
+      .toBe("Agent A amended")
+    expect(await run(PlanStore.readDocument(WT, "session", "chat-b"))).toBeNull()
+    expect(second.id).toBe("plan-b")
   })
 
   it("isolates same-basename repositories and deletes only the requested plans", async () => {
@@ -206,6 +332,7 @@ describe("PlanStore canonical document", () => {
     }
     const amended = await run(
       PlanStore.updateDocument(WT, {
+          ...OWNER,
         planId: "plan-1",
         baseRevision: initial.revision,
         plan: amendment,
@@ -228,7 +355,7 @@ describe("PlanStore canonical document", () => {
     // silently no-ops. Mirrors the ThemeService.watch test.
     const first = await run(promote())
     expect(first.revision).toBe(1)
-    const file = await run(PlanStore.currentFileFor(WT))
+    const file = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
     const c2 = readFileSync(file, "utf8")
       .replace('"revision": 1', '"revision": 2')
       .replace("One document is authoritative.", "Edited externally.")
@@ -246,7 +373,7 @@ describe("PlanStore canonical document", () => {
     }, 300)
     try {
       const chunk = await run(
-        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT, "s1", "c1"))).pipe(
           Stream.take(1),
           Stream.runCollect
         )
@@ -265,7 +392,7 @@ describe("PlanStore canonical document", () => {
     // forever — emission identity must be the (id, revision) pair.
     const first = await run(promote())
     expect(first.revision).toBe(1)
-    const file = await run(PlanStore.currentFileFor(WT))
+    const file = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
     const replacement = readFileSync(file, "utf8").replace(
       '"id": "plan-1"',
       '"id": "plan-2"'
@@ -279,7 +406,7 @@ describe("PlanStore canonical document", () => {
     }, 300)
     try {
       const chunk = await run(
-        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT, "s1", "c1"))).pipe(
           Stream.take(1),
           Stream.runCollect
         )
@@ -295,13 +422,13 @@ describe("PlanStore canonical document", () => {
   it("discard removes only the canonical file and watch emits the deletion", async () => {
     const first = await run(promote())
     expect(first.revision).toBe(1)
-    const file = await run(PlanStore.currentFileFor(WT))
+    const file = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
     const dir = await run(PlanStore.dirFor(WT))
-    await run(PlanStore.discard(WT))
+    await run(PlanStore.discard(WT, "s1", "c1"))
     expect(existsSync(file)).toBe(false)
     expect(existsSync(dir)).toBe(true)
     // Idempotent: discarding an absent plan succeeds.
-    await run(PlanStore.discard(WT))
+    await run(PlanStore.discard(WT, "s1", "c1"))
 
     // Re-promote so the watcher has a baseline document, then discard while a
     // subscriber is live: the deletion must reach it as a `null` emission. A
@@ -321,7 +448,7 @@ describe("PlanStore canonical document", () => {
     }, 300)
     try {
       const chunk = await run(
-        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT, "s1", "c1"))).pipe(
           Stream.take(1),
           Stream.runCollect
         )
@@ -342,10 +469,10 @@ describe("PlanStore canonical document", () => {
     // discard's null emission (key also null); only CONSECUTIVE duplicates may
     // be suppressed.
     const seeded = await run(promote())
-    const file = await run(PlanStore.currentFileFor(WT))
+    const file = await run(PlanStore.currentFileFor(WT, "s1", "c1"))
     const dir = await run(PlanStore.dirFor(WT))
     const content = readFileSync(file, "utf8")
-    await run(PlanStore.discard(WT))
+    await run(PlanStore.discard(WT, "s1", "c1"))
     expect(existsSync(file)).toBe(false)
     expect(seeded.revision).toBe(1)
 
@@ -365,7 +492,7 @@ describe("PlanStore canonical document", () => {
     }, 300)
     try {
       const chunk = await run(
-        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT))).pipe(
+        Stream.unwrap(Effect.map(PlanStore, (s) => s.watch(WT, "s1", "c1"))).pipe(
           Stream.take(2),
           Stream.runCollect
         )
@@ -383,6 +510,7 @@ describe("PlanStore canonical document", () => {
       Effect.gen(function* () {
         const first = yield* promote()
         const second = yield* PlanStore.updateDocument(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: first.revision,
           plan: editAcceptanceText(SOURCE, "The source survives every restart."),
@@ -409,6 +537,7 @@ describe("PlanStore canonical document", () => {
       Effect.gen(function* () {
         const first = yield* promote()
         const second = yield* PlanStore.updateDocument(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: first.revision,
           plan: editProse(SOURCE, "The canonical document is authoritative."),
@@ -416,6 +545,7 @@ describe("PlanStore canonical document", () => {
         })
         const stale = yield* Effect.either(
           PlanStore.updateDocument(WT, {
+          ...OWNER,
             planId: first.id,
             baseRevision: first.revision,
             plan: editProse(SOURCE, "A stale local document is authoritative."),
@@ -442,6 +572,7 @@ describe("PlanStore canonical document", () => {
         const first = yield* promote()
         const invalid = yield* Effect.either(
           PlanStore.updateDocument(WT, {
+          ...OWNER,
             planId: first.id,
             baseRevision: first.revision,
             // Missing `stages`/`annotations` — fails Schema validation.
@@ -472,6 +603,7 @@ describe("PlanStore canonical document", () => {
         const first = yield* promote()
         const invalid = yield* Effect.either(
           PlanStore.updateDocument(WT, {
+          ...OWNER,
             planId: first.id,
             baseRevision: first.revision,
             plan: duplicated,
@@ -492,6 +624,7 @@ describe("PlanStore canonical document", () => {
       Effect.gen(function* () {
         const first = yield* promote()
         const criterion = yield* PlanStore.setCriterionStatus(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: first.revision,
           criterionId: "01.1",
@@ -500,6 +633,7 @@ describe("PlanStore canonical document", () => {
           author: "user"
         })
         return yield* PlanStore.addAnnotation(WT, {
+          ...OWNER,
           planId: criterion.id,
           baseRevision: criterion.revision,
           stageId: "01",
@@ -540,6 +674,7 @@ describe("PlanStore canonical document", () => {
         const first = yield* promote(source)
         const before = planStageSemanticFingerprint(first.plan.stages[0]!)
         const updated = yield* PlanStore.setTaskStatusLatest(WT, {
+          ...OWNER,
           planId: first.id,
           stageId: "01",
           taskId: "01.task.1",
@@ -578,6 +713,7 @@ describe("PlanStore canonical document", () => {
         const first = yield* promote(source)
         const fingerprint = planStageSemanticFingerprint(first.plan.stages[0]!)
         yield* PlanStore.setTaskStatusLatest(WT, {
+          ...OWNER,
           planId: first.id,
           stageId: "01",
           taskId: "01.task.1",
@@ -586,6 +722,7 @@ describe("PlanStore canonical document", () => {
         })
         const afterFirst = yield* PlanStore.readDocument(WT)
         yield* PlanStore.setTaskStatusLatest(WT, {
+          ...OWNER,
           planId: first.id,
           stageId: "01",
           taskId: "01.task.1",
@@ -593,6 +730,7 @@ describe("PlanStore canonical document", () => {
           expectedStageFingerprint: fingerprint
         })
         yield* PlanStore.setTaskStatusLatest(WT, {
+          ...OWNER,
           planId: first.id,
           stageId: "01",
           taskId: "01.task.2",
@@ -625,6 +763,7 @@ describe("PlanStore canonical document", () => {
       Effect.gen(function* () {
         const first = yield* promote()
         const thread = yield* PlanStore.addAnnotation(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: first.revision,
           stageId: "01",
@@ -632,6 +771,7 @@ describe("PlanStore canonical document", () => {
           author: "user"
         })
         const replied = yield* PlanStore.appendAnnotationMessage(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: thread.revision,
           annotationId: thread.plan.annotations[0]!.id,
@@ -643,6 +783,7 @@ describe("PlanStore canonical document", () => {
         })
         const reply = replied.plan.annotations[0]!.messages[1]!
         const sent = yield* PlanStore.updateAnnotationMessageDelivery(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: replied.revision,
           annotationId: replied.plan.annotations[0]!.id,
@@ -651,6 +792,7 @@ describe("PlanStore canonical document", () => {
           author: "agent"
         })
         const withOutbox = yield* PlanStore.updateAnnotationMentionDeliveries(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: sent.revision,
           annotationId: sent.plan.annotations[0]!.id,
@@ -668,6 +810,7 @@ describe("PlanStore canonical document", () => {
           author: "agent"
         })
         const resolved = yield* PlanStore.setAnnotationResolved(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: withOutbox.revision,
           annotationId: withOutbox.plan.annotations[0]!.id,
@@ -675,6 +818,7 @@ describe("PlanStore canonical document", () => {
           author: "user"
         })
         const reopened = yield* PlanStore.setAnnotationResolved(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: resolved.revision,
           annotationId: resolved.plan.annotations[0]!.id,
@@ -683,6 +827,7 @@ describe("PlanStore canonical document", () => {
         })
         const stale = yield* Effect.either(
           PlanStore.appendAnnotationMessage(WT, {
+          ...OWNER,
             planId: first.id,
             baseRevision: thread.revision,
             annotationId: thread.plan.annotations[0]!.id,
@@ -734,6 +879,7 @@ describe("PlanStore canonical document", () => {
       Effect.gen(function* () {
         const first = yield* promote()
         const thread = yield* PlanStore.addAnnotation(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: first.revision,
           stageId: "01",
@@ -745,6 +891,7 @@ describe("PlanStore canonical document", () => {
         ).pipe(Stream.take(1), Stream.runCollect, Effect.fork)
         yield* Effect.sleep("25 millis")
         const appended = yield* PlanStore.appendAnnotationMessage(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: thread.revision,
           annotationId: thread.plan.annotations[0]!.id,
@@ -775,6 +922,7 @@ describe("PlanStore canonical document", () => {
           ["Writer A", "Writer B"].map((label) =>
             Effect.either(
               PlanStore.updateDocument(WT, {
+          ...OWNER,
                 planId: first.id,
                 baseRevision: first.revision,
                 plan: editProse(SOURCE, ` is authoritative.`),
@@ -822,6 +970,7 @@ describe("PlanStore canonical document", () => {
       Effect.gen(function* () {
         const first = yield* promote(ORCHESTRATED_SOURCE)
         const completed = yield* PlanStore.updateDocument(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: first.revision,
           plan: first.plan,
@@ -850,6 +999,7 @@ describe("PlanStore canonical document", () => {
       Effect.gen(function* () {
         const first = yield* promote(ORCHESTRATED_SOURCE)
         yield* PlanStore.updateDocument(WT, {
+          ...OWNER,
           planId: first.id,
           baseRevision: first.revision,
           plan: first.plan,

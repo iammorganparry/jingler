@@ -7,6 +7,7 @@ export interface PublishedAgentFileActivity extends AgentFileActivity {
 }
 
 const activities = new Map<string, PublishedAgentFileActivity>()
+const touchedFiles = new Map<string, ReadonlyArray<string>>()
 /**
  * Per-session override from the Fleet: when the operator selects a delegated
  * agent in the Fleet drawer, ITS file activity takes precedence over the main
@@ -18,6 +19,8 @@ const listeners = new Set<() => void>()
 let sequence = 0
 
 const keyOf = (sessionId: string, chatId: string): string => `${sessionId}\u0000${chatId}`
+
+export const getAgentFileActivityVersion = (): number => sequence
 
 export const subscribeAgentFileActivity = (listener: () => void): (() => void) => {
   listeners.add(listener)
@@ -56,12 +59,22 @@ export const publishAgentFileActivity = (
   }
   sequence += 1
   activities.set(key, { ...activity, sequence })
+  const paths = touchedFiles.get(key) ?? []
+  if (!paths.includes(activity.path)) {
+    touchedFiles.set(key, [...paths, activity.path].slice(-20))
+  }
   notify()
 }
 
 export const clearAgentFileActivityChat = (sessionId: string, chatId: string): void => {
+  touchedFiles.delete(keyOf(sessionId, chatId))
   publishAgentFileActivity(sessionId, chatId, null)
 }
+
+export const getAgentTouchedFiles = (
+  sessionId: string,
+  chatId: string
+): ReadonlyArray<string> => touchedFiles.get(keyOf(sessionId, chatId)) ?? []
 
 /**
  * Publish (or clear, with `null`) the SELECTED Fleet agent's file activity.
@@ -105,6 +118,11 @@ export const clearAgentFileActivitySession = (sessionId: string): void => {
   for (const key of activities.keys()) {
     if (!key.startsWith(prefix)) continue
     activities.delete(key)
+    changed = true
+  }
+  for (const key of touchedFiles.keys()) {
+    if (!key.startsWith(prefix)) continue
+    touchedFiles.delete(key)
     changed = true
   }
   if (fleetActivities.delete(sessionId)) changed = true

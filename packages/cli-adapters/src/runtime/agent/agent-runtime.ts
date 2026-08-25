@@ -1,5 +1,7 @@
 import type {
   Message,
+  AgentRosterEntry,
+  PeerAgentMessageResult,
   PermissionMode,
   PiRunSpec,
   ExplanationPayload,
@@ -70,6 +72,11 @@ export interface AgentRuntimeContext {
   /** Discard the canonical plan; the next submission proposes fresh. Optional: only `AgentRunner` supplies it. */
   readonly discardPlan?: () => Effect.Effect<void>
   readonly proposePlan: (plan: PlanPrd) => Effect.Effect<RuntimePlanDecision>
+  readonly listPeerAgents?: () => Effect.Effect<ReadonlyArray<AgentRosterEntry>>
+  readonly messagePeerAgent?: (
+    targetChatId: string,
+    text: string
+  ) => Effect.Effect<PeerAgentMessageResult>
 }
 
 export interface AgentRuntimeShape {

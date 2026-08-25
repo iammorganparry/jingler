@@ -106,10 +106,10 @@ const primaryAction = (input: {
     case "executing":
       return { label: "Implementation running", icon: LoaderCircle, disabled: true }
     case "needs-verification":
-      // Unverified criteria are a call to action, not a terminal state: re-drive
-      // execution (which verifies the remaining criteria) or revise the plan.
+      // Unverified criteria re-drive execution; the approved plan does not pass
+      // through a second approval gate when an amendment adds pending work.
       return {
-        label: "Approve & implement",
+        label: "Verify remaining",
         icon: Play,
         disabled: !input.canApprove,
         onRun: input.onResume

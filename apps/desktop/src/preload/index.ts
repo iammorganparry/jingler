@@ -48,6 +48,7 @@ interface AuthCompletePayload {
 
 interface PreviewEventPayload {
   readonly sessionId: string
+  readonly chatId: string
   readonly url: string
 }
 

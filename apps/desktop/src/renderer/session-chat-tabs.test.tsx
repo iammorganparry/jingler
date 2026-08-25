@@ -4,7 +4,8 @@ import { act, cleanup, fireEvent, render, renderHook, screen, within } from "@te
 import type { Session, SubagentFleetNode } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FileBrowserController } from "./use-file-browser.js"
-import { SessionChatTabs } from "./session-chat-tabs.js"
+import { rpc } from "./rpc-client.js"
+import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js"
 import {
   clearSubagentTabs,
   publishSubagentTabs,
@@ -24,7 +25,6 @@ vi.mock("./use-file-browser.js", () => ({
 
 vi.mock("./conversation-registry.js", () => ({
   disposeChatActor: vi.fn(),
-  rehomeSharedPlan: vi.fn(),
   useChatActivities: () => ({})
 }))
 
@@ -34,7 +34,8 @@ vi.mock("./rpc-client.js", () => ({
     sessionsSelectChat: vi.fn(),
     sessionsRenameChat: vi.fn(),
     sessionsCloseChat: vi.fn(),
-    sessionsReopenChat: vi.fn()
+    sessionsReopenChat: vi.fn(),
+    agentMessagePeer: vi.fn()
   }
 }))
 
@@ -146,14 +147,18 @@ const controller = (
 const renderTabs = (filesActive = true) => {
   const onSelectConversation = vi.fn()
   const onSelectFiles = vi.fn()
-  render(
+  render(<>
     <SessionChatTabs
       session={session}
       filesActive={filesActive}
       onSelectConversation={onSelectConversation}
       onSelectFiles={onSelectFiles}
     />
-  )
+    <SessionSubagentTabs
+      session={session}
+      onSelectConversation={onSelectConversation}
+    />
+  </>)
   return { onSelectConversation, onSelectFiles }
 }
 
@@ -167,6 +172,28 @@ afterEach(() => {
 })
 
 describe("SessionChatTabs subagent tabs", () => {
+  it("does not mark a subagent selected while Files owns the pane", () => {
+    const worker = subagentNode()
+    act(() => publishSubagentTabs(session.id, {
+      chatId: "chat-1",
+      active: [worker],
+      completed: [],
+      selectedId: worker.id
+    }))
+
+    render(
+      <SessionSubagentTabs
+        session={session}
+        filesActive
+        onSelectConversation={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "worker · Implement tabs" }).getAttribute("aria-current")
+    ).toBeNull()
+  })
+
   it("selects a live worker tab and moves completed output into Previous chats", () => {
     const worker = subagentNode()
     const reviewer = subagentNode({
@@ -209,6 +236,120 @@ describe("SessionChatTabs subagent tabs", () => {
       chatId: "chat-1",
       nodeId: reviewer.id
     })
+  })
+
+  it("opens a completed child by parent chat when child ids collide", () => {
+    const secondChat = {
+      id: "chat-2",
+      title: "Second",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z"
+    }
+    const completed = (task: string) => subagentNode({
+      id: "shared-worker",
+      task,
+      status: "completed",
+      completedAt: 2,
+      terminal: { reason: "completed", summary: task, at: 2, retryable: false }
+    })
+    act(() => {
+      publishSubagentTabs(session.id, {
+        chatId: "chat-1",
+        active: [],
+        completed: [completed("First history")],
+        selectedId: "main"
+      })
+      publishSubagentTabs(session.id, {
+        chatId: "chat-2",
+        active: [],
+        completed: [completed("Second history")],
+        selectedId: "main"
+      })
+    })
+    vi.mocked(rpc.sessionsSelectChat).mockResolvedValue({ ...session, activeChatId: "chat-2" })
+    render(
+      <SessionChatTabs
+        session={{ ...session, chats: [...session.chats, secondChat] }}
+        filesActive={false}
+        onSelectConversation={vi.fn()}
+        onSelectFiles={vi.fn()}
+      />
+    )
+    const selection = renderHook(() => useSubagentTabSelection(session.id))
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Previous chats" }), {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open worker · Second history" }))
+
+    expect(selection.result.current).toMatchObject({ chatId: "chat-2", nodeId: "shared-worker" })
+    expect(rpc.sessionsSelectChat).toHaveBeenCalledWith(session.id, "chat-2")
+  })
+
+  it("drops a drafted peer message when the sending agent changes", () => {
+    const secondChat = {
+      id: "chat-2",
+      title: "Second",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z"
+    }
+    const twoChats = { ...session, chats: [...session.chats, secondChat] }
+    const view = render(
+      <SessionSubagentTabs session={twoChats} onSelectConversation={vi.fn()} />
+    )
+    fireEvent.click(screen.getByText("Peer agents"))
+    fireEvent.click(screen.getByRole("button", { name: "Message Second" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Message to Second" }), {
+      target: { value: "draft from chat one" }
+    })
+
+    view.rerender(
+      <SessionSubagentTabs
+        session={{ ...twoChats, activeChatId: "chat-2" }}
+        onSelectConversation={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByDisplayValue("draft from chat one")).toBeNull()
+  })
+
+  it("shows only children of the selected top-level agent", () => {
+    const secondChat = {
+      id: "chat-2",
+      title: "Second",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z"
+    }
+    act(() => {
+      publishSubagentTabs(session.id, {
+        chatId: "chat-1",
+        active: [subagentNode({ id: "worker-a", task: "Agent A task" })],
+        completed: [],
+        selectedId: "main"
+      })
+      publishSubagentTabs(session.id, {
+        chatId: "chat-2",
+        active: [subagentNode({ id: "worker-b", task: "Agent B task" })],
+        completed: [],
+        selectedId: "main"
+      })
+    })
+    const first = { ...session, chats: [...session.chats, secondChat] }
+    const view = render(
+      <SessionSubagentTabs session={first} onSelectConversation={vi.fn()} />
+    )
+    expect(screen.getByRole("button", { name: /Agent A task/ })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Agent B task/ })).toBeNull()
+
+    view.rerender(
+      <SessionSubagentTabs
+        session={{ ...first, activeChatId: "chat-2" }}
+        onSelectConversation={vi.fn()}
+      />
+    )
+    expect(screen.queryByRole("button", { name: /Agent A task/ })).toBeNull()
+    expect(screen.getByRole("button", { name: /Agent B task/ })).toBeTruthy()
   })
 })
 

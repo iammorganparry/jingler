@@ -3,7 +3,7 @@ import { join } from "node:path"
 import {
   appShell,
   expect,
-  planDirectory,
+  planFile,
   type LaunchedApp,
   type SeedSession,
   test
@@ -52,8 +52,15 @@ const session = (id = "s_enhanced_plan") =>
     ]
   }
 
-const currentPlanPath = (launched: LaunchedApp): string =>
-  join(planDirectory(launched.home, launched.repoPath), "current-plan.json")
+const currentPlanPath = (launched: LaunchedApp): string => {
+  const sessions = JSON.parse(
+    readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
+  )
+  const session = sessions.find((candidate: { worktreePath?: string }) =>
+    candidate.worktreePath === launched.repoPath
+  ) ?? sessions[0]
+  return planFile(launched.home, launched.repoPath, session.id, session.activeChatId)
+}
 
 const readPlan = (launched: LaunchedApp) =>
   JSON.parse(readFileSync(currentPlanPath(launched), "utf8"))
@@ -142,7 +149,29 @@ test("the producing agent amends an approved plan in place without regressing co
       stage.tasks.filter((task) => task.status === "completed").map((task) => task.id)
   )
   expect(completedAfter).toEqual(expect.arrayContaining(completedBefore))
-  await expect(launched.window.getByRole("button", { name: /Approve & implement/ })).toHaveCount(0)
+  await expect(
+    launched.window.getByRole("button", { name: "Approve & implement" })
+  ).toHaveCount(0)
+  await expect(
+    launched.window.getByRole("button", { name: "Verify remaining" })
+  ).toBeVisible()
+
+  const ownerPlanPath = currentPlanPath(launched)
+  const ownerRevision = readPlan(launched).revision
+  await launched.window.getByTestId("active-chat-tab").first().dblclick()
+  const title = launched.window.getByRole("textbox", { name: "Chat title" })
+  await title.fill("Plan owner")
+  await title.press("Enter")
+  await launched.window.getByRole("button", { name: "New chat" }).click()
+  await launched.window.getByRole("button", { name: "Close Plan owner" }).click()
+  expect(existsSync(ownerPlanPath)).toBe(true)
+  expect(JSON.parse(readFileSync(ownerPlanPath, "utf8")).revision).toBe(ownerRevision)
+  await launched.window.getByRole("button", { name: "Previous chats" }).click()
+  await launched.window.getByRole("menuitem", { name: "Reopen Plan owner" }).click()
+  await expect(
+    launched.window.getByRole("button", { name: "Plan owner", exact: true })
+  ).toHaveAttribute("aria-current", "page")
+  expect(readPlan(launched).revision).toBe(ownerRevision)
 })
 
 test("plan mode always uses Jingler's structured Plan", async ({ launchApp }) => {

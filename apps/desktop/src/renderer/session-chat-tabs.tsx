@@ -9,17 +9,57 @@
  * and there is nothing shared to hoist that would be simpler than the calls.
  */
 import type { Session } from "@jingler/core"
-import { ChatTabBar, FileIcon } from "@jingler/ui"
+import { AgentRoster, ChatTabBar, FileIcon, SubagentTabBar } from "@jingler/ui"
 import { X } from "lucide-react"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
-import { disposeChatActor, rehomeSharedPlan, useChatActivities } from "./conversation-registry.js"
+import { disposeChatActor, useChatActivities } from "./conversation-registry.js"
 import { clearDraft } from "./draft-store.js"
+import { useAgentRoster } from "./agent-roster.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import {
   selectSubagentTab,
   useSessionSubagentTabs
 } from "./subagent-tab-store.js"
+
+export function SessionSubagentTabs({
+  session,
+  filesActive = false,
+  onSelectConversation
+}: {
+  readonly session: Session
+  readonly filesActive?: boolean
+  readonly onSelectConversation: () => void
+}) {
+  const snapshots = useSessionSubagentTabs(session.id)
+  const active = snapshots.find(({ chatId }) => chatId === session.activeChatId)
+  const subagents = active?.active ?? []
+  const roster = useAgentRoster(session)
+  return (
+    <>
+    <SubagentTabBar
+      subagents={subagents.map((node) => ({
+        id: node.id,
+        title: `${node.agent} · ${node.task}`,
+        status: node.status === "needs-attention" ? "attention" : "running"
+      }))}
+      activeSubagentId={filesActive ? undefined : active?.selectedId}
+      onSelectSubagent={(nodeId) => {
+        onSelectConversation()
+        selectSubagentTab(session.id, session.activeChatId, nodeId)
+      }}
+    />
+    <AgentRoster
+      key={session.activeChatId}
+      agents={roster}
+      currentChatId={session.activeChatId}
+      onMessage={(toChatId, text) =>
+        rpc.agentMessagePeer(session.id, session.activeChatId, toChatId, text)
+      }
+    />
+    </>
+  )
+}
 
 export function SessionChatTabs({
   session,
@@ -39,7 +79,7 @@ export function SessionChatTabs({
   const subagentTabs = useSessionSubagentTabs(session.id)
   const activeSubagents = subagentTabs.find(({ chatId }) => chatId === activeChat.id)
   const previousSubagents = subagentTabs.flatMap(({ chatId, completed }) =>
-    completed.map((node) => ({ chatId, node }))
+    completed.map((node) => ({ id: `${chatId}\0${node.id}`, chatId, node }))
   )
   const files = useFileBrowser(session.id, session.worktreePath)
 
@@ -47,20 +87,18 @@ export function SessionChatTabs({
     void rpc.sessionsCreateChat(session.id).then(publishSessionUpdate)
   }
   const selectChat = (chatId: string) => {
-    onSelectConversation()
     selectSubagentTab(session.id, chatId, "main")
-    if (chatId === activeChat.id) return
+    if (chatId === activeChat.id) {
+      onSelectConversation()
+      return
+    }
     void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
   }
-  const selectSubagent = (nodeId: string) => {
-    onSelectConversation()
-    selectSubagentTab(session.id, activeChat.id, nodeId)
-  }
-  const openPreviousSubagent = (nodeId: string) => {
-    const previous = previousSubagents.find(({ node }) => node.id === nodeId)
+  const openPreviousSubagent = (id: string) => {
+    const previous = previousSubagents.find((candidate) => candidate.id === id)
     if (previous === undefined) return
     onSelectConversation()
-    selectSubagentTab(session.id, previous.chatId, nodeId)
+    selectSubagentTab(session.id, previous.chatId, previous.node.id)
     if (previous.chatId !== activeChat.id) {
       const closed = session.closedChats?.some(({ id }) => id === previous.chatId) ?? false
       const open = closed ? rpc.sessionsReopenChat : rpc.sessionsSelectChat
@@ -73,7 +111,6 @@ export function SessionChatTabs({
   const closeChat = (chatId: string) => {
     void rpc.sessionsCloseChat(session.id, chatId).then((updated) => {
       clearDraft(chatId)
-      rehomeSharedPlan(session.id, chatId, updated.activeChatId)
       disposeChatActor(session.id, chatId)
       publishSessionUpdate(updated)
     }).catch(() => {})
@@ -90,7 +127,6 @@ export function SessionChatTabs({
       for (const chat of session.chats) {
         await rpc.sessionsCloseChat(session.id, chat.id).then((updated) => {
           clearDraft(chat.id)
-          rehomeSharedPlan(session.id, chat.id, updated.activeChatId)
           disposeChatActor(session.id, chat.id)
           publishSessionUpdate(updated)
         }).catch(() => {})
@@ -182,16 +218,8 @@ export function SessionChatTabs({
           : activeChat.id
       }
       onSelectChat={selectChat}
-      subagents={(activeSubagents?.active ?? []).map((node) => ({
-        id: node.id,
-        title: `${node.agent} · ${node.task}`,
-        status: node.status === "needs-attention" ? "attention" : "running"
-      }))}
-      subagentChatId={activeChat.id}
-      activeSubagentId={filesActive ? undefined : activeSubagents?.selectedId}
-      onSelectSubagent={selectSubagent}
-      previousSubagents={previousSubagents.map(({ node }) => ({
-        id: node.id,
+      previousSubagents={previousSubagents.map(({ id, node }) => ({
+        id,
         title: `${node.agent} · ${node.task}`
       }))}
       onOpenPreviousSubagent={openPreviousSubagent}

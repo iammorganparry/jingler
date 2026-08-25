@@ -1,9 +1,8 @@
 import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
 import {
   appShell,
   expect,
-  planDirectory,
+  planFile,
   type LaunchedApp,
   type SeedSession,
   test
@@ -55,7 +54,7 @@ const session = (id = "s_discard_plan") =>
 const composerPlaceholder = /Message .+…/
 
 const currentPlanPath = (launched: LaunchedApp): string =>
-  join(planDirectory(launched.home, launched.repoPath), "current-plan.json")
+  planFile(launched.home, launched.repoPath, "s_discard_plan", "s_discard_plan_chat")
 
 const readPlan = (launched: LaunchedApp) =>
   JSON.parse(readFileSync(currentPlanPath(launched), "utf8"))

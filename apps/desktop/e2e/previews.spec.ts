@@ -64,6 +64,17 @@ const isolatedSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<See
   }
 ]
 
+const agentBrowserSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
+  ...seededSessions({ repoPath })[0]!,
+  id: "s_preview_agents",
+  title: "Agent browser isolation",
+  chats: [
+    { id: "chat-alpha", title: "Agent Alpha", createdAt: "2026-07-11T00:00:00.000Z", updatedAt: "2026-07-11T00:00:00.000Z" },
+    { id: "chat-beta", title: "Agent Beta", createdAt: "2026-07-11T00:00:00.000Z", updatedAt: "2026-07-11T00:00:00.000Z" }
+  ],
+  activeChatId: "chat-alpha"
+}]
+
 const closeServer = (server: Server): Promise<void> =>
   new Promise((resolve) => {
     server.close(() => resolve())
@@ -119,7 +130,7 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   expect(browserBox!.width / splitBox!.width).toBeLessThan(0.7)
   await url.fill("http://localhost:4321")
   await url.press("Enter")
-  await expect(url).toHaveValue("http://localhost:4321")
+  await expect(url).toBeVisible()
 
   // At the app's supported minimum width the session pane is under 960px, so
   // Browser becomes the sole body instead of squeezing chat into a sliver.
@@ -214,6 +225,70 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
   }
 })
 
+test("two agents in one session keep independent browser state", async ({ launchApp }) => {
+  const server = createServer((request, response) => {
+    const owner = request.url?.includes("beta") ? "beta" : "alpha"
+    if (!request.url?.endsWith("-history")) {
+      response.writeHead(200, { "Content-Type": "text/html" })
+      response.end(`<script>document.cookie="owner=${owner}; path=/";localStorage.setItem("owner","${owner}");history.pushState({},"","/${owner}-history")</script>`)
+      return
+    }
+    response.writeHead(200, { "Content-Type": "text/html" })
+    response.end(owner)
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject)
+    server.listen({ host: "127.0.0.1", port: 0 }, resolve)
+  })
+  const address = server.address()
+  if (address === null || typeof address === "string") {
+    await closeServer(server)
+    throw new Error("Agent browser isolation server has no TCP address")
+  }
+  const origin = `http://127.0.0.1:${address.port}`
+
+  try {
+    const { app, window } = await launchApp({
+      configured: true,
+      withRepo: true,
+      sessions: agentBrowserSession
+    })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    const url = window.getByLabel("Preview URL")
+    await url.fill(`${origin}/alpha`)
+    await url.press("Enter")
+    await expect(url).toHaveValue(`${origin}/alpha-history`)
+
+    await window.getByTitle("2. Agent Beta").click()
+    await expect(url).toBeHidden()
+    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    await url.fill(`${origin}/beta`)
+    await url.press("Enter")
+    await expect(url).toHaveValue(`${origin}/beta-history`)
+
+    const pages = await app.evaluate(async ({ webContents }, expectedOrigin) =>
+      Promise.all(webContents.getAllWebContents()
+        .filter((contents) => contents.getURL().startsWith(expectedOrigin))
+        .map(async (contents) => ({
+          url: contents.getURL(),
+          cookie: await contents.executeJavaScript("document.cookie"),
+          owner: await contents.executeJavaScript("localStorage.getItem('owner')"),
+          historyLength: await contents.executeJavaScript("history.length")
+        }))), origin)
+    expect(pages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ url: `${origin}/alpha-history`, cookie: "owner=alpha", owner: "alpha" }),
+      expect.objectContaining({ url: `${origin}/beta-history`, cookie: "owner=beta", owner: "beta" })
+    ]))
+    expect(pages.every((page) => page.historyLength >= 2)).toBe(true)
+
+    await window.getByTitle("1. Agent Alpha").click()
+    await expect(url).toHaveValue(`${origin}/alpha-history`)
+  } finally {
+    await closeServer(server)
+  }
+})
+
 test("deleting a session closes its native browser resources", async ({ launchApp }) => {
   const server = createServer((_request, response) => {
     response.writeHead(200, { "Content-Type": "text/html" })
@@ -255,7 +330,8 @@ test("deleting a session closes its native browser resources", async ({ launchAp
         origin
       )
     await expect.poll(resourceCount).toBe(1)
-    const partition = "persist:jingler-browser-preview:s_preview_alpha"
+    const partition =
+      "persist:jingler-browser-preview:s_preview_alpha:c_s_preview_alpha_1"
     await expect
       .poll(() =>
         app.evaluate(

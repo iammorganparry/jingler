@@ -32,10 +32,10 @@ describe("plan document registry", () => {
       sessionId,
       load: async () => document(sessionId)
     }
-    const firstView = getPlanDocumentActor(sessionId, input)
+    const firstView = getPlanDocumentActor(sessionId, `chat-${sessionId}`, input)
     await waitFor(firstView, (snapshot) => snapshot.matches("clean"))
 
-    const remountedView = getPlanDocumentActor(sessionId, input)
+    const remountedView = getPlanDocumentActor(sessionId, `chat-${sessionId}`, input)
     expect(remountedView).toBe(firstView)
     expect(remountedView.getSnapshot().context.document?.revision).toBe(1)
   })
@@ -43,7 +43,7 @@ describe("plan document registry", () => {
   it("resolves a flush immediately for the read-only plan", async () => {
     const sessionId = "registry-flush"
     sessions.add(sessionId)
-    const actor = getPlanDocumentActor(sessionId, {
+    const actor = getPlanDocumentActor(sessionId, `chat-${sessionId}`, {
       sessionId,
       load: async () => document(sessionId)
     })

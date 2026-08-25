@@ -28,8 +28,8 @@ export interface BrowserControlSessionPortShape {
 }
 
 export interface BrowserControlPortShape {
-  /** Bind every operation to one repository session before it reaches Electron. */
-  readonly forSession: (sessionId: string) => BrowserControlSessionPortShape
+  /** Bind every operation to one top-level agent before it reaches Electron. */
+  readonly forAgent: (sessionId: string, chatId: string) => BrowserControlSessionPortShape
 }
 
 export class BrowserControlPort extends Context.Tag("@jingler/BrowserControlPort")<

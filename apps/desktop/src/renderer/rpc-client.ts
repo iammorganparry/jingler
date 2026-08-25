@@ -924,6 +924,12 @@ export const rpc = {
     request: SubagentFleetControlRequest
   ): Promise<SubagentFleetControlOutcome> =>
     run((c) => c.Agent.controlSubagent({ sessionId, chatId, request })),
+  agentMessagePeer: (
+    sessionId: string,
+    fromChatId: string,
+    toChatId: string,
+    text: string
+  ) => run((c) => c.Agent.messagePeer({ sessionId, fromChatId, toChatId, text })),
   agentSteer: (
     sessionId: string,
     chatId: string,
@@ -1263,28 +1269,31 @@ export const rpc = {
   /** Show the preview view and load `url` at `bounds` (rejects non-http(s)). */
   browserPreviewOpen: (
     sessionId: string,
+    chatId: string,
     url: string,
     bounds: BrowserBounds
   ): Promise<void> =>
-    run((c) => c.BrowserPreview.open({ sessionId, url, bounds })),
+    run((c) => c.BrowserPreview.open({ sessionId, chatId, url, bounds })),
   /** Keep the native view aligned with the pane's on-screen rect. */
   browserPreviewSetBounds: (
     sessionId: string,
+    chatId: string,
     bounds: BrowserBounds
   ): Promise<void> =>
-    run((c) => c.BrowserPreview.setBounds({ sessionId, bounds })),
+    run((c) => c.BrowserPreview.setBounds({ sessionId, chatId, bounds })),
   /** Navigate the open preview to a new URL (rejects non-http(s)). */
-  browserPreviewNavigate: (sessionId: string, url: string): Promise<void> =>
-    run((c) => c.BrowserPreview.navigate({ sessionId, url })),
+  browserPreviewNavigate: (sessionId: string, chatId: string, url: string): Promise<void> =>
+    run((c) => c.BrowserPreview.navigate({ sessionId, chatId, url })),
   /** Reload the current preview page. */
-  browserPreviewReload: (sessionId: string): Promise<void> =>
-    run((c) => c.BrowserPreview.reload({ sessionId })),
+  browserPreviewReload: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.reload({ sessionId, chatId })),
   /** Hide the native view for a tab switch, keeping its page and history alive. */
   browserPreviewSetVisible: (
     sessionId: string,
+    chatId: string,
     visible: boolean
   ): Promise<void> =>
-    run((c) => c.BrowserPreview.setVisible({ sessionId, visible })),
+    run((c) => c.BrowserPreview.setVisible({ sessionId, chatId, visible })),
   // ── Auth ─────────────────────────────────────────────────────────────────
   /** The current authenticated session, or null when signed out. */
   authGetSession: (): Promise<AuthSession | null> =>
@@ -1330,14 +1339,15 @@ export const rpc = {
       if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
-  planCurrent: (sessionId: string): Promise<PlanDocument | null> =>
-    run((c) => c.Plan.current({ sessionId })),
-  planStartDraft: (sessionId: string): Promise<PlanDocument> =>
-    run((c) => c.Plan.startDraft({ sessionId })),
-  planDiscard: (sessionId: string): Promise<null> =>
-    run((c) => c.Plan.discard({ sessionId })),
+  planCurrent: (sessionId: string, chatId: string): Promise<PlanDocument | null> =>
+    run((c) => c.Plan.current({ sessionId, chatId })),
+  planStartDraft: (sessionId: string, chatId: string): Promise<PlanDocument> =>
+    run((c) => c.Plan.startDraft({ sessionId, chatId })),
+  planDiscard: (sessionId: string, chatId: string): Promise<null> =>
+    run((c) => c.Plan.discard({ sessionId, chatId })),
   planUpdateDocument: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     plan: PlanPrd
@@ -1345,6 +1355,7 @@ export const rpc = {
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
   planDispatchMessage: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     annotationId: string
@@ -1358,6 +1369,7 @@ export const rpc = {
   }> => run((c) => c.Plan.dispatchMessage(input)),
   planDispatchExistingMessage: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     annotationId: string
@@ -1369,6 +1381,7 @@ export const rpc = {
   }> => run((c) => c.Plan.dispatchExistingMessage(input)),
   planUpdateMessageDelivery: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     annotationId: string
@@ -1378,6 +1391,7 @@ export const rpc = {
   }): Promise<PlanDocument> => run((c) => c.Plan.updateMessageDelivery(input)),
   planSetThreadResolved: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     annotationId: string
@@ -1386,6 +1400,7 @@ export const rpc = {
   }): Promise<PlanDocument> => run((c) => c.Plan.setThreadResolved(input)),
   planWatch: (
     sessionId: string,
+    chatId: string,
     onDocument: (document: PlanDocument | null) => void
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
@@ -1393,7 +1408,7 @@ export const rpc = {
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = coreRuntime.runFork(
-        client.Plan.watch({ sessionId }).pipe(
+        client.Plan.watch({ sessionId, chatId }).pipe(
           Stream.runForEach((document) =>
             Effect.sync(() => onDocument(document))
           )

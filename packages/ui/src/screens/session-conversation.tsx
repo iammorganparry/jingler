@@ -63,9 +63,9 @@ export interface SessionConversationProps {
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
   /** Toggle the browser belonging to the named session. */
-  onToggleBrowser?: (sessionId: string) => void
+  onToggleBrowser?: (sessionId: string, chatId: string) => void
   /** Whether the named session's browser is currently visible. */
-  isBrowserActive?: (sessionId: string) => boolean
+  isBrowserActive?: (sessionId: string, chatId: string) => boolean
   /** Promote or demote a session from the persistent tray. */
   onSetSessionPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session from the sidebar quick-actions (undoable). */
@@ -115,6 +115,14 @@ export interface SessionConversationProps {
       readonly activeTabId: TabKey
       readonly onSelectConversation: () => void
       readonly onSelectFiles: () => void
+    }
+  ) => ReactNode
+  /** Render children of the selected top-level agent in a second tab row. */
+  renderSubagentTabs?: (
+    session: Session,
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
     }
   ) => ReactNode
   /** Session ids that should surface a Plan Review tab (plan mode / has a plan). */
@@ -315,6 +323,7 @@ export function SessionConversation(props: SessionConversationProps) {
             onOpenFile={props.onOpenFile}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}
+            renderSubagentTabs={props.renderSubagentTabs}
             onRenameSession={props.onRenameSession}
             onToggleBrowser={props.onToggleBrowser}
             isBrowserActive={props.isBrowserActive}

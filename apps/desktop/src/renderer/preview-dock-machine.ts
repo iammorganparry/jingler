@@ -3,7 +3,12 @@ import type { DockSide } from "@jingler/ui"
 import { assign, setup } from "xstate"
 
 export const DEFAULT_PREVIEW_URL = "http://localhost:3000"
-const SESSIONS_KEY = "jingler.browser.sessions.v1"
+const SESSIONS_KEY = "jingler.browser.agents.v2"
+
+export const previewOwnerId = (sessionId: string, chatId: string): string =>
+  `${sessionId}\0${chatId}`
+
+const sessionIdFromOwner = (ownerId: string): string => ownerId.split("\0", 1)[0] ?? ownerId
 const SIDE_KEY = "jingler.browser.side"
 const LEGACY_VISIBLE_KEY = "jingler.browser.visible"
 const LEGACY_ASSET_TABS_KEY = "jingler.preview.tabs"
@@ -34,7 +39,7 @@ export type PreviewDockEvent =
 const defaultSessionState = (visible = false): PreviewSessionState => ({
   url: DEFAULT_PREVIEW_URL,
   visible,
-  source: "operator"
+  source: "native"
 })
 
 const readSide = (): DockSide => {
@@ -171,25 +176,35 @@ export const previewDockMachine = setup({
     }),
     removeSession: assign(({ context, event }) => {
       if (event.type !== "REMOVE_SESSION") return {}
-      const { [event.sessionId]: _removed, ...sessions } = context.sessions
+      const sessions = Object.fromEntries(
+        Object.entries(context.sessions).filter(
+          ([ownerId]) => sessionIdFromOwner(ownerId) !== event.sessionId
+        )
+      )
       persistSessions(sessions)
       return {
         sessions,
         focusedSessionId:
-          context.focusedSessionId === event.sessionId ? null : context.focusedSessionId
+          context.focusedSessionId !== null &&
+          sessionIdFromOwner(context.focusedSessionId) === event.sessionId
+            ? null
+            : context.focusedSessionId
       }
     }),
     reconcileSessions: assign(({ context, event }) => {
       if (event.type !== "RECONCILE_SESSIONS") return {}
       const retained = new Set(event.sessionIds)
       const sessions = Object.fromEntries(
-        Object.entries(context.sessions).filter(([sessionId]) => retained.has(sessionId))
+        Object.entries(context.sessions).filter(([ownerId]) =>
+          retained.has(sessionIdFromOwner(ownerId))
+        )
       )
       persistSessions(sessions)
       return {
         sessions,
         focusedSessionId:
-          context.focusedSessionId !== null && retained.has(context.focusedSessionId)
+          context.focusedSessionId !== null &&
+          retained.has(sessionIdFromOwner(context.focusedSessionId))
             ? context.focusedSessionId
             : null
       }

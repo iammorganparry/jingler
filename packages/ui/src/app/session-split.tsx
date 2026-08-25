@@ -56,10 +56,18 @@ export interface SessionSplitProps {
       readonly onSelectFiles: () => void
     }
   ) => ReactNode
+  /** Render children of the selected top-level agent in a second tab row. */
+  renderSubagentTabs?: (
+    session: Session,
+    ctx: {
+      readonly activeTabId: TabKey
+      readonly onSelectConversation: () => void
+    }
+  ) => ReactNode
   /** Rename a session from its pane title. */
   onRenameSession?: (id: string, title: string) => void
-  onToggleBrowser?: (sessionId: string) => void
-  isBrowserActive?: (sessionId: string) => boolean
+  onToggleBrowser?: (sessionId: string, chatId: string) => void
+  isBrowserActive?: (sessionId: string, chatId: string) => boolean
   planSessions?: ReadonlySet<string>
   explanationSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>
@@ -144,6 +152,7 @@ export function SessionSplit(props: SessionSplitProps) {
         onOpenFile={props.onOpenFile}
         conversationPane={props.conversationPane}
         renderChatTabs={props.renderChatTabs}
+        renderSubagentTabs={props.renderSubagentTabs}
         onRenameSession={props.onRenameSession}
         onToggleBrowser={props.onToggleBrowser}
         isBrowserActive={props.isBrowserActive}

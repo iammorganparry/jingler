@@ -228,6 +228,44 @@ describe("Jingler pi control tools", () => {
   })
 })
 
+describe("Jingler peer-agent tools", () => {
+  it("lists peers and delivers an attributed target message through run callbacks", async () => {
+    const listPeerAgents = vi.fn(() => Effect.succeed([{
+      chatId: "chat-b",
+      title: "Agent B",
+      status: "running" as const,
+      task: "Implement B",
+      planStage: null,
+      touchedFiles: ["src/b.ts"],
+      updatedAt: "2026-01-01T00:00:00Z"
+    }]))
+    const messagePeerAgent = vi.fn(() =>
+      Effect.succeed({ status: "delivered" as const, targetChatId: "chat-b" })
+    )
+    const registry = createJinglerControlTools(runtimeContext({
+      listPeerAgents,
+      messagePeerAgent
+    }))
+
+    const listed = await Effect.runPromise(registry.execute({
+      id: "jingler_list_agents",
+      arguments: {},
+      role: "conversation",
+      mode: "ask"
+    }))
+    const messaged = await Effect.runPromise(registry.execute({
+      id: "jingler_message_agent",
+      arguments: { targetChatId: "chat-b", text: "I am editing src/a.ts" },
+      role: "conversation",
+      mode: "ask"
+    }))
+
+    expect(listed.status).toBe("success")
+    expect(messaged.status).toBe("success")
+    expect(messagePeerAgent).toHaveBeenCalledWith("chat-b", "I am editing src/a.ts")
+  })
+})
+
 describe("Jingler plan discard tool", () => {
   it("discards the canonical plan through the run context", async () => {
     const discardPlan = vi.fn(() => Effect.void)

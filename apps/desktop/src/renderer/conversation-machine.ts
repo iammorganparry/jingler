@@ -574,7 +574,7 @@ const loadConversation = fromPromise<
     // Only the tail — older turns page in via LOAD_OLDER. A whole 46MB
     // transcript held as one parsed array was the renderer's high-water mark.
     rpc.sessionsTranscriptPage(input.session.id, input.chatId, undefined, HISTORY_PAGE_SIZE),
-    rpc.planCurrent(input.session.id)
+    rpc.planCurrent(input.session.id, input.chatId)
   ]))
   const rawTranscript = page.messages
   // A loaded transcript has no live run — settle any turn left mid-stream (the

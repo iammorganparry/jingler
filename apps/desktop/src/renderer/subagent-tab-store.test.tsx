@@ -78,6 +78,33 @@ describe("subagent tab store", () => {
     expect(result.current[0]?.active).toEqual([worker])
   })
 
+  it("keeps identical child ids isolated by parent chat", () => {
+    const { result } = renderHook(() => useSessionSubagentTabs("session-1"))
+    act(() => {
+      publishSubagentTabs("session-1", {
+        chatId: "chat-a",
+        active: [node({ task: "Agent A child" })],
+        completed: [],
+        selectedId: "parent/worker-1"
+      })
+      publishSubagentTabs("session-1", {
+        chatId: "chat-b",
+        active: [node({ task: "Agent B child" })],
+        completed: [],
+        selectedId: "main"
+      })
+    })
+
+    expect(result.current.find(({ chatId }) => chatId === "chat-a")?.active[0]?.task)
+      .toBe("Agent A child")
+    expect(result.current.find(({ chatId }) => chatId === "chat-b")?.active[0]?.task)
+      .toBe("Agent B child")
+    expect(result.current.find(({ chatId }) => chatId === "chat-a")?.selectedId)
+      .toBe("parent/worker-1")
+    expect(result.current.find(({ chatId }) => chatId === "chat-b")?.selectedId)
+      .toBe("main")
+  })
+
   it("retains an unknown child's partial output in completed history", () => {
     const unknown = node({
       status: "unknown",
