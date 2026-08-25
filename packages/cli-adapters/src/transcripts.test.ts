@@ -322,6 +322,113 @@ describe("TranscriptStore", () => {
     expect(messages).toStrictEqual([])
   })
 
+  it("append never round-trips existing messages through the schema", async () => {
+    // Corrupt u1's role in place ("user" → "zser": same byte length, still
+    // valid JSON, so the size+inode index check keeps passing — but no longer
+    // schema-decodable). The whole-file path decodes the ENTIRE array (which
+    // now fails → []) and would rewrite the transcript as just the new
+    // message, losing everything; the bounded path copies untouched bytes
+    // verbatim, so the corrupt marker surviving an append proves no
+    // whole-file decode happened.
+    const result = await run(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const paths = yield* AppPaths
+        yield* TranscriptStore.append("s1", userMessage("u1", "first", "2026-07-11T10:00:00.000Z"))
+        yield* TranscriptStore.append("s1", userMessage("u2", "second", "2026-07-11T10:00:01.000Z"))
+        const file = path.join(paths.transcriptsDir, "s1.json")
+        const before = yield* fs.readFileString(file)
+        yield* fs.writeFileString(file, before.replace('"role":"user"', '"role":"zser"'))
+        yield* TranscriptStore.append("s1", userMessage("u3", "third", "2026-07-11T10:00:02.000Z"))
+        return {
+          raw: yield* fs.readFileString(file),
+          page: yield* TranscriptStore.listPage("s1", { limit: 1 })
+        }
+      }).pipe(Effect.orDie)
+    )
+    expect(result.raw).toContain('"zser"')
+    expect(result.raw).toContain('"u3"')
+    // The windowed read decodes only its own slice, so the newest message is
+    // still reachable past the corrupt one.
+    expect(result.page.messages.map((m) => m.id)).toStrictEqual(["u3"])
+    expect(result.page.hasMore).toBe(true)
+  })
+
+  it("keeps offsets in bytes across multi-byte content", async () => {
+    // Offsets are BYTE positions and emoji/CJK are multi-byte in UTF-8; a
+    // splice that counted UTF-16 units would shear every later window.
+    const first = userMessage("u1", "café 🚀 départ", "2026-07-11T10:00:00.000Z")
+    const second = userMessage("u2", "plain", "2026-07-11T10:00:01.000Z")
+    const result = await run(
+      Effect.gen(function* () {
+        yield* TranscriptStore.append("s1", first)
+        yield* TranscriptStore.append("s1", second)
+        yield* TranscriptStore.patchLast("s1", (m): Message => ({
+          ...m,
+          parts: [{ _tag: "Text", text: "終わり ✅" }]
+        }))
+        const newest = yield* TranscriptStore.listPage("s1", { limit: 1 })
+        return {
+          all: yield* TranscriptStore.list("s1"),
+          newest,
+          older: yield* TranscriptStore.listPage("s1", { before: newest.cursor, limit: 1 })
+        }
+      })
+    )
+    expect(result.all).toHaveLength(2)
+    expect(result.all[0]).toStrictEqual(first)
+    expect(result.all[1]!.parts).toStrictEqual([{ _tag: "Text", text: "終わり ✅" }])
+    expect(result.newest.messages.map((m) => m.id)).toStrictEqual(["u2"])
+    expect(result.older.messages).toStrictEqual([first])
+  })
+
+
+  it("patchById splices a size-changing patch mid-file and later reads stay aligned", async () => {
+    const grown = "a much longer body than the original turn carried".repeat(3)
+    const result = await run(
+      Effect.gen(function* () {
+        yield* TranscriptStore.append("s1", userMessage("u1", "first", "2026-07-11T10:00:00.000Z"))
+        yield* TranscriptStore.append("s1", userMessage("u2", "second", "2026-07-11T10:00:01.000Z"))
+        yield* TranscriptStore.append("s1", userMessage("u3", "third", "2026-07-11T10:00:02.000Z"))
+        yield* TranscriptStore.patchById("s1", "u2", (m): Message => ({
+          ...m,
+          parts: [{ _tag: "Text", text: grown }]
+        }))
+        return {
+          all: yield* TranscriptStore.list("s1"),
+          newest: yield* TranscriptStore.listPage("s1", { limit: 1 })
+        }
+      })
+    )
+    expect(result.all.map((m) => m.id)).toStrictEqual(["u1", "u2", "u3"])
+    expect(result.all[1]!.parts).toStrictEqual([{ _tag: "Text", text: grown }])
+    // Every offset after the patched message shifted by the size delta; the
+    // newest window still lands exactly on u3.
+    expect(result.newest.messages.map((m) => m.id)).toStrictEqual(["u3"])
+  })
+
+  it("falls back to the whole-file path and rebuilds a missing index sidecar", async () => {
+    const first = userMessage("u1", "first", "2026-07-11T10:00:00.000Z")
+    const second = userMessage("u2", "second", "2026-07-11T10:00:01.000Z")
+    const result = await run(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const paths = yield* AppPaths
+        yield* TranscriptStore.append("s1", first)
+        yield* fs.remove(path.join(paths.transcriptsDir, "s1.json.index"))
+        yield* TranscriptStore.append("s1", second)
+        return {
+          all: yield* TranscriptStore.list("s1"),
+          indexRestored: yield* fs.exists(path.join(paths.transcriptsDir, "s1.json.index"))
+        }
+      }).pipe(Effect.orDie)
+    )
+    expect(result.all).toStrictEqual([first, second])
+    expect(result.indexRestored).toBe(true)
+  })
+
   describe("listPage — the renderer's windowed read", () => {
     // Ten user turns, u0 (oldest) .. u9 (newest), so a window's contents pin
     // exactly which slice came back.

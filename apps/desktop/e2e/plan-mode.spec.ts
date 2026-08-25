@@ -52,6 +52,8 @@ const session = (id = "s_enhanced_plan") =>
     ]
   }
 
+const RAW_APPROVE_JSON = /"_tag"\s*:\s*"Approve"/
+
 const currentPlanPath = (launched: LaunchedApp): string => {
   const sessions = JSON.parse(
     readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
@@ -144,6 +146,14 @@ test("the producing agent amends an approved plan in place without regressing co
   await expect.poll(() => readPlan(launched).plan.stages.some(
     (stage: { id: string }) => stage.id === "s_07"
   )).toBe(true)
+
+  // The amendment's jingler_submit_plan call is exactly the turn with no plan
+  // card in it (the amendment patches the ORIGINAL proposal message), so the
+  // transcript must show the dedicated submit-plan card — never the decision's
+  // raw JSON, and never a generic "Submit plan" tool row.
+  await expect(launched.window.getByTestId("submit-plan-card").last()).toBeVisible()
+  await expect(launched.window.getByText(RAW_APPROVE_JSON)).toHaveCount(0)
+
   const completedAfter = readPlan(launched).plan.stages.flatMap(
     (stage: { tasks: ReadonlyArray<{ id: string; status: string }> }) =>
       stage.tasks.filter((task) => task.status === "completed").map((task) => task.id)
