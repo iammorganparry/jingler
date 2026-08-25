@@ -202,7 +202,7 @@ export function useConversation(
             ...(anchor ? { anchor } : {})
           }),
         dispatchPlanMessage: (input) =>
-          rpc.planDispatchMessage({ sessionId: session.id, ...input }),
+          rpc.planDispatchMessage({ sessionId: session.id, chatId, ...input }),
         revisePlan: (planId) => actor.send({ type: "REVISE_PLAN", planId }),
         approvePlan: (planId, executionMode, revision) =>
           actor.send({ type: "APPROVE_PLAN", planId, executionMode, revision }),

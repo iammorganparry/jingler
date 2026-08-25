@@ -80,6 +80,14 @@ export const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
  */
 export const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 
+type PendingNavigation = { readonly requestedUrl: string; readonly redirects: ReadonlySet<string> }
+
+export const acceptsPreviewNavigationCommit = (
+  pending: PendingNavigation | undefined,
+  url: string
+): boolean =>
+  pending === undefined || pending.requestedUrl === url || pending.redirects.has(url)
+
 export interface PreviewViewServiceShape {
   /** Show the browser view and load `url` at `bounds`. Rejects non-http(s) URLs. */
   readonly openBrowser: (sessionId: string, chatId: string, url: string, bounds: BrowserBounds) => Effect.Effect<void, BrowserPreviewError>
@@ -103,6 +111,8 @@ export interface PreviewViewServiceShape {
   readonly setVisible: (sessionId: string, chatId: string, visible: boolean) => Effect.Effect<void>
   /** Hide the named session's PDF without affecting Preview or split panes. */
   readonly hideFile: (sessionId: string) => Effect.Effect<void>
+  /** Destroy one closed chat's browser view without clearing its persistent partition. */
+  readonly closeBrowser: (sessionId: string, chatId: string) => Effect.Effect<void>
   /** Permanently destroy one session's views and clear only its browser partition. */
   readonly deleteSession: (
     sessionId: string,
@@ -181,6 +191,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   // renderer answers that reveal by calling `openBrowser`; without this guard a
   // still-blank WebContents starts a second load and Electron aborts the first.
   const controlledNavigations = new Set<string>()
+  const pendingNavigations = new Map<string, { requestedUrl: string; redirects: Set<string> }>()
 
   const mainWindow = (): BrowserWindow | null => BrowserWindow.getAllWindows()[0] ?? null
 
@@ -227,12 +238,26 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
       // followable — a file-origin page that can navigate can walk the disk.
       if (owner === "asset" || !isHttpUrl(url)) event.preventDefault()
     })
-    if (owner === "browser" && sessionId !== null) {
+    if (owner === "browser" && sessionId !== null && chatId !== null) {
+      const key = browserOwnerKey(sessionId, chatId)
       const publishUrl = (url: string) => {
-        if (isHttpUrl(url)) {
-          mainWindow()?.webContents.send(PREVIEW_URL_CHANNEL, { sessionId, chatId, url })
-        }
+        if (!isHttpUrl(url)) return
+        const pending = pendingNavigations.get(key)
+        if (!acceptsPreviewNavigationCommit(pending, url)) return
+        pendingNavigations.delete(key)
+        mainWindow()?.webContents.send(PREVIEW_URL_CHANNEL, { sessionId, chatId, url })
       }
+      view.webContents.on("will-redirect", (details) => {
+        if (details.isMainFrame) pendingNavigations.get(key)?.redirects.add(details.url)
+      })
+      view.webContents.on("did-fail-load", (_event, _code, _description, url, isMainFrame) => {
+        if (!isMainFrame) return
+        const pending = pendingNavigations.get(key)
+        if (
+          pending !== undefined &&
+          (url === pending.requestedUrl || pending.redirects.has(url))
+        ) pendingNavigations.delete(key)
+      })
       view.webContents.on("did-navigate", (_event, url) => publishUrl(url))
       view.webContents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
         if (isMainFrame) publishUrl(url)
@@ -323,6 +348,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
     assetViews.clear()
     visibleBrowserSessions.clear()
     visibleAssetSessions.clear()
+    pendingNavigations.clear()
   }
 
   const closeSessionNow = (sessionId: string): void => {
@@ -331,6 +357,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
       destroy(view)
       browserViews.delete(key)
       visibleBrowserSessions.delete(key)
+      pendingNavigations.delete(key)
     }
     destroy(assetViews.get(sessionId) ?? null)
     assetViews.delete(sessionId)
@@ -387,7 +414,13 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
 
     navigate: (sessionId, chatId, url) =>
       isHttpUrl(url)
-        ? Effect.sync(() => load(browserViews.get(browserOwnerKey(sessionId, chatId)) ?? null, url))
+        ? Effect.sync(() => {
+            const key = browserOwnerKey(sessionId, chatId)
+            const view = browserViews.get(key) ?? null
+            if (view === null) return
+            pendingNavigations.set(key, { requestedUrl: url, redirects: new Set() })
+            load(view, url)
+          })
         : rejectBadUrl(url),
 
     reload: (sessionId, chatId) =>
@@ -400,6 +433,15 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
 
     hideFile: (sessionId) => Effect.sync(() => {
       setOwnerVisible(assetViews, visibleAssetSessions, sessionId, false)
+    }),
+
+    closeBrowser: (sessionId, chatId) => Effect.sync(() => {
+      const key = browserOwnerKey(sessionId, chatId)
+      destroy(browserViews.get(key) ?? null)
+      browserViews.delete(key)
+      visibleBrowserSessions.delete(key)
+      controlledNavigations.delete(key)
+      pendingNavigations.delete(key)
     }),
 
     deleteSession: (sessionId, knownChatIds) =>

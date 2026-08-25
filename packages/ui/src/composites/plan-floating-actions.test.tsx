@@ -12,6 +12,7 @@ describe("PlanFloatingActions", () => {
     ["proposed", "Approve"],
     ["stale", "Approve & implement"],
     ["executing", "Implementation running"],
+    ["needs-verification", "Verify remaining"],
     ["done", "Plan completed"]
   ]
 

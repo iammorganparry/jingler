@@ -82,17 +82,12 @@ describe("previewDockMachine", () => {
     })
   })
 
-  it("ignores a stale native URL from the page an operator just replaced", () => {
+  it("accepts a committed cross-origin redirect after operator navigation", () => {
     const actor = start()
     actor.send({ type: "NAVIGATE", sessionId: "agent", url: "http://localhost:4321" })
-    actor.send({ type: "NATIVE_URL", sessionId: "agent", url: "http://localhost:3000/old" })
+    actor.send({ type: "NATIVE_URL", sessionId: "agent", url: "https://login.example/ready" })
     expect(previewSessionState(actor.getSnapshot().context, "agent")).toMatchObject({
-      url: "http://localhost:4321",
-      source: "operator"
-    })
-    actor.send({ type: "NATIVE_URL", sessionId: "agent", url: "http://localhost:4321/ready" })
-    expect(previewSessionState(actor.getSnapshot().context, "agent")).toMatchObject({
-      url: "http://localhost:4321/ready",
+      url: "https://login.example/ready",
       source: "native"
     })
   })

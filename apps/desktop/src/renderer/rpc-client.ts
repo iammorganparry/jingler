@@ -1347,6 +1347,7 @@ export const rpc = {
     run((c) => c.Plan.discard({ sessionId, chatId })),
   planUpdateDocument: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     plan: PlanPrd
@@ -1354,6 +1355,7 @@ export const rpc = {
   }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
   planDispatchMessage: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     annotationId: string
@@ -1367,6 +1369,7 @@ export const rpc = {
   }> => run((c) => c.Plan.dispatchMessage(input)),
   planDispatchExistingMessage: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     annotationId: string
@@ -1378,6 +1381,7 @@ export const rpc = {
   }> => run((c) => c.Plan.dispatchExistingMessage(input)),
   planUpdateMessageDelivery: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     annotationId: string
@@ -1387,6 +1391,7 @@ export const rpc = {
   }): Promise<PlanDocument> => run((c) => c.Plan.updateMessageDelivery(input)),
   planSetThreadResolved: (input: {
     sessionId: string
+    chatId: string
     planId: string
     baseRevision: number
     annotationId: string

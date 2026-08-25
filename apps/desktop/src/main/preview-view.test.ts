@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  acceptsPreviewNavigationCommit,
   browserPartitionForAgent,
   fileUrlFor,
   isHttpUrl,
@@ -28,6 +29,22 @@ describe("isHttpUrl", () => {
     expect(isHttpUrl("localhost:3000")).toBe(false) // no scheme → not a valid URL
     expect(isHttpUrl("")).toBe(false)
     expect(isHttpUrl("not a url")).toBe(false)
+  })
+})
+
+describe("acceptsPreviewNavigationCommit", () => {
+  const pending = {
+    requestedUrl: "http://localhost:4321",
+    redirects: new Set(["https://login.example/callback"])
+  }
+
+  it("drops an old commit while a replacement navigation is pending", () => {
+    expect(acceptsPreviewNavigationCommit(pending, "http://localhost:3000/old")).toBe(false)
+  })
+
+  it("accepts the request and its server-side redirects", () => {
+    expect(acceptsPreviewNavigationCommit(pending, pending.requestedUrl)).toBe(true)
+    expect(acceptsPreviewNavigationCommit(pending, "https://login.example/callback")).toBe(true)
   })
 })
 

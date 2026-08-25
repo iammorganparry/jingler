@@ -1434,6 +1434,8 @@ describe("AgentRunner plan mode", () => {
             const proposed = yield* PlanStore.readDocument(temp.root)
             expect(proposed).not.toBeNull()
             const edited = yield* PlanStore.updateDocument(temp.root, {
+              sessionId: SESSION,
+              producingChatId: SESSION,
               planId: proposed!.id,
               baseRevision: proposed!.revision,
               plan: { ...proposed!.plan, title: `${proposed!.plan.title} (operator edit)` },
@@ -1676,6 +1678,8 @@ describe("AgentRunner plan mode", () => {
           author: "agent"
         })
         yield* PlanStore.updateDocument(temp.root, {
+          sessionId: SESSION,
+          producingChatId: SESSION,
           planId: first.id,
           baseRevision: first.revision,
           plan: mkPlan("PRD: Stale plan", "The newer revision works."),

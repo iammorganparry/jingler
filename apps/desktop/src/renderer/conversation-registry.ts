@@ -67,7 +67,6 @@ const snapshots = new Map<string, ConversationSnapshot>()
 let chatActivities: Record<string, Record<string, SessionActivity>> = {}
 const EMPTY_CHAT_ACTIVITIES: Readonly<Record<string, SessionActivity>> = {}
 const activityListeners = new Set<() => void>()
-const sharedPlanBodies = new Map<string, string>()
 /**
  * Previous observation per actor, for the notification edge detector — see
  * `notificationFor`. Held per key (and dropped with the actor) rather than in the
@@ -170,24 +169,6 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
   else setSessionDiff(sessionId, diffCounts(diffSnapshot.context.patch))
 }
 
-/** Broadcast a chat's plan to the session's other chats, when it actually changed. */
-const broadcastSharedPlan = (key: string, snap: ConversationSnapshot): void => {
-  const plan = latestPlan(snap.context.messages)
-  if (plan === null) return
-  const sessionId = snap.context.session.id
-  const body = JSON.stringify(plan)
-  if (sharedPlanBodies.get(sessionId) === body) return
-  sharedPlanBodies.set(sessionId, body)
-  for (const [otherKey, otherActor] of registry) {
-    if (otherKey === key || !otherKey.startsWith(`${sessionId}:`)) continue
-    otherActor.send({
-      type: "SHARED_PLAN_UPDATED",
-      plan,
-      producingChatId: snap.context.sharedPlanChatId ?? snap.context.chatId
-    })
-  }
-}
-
 /**
  * Everything the registry derives from one actor's latest snapshot: live activity,
  * plan presence, diff totals, the cross-chat plan broadcast, and the desktop
@@ -229,7 +210,6 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
     : null
   if (snap.context.loaded) notifyBaselines.set(key, observed)
 
-  broadcastSharedPlan(key, snap)
   publishChatActivity(session.id, chatId, activity)
   const currentFile = agentFileActivityFor(snap)
   const pendingFile = pendingFileActivities.get(key) ?? null
@@ -297,15 +277,6 @@ const forget = (key: string): void => {
   const chatId = key.slice(separator + 1)
   publishChatActivity(sessionId, chatId, null)
   clearAgentFileActivityChat(sessionId, chatId)
-  // The shared-plan dedupe body is session-keyed, so it outlives any one chat
-  // actor — but once the session's LAST actor is gone nothing can broadcast,
-  // and holding the serialized plan until session deletion is a slow leak.
-  // Worst case of dropping it: one redundant broadcast when the session is
-  // next opened.
-  const stillResident = [...registry.keys()].some((k) =>
-    k.startsWith(`${sessionId}:`)
-  )
-  if (!stillResident) sharedPlanBodies.delete(sessionId)
 }
 
 /**
@@ -412,7 +383,6 @@ export const disposeConversationActor = (sessionId: string): void => {
   }
   delete chatActivities[sessionId]
   clearAgentFileActivitySession(sessionId)
-  sharedPlanBodies.delete(sessionId)
   setSessionActivity(sessionId, null)
   clearSessionDiff(sessionId)
 }
@@ -424,23 +394,4 @@ export const disposeChatActor = (sessionId: string, chatId: string): void => {
   clearAgentFileActivityChat(sessionId, chatId)
   publishChatActivity(sessionId, chatId, null)
   recomputeSession(sessionId)
-}
-
-/** Point every live copy of a shared plan at its replacement producing chat. */
-export const rehomeSharedPlan = (
-  sessionId: string,
-  fromChatId: string,
-  toChatId: string
-): void => {
-  if (fromChatId === toChatId) return
-  const plan = [...snapshots.entries()]
-    .filter(([key]) => key.startsWith(`${sessionId}:`))
-    .filter(([, snapshot]) => snapshot.context.sharedPlanChatId === fromChatId)
-    .map(([, snapshot]) => latestPlan(snapshot.context.messages))
-    .find((candidate) => candidate !== null)
-  if (plan === undefined || plan === null) return
-  for (const [key, actor] of registry) {
-    if (!key.startsWith(`${sessionId}:`)) continue
-    actor.send({ type: "SHARED_PLAN_UPDATED", plan, producingChatId: toChatId })
-  }
 }

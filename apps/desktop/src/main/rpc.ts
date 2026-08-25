@@ -935,6 +935,7 @@ export const planWatch = (sessionId: string, chatId: string) =>
 /** Internal ordered append used by dispatch/relay flows and their CAS tests. */
 export const planAppendMessage = (input: {
   readonly sessionId: string;
+  readonly chatId: string;
   readonly planId: string;
   readonly baseRevision: number;
   readonly annotationId: string;
@@ -950,7 +951,10 @@ export const planAppendMessage = (input: {
         ? Effect.fail(
             planMutationConflict("This session has no plan worktree."),
           )
-        : PlanStore.appendAnnotationMessage(session.worktreePath, input),
+        : PlanStore.appendAnnotationMessage(session.worktreePath, {
+            ...input,
+            producingChatId: input.chatId,
+          }),
     ),
     Effect.catchTag("SessionNotFoundError", () =>
       Effect.fail(planMutationConflict("The plan session no longer exists.")),
@@ -960,6 +964,7 @@ export const planAppendMessage = (input: {
 /** `Plan.updateMessageDelivery` handler. */
 export const planUpdateMessageDelivery = (input: {
   readonly sessionId: string;
+  readonly chatId: string;
   readonly planId: string;
   readonly baseRevision: number;
   readonly annotationId: string;
@@ -975,7 +980,7 @@ export const planUpdateMessageDelivery = (input: {
           )
         : PlanStore.updateAnnotationMessageDelivery(
             session.worktreePath,
-            input,
+            { ...input, producingChatId: input.chatId },
           ),
     ),
     Effect.catchTag("SessionNotFoundError", () =>
@@ -985,6 +990,7 @@ export const planUpdateMessageDelivery = (input: {
 
 const planUpdateMentionDeliveries = (input: {
   readonly sessionId: string;
+  readonly chatId: string;
   readonly planId: string;
   readonly baseRevision: number;
   readonly annotationId: string;
@@ -1001,7 +1007,7 @@ const planUpdateMentionDeliveries = (input: {
           )
         : PlanStore.updateAnnotationMentionDeliveries(
             session.worktreePath,
-            input,
+            { ...input, producingChatId: input.chatId },
           ),
     ),
     Effect.catchTag("SessionNotFoundError", () =>
@@ -1012,6 +1018,7 @@ const planUpdateMentionDeliveries = (input: {
 /** `Plan.setThreadResolved` handler. */
 export const planSetThreadResolved = (input: {
   readonly sessionId: string;
+  readonly chatId: string;
   readonly planId: string;
   readonly baseRevision: number;
   readonly annotationId: string;
@@ -1024,7 +1031,10 @@ export const planSetThreadResolved = (input: {
         ? Effect.fail(
             planMutationConflict("This session has no plan worktree."),
           )
-        : PlanStore.setAnnotationResolved(session.worktreePath, input),
+        : PlanStore.setAnnotationResolved(session.worktreePath, {
+            ...input,
+            producingChatId: input.chatId,
+          }),
     ),
     Effect.catchTag("SessionNotFoundError", () =>
       Effect.fail(planMutationConflict("The plan session no longer exists.")),
@@ -1033,6 +1043,7 @@ export const planSetThreadResolved = (input: {
 
 interface PlanDispatchMessageInput {
   readonly sessionId: string;
+  readonly chatId: string;
   readonly planId: string;
   readonly baseRevision: number;
   readonly annotationId: string;
@@ -1073,6 +1084,7 @@ export const planDispatchMessage = (input: PlanDispatchMessageInput) =>
 
 interface PlanDispatchExistingMessageInput {
   readonly sessionId: string;
+  readonly chatId: string;
   readonly planId: string;
   readonly baseRevision: number;
   readonly annotationId: string;
@@ -1089,7 +1101,7 @@ export const planDispatchExistingMessage = (
         ? Effect.fail(
             planMutationConflict("This session has no plan worktree."),
           )
-        : PlanStore.readDocument(session.worktreePath),
+        : PlanStore.readDocument(session.worktreePath, session.id, input.chatId),
     ),
     Effect.flatMap((document) =>
       document === null ||
@@ -5282,12 +5294,12 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       // grows one-per-chat for the life of the process).
       yield* BackgroundTaskStore.clearChat(sessionId, chatId);
       yield* runner.forgetChat(chatId);
+      yield* Effect.flatMap(PreviewViewService, (preview) =>
+        preview.closeBrowser(sessionId, chatId),
+      );
       const updated = yield* SessionStore.closeChat(sessionId, chatId);
       yield* ContextManager.forget(chatId);
       if (session.worktreePath) {
-        yield* PlanStore.discard(session.worktreePath, sessionId, chatId).pipe(
-          Effect.ignore,
-        );
         yield* ExplanationStore.rehome(
           session.worktreePath,
           sessionId,
@@ -6088,7 +6100,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     ),
   "Plan.watch": ({ sessionId, chatId }) =>
     interruptOnPageGone(planWatch(sessionId, chatId)),
-  "Plan.updateDocument": ({ sessionId, planId, baseRevision, plan, author }) =>
+  "Plan.updateDocument": ({ sessionId, chatId, planId, baseRevision, plan, author }) =>
     SessionStore.get(sessionId).pipe(
       Effect.map((session) => session.worktreePath),
       Effect.flatMap((worktreePath) =>
@@ -6101,6 +6113,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
               }),
             )
           : PlanStore.updateDocument(worktreePath, {
+              sessionId,
+              producingChatId: chatId,
               planId,
               baseRevision,
               plan,

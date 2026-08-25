@@ -36,18 +36,10 @@ export type PreviewDockEvent =
   | { readonly type: "REMOVE_SESSION"; readonly sessionId: string }
   | { readonly type: "RECONCILE_SESSIONS"; readonly sessionIds: ReadonlyArray<string> }
 
-const sameOrigin = (left: string, right: string): boolean => {
-  try {
-    return new URL(left).origin === new URL(right).origin
-  } catch {
-    return false
-  }
-}
-
 const defaultSessionState = (visible = false): PreviewSessionState => ({
   url: DEFAULT_PREVIEW_URL,
   visible,
-  source: "operator"
+  source: "native"
 })
 
 const readSide = (): DockSide => {
@@ -164,13 +156,11 @@ export const previewDockMachine = setup({
     nativeUrl: assign(({ context, event }) => {
       if (event.type !== "NATIVE_URL" || event.url.length === 0) return {}
       return {
-        sessions: updateSession(context, event.sessionId, (current) =>
-          context.sessions[event.sessionId] !== undefined &&
-          current.source === "operator" &&
-          !sameOrigin(current.url, event.url)
-            ? current
-            : { ...current, url: event.url, source: "native" }
-        )
+        sessions: updateSession(context, event.sessionId, (current) => ({
+          ...current,
+          url: event.url,
+          source: "native"
+        }))
       }
     }),
     revealBrowser: assign(({ context, event }) => {

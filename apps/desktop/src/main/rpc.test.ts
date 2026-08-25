@@ -817,6 +817,8 @@ describe("RPC handlers", () => {
           author: "agent",
         });
         const withThread = yield* PlanStore.addAnnotation(worktreePath, {
+          sessionId: "session-plan-thread",
+          producingChatId: "chat-plan-thread",
           planId: plan.id,
           baseRevision: plan.revision,
           stageId: "01",
@@ -832,6 +834,7 @@ describe("RPC handlers", () => {
         yield* Effect.sleep("25 millis");
         const appended = yield* planAppendMessage({
           sessionId: "session-plan-thread",
+          chatId: "chat-plan-thread",
           planId: plan.id,
           baseRevision: withThread.revision,
           annotationId,
@@ -847,6 +850,7 @@ describe("RPC handlers", () => {
         const messageId = appended.plan.annotations[0]!.messages[1]!.id;
         const delivered = yield* planUpdateMessageDelivery({
           sessionId: "session-plan-thread",
+          chatId: "chat-plan-thread",
           planId: plan.id,
           baseRevision: appended.revision,
           annotationId,
@@ -856,6 +860,7 @@ describe("RPC handlers", () => {
         });
         const resolved = yield* planSetThreadResolved({
           sessionId: "session-plan-thread",
+          chatId: "chat-plan-thread",
           planId: plan.id,
           baseRevision: delivered.revision,
           annotationId,
@@ -865,6 +870,7 @@ describe("RPC handlers", () => {
         const stale = yield* Effect.either(
           planSetThreadResolved({
             sessionId: "session-plan-thread",
+            chatId: "chat-plan-thread",
             planId: plan.id,
             baseRevision: appended.revision,
             annotationId,
@@ -875,6 +881,7 @@ describe("RPC handlers", () => {
         const retrySent = yield* Effect.either(
           planDispatchExistingMessage({
             sessionId: "session-plan-thread",
+            chatId: "chat-plan-thread",
             planId: plan.id,
             baseRevision: resolved.revision,
             annotationId,

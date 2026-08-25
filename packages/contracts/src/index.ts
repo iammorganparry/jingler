@@ -1875,6 +1875,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     ),
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
       plan: PlanPrd,
@@ -1899,6 +1900,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     ),
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
       annotationId: Schema.String,
@@ -1922,6 +1924,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     ),
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
       annotationId: Schema.String,
@@ -1939,6 +1942,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     ),
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
       annotationId: Schema.String,
@@ -1958,6 +1962,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     ),
     payload: {
       sessionId: Schema.String,
+      chatId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
       annotationId: Schema.String,

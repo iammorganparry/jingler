@@ -459,7 +459,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         return { pending, run } as const
       })
 
-    const canonicalPlan = (sessionId: string, planId: string) =>
+    const canonicalPlan = (sessionId: string, chatId: string, planId: string) =>
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId).pipe(
           Effect.orElseSucceed(() => null)
@@ -468,7 +468,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         const document = yield* PlanStore.readDocument(
           session.worktreePath,
           session.id,
-          session.activeChatId
+          chatId
         )
         return document?.id === planId
           ? { document, worktreePath: session.worktreePath }
@@ -484,13 +484,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       anchor?: { readonly quote: string; readonly prefix: string; readonly suffix: string }
     ) =>
       Effect.gen(function* () {
-        const { run } = yield* pendingPlanRun(sessionId, planId)
-        if (run === undefined) return
-        const canonical = yield* canonicalPlan(sessionId, planId)
+        const { pending, run } = yield* pendingPlanRun(sessionId, planId)
+        if (pending === null || run === undefined) return
+        const canonical = yield* canonicalPlan(sessionId, pending.chatId, planId)
         const saved =
           canonical === null
             ? Option.none()
             : yield* PlanStore.addAnnotation(canonical.worktreePath, {
+                sessionId: canonical.document.sessionId,
+                producingChatId: canonical.document.producingChatId,
                 planId,
                 baseRevision: canonical.document.revision,
                 // "" targets a section/global comment (no stage).
@@ -523,9 +525,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     /** Route the open comments back to the agent as a revision and resume planning. */
     const revisePlan = (sessionId: string, planId: string) =>
       Effect.gen(function* () {
-        const { run } = yield* pendingPlanRun(sessionId, planId)
-        if (run === undefined) return
-        const canonical = yield* canonicalPlan(sessionId, planId)
+        const { pending, run } = yield* pendingPlanRun(sessionId, planId)
+        if (pending === null || run === undefined) return
+        const canonical = yield* canonicalPlan(sessionId, pending.chatId, planId)
         const plan =
           canonical === null
             ? yield* run.readPlan(planId)
@@ -551,6 +553,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               ].join("\n")
         if (canonical !== null && routedPlan !== null) {
           yield* PlanStore.updateDocument(canonical.worktreePath, {
+            sessionId: canonical.document.sessionId,
+            producingChatId: canonical.document.producingChatId,
             planId,
             baseRevision: canonical.document.revision,
             plan: routedPlan,
@@ -580,7 +584,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     ) =>
       Effect.gen(function* () {
         const { pending, run } = yield* pendingPlanRun(sessionId, planId)
-        const canonical = yield* canonicalPlan(sessionId, planId)
+        const canonical = pending === null
+          ? null
+          : yield* canonicalPlan(sessionId, pending.chatId, planId)
         if (
           canonical !== null &&
           expectedRevision !== undefined &&
@@ -605,6 +611,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         }
         if (canonical !== null) {
           const approval = yield* PlanStore.updateDocument(canonical.worktreePath, {
+            sessionId: canonical.document.sessionId,
+            producingChatId: canonical.document.producingChatId,
             planId,
             baseRevision: canonical.document.revision,
             plan: canonical.document.plan,
@@ -683,7 +691,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       const planId = maybePlanId ?? chatIdOrPlanId
       return Stream.unwrap(
         Effect.gen(function* () {
-          const canonical = yield* canonicalPlan(sessionId, planId)
+          const canonical = yield* canonicalPlan(sessionId, chatId, planId)
           if (
             canonical !== null &&
             expectedRevision !== undefined &&
@@ -700,6 +708,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           if (plan === null) return Stream.empty
           if (canonical !== null) {
             const execution = yield* PlanStore.updateDocument(canonical.worktreePath, {
+              sessionId: canonical.document.sessionId,
+              producingChatId: canonical.document.producingChatId,
               planId,
               baseRevision: canonical.document.revision,
               plan: canonical.document.plan,
@@ -1402,7 +1412,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (activePlanId === null) return
               const markers = planEvidenceFromText(text)
               if (markers.length === 0) return
-              const initial = yield* PlanStore.readDocument(worktreePath)
+              const initial = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
               if (
                 initial === null ||
                 initial.id !== activePlanId ||
@@ -1416,6 +1426,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   )
                 ) continue
                 const updated = yield* PlanStore.setCriterionStatus(worktreePath, {
+                  sessionId,
+                  producingChatId: chatId,
                   planId: document.id,
                   baseRevision: document.revision,
                   criterionId: marker.criterionId,
@@ -1433,6 +1445,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               )
               if (complete) {
                 yield* PlanStore.updateDocument(worktreePath, {
+                  sessionId,
+                  producingChatId: chatId,
                   planId: document.id,
                   baseRevision: document.revision,
                   plan: document.plan,
@@ -1489,7 +1503,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (worktreePath.length === 0) return
               const activePlanId = yield* Ref.get(executingPlanId)
               if (activePlanId === null) return
-              const canonical = yield* PlanStore.readDocument(worktreePath)
+              const canonical = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
               if (canonical === null || canonical.id !== activePlanId) return
               const seen = yield* Ref.get(persistedTaskMarkers)
               for (const marker of planTaskProgressFromText(text)) {
@@ -1533,6 +1547,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 const persisted = yield* PlanStore.setTaskStatusLatest(
                   worktreePath,
                   {
+                    sessionId,
+                    producingChatId: chatId,
                     planId: activePlanId,
                     stageId: marker.stageId,
                     taskId: marker.taskId,
@@ -1558,7 +1574,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               if (worktreePath.length === 0) return
               const activePlanId = yield* Ref.get(settlingPlanId)
               if (activePlanId === null) return
-              const document = yield* PlanStore.readDocument(worktreePath)
+              const document = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
               if (
                 document === null ||
                 document.id !== activePlanId ||
@@ -1571,6 +1587,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 )
               )
               yield* PlanStore.updateDocument(worktreePath, {
+                sessionId,
+                producingChatId: chatId,
                 planId: document.id,
                 baseRevision: document.revision,
                 plan: document.plan,
