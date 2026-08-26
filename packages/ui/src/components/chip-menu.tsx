@@ -10,7 +10,7 @@ import {
   CommandItem,
   CommandList
 } from "./command.js"
-import { Popover, PopoverContent, PopoverTrigger } from "./popover.js"
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from "./beui/popover-morph.js"
 
 export interface ChipOption<T extends string> {
   value: T
@@ -74,6 +74,7 @@ export function ChipMenu<T extends string>({
   className?: string
 }) {
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
   const sections: ReadonlyArray<ChipGroup<T>> = useMemo(
     () => groups ?? [{ label: "", options: options ?? [] }],
@@ -119,8 +120,8 @@ export function ChipMenu<T extends string>({
   if (disabled) return chip
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <MorphPopover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setSearch("") }}>
+      <MorphPopoverTrigger>
         <button
           type="button"
           aria-label={ariaLabel}
@@ -132,18 +133,32 @@ export function ChipMenu<T extends string>({
         >
           {chip}
         </button>
-      </PopoverTrigger>
-      <PopoverContent
+      </MorphPopoverTrigger>
+      <MorphPopoverContent
         side={side}
         align="start"
-        style={matchTriggerWidth ? { width: "var(--radix-popover-trigger-width)" } : undefined}
+        matchTriggerWidth={matchTriggerWidth}
         className={cn(
           "overflow-hidden p-0",
           !matchTriggerWidth && (searchable ? "w-[280px]" : "w-[210px]")
         )}
       >
         <Command loop filter={includesSearch}>
-          {searchable && <CommandInput ref={inputRef} placeholder={searchPlaceholder} />}
+          {searchable && <CommandInput
+            ref={(node) => {
+              inputRef.current = node
+              if (node && open) node.focus()
+            }}
+            value={search}
+            onValueChange={setSearch}
+            placeholder={searchPlaceholder}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault()
+                setOpen(false)
+              }
+            }}
+          />}
           <CommandList>
             <CommandEmpty>{emptyLabel}</CommandEmpty>
             {sections.map((section, index) => (
@@ -175,7 +190,7 @@ export function ChipMenu<T extends string>({
             ))}
           </CommandList>
         </Command>
-      </PopoverContent>
-    </Popover>
+      </MorphPopoverContent>
+    </MorphPopover>
   )
 }

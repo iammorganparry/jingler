@@ -21,7 +21,7 @@ import { usePopoverPortalPosition } from "./popover-position.js";
 import { EASE_OUT, SPRING_PANEL } from "./ease.js";
 import { cn } from "../../lib/cn.js";
 
-type Side = "top" | "bottom";
+type Side = "top" | "right" | "bottom" | "left";
 type Align = "start" | "end";
 
 type MorphContextValue = {
@@ -193,12 +193,20 @@ export function MorphPopoverTrigger({ children }: MorphPopoverTriggerProps) {
   });
 }
 
-const originFor = (side: Side, align: Align) =>
-  `${side === "bottom" ? "top" : "bottom"} ${align === "end" ? "right" : "left"}`;
+const originFor = (side: Side, align: Align) => {
+  if (side === "left" || side === "right")
+    return `${align === "end" ? "bottom" : "top"} ${side === "left" ? "right" : "left"}`;
+  return `${side === "bottom" ? "top" : "bottom"} ${align === "end" ? "right" : "left"}`;
+};
 
 // A clip that hides everything but the corner nearest the trigger, so the
 // panel appears to grow out of it. inset(top right bottom left).
 function clipHidden(side: Side, align: Align, radius: number) {
+  if (side === "left" || side === "right") {
+    const top = align === "end" ? "92%" : "0%";
+    const bottom = align === "end" ? "0%" : "92%";
+    return `inset(${top} ${side === "left" ? "0%" : "92%"} ${bottom} ${side === "right" ? "0%" : "92%"} round ${radius}px)`;
+  }
   const top = side === "bottom" ? "0%" : "92%";
   const bottom = side === "bottom" ? "92%" : "0%";
   const right = align === "end" ? "0%" : "92%";
@@ -219,6 +227,8 @@ export interface MorphPopoverContentProps {
   sideOffset?: number;
   /** Panel corner radius, in px. Default 16. */
   radius?: number;
+  /** Product extension: match the measured trigger width. */
+  matchTriggerWidth?: boolean;
   className?: string;
 }
 
@@ -228,6 +238,7 @@ export function MorphPopoverContent({
   align = "end",
   sideOffset = 8,
   radius = 16,
+  matchTriggerWidth = false,
   className,
 }: MorphPopoverContentProps) {
   const ctx = useMorphContext("MorphPopoverContent");
@@ -240,15 +251,24 @@ export function MorphPopoverContent({
   );
 
   useEffect(() => setPortalReady(true), []);
+  const contentWidth = layout && matchTriggerWidth ? layout.trigger.width : layout?.content.width ?? 0;
   const left = layout
-    ? align === "end"
-      ? layout.trigger.left + layout.trigger.width - layout.content.width
-      : layout.trigger.left
+    ? side === "left"
+      ? layout.trigger.left - contentWidth - sideOffset
+      : side === "right"
+        ? layout.trigger.left + layout.trigger.width + sideOffset
+        : align === "end"
+          ? layout.trigger.left + layout.trigger.width - contentWidth
+          : layout.trigger.left
     : 0;
   const top = layout
     ? side === "bottom"
       ? layout.trigger.top + layout.trigger.height + sideOffset
-      : layout.trigger.top - layout.content.height - sideOffset
+      : side === "top"
+        ? layout.trigger.top - layout.content.height - sideOffset
+        : align === "end"
+          ? layout.trigger.top + layout.trigger.height - layout.content.height
+          : layout.trigger.top
     : 0;
 
   // Both directions travel between the exact same hidden/show states. Exit
@@ -302,7 +322,7 @@ export function MorphPopoverContent({
             role="dialog"
             aria-labelledby={ctx.triggerId}
             variants={clip}
-            style={{ borderRadius: radius }}
+            style={{ borderRadius: radius, width: matchTriggerWidth && layout ? layout.trigger.width : undefined }}
             className={cn(
               "overflow-hidden border border-line bg-panel",
               className,

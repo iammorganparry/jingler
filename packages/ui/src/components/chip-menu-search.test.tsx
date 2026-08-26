@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ChipMenu } from "./chip-menu.js"
 
@@ -128,6 +128,6 @@ describe("ChipMenu search — shadcn/cmdk keyboard behavior", () => {
     open()
     await new Promise((r) => requestAnimationFrame(() => r(null)))
     fireEvent.keyDown(box(), { key: "Escape" })
-    expect(screen.queryByRole("combobox")).toBeNull()
+    await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull())
   })
 })

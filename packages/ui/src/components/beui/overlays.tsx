@@ -1,11 +1,11 @@
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
+import { type ReactElement, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
 import { AnimatePresence, m, useMotionValue, useReducedMotion, useTransform } from "motion/react"
 import { ChevronDown, GripHorizontal, PanelLeftClose, PanelLeftOpen, X } from "lucide-react"
 import { cn } from "../../lib/cn.js"
 import { FAST, SPRING, SPRING_SOFT } from "../../lib/motion.js"
 import { Tooltip } from "../tooltip.js"
 import { ContextMenu } from "../context-menu.js"
-import { Popover, PopoverContent, PopoverTrigger } from "../popover.js"
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from "./popover-morph.js"
 
 export function BottomSheet({ open, onOpenChange, title, children, className }: { open: boolean; onOpenChange?: (open: boolean) => void; title?: ReactNode; children: ReactNode; className?: string }) {
   return <AnimatePresence>{open && <><m.button type="button" aria-label="Close sheet" onClick={() => onOpenChange?.(false)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={FAST} className="fixed inset-0 z-40 bg-overlay" /><m.section role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : "Sheet"} initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={SPRING} className={cn("fixed inset-x-3 bottom-3 z-50 max-h-[85vh] overflow-auto rounded-xl border border-line bg-panel p-4 shadow-2xl", className)}><div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />{title && <h2 className="mb-3 text-sm font-semibold text-text-bright">{title}</h2>}{children}</m.section></>}</AnimatePresence>
@@ -105,8 +105,9 @@ export function AnimatedContextMenu({ trigger, items }: { trigger: ReactNode; it
   return <ContextMenu items={items.map(item => ({ id: item.id, label: item.label, onSelect: item.disabled ? () => {} : (item.onSelect ?? (() => {})) }))}>{trigger}</ContextMenu>
 }
 
-export function MotionPopover({ trigger, children, align = "center" }: { trigger: ReactNode; children: ReactNode; align?: "start" | "center" | "end" }) {
-  return <Popover><PopoverTrigger asChild>{trigger}</PopoverTrigger><PopoverContent align={align} className="origin-[var(--radix-popover-content-transform-origin)] animate-in fade-in zoom-in-95">{children}</PopoverContent></Popover>
+export function MotionPopover({ trigger, children, align = "end" }: { trigger: ReactNode; children: ReactNode; align?: "start" | "center" | "end" }) {
+  const resolvedAlign = align === "center" ? "end" : align
+  return <MorphPopover><MorphPopoverTrigger>{trigger as ReactElement}</MorphPopoverTrigger><MorphPopoverContent align={resolvedAlign}>{children}</MorphPopoverContent></MorphPopover>
 }
 
 export function MorphingModal({ open, onOpenChange, title, children, className }: { open: boolean; onOpenChange?: (open: boolean) => void; title?: ReactNode; children: ReactNode; className?: string }) {
