@@ -35,12 +35,12 @@ export interface BadgeProps {
 }
 
 /** Compatibility API backed by the official BeUI AnimatedBadge. */
-export function Badge({ children, tone = "neutral", className, title }: BadgeProps) {
+export function Badge({ children, tone = "neutral", size = "sm", className, title }: BadgeProps) {
   return (
     <AnimatedBadge
       title={title}
       status={statusFor[tone]}
-      size="sm"
+      size={size === "xs" ? "sm" : "md"}
       showIcon={false}
       className={cn("font-mono", toneClass[tone], className)}
     >

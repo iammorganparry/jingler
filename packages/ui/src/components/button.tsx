@@ -5,7 +5,7 @@ import { EASE_OUT, SPRING_PRESS } from "./beui/ease.js"
 import { cn } from "../lib/cn.js"
 
 const button = cva(
-  "inline-flex select-none items-center justify-center whitespace-nowrap font-medium transition-colors outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex select-none items-center justify-center whitespace-nowrap font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {

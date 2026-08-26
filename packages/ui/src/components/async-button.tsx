@@ -1,27 +1,12 @@
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { TriangleAlert } from "lucide-react"
+import { Loader } from "./beui/loader.js"
+import { Button } from "./button.js"
 import { cn } from "../lib/cn.js"
 
 type AsyncState = "idle" | "pending" | "success" | "error"
 
-const VARIANT: Record<string, string> = {
-  primary: "bg-blue text-editor",
-  secondary: "border border-line bg-surface text-text-body",
-  danger: "border border-red/45 bg-transparent text-red"
-}
-const SUCCESS = "bg-green text-editor"
-
-/** A small spinner ring (design's pending state). */
-function Spinner({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-block size-[13px] flex-none animate-spin-fast rounded-full border-2 border-current/30 border-t-current",
-        className
-      )}
-    />
-  )
-}
+const SUCCESS = "bg-green text-white"
 
 /** An animated "draw-in" check mark (design's success state). */
 function CheckDraw() {
@@ -71,7 +56,7 @@ export function AsyncButton({
   /** Label shown when held in the terminal `done` state (defaults to successLabel). */
   doneLabel?: ReactNode
   onClick: () => Promise<void> | void
-  variant?: keyof typeof VARIANT
+  variant?: "primary" | "secondary" | "danger"
   /** Hold the success state after completing (no reset) — the action can't re-fire. */
   terminal?: boolean
   /** Externally-controlled terminal success (already done, e.g. persisted "sent"). */
@@ -112,26 +97,22 @@ export function AsyncButton({
     effective === "success"
       ? SUCCESS
       : effective === "error"
-        ? "border border-red/45 bg-transparent text-red animate-shake"
-        : VARIANT[variant]
+        ? "animate-shake"
+        : undefined
 
   return (
-    <button
+    <Button
       ref={ref}
-      type="button"
+      variant={variant}
+      size={size}
       disabled={locked}
       onClick={run}
       style={minW ? { minWidth: minW } : undefined}
-      className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-md font-semibold outline-none transition-[color,background-color,border-color,scale] duration-100 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] disabled:cursor-default disabled:active:scale-100",
-        size === "md" ? "px-3.5 py-1.5 text-[13px]" : "px-3 py-1 text-[12px]",
-        tone,
-        className
-      )}
+      className={cn(tone, className)}
     >
       {effective === "pending" ? (
         <>
-          <Spinner />
+          <Loader size={13} label="Working" />
           {pendingLabel ?? children}
         </>
       ) : effective === "success" ? (
@@ -150,6 +131,6 @@ export function AsyncButton({
           {children}
         </>
       )}
-    </button>
+    </Button>
   )
 }

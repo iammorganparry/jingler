@@ -2,7 +2,7 @@
 
 Snapshot: 2026-08-25 · Official registry: https://beui.dev/r · Agent guide: https://beui.dev/docs/ai-agents
 
-Jingler carries the 39 Motion entries as reusable atoms/primitives and the 17 Agent entries as reusable molecules. The 22 BeUI Blocks are deliberately excluded. Imported ideas and adapted source remain MIT licensed; Jingler semantic tokens, existing renderers, and product behavior take precedence.
+Jingler carries the 15 Motion entries with production callers as reusable atoms/primitives and the 17 Agent entries as reusable molecules. Unused Motion atoms and the 22 BeUI Blocks are deliberately excluded. Imported ideas and adapted source remain MIT licensed; Jingler semantic tokens, existing renderers, and product behavior take precedence.
 
 ## Migration style rule
 
@@ -18,7 +18,7 @@ Jingler carries the 39 Motion entries as reusable atoms/primitives and the 17 Ag
 | Public compatibility path | BeUI owner |
 |---|---|
 | `components/button.tsx` | BeUI Button press, hover, ripple, sizes, and variants; Jingler squircle radius |
-| `components/input.tsx` / `MotionInput` | BeUI Input field geometry, validation motion, icons, and states |
+| `components/input.tsx` | BeUI Input field geometry and states |
 | `components/checkbox.tsx` | BeUI Checkbox draw animation and press feedback |
 | `components/toggle.tsx` | BeUI Switch heavy-thumb motion |
 | `components/segmented-control.tsx` | BeUI Tabs `segment` variant |
@@ -36,49 +36,26 @@ Compatibility files remain only where callers rely on an established product API
 - Replaced with native/existing Jingler behavior: `next-themes`, `lenis`, and `ai`; these are not added.
 - Existing component collisions are merged or wrapped rather than duplicated.
 
-## Motion atoms (39)
+## Motion atoms (15)
 
 | Component | Slug/source | Registry dependencies | Jingler destination / decision |
 |---|---|---|---|
-| Tilt Card | [`tilt-card`](https://beui.dev/r/tilt-card) | motion | Export `TiltCard` from `components/beui` |
 | Button | [`button`](https://beui.dev/r/button) | lucide-react, motion | Merge with `components/button.tsx` |
-| Animated CTA Buttons | [`expanding-arrow-button`](https://beui.dev/r/expanding-arrow-button) | motion | Export `ExpandingArrowButton` from `components/beui` |
-| Expandable Control | [`expandable-control`](https://beui.dev/r/expandable-control) | lucide-react, motion | Export `ExpandableControl` from `components/beui` |
-| Marquee | [`marquee`](https://beui.dev/r/marquee) | none | Export `Marquee` from `components/beui` |
 | Tabs | [`tabs`](https://beui.dev/r/tabs) | motion | Export `Tabs` from `components/beui` |
 | Switch | [`switch`](https://beui.dev/r/switch) | motion | Export `Switch` from `components/beui` |
 | Input | [`input`](https://beui.dev/r/input) | lucide-react, motion | Merge with `components/input.tsx` |
 | Select | [`select`](https://beui.dev/r/select) | lucide-react, motion | Merge with `components/select.tsx` |
-| Combobox | [`combobox`](https://beui.dev/r/combobox) | lucide-react, motion | Export `Combobox` from `components/beui` |
 | Checkbox | [`checkbox`](https://beui.dev/r/checkbox) | motion | Merge with `components/checkbox.tsx` |
-| Radio Group | [`radio`](https://beui.dev/r/radio) | motion | Export `Radio` from `components/beui` |
-| Bottom Sheet | [`bottom-sheet`](https://beui.dev/r/bottom-sheet) | motion | Export `BottomSheet` from `components/beui` |
-| Pull to Refresh | [`pull-to-refresh`](https://beui.dev/r/pull-to-refresh) | lucide-react, motion | Export `PullToRefresh` from `components/beui` |
 | Shared Layout Background | [`shared-layout-bg`](https://beui.dev/r/shared-layout-bg) | lucide-react, motion | Export `SharedLayoutBg` from `components/beui` |
-| Bounce Sidebar | [`bounce-sidebar`](https://beui.dev/r/bounce-sidebar) | motion | Export `BounceSidebar` from `components/beui` |
-| Animated Sidebar | [`animated-sidebar`](https://beui.dev/r/animated-sidebar) | lucide-react, motion | Export `AnimatedSidebar` from `components/beui` |
 | Preview Rail | [`preview-rail`](https://beui.dev/r/preview-rail) | motion | Export `PreviewRail` from `components/beui` |
 | Dock | [`dock`](https://beui.dev/r/dock) | lucide-react, motion | Export `Dock` from `components/beui` |
 | Tooltip | [`tooltip`](https://beui.dev/r/tooltip) | lucide-react, motion | Merge with `components/tooltip.tsx` |
 | Animated Context Menu | [`context-menu`](https://beui.dev/r/context-menu) | lucide-react, motion | Merge with `components/context-menu.tsx` |
 | Popover | [`popover`](https://beui.dev/r/popover) | lucide-react, motion | Use `MorphPopover`; legacy Radix atom deleted |
-| Morphing Modal | [`morphing-modal`](https://beui.dev/r/morphing-modal) | lucide-react, motion | Export `MorphingModal` from `components/beui` |
-| Center Morph Modal | [`center-morph-modal`](https://beui.dev/r/center-morph-modal) | lucide-react, motion | Export `CenterMorphModal` from `components/beui` |
-| Text Animation | [`text-animation`](https://beui.dev/r/text-animation) | motion | Export `TextAnimation` from `components/beui` |
-| Number Animation | [`number`](https://beui.dev/r/number) | motion | Export `Number` from `components/beui` |
 | Animated Badge | [`animated-badge`](https://beui.dev/r/animated-badge) | lucide-react, motion | Export `AnimatedBadge` from `components/beui` |
 | Action Swap | [`action-swap`](https://beui.dev/r/action-swap) | lucide-react, motion | Export `ActionSwap` from `components/beui` |
-| Animated Toast Stack | [`animated-toast-stack`](https://beui.dev/r/animated-toast-stack) | lucide-react, motion | Export `AnimatedToastStack` from `components/beui` |
-| Theme Toggle | [`theme-toggle`](https://beui.dev/r/theme-toggle) | lucide-react, motion, next-themes | Export `ThemeToggle` from `components/beui` |
-| Bouncy Accordion | [`bouncy-accordion`](https://beui.dev/r/bouncy-accordion) | lucide-react, motion | Export `BouncyAccordion` from `components/beui` |
-| Drawer | [`drawer`](https://beui.dev/r/drawer) | motion | Export `Drawer` from `components/beui` |
-| Scroll Animation | [`scroll-animation`](https://beui.dev/r/scroll-animation) | lenis, motion | Export `ScrollAnimation` from `components/beui` |
-| Range Slider | [`range-slider`](https://beui.dev/r/range-slider) | motion | Export `RangeSlider` from `components/beui` |
-| Wheel Picker | [`wheel-picker`](https://beui.dev/r/wheel-picker) | motion | Export `WheelPicker` from `components/beui` |
-| Table | [`table`](https://beui.dev/r/table) | @tanstack/react-virtual, lucide-react, motion | Export `Table` from `components/beui` |
-| Shader Background | [`shader-background`](https://beui.dev/r/shader-background) | @paper-design/shaders-react, motion | Export `ShaderBackground` from `components/beui` |
-| Cylinder Carousel | [`cylinder-carousel`](https://beui.dev/r/cylinder-carousel) | @paper-design/shaders-react, motion | Export `CylinderCarousel` from `components/beui` |
 | Loader | [`loader`](https://beui.dev/r/loader) | motion | Export `Loader` from `components/beui` |
+
 
 ## Agent molecules (17)
 

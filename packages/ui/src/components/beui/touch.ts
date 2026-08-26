@@ -4,13 +4,13 @@
 // mid-gesture, so a press-and-hold or a drag simply dies. Surfaces that own
 // their gesture have to opt out.
 //
-// What the two classes below cover, precisely:
+// What the class below covers, precisely:
 // - `-webkit-touch-callout: none` stops iOS's long-press callout. WebKit-only:
 //   it is not a property other engines have, so it is inert everywhere else.
 // - `user-select: none` stops the long-press selection on every engine,
 //   Android included, and stops a drag from painting a selection under the
-//   cursor. It is inherited, so it reaches every descendant — which is why the
-//   two classes differ only in whether they apply it unconditionally.
+//   cursor. It is inherited, so it reaches every descendant; this class limits
+//   that suppression to coarse-pointer devices.
 // What neither covers:
 // - Chrome for Android's long-press menu on a link or an image. No CSS
 //   suppresses it; a gesture surface that wraps one needs its own
@@ -20,22 +20,12 @@
 //   it on the surface does nothing — the child itself needs `draggable={false}`.
 
 /**
- * Classes for a surface that *is* the control: a thumb, a drum, a stage, a
- * handle, a hold button. Selection is suppressed on every input, because a
- * drag that highlights the control's own label is wrong on a mouse too.
- * Compose with `touch-none` when the surface also owns the scroll axis — leave
- * it off when the page must still scroll from there.
- */
-export const TOUCH_GESTURE_CLASS = "select-none [-webkit-touch-callout:none]";
-
-/**
- * The same opt-out for a gesture surface that wraps content the consumer owns:
+ * Opt-out classes for a gesture surface that wraps content the consumer owns:
  * a scroller, a context-menu trigger, a sheet header, a list row. Selection is
  * suppressed only where the platform runs its own press gestures — a coarse
  * pointer — so a mouse user can still select and copy that content. If the
  * gesture itself would paint a selection under the cursor, add `select-none`
- * for the duration of the gesture rather than reaching for
- * `TOUCH_GESTURE_CLASS`.
+ * for the duration of the gesture.
  *
  * `pointer: coarse` describes the *primary* pointer and nothing else, so a
  * hybrid machine reads it wrong in both directions: a tablet with a mouse

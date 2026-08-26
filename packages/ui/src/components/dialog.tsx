@@ -1,7 +1,7 @@
 import * as React from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
-import { m, useReducedMotion } from "motion/react"
+import { motion, useReducedMotion } from "motion/react"
 import { cn } from "../lib/cn.js"
 import { useNativeEclipsingOverlay } from "../lib/native-overlay.js"
 
@@ -25,7 +25,7 @@ export const DialogOverlay = React.forwardRef<
   return (
     <DialogPrimitive.Overlay
       ref={ref}
-      className={cn("fixed inset-0 z-50 bg-editor/10 backdrop-blur-sm", className)}
+      className={cn("fixed inset-0 z-40 bg-editor/10 backdrop-blur-sm", className)}
       {...props}
     />
   )
@@ -42,14 +42,13 @@ export const DialogContent = React.forwardRef<
   const reduce = useReducedMotion()
   return <DialogPortal>
     <DialogOverlay />
-    <DialogPrimitive.Content asChild {...props}>
-      <m.div
-        ref={ref}
+    <DialogPrimitive.Content ref={ref} className="fixed left-1/2 top-1/2 z-50 max-w-[90vw] -translate-x-1/2 -translate-y-1/2 outline-none" {...props}>
+      <motion.div
         initial={reduce ? { opacity: 0 } : { opacity: 1, clipPath: "inset(48% 48% 48% 48% round 30px)" }}
         animate={{ opacity: 1, clipPath: "inset(0% 0% 0% 0% round 30px)" }}
         transition={reduce ? { duration: 0.14 } : { duration: 0.43, ease: [0.2, 0, 0.2, 1] }}
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-4rem)] w-[460px] max-w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[30px] border border-line bg-panel shadow-[0_16px_48px_var(--sb-shadow-strong)] outline-none will-change-[clip-path]",
+          "relative flex max-h-[calc(100vh-4rem)] w-[460px] max-w-[90vw] flex-col overflow-hidden rounded-[30px] border border-line bg-panel shadow-[0_16px_48px_var(--sb-shadow-strong)] will-change-[clip-path]",
           className
         )}
       >
@@ -59,7 +58,7 @@ export const DialogContent = React.forwardRef<
             <X size={14} />
           </DialogPrimitive.Close>
         )}
-      </m.div>
+      </motion.div>
     </DialogPrimitive.Content>
   </DialogPortal>
 })

@@ -18,8 +18,17 @@ describe("BeUI production ownership", () => {
     expect(source("../dialog.tsx")).toContain("clipPath")
   })
 
-  it("does not restore superseded Popover or DropdownMenu atoms", () => {
-    expect(existsSync(new URL("../popover.tsx", import.meta.url))).toBe(false)
-    expect(existsSync(new URL("../dropdown-menu.tsx", import.meta.url))).toBe(false)
+  it("does not restore unused BeUI or superseded legacy atoms", () => {
+    for (const relative of [
+      "../popover.tsx",
+      "../dropdown-menu.tsx",
+      "./visual.tsx",
+      "./combobox.tsx",
+      "./combobox/context.tsx"
+    ]) expect(existsSync(new URL(relative, import.meta.url))).toBe(false)
+
+    expect(source("./controls.tsx")).not.toContain("MotionButton")
+    expect(source("./feedback.tsx")).not.toContain("Marquee")
+    expect(source("./overlays.tsx")).not.toContain("BottomSheet")
   })
 })

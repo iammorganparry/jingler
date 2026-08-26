@@ -139,8 +139,9 @@ export function Select({
       if (!controlled) setInternal(next);
       onValueChange?.(next);
       setOpen(false);
+      requestAnimationFrame(() => document.getElementById(`${baseId}-trigger`)?.focus());
     },
-    [controlled, onValueChange, setOpen],
+    [baseId, controlled, onValueChange, setOpen],
   );
 
   const register = useCallback((v: string, label: string) => {
@@ -231,6 +232,14 @@ export function SelectTrigger({
 }: SelectTriggerProps) {
   const ctx = useSelectContext("SelectTrigger");
   const isTop = ctx.placement === "top";
+  const focusChoice = (edge: "first" | "last" = "first") => requestAnimationFrame(() => {
+    const list = document.getElementById(ctx.listId);
+    const search = list?.parentElement?.querySelector<HTMLInputElement>("input");
+    if (search) return search.focus();
+    const options = [...(list?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [])];
+    const selected = options.find((option) => option.getAttribute("aria-selected") === "true");
+    (selected ?? options[edge === "first" ? 0 : options.length - 1])?.focus();
+  });
   // edge facing the panel flattens then rounds; the far edge stays rounded.
   // All four corners are specified so none gets stranded when placement flips.
   const kf = ctx.open ? [0, 0, 12] : [12, 0, 12];
@@ -248,7 +257,17 @@ export function SelectTrigger({
       aria-label={ariaLabel ?? ariaLabelAttribute}
       aria-expanded={ctx.open}
       aria-controls={ctx.listId}
-      onClick={() => ctx.setOpen(!ctx.open)}
+      onClick={() => {
+        const next = !ctx.open;
+        ctx.setOpen(next);
+        if (next) focusChoice();
+      }}
+      onKeyDown={(event) => {
+        if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        if (!ctx.open) ctx.setOpen(true);
+        focusChoice(event.key === "ArrowUp" ? "last" : "first");
+      }}
       // Gooey: the edge facing the panel snaps flat (panel attached) then rounds
       // back once the panel pulls away — the two pinch apart.
       initial={false}
@@ -544,6 +563,23 @@ export function SelectItem({
         data-value={value}
         disabled={disabled}
         onClick={() => ctx.select(value)}
+        onKeyDown={(event) => {
+          const options = [...(document.getElementById(ctx.listId)?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [])];
+          const current = options.indexOf(event.currentTarget);
+          if (event.key === "Escape") {
+            event.preventDefault();
+            ctx.setOpen(false);
+            document.getElementById(ctx.triggerId)?.focus();
+          } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+            event.preventDefault();
+            const next = event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? options.length - 1
+                : (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+            options[next]?.focus();
+          }
+        }}
         className={cn(
           "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm outline-none transition-colors",
           selected
