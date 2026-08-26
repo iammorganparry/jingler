@@ -17,7 +17,7 @@ export function StreamingText({
 }) {
   return (
     <StreamingResponse streaming={streaming} className={className}>
-      <Markdown>
+      <Markdown streaming={streaming}>
         {text}
       </Markdown>
     </StreamingResponse>

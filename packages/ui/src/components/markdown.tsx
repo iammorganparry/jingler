@@ -4,6 +4,9 @@ import rehypeKatex from "rehype-katex"
 import remarkMath from "remark-math"
 import { cn } from "../lib/cn.js"
 import { DiffPeek } from "./diff-peek.js"
+import { CodeBlock } from "./beui/code-block.js"
+import { FileIcon } from "./file-icon.js"
+import type { AgentCodeLanguage } from "./beui/agent-code.js"
 import { HtmlPreview } from "./html-preview.js"
 import { MermaidDiagram } from "./mermaid-diagram.js"
 import { useOpenAsset, useOpenPath } from "../asset/open-asset-context.js"
@@ -77,8 +80,11 @@ const ALLOWED_TAGS: AllowedTags = {
  * those constantly) turned into one giant link.
  */
 const InsideFence = createContext(false)
+const MarkdownStreaming = createContext(false)
+const CODE_LANGUAGES = new Set<AgentCodeLanguage>(["bash", "diff", "json", "text", "tsx", "typescript"])
 
 function MarkdownPre({ children }: { children?: ReactNode }) {
+  const streaming = useContext(MarkdownStreaming)
   const code = isValidElement<{ className?: string; children?: unknown }>(children) ? children : null
   const lang = /language-(\w+)/.exec(code?.props.className ?? "")?.[1]
   if (lang === "diff") {
@@ -100,12 +106,11 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
     const text = String(code?.props.children ?? "").replace(/\n$/, "")
     return <MermaidDiagram source={text} />
   }
-  // Non-diff code blocks: plain, styled by `.sb-md pre` (no chrome).
-  return (
-    <InsideFence.Provider value={true}>
-      <pre>{children}</pre>
-    </InsideFence.Provider>
-  )
+  const text = String(code?.props.children ?? "").replace(/\n$/, "")
+  const language = CODE_LANGUAGES.has(lang as AgentCodeLanguage) ? lang as AgentCodeLanguage : "text"
+  if (text.split("\n").length > 200) return <InsideFence.Provider value={true}><pre>{children}</pre></InsideFence.Provider>
+  const iconPath = `code.${language === "typescript" ? "ts" : language === "bash" ? "sh" : language}`
+  return <CodeBlock code={text} language={language} fileIcon={<FileIcon path={iconPath} size={14} />} status={streaming ? "streaming" : "complete"} />
 }
 
 /**
@@ -260,7 +265,7 @@ const useAssetUrlTransform = (): UrlTransform => {
  * A ```diff fenced block is rendered with our own `DiffPeek` (the same red/green
  * line view used elsewhere) instead of Streamdown's generic code-block chrome.
  */
-export function Markdown({ children, className }: { children: string; className?: string }) {
+export function Markdown({ children, className, streaming = false }: { children: string; className?: string; streaming?: boolean }) {
   const source = useMemo(() => unwrapNoOpAnchors(children), [children])
   const urlTransform = useAssetUrlTransform()
   return (
@@ -270,6 +275,7 @@ export function Markdown({ children, className }: { children: string; className?
         className
       )}
     >
+      <MarkdownStreaming.Provider value={streaming}>
       <Streamdown
         parseIncompleteMarkdown
         plugins={PLUGINS}
@@ -280,6 +286,7 @@ export function Markdown({ children, className }: { children: string; className?
       >
         {source}
       </Streamdown>
+      </MarkdownStreaming.Provider>
     </div>
   )
 }

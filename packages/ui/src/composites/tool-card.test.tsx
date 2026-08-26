@@ -103,10 +103,8 @@ describe("tool card — expanding a call", () => {
     )
     // The header must not become a toggle: the change is already on show.
     expect(screen.queryByRole("button", { expanded: false })).toBeNull()
-    await waitFor(() => {
-      const pierre = document.querySelector("diffs-container")
-      expect(pierre?.shadowRoot?.textContent).toContain("added a line")
-    })
+    await waitFor(() => expect(document.body.textContent).toContain("added a line"))
+    expect(document.querySelector("diffs-container")).toBeNull()
   })
 })
 
@@ -143,7 +141,8 @@ describe("tool card — canonical file changes", () => {
     expect(screen.getByText("src/after.ts")).toBeDefined()
     expect(screen.getByText("No newline")).toBeDefined()
     await waitFor(() => {
-      expect(document.querySelectorAll("diffs-container")).toHaveLength(4)
+      expect(document.body.textContent).toContain("changed")
+      expect(document.querySelectorAll("[data-material-file-icon]")).toHaveLength(8)
     })
   })
 
