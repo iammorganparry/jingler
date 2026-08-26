@@ -22,7 +22,7 @@ import {
   Monitor,
   LoaderCircle,
   Server,
-  Sparkles,
+  SquarePen,
   X,
 } from "lucide-react";
 import { Button } from "../components/button.js";
@@ -231,7 +231,7 @@ function SearchPicker<T extends string>({
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
-              selected ? "text-text-bright" : "text-dim",
+              selected ? "text-muted-foreground" : "text-dim",
             )}
           >
             {selected?.label ?? placeholder}
@@ -245,7 +245,7 @@ function SearchPicker<T extends string>({
       >
         <Command loop>
           <CommandInput autoFocus placeholder={searchPlaceholder} />
-          <CommandList className="max-h-[360px]">
+          <CommandList className="max-h-[360px] pt-3">
             <CommandEmpty>{emptyLabel}</CommandEmpty>
             {options.map((option) => (
               <CommandItem
@@ -272,7 +272,7 @@ function SearchPicker<T extends string>({
                 {option.value === value && (
                   <Check
                     size={15}
-                    className="flex-none text-blue"
+                    className="flex-none text-muted-foreground"
                     aria-hidden
                   />
                 )}
@@ -416,7 +416,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       keywords: project.path,
       disabled: project.availability !== "available",
       icon: (
-        <FolderGit2 size={16} className="flex-none text-blue" aria-hidden />
+        <FolderGit2 size={16} className="flex-none text-muted-foreground" aria-hidden />
       ),
     }));
   const checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">> = [
@@ -425,7 +425,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       label: "Worktree",
       description: "Create an isolated Git worktree",
       keywords: "new isolated branch",
-      icon: <GitFork size={16} className="flex-none text-purple" aria-hidden />,
+      icon: <GitFork size={16} className="flex-none text-muted-foreground" aria-hidden />,
     },
     {
       value: "direct",
@@ -446,7 +446,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       value: branch,
       label: branch,
       keywords: branch.replaceAll("/", " "),
-      icon: <GitBranch size={16} className="flex-none text-cyan" aria-hidden />,
+      icon: <GitBranch size={16} className="flex-none text-muted-foreground" aria-hidden />,
     }),
   );
   const sourceOptions: ReadonlyArray<{
@@ -457,15 +457,15 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
   }> = [
     {
       value: "blank",
-      label: "Blank task",
+      label: "New task",
       description: "Start from a base branch",
-      icon: <Sparkles size={15} className="text-blue" />,
+      icon: <SquarePen size={15} className="text-muted-foreground" />,
     },
     {
       value: "branch",
       label: "Existing branch",
       description: "Continue work already started",
-      icon: <GitBranch size={15} className="text-cyan" />,
+      icon: <GitBranch size={15} className="text-muted-foreground" />,
     },
     ...(props.loadPullRequests
       ? [
@@ -473,7 +473,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             value: "pr" as const,
             label: "Pull request",
             description: "Work on an open GitHub PR",
-            icon: <GitPullRequest size={15} className="text-green" />,
+            icon: <GitPullRequest size={15} className="text-muted-foreground" />,
           },
         ]
       : []),
@@ -483,7 +483,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
             value: "github" as const,
             label: "GitHub issue",
             description: "Link and prefill from GitHub",
-            icon: <GithubMark className="size-[15px] text-text" />,
+            icon: <GithubMark className="size-[15px] text-muted-foreground" />,
           },
         ]
       : []),
@@ -493,9 +493,9 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
       description: `Link and prefill from ${provider.label}`,
       icon:
         provider.id === "linear" ? (
-          <LinearMark className="size-[15px] text-text-bright" />
+          <LinearMark className="size-[15px] text-muted-foreground" />
         ) : (
-          <CircleDot size={15} className="text-purple" />
+          <CircleDot size={15} className="text-muted-foreground" />
         ),
     })),
   ];
@@ -555,115 +555,6 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 </Button>
               )}
             </div>
-            <div className="flex flex-col gap-1.5">
-              <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
-                Start from
-              </span>
-              <div
-                className="grid grid-cols-[repeat(auto-fit,minmax(156px,1fr))] gap-2"
-                role="radiogroup"
-                aria-label="Session source"
-              >
-                {sourceOptions.map((option) => {
-                  const selected = option.value === source;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() =>
-                        send({ type: "SET_SOURCE", source: option.value })
-                      }
-                      className={cn(
-                        "group flex min-h-[74px] min-w-0 flex-col justify-center gap-1.5 rounded-lg border px-3.5 text-left outline-none transition-[background-color,border-color,transform] active:translate-y-px focus-visible:ring-2 focus-visible:ring-ring",
-                        selected
-                          ? "border-brand/60 bg-selection"
-                          : "border-line bg-sunken hover:border-line-strong hover:bg-surface",
-                      )}
-                    >
-                      <span className="flex items-center gap-2 text-[12.5px] font-semibold text-text-bright">
-                        {option.icon}
-                        <span className="truncate">{option.label}</span>
-                      </span>
-                      <span className="truncate text-[10.5px] text-dim">
-                        {option.description}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] items-end gap-3">
-              <div className="flex flex-col gap-0.5">
-                <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
-                  Project
-                </span>
-                <SearchPicker
-                  value={projectId}
-                  options={projectOptions}
-                  onValueChange={(value) =>
-                    send({ type: "SET_PROJECT", projectId: value })
-                  }
-                  ariaLabel="Project"
-                  placeholder="Choose project"
-                  searchPlaceholder="Search projects…"
-                  emptyLabel="No projects match."
-                  disabled={loading}
-                  triggerClassName="w-full"
-                />
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
-                  Checkout mode
-                </span>
-                <SearchPicker
-                  value={isolation}
-                  options={checkoutOptions}
-                  onValueChange={(value) =>
-                    send({ type: "SET_ISOLATION", isolation: value })
-                  }
-                  ariaLabel="Checkout"
-                  placeholder="Choose checkout"
-                  searchPlaceholder="Search checkout modes…"
-                  emptyLabel="No checkout modes match."
-                  disabled={loading}
-                  triggerClassName="w-full"
-                />
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="px-2 text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground">
-                  {source === "branch" || source === "pr"
-                    ? "Working branch"
-                    : "Base branch"}
-                </span>
-                <SearchPicker
-                  value={
-                    source === "pr"
-                      ? (selectedPr?.headRefName ?? "")
-                      : baseBranch
-                  }
-                  options={branchOptions}
-                  onValueChange={(value) =>
-                    send({ type: "SET_BASE", baseBranch: value })
-                  }
-                  ariaLabel="Base branch"
-                  placeholder={
-                    loading
-                      ? environmentId === "local"
-                        ? "Loading branches…"
-                        : "Preparing on host…"
-                      : "Choose branch"
-                  }
-                  searchPlaceholder="Search branches…"
-                  emptyLabel="No branches match."
-                  disabled={loading || source === "pr"}
-                  triggerClassName="w-full"
-                />
-              </div>
-            </div>
-
             {source !== "blank" && source !== "branch" && (
               <section
                 className="overflow-hidden rounded-xl border border-line bg-panel"
@@ -790,6 +681,84 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
               }
               allowPlan
               disabledReason={unavailableReason}
+              contextControls={
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                  <div className="min-w-[130px] flex-1">
+                    <SearchPicker
+                      value={projectId}
+                      options={projectOptions}
+                      onValueChange={(value) =>
+                        send({ type: "SET_PROJECT", projectId: value })
+                      }
+                      ariaLabel="Project"
+                      placeholder="Choose project"
+                      searchPlaceholder="Search projects…"
+                      emptyLabel="No projects match."
+                      disabled={loading}
+                      triggerClassName="h-8 w-full px-2 text-[11.5px]"
+                      contentClassName="w-[340px]"
+                    />
+                  </div>
+                  <div className="min-w-[130px] flex-1">
+                    <SearchPicker
+                      value={source}
+                      options={sourceOptions}
+                      onValueChange={(value) =>
+                        send({ type: "SET_SOURCE", source: value })
+                      }
+                      ariaLabel="Session source"
+                      placeholder="Start from"
+                      searchPlaceholder="Search session sources…"
+                      emptyLabel="No session sources match."
+                      disabled={loading}
+                      triggerClassName="h-8 w-full px-2 text-[11.5px]"
+                      contentClassName="w-[300px]"
+                    />
+                  </div>
+                  <div className="min-w-[130px] flex-1">
+                    <SearchPicker
+                      value={isolation}
+                      options={checkoutOptions}
+                      onValueChange={(value) =>
+                        send({ type: "SET_ISOLATION", isolation: value })
+                      }
+                      ariaLabel="Checkout"
+                      placeholder="Choose checkout"
+                      searchPlaceholder="Search checkout modes…"
+                      emptyLabel="No checkout modes match."
+                      disabled={loading}
+                      triggerClassName="h-8 w-full px-2 text-[11.5px]"
+                      contentClassName="w-[300px]"
+                    />
+                  </div>
+                  <div className="min-w-[130px] flex-1">
+                    <SearchPicker
+                      value={
+                        source === "pr"
+                          ? (selectedPr?.headRefName ?? "")
+                          : baseBranch
+                      }
+                      options={branchOptions}
+                      onValueChange={(value) =>
+                        send({ type: "SET_BASE", baseBranch: value })
+                      }
+                      ariaLabel="Base branch"
+                      placeholder={
+                        loading
+                          ? environmentId === "local"
+                            ? "Loading branches…"
+                            : "Preparing on host…"
+                          : "Choose branch"
+                      }
+                      searchPlaceholder="Search branches…"
+                      emptyLabel="No branches match."
+                      disabled={loading || source === "pr"}
+                      triggerClassName="h-8 w-full px-2 text-[11.5px]"
+                      contentClassName="w-[320px]"
+                    />
+                  </div>
+                </div>
+              }
             />
             {draft.trim().length === 0 && unavailableReason === undefined && (
               <div className="flex justify-end">

@@ -56,6 +56,20 @@ describe("Composer send row", () => {
     expect(repo.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  it("lets the new-session screen replace static repository metadata with controls", () => {
+    render(
+      <Composer
+        repo="widget"
+        branch="main"
+        contextControls={<button type="button">Choose project</button>}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Choose project" })).toBeTruthy()
+    expect(screen.queryByTitle("Repository: widget")).toBeNull()
+    expect(screen.queryByTestId("composer-branch")).toBeNull()
+  })
+
   it("shows the dirty badge beside the repo, and hides it for a clean tree", () => {
     const { rerender } = render(
       <Composer repo="widget" branch="main" diff={{ files: 29, added: 689, removed: 38 }} />

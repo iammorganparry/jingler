@@ -6,6 +6,8 @@ import { startFakeLinearServer } from "./fake-linear.js"
 const API_KEY = "lin_api_e2e_linear_plugin"
 const LINKED_LINEAR_ISSUE = /Linked issue ENG-/
 const LINEAR_IDENTIFIER = /^ENG-/
+const LINEAR_SOURCE_NAME = /^Linear issue/
+const NEW_SESSION_SOURCES = ["New task", "Existing branch", "Pull request", "GitHub issue", "Linear issue"] as const
 
 test("shows every new-session source and starts from a Linear issue", async ({
   launchApp
@@ -20,13 +22,16 @@ test("shows every new-session source and starts from a Linear issue", async ({
     await configureLinear(launched.window)
     await launched.window.getByTestId("new-session").click()
 
-    for (const label of ["Blank task", "Existing branch", "Pull request", "GitHub issue", "Linear issue"]) {
-      await expect(launched.window.getByRole("radio", { name: new RegExp(label) })).toBeVisible()
-    }
+    await launched.window.getByRole("button", { name: "Session source" }).click()
+    await Promise.all(
+      NEW_SESSION_SOURCES.map((label) =>
+        expect(launched.window.getByRole("option", { name: new RegExp(label) })).toBeVisible()
+      )
+    )
 
-    await launched.window.getByRole("radio", { name: /^Linear issue/ }).click()
-    const linearSource = launched.window.getByRole("radio", { name: /^Linear issue/ })
+    const linearSource = launched.window.getByRole("option", { name: LINEAR_SOURCE_NAME })
     await expect(linearSource.locator('[data-linear-mark="true"]')).toBeVisible()
+    await linearSource.click()
     await expect(launched.window.getByRole("heading", { name: "Linear issues" })).toBeVisible()
     const issue = launched.window.getByRole("button", { name: /Document retry policy/ })
     await expect(issue).toBeVisible({ timeout: 20_000 })
@@ -40,8 +45,12 @@ test("shows every new-session source and starts from a Linear issue", async ({
     // before writing it; this test reads the same persisted representation.
     const sessions = JSON.parse(
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
-    ) as ReadonlyArray<{ readonly linkedIssue?: { readonly providerId: string; readonly identifier: string } }>
-    expect(sessions[0]?.linkedIssue).toMatchObject({ providerId: "linear", identifier: "ENG-124" })
+    ) as ReadonlyArray<{
+      readonly linkedIssues?: ReadonlyArray<{ readonly providerId: string; readonly identifier: string }>
+    }>
+    expect(sessions[0]?.linkedIssues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ providerId: "linear", identifier: "ENG-124" })])
+    )
   } finally {
     await linear.close()
   }
@@ -168,7 +177,7 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
     await launched.window.getByRole("button", { name: "Checkout" }).click()
     await launched.window.getByRole("option", { name: "Local" }).click()
     await launched.window.getByRole("button", { name: "Create workspace", exact: true }).click()
-    const linkRow = sessionRow(launched.window, "Untitled session")
+    const linkRow = launched.window.locator('[data-testid^="session-row-"]').first()
     await expect(linkRow).toBeVisible()
     await openLinearIssueTab(launched.window)
     await expect(launched.window.getByRole("heading", { name: "Link an existing issue" })).toBeVisible({
@@ -205,13 +214,17 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
       readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
     ) as ReadonlyArray<{
       readonly id: string
-      readonly linkedIssue?: { readonly providerId: string; readonly identifier: string }
+      readonly linkedIssues?: ReadonlyArray<{ readonly providerId: string; readonly identifier: string }>
     }>
     expect(sessions).toHaveLength(1)
-    expect(sessions[0]?.linkedIssue).toMatchObject({
-      providerId: "linear",
-      identifier: expect.stringMatching(LINEAR_IDENTIFIER)
-    })
+    expect(sessions[0]?.linkedIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: "linear",
+          identifier: expect.stringMatching(LINEAR_IDENTIFIER)
+        })
+      ])
+    )
   } finally {
     await linear.close()
   }

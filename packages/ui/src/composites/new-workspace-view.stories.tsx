@@ -13,9 +13,12 @@ import { ProviderCatalog } from "@jingler/core"
 import { Schema } from "effect"
 import { useRef, useState } from "react"
 import { expect, fireEvent, fn, userEvent, waitFor, within } from "storybook/test"
-import { CircleDot, GitBranch, GitPullRequest, Sparkles } from "lucide-react"
+import { FolderGit2, GitBranch, GitFork, GitPullRequest, SlidersHorizontal, SquarePen } from "lucide-react"
+import { MotionTabs } from "../components/beui/index.js"
+import { Select, SelectContent, SelectItem, SelectSearch, SelectTrigger, SelectValue } from "../components/beui/select.js"
 import { Button } from "../components/button.js"
 import { GithubMark } from "../components/github-mark.js"
+import { LinearMark } from "../components/linear-mark.js"
 import { SearchInput } from "../components/search-input.js"
 import { SessionConversation } from "../screens/session-conversation.js"
 import { AddProjectDialog } from "./add-project-dialog.js"
@@ -109,33 +112,33 @@ const SOURCE_OPTIONS: ReadonlyArray<{
 }> = [
   {
     value: "blank",
-    label: "Blank task",
+    label: "New task",
     description: "Start from a base branch",
-    icon: <Sparkles size={15} className="text-blue" />
+    icon: <SquarePen size={15} className="text-muted-foreground" />
   },
   {
     value: "branch",
     label: "Existing branch",
     description: "Continue work already started",
-    icon: <GitBranch size={15} className="text-cyan" />
+    icon: <GitBranch size={15} className="text-muted-foreground" />
   },
   {
     value: "pr",
     label: "Pull request",
     description: "Work on an open GitHub PR",
-    icon: <GitPullRequest size={15} className="text-green" />
+    icon: <GitPullRequest size={15} className="text-muted-foreground" />
   },
   {
     value: "github",
     label: "GitHub issue",
     description: "Link and prefill from GitHub",
-    icon: <GithubMark className="size-[15px] text-text" />
+    icon: <GithubMark className="size-[15px] text-muted-foreground" />
   },
   {
     value: "linear",
     label: "Linear issue",
     description: "Link and prefill from Linear",
-    icon: <CircleDot size={15} className="text-purple" />
+    icon: <LinearMark className="size-[15px] text-muted-foreground" />
   }
 ]
 
@@ -538,17 +541,17 @@ function SessionSourcePrototype({ initialSource = "blank" }: { initialSource?: P
             <PreviewField
               label="Project"
               value="jingler"
-              icon={<GitBranch size={15} className="text-blue" />}
+              icon={<GitBranch size={15} className="text-muted-foreground" />}
             />
             <PreviewField
               label="Checkout mode"
               value={source === "pr" ? "PR worktree" : "Worktree"}
-              icon={<GitPullRequest size={15} className="text-purple" />}
+              icon={<GitPullRequest size={15} className="text-muted-foreground" />}
             />
             <PreviewField
               label={source === "branch" || source === "pr" ? "Working branch" : "Base branch"}
               value={branch}
-              icon={<GitBranch size={15} className="text-cyan" />}
+              icon={<GitBranch size={15} className="text-muted-foreground" />}
             />
           </div>
 
@@ -586,7 +589,7 @@ function SessionSourcePrototype({ initialSource = "blank" }: { initialSource?: P
                             : "border-line bg-sunken text-text hover:border-line-strong"
                         }`}
                       >
-                        <GitBranch size={14} className="text-cyan" />
+                        <GitBranch size={14} className="text-muted-foreground" />
                         {candidate}
                       </button>
                     ))}
@@ -643,7 +646,153 @@ function SessionSourceStory({ initialSource }: { initialSource?: PreviewSource }
         onNewSession={() => {}}
         showEmpty
         version="2.0.3"
+        newSessionViewActive
         newSessionView={<SessionSourcePrototype initialSource={initialSource} />}
+      />
+    </div>
+  )
+}
+
+type MinimalConcept = "prompt-first" | "source-tabs" | "setup-dock"
+
+function MinimalSessionConcept({ concept }: { concept: MinimalConcept }) {
+  const [source, setSource] = useState<PreviewSource>("blank")
+  const [project, setProject] = useState("jingler")
+  const [branch, setBranch] = useState("main")
+  const [checkout, setCheckout] = useState("worktree")
+  const [draft, setDraft] = useState("")
+  const sourceTabs = SOURCE_OPTIONS.map(({ value, label }) => ({ value, label }))
+  const controls = (
+    <>
+      <ConceptSelect
+        label="Project"
+        value={project}
+        onValueChange={setProject}
+        icon={<FolderGit2 className="size-3.5 text-muted-foreground" />}
+        options={[{ value: "jingler", label: "jingler" }, { value: "device-relay", label: "device-relay" }]}
+      />
+      {concept !== "source-tabs" && (
+        <ConceptSelect
+          label="Start from"
+          value={source}
+          onValueChange={(value) => setSource(value as PreviewSource)}
+          icon={<SquarePen className="size-3.5 text-muted-foreground" />}
+          options={SOURCE_OPTIONS.map(({ value, label, icon }) => ({ value, label, icon }))}
+        />
+      )}
+      <ConceptSelect
+        label="Checkout"
+        value={checkout}
+        onValueChange={setCheckout}
+        icon={<GitFork className="size-3.5 text-muted-foreground" />}
+        options={[{ value: "worktree", label: "Worktree" }, { value: "direct", label: "Local checkout" }]}
+      />
+      <ConceptSelect
+        label={source === "branch" || source === "pr" ? "Branch" : "Base"}
+        value={branch}
+        onValueChange={setBranch}
+        icon={<GitBranch className="size-3.5 text-muted-foreground" />}
+        options={[{ value: "main", label: "main" }, { value: "develop", label: "develop" }, { value: "release/2.0", label: "release/2.0" }]}
+      />
+    </>
+  )
+  const composer = (
+    <Composer
+      value={draft}
+      onValueChange={setDraft}
+      placeholder="What do you want the agent to do?"
+      repo={project}
+      branch={branch}
+      contextControls={concept === "prompt-first" ? controls : undefined}
+      providerCatalog={PROVIDER_CATALOG}
+      connectionId={PROVIDER_CATALOG.connections[0]!.connection.id}
+      modelId={PROVIDER_CATALOG.connections[0]!.models[0]!.id}
+      mode="auto"
+      onSend={() => {}}
+    />
+  )
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-editor">
+      <header className="flex h-12 flex-none items-center border-b border-hairline px-5">
+        <h1 className="text-[13px] font-semibold text-text-bright">New session</h1>
+        <span className="ml-2 rounded bg-surface px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-dim">Concept</span>
+      </header>
+      <main className="flex min-h-0 flex-1 overflow-auto px-6 py-10">
+        <div className="m-auto flex w-full max-w-[760px] flex-col gap-5">
+          <div className="text-center">
+            <h2 className="text-[22px] font-semibold tracking-[-0.35px] text-text-bright">Start something</h2>
+            <p className="mt-1 text-[12px] text-muted-foreground">Describe the outcome. The setup stays out of your way.</p>
+          </div>
+
+          {concept === "prompt-first" && composer}
+
+          {concept === "source-tabs" && (
+            <>
+              <MotionTabs items={sourceTabs} value={source} onChange={setSource} variant="segment" className="mx-auto" />
+              {composer}
+              <div className="mx-auto grid w-full max-w-[610px] grid-cols-3 gap-2">{controls}</div>
+            </>
+          )}
+
+          {concept === "setup-dock" && (
+            <>
+              {composer}
+              <div className="mx-auto flex max-w-full items-center gap-1 rounded-xl border border-line bg-panel p-1 shadow-sm">
+                <span className="flex size-8 flex-none items-center justify-center text-dim" aria-hidden><SlidersHorizontal className="size-3.5" /></span>
+                {controls}
+              </div>
+              <p className="text-center text-[10.5px] text-dim">Session starts from <span className="font-mono text-text">{project}/{branch}</span> in an isolated worktree.</p>
+            </>
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
+
+function ConceptSelect({ label, value, onValueChange, icon, options }: {
+  label: string
+  value: string
+  onValueChange: (value: string) => void
+  icon: React.ReactNode
+  options: ReadonlyArray<{ value: string; label: string; icon?: React.ReactNode }>
+}) {
+  const selectedIcon = options.find((option) => option.value === value)?.icon ?? icon
+  return (
+    <Select value={value} onValueChange={onValueChange} placement="top" className="min-w-0 flex-1">
+      <SelectTrigger ariaLabel={label} className="h-8 min-w-0 rounded-lg border-0 bg-transparent px-2 py-0 text-[11.5px] shadow-none hover:bg-surface">
+        <span className="flex min-w-0 items-center gap-1.5">
+          {selectedIcon}
+          <SelectValue placeholder={label} className="truncate text-muted-foreground" />
+        </span>
+      </SelectTrigger>
+      <SelectContent
+        className="right-auto w-56"
+        search={<SelectSearch autoFocus wrapperClassName="mb-2" placeholder={`Search ${label.toLowerCase()}…`} />}
+      >
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            <span className="flex min-w-0 items-center gap-2">{option.icon}{option.label}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function MinimalConceptStory({ concept }: { concept: MinimalConcept }) {
+  return (
+    <div className="flex h-screen w-full bg-panel">
+      <SessionConversation
+        sessions={SIDEBAR_SESSIONS}
+        activeSessionId={null}
+        onSelectSession={() => {}}
+        onNewSession={() => {}}
+        showEmpty
+        version="2.0.3"
+        newSessionViewActive
+        newSessionView={<MinimalSessionConcept concept={concept} />}
       />
     </div>
   )
@@ -676,6 +825,21 @@ type Story = StoryObj<typeof meta>
 
 /** Manual confirmation surface: sidebar stays fixed while creation owns the main pane. */
 export const Ready: Story = {}
+
+/** Prompt Input first; every setup choice collapses into one quiet strip. */
+export const MinimalPromptFirst: Story = {
+  render: () => <MinimalConceptStory concept="prompt-first" />
+}
+
+/** BeUI expandable-tabs direction: source is the only prominent setup choice. */
+export const MinimalSourceTabs: Story = {
+  render: () => <MinimalConceptStory concept="source-tabs" />
+}
+
+/** BeUI overflow-actions direction: all setup lives in a compact dock. */
+export const MinimalSetupDock: Story = {
+  render: () => <MinimalConceptStory concept="setup-dock" />
+}
 
 /** Approval surface: all source choices are interactive on the unified screen. */
 export const SessionSources: Story = {

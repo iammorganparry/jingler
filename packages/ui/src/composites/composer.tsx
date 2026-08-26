@@ -266,6 +266,7 @@ export function Composer({
   onCodeReferencesClear,
   planDocument,
   onOpenPlanStage,
+  contextControls,
   className,
 }: {
   skills?: ReadonlyArray<Skill>;
@@ -312,6 +313,8 @@ export function Composer({
   planDocument?: PlanDocument;
   /** Open Plan Review at a selected canonical stage. */
   onOpenPlanStage?: (stageId: string) => void;
+  /** New-session-only controls rendered instead of static repository metadata. */
+  contextControls?: ReactNode;
   /** Canonical certified model surface. */
   providerCatalog?: ProviderCatalog | null;
   connectionId?: ProviderConnectionId | null;
@@ -970,11 +973,11 @@ export function Composer({
           )}
           </span>
         </div>
-        {/* Lower row: repository sits bottom-left as quiet metadata, the working
-            branch bottom-right on the same line — `justify-between` splits them.
-            An empty span holds the left slot when there is no repo, so a lone
-            branch still lands on the right. */}
-        {(repo || branch || branchPending) && (
+        {contextControls ? (
+          <div className="flex min-w-0 items-center gap-1 px-1 pt-1">
+            {contextControls}
+          </div>
+        ) : (repo || branch || branchPending) && (
           <div className="flex items-center justify-between gap-2 px-1.5 pt-1 font-mono text-[10.5px] text-dim">
             {repo ? (
               <span className="flex min-w-0 items-center gap-2">
