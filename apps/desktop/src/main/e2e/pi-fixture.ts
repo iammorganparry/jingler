@@ -683,6 +683,22 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
 
 const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const prompt = latestOperatorText(context)
+  if (prompt.includes("[[beui-production]]")) {
+    return fauxAssistantMessage([
+      "Production renderers are mounted.",
+      "```typescript",
+      "const production = true",
+      "```",
+      "```diff",
+      "diff --git a/src/production.ts b/src/production.ts",
+      "--- a/src/production.ts",
+      "+++ b/src/production.ts",
+      "@@ -1 +1 @@",
+      "-false",
+      "+true",
+      "```"
+    ].join("\n"))
+  }
   if (prompt.includes("[[expect-code-context]]")) {
     return fauxAssistantMessage(
       prompt.includes("<repository-code-references>")

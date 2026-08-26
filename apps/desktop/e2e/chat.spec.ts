@@ -155,6 +155,26 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
   await expect(window.getByText("Approval needed · run a command")).toHaveCount(0)
 })
 
+test("the production transcript mounts BeUI code and diff renderers", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[beui-production]] Show the production renderers.")
+  await composer.press("Enter")
+
+  const transcript = window.getByTestId("conversation-scroll")
+  await expect(transcript.getByRole("button", { name: "Copy code" })).toBeVisible({ timeout: 20_000 })
+  await expect(transcript.getByRole("button", { name: "Copy diff" })).toBeVisible()
+  await expect(window.getByRole("navigation", { name: "Message navigation" })).toBeAttached()
+  await expect(window.getByRole("button", { name: "Accept Edits" })).toHaveAttribute("aria-haspopup", "listbox")
+  expect(await transcript.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+})
+
 test("unimported skills stay unavailable and the @ menu references files", async ({
   launchApp
 }) => {

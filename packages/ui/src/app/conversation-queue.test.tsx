@@ -1,5 +1,7 @@
+import type { Message } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { MessageTurn } from "../composites/message-turn.js"
 import { ConversationView } from "./conversation-view.js"
 
 afterEach(cleanup)
@@ -35,6 +37,29 @@ describe("ConversationView — queued messages", () => {
     expect(screen.getByRole("button", { name: "Go to user message 1 of 3" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Go to assistant message 2 of 3" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Go to user message 3 of 3" })).toBeTruthy()
+  })
+
+  it("mounts the approved components at the production conversation boundary", () => {
+    render(<ConversationView mode="accept-edits" messages={[]} />)
+    expect(screen.getByRole("navigation", { name: "Message navigation" })).toBeTruthy()
+    expect(screen.getByPlaceholderText("Message the agent…")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Accept Edits" }).getAttribute("aria-haspopup")).toBe("listbox")
+
+    const message: Message = {
+      id: "a1",
+      role: "assistant",
+      streaming: false,
+      createdAt: new Date(0).toISOString(),
+      parts: [
+        { _tag: "Text", text: "```typescript\nconst ready = true\n```" },
+        { _tag: "Tool", tool: { id: "bash-1", name: "Bash", target: "pnpm test", status: "success", meta: "exit 0", diff: null, preview: null, output: "tests passed" } },
+        { _tag: "Tool", tool: { id: "write-1", name: "Write", target: "src/ready.ts", status: "success", meta: null, diff: null, preview: "diff --git a/src/ready.ts b/src/ready.ts\n--- a/src/ready.ts\n+++ b/src/ready.ts\n@@ -1 +1 @@\n-false\n+true" } }
+      ]
+    }
+    render(<MessageTurn message={message} />)
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Copy diff" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /pnpm test.*Bash.*Completed/ })).toBeTruthy()
   })
 
   it("shows the breathing orb only while the agent is running", () => {
