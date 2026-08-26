@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { BEUI_MOTION_COMPONENTS, BouncyAccordion, MotionTabs } from "./index.js"
+import { BEUI_MOTION_COMPONENTS, BouncyAccordion, MotionButton, MotionCheckbox, MotionInput, MotionTabs } from "./index.js"
 
 describe("BeUI motion catalog", () => {
   it("keeps all 39 official Motion entries unique", () => {
@@ -14,6 +14,32 @@ describe("BeUI motion catalog", () => {
     expect(screen.getByRole("tab", { name: "One" }).getAttribute("aria-selected")).toBe("true")
     fireEvent.click(screen.getByRole("tab", { name: "Two" }))
     expect(onChange).toHaveBeenCalledWith("two")
+  })
+
+  it("keeps the official BeUI control geometry and behavior", () => {
+    const onClick = vi.fn()
+    const onCheckedChange = vi.fn()
+    render(<>
+      <MotionButton onClick={onClick}>Continue</MotionButton>
+      <MotionCheckbox checked={false} onCheckedChange={onCheckedChange} aria-label="Choice" />
+      <MotionInput aria-label="Name" />
+    </>)
+
+    const button = screen.getByRole("button", { name: "Continue" })
+    expect(button.className).toContain("h-10")
+    expect(button.className).toContain("rounded-full")
+    fireEvent.click(button)
+    expect(onClick).toHaveBeenCalledOnce()
+
+    const checkbox = screen.getByRole("checkbox", { name: "Choice" })
+    expect(checkbox.className).toContain("size-5")
+    expect(checkbox.className).toContain("border-2")
+    fireEvent.click(checkbox)
+    expect(onCheckedChange).toHaveBeenCalledWith(true)
+
+    const input = screen.getByRole("textbox", { name: "Name" })
+    expect(input.parentElement?.className).toContain("h-11")
+    expect(input.parentElement?.className).toContain("rounded-full")
   })
 
   it("exposes accordion disclosure state", () => {

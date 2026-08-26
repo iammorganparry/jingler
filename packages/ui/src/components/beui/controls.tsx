@@ -2,16 +2,17 @@ import {
   type ChangeEvent,
   type InputHTMLAttributes,
   type ReactNode,
+  useEffect,
   useId,
   useMemo,
+  useRef,
   useState
 } from "react"
-import { AnimatePresence, LayoutGroup, m } from "motion/react"
+import { AnimatePresence, LayoutGroup, animate, m, useReducedMotion } from "motion/react"
 import { Check, ChevronDown, Search } from "lucide-react"
 import { cn } from "../../lib/cn.js"
-import { FAST, SPRING } from "../../lib/motion.js"
+import { SPRING } from "../../lib/motion.js"
 import { Button, type ButtonProps } from "../button.js"
-import { Input } from "../input.js"
 import { Checkbox } from "../checkbox.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select.js"
 import { Toggle } from "../toggle.js"
@@ -37,9 +38,9 @@ export function ExpandableControl({ icon, label, expanded, onExpandedChange, cla
   )
 }
 
-/** BeUI's spring-pressed button behavior on Jingler's existing Button API. */
+/** Compatibility export; Button is the canonical BeUI spring-pressed control. */
 export function MotionButton(props: ButtonProps) {
-  return <m.div whileTap={{ scale: 0.96 }} transition={SPRING} className="inline-flex"><Button {...props} /></m.div>
+  return <Button {...props} />
 }
 
 export function AnimatedCTAButton({ children, trailing = "â†’", ...props }: ButtonProps & { trailing?: ReactNode }) {
@@ -68,18 +69,55 @@ export function MotionSwitch(props: React.ComponentProps<typeof Toggle>) {
   return <m.span whileTap={{ scale: 0.94 }} transition={SPRING} className="inline-flex"><Toggle {...props} /></m.span>
 }
 
-export function MotionInput({ label, error, success, left, right, className, ...props }: InputHTMLAttributes<HTMLInputElement> & {
+export function MotionInput({ label, error, success, left, right, className, disabled, id, onFocus, onBlur, ...props }: InputHTMLAttributes<HTMLInputElement> & {
   label?: ReactNode
   error?: ReactNode
   success?: boolean
   left?: ReactNode
   right?: ReactNode
 }) {
-  return <label className="flex w-full flex-col gap-1.5 text-[11px] text-muted-foreground">{label}<m.span animate={error ? { x: [0, -3, 3, -2, 0] } : undefined} transition={FAST} className="relative flex items-center">
-    {left && <span className="pointer-events-none absolute left-2.5 text-dim">{left}</span>}
-    <Input {...props} aria-invalid={Boolean(error)} className={cn(left && "pl-8", (right || success) && "pr-8", error && "border-red/60", success && "border-green/60", className)} />
-    <AnimatePresence>{(right || success) && <m.span initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className={cn("pointer-events-none absolute right-2.5", success ? "text-green" : "text-dim")}>{success ? <Check className="size-3.5" /> : right}</m.span>}</AnimatePresence>
-  </m.span>{error && <span className="text-red">{error}</span>}</label>
+  const generatedId = useId()
+  const inputId = id ?? generatedId
+  const reduce = useReducedMotion()
+  const fieldRef = useRef<HTMLDivElement>(null)
+  const [focused, setFocused] = useState(false)
+  const hasError = Boolean(error)
+
+  useEffect(() => {
+    if (!fieldRef.current || reduce || !hasError) return
+    animate(fieldRef.current, { x: [0, -6, 6, -4, 4, -2, 0] }, { duration: 0.45 })
+  }, [hasError, reduce])
+
+  return <div className={cn("flex flex-col gap-1.5", className)}>
+    {label && <label htmlFor={inputId} className="px-1 text-sm font-medium text-text-bright">{label}</label>}
+    <div ref={fieldRef} data-state={hasError ? "error" : success ? "success" : focused ? "focused" : "idle"} className={cn(
+      "relative h-11 overflow-hidden rounded-full border border-line transition-colors duration-200",
+      focused && !hasError && "border-text-bright/40 ring-2 ring-ring/40",
+      hasError && "border-red ring-2 ring-red/25",
+      disabled && "opacity-60"
+    )}>
+      {left && <span className="pointer-events-none absolute left-3 top-1/2 flex -translate-y-1/2 items-center text-muted-foreground [&_svg]:size-4">{left}</span>}
+      <input
+        {...props}
+        id={inputId}
+        disabled={disabled}
+        aria-invalid={hasError || undefined}
+        aria-describedby={error ? `${inputId}-error` : undefined}
+        onFocus={(event) => { setFocused(true); onFocus?.(event) }}
+        onBlur={(event) => { setFocused(false); onBlur?.(event) }}
+        className={cn(
+          "h-full w-full bg-transparent text-base leading-6 text-text-bright caret-text-bright outline-none placeholder:text-muted-foreground/60",
+          left ? "pl-10" : "pl-3.5",
+          right || success ? "pr-10" : "pr-3.5",
+          disabled && "cursor-not-allowed"
+        )}
+      />
+      {success ? <m.svg viewBox="0 0 24 24" fill="none" className="absolute right-3.5 top-1/2 size-5 -translate-y-1/2 text-green">
+        <m.path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" initial={reduce ? { pathLength: 1 } : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.35, ease: "easeOut" }} />
+      </m.svg> : right ? <span className="absolute right-0 top-0 flex h-full items-center text-muted-foreground [&_button]:grid [&_button]:size-11 [&_button]:place-items-center [&_svg]:size-4">{right}</span> : null}
+    </div>
+    <AnimatePresence initial={false}>{error && <m.p id={`${inputId}-error`} role="alert" initial={reduce ? { opacity: 0 } : { opacity: 0, y: -4, filter: "blur(4px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4, filter: "blur(4px)" }} transition={{ duration: 0.2 }} className="px-1 text-xs text-red">{error}</m.p>}</AnimatePresence>
+  </div>
 }
 
 export function MotionSelect({ value, onValueChange, placeholder, options, className }: {
@@ -108,7 +146,7 @@ export function Combobox({ options, value, onValueChange, placeholder = "Searchâ
 }
 
 export function MotionCheckbox(props: React.ComponentProps<typeof Checkbox>) {
-  return <m.span whileTap={{ scale: 0.88 }} transition={SPRING} className="inline-flex"><Checkbox {...props} /></m.span>
+  return <Checkbox {...props} />
 }
 
 export function RadioGroup({ value, onValueChange, options, className }: {
