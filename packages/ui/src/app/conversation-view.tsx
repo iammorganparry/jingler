@@ -159,6 +159,8 @@ export interface ConversationViewProps {
    * stage id from the composer progress dock.
    */
   onOpenPlanReview?: (stepId?: string) => void
+  /** Discard the canonical plan (from a transcript submit-plan card). */
+  onDiscardPlan?: () => void
   /** Fork a drifted direct session's work onto a new worktree session (BranchDrift banner). */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session (BranchDrift banner). */
@@ -266,6 +268,7 @@ export function ConversationView({
   onApprovePlan,
   onResumePlan,
   onOpenPlanReview,
+  onDiscardPlan,
   onForkOntoBranch,
   onAdoptBranch,
   plan = null,
@@ -513,6 +516,7 @@ export function ConversationView({
                       onApprovePlan={onApprovePlan}
                       onResumePlan={onResumePlan}
                       onOpenPlanReview={onOpenPlanReview}
+                      onDiscardPlan={onDiscardPlan}
                       onForkOntoBranch={onForkOntoBranch}
                       onAdoptBranch={onAdoptBranch}
                     />

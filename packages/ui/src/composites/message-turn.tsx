@@ -17,6 +17,11 @@ import { PlanApprovalCard } from "./plan-card.js"
 import { QuestionSummary } from "./question-summary.js"
 import { ThoughtBlock } from "./thought-block.js"
 import { ToolCall } from "./tool-call.js"
+import {
+  SUBMIT_PLAN_TOOL,
+  SubmitPlanCard,
+  decodeSubmitPlanDecision
+} from "./submit-plan-card.js"
 import { StreamingText } from "./streaming-text.js"
 import { toolDisplayName } from "../lib/tool-names.js"
 
@@ -28,6 +33,14 @@ const WIDTH = "w-full"
 const COLLAPSE_MIN = 3
 
 type ToolPart = Extract<ContentPart, { _tag: "Tool" }>
+
+/**
+ * Tool parts that may collapse into a "+ N more" run. The submit-plan control
+ * tool renders as its own card (or not at all — see `SubmitPlanPart`), never
+ * inside a collapsed tool run.
+ */
+const isGroupableTool = (part: ContentPart): part is ToolPart =>
+  part._tag === "Tool" && part.tool.name !== SUBMIT_PLAN_TOOL
 type ImagePart = Extract<ContentPart, { _tag: "Image" }>
 type ThinkingPart = Extract<ContentPart, { _tag: "Thinking" }>
 type PlanTaskProgressPart = Extract<ContentPart, { _tag: "PlanTaskProgress" }>
@@ -317,14 +330,52 @@ function MergedThoughts({ parts }: { parts: ReadonlyArray<ThinkingPart> }) {
   )
 }
 
+/**
+ * The submit-plan control tool gets its own card — the generic one dumps the
+ * decision's raw JSON. When this TURN also carries the plan itself (a gated
+ * proposal: PlanProposed lands in the same message), the PlanApprovalCard is
+ * the surface — approve lives there — and a second card for the same plan
+ * would just be clutter, so this one disappears. What stays visible is the
+ * turn with no plan card: above all an auto-applied mid-execution amendment.
+ */
+function SubmitPlanPart({
+  tool,
+  inlinePlanIds,
+  onOpenPlanReview,
+  onDiscardPlan
+}: {
+  tool: ToolCallModel
+  inlinePlanIds?: ReadonlySet<string>
+  onOpenPlanReview?: () => void
+  onDiscardPlan?: () => void
+}) {
+  const decision = decodeSubmitPlanDecision(tool.output)
+  const shownDespitePlanCard =
+    decision?.kind === "approved" &&
+    decision.plan !== null &&
+    !inlinePlanIds?.has(decision.plan.id)
+  if ((inlinePlanIds?.size ?? 0) > 0 && !shownDespitePlanCard) return null
+  return (
+    <SubmitPlanCard
+      tool={tool}
+      decision={decision}
+      onOpenPlanReview={onOpenPlanReview}
+      onDiscardPlan={onDiscardPlan}
+      className={WIDTH}
+    />
+  )
+}
+
 function PartView({
   part,
   markdown,
   planDocument,
+  inlinePlanIds,
   onDecideGate,
   onApprovePlan,
   onResumePlan,
   onOpenPlanReview,
+  onDiscardPlan,
   onForkOntoBranch,
   onAdoptBranch,
   streamingText = false
@@ -332,11 +383,15 @@ function PartView({
   part: ContentPart
   markdown: boolean
   planDocument?: PlanDocument | null
+  /** Ids of every Plan part in this MESSAGE (not just the visible slice). */
+  inlinePlanIds?: ReadonlySet<string>
   streamingText?: boolean
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
   onResumePlan?: (planId: string) => void
   onOpenPlanReview?: () => void
+  /** Discard the session's canonical plan (Plan Review's discard, inline). */
+  onDiscardPlan?: () => void
   onForkOntoBranch?: () => void | Promise<void>
   onAdoptBranch?: () => void | Promise<void>
 }) {
@@ -354,7 +409,16 @@ function PartView({
       return <MergedThoughts parts={[part]} />
 
     case "Tool":
-      return <ToolCardView tool={part.tool} />
+      return part.tool.name === SUBMIT_PLAN_TOOL ? (
+        <SubmitPlanPart
+          tool={part.tool}
+          inlinePlanIds={inlinePlanIds}
+          onOpenPlanReview={onOpenPlanReview}
+          onDiscardPlan={onDiscardPlan}
+        />
+      ) : (
+        <ToolCardView tool={part.tool} />
+      )
     case "Gate":
       return (
         <ApprovalGate
@@ -419,10 +483,12 @@ function renderParts(
   markdown: boolean,
   handlers: {
     planDocument?: PlanDocument | null
+    inlinePlanIds?: ReadonlySet<string>
     onDecideGate?: (gateId: string, decision: GateDecision) => void
     onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
     onResumePlan?: (planId: string) => void
     onOpenPlanReview?: () => void
+    onDiscardPlan?: () => void
     onForkOntoBranch?: () => void | Promise<void>
     onAdoptBranch?: () => void | Promise<void>
   },
@@ -469,7 +535,7 @@ function renderParts(
   }
   parts.forEach((part, localIndex) => {
     const i = localIndex + keyOffset
-    if (part._tag === "Tool") {
+    if (isGroupableTool(part)) {
       flushImgs()
       flushThoughts()
       if (run.length === 0) runStart = i
@@ -549,6 +615,7 @@ function MessageTurnImpl({
   onApprovePlan,
   onResumePlan,
   onOpenPlanReview,
+  onDiscardPlan,
   onForkOntoBranch,
   onAdoptBranch
 }: {
@@ -564,12 +631,19 @@ function MessageTurnImpl({
   onResumePlan?: (planId: string) => void
   /** Open the full Plan Review view from the inline plan card. */
   onOpenPlanReview?: () => void
+  /** Discard the canonical plan from the inline submit-plan card. */
+  onDiscardPlan?: () => void
   /** Fork a drifted direct session's work onto a new worktree session. */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session. */
   onAdoptBranch?: () => void | Promise<void>
 }) {
   const isAssistant = message.role === "assistant"
+  // From the FULL part list, not the visible slice: a mega-turn's collapsed
+  // prefix can hold the Plan part whose presence suppresses the submit card.
+  const inlinePlanIds = new Set(
+    message.parts.flatMap((part) => (part._tag === "Plan" ? [part.plan.id] : []))
+  )
   const [showAllParts, setShowAllParts] = useState(false)
   const hiddenParts = showAllParts ? 0 : hiddenPrefixLength(message.parts.length)
   const visibleParts =
@@ -607,10 +681,12 @@ function MessageTurnImpl({
         isAssistant,
         {
           planDocument,
+          inlinePlanIds,
           onDecideGate,
           onApprovePlan,
           onResumePlan,
           onOpenPlanReview,
+          onDiscardPlan,
           onForkOntoBranch,
           onAdoptBranch
         },

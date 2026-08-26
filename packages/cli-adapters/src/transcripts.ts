@@ -7,6 +7,7 @@ import { AppPaths } from "./app-paths.js"
 
 const MessageArray = Schema.Array(MessageSchema)
 const PAGE_CURSOR = /^v1:(\d+)$/
+const CLOSE_BRACKET = Buffer.from("]")
 let writeSequence = 0
 const nextWriteId = (): number => ++writeSequence
 
@@ -28,6 +29,20 @@ interface TranscriptIndex {
   /** Atomic transcript replacements receive a new inode. */
   readonly inode: number
   readonly offsets: ReadonlyArray<readonly [start: number, end: number]>
+}
+
+/**
+ * The structural invariants the byte-splicing paths rely on: offsets start at
+ * byte 1, abut with exactly one separator byte between messages, and end flush
+ * against the closing bracket (an empty transcript is exactly `[]`).
+ */
+const structurallySound = (index: TranscriptIndex): boolean => {
+  let previousEnd = 0
+  for (const [start, end] of index.offsets) {
+    if (start !== previousEnd + 1 || end < start) return false
+    previousEnd = end
+  }
+  return index.byteLength === (index.offsets.length === 0 ? 2 : previousEnd + 1)
 }
 
 type TranscriptEnv = FileSystem.FileSystem | Path.Path | AppPaths
@@ -73,28 +88,22 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           )
         })
 
-      const writeAll = (
+      /**
+       * Persist an already-serialized transcript (the exact `[…]` text) plus its
+       * byte-offset index. Shared by `writeAll` (full re-encode) and the bounded
+       * mutation paths below, which splice raw bytes and must produce byte-for-byte
+       * the same file/index shape this writes.
+       */
+      const writeSerialized = (
         chatId: string,
-        messages: ReadonlyArray<Message>
+        serialized: string,
+        offsets: ReadonlyArray<readonly [number, number]>
       ): Effect.Effect<void, never, TranscriptEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
           const paths = yield* AppPaths
           const file = yield* fileFor(chatId)
           yield* fs.makeDirectory(paths.transcriptsDir, { recursive: true }).pipe(Effect.ignore)
-          const encoded = yield* Schema.encode(MessageArray)(messages).pipe(
-            Effect.orElseSucceed(() => messages)
-          )
-          const chunks = encoded.map((message) => JSON.stringify(message))
-          const offsets: Array<readonly [number, number]> = []
-          let byteOffset = 1
-          for (const [index, chunk] of chunks.entries()) {
-            const start = byteOffset
-            const end = start + Buffer.byteLength(chunk)
-            offsets.push([start, end])
-            byteOffset = end + (index === chunks.length - 1 ? 0 : 1)
-          }
-          const serialized = `[${chunks.join(",")}]`
           // Write-then-rename, NOT a direct overwrite. `writeFileString` truncates
           // the target before writing, so killing the main process mid-write (an
           // electron-vite dev restart does exactly this, and we rewrite the whole
@@ -142,6 +151,192 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
               Effect.tapError(() => fs.remove(indexTmp).pipe(Effect.ignore)),
               Effect.ignore
             )
+        })
+
+      const writeAll = (
+        chatId: string,
+        messages: ReadonlyArray<Message>
+      ): Effect.Effect<void, never, TranscriptEnv> =>
+        Effect.gen(function* () {
+          const encoded = yield* Schema.encode(MessageArray)(messages).pipe(
+            Effect.orElseSucceed(() => messages)
+          )
+          const chunks = encoded.map((message) => JSON.stringify(message))
+          const offsets: Array<readonly [number, number]> = []
+          let byteOffset = 1
+          for (const [index, chunk] of chunks.entries()) {
+            const start = byteOffset
+            const end = start + Buffer.byteLength(chunk)
+            offsets.push([start, end])
+            byteOffset = end + (index === chunks.length - 1 ? 0 : 1)
+          }
+          yield* writeSerialized(chatId, `[${chunks.join(",")}]`, offsets)
+        })
+
+      /** Schema-encode ONE message to the exact chunk text `writeAll` would emit. */
+      const encodeOne = (message: Message): Effect.Effect<string> =>
+        Schema.encode(MessageSchema)(message).pipe(
+          Effect.orElseSucceed(() => message),
+          Effect.map((encoded) => JSON.stringify(encoded))
+        )
+
+      /** Schema-decode one message slice; null (never a failure) when it doesn't parse. */
+      const decodeSlice = (slice: string): Effect.Effect<Message | null> =>
+        Schema.decodeUnknown(Schema.parseJson(MessageSchema))(slice).pipe(
+          Effect.map((message): Message | null => message),
+          Effect.orElseSucceed((): Message | null => null)
+        )
+
+      /**
+       * The transcript's raw bytes together with a VALIDATED index, or null.
+       *
+       * This is the entry ticket to the bounded mutation paths: every write used
+       * to be readAll → schema-decode of the ENTIRE message array → re-encode →
+       * rewrite, which on a long session (a 58MB transcript was measured live)
+       * costs seconds of main-process CPU and hundreds of MB of allocation per
+       * turn boundary — the "session gets slower as it ages" failure. With a
+       * trustworthy index the mutations below splice raw bytes instead and only
+       * ever encode/decode the one message they touch.
+       *
+       * Trust is earned, not assumed: `readIndex` already checks size + inode
+       * against the live file, and this re-checks the actual bytes read (the
+       * stat and the read are two steps) plus the structural invariants the
+       * splice math relies on — offsets that start at byte 1, abut with exactly
+       * one separator byte, and end flush against the closing bracket. Anything
+       * off → null, and the caller falls back to the readAll/writeAll path,
+       * which rebuilds the index as it always has.
+       */
+      const readValidRaw = (
+        chatId: string
+      ): Effect.Effect<
+        { readonly raw: Buffer; readonly index: TranscriptIndex } | null,
+        never,
+        TranscriptEnv
+      > =>
+        Effect.gen(function* () {
+          const index = yield* readIndex(chatId)
+          if (index === null) return null
+          const fs = yield* FileSystem.FileSystem
+          const file = yield* fileFor(chatId)
+          const bytes = yield* fs
+            .readFile(file)
+            .pipe(Effect.orElseSucceed((): Uint8Array | null => null))
+          if (bytes === null) return null
+          const raw = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+          if (raw.byteLength !== index.byteLength) return null
+          return structurallySound(index) ? { raw, index } : null
+        })
+
+      /**
+       * Append already-decoded messages by splicing their encoded chunks onto the
+       * raw tail. Caller holds the lock and has verified the index is non-empty.
+       */
+      const appendRaw = (
+        chatId: string,
+        state: { readonly raw: Buffer; readonly index: TranscriptIndex },
+        toAppend: ReadonlyArray<Message>
+      ): Effect.Effect<void, never, TranscriptEnv> =>
+        Effect.gen(function* () {
+          const offsets = [...state.index.offsets]
+          const lastEnd = offsets[offsets.length - 1]![1]
+          const parts: Array<Buffer> = [state.raw.subarray(0, lastEnd)]
+          let cursor = lastEnd
+          for (const message of toAppend) {
+            const chunk = Buffer.from(`,${yield* encodeOne(message)}`)
+            parts.push(chunk)
+            offsets.push([cursor + 1, cursor + chunk.byteLength])
+            cursor += chunk.byteLength
+          }
+          parts.push(CLOSE_BRACKET)
+          yield* writeSerialized(chatId, Buffer.concat(parts).toString("utf8"), offsets)
+        })
+
+      /**
+       * Replace message `i` with an already-encoded chunk: copy the bytes either
+       * side verbatim and shift every later offset by the size delta. For the
+       * last message the suffix is just the closing bracket.
+       */
+      const writeSpliced = (
+        chatId: string,
+        state: { readonly raw: Buffer; readonly index: TranscriptIndex },
+        i: number,
+        chunk: Buffer
+      ): Effect.Effect<void, never, TranscriptEnv> => {
+        const [start, end] = state.index.offsets[i]!
+        const delta = chunk.byteLength - (end - start)
+        const serialized = Buffer.concat([
+          state.raw.subarray(0, start),
+          chunk,
+          state.raw.subarray(end)
+        ]).toString("utf8")
+        const offsets = state.index.offsets.map(
+          ([s, e], j): readonly [number, number] =>
+            j < i ? [s, e] : j === i ? [start, start + chunk.byteLength] : [s + delta, e + delta]
+        )
+        return writeSerialized(chatId, serialized, offsets)
+      }
+
+      /**
+       * `patchById`'s bounded path. The target is located by scanning raw slices
+       * for the id's JSON encoding (`"id":"…"` — nested part ids can false-hit,
+       * so each hit is verified by decoding just that slice). Returns true when
+       * the outcome is settled — patched, or no slice carries the id — and false
+       * when a candidate slice failed to decode and the caller must fall back.
+       */
+      const patchByIdRaw = (
+        chatId: string,
+        state: { readonly raw: Buffer; readonly index: TranscriptIndex },
+        messageId: string,
+        fn: (msg: Message) => Message
+      ): Effect.Effect<boolean, never, TranscriptEnv> =>
+        Effect.gen(function* () {
+          const needle = Buffer.from(`"id":${JSON.stringify(messageId)}`)
+          for (let i = 0; i < state.index.offsets.length; i++) {
+            const [start, end] = state.index.offsets[i]!
+            const slice = state.raw.subarray(start, end)
+            if (!slice.includes(needle)) continue
+            const decoded = yield* decodeSlice(slice.toString("utf8"))
+            if (decoded === null) return false
+            if (decoded.id !== messageId) continue
+            const chunk = Buffer.from(yield* encodeOne(fn(decoded)))
+            yield* writeSpliced(chatId, state, i, chunk)
+            return true
+          }
+          return true
+        })
+
+      /**
+       * Whether any message carries this external-instruction identity, decided
+       * from raw bytes: a message whose `deliveryId`/`semanticKey` EQUALS the
+       * needle necessarily CONTAINS its JSON encoding (both sides are serialized
+       * by the same JSON.stringify), so slices without either needle can't
+       * match and are never parsed. Containment can false-positive (the value
+       * quoted inside unrelated text), so hits are verified by decoding just
+       * that slice. Returns null — "couldn't decide" — when a candidate slice
+       * fails to decode; the caller then falls back to the readAll semantics.
+       */
+      const scanExternalInstruction = (
+        state: { readonly raw: Buffer; readonly index: TranscriptIndex },
+        identity: ExternalInstructionIdentity
+      ): Effect.Effect<boolean | null> =>
+        Effect.gen(function* () {
+          const needles = [
+            Buffer.from(JSON.stringify(identity.deliveryId)),
+            Buffer.from(JSON.stringify(identity.semanticKey))
+          ]
+          if (!needles.some((needle) => state.raw.includes(needle))) return false
+          const candidates = state.index.offsets.filter(([start, end]) => {
+            const slice = state.raw.subarray(start, end)
+            return needles.some((needle) => slice.includes(needle))
+          })
+          for (const [start, end] of candidates) {
+            const decoded = yield* decodeSlice(
+              state.raw.subarray(start, end).toString("utf8")
+            )
+            if (decoded === null) return null
+            if (sameExternalInstruction(decoded, identity)) return true
+          }
+          return false
         })
 
       const list = (chatId: string) => readAll(chatId)
@@ -367,10 +562,19 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           })
         )
 
-      /** Append a message to the end of the transcript. */
+      /**
+       * Append a message to the end of the transcript. Bounded: with a valid
+       * index only the NEW message is encoded — existing bytes are copied, never
+       * schema-decoded. Falls back to the whole-file path (which rebuilds the
+       * index) when the index is missing, stale, or the transcript is empty.
+       */
       const append = (chatId: string, message: Message) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
+            const state = yield* readValidRaw(chatId)
+            if (state !== null && state.index.offsets.length > 0) {
+              return yield* appendRaw(chatId, state, [message])
+            }
             const existing = yield* readAll(chatId)
             yield* writeAll(chatId, [...existing, message])
           })
@@ -383,17 +587,43 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
         message.externalInstruction?.deliveryId === identity.deliveryId ||
         message.externalInstruction?.semanticKey === identity.semanticKey
 
+      /**
+       * `appendTurn`'s bounded path: replay-check from raw bytes, then splice
+       * the pair onto the tail. Returns the appendTurn result, or null when a
+       * candidate slice failed to decode and the caller must fall back.
+       */
+      const appendTurnRaw = (
+        chatId: string,
+        state: { readonly raw: Buffer; readonly index: TranscriptIndex },
+        turn: readonly [user: Message, assistant: Message],
+        identity: ExternalInstructionIdentity | undefined
+      ): Effect.Effect<boolean | null, never, TranscriptEnv> =>
+        Effect.gen(function* () {
+          const replay =
+            identity === undefined
+              ? false
+              : yield* scanExternalInstruction(state, identity)
+          if (replay === null) return null
+          if (replay) return false
+          yield* appendRaw(chatId, state, turn)
+          return true
+        })
+
       /** Durable idempotency check used before reserving or scheduling a run. */
       const hasExternalInstruction = (
         chatId: string,
         identity: ExternalInstructionIdentity
       ) =>
         lock.withPermits(1)(
-          readAll(chatId).pipe(
-            Effect.map((messages) =>
-              messages.some((message) => sameExternalInstruction(message, identity))
-            )
-          )
+          Effect.gen(function* () {
+            const state = yield* readValidRaw(chatId)
+            if (state !== null) {
+              const found = yield* scanExternalInstruction(state, identity)
+              if (found !== null) return found
+            }
+            const messages = yield* readAll(chatId)
+            return messages.some((message) => sameExternalInstruction(message, identity))
+          })
         )
 
       /**
@@ -408,6 +638,14 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
       ) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
+            const state = yield* readValidRaw(chatId)
+            const fast =
+              state !== null && state.index.offsets.length > 0
+                ? yield* appendTurnRaw(chatId, state, [user, assistant], identity)
+                : null
+            // null: no usable index, or a candidate slice failed to decode —
+            // the whole-file path owns undecodable-transcript semantics.
+            if (fast !== null) return fast
             const existing = yield* readAll(chatId)
             if (
               identity !== undefined &&
@@ -420,10 +658,26 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           })
         )
 
-      /** Replace the last message via `fn` (a no-op when the transcript is empty). */
+      /**
+       * Replace the last message via `fn` (a no-op when the transcript is empty).
+       * Bounded: only the last message is decoded and re-encoded; every earlier
+       * message rides along as raw bytes.
+       */
       const patchLast = (chatId: string, fn: (last: Message) => Message) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
+            const state = yield* readValidRaw(chatId)
+            if (state !== null && state.index.offsets.length > 0) {
+              const last = state.index.offsets.length - 1
+              const [start, end] = state.index.offsets[last]!
+              const decoded = yield* decodeSlice(
+                state.raw.subarray(start, end).toString("utf8")
+              )
+              if (decoded !== null) {
+                const chunk = Buffer.from(yield* encodeOne(fn(decoded)))
+                return yield* writeSpliced(chatId, state, last, chunk)
+              }
+            }
             const existing = yield* readAll(chatId)
             if (existing.length === 0) return
             const next = [...existing.slice(0, -1), fn(existing[existing.length - 1]!)]
@@ -439,6 +693,11 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
        * that lives further back — notably a plan part, which stays in the message
        * of the turn it was proposed in while execution continues across later
        * turns.
+       *
+       * Bounded like `patchLast`: the target is located by scanning raw slices
+       * for the id's JSON encoding (`"id":"…"` — nested part ids can false-hit,
+       * so each hit is verified by decoding just that slice), then spliced in
+       * place with the trailing offsets shifted by the size delta.
        */
       const patchById = (
         chatId: string,
@@ -447,6 +706,15 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
       ) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
+            const state = yield* readValidRaw(chatId)
+            if (state !== null && state.index.offsets.length > 0) {
+              const settled = yield* patchByIdRaw(chatId, state, messageId, fn)
+              // Settled covers "patched" AND "no slice carries the id" — the
+              // latter is a definitive no-op, same as `findIndex === -1` below.
+              // Unsettled means a candidate slice failed to decode; the
+              // whole-file path owns undecodable-transcript semantics.
+              if (settled) return
+            }
             const existing = yield* readAll(chatId)
             const idx = existing.findIndex((m) => m.id === messageId)
             if (idx === -1) return

@@ -236,6 +236,15 @@ export function ConversationPane({
         : undefined,
     [approvePlanForRevision, convo.approvePlan, planRevision]
   )
+  // Same discard as Plan Review's floating action: deleting the canonical file
+  // flows back through Plan.watch as a null emission, clearing every surface.
+  // Keyed only on the session id so MessageTurn's memo holds across tokens.
+  const onDiscardPlanStable = useMemo(
+    () => () => {
+      rpc.planDiscard(session.id, activeChat.id).catch(() => {})
+    },
+    [session.id, activeChat.id]
+  )
   const onResumePlanStable = useMemo(
     () =>
       approvePlanForRevision
@@ -1237,6 +1246,7 @@ export function ConversationPane({
           onApprovePlan={onApprovePlanStable}
           onResumePlan={onResumePlanStable}
           onOpenPlanReview={onOpenPlanReview}
+          onDiscardPlan={onDiscardPlanStable}
           onForkOntoBranch={onForkOntoBranchStable}
           onAdoptBranch={onAdoptBranchStable}
           plan={convo.plan}
