@@ -6,11 +6,29 @@ Jingler carries the 39 Motion entries as reusable atoms/primitives and the 17 Ag
 
 ## Migration style rule
 
-- Preserve each BeUI component's source structure, spacing, radii, typography scale, motion, menu treatment, and interaction states.
+- Preserve each BeUI component's source structure, spacing, typography scale, motion, menu treatment, and interaction states.
+- Preserve BeUI radii except for the product-wide Button rule: every Button size and variant uses Jingler's `rounded-lg` squircle instead of the registry's pill radius.
 - Substitute only Jingler semantic color tokens and unavoidable local imports. Do not reskin BeUI to resemble the legacy Jingler component it replaces.
 - Jingler keeps ownership of product layout, protocol behavior, provider identity, data flow, accessibility contracts, and reduced-motion support.
 - When product behavior differs, compose around the BeUI component rather than copying the old component's visual treatment into it.
 - Composer uses Prompt Input as its base and the same BeUI Select treatment for model, environment, permission, and reasoning; the model dropdown adds only a compact search field and Jingler model metadata.
+
+## Production ownership
+
+| Public compatibility path | BeUI owner |
+|---|---|
+| `components/button.tsx` | BeUI Button press, hover, ripple, sizes, and variants; Jingler squircle radius |
+| `components/input.tsx` / `MotionInput` | BeUI Input field geometry, validation motion, icons, and states |
+| `components/checkbox.tsx` | BeUI Checkbox draw animation and press feedback |
+| `components/toggle.tsx` | BeUI Switch heavy-thumb motion |
+| `components/segmented-control.tsx` | BeUI Tabs `segment` variant |
+| `components/loading.tsx` | BeUI Loader and BeUI loading shimmer |
+| `components/badge.tsx` | BeUI Animated Badge |
+| `components/tooltip.tsx` | BeUI Tooltip portal, gestures, and motion |
+| `components/chip-menu.tsx` | BeUI Morph Popover plus product-owned Command filtering |
+| `components/dialog.tsx` | BeUI center-unfold presentation plus Radix focus ownership |
+
+Compatibility files remain only where callers rely on an established product API; their rendering is BeUI-owned. Provider marks, command filtering, renderer adapters, file/diff UI, and product status components remain Jingler-owned behavior.
 
 ## Dependency policy
 

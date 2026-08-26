@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   LinkedIssueSelector,
@@ -40,7 +40,7 @@ describe("LinkedIssueSelector", () => {
     expect(screen.getByRole("option", { name: /ENG-124 Document retry policy/ })).toBeDefined()
   })
 
-  it("emits the opaque value and closes after selection", () => {
+  it("emits the opaque value and closes after selection", async () => {
     const onValueChange = vi.fn()
     render(
       <LinkedIssueSelector
@@ -54,7 +54,7 @@ describe("LinkedIssueSelector", () => {
     fireEvent.click(screen.getByRole("option", { name: /ENG-126 Add settlement audit events/ }))
 
     expect(onValueChange).toHaveBeenCalledWith("eng-126")
-    expect(screen.queryByRole("option")).toBeNull()
+    await waitFor(() => expect(screen.queryByRole("option")).toBeNull())
   })
 
   it("keeps compact triggers identifier-only while full triggers expose the title", () => {

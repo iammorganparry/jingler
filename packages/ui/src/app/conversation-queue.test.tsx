@@ -68,8 +68,8 @@ describe("ConversationView — queued messages", () => {
 
     view.rerender(<ConversationView messages={[]} mode="accept-edits" busy />)
     const orb = screen.getByRole("status", { name: "Agent breathing…" })
-    expect(orb.textContent).toBe("")
-    expect(orb.querySelector("canvas")?.style.width).toBe("20px")
+    expect(orb.querySelector("svg")?.getAttribute("width")).toBe("20")
+    expect(orb.querySelectorAll("circle")).toHaveLength(2)
   })
 
   it("shows every message while the queue is small", () => {
