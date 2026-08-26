@@ -1,0 +1,306 @@
+diff --git a/src/extension/index.ts b/src/extension/index.ts
+index 7c947b6..e425896 100644
+--- a/src/extension/index.ts
++++ b/src/extension/index.ts
+@@ -643,6 +643,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 	});
+ 
+ 	const executeSubagentCollapsed = (id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: ((result: AgentToolResult<Details>) => void) | undefined, ctx: ExtensionContext) => {
++		state.lastUiContext = ctx;
++		supervisorChannel.start();
+ 		if (ctx.hasUI) ctx.ui.setToolsExpanded(false);
+ 		return executor.executePublic(id, params, signal, onUpdate, ctx);
+ 	};
+@@ -671,6 +673,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 		getContext: () => state.lastUiContext,
+ 		execute: (id, params, signal, onUpdate, ctx) => executor.executePublic(id, params, signal, onUpdate, ctx),
+ 		state,
++		replySupervisor: (requestId, message) => supervisorChannel.reply(requestId, message),
+ 	});
+ 
+ 
+diff --git a/src/extension/rpc.ts b/src/extension/rpc.ts
+index 21da739..1786b8b 100644
+--- a/src/extension/rpc.ts
++++ b/src/extension/rpc.ts
+@@ -31,7 +31,7 @@ export const SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
+ export const SUBAGENT_RPC_READY_EVENT = "subagents:rpc:v1:ready";
+ export const SUBAGENT_RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
+ 
+-export const SUBAGENT_RPC_METHODS = ["ping", "status", "manage", "spawn", "steer", "interrupt", "stop", "resume"] as const;
++export const SUBAGENT_RPC_METHODS = ["ping", "status", "manage", "spawn", "steer", "interrupt", "stop", "resume", "reply"] as const;
+ export type SubagentRpcMethod = typeof SUBAGENT_RPC_METHODS[number];
+ 
+ export interface SubagentRpcRequestEnvelope {
+@@ -315,6 +315,7 @@ interface RegisterSubagentRpcBridgeOptions {
+ 	now?: () => number;
+ 	/** Native live state, projected into the optional public fleet-status capability. */
+ 	state?: SubagentState;
++	replySupervisor?: (requestId: string, message: string) => { requestId: string; runId: string; agent: string };
+ }
+ 
+ class SubagentRpcError extends Error {
+@@ -659,6 +660,17 @@ async function handleRequest(
+ ): Promise<unknown> {
+ 	const ctx = options.getContext();
+ 	if (request.method === "ping") return pingData(ctx);
++	if (request.method === "reply") {
++		const input = assertRecordParams(request.params, "reply");
++		if (typeof input.requestId !== "string" || !input.requestId.trim()) {
++			throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty requestId.");
++		}
++		if (typeof input.message !== "string" || !input.message.trim()) {
++			throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty message.");
++		}
++		if (!options.replySupervisor) throw new SubagentRpcError("invalid_state", "Supervisor reply is unavailable.");
++		return options.replySupervisor(input.requestId.trim(), input.message.trim());
++	}
+ 	if (!ctx) throw new SubagentRpcError("no_active_session", "No active extension context for subagent RPC.");
+ 
+ 	if (request.method === "manage") {
+diff --git a/src/intercom/native-supervisor-channel.ts b/src/intercom/native-supervisor-channel.ts
+index 871b5f6..f802d90 100644
+--- a/src/intercom/native-supervisor-channel.ts
++++ b/src/intercom/native-supervisor-channel.ts
+@@ -422,18 +422,32 @@ function cleanupStaleEmptySupervisorChannels(nowMs = Date.now()): number {
+ 	return removed;
+ }
+ 
+-function currentContextSessionId(state: Pick<SubagentState, "currentSessionId">, ctx: ExtensionContext): string | undefined {
+-	try {
+-		const sessionId = ctx.sessionManager.getSessionId();
+-		if (sessionId) return sessionId;
+-	} catch {
+-		// Fall through to the last known identity.
++function currentContextSessionId(
++	state: Pick<SubagentState, "currentSessionId">,
++	ctx?: ExtensionContext,
++	rememberedSessionId?: string,
++): string | undefined {
++	if (ctx) {
++		try {
++			const sessionId = ctx.sessionManager.getSessionId();
++			if (sessionId) return sessionId;
++		} catch {
++			// Fall through to the last verified identity.
++		}
+ 	}
+-	return state.currentSessionId ?? undefined;
++	return state.currentSessionId ?? rememberedSessionId ?? undefined;
+ }
+ 
+-function requestMatchesContext(request: SupervisorRequest, state: Pick<SubagentState, "currentSessionId">, ctx: ExtensionContext): boolean {
+-	const currentSessionId = currentContextSessionId(state, ctx);
++function requestMatchesContext(
++	request: SupervisorRequest,
++	state: SubagentState,
++	ctx?: ExtensionContext,
++	rememberedSessionId?: string,
++): boolean {
++	if (state.foregroundRuns.has(request.runId) || state.foregroundControls.has(request.runId) || state.asyncJobs.has(request.runId)) {
++		return true;
++	}
++	const currentSessionId = currentContextSessionId(state, ctx, rememberedSessionId);
+ 	return Boolean(currentSessionId && request.orchestratorSessionId === currentSessionId);
+ }
+ 
+@@ -614,7 +628,7 @@ function buildParentSupervisorTool(pending: Map<string, PendingSupervisorRequest
+ 	};
+ }
+ 
+-export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentState, deps: NativeSupervisorChannelDeps = {}): { start: () => void; activateTransport: () => void; dispose: () => void; pending: Map<string, PendingSupervisorRequest> } {
++export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentState, deps: NativeSupervisorChannelDeps = {}): { start: () => void; activateTransport: () => void; dispose: () => void; pending: Map<string, PendingSupervisorRequest>; reply: (requestId: string, message: string) => { requestId: string; runId: string; agent: string } } {
+ 	const watch = deps.watch ?? fs.watch;
+ 	const timers = deps.timers ?? globalThis;
+ 	const pending = new Map<string, PendingSupervisorRequest>();
+@@ -626,6 +640,7 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 	let deferredWatcherRefresh: ReturnType<typeof setImmediate> | undefined;
+ 	let started = false;
+ 	let lastStaleCleanupAt = 0;
++	let rememberedSessionId: string | undefined;
+ 	const platform = deps.platform ?? process.platform;
+ 	const useNativeWatcher = () => shouldUseNativeFsWatch("supervisor-channel", platform) && platform !== "win32";
+ 	const hasTransportDemand = () => {
+@@ -651,14 +666,14 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 
+ 	const poll = (): void => {
+ 		cleanupStaleChannelsIfDue();
+-		const ctx = state.lastUiContext;
+-		if (!ctx) return;
++		const ctx = state.lastUiContext ?? undefined;
++		if (ctx) rememberedSessionId = currentContextSessionId(state, ctx) ?? rememberedSessionId;
+ 		refreshPendingRequests(pending, state, ctx);
+ 		const now = Date.now();
+ 		for (const { channelDir, file } of listRequestFiles()) {
+ 			if (seenFiles.has(file)) continue;
+ 			const request = parseRequestFile(file, channelDir);
+-			if (!request || !requestMatchesContext(request, state, ctx)) continue;
++			if (!request || !requestMatchesContext(request, state, ctx, rememberedSessionId)) continue;
+ 			const lifecycle = requestLifecycle(request, state, undefined, now);
+ 			if (lifecycle !== "pending") {
+ 				seenFiles.add(file);
+@@ -684,6 +699,8 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 					runId: request.runId,
+ 					agent: request.agent,
+ 					childIndex: request.childIndex,
++					requestedAt: request.createdAt,
++					deadlineAt: request.expiresAt ?? null,
+ 				},
+ 			}, { triggerTurn: true });
+ 			if (request.expectsReply) {
+@@ -692,6 +709,10 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 					runId: request.runId,
+ 					agent: request.agent,
+ 					childIndex: request.childIndex,
++					reason: request.reason,
++					message: request.message,
++					requestedAt: request.createdAt,
++					deadlineAt: request.expiresAt ?? null,
+ 				});
+ 				if (pending.has(request.id)) markForegroundSupervisorAttention(request, state);
+ 			}
+@@ -757,6 +778,15 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 	};
+ 
+ 	return {
++		reply: (requestId, message) => {
++			refreshPendingRequests(pending, state, state.lastUiContext ?? undefined);
++			const request = pending.get(requestId);
++			if (!request) throw new Error(`No pending supervisor request found for replyTo '${requestId}'.`);
++			writeReply(request, message);
++			pending.delete(request.id);
++			clearForegroundSupervisorAttention(request, pending, state);
++			return { requestId: request.id, runId: request.runId, agent: request.agent };
++		},
+ 		activateTransport: () => {
+ 			if (!started) return;
+ 			poll();
+diff --git a/src/runs/background/subagent-runner.ts b/src/runs/background/subagent-runner.ts
+index 7fb4dd9..a798574 100644
+--- a/src/runs/background/subagent-runner.ts
++++ b/src/runs/background/subagent-runner.ts
+@@ -13,7 +13,7 @@ import { updateActiveRunIndex } from "./active-run-index.ts";
+ import { createChildTranscriptWriter, type ChildTranscriptWriter } from "../../shared/child-transcript.ts";
+ import { closeSteerInbox, consumeInterruptRequest, consumeSteerRequests, deliverInterruptRequest, deliverStopRequest, deliverTimeoutRequest, enqueueStepSteer, steerAcksDir, steerCapabilityPath, stepSteerInboxDir, watchAsyncControlInbox, type SteerAck, type SteerCapability, type SteerRequest, type StopRequest } from "./control-channel.ts";
+ import { appendJsonl as appendRawJsonl, formatOutputArtifactContent, getArtifactPaths, writeArtifact, writeMetadata } from "../../shared/artifacts.ts";
+-import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
++import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, getPiSpawnEnv, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
+ import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
+ import {
+ 	type ActivityState,
+@@ -610,7 +610,7 @@ function runPiStreaming(
+ 		const child = spawn(spawnSpec.command, spawnSpec.args, {
+ 			cwd,
+ 			stdio: ["ignore", "pipe", "pipe"],
+-			env: spawnEnv,
++			env: getPiSpawnEnv(spawnEnv),
+ 			windowsHide: true,
+ 			detached: process.platform !== "win32",
+ 		});
+diff --git a/src/runs/foreground/execution.ts b/src/runs/foreground/execution.ts
+index 1802f9d..2424ec7 100644
+--- a/src/runs/foreground/execution.ts
++++ b/src/runs/foreground/execution.ts
+@@ -57,7 +57,7 @@ import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
+ import { effectiveToolTimeoutMs, formatToolTimeoutMessage, resolveToolTimeoutMs, toolTimeoutCallKey, toolTimeoutFromEnv } from "../shared/tool-timeout.ts";
+ import { evaluateCompletionMutationGuard, validateImplementationToolContract } from "../shared/completion-guard.ts";
+ import { arbitrateCompletionGuardRescue } from "../shared/llm-intent-arbiter.ts";
+-import { getPiSpawnCommand } from "../shared/pi-spawn.ts";
++import { getPiSpawnCommand, getPiSpawnEnv } from "../shared/pi-spawn.ts";
+ import { createJsonlWriter } from "../../shared/jsonl-writer.ts";
+ import { createOrcaProgressTab, type OrcaProgressTab } from "../shared/orca-progress-tabs.ts";
+ import { attachPostExitStdioGuard, trySignalChild } from "../../shared/post-exit-stdio-guard.ts";
+@@ -135,6 +135,11 @@ function redactResultPrompt<T extends SingleResult>(result: T): T {
+ 	return result;
+ }
+ 
++function isBlockingSupervisorToolCall(toolName: string | undefined, args: Record<string, unknown>): boolean {
++	return (toolName === "intercom" && args.action === "ask")
++		|| (toolName === "contact_supervisor" && (args.reason === "need_decision" || args.reason === "interview_request"));
++}
++
+ function sumUsage(target: Usage, source: Usage): void {
+ 	target.input += source.input;
+ 	target.output += source.output;
+@@ -564,7 +569,7 @@ async function runSingleAttempt(
+ 	const exitCode = await new Promise<number>((resolve) => {
+ 		const proc = spawn(spawnSpec.command, spawnSpec.args, {
+ 			cwd: options.cwd ?? runtimeCwd,
+-			env: spawnEnv,
++			env: getPiSpawnEnv(spawnEnv),
+ 			stdio: ["ignore", "pipe", "pipe"],
+ 			windowsHide: true,
+ 		});
+@@ -615,6 +620,9 @@ async function runSingleAttempt(
+ 			receiptProgress.status = "detached";
+ 			receiptProgress.durationMs = Date.now() - startTime;
+ 			const receipt = snapshotResult(result, receiptProgress);
++			if (!receipt.sessionFile && options.sessionFile && existsSync(options.sessionFile)) {
++				receipt.sessionFile = options.sessionFile;
++			}
+ 			receipt.exitCode = -2;
+ 			receipt.detached = true;
+ 			receipt.detachedReason = reason;
+@@ -1051,6 +1059,8 @@ async function runSingleAttempt(
+ 				const toolArgs = evt.args && typeof evt.args === "object" && !Array.isArray(evt.args)
+ 					? evt.args as Record<string, unknown>
+ 					: {};
++				const shouldDetachForBlockingSupervisor = options.allowIntercomDetach
++					&& isBlockingSupervisorToolCall(evt.toolName, toolArgs);
+ 				const activeTool = evt.toolName !== undefined ? recordActiveToolCall(evt as { toolCallId?: unknown; toolName: string }, toolArgs, now) : undefined;
+ 				if (evt.toolName !== undefined) armToolTimeout(evt as { toolCallId?: unknown; toolName: string });
+ 				if (options.structuredOutput && evt.toolName === "structured_output") {
+@@ -1068,6 +1078,7 @@ async function runSingleAttempt(
+ 				observedMutationAttempt = observedMutationAttempt || mutates;
+ 				pendingToolResult = { tool: evt.toolName ?? "tool", path: activeTool?.path, mutates, startedAt: now };
+ 				fireUpdate();
++				if (shouldDetachForBlockingSupervisor) detachForeground("intercom coordination");
+ 			}
+ 
+ 			if (evt.type === "tool_execution_end") {
+diff --git a/src/runs/shared/pi-spawn.ts b/src/runs/shared/pi-spawn.ts
+index abfbdb2..abd4391 100644
+--- a/src/runs/shared/pi-spawn.ts
++++ b/src/runs/shared/pi-spawn.ts
+@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
+ 
+ export const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
+ export const PI_SUBAGENT_PI_BINARY_ENV = "PI_SUBAGENT_PI_BINARY";
++export const PI_SUBAGENT_PI_BINARY_ARGS_ENV = "PI_SUBAGENT_PI_BINARY_ARGS";
++export const PI_SUBAGENT_ELECTRON_RUN_AS_NODE_ENV = "PI_SUBAGENT_ELECTRON_RUN_AS_NODE";
+ 
+ export function findPiPackageRootFromEntry(
+ 	entryPoint: string,
+@@ -58,6 +60,12 @@ interface PiSpawnCommand {
+ 	args: string[];
+ }
+ 
++export function getPiSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
++	return env[PI_SUBAGENT_ELECTRON_RUN_AS_NODE_ENV] === "1"
++		? { ...env, ELECTRON_RUN_AS_NODE: "1" }
++		: env;
++}
++
+ function isRunnableNodeScript(
+ 	filePath: string,
+ 	existsSync: (filePath: string) => boolean,
+@@ -143,7 +151,18 @@ export function getPiSpawnCommand(
+ 	const env = deps.env ?? process.env;
+ 	const piBinary = env[PI_SUBAGENT_PI_BINARY_ENV]?.trim();
+ 	if (piBinary) {
+-		return { command: piBinary, args };
++		const prefixValue = env[PI_SUBAGENT_PI_BINARY_ARGS_ENV]?.trim();
++		if (!prefixValue) return { command: piBinary, args };
++		let prefixArgs: unknown;
++		try {
++			prefixArgs = JSON.parse(prefixValue);
++		} catch {
++			throw new Error(`${PI_SUBAGENT_PI_BINARY_ARGS_ENV} must be a JSON string array.`);
++		}
++		if (!Array.isArray(prefixArgs) || !prefixArgs.every((value): value is string => typeof value === "string")) {
++			throw new Error(`${PI_SUBAGENT_PI_BINARY_ARGS_ENV} must be a JSON string array.`);
++		}
++		return { command: piBinary, args: [...prefixArgs, ...args] };
+ 	}
+ 
+ 	const execPath = deps.execPath ?? process.execPath;

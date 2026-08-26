@@ -322,6 +322,33 @@ describe("pi file-change events", () => {
     })
   })
 
+  it("uses the parent call task for a redacted direct child display", () => {
+    expect(piSubagentProgress({
+      type: "tool_execution_end",
+      toolCallId: "subagent-call",
+      toolName: "subagent",
+      result: {
+        content: [{ type: "text", text: "Detached for intercom coordination." }],
+        details: {
+          mode: "single",
+          runId: "run-1",
+          results: [{
+            index: 0,
+            agent: "reviewer",
+            task: "[prompt redacted]",
+            detached: true
+          }]
+        }
+      },
+      isError: false
+    } as never, "Review the checkout flow")).toEqual({
+      runId: "run-1",
+      mode: "single",
+      settled: false,
+      children: [expect.objectContaining({ task: "Review the checkout flow" })]
+    })
+  })
+
   it("projects an async spawn acknowledgment that carries no progress array", () => {
     // Real pi-subagents async output: `{mode, runId, asyncId, asyncDir,
     // results: []}` — no `progress` key. This must decode to an empty-children
@@ -503,7 +530,9 @@ describe("pi file-change events", () => {
         expectsReply: true,
         runId: "run-1",
         agent: "worker",
-        childIndex: 0
+        childIndex: 0,
+        requestedAt: 2,
+        deadlineAt: 3
       },
       timestamp: 1
     } as const
@@ -515,8 +544,8 @@ describe("pi file-change events", () => {
         runId: "run-1",
         agent: "worker",
         childIndex: 0,
-        requestedAt: 1,
-        deadlineAt: null
+        requestedAt: 2,
+        deadlineAt: 3
       })
     }
   })
