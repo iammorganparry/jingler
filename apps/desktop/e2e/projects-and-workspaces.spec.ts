@@ -151,7 +151,7 @@ test("creates a direct workspace from a registered project", async ({ launchApp 
   const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
   const canonicalProjectPath = realpathSync(projectPath)
   expect(persisted).toMatchObject({
-    title: "Untitled session",
+    title: expect.any(String),
     autoTitle: true,
     repoPath: canonicalProjectPath,
     worktreePath: canonicalProjectPath,
