@@ -16,7 +16,6 @@ import type {
 import type {
   Message,
   PiRunSpec,
-  SubagentFleetControlRequest,
   ProviderConnection,
   RuntimeDiagnosticSnapshot,
   StreamEvent
@@ -361,13 +360,28 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     fleetEvents
   } = input
   const { session } = embedded.result
+  const subagentTasks = new Map<string, string>()
   return {
     id: session.sessionFile ?? session.sessionId,
     parentPiSessionId: session.sessionId,
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
     subscribe: (listener) => session.subscribe((event) => {
-      const progress = piSubagentProgress(event)
+      if (
+        event.type === "tool_execution_start" &&
+        event.toolName === "subagent" &&
+        typeof event.args === "object" &&
+        event.args !== null &&
+        "task" in event.args &&
+        typeof event.args.task === "string"
+      ) {
+        subagentTasks.set(event.toolCallId, event.args.task)
+      }
+      const progress = piSubagentProgress(
+        event,
+        "toolCallId" in event ? subagentTasks.get(event.toolCallId) : undefined
+      )
+      if (event.type === "tool_execution_end") subagentTasks.delete(event.toolCallId)
       if (progress) lifecycle.progress(progress)
       const attention = piSupervisorAttention(event)
       if (attention) lifecycle.attention(attention)

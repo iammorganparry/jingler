@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { resolve } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -7,8 +8,28 @@ import { describe, expect, it } from "vitest"
 
 const execute = promisify(execFile)
 const require = createRequire(import.meta.url)
+const REMOVED_PROMPT_PATCH = /PROMPT_REDACTED|task: progress\.task|task: result\.task/u
+const CHANGED_PATCH_LINE = /^[+-](?![+-])/u
 
-describe("Jingler pi-subagents RPC patch", () => {
+describe("Jingler pi-subagents compatibility patch", () => {
+  it("contains only the four host compatibility fixes", async () => {
+    const patch = await readFile("patches/pi-subagents@0.57.0.patch", "utf8")
+    const files = [...patch.matchAll(/^diff --git a\/(.+?) b\//gmu)]
+      .map(([, file]) => file)
+    expect(files).toEqual([
+      "src/extension/index.ts",
+      "src/extension/rpc.ts",
+      "src/intercom/native-supervisor-channel.ts",
+      "src/runs/background/subagent-runner.ts",
+      "src/runs/foreground/execution.ts",
+      "src/runs/shared/pi-spawn.ts"
+    ])
+    const changedLines = patch.split("\n")
+      .filter((line) => CHANGED_PATCH_LINE.test(line))
+      .join("\n")
+    expect(changedLines).not.toMatch(REMOVED_PROMPT_PATCH)
+  })
+
   it("acknowledges an exact native supervisor reply without an active model turn", async () => {
     const rpcUrl = pathToFileURL(
       resolve("node_modules/pi-subagents/src/extension/rpc.ts")

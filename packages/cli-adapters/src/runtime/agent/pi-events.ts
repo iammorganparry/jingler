@@ -42,7 +42,9 @@ const SupervisorAttention = Schema.Struct({
     expectsReply: Schema.Boolean,
     runId: Schema.String,
     agent: Schema.String,
-    childIndex: Schema.Number
+    childIndex: Schema.Number,
+    requestedAt: Schema.Number,
+    deadlineAt: Schema.NullOr(Schema.Number)
   })
 })
 const decodeSupervisorAttention = Schema.decodeUnknownOption(SupervisorAttention)
@@ -180,8 +182,12 @@ const normalizeMessageUpdate = (
   return null
 }
 
+const displayTask = (task: string, directTask?: string): string =>
+  task === "[prompt redacted]" && directTask ? directTask : task
+
 export const piSubagentProgress = (
-  event: AgentSessionEvent
+  event: AgentSessionEvent,
+  directTask?: string
 ): PiSubagentProgressInput | null => {
   if (
     (event.type !== "tool_execution_update" && event.type !== "tool_execution_end") ||
@@ -205,6 +211,7 @@ export const piSubagentProgress = (
       settled,
       children: decoded.progress.map((child) => ({
         ...child,
+        task: displayTask(child.task, directTask),
         runId: results.get(child.index)?.runId ?? null,
         sessionFile: results.get(child.index)?.sessionFile ?? null
       }))
@@ -260,7 +267,9 @@ export const piSubagentProgress = (
           : child.error !== undefined || child.timedOut || child.stopped || child.interrupted
             ? "failed" as const
             : "completed" as const,
-        task: child.task ?? "Delegated work",
+        task: child.task === undefined
+          ? (directTask ?? "Delegated work")
+          : displayTask(child.task, directTask),
         tokens: 0,
         toolCount: 0,
         durationMs: 0,
@@ -287,8 +296,8 @@ export const piSupervisorAttention = (
     agent: message.details.agent,
     reason: message.details.reason,
     message: message.content,
-    requestedAt: message.timestamp,
-    deadlineAt: null
+    requestedAt: message.details.requestedAt,
+    deadlineAt: message.details.deadlineAt
   }
 }
 

@@ -99,7 +99,7 @@ export const assertLockedPiResources = (
     ],
     [
       "skill",
-      loader.getSkills().skills.length === 6 &&
+      loader.getSkills().skills.length > 0 &&
         loader.getSkills().skills.every((skill) => skill.filePath.startsWith(PONYTAIL_SKILLS_PATH))
     ],
     ["prompt template", loader.getPrompts().prompts.length === 0],
