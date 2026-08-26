@@ -1,7 +1,7 @@
-import { ThinkingOrb as BreathingOrb } from "thinking-orbs"
+import { Loader } from "./beui/loader.js"
 import { cn } from "../lib/cn.js"
 
-/** Dotted breathing orbit used wherever a live agent is between visible output. */
+/** Compatibility name backed by BeUI's metaballs loading state. */
 export function ThinkingOrb({
   compact = false,
   label = "Agent breathing…",
@@ -11,38 +11,22 @@ export function ThinkingOrb({
   label?: string
   className?: string
 }) {
-  return (
-    <span
-      role="status"
-      aria-label={label}
-      title={compact ? label : undefined}
-      className={cn("inline-flex items-center justify-center", className)}
-    >
-      <BreathingOrb state="breathing" size={20} theme="auto" aria-hidden />
-    </span>
-  )
+  return <Loader variant="metaballs" size={compact ? 16 : 20} label={label} className={className} />
 }
 
-/** A small One Dark spinner. */
+/** Compatibility name backed by the official BeUI spinner. */
 export function Spinner({ size = 14, className }: { size?: number; className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-block rounded-full border-2 border-dim border-t-transparent [animation:var(--animate-spin-fast)]",
-        className
-      )}
-      style={{ width: size, height: size }}
-    />
-  )
+  return <Loader variant="spinner" size={size} className={className} />
 }
 
-/** A shimmering skeleton placeholder. */
+/** BeUI loading-state shimmer, kept as a rectangular compatibility primitive. */
 export function Skeleton({ className }: { className?: string }) {
   return (
     <span
+      role="status"
+      aria-label="Loading"
       className={cn(
-        "block h-5 rounded-md [background-size:220px_100%] [animation:var(--animate-shine)]",
-        "bg-[linear-gradient(90deg,transparent,var(--sb-hover),transparent)]",
+        "block h-5 rounded-md bg-[linear-gradient(100deg,var(--sb-muted),var(--sb-text-bright),var(--sb-muted))] bg-[length:220%_100%] animate-shine opacity-20",
         className
       )}
     />

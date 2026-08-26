@@ -27,7 +27,7 @@ describe("BeUI motion catalog", () => {
 
     const button = screen.getByRole("button", { name: "Continue" })
     expect(button.className).toContain("h-10")
-    expect(button.className).toContain("rounded-full")
+    expect(button.className).toContain("rounded-lg")
     fireEvent.click(button)
     expect(onClick).toHaveBeenCalledOnce()
 

@@ -18,11 +18,6 @@ export function AnimatedNumber({ value, format = value => String(value), classNa
   return <span className={cn("relative inline-flex overflow-hidden font-mono tabular-nums", className)}><AnimatePresence mode="popLayout" initial={false}><m.span key={value} initial={{ y: "70%", opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: "-70%", opacity: 0 }} transition={SPRING}>{format(value)}</m.span></AnimatePresence></span>
 }
 
-export function AnimatedBadge({ children, tone = "neutral", pulse = false, icon, className }: { children: ReactNode; tone?: "neutral" | "success" | "warning" | "error" | "info"; pulse?: boolean; icon?: ReactNode; className?: string }) {
-  const tones = { neutral: "bg-hover text-text", success: "bg-green/15 text-green", warning: "bg-yellow/15 text-yellow", error: "bg-red/15 text-red", info: "bg-blue/15 text-blue" }
-  return <m.span layout transition={SPRING} className={cn("inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px]", tones[tone], pulse && "animate-pulse-dot", className)}>{icon}<AnimatePresence mode="popLayout" initial={false}><m.span key={String(children)} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }}>{children}</m.span></AnimatePresence></m.span>
-}
-
 export function ActionSwap({ value, children, className }: { value: string; children: ReactNode; className?: string }) {
   return <span className={cn("relative inline-grid overflow-hidden", className)}><AnimatePresence mode="popLayout" initial={false}><m.span key={value} initial={{ opacity: 0, filter: "blur(4px)", y: 4 }} animate={{ opacity: 1, filter: "blur(0px)", y: 0 }} exit={{ opacity: 0, filter: "blur(4px)", y: -4 }} transition={FAST} className="col-start-1 row-start-1">{children}</m.span></AnimatePresence></span>
 }
@@ -42,20 +37,5 @@ export function ScrollProgress({ container, className }: { container?: React.Ref
   return <m.div aria-hidden style={{ scaleX, transformOrigin: "0 50%" }} className={cn("h-0.5 bg-brand", className)} />
 }
 
-export type LoaderVariant = "spinner" | "dots" | "bars" | "matrix" | "comet" | "percent" | "ascii"
-export function Loader({ variant = "spinner", size = 16, value = 0, label = "Loading", className }: { variant?: LoaderVariant; size?: number; value?: number; label?: string; className?: string }) {
-  const reduce = useReducedMotion()
-  const common = cn("inline-flex items-center justify-center text-current", className)
-  if (variant === "percent") return <span role="status" aria-label={label} className={cn(common, "font-mono text-[11px] tabular-nums")}>{Math.round(value)}%</span>
-  if (variant === "ascii") return <AsciiLoader label={label} className={common} />
-  if (variant === "dots" || variant === "matrix" || variant === "bars") return <span role="status" aria-label={label} className={cn(common, "gap-1")} style={{ width: size * 2, height: size }}>{[0,1,2].map(index => <m.span key={index} animate={reduce ? { opacity: [0.35,1,0.35] } : variant === "bars" ? { scaleY: [0.45,1,0.45] } : { y: [0,-3,0] }} transition={{ duration: .8, repeat: Infinity, delay: index * .12 }} className={cn("bg-current", variant === "bars" ? "h-full w-0.5 rounded-full" : "size-1 rounded-full")} />)}</span>
-  if (variant === "comet") return <span role="status" aria-label={label} className={cn(common, "relative rounded-full border border-current/20")} style={{ width: size, height: size }}><m.span animate={reduce ? { opacity: [0.4,1,0.4] } : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: "linear" }} className="absolute inset-0 rounded-full border-t-2 border-current" /></span>
-  return <m.span role="status" aria-label={label} animate={reduce ? { opacity: [0.4,1,0.4] } : { rotate: 360 }} transition={{ duration: .8, repeat: Infinity, ease: "linear" }} className={cn(common, "rounded-full border-2 border-current/20 border-t-current")} style={{ width: size, height: size }} />
-}
-
-function AsciiLoader({ label, className }: { label: string; className?: string }) {
-  const frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
-  const [frame, setFrame] = useState(0)
-  useEffect(() => { const id = window.setInterval(() => setFrame(current => (current + 1) % frames.length), 80); return () => window.clearInterval(id) }, [])
-  return <span role="status" aria-label={label} className={cn("font-mono", className)}>{frames[frame]}</span>
-}
+export { AnimatedBadge, type AnimatedBadgeProps, type AnimatedBadgeSize, type AnimatedBadgeStatus } from "./animated-badge.js"
+export { Loader, type LoaderProps, type LoaderVariant } from "./loader.js"

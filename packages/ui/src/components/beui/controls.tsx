@@ -8,7 +8,7 @@ import {
   useRef,
   useState
 } from "react"
-import { AnimatePresence, LayoutGroup, animate, m, useReducedMotion } from "motion/react"
+import { AnimatePresence, MotionConfig, animate, m, useReducedMotion, type Transition } from "motion/react"
 import { Check, ChevronDown, Search } from "lucide-react"
 import { cn } from "../../lib/cn.js"
 import { SPRING } from "../../lib/motion.js"
@@ -48,6 +48,7 @@ export function AnimatedCTAButton({ children, trailing = "→", ...props }: Butt
 }
 
 export interface MotionTabItem<T extends string> { value: T; label: ReactNode; disabled?: boolean }
+const TAB_TRANSITION: Transition = { type: "spring", stiffness: 170, damping: 24, mass: 1.2 }
 export function MotionTabs<T extends string>({ items, value, onChange, variant = "pill", className }: {
   items: ReadonlyArray<MotionTabItem<T>>
   value: T
@@ -56,17 +57,60 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
   className?: string
 }) {
   const id = useId()
-  return <LayoutGroup id={id}><div role="tablist" className={cn("inline-flex items-center gap-1", variant === "segment" && "rounded-lg border border-line bg-sunken p-1", className)}>{items.map(item => {
-    const active = item.value === value
-    return <button key={item.value} type="button" role="tab" aria-selected={active} disabled={item.disabled} onClick={() => onChange?.(item.value)} className={cn("relative rounded-md px-3 py-1.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring", active ? "text-text-bright" : "text-muted-foreground hover:text-text")}>
-      {active && <m.span layoutId="active" transition={SPRING} className={cn("absolute inset-0 -z-10", variant === "underline" ? "top-auto h-0.5 rounded-full bg-brand" : "rounded-md bg-surface shadow-sm")} />}
-      {item.label}
-    </button>
-  })}</div></LayoutGroup>
+  const reduce = useReducedMotion()
+  const listClass = variant === "pill"
+    ? "inline-flex items-center gap-1 rounded-full bg-panel p-1"
+    : variant === "underline"
+      ? "inline-flex items-center gap-1 border-b border-line"
+      : "inline-flex items-center gap-0 rounded-lg bg-panel p-0.5"
+
+  return <MotionConfig transition={reduce ? { duration: 0 } : TAB_TRANSITION}>
+    <m.div layoutRoot className={className}>
+      <div role="tablist" className={listClass}>
+        {items.map((item) => {
+          const active = item.value === value
+          if (variant === "underline") return <button
+            key={item.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            disabled={item.disabled}
+            onClick={() => !item.disabled && onChange?.(item.value)}
+            className={cn(
+              "relative isolate -mb-px inline-flex min-h-11 items-center px-3 pb-2.5 pt-1 text-sm font-medium transition-colors",
+              active ? "text-text-bright" : "text-muted-foreground hover:text-text-bright",
+              item.disabled && "cursor-not-allowed opacity-50"
+            )}
+          >
+            {item.label}
+            {active && <m.span layoutId={id} layout="position" className="absolute -bottom-px left-0 right-0 h-px bg-brand" />}
+          </button>
+
+          const radius = variant === "pill" ? "rounded-full" : "rounded-md"
+          return <div key={item.value} className="relative">
+            {active && <m.span layoutId={id} layout="position" style={{ borderRadius: variant === "pill" ? 9999 : 8 }} className={cn("absolute inset-0 bg-brand", radius)} />}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={active}
+              disabled={item.disabled}
+              onClick={() => !item.disabled && onChange?.(item.value)}
+              className={cn(
+                "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent px-3.5 py-1.5 text-sm font-medium outline-none transition-colors",
+                active ? "text-white" : "text-muted-foreground hover:text-text-bright",
+                item.disabled && "cursor-not-allowed opacity-50",
+                radius
+              )}
+            >{item.label}</button>
+          </div>
+        })}
+      </div>
+    </m.div>
+  </MotionConfig>
 }
 
 export function MotionSwitch(props: React.ComponentProps<typeof Toggle>) {
-  return <m.span whileTap={{ scale: 0.94 }} transition={SPRING} className="inline-flex"><Toggle {...props} /></m.span>
+  return <Toggle {...props} />
 }
 
 export function MotionInput({ label, error, success, left, right, className, disabled, id, onFocus, onBlur, ...props }: InputHTMLAttributes<HTMLInputElement> & {

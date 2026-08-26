@@ -91,7 +91,7 @@ function CatalogDemo() {
     <Spec name="center-morph-modal"><button onClick={() => setModal("center")}>Open center modal</button><CenterMorphModal open={modal === "center"} onOpenChange={() => setModal(undefined)} title="Center modal">Content</CenterMorphModal></Spec>
     <Spec name="text-animation"><AnimatedText mode="shimmer">Streaming response</AnimatedText></Spec>
     <Spec name="number"><button onClick={() => setCount(value => value + 1)}><AnimatedNumber value={count} /></button></Spec>
-    <Spec name="animated-badge"><AnimatedBadge tone="success" icon={<Bell className="size-3" />}>Ready</AnimatedBadge></Spec>
+    <Spec name="animated-badge"><AnimatedBadge status="success" icon={<Bell className="size-3" />}>Ready</AnimatedBadge></Spec>
     <Spec name="action-swap"><ActionSwap value={String(open)}>{open ? "Stop" : "Send"}</ActionSwap></Spec>
     <Spec name="animated-toast-stack"><AnimatedToastStack items={[{ id: "one", title: "Build complete", tone: "success" }]} /></Spec>
     <Spec name="theme-toggle"><ThemeToggle theme="dark" /></Spec>

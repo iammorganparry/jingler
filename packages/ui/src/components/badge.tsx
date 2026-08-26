@@ -1,44 +1,50 @@
 import type { ReactNode } from "react"
-import { cva, type VariantProps } from "class-variance-authority"
+import { AnimatedBadge, type AnimatedBadgeStatus } from "./beui/animated-badge.js"
 import { cn } from "../lib/cn.js"
 
-/**
- * Tag / Chip — a small mono label with a tinted background. Tone-colored variants
- * match the design's accent chips; `count` is the neutral count pill.
- */
-const badge = cva(
-  "inline-flex items-center gap-1.5 font-mono whitespace-nowrap",
-  {
-    variants: {
-      tone: {
-        count: "bg-hover text-muted-foreground",
-        neutral: "bg-hover text-text",
-        blue: "bg-blue/12 text-blue",
-        green: "bg-green/[0.13] text-green",
-        yellow: "bg-yellow/12 text-yellow",
-        red: "bg-red/10 text-red",
-        purple: "bg-purple/[0.13] text-purple",
-        cyan: "bg-cyan/12 text-cyan"
-      },
-      size: {
-        xs: "text-[9px] rounded-sm px-1.5 py-0.5",
-        sm: "text-[10px] rounded-md px-[7px] py-0.5"
-      }
-    },
-    defaultVariants: { tone: "neutral", size: "sm" }
-  }
-)
+export type BadgeTone = "count" | "neutral" | "blue" | "green" | "yellow" | "red" | "purple" | "cyan"
 
-export interface BadgeProps extends VariantProps<typeof badge> {
+const statusFor: Record<BadgeTone, AnimatedBadgeStatus> = {
+  count: "neutral",
+  neutral: "neutral",
+  blue: "info",
+  green: "success",
+  yellow: "warning",
+  red: "danger",
+  purple: "info",
+  cyan: "info"
+}
+
+const toneClass: Partial<Record<BadgeTone, string>> = {
+  count: "border-line bg-hover text-muted-foreground",
+  neutral: "border-line bg-hover text-text",
+  blue: "border-blue/30 bg-blue/10 text-blue",
+  green: "border-green/30 bg-green/10 text-green",
+  yellow: "border-yellow/30 bg-yellow/10 text-yellow",
+  red: "border-red/30 bg-red/10 text-red",
+  purple: "border-purple/30 bg-purple/10 text-purple",
+  cyan: "border-cyan/30 bg-cyan/10 text-cyan"
+}
+
+export interface BadgeProps {
   children: ReactNode
+  tone?: BadgeTone
+  size?: "xs" | "sm"
   className?: string
   title?: string
 }
 
-export function Badge({ children, tone, size, className, title }: BadgeProps) {
+/** Compatibility API backed by the official BeUI AnimatedBadge. */
+export function Badge({ children, tone = "neutral", className, title }: BadgeProps) {
   return (
-    <span title={title} className={cn(badge({ tone, size }), className)}>
+    <AnimatedBadge
+      title={title}
+      status={statusFor[tone]}
+      size="sm"
+      showIcon={false}
+      className={cn("font-mono", toneClass[tone], className)}
+    >
       {children}
-    </span>
+    </AnimatedBadge>
   )
 }

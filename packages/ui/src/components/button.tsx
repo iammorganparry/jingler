@@ -16,9 +16,9 @@ const button = cva(
         outline: "border border-line bg-transparent text-text-bright hover:bg-brand/5"
       },
       size: {
-        sm: "h-8 gap-1.5 rounded-full px-3 text-xs",
-        md: "h-10 gap-2 rounded-full px-5 text-sm",
-        lg: "h-12 gap-2 rounded-full px-6 text-base",
+        sm: "h-8 gap-1.5 rounded-lg px-3 text-xs",
+        md: "h-10 gap-2 rounded-lg px-5 text-sm",
+        lg: "h-12 gap-2 rounded-lg px-6 text-base",
         icon: "size-8 rounded-lg"
       }
     },
