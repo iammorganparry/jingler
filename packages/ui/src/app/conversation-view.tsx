@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type {
   Attachment,
   ExecutionMode,
@@ -30,6 +30,7 @@ import { ThinkingOrb } from "../components/loading.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import { MessageTurn, ToolStopContext } from "../composites/message-turn.js"
+import { MessageScroller } from "../composites/beui/messages.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
 import { RunStats } from "../composites/run-stats.js"
@@ -47,28 +48,6 @@ const QUEUE_PREVIEW = 5
 /** Shift+Tab cycles Jingler's provider-neutral permission modes. */
 const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
 const MODE_CYCLE_WITH_PLAN: ReadonlyArray<PermissionMode> = [...MODE_CYCLE, "plan"]
-
-const useStickyBottomOnResize = (
-  scrollRef: RefObject<HTMLDivElement | null>,
-  transcriptRef: RefObject<HTMLDivElement | null>,
-  stick: RefObject<boolean>
-) => {
-  useLayoutEffect(() => {
-    if (typeof ResizeObserver === "undefined") return
-    const scroll = scrollRef.current
-    const transcript = transcriptRef.current
-    if (!(scroll && transcript)) return
-
-    const pinToBottom = () => {
-      if (stick.current) scroll.scrollTop = scroll.scrollHeight
-    }
-    const observer = new ResizeObserver(pinToBottom)
-    observer.observe(scroll)
-    observer.observe(transcript)
-    pinToBottom()
-    return () => observer.disconnect()
-  }, [scrollRef, transcriptRef, stick])
-}
 
 export interface ConversationViewProps {
   messages: ReadonlyArray<Message>
@@ -313,9 +292,9 @@ export function ConversationView({
   const gutter = atLeast(useWidthTier(), "mid") ? "px-[30px]" : "px-3"
   const scrollRef = useRef<HTMLDivElement>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
-  // Sticky-bottom: follow the newest content while the operator is parked at the
-  // bottom, but never yank them down once they've scrolled up to read.
-  const stick = useRef(true)
+  // MessageScroller owns live-edge following. Keeping the current decision in
+  // state lets history paging pause it without racing the scroller's observer.
+  const [following, setFollowing] = useState(true)
   const [queueExpanded, setQueueExpanded] = useState(false)
   const queueLimit = queueExpanded ? queued.length : QUEUE_PREVIEW
 
@@ -406,24 +385,13 @@ export function ConversationView({
   const handleLoadEarlier = useCallback(() => {
     const el = scrollRef.current
     if (el) restoreScroll.current = { height: el.scrollHeight, top: el.scrollTop }
-    // Never let the sticky-bottom follow yank the reader back down mid-prepend.
-    stick.current = false
+    // Never let live-edge following yank the reader back down mid-prepend.
+    setFollowing(false)
     onLoadEarlier?.()
   }, [onLoadEarlier])
 
-  // Standard chat scroll: keep the newest content in view while stuck to the
-  // bottom, so the transcript grows downward and never leaves trailing dead
-  // space. `messages` is a fresh array on every stream delta, so this re-pins as
-  // the current turn fills — but only while the operator hasn't scrolled up.
-  useLayoutEffect(() => {
-    if (stick.current && messages.length > 0) {
-      virtualizer.scrollToIndex(messages.length - 1, { align: "end" })
-    }
-  }, [messages, virtualizer])
-
-  // Runs on the SAME `messages` change as the prepend (stick is false here, so
-  // the sticky-bottom effect above no-ops and doesn't fight this). An errored
-  // load prepends nothing, so heights are equal and this is a no-op.
+  // Runs on the same `messages` change as the prepend. Following is paused, so
+  // an errored load prepends nothing and equal heights make this a no-op.
   useLayoutEffect(() => {
     const el = scrollRef.current
     const saved = restoreScroll.current
@@ -431,53 +399,6 @@ export function ConversationView({
     el.scrollTop = el.scrollHeight - saved.height + saved.top
     restoreScroll.current = null
   }, [messages])
-
-  // A restored transcript is not fully sized on the first layout pass: virtual
-  // rows are measured after render, and rich content can grow later as it loads.
-  // Keep correcting those size changes while the operator is parked at the
-  // bottom. Message updates alone cannot cover this because measurement changes
-  // do not create a new `messages` array.
-  useStickyBottomOnResize(scrollRef, transcriptRef, stick)
-
-  // Track whether we're parked at the bottom (within a small threshold), so
-  // scrolling up to read pauses the auto-follow and scrolling back resumes it.
-  //
-  // Unsticking is a USER decision, never a layout artifact. Virtual rows
-  // measure in after the initial bottom-pin, and each correction fires scroll
-  // events whose distance-to-bottom is momentarily huge (a heavy transcript's
-  // estimates can be off by hundreds of thousands of px) — treating those as
-  // "the reader scrolled up" stranded a freshly opened session mid-transcript
-  // instead of at its newest message. So a scroll event may only turn the
-  // follow OFF when a real gesture (wheel, touch, pointer on the scrollbar,
-  // scrolling keys) marked the movement as the operator's.
-  // Intent is a TIMESTAMP, not a latch. The first version latched a boolean
-  // and cleared it whenever a scroll event landed near the bottom — but while
-  // a reply streams, the per-token bottom-pin IS such an event, so it wiped
-  // the operator's in-flight wheel-up before it travelled the 80px threshold
-  // and the next token yanked the view back down: the "bouncing" transcript.
-  // A recent-gesture window needs no clearing, so programmatic pins can't
-  // steal it; it simply expires.
-  const lastUserScrollAt = useRef(0)
-  const markUserScroll = useCallback(() => {
-    lastUserScrollAt.current = performance.now()
-  }, [])
-  const onUserWheel = useCallback((event: { deltaY: number }) => {
-    lastUserScrollAt.current = performance.now()
-    // Wheeling UP is an unambiguous "stop following" — honour it immediately
-    // rather than waiting for the resulting scroll to clear the threshold,
-    // which a mid-stream pin could pre-empt.
-    if (event.deltaY < 0) stick.current = false
-  }, [])
-  const onScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    if (nearBottom) {
-      stick.current = true
-      return
-    }
-    if (performance.now() - lastUserScrollAt.current < 600) stick.current = false
-  }, [])
 
   return (
     <div ref={modeHotkeyRef} className="flex min-h-0 min-w-0 flex-1">
@@ -491,19 +412,18 @@ export function ConversationView({
             onDelete={archived.onDelete}
           />
         )}
-        <div
-          ref={scrollRef}
-          data-testid="conversation-scroll"
-          onScroll={onScroll}
-          onWheel={onUserWheel}
-          onTouchMove={markUserScroll}
-          onPointerDown={markUserScroll}
-          onKeyDown={markUserScroll}
-          className={cn(
+        <MessageScroller
+          followOutput={following}
+          onFollowChange={setFollowing}
+          busy={busy}
+          viewportRef={scrollRef}
+          viewportTestId="conversation-scroll"
+          className="flex-1"
+          viewportClassName={cn(
             // `both-edges` reserves the scrollbar gutter symmetrically so the
             // centered content stays on the window's centre axis — matching the
             // composer below (which has no scrollbar) exactly.
-            "flex-1 overflow-auto py-[26px] [scrollbar-gutter:stable_both-edges]",
+            "py-[26px] [scrollbar-gutter:stable_both-edges]",
             gutter,
             archived && "opacity-60"
           )}
@@ -571,7 +491,7 @@ export function ConversationView({
               <ThinkingOrb />
             </div>
           ) : null}
-        </div>
+        </MessageScroller>
 
         {/* Same gutter + centered max-width as the transcript column above. */}
         <div className={cn("flex-none pb-[18px] pt-[11px]", gutter)}>

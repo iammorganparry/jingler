@@ -4,6 +4,7 @@ import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Button } from "../components/button.js"
 import { Kbd } from "../components/kbd.js"
+import { ToolApprovalSurface } from "./beui/work.js"
 
 const RESOLVED_LABEL: Record<Exclude<GateStatus, "pending">, string> = {
   approved: "Allowed",
@@ -37,7 +38,7 @@ export function ApprovalGate({
 }) {
   const pending = status === "pending"
   return (
-    <div className={cn("overflow-hidden rounded-xl border border-blue/50 bg-blue/[0.05]", className)}>
+    <ToolApprovalSurface className={cn("border-blue/50", className)}>
       <div className="flex items-center gap-[9px] border-b border-blue/20 px-3 py-[9px]">
         <span className="flex size-5 items-center justify-center rounded-md bg-blue/[0.16] text-blue">
           <KeyRound size={11} />
@@ -86,6 +87,6 @@ export function ApprovalGate({
           </div>
         )}
       </div>
-    </div>
+    </ToolApprovalSurface>
   )
 }

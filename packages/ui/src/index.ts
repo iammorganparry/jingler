@@ -54,8 +54,10 @@ export * from "./components/linear-mark.js"
 export * from "./components/connector-logo.js"
 export * from "./components/oauth-button.js"
 export * from "./components/auth-divider.js"
+export * from "./components/beui/index.js"
 
 // Molecules / composites
+export * from "./composites/beui/index.js"
 export * from "./composites/tool-call.js"
 export * from "./composites/thought-block.js"
 export * from "./composites/phase-node.js"

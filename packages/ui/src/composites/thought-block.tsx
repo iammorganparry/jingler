@@ -1,6 +1,8 @@
 import { useState } from "react"
+import { AnimatePresence, m } from "motion/react"
 import { Brain, ChevronRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { SPRING } from "../lib/motion.js"
 
 const secondsLabel = (seconds: number): string =>
   seconds === 1 ? "Thought for 1 second" : `Thought for ${seconds} seconds`
@@ -64,14 +66,23 @@ export function ThoughtBlock({
         )}
       </button>
 
-      {collapsible && open && (
-        // Deliberately frameless: the reasoning reads as marginalia — small,
-        // dim, italic — not as a card competing with the answer. Indented to
-        // align under the label, clear of the brain glyph.
-        <div className="mt-1.5 pl-5 italic text-[calc(11px*var(--sb-font-scale,1))] leading-[1.6] text-dim">
-          {children}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {collapsible && open && (
+          // Deliberately frameless: the reasoning reads as marginalia — small,
+          // dim, italic — not as a card competing with the answer.
+          <m.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={SPRING}
+            className="overflow-hidden"
+          >
+            <div className="mt-1.5 pl-5 italic text-[calc(11px*var(--sb-font-scale,1))] leading-[1.6] text-dim">
+              {children}
+            </div>
+          </m.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
