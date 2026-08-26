@@ -64,7 +64,7 @@ describe("tool card — the file being written", () => {
   it("does not split a command into directory and filename", () => {
     // A Bash target is a command; slicing it at the last "/" would be nonsense.
     render(<MessageTurn message={tool({ name: "Bash", target: "pnpm --filter @jingler/ui test" })} />)
-    expect(screen.getByText("pnpm --filter @jingler/ui test")).toBeDefined()
+    expect(screen.getAllByText("pnpm --filter @jingler/ui test").length).toBeGreaterThan(0)
   })
 })
 
@@ -75,9 +75,9 @@ describe("tool card — expanding a call", () => {
         message={tool({ name: "Bash", target: "pnpm typecheck", output: "Tasks: 6 successful\nDone in 2.6s" })}
       />
     )
-    expect(screen.queryByText(/Done in 2.6s/)).toBeNull()
+    expect(screen.getByRole("region", { hidden: true }).getAttribute("aria-hidden")).toBe("true")
     fireEvent.click(screen.getByRole("button", { expanded: false }))
-    expect(screen.getByText(/Done in 2.6s/)).toBeDefined()
+    expect(screen.getByRole("log").textContent).toContain("Done in 2.6s")
   })
 
   it("collapses again on a second click", () => {
@@ -85,7 +85,15 @@ describe("tool card — expanding a call", () => {
     fireEvent.click(screen.getByRole("button", { expanded: false }))
     expect(screen.getByRole("button", { expanded: true })).toBeDefined()
     fireEvent.click(screen.getByRole("button", { expanded: true }))
-    expect(screen.queryByText("hello")).toBeNull()
+    expect(screen.getByRole("region", { hidden: true }).getAttribute("aria-hidden")).toBe("true")
+  })
+
+  it("keeps large command output in one bounded scroll region", () => {
+    render(<MessageTurn message={tool({ output: Array.from({ length: 600 }, (_, index) => `line ${index}`).join("\n") })} />)
+    fireEvent.click(screen.getByRole("button", { expanded: false }))
+    const log = screen.getByRole("log")
+    expect(log.style.maxHeight).toBe("320px")
+    expect(log.querySelectorAll("pre")).toHaveLength(1)
   })
 
   it("says so when a finished call printed nothing", () => {

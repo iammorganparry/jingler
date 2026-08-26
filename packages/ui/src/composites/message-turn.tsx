@@ -8,6 +8,7 @@ import { Eyebrow } from "../components/eyebrow.js"
 import { DiffPeek } from "../components/diff-peek.js"
 import { FileChangeList } from "../components/file-change-list.js"
 import { Markdown } from "../components/markdown.js"
+import { ToolResult as BeUIToolResult, ToolResultOutput } from "../components/beui/tool-result.js"
 import { providerColor, providerLabel, ProviderIcon } from "../components/provider-icon.js"
 import { ApprovalGate } from "./approval-gate.js"
 import { BranchDriftBanner } from "./branch-drift-banner.js"
@@ -171,7 +172,7 @@ const emptyBodyNote = (tool: ToolCallModel): string => {
 
 function ToolCardView({ tool }: { tool: ToolCallModel }) {
   const stopTool = useContext(ToolStopContext)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(tool.status === "running")
   const canonicalChanges = tool.fileChanges?.changes ?? []
   const legacyPreview = canonicalChanges.length === 0 ? tool.preview : null
   const lines = legacyPreview ? legacyPreview.replace(/\n+$/, "").split("\n") : []
@@ -188,6 +189,27 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
     tool.status === "running" && stopTool !== null && isStoppableTool(displayName)
       ? stopTool
       : undefined
+  if (isStoppableTool(displayName) && canonicalChanges.length === 0 && !legacyPreview) {
+    const output = tool.output ?? emptyBodyNote(tool)
+    return (
+      <BeUIToolResult
+        tool={displayName}
+        title={tool.target ?? displayName}
+        meta={toolMeta(tool)}
+        status={tool.status}
+        kind="terminal"
+        open={expanded}
+        onOpenChange={setExpanded}
+        collapseOnComplete={false}
+        maxHeight={320}
+        copyText={tool.output}
+        onStop={onStop}
+        className={WIDTH}
+      >
+        <ToolResultOutput language="bash">{output}</ToolResultOutput>
+      </BeUIToolResult>
+    )
+  }
   return (
     <ToolCall
       status={tool.status}

@@ -5,7 +5,6 @@ import { FleetAgentView } from "./subagent-view.js"
 
 const NOT_AVAILABLE = /not available yet/
 const ORCHESTRATES = /orchestrates other agents/
-const TOOL_RESULT = /Tool result \(command_execute\)/
 
 const fleetNode = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => ({
   id: "parent/run-1",
@@ -74,10 +73,10 @@ describe("FleetAgentView", () => {
 
     render(<FleetAgentView messages={[message]} />)
 
-    expect(screen.getByText("pnpm test")).toBeDefined()
-    expect(screen.queryByText(TOOL_RESULT)).toBeNull()
+    expect(screen.getAllByText("pnpm test").length).toBeGreaterThan(0)
+    expect(screen.getByRole("region", { hidden: true }).getAttribute("aria-hidden")).toBe("true")
     fireEvent.click(screen.getByRole("button", { expanded: false }))
-    expect(screen.getByText("18 tests passed")).toBeDefined()
+    expect(screen.getByRole("log").textContent).toContain("18 tests passed")
   })
 
   it("shows live activity for a running child with no transcript, not a dead 'not available' line", () => {
