@@ -30,12 +30,12 @@ describe("Composer at width", () => {
     renderAt(700)
     expect(screen.getByRole("button", { name: /Send/ })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Thinking strength" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Composer settings" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Composer options" })).toBeNull()
 
     cleanup()
     renderAt(450)
     expect(screen.getByRole("button", { name: /Send/ })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Composer settings" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Composer options" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Thinking strength" })).toBeNull()
   })
 
@@ -64,7 +64,7 @@ describe("Composer at width", () => {
       }]
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Composer settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Composer options" }))
     for (const label of ["Model", "Environment", "Permission", "Reasoning"])
       expect(screen.getByText(label)).toBeTruthy()
 

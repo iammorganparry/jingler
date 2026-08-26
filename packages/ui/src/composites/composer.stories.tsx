@@ -248,7 +248,7 @@ function CompactSettingsFixture() {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const frame = requestAnimationFrame(() =>
-      ref.current?.querySelector<HTMLButtonElement>('button[aria-label="Composer settings"]')?.click()
+      ref.current?.querySelector<HTMLButtonElement>('button[aria-label="Composer options"]')?.click()
     )
     return () => cancelAnimationFrame(frame)
   }, [])

@@ -897,9 +897,9 @@ export function Composer({
           {compactSettings ? (
             <MorphPopover open={settingsOpen} onOpenChange={setSettingsOpen}>
               <MorphPopoverTrigger>
-                <button type="button" aria-label="Composer settings" className="flex h-8 items-center gap-1.5 rounded-xl px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring">
+                <button type="button" aria-label="Composer options" className="flex h-8 items-center gap-1.5 rounded-xl px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring">
                   <SlidersHorizontal size={14} aria-hidden />
-                  <span>Settings</span>
+                  <span>Options</span>
                 </button>
               </MorphPopoverTrigger>
               <MorphPopoverContent side="top" align="start" sideOffset={8} radius={12} className="w-72 max-w-[calc(100vw-24px)] p-2">
