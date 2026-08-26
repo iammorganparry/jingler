@@ -39,6 +39,21 @@ describe("Composer at width", () => {
     expect(screen.queryByRole("button", { name: "Thinking strength" })).toBeNull()
   })
 
+  it("opens desktop and compact menus above without a hidden first render", () => {
+    renderAt(700)
+    fireEvent.click(screen.getByRole("button", { name: "Auto" }))
+    const select = document.querySelector<HTMLElement>('[data-side="top"][aria-hidden="false"]')
+    expect(select?.style.display).not.toBe("none")
+
+    fireEvent.click(screen.getByRole("button", { name: "Composer menu" }))
+    expect(document.querySelector('[data-morph-popover-portal][data-side="top"]')).toBeTruthy()
+
+    cleanup()
+    renderAt(450)
+    fireEvent.click(screen.getByRole("button", { name: "Composer options" }))
+    expect(document.querySelector('[data-morph-popover-portal][data-side="top"]')).toBeTruthy()
+  })
+
   it("keeps all four selections in the compact settings popover", () => {
     const onSetModel = vi.fn()
     const onSetEnvironment = vi.fn()

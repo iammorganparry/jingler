@@ -65,10 +65,12 @@ describe("ProviderModelBrowser", () => {
         connectionId={null}
         modelId={null}
         onSelect={onSelect}
+        placement="top"
       />
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }))
+    expect(document.querySelector('[data-side="top"][aria-hidden="false"]')).toBeTruthy()
     expect(screen.getByRole("textbox", { name: "Search models" })).toBeTruthy()
     expect(screen.getByText("Claude Sonnet")).toBeTruthy()
     expect(screen.getByRole("option", { name: /Claude Sonnet/i }).querySelector("[data-provider-logo]")).toBeTruthy()

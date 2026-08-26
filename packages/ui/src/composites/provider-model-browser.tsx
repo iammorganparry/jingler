@@ -5,7 +5,7 @@ import type {
   ProviderModelId
 } from "@jingler/core"
 import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
-import { Select, SelectContent, SelectItem, SelectSearch, SelectTrigger } from "../components/beui/select.js"
+import { Select, SelectContent, SelectItem, SelectSearch, SelectTrigger, type SelectPlacement } from "../components/beui/select.js"
 import { cn } from "../lib/cn.js"
 
 export interface ProviderModelSelection {
@@ -75,7 +75,8 @@ export function ProviderModelBrowser({
   modelId,
   onSelect,
   className,
-  inlineContent = false
+  inlineContent = false,
+  placement
 }: {
   catalog: ProviderCatalog
   connectionId: ProviderConnectionId | null
@@ -83,6 +84,7 @@ export function ProviderModelBrowser({
   onSelect?: (selection: ProviderModelSelection) => void
   className?: string
   inlineContent?: boolean
+  placement?: SelectPlacement
 }) {
   const selections = browsableModels(catalog)
   const providerOrder: ProviderId[] = []
@@ -122,6 +124,7 @@ export function ProviderModelBrowser({
     <Select
       value={selected === undefined ? value : selectionKey(selected)}
       disabled={selections.length === 0}
+      placement={placement}
       onValueChange={(key) => {
         const selection = selections.find((candidate) => selectionKey(candidate) === key)
         if (selection)

@@ -280,6 +280,7 @@ export function MorphPopoverContent({
       {ctx.open ? (
         <motion.div
           data-morph-popover-portal=""
+          data-side={side}
           // Wrapper carries the shadow as a drop-shadow filter, which hugs the
           // clipped shape below (box-shadow would just get clipped away).
           variants={wrap}

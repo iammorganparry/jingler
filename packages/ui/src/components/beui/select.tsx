@@ -42,7 +42,7 @@ const ITEM_VARIANTS: Variants = {
   show: { opacity: 1, y: 0, filter: "blur(0px)" },
 };
 
-type Placement = "bottom" | "top";
+export type SelectPlacement = "bottom" | "top";
 
 interface SelectContextValue {
   value: string | undefined;
@@ -58,8 +58,9 @@ interface SelectContextValue {
   triggerId: string;
   listId: string;
   disabled: boolean;
-  placement: Placement;
-  setPlacement: (p: Placement) => void;
+  placement: SelectPlacement;
+  fixedPlacement?: SelectPlacement;
+  setPlacement: (p: SelectPlacement) => void;
 }
 
 const SelectContext = createContext<SelectContextValue | null>(null);
@@ -89,6 +90,7 @@ export interface SelectProps {
    */
   onOpenChange?: (open: boolean) => void;
   disabled?: boolean;
+  placement?: SelectPlacement;
   className?: string;
   children: ReactNode;
 }
@@ -101,6 +103,7 @@ export function Select({
   defaultOpen = false,
   onOpenChange,
   disabled = false,
+  placement: fixedPlacement,
   className,
   children,
 }: SelectProps) {
@@ -111,12 +114,16 @@ export function Select({
   const [internal, setInternal] = useState(defaultValue);
   const [query, setQuery] = useState("");
   const [labels, setLabels] = useState<Map<string, string>>(new Map());
-  const [placement, setPlacement] = useState<Placement>("bottom");
+  const [placement, setPlacement] = useState<SelectPlacement>(fixedPlacement ?? "bottom");
 
   const controlled = value !== undefined;
   const current = controlled ? value : internal;
   const openControlled = openProp !== undefined;
   const open = openControlled ? openProp : internalOpen;
+
+  useLayoutEffect(() => {
+    if (fixedPlacement) setPlacement(fixedPlacement);
+  }, [fixedPlacement]);
 
   const setOpen = useCallback(
     (next: boolean) => {
@@ -180,6 +187,7 @@ export function Select({
       listId: `${baseId}-list`,
       disabled,
       placement,
+      fixedPlacement,
       setPlacement,
     }),
     [
@@ -195,6 +203,7 @@ export function Select({
       baseId,
       disabled,
       placement,
+      fixedPlacement,
     ],
   );
 
@@ -394,6 +403,10 @@ export function SelectContent({
   // On open, flip upward when there isn't room below and there's more above.
   useLayoutEffect(() => {
     if (!open || inline) return;
+    if (ctx.fixedPlacement) {
+      setPlacement(ctx.fixedPlacement);
+      return;
+    }
     const trigger = document.getElementById(ctx.triggerId);
     const node = innerRef.current;
     if (!trigger || !node) return;
@@ -402,7 +415,7 @@ export function SelectContent({
     const below = window.innerHeight - rect.bottom;
     const above = rect.top;
     setPlacement(below < h + 16 && above > below ? "top" : "bottom");
-  }, [open, inline, ctx.triggerId, setPlacement]);
+  }, [open, inline, ctx.fixedPlacement, ctx.triggerId, setPlacement]);
 
   // Specify EVERY corner + both margins each render. The near edge (facing the
   // trigger) animates flat->round and the gap opens on that side; the far edge
@@ -424,6 +437,7 @@ export function SelectContent({
   // placeholder the moment the panel closes.
   return (
     <motion.div
+      data-side={isTop ? "top" : "bottom"}
       aria-hidden={!open}
       inert={!open}
       initial={false}
@@ -462,7 +476,7 @@ export function SelectContent({
             }
       }
       style={{
-        display: present ? undefined : "none",
+        display: open || present ? undefined : "none",
         transformOrigin: isTop ? "bottom" : "top",
         overflow: "hidden",
         pointerEvents: open ? "auto" : "none",

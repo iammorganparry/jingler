@@ -39,6 +39,23 @@ describe("BeUI production selection primitives", () => {
     expect(onValueChange).toHaveBeenCalledWith("auto");
   });
 
+  it("shows a fixed-top Select immediately on activation", () => {
+    render(
+      <Select value="ask" placement="top">
+        <SelectTrigger ariaLabel="Permission mode">Ask</SelectTrigger>
+        <SelectContent>
+          <SelectItem value="ask">Ask</SelectItem>
+          <SelectItem value="auto">Auto</SelectItem>
+        </SelectContent>
+      </Select>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Permission mode" }));
+    const surface = document.querySelector<HTMLElement>('[data-side="top"]');
+    expect(surface?.getAttribute("aria-hidden")).toBe("false");
+    expect(surface?.style.display).not.toBe("none");
+  });
+
   it("uses Combobox for a searchable choice", () => {
     const onValueChange = vi.fn();
     render(

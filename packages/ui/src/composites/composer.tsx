@@ -206,7 +206,7 @@ function ComposerSelect<T extends string>({
 }) {
   const current = options.find((option) => option.value === value);
   return (
-    <Select value={value} onValueChange={(next) => onSelect?.(next as T)} disabled={disabled} className="min-w-0">
+    <Select value={value} onValueChange={(next) => onSelect?.(next as T)} disabled={disabled} placement={inlineContent ? undefined : "top"} className="min-w-0">
       <SelectTrigger ariaLabel={ariaLabel} className={cn("h-8 w-auto max-w-52 rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-surface focus-visible:ring-2", className)}>
         <span className="flex min-w-0 items-center gap-1.5">
           {icon && <span className="grid size-4 shrink-0 place-items-center text-muted-foreground [&_svg]:size-3.5">{icon}</span>}
@@ -914,7 +914,7 @@ export function Composer({
           ) : (
             <>
               {onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
-              {providerCatalog && <ProviderModelBrowser catalog={providerCatalog} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
+              {providerCatalog && <ProviderModelBrowser catalog={providerCatalog} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} placement="top" className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
               <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
               {(!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
             </>

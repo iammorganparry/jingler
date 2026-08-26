@@ -144,7 +144,30 @@ test("Auto mode runs the command without pausing for approval", async ({ launchA
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.click()
   // Switch to Auto via the composer's mode chip (seeded as accept-edits).
-  await window.getByRole("button", { name: "Accept Edits", exact: true }).click()
+  const mode = window.getByRole("button", { name: "Accept Edits", exact: true })
+  const opened = await mode.evaluate((element) => new Promise<{ latency: number; side: string | null; above: boolean }>((resolve, reject) => {
+    const trigger = element as HTMLButtonElement
+    const surface = trigger.parentElement?.querySelector<HTMLElement>("[data-side]")
+    if (!surface) return reject(new Error("Composer Select surface is missing"))
+    const started = performance.now()
+    const finish = () => {
+      if (surface.getAttribute("aria-hidden") !== "false" || getComputedStyle(surface).display === "none") return false
+      const triggerRect = trigger.getBoundingClientRect()
+      const surfaceRect = surface.getBoundingClientRect()
+      resolve({ latency: performance.now() - started, side: surface.dataset.side ?? null, above: surfaceRect.bottom <= triggerRect.top + 1 })
+      return true
+    }
+    const observer = new MutationObserver(() => {
+      if (finish()) observer.disconnect()
+    })
+    observer.observe(surface, { attributes: true, attributeFilter: ["aria-hidden", "style"] })
+    trigger.click()
+    if (finish()) observer.disconnect()
+    setTimeout(() => reject(new Error("Composer Select did not become visible")), 500)
+  }))
+  expect(opened.side).toBe("top")
+  expect(opened.above).toBe(true)
+  expect(opened.latency).toBeLessThan(100)
   await window.getByRole("option", { name: /^Auto\b/ }).click()
 
   await composer.pressSequentially("Add rate limiting.")
