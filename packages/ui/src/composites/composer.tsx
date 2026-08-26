@@ -26,6 +26,7 @@ import {
   MousePointer2,
   Plus,
   Server,
+  SlidersHorizontal,
   Sparkles,
   Square,
 } from "lucide-react";
@@ -192,6 +193,7 @@ function ComposerSelect<T extends string>({
   ariaLabel,
   disabled = false,
   className,
+  inlineContent = false,
 }: {
   value: T;
   options: ReadonlyArray<ComposerOption<T>>;
@@ -200,6 +202,7 @@ function ComposerSelect<T extends string>({
   ariaLabel?: string;
   disabled?: boolean;
   className?: string;
+  inlineContent?: boolean;
 }) {
   const current = options.find((option) => option.value === value);
   return (
@@ -210,7 +213,7 @@ function ComposerSelect<T extends string>({
           <span className="truncate text-muted-foreground">{current?.label ?? value}</span>
         </span>
       </SelectTrigger>
-      <SelectContent className="right-auto w-52 shadow-none">
+      <SelectContent inline={inlineContent} className={cn("right-auto w-52 shadow-none", inlineContent && "mt-1 w-full")}>
         {options.map((option) => <SelectItem key={option.value} value={option.value} className="py-2"><span className="flex min-w-0 flex-col"><span className="truncate text-sm text-text-bright">{option.label}</span>{option.description && <span className="truncate text-xs leading-4 text-muted-foreground">{option.description}</span>}</span></SelectItem>)}
       </SelectContent>
     </Select>
@@ -396,12 +399,25 @@ export function Composer({
   // the glyph from drifting out of step with the label beside it.
   const reasoningChoice: ReasoningChoice | "off" =
     thinkingEnabled === false ? "off" : (reasoningEffort ?? "default");
+  const environmentOptions: ReadonlyArray<ComposerOption<string>> = [
+    { value: "__local__", label: <span className="inline-flex min-w-0 items-center gap-1.5"><Monitor size={13} className="flex-none" aria-hidden data-environment-icon="local" /><span className="truncate">Local</span></span> },
+    ...environments.map((environment) => ({ value: environment.id, label: <span className="inline-flex min-w-0 items-center gap-1.5">{environment.kind === "managed" ? <Cloud size={13} className="flex-none" aria-hidden data-environment-icon="cloud" /> : <Server size={13} className="flex-none" aria-hidden data-environment-icon="remote" />}<span className="truncate">{environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}</span></span> }))
+  ];
+  const setReasoningChoice = (value: ReasoningChoice | "off") =>
+    onSetReasoning?.(
+      value === "default"
+        ? undefined
+        : value === "off"
+          ? { enabled: false }
+          : { enabled: true, effort: value },
+    );
 
   // The pane's tier (see `session-pane.tsx`). The composer sits in a 760px
   // reading column, so above `wide` it always has its full width; below it, the
   // column is the pane and every pixel is contested.
   const tier = useWidthTier();
   const roomy = atLeast(tier, "wide");
+  const compactSettings = !atLeast(tier, "mid");
 
   const prompt = placeholder ?? "Message the agent…";
 
@@ -416,6 +432,7 @@ export function Composer({
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Shims, so every call site below reads/writes exactly as it did when this was
   // plain local state — including the `setAttachments(prev => …)` updater form.
@@ -877,52 +894,30 @@ export function Composer({
               />
             </button>
           )}
-          {onSetEnvironment && (
-            <ComposerSelect<string>
-              value={environmentId ?? "__local__"}
-              options={[
-                { value: "__local__", label: <span className="inline-flex min-w-0 items-center gap-1.5"><Monitor size={13} className="flex-none" aria-hidden data-environment-icon="local" /><span className="truncate">Local</span></span> },
-                ...environments.map((environment) => ({ value: environment.id, label: <span className="inline-flex min-w-0 items-center gap-1.5">{environment.kind === "managed" ? <Cloud size={13} className="flex-none" aria-hidden data-environment-icon="cloud" /> : <Server size={13} className="flex-none" aria-hidden data-environment-icon="remote" />}<span className="truncate">{environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}</span></span> }))
-              ]}
-              onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)}
-              disabled={environmentPending}
-              ariaLabel="Execution environment"
-              className="max-w-[150px]"
-            />
-          )}
-          {providerCatalog && (
-            <ProviderModelBrowser
-              catalog={providerCatalog}
-              connectionId={connectionId}
-              modelId={modelId}
-              onSelect={onSetModel}
-              className={roomy ? "max-w-[190px]" : "max-w-[112px]"}
-            />
-          )}
-          <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
-          {(!selectedModel || reasoningEfforts.length > 0) && (
-            <ComposerSelect
-              value={reasoningChoice}
-              options={reasoningOptions}
-              onSelect={(value) =>
-                onSetReasoning?.(
-                  value === "default"
-                    ? undefined
-                    : value === "off"
-                      ? { enabled: false }
-                      : { enabled: true, effort: value },
-                )
-              }
-              ariaLabel="Thinking strength"
-              icon={
-                <SignalBars
-                  level={reasoningLevel(reasoningEfforts, reasoningChoice)}
-                  total={reasoningEfforts.length}
-                  slashed={thinkingEnabled === false}
-                />
-              }
-              className="max-w-[132px]"
-            />
+          {compactSettings ? (
+            <MorphPopover open={settingsOpen} onOpenChange={setSettingsOpen}>
+              <MorphPopoverTrigger>
+                <button type="button" aria-label="Composer settings" className="flex h-8 items-center gap-1.5 rounded-xl px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring">
+                  <SlidersHorizontal size={14} aria-hidden />
+                  <span>Settings</span>
+                </button>
+              </MorphPopoverTrigger>
+              <MorphPopoverContent side="top" align="start" sideOffset={8} radius={12} className="w-72 max-w-[calc(100vw-24px)] p-2">
+                <div className="space-y-1.5">
+                  {providerCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={providerCatalog} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
+                  {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
+                  <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Permission</div><ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} inlineContent className="w-full max-w-none" /></div>
+                  {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" inlineContent className="w-full max-w-none" /></div>}
+                </div>
+              </MorphPopoverContent>
+            </MorphPopover>
+          ) : (
+            <>
+              {onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
+              {providerCatalog && <ProviderModelBrowser catalog={providerCatalog} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
+              <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
+              {(!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
+            </>
           )}
           {/* `min-w-[8px]` so the spacer still exists after a wrap — a bare
               `flex-1` on a wrapped line collapses to nothing and the send button

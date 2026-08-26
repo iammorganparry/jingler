@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useEffect, useRef, useState } from "react"
 import type { PermissionMode, ReasoningSetting } from "@jingler/core"
 import { Check, ImagePlus, Search, Sparkles } from "lucide-react"
+import { WidthTierValue } from "../hooks/width-tier.js"
 import { testProviderCatalog } from "../test-support.js"
 import { Composer } from "./composer.js"
 
@@ -243,6 +244,17 @@ function Comparison({ kind }: { kind: "model" | "select" | "action" }) {
   )
 }
 
+function CompactSettingsFixture() {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() =>
+      ref.current?.querySelector<HTMLButtonElement>('button[aria-label="Composer settings"]')?.click()
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  return <WidthTierValue width={450}><div ref={ref}><ComposerFixture /></div></WidthTierValue>
+}
+
 export const CurrentVsProposed: Story = {
   render: () => <Comparison kind="model" />
 }
@@ -251,6 +263,14 @@ export const SelectCurrentVsProposed: Story = {
 }
 export const ActionCurrentVsProposed: Story = {
   render: () => <Comparison kind="action" />
+}
+
+export const ResponsiveSettings: Story = {
+  render: () => (
+    <main className="flex h-screen min-h-[620px] items-end justify-center bg-editor p-4 text-text">
+      <div className="w-[450px] max-w-full"><CompactSettingsFixture /></div>
+    </main>
+  )
 }
 
 export const ProductionLayout: Story = {

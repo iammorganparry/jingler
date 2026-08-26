@@ -74,13 +74,15 @@ export function ProviderModelBrowser({
   connectionId,
   modelId,
   onSelect,
-  className
+  className,
+  inlineContent = false
 }: {
   catalog: ProviderCatalog
   connectionId: ProviderConnectionId | null
   modelId: ProviderModelId | null
   onSelect?: (selection: ProviderModelSelection) => void
   className?: string
+  inlineContent?: boolean
 }) {
   const selections = browsableModels(catalog)
   const providerOrder: ProviderId[] = []
@@ -133,12 +135,13 @@ export function ProviderModelBrowser({
     >
       <SelectTrigger
         ariaLabel={`Model: ${selected?.label ?? modelId ?? "Choose model"}`}
-        className="h-8 w-auto min-w-0 rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-surface focus-visible:ring-2"
+        className={cn("h-8 w-auto min-w-0 rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-surface focus-visible:ring-2", inlineContent && "w-full")}
       >
         <span className="truncate text-muted-foreground">{selected?.label ?? modelId ?? "Choose model"}</span>
       </SelectTrigger>
       <SelectContent
-        className="right-auto w-72 shadow-none"
+        inline={inlineContent}
+        className={cn("right-auto w-72 shadow-none", inlineContent && "mt-1 w-full")}
         search={<SelectSearch autoFocus aria-label="Search models" placeholder="Search models…" />}
       >
         {groups.map((group) => (

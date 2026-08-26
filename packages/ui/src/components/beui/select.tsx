@@ -351,12 +351,14 @@ export interface SelectContentProps {
   className?: string;
   children: ReactNode;
   search?: ReactNode;
+  inline?: boolean;
 }
 
 export function SelectContent({
   className,
   children,
   search,
+  inline = false,
 }: SelectContentProps) {
   const ctx = useSelectContext("SelectContent");
   const innerRef = useRef<HTMLDivElement>(null);
@@ -389,7 +391,7 @@ export function SelectContent({
 
   // On open, flip upward when there isn't room below and there's more above.
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open || inline) return;
     const trigger = document.getElementById(ctx.triggerId);
     const node = innerRef.current;
     if (!trigger || !node) return;
@@ -398,13 +400,13 @@ export function SelectContent({
     const below = window.innerHeight - rect.bottom;
     const above = rect.top;
     setPlacement(below < h + 16 && above > below ? "top" : "bottom");
-  }, [open, ctx.triggerId, setPlacement]);
+  }, [open, inline, ctx.triggerId, setPlacement]);
 
   // Specify EVERY corner + both margins each render. The near edge (facing the
   // trigger) animates flat->round and the gap opens on that side; the far edge
   // stays rounded and its margin pinned to 0. Setting all of them avoids a
   // stranded square corner when the placement flips between opens.
-  const isTop = ctx.placement === "top";
+  const isTop = !inline && ctx.placement === "top";
   const nearGap = open ? 8 : 0;
   const nearRadius = open ? 12 : 0;
 
@@ -466,8 +468,9 @@ export function SelectContent({
       // flush against the trigger, then separates into its own rounded pill;
       // sits above or below depending on available space
       className={cn(
-        "absolute left-0 right-0 z-20 rounded-xl border border-line bg-panel shadow-lg",
-        isTop ? "bottom-full" : "top-full",
+        "z-20 rounded-xl border border-line bg-panel shadow-lg",
+        inline ? "relative inset-auto" : "absolute left-0 right-0",
+        !inline && (isTop ? "bottom-full" : "top-full"),
         className,
       )}
     >
