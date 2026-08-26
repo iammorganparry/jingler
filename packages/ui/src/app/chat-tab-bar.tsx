@@ -1,9 +1,9 @@
-import * as ContextMenu from "@radix-ui/react-context-menu"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { Fragment, useState, type ReactNode } from "react"
 import { Bot, ChevronRight, FileStack, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
+import { ContextMenu } from "../components/context-menu.js"
 import { StatusDot } from "../components/status-dot.js"
 
 export interface ChatTabItem {
@@ -58,24 +58,9 @@ function GroupContextMenu({
   children: ReactNode
 }) {
   return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal>
-        <ContextMenu.Content
-          collisionPadding={8}
-          className="z-50 flex min-w-[180px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
-        >
-          <ContextMenu.Item
-            aria-label={label}
-            onSelect={onSelect}
-            className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[7px] text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
-          >
-            <X className="size-3.5 flex-none text-dim" />
-            {label}
-          </ContextMenu.Item>
-        </ContextMenu.Content>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
+    <ContextMenu items={[{ label, icon: X, onSelect }]}>
+      {children}
+    </ContextMenu>
   )
 }
 

@@ -110,6 +110,7 @@ describe("ContextMenu submenu identity", () => {
     const trigger = screen.getByRole("menuitem", { name: /Split with/ })
     trigger.focus()
     fireEvent.keyDown(trigger, { key: "ArrowRight" })
+    expect(trigger.getAttribute("aria-expanded")).toBe("true")
   }
 
   it("offers every session, even two sharing a title", () => {

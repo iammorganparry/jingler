@@ -1,111 +1,185 @@
-import type { ReactNode } from "react"
-import * as ContextMenuPrimitive from "@radix-ui/react-context-menu"
+import { createPortal } from "react-dom"
+import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type ReactElement, type ReactNode } from "react"
+import { motion, useReducedMotion } from "motion/react"
 import { ChevronRight, type LucideIcon } from "lucide-react"
+import {
+  ContextMenu as BeUIContextMenu,
+  ContextMenuContent,
+  ContextMenuItem as BeUIContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger
+} from "./beui/context-menu.js"
+import { SPRING_LAYOUT, SPRING_PANEL } from "./beui/ease.js"
 import { cn } from "../lib/cn.js"
 
 export interface ContextMenuItem {
-  /** The accessible label, and the React key when no `id` is given. */
   label: string
-  /**
-   * Stable identity, for rows whose LABEL can repeat.
-   *
-   * Static menus (Rename / Archive / Delete) can key on the label safely — those
-   * strings are written here and are unique by construction. Rows built from
-   * DATA cannot: "Split with ▸" is one row per session, labelled with the
-   * session's title, and titles are auto-generated and operator-editable, so two
-   * sessions called "Fix build" is an ordinary Tuesday. Keying those on the label
-   * hands React two children with the same key.
-   *
-   * What that costs today is a console error on every open, which is the whole
-   * of the *observed* damage — both rows do render and each still runs its own
-   * `onSelect` (`context-menu.test.tsx` pins both). The reason to fix it anyway
-   * is that React documents sibling keys as required-unique and its behaviour
-   * with duplicates as undefined, so "it happens to work" is a property of this
-   * version rather than a guarantee — and a menu that errors every time it opens
-   * trains you to ignore the console.
-   *
-   * Named `id` rather than `key` deliberately: `key` on a plain object looks
-   * like React's reserved prop, and would be silently swallowed by React the
-   * first time somebody spread an item onto a component.
-   */
   id?: string
   icon?: LucideIcon
-  /** Ignored when `submenu` is present — a parent row opens rather than acts. */
   onSelect: () => void
-  /** `danger` tints the row red (destructive actions like delete). */
   tone?: "default" | "danger"
-  /** Render a hairline separator above this item. */
   separated?: boolean
-  /**
-   * Nested items, rendered as a flyout (Arc's "Split with ▸"). Present but
-   * EMPTY renders a disabled row rather than a menu that opens onto nothing —
-   * "Split with" with no other sessions is information, not a dead end.
-   */
   submenu?: ReadonlyArray<ContextMenuItem>
 }
 
-/** Identity for React, preferring the explicit one. See `ContextMenuItem.id`. */
 const keyOf = (item: ContextMenuItem): string => item.id ?? item.label
 
-/** Shared by the flyout and the root content, so nesting can't drift in style. */
-const CONTENT_CLASS =
-  "z-50 flex min-w-[168px] flex-col gap-0.5 overflow-hidden rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
+type OpenSubmenu = {
+  item: ContextMenuItem
+  anchor: HTMLButtonElement
+  focusFirst: boolean
+}
 
-const ITEM_CLASS = (danger: boolean) =>
-  cn(
-    "flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[7px] text-[12.5px] outline-none",
-    danger
-      ? "text-red data-[highlighted]:bg-red/10 data-[highlighted]:text-red"
-      : "text-text-body data-[highlighted]:bg-surface data-[highlighted]:text-text-bright",
-    "data-[disabled]:cursor-default data-[disabled]:text-dim data-[disabled]:data-[highlighted]:bg-transparent"
-  )
+function Submenu({
+  state,
+  onClose,
+  onRootClose
+}: {
+  state: OpenSubmenu
+  onClose: () => void
+  onRootClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const reduce = useReducedMotion() ?? false
+  const [active, setActive] = useState(0)
+  const [position, setPosition] = useState({ left: 0, top: 0 })
+  const items = state.item.submenu ?? []
 
-/** One row: a plain item, a disabled item, or a parent that opens a flyout. */
-function Row({ item }: { item: ContextMenuItem }) {
-  const Icon = item.icon
-  const danger = item.tone === "danger"
-  const label = (
-    <>
-      {Icon && <Icon size={13} className="flex-none" />}
-      <span className="flex-1">{item.label}</span>
-    </>
-  )
-  if (item.submenu) {
-    if (item.submenu.length === 0) {
-      return (
-        <ContextMenuPrimitive.Item disabled className={ITEM_CLASS(false)}>
-          {label}
-        </ContextMenuPrimitive.Item>
-      )
-    }
-    return (
-      <ContextMenuPrimitive.Sub>
-        <ContextMenuPrimitive.SubTrigger className={ITEM_CLASS(danger)}>
-          {label}
-          <ChevronRight size={12} className="flex-none text-dim" />
-        </ContextMenuPrimitive.SubTrigger>
-        <ContextMenuPrimitive.Portal>
-          <ContextMenuPrimitive.SubContent className={CONTENT_CLASS} sideOffset={2}>
-            {item.submenu.map((child) => (
-              <Row key={keyOf(child)} item={child} />
-            ))}
-          </ContextMenuPrimitive.SubContent>
-        </ContextMenuPrimitive.Portal>
-      </ContextMenuPrimitive.Sub>
-    )
+  useLayoutEffect(() => {
+    const menu = ref.current
+    if (!menu) return
+    const anchor = state.anchor.getBoundingClientRect()
+    const rect = menu.getBoundingClientRect()
+    const openLeft = anchor.right + 4
+    setPosition({
+      left: openLeft + rect.width <= window.innerWidth - 8 ? openLeft : anchor.left - rect.width - 4,
+      top: Math.min(Math.max(8, anchor.top - 6), window.innerHeight - rect.height - 8)
+    })
+  }, [state])
+
+  useEffect(() => {
+    if (state.focusFirst) ref.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus()
+  }, [state])
+
+  const move = (direction: 1 | -1) => {
+    const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])]
+    if (buttons.length === 0) return
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    const next = current < 0 ? 0 : (current + direction + buttons.length) % buttons.length
+    buttons[next]?.focus()
   }
-  return (
-    <ContextMenuPrimitive.Item onSelect={item.onSelect} className={ITEM_CLASS(danger)}>
-      {label}
-    </ContextMenuPrimitive.Item>
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    event.stopPropagation()
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      move(event.key === "ArrowDown" ? 1 : -1)
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault()
+      const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])]
+      buttons[event.key === "Home" ? 0 : buttons.length - 1]?.focus()
+    } else if (event.key === "ArrowLeft" || event.key === "Escape") {
+      event.preventDefault()
+      onClose()
+      state.anchor.focus()
+    }
+  }
+
+  return createPortal(
+    <motion.div
+      ref={ref}
+      data-context-menu-submenu-portal=""
+      role="menu"
+      aria-label={state.item.label}
+      initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={reduce ? { duration: 0.1 } : SPRING_PANEL}
+      style={position}
+      onKeyDown={onKeyDown}
+      className="fixed z-[101] min-w-56 overflow-hidden rounded-[12px] border border-line bg-panel p-1.5 text-text-bright outline-none [filter:drop-shadow(0_18px_28px_rgba(0,0,0,0.2))]"
+    >
+      {items.map((item, index) => {
+        const Icon = item.icon
+        return (
+          <button
+            key={keyOf(item)}
+            type="button"
+            role="menuitem"
+            onFocus={() => setActive(index)}
+            onPointerMove={(event) => {
+              if (event.pointerType !== "touch") event.currentTarget.focus()
+            }}
+            onClick={() => {
+              item.onSelect()
+              onRootClose()
+            }}
+            className={cn(
+              "relative isolate flex w-full select-none items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-text-bright/15",
+              item.tone === "danger" ? "text-red" : "text-text-bright"
+            )}
+          >
+            {active === index && (
+              <motion.span
+                layoutId="context-submenu-active"
+                className={cn("absolute inset-0 -z-10 rounded-[8px]", item.tone === "danger" ? "bg-red/10" : "bg-text-bright/[0.065]")}
+                transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
+              />
+            )}
+            {Icon && <Icon aria-hidden="true" className="size-4 shrink-0" />}
+            <span className="flex-1">{item.label}</span>
+          </button>
+        )
+      })}
+    </motion.div>,
+    document.body
   )
 }
 
-/**
- * A right-click context menu, styled to match the One Dark dropdowns (see
- * `chip-menu.tsx`). Radix owns positioning, focus, keyboard, and dismissal;
- * `children` is the element the menu opens on (right-click / long-press).
- */
+function Row({
+  item,
+  submenu,
+  setSubmenu
+}: {
+  item: ContextMenuItem
+  submenu: OpenSubmenu | null
+  setSubmenu: (submenu: OpenSubmenu | null) => void
+}) {
+  const Icon = item.icon
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const hasSubmenu = item.submenu !== undefined
+  const disabled = hasSubmenu && item.submenu!.length === 0
+  const openSubmenu = (focusFirst: boolean) => {
+    if (!triggerRef.current || disabled) return
+    setSubmenu({ item, anchor: triggerRef.current, focusFirst })
+  }
+  return (
+    <BeUIContextMenuItem
+      buttonRef={triggerRef}
+      textValue={item.label}
+      disabled={disabled}
+      tone={item.tone === "danger" ? "destructive" : "default"}
+      closeOnSelect={!hasSubmenu}
+      onSelect={hasSubmenu ? () => openSubmenu(true) : item.onSelect}
+      onPointerMove={() => hasSubmenu ? openSubmenu(false) : setSubmenu(null)}
+      onKeyDown={(event) => {
+        if (hasSubmenu && (event.key === "ArrowRight" || event.key === "Enter" || event.key === " ")) {
+          event.preventDefault()
+          openSubmenu(true)
+        } else if (event.key === "ArrowLeft" && submenu) {
+          event.preventDefault()
+          setSubmenu(null)
+        }
+      }}
+      aria-haspopup={hasSubmenu ? "menu" : undefined}
+      aria-expanded={hasSubmenu ? submenu?.item === item : undefined}
+    >
+      {Icon && <Icon aria-hidden="true" className="size-4 shrink-0" />}
+      <span className="flex-1">{item.label}</span>
+      {hasSubmenu && <ChevronRight aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />}
+    </BeUIContextMenuItem>
+  )
+}
+
 export function ContextMenu({
   items,
   children
@@ -113,21 +187,24 @@ export function ContextMenu({
   items: ReadonlyArray<ContextMenuItem>
   children: ReactNode
 }) {
+  const [open, setOpen] = useState(false)
+  const [submenu, setSubmenu] = useState<OpenSubmenu | null>(null)
+  const setRootOpen = (next: boolean) => {
+    setOpen(next)
+    if (!next) setSubmenu(null)
+  }
   return (
-    <ContextMenuPrimitive.Root>
-      <ContextMenuPrimitive.Trigger asChild>{children}</ContextMenuPrimitive.Trigger>
-      <ContextMenuPrimitive.Portal>
-        <ContextMenuPrimitive.Content className={CONTENT_CLASS}>
-          {items.map((item, i) => (
-            <div key={keyOf(item)}>
-              {item.separated && i > 0 && (
-                <ContextMenuPrimitive.Separator className="my-1 h-px bg-line" />
-              )}
-              <Row item={item} />
-            </div>
-          ))}
-        </ContextMenuPrimitive.Content>
-      </ContextMenuPrimitive.Portal>
-    </ContextMenuPrimitive.Root>
+    <BeUIContextMenu open={open} onOpenChange={setRootOpen}>
+      <ContextMenuTrigger>{children as ReactElement<HTMLAttributes<HTMLElement>>}</ContextMenuTrigger>
+      <ContextMenuContent ariaLabel="Actions" className="w-60">
+        {items.map((item, index) => (
+          <div key={keyOf(item)}>
+            {item.separated && index > 0 && <ContextMenuSeparator />}
+            <Row item={item} submenu={submenu} setSubmenu={setSubmenu} />
+          </div>
+        ))}
+      </ContextMenuContent>
+      {submenu && <Submenu state={submenu} onClose={() => setSubmenu(null)} onRootClose={() => setRootOpen(false)} />}
+    </BeUIContextMenu>
   )
 }
