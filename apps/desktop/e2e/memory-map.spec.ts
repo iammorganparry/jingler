@@ -79,7 +79,7 @@ test("Memory map restores explicit navigation state and clears it at an organiza
     await second.window.getByTestId("memory-sidebar-item").click()
     const otherCanvas = second.window.getByTestId("memory-map-canvas")
     await expect(otherCanvas).toBeVisible()
-    await expect(second.window.getByRole("combobox", { name: "Memory organization" })).toHaveValue("org-other")
+    await expect(second.window.getByRole("button", { name: "Memory organization" })).toContainText("Other Team")
     await expect(second.window.getByPlaceholder("Filter nodes")).toHaveValue("")
     await expect(otherCanvas).toHaveAttribute("data-viewport", "0,0,1")
     await expect(second.window.getByTestId("memory-inspector")).toHaveCount(0)

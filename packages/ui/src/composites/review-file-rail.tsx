@@ -9,7 +9,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue
-} from "../components/select.js"
+} from "../components/beui/select.js"
 import { cn } from "../lib/cn.js"
 import type { ReviewFileKind } from "./code-review-view-machine.js"
 import { ReviewFileTree } from "./review-file-tree.js"

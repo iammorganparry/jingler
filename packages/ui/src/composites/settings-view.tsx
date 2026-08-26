@@ -41,6 +41,7 @@ import {
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/beui/select.js"
 import { Callout } from "../components/callout.js"
 import {
   Dialog,
@@ -1042,13 +1043,10 @@ function GeneralSection({
                   Refresh devices
                 </button>
               </div>
-              <select
-                id="offload-target"
-                aria-label="Offload Compute target"
-                className="w-full rounded-md border border-line bg-sunken px-2 py-1.5 text-[12px] text-text-bright"
+              <Select
                 value={offloadTarget.kind}
-                onChange={(event) => {
-                  if (event.target.value === "cloud") saveOffload({ target: { kind: "cloud" } })
+                onValueChange={(value) => {
+                  if (value === "cloud") saveOffload({ target: { kind: "cloud" } })
                   else if (offloadEnvironments[0]) {
                     saveOffload({
                       target: { kind: "owned-device", deviceId: offloadEnvironments[0].id }
@@ -1056,26 +1054,34 @@ function GeneralSection({
                   }
                 }}
               >
-                <option value="cloud">Cloud Sandbox</option>
-                <option value="owned-device" disabled={offloadEnvironments.length === 0}>
-                  Owned device
-                </option>
-              </select>
+                <SelectTrigger ariaLabel="Offload Compute target" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cloud">Cloud Sandbox</SelectItem>
+                  <SelectItem value="owned-device" disabled={offloadEnvironments.length === 0}>
+                    Owned device
+                  </SelectItem>
+                </SelectContent>
+              </Select>
               {offloadTarget.kind === "owned-device" && (
-                <select
-                  aria-label="Owned device for Offload Compute"
-                  className="w-full rounded-md border border-line bg-sunken px-2 py-1.5 text-[12px] text-text-bright"
+                <Select
                   value={offloadTarget.deviceId}
-                  onChange={(event) => saveOffload({
-                    target: { kind: "owned-device", deviceId: event.target.value }
+                  onValueChange={(deviceId) => saveOffload({
+                    target: { kind: "owned-device", deviceId }
                   })}
                 >
-                  {offloadEnvironments.map((environment) => (
-                    <option key={environment.id} value={environment.id}>
-                      {environment.name}{environment.state === "online" ? " · online" : " · offline"}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger ariaLabel="Owned device for Offload Compute" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {offloadEnvironments.map((environment) => (
+                      <SelectItem key={environment.id} value={environment.id}>
+                        {environment.name}{environment.state === "online" ? " · online" : " · offline"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
               <p className="text-[10px] text-dim">
                 The selected target is fail-closed; unavailable devices never fall back to cloud or local execution.

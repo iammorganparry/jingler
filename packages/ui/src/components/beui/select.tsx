@@ -211,12 +211,14 @@ export interface SelectTriggerProps {
   className?: string;
   children: ReactNode;
   ariaLabel?: string;
+  "aria-label"?: string;
 }
 
 export function SelectTrigger({
   className,
   children,
   ariaLabel,
+  "aria-label": ariaLabelAttribute,
 }: SelectTriggerProps) {
   const ctx = useSelectContext("SelectTrigger");
   const isTop = ctx.placement === "top";
@@ -234,7 +236,7 @@ export function SelectTrigger({
       id={ctx.triggerId}
       disabled={ctx.disabled}
       aria-haspopup="listbox"
-      aria-label={ariaLabel}
+      aria-label={ariaLabel ?? ariaLabelAttribute}
       aria-expanded={ctx.open}
       aria-controls={ctx.listId}
       onClick={() => ctx.setOpen(!ctx.open)}
@@ -476,7 +478,7 @@ export function SelectContent({
     >
       <div ref={innerRef} className="p-1">
         {search}
-        <motion.div
+        <motion.ul
           id={ctx.listId}
           role="listbox"
           aria-labelledby={ctx.triggerId}
@@ -485,7 +487,7 @@ export function SelectContent({
           animate={open ? "show" : "hidden"}
         >
           {children}
-        </motion.div>
+        </motion.ul>
       </div>
     </motion.div>
   );
@@ -525,6 +527,7 @@ export function SelectItem({
         type="button"
         role="option"
         aria-selected={selected}
+        data-value={value}
         disabled={disabled}
         onClick={() => ctx.select(value)}
         className={cn(

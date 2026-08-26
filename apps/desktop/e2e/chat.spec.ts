@@ -365,7 +365,7 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
   await expect(rail.locator('[data-item-path="README.md"]')).toHaveCount(0)
 
   await search.clear()
-  await rail.getByRole("combobox", { name: "Filter changed files by type" }).click()
+  await rail.getByRole("button", { name: "Filter changed files by type" }).click()
   await window.getByRole("option", { name: "JSON" }).click()
   await expect(rail.locator('[data-item-path="config.json"]')).toBeVisible()
   await expect(rail.locator('[data-item-path="src/auth.test.ts"]')).toHaveCount(0)

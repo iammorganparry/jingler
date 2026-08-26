@@ -178,8 +178,7 @@ test("historical proposals never surface a queue, and access failures remain saf
     await freeMember.window.getByTestId("memory-sidebar-item").click()
     await expect(freeMember.window.getByText("Choose a team memory vault")).toBeVisible()
     await expect(
-      freeMember.window.getByRole("combobox", { name: "Memory organization" })
-        .locator('option[value="org-free"]')
+      freeMember.window.locator('[role="option"][data-value="org-free"]')
     ).toHaveCount(0)
     await freeMember.app.close()
 

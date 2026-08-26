@@ -1,8 +1,9 @@
 import type { AuthKind, CodexLoginMethod, ProviderId } from "@jingler/core"
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import { Button } from "../components/button.js"
 import { Input } from "../components/input.js"
 import { Spinner } from "../components/loading.js"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/beui/select.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 
 export interface ProviderAuthFormsProps {
@@ -35,7 +36,7 @@ export function ProviderAuthForms({
 }: ProviderAuthFormsProps) {
   const claudeToken = useRef<HTMLInputElement>(null)
   const apiKey = useRef<HTMLInputElement>(null)
-  const apiProvider = useRef<HTMLSelectElement>(null)
+  const [apiProvider, setApiProvider] = useState("anthropic")
   const allows = (kind: AuthKind) => authKinds.includes(kind)
   const isPending = (kind: AuthKind) => pendingAuthKind === kind
 
@@ -48,7 +49,7 @@ export function ProviderAuthForms({
 
   const submitApiKey = () => {
     const key = apiKey.current?.value.trim() ?? ""
-    const providerId = apiProviderId ?? apiProvider.current?.value ?? "anthropic"
+    const providerId = apiProviderId ?? apiProvider
     if (!key) return
     if (apiKey.current) apiKey.current.value = ""
     onConnectApi(providerId, key)
@@ -135,16 +136,17 @@ export function ProviderAuthForms({
           </summary>
           <div className="mt-3 flex gap-2">
             {apiProviderId === undefined && (
-              <select
-                ref={apiProvider}
-                className="rounded-md border border-line bg-canvas px-2 text-[12px] text-text"
-                disabled={busy}
-              >
-                <option value="anthropic">Anthropic API</option>
-                <option value="openai">OpenAI API</option>
-                <option value="google">Google API</option>
-                <option value="openrouter">OpenRouter API</option>
-              </select>
+              <Select value={apiProvider} onValueChange={setApiProvider} disabled={busy} className="w-40">
+                <SelectTrigger ariaLabel="API provider" className="h-8 bg-canvas px-2 py-0 text-[12px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="anthropic">Anthropic API</SelectItem>
+                  <SelectItem value="openai">OpenAI API</SelectItem>
+                  <SelectItem value="google">Google API</SelectItem>
+                  <SelectItem value="openrouter">OpenRouter API</SelectItem>
+                </SelectContent>
+              </Select>
             )}
             <Input
               ref={apiKey}

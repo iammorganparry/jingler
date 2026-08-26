@@ -16,6 +16,7 @@ import {
   ZoomOut
 } from "lucide-react"
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/beui/select.js"
 import { MemoryMapList } from "./memory-map-list.js"
 
 // The WebGL layer pulls in three.js; lazy-load it so it never enters a
@@ -253,17 +254,26 @@ export function MemoryMap({
               className="w-28 bg-transparent text-text outline-none placeholder:text-dim"
             />
           </label>
-          <select aria-label="Relationship filter" value={filters.relationship ?? ""} onChange={(event) => onFiltersChange({ ...filters, relationship: relationshipFrom(event.currentTarget.value) })} className="rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <option value="">All relationships</option>
-            <option value="wikilink">Wikilinks</option><option value="citation">Citations</option><option value="dependency">Dependencies</option><option value="backlink">Backlinks</option><option value="schema">Schema</option>
-          </select>
-          <select aria-label="Topic filter" value={filters.topic ?? ""} onChange={(event) => onFiltersChange({ ...filters, topic: event.currentTarget.value || null })} className="rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <option value="">All topics</option>
-            {graph.clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.label}</option>)}
-          </select>
-          <select aria-label="Freshness filter" value={filters.freshness ?? ""} onChange={(event) => onFiltersChange({ ...filters, freshness: freshnessFrom(event.currentTarget.value) })} className="rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <option value="">All freshness</option><option value="fresh">Fresh</option><option value="aging">Aging</option><option value="stale">Stale</option><option value="unknown">Unknown</option>
-          </select>
+          <Select value={filters.relationship ?? ""} onValueChange={(value) => onFiltersChange({ ...filters, relationship: relationshipFrom(value) })}>
+            <SelectTrigger ariaLabel="Relationship filter" className="h-8 bg-sunken px-2 py-1.5 text-[10.5px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All relationships</SelectItem>
+              <SelectItem value="wikilink">Wikilinks</SelectItem><SelectItem value="citation">Citations</SelectItem><SelectItem value="dependency">Dependencies</SelectItem><SelectItem value="backlink">Backlinks</SelectItem><SelectItem value="schema">Schema</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filters.topic ?? ""} onValueChange={(value) => onFiltersChange({ ...filters, topic: value || null })}>
+            <SelectTrigger ariaLabel="Topic filter" className="h-8 bg-sunken px-2 py-1.5 text-[10.5px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All topics</SelectItem>
+              {graph.clusters.map((cluster) => <SelectItem key={cluster.id} value={cluster.id}>{cluster.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={filters.freshness ?? ""} onValueChange={(value) => onFiltersChange({ ...filters, freshness: freshnessFrom(value) })}>
+            <SelectTrigger ariaLabel="Freshness filter" className="h-8 bg-sunken px-2 py-1.5 text-[10.5px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All freshness</SelectItem><SelectItem value="fresh">Fresh</SelectItem><SelectItem value="aging">Aging</SelectItem><SelectItem value="stale">Stale</SelectItem><SelectItem value="unknown">Unknown</SelectItem>
+            </SelectContent>
+          </Select>
           <button type="button" aria-pressed={filters.healthOnly} onClick={() => onFiltersChange({ ...filters, healthOnly: !filters.healthOnly })} className="rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring">Findings</button>
           <button type="button" aria-pressed={filters.showIsolated} onClick={() => onFiltersChange({ ...filters, showIsolated: !filters.showIsolated })} className="flex items-center gap-1 rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring"><Eye size={11} /> Isolated</button>
         </div>

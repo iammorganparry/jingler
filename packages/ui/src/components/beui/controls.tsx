@@ -13,7 +13,7 @@ import { FAST, SPRING } from "../../lib/motion.js"
 import { Button, type ButtonProps } from "../button.js"
 import { Input } from "../input.js"
 import { Checkbox } from "../checkbox.js"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../select.js"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select.js"
 import { Toggle } from "../toggle.js"
 
 export function ExpandableControl({ icon, label, expanded, onExpandedChange, className }: {

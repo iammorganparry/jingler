@@ -45,7 +45,8 @@ describe("MemoryMap", () => {
     expect(selectEdge).toHaveBeenCalledWith("edge:1")
     fireEvent.click(screen.getByRole("button", { name: "Pan right" }))
     expect(changeViewport).toHaveBeenCalledWith({ x: -50, y: 0, zoom: 1 })
-    fireEvent.change(screen.getByRole("combobox", { name: "Freshness filter" }), { target: { value: "stale" } })
+    fireEvent.click(screen.getByRole("button", { name: "Freshness filter" }))
+    fireEvent.click(screen.getByRole("option", { name: "Stale" }))
     expect(changeFilters).toHaveBeenCalledWith(expect.objectContaining({ freshness: "stale" }))
   })
 

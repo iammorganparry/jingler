@@ -159,6 +159,19 @@ describe("SetupScreen", () => {
     expect(input.type).toBe("password");
   });
 
+  it("submits an API key for the selected BeUI provider", () => {
+    const onConnectApi = vi.fn();
+    render(<SetupScreen {...props({ step: "provider", onConnectApi })} />);
+    fireEvent.click(screen.getByText("Use an API key instead"));
+    fireEvent.click(screen.getByRole("button", { name: "API provider" }));
+    fireEvent.click(screen.getByRole("option", { name: "Google API" }));
+    fireEvent.change(screen.getByPlaceholderText("Provider API key"), {
+      target: { value: "test-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save API key" }));
+    expect(onConnectApi).toHaveBeenCalledWith("google", "test-key");
+  });
+
   it("offers browser and device-code Codex subscription login", () => {
     const onStartCodex = vi.fn();
     render(<SetupScreen {...props({ step: "provider", onStartCodex })} />);

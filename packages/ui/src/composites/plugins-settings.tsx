@@ -42,6 +42,7 @@ import type {
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"
 import { Toggle } from "../components/toggle.js"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/beui/select.js"
 import { pluginSecretSettingMachine } from "./plugin-secret-setting-machine.js"
 
 export interface PluginsSettingsProps {
@@ -169,19 +170,18 @@ function OrdinarySettingControl({
           />
         </div>
       ) : setting.type === "enum" ? (
-        <select
-          id={`plugin-setting-input-${setting.id}`}
-          aria-label={setting.label}
-          value={stringDraft}
-          onChange={(event) => setDraft(event.currentTarget.value)}
-          className={fieldClass}
-        >
-          {(setting.options ?? []).map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
+        <Select value={stringDraft} onValueChange={setDraft}>
+          <SelectTrigger ariaLabel={setting.label} className={fieldClass}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(setting.options ?? []).map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       ) : (
         <input
           id={`plugin-setting-input-${setting.id}`}

@@ -42,6 +42,11 @@ import {
   LoginScreen,
   SetupScreen,
   JinglerApp,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
@@ -161,23 +166,25 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
     >
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-3 py-2">
         <strong className="mr-2 text-[12px] text-text-bright">Memory</strong>
-        <select
-          aria-label="Memory organization"
+        <Select
           value={context.organizationId ?? ""}
-          onChange={(event) =>
-            memory.changeOrganization(event.currentTarget.value)
-          }
-          className="max-w-48 rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onValueChange={memory.changeOrganization}
+          className="max-w-48"
         >
-          {context.organizationId === null && (
-            <option value="">Choose a paid team…</option>
-          )}
-          {context.access?.organizations.map((organization) => (
-            <option key={organization.id} value={organization.id}>
-              {organization.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            ariaLabel="Memory organization"
+            className="h-8 bg-sunken px-2 py-1.5 text-[10.5px]"
+          >
+            <SelectValue placeholder="Choose a paid team…" />
+          </SelectTrigger>
+          <SelectContent>
+            {context.access?.organizations.map((organization) => (
+              <SelectItem key={organization.id} value={organization.id}>
+                {organization.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <label className="flex min-w-40 flex-1 items-center gap-2 rounded-md border border-line bg-sunken px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-ring">
           <Search size={13} className="text-muted-foreground" />
           <span className="sr-only">Search all memory</span>
@@ -192,18 +199,24 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
             className="min-w-0 flex-1 bg-transparent text-[10.5px] text-text outline-none placeholder:text-dim"
           />
         </label>
-        <select
+        <Select
           disabled={context.organizationId === null}
-          aria-label="Memory time range"
           value={context.range}
-          onChange={(event) => memory.changeRange(event.currentTarget.value)}
-          className="rounded-md border border-line bg-sunken px-2 py-1.5 text-[10.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onValueChange={memory.changeRange}
         >
-          <option value="7d">7 days</option>
-          <option value="30d">30 days</option>
-          <option value="90d">90 days</option>
-          <option value="all">All time</option>
-        </select>
+          <SelectTrigger
+            ariaLabel="Memory time range"
+            className="h-8 bg-sunken px-2 py-1.5 text-[10.5px]"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7d">7 days</SelectItem>
+            <SelectItem value="30d">30 days</SelectItem>
+            <SelectItem value="90d">90 days</SelectItem>
+            <SelectItem value="all">All time</SelectItem>
+          </SelectContent>
+        </Select>
         <button
           type="button"
           disabled={context.organizationId === null || memory.exporting}

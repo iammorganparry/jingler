@@ -247,6 +247,30 @@ describe("PluginsSettings", () => {
     expect(onClearSecret).toHaveBeenCalledWith("hello-tab", "hello-tab.api-key")
   })
 
+  it("saves an enum setting selected through BeUI", () => {
+    const onSetSetting = vi.fn(async () => undefined)
+    const withSetting = plugin({
+      manifest: {
+        ...plugin().manifest,
+        contributes: { settings: [{ id: "hello-tab.team", label: "Team", type: "enum", options: ["Platform", "Product"] }] }
+      }
+    } as Partial<LoadedPlugin>)
+
+    render(
+      <PluginsSettings
+        catalog={{ plugins: [withSetting], failed: [] }}
+        {...base}
+        settings={{ "hello-tab": { values: { "hello-tab.team": "Platform" }, secrets: {} } }}
+        onSetSetting={onSetSetting}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Team" }))
+    fireEvent.click(screen.getByRole("option", { name: "Product" }))
+    fireEvent.click(screen.getByText("Save"))
+    expect(onSetSetting).toHaveBeenCalledWith("hello-tab", "hello-tab.team", "Product")
+  })
+
   it("renders and saves an ordinary manifest-declared setting", () => {
     const onSetSetting = vi.fn(async () => undefined)
     const withSetting = plugin({
