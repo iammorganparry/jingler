@@ -61,7 +61,7 @@ Compatibility files remain only where callers rely on an established product API
 | Dock | [`dock`](https://beui.dev/r/dock) | lucide-react, motion | Export `Dock` from `components/beui` |
 | Tooltip | [`tooltip`](https://beui.dev/r/tooltip) | lucide-react, motion | Merge with `components/tooltip.tsx` |
 | Animated Context Menu | [`context-menu`](https://beui.dev/r/context-menu) | lucide-react, motion | Merge with `components/context-menu.tsx` |
-| Popover | [`popover`](https://beui.dev/r/popover) | lucide-react, motion | Merge with `components/popover.tsx` |
+| Popover | [`popover`](https://beui.dev/r/popover) | lucide-react, motion | Use `MorphPopover`; legacy Radix atom deleted |
 | Morphing Modal | [`morphing-modal`](https://beui.dev/r/morphing-modal) | lucide-react, motion | Export `MorphingModal` from `components/beui` |
 | Center Morph Modal | [`center-morph-modal`](https://beui.dev/r/center-morph-modal) | lucide-react, motion | Export `CenterMorphModal` from `components/beui` |
 | Text Animation | [`text-animation`](https://beui.dev/r/text-animation) | motion | Export `TextAnimation` from `components/beui` |
