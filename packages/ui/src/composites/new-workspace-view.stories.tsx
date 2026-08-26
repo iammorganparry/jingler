@@ -387,6 +387,7 @@ function NewSessionStory({
         }}
         showEmpty
         version="2.0.3"
+        newSessionViewActive={open}
         newSessionView={
           open ? (
             <NewWorkspaceView

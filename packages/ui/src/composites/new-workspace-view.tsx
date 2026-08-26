@@ -11,7 +11,6 @@ import type { SessionCreationPhase } from "@jingler/contracts";
 import { useMachine } from "@xstate/react";
 import {
   Check,
-  ChevronDown,
   CircleDot,
   Cloud,
   FolderGit2,
@@ -30,17 +29,12 @@ import { GithubMark } from "../components/github-mark.js";
 import { LinearMark } from "../components/linear-mark.js";
 import { SearchInput } from "../components/search-input.js";
 import {
-  Command,
-  CommandEmpty,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "../components/command.js";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "../components/popover.js";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSearch,
+  SelectTrigger,
+} from "../components/beui/select.js";
 import { cn } from "../lib/cn.js";
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js";
 import { Composer } from "./composer.js";
@@ -213,75 +207,87 @@ function SearchPicker<T extends string>({
   contentClassName?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState("");
   const selected = options.find((option) => option.value === value);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filtered = normalizedQuery
+    ? options.filter((option) =>
+        `${option.label} ${option.keywords ?? ""}`
+          .toLocaleLowerCase()
+          .includes(normalizedQuery),
+      )
+    : options;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={ariaLabel}
-          disabled={disabled}
-          className={cn(
-            "flex h-10 min-w-0 items-center gap-2 rounded-md px-2 text-left text-[13px] text-text outline-none transition-[background-color,color,transform] hover:bg-surface active:scale-[0.96] disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring",
-            triggerClassName,
-          )}
-        >
+    <Select
+      value={value}
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setQuery("");
+      }}
+      onValueChange={(next) => onValueChange(next as T)}
+      disabled={disabled}
+      placement="top"
+      className="min-w-0"
+    >
+      <SelectTrigger
+        ariaLabel={ariaLabel}
+        className={cn(
+          "h-10 min-w-0 rounded-lg border-0 bg-transparent px-2 py-0 text-[13px] shadow-none hover:bg-surface",
+          triggerClassName,
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
           {selected?.icon}
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate",
-              selected ? "text-muted-foreground" : "text-dim",
-            )}
-          >
+          <span className={cn("truncate", selected ? "text-muted-foreground" : "text-dim")}>
             {selected?.label ?? placeholder}
           </span>
-          <ChevronDown size={13} className="flex-none text-dim" aria-hidden />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className={cn("overflow-hidden p-0", contentClassName)}
+        </span>
+      </SelectTrigger>
+      <SelectContent
+        className={cn(
+          "right-auto [&_ul]:max-h-[360px] [&_ul]:overflow-y-auto [&_ul]:pt-2",
+          contentClassName,
+        )}
+        search={
+          <SelectSearch
+            autoFocus
+            wrapperClassName="mb-2"
+            placeholder={searchPlaceholder}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        }
       >
-        <Command loop>
-          <CommandInput autoFocus placeholder={searchPlaceholder} />
-          <CommandList className="max-h-[360px] pt-3">
-            <CommandEmpty>{emptyLabel}</CommandEmpty>
-            {options.map((option) => (
-              <CommandItem
-                key={option.value}
-                value={`${option.label} ${option.keywords ?? ""}`}
-                disabled={option.disabled}
-                onSelect={() => {
-                  onValueChange(option.value);
-                  setOpen(false);
-                }}
-                className="min-h-11 gap-2.5"
-              >
-                {option.icon}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium">
-                    {option.label}
-                  </span>
-                  {option.description && (
-                    <span className="block truncate text-[11px] text-muted-foreground">
-                      {option.description}
-                    </span>
-                  )}
+        {filtered.length === 0 ? (
+          <li className="py-8 text-center text-[12px] text-muted-foreground">
+            {emptyLabel}
+          </li>
+        ) : filtered.map((option) => (
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            textValue={option.label}
+            disabled={option.disabled}
+            className="min-h-11 gap-2.5 py-2"
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-2.5">
+              {option.icon}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium">
+                  {option.label}
                 </span>
-                {option.value === value && (
-                  <Check
-                    size={15}
-                    className="flex-none text-muted-foreground"
-                    aria-hidden
-                  />
+                {option.description && (
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {option.description}
+                  </span>
                 )}
-              </CommandItem>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+              </span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
