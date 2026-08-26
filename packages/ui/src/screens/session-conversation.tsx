@@ -58,8 +58,6 @@ export interface SessionConversationProps {
   onSeparateAll?: (groupId: string) => void
   /** Continuous divider drag, as a fraction of the split's width. */
   onResizePane?: (index: number, delta: number) => void
-  /** Which pane each on-screen session occupies, for the sidebar's badges. */
-  slotBySession?: ReadonlyMap<string, number>
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
   /** Toggle the browser belonging to the named session. */
@@ -253,7 +251,6 @@ export function SessionConversation(props: SessionConversationProps) {
         sessions={props.sessions}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
-        slotBySession={props.slotBySession}
         splitGroups={props.splitGroups}
         activeGroupId={props.activeGroupId}
         onFocusPane={props.onFocusGroupPane}

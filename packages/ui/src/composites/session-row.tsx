@@ -68,7 +68,6 @@ export function SessionRow({
   onArchive,
   onRestore,
   onDelete,
-  slotIndex = null,
   className
 }: {
   session: Session
@@ -103,12 +102,6 @@ export function SessionRow({
   onRestore?: (id: string) => void
   /** Permanently delete a session (the caller confirms first). */
   onDelete?: (id: string) => void | Promise<void>
-  /**
-   * Which grid slot this session currently occupies, or null when it isn't on
-   * screen. Drives the numbered badge — the answer to "where did that one go?"
-   * when four sessions are live at once.
-   */
-  slotIndex?: number | null
   className?: string
 }) {
   // One rollup, three jobs: what the row says, what colour it says it in, and
@@ -229,7 +222,7 @@ export function SessionRow({
    * session grid; the slots downstream are the targets.
    *
    * `effectAllowed = "copyMove"` because a drop doesn't remove the session from
-   * the sidebar — the row stays put and simply gains a slot badge.
+   * the sidebar.
    */
   const dragProps = {
     // Never while renaming: in Chromium a `draggable` ancestor swallows
@@ -241,26 +234,6 @@ export function SessionRow({
       e.dataTransfer.effectAllowed = "copyMove"
     }
   }
-
-  /**
-   * The numbered badge marking a session that's live in the grid. 1-based for
-   * display — the operator counts panes from one, even though slots are indexed
-   * from zero everywhere in the model.
-   */
-  const slotBadge =
-    slotIndex == null ? null : (
-      <span
-        data-testid={`session-slot-badge-${session.id}`}
-        title={`Showing in pane ${slotIndex + 1}`}
-        className="flex-none"
-      >
-        {/* Blue, unlike the neutral `count` badges beside it: this one says "on
-            screen right now", which is a different kind of fact from a PR number. */}
-        <Badge tone="blue" size="xs">
-          {slotIndex + 1}
-        </Badge>
-      </span>
-    )
 
   const commit = () => {
     if (draft === null) return
@@ -296,7 +269,6 @@ export function SessionRow({
           >
             {session.title}
           </span>
-          {slotBadge}
         </div>
         <div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
           <Badge tone={closed ? "red" : "purple"} size="sm">
@@ -399,7 +371,6 @@ export function SessionRow({
               {session.title}
             </span>
           )}
-          {slotBadge}
         </div>
         <div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
           <span

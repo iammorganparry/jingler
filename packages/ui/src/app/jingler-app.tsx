@@ -726,17 +726,6 @@ export function JinglerApp({
   // should answer to.
   const showEmpty = Boolean(renderConversation) && group === null
 
-  // Which pane each ON-SCREEN session sits in, for the sidebar's numbered badges.
-  // Only the active group is badged: those are the panes the numbers refer to,
-  // and the ⌃⇧1..4 shortcuts below address exactly the same set.
-  const paneBySession = useMemo(() => {
-    const map = new Map<string, number>()
-    group?.panes.forEach((p, i) => {
-      map.set(p.sessionId, i)
-    })
-    return map
-  }, [group])
-
   /** Merge a session into the active group at `at` — a drop, or ⌃⇧=. */
   const splitActiveWith = useCallback(
     (sessionId: string, at: number) => {
@@ -1197,7 +1186,6 @@ export function JinglerApp({
         onResizePane={(index, delta) =>
           group && split.resizePane(group.id, index, delta)
         }
-        slotBySession={paneBySession}
         onRenameSession={onRenameSession}
         onToggleBrowser={onToggleBrowser}
         isBrowserActive={isBrowserActive}

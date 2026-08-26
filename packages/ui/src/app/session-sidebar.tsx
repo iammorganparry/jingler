@@ -52,11 +52,6 @@ export interface SessionSidebarProps {
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
   /**
-   * Which pane each on-screen session occupies, for the numbered badges. Absent
-   * when the split isn't wired (stories) — rows then show no badge.
-   */
-  slotBySession?: ReadonlyMap<string, number>
-  /**
    * The splits, so a multi-pane group renders as ONE row (Arc's pill) rather than
    * as N unrelated rows. Groups of one aren't listed here — a one-pane group and
    * a plain session are the same object, and the caller renders it as a
@@ -147,7 +142,6 @@ function SidebarBody({
   sessions,
   environments = [],
   activeSessionId,
-  slotBySession,
   splitGroups,
   activeGroupId,
   onFocusPane,
@@ -349,7 +343,6 @@ function SidebarBody({
         activity={liveActivity?.[s.id]}
         prState={prStates?.[s.id]}
         active={s.id === activeSessionId}
-        slotIndex={slotBySession?.get(s.id) ?? null}
         onSelect={onSelect}
         onRename={onRename}
         onSetPersistent={onSetPersistent}
