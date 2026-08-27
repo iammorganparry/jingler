@@ -17,15 +17,10 @@ import {
   ProviderId,
   ProviderModelId,
   ReasoningEffort,
-  type PlanPrd,
   type ModelCertification
 } from "@jingler/core"
 import { Option, Schema } from "effect"
-import {
-  planTaskProgressFingerprint,
-  scriptedPlanPrd,
-  type DiscoveredProviderModel
-} from "@jingler/cli-adapters"
+import { type DiscoveredProviderModel } from "@jingler/cli-adapters"
 import { scriptedPiScenarioResponses } from "@jingler/cli-adapters/runtime/certification/pi-scenario-fixture"
 import { E2E_PI_CONNECTION_ID, E2E_PI_MODEL_ID, E2E_PI_PROVIDER_ID } from "./fixture-identity.js"
 import {
@@ -51,7 +46,8 @@ export type E2ePiFixture = Schema.Schema.Type<typeof E2ePiFixture>
 
 const PROVIDER_ID = Schema.decodeUnknownSync(ProviderId)(E2E_PI_PROVIDER_ID)
 const MODEL_ID = Schema.decodeUnknownSync(ProviderModelId)(E2E_PI_MODEL_ID)
-const SUBMIT_PLAN_TOOL = "jingler_submit_plan"
+const SUBMIT_PLAN_TOOL = "plannotator_submit_plan"
+const PLAN_WRITE_TOOL = "write"
 const QUESTION_TOOL = "jingler_ask_question"
 const READ_TOOL = "workspace_read_file"
 const WRITE_TOOL = "workspace_write"
@@ -254,22 +250,6 @@ const callTool = (
   fauxAssistantMessage(fauxToolCall(name, input, { id }), {
     stopReason: "toolUse"
   })
-
-const planTaskMarkers = (plan: PlanPrd): ReadonlyArray<string> =>
-  plan.stages.flatMap((stage) =>
-    (stage.tasks ?? []).map(
-      (task) =>
-        `PLAN_TASK stage=${stage.id} fingerprint=${planTaskProgressFingerprint(stage)} task=${task.id} status=completed`
-    )
-  )
-
-const planResultMarkers = (plan: PlanPrd): ReadonlyArray<string> =>
-  plan.stages.flatMap((stage) =>
-    stage.acceptance.map(
-      (criterion) =>
-        `PLAN_RESULT criterion=${criterion.id} status=passed evidence=Deterministic pi completed and verified the planned work.`
-    )
-  )
 
 const browserUrlFrom = (context: PiContext): string => {
   const match = latestOperatorText(context).match(/\[\[browser-url=([^\]]+)\]\]/)
@@ -649,36 +629,36 @@ const reviewResponse = (context: PiContext): ReturnType<typeof fauxAssistantMess
   return fauxAssistantMessage('```json\n{"findings":[]}\n```')
 }
 
+const PLANNOTATOR_E2E_PLAN = [
+  "# Context",
+  "Replace the auth flow with a deterministic test implementation.",
+  "",
+  "# Steps",
+  "- [ ] Implement the auth change",
+  "- [ ] Verify the auth change",
+  "",
+  "# Verification",
+  "Run the focused auth checks."
+].join("\n")
+
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
-  const prompt = latestOperatorText(context)
-  const prompts = operatorText(context)
-  const originalPlanPrompt = prompts.find((text) => text.includes("[[plan]]")) ?? prompt
-  const amended = prompt !== originalPlanPrompt || prompt.includes("[[amendment]]")
-  const plan = scriptedPlanPrd("e2e", amended ? 2 : 1, false, amended)
   const lastMessage = context.messages.at(-1)
-
-  if (lastMessage?.role !== "toolResult" || lastMessage.toolName !== SUBMIT_PLAN_TOOL) {
-    return fauxAssistantMessage(fauxToolCall(SUBMIT_PLAN_TOOL, { plan }), {
-      stopReason: "toolUse"
-    })
+  const submitted = context.messages.some(
+    (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL
+  )
+  if (submitted) {
+    return fauxAssistantMessage(
+      "Implemented and verified the approved plan. [DONE:1] [DONE:2]"
+    )
   }
-  if (toolResultText(lastMessage).includes('"_tag":"Revise"')) {
-    const revised = scriptedPlanPrd("e2e", 2, false, true)
-    return fauxAssistantMessage(fauxToolCall(SUBMIT_PLAN_TOOL, { plan: revised }), {
-      stopReason: "toolUse"
-    })
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === PLAN_WRITE_TOOL) {
+    return callTool(SUBMIT_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-submit")
   }
-
-  const markers = originalPlanPrompt.includes("[[plan-partial-hold]]")
-    ? planTaskMarkers(plan).filter((marker) => marker.includes("stage=s_02 "))
-    : [
-        "Steps 2, 3 and 5 are done.",
-        ...planTaskMarkers(plan),
-        ...(originalPlanPrompt.includes("[[plan-needs-verification]]")
-          ? []
-          : planResultMarkers(plan))
-      ]
-  return fauxAssistantMessage(markers.join("\n"))
+  return callTool(
+    PLAN_WRITE_TOOL,
+    { path: "PLAN.md", content: PLANNOTATOR_E2E_PLAN },
+    "plannotator-write"
+  )
 }
 
 const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {

@@ -2469,6 +2469,25 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String, visible: Schema.Boolean }
   }),
 
+  Rpc.make("PlannotatorPreview.open", {
+    error: BrowserPreviewError,
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      url: Schema.String,
+      bounds: BrowserBounds
+    }
+  }),
+  Rpc.make("PlannotatorPreview.setBounds", {
+    payload: { sessionId: Schema.String, chatId: Schema.String, bounds: BrowserBounds }
+  }),
+  Rpc.make("PlannotatorPreview.setVisible", {
+    payload: { sessionId: Schema.String, chatId: Schema.String, visible: Schema.Boolean }
+  }),
+  Rpc.make("PlannotatorPreview.close", {
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
   // ── Browser control (agent QA) ───────────────────────────────────────────────
   // The SAME embedded browser view as BrowserPreview, but driven by an AGENT
   // rather than the operator — so it can QA a preview URL in the browser the

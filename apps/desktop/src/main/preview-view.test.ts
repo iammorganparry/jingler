@@ -4,6 +4,9 @@ import {
   browserPartitionForAgent,
   fileUrlFor,
   isHttpUrl,
+  isLoopbackHttpUrl,
+  isSameOriginHttpUrl,
+  plannotatorPartition,
   toRect
 } from "./preview-view.js"
 
@@ -29,6 +32,32 @@ describe("isHttpUrl", () => {
     expect(isHttpUrl("localhost:3000")).toBe(false) // no scheme → not a valid URL
     expect(isHttpUrl("")).toBe(false)
     expect(isHttpUrl("not a url")).toBe(false)
+  })
+})
+
+describe("Plannotator preview security", () => {
+  it("accepts only loopback HTTP origins", () => {
+    expect(isLoopbackHttpUrl("http://localhost:19432/review")).toBe(true)
+    expect(isLoopbackHttpUrl("http://127.0.0.1:19432/review")).toBe(true)
+    expect(isLoopbackHttpUrl("http://evil.example/review")).toBe(false)
+    expect(isLoopbackHttpUrl("file:///tmp/review.html")).toBe(false)
+  })
+
+  it("allows in-app routes only on the review server's exact origin", () => {
+    const origin = "http://localhost:19432"
+    expect(isSameOriginHttpUrl("http://localhost:19432/settings", origin)).toBe(true)
+    expect(isSameOriginHttpUrl("http://localhost:19433/settings", origin)).toBe(false)
+    expect(isSameOriginHttpUrl("https://plannotator.ai", origin)).toBe(false)
+    expect(isSameOriginHttpUrl("javascript:alert(1)", origin)).toBe(false)
+  })
+
+  it("uses an ephemeral partition isolated per chat", () => {
+    expect(plannotatorPartition("session-a", "chat-a")).toBe(
+      "jingler-plannotator:session-a:chat-a"
+    )
+    expect(plannotatorPartition("session-a", "chat-a")).not.toBe(
+      plannotatorPartition("session-a", "chat-b")
+    )
   })
 })
 

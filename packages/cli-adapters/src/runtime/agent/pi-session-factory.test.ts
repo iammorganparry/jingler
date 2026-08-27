@@ -174,7 +174,9 @@ describe("pi session creation", () => {
     }, {} as never))
 
     expect(enterPlanMode).toHaveBeenCalledOnce()
-    expect(captured[0]?.tools).toEqual(expect.arrayContaining(["write", "edit"]))
+    expect(captured[0]?.tools).toEqual(
+      expect.arrayContaining(["write", "edit", "plannotator_submit_plan"])
+    )
     expect(captured[0]?.customTools?.map(({ name }) => name)).not.toContain(
       "jingler_submit_plan"
     )

@@ -5,7 +5,6 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
-  Theme,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
   type EventBus,
@@ -68,11 +67,20 @@ interface CapabilityCeilingModule {
 }
 
 const jiti = createJiti(import.meta.url)
-const hostTheme = new Theme(
-  new Proxy({} as ConstructorParameters<typeof Theme>[0], { get: () => "" }),
-  new Proxy({} as ConstructorParameters<typeof Theme>[1], { get: () => "" }),
-  "truecolor"
-)
+const hostTheme = {
+  fg: (_color: string, text: string) => text,
+  bg: (_color: string, text: string) => text,
+  bold: (text: string) => text,
+  italic: (text: string) => text,
+  underline: (text: string) => text,
+  inverse: (text: string) => text,
+  strikethrough: (text: string) => text,
+  getFgAnsi: () => "",
+  getBgAnsi: () => "",
+  getColorMode: () => "truecolor" as const,
+  getThinkingBorderColor: () => (text: string) => text,
+  getBashModeBorderColor: () => (text: string) => text
+} as unknown as ExtensionUIContext["theme"]
 
 const makeExtensionUIContext = (): ExtensionUIContext => ({
   select: async () => undefined,
@@ -410,6 +418,7 @@ const createEmbeddedSession = (
             ...(registry?.capabilitiesFor("plan", "plan").map(({ id }) => id) ?? []),
             "write",
             "edit",
+            "plannotator_submit_plan",
             ...(nativeSubagentsEnabled
               ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
               : [])
@@ -484,7 +493,7 @@ const createEmbeddedSession = (
         message:
           cause instanceof PiSessionFactoryError
             ? cause.message
-            : "Failed to create embedded pi session",
+            : `Failed to create embedded pi session: ${cause instanceof Error ? cause.message : String(cause)}`,
         cause
       })
   })

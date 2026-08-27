@@ -33,7 +33,8 @@ import {
   PlanReview,
   ResizeHandle,
   RuntimeRecoveryCard,
-  useContainerWidth
+  useContainerWidth,
+  useHasNativeEclipsingOverlay
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import { publishFleetAgentFileActivity } from "./agent-file-activity.js"
@@ -78,6 +79,7 @@ import {
   rpcFailureTag
 } from "./rpc-failure.js"
 import { providerRecoveryOf } from "./provider-recovery.js"
+import { useNativeViewBounds } from "./use-native-view-bounds.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
 
@@ -90,6 +92,47 @@ const initialPlanSplitRatio = (): number => {
   } catch {
     return DEFAULT_PLAN_SPLIT_RATIO
   }
+}
+
+function PlannotatorPlanView({
+  sessionId,
+  chatId,
+  url
+}: {
+  readonly sessionId: string
+  readonly chatId: string
+  readonly url: string
+}) {
+  const overlayOpen = useHasNativeEclipsingOverlay()
+  const boundsRef = useNativeViewBounds({
+    active: true,
+    onFirstPaintableRect: (rect) => {
+      void rpc.plannotatorPreviewOpen(sessionId, chatId, url, rect).catch(() => {})
+    },
+    onBoundsChanged: (rect) => {
+      void rpc.plannotatorPreviewSetBounds(sessionId, chatId, rect)
+    }
+  })
+
+  useEffect(() => {
+    void rpc.plannotatorPreviewSetVisible(sessionId, chatId, !overlayOpen)
+  }, [chatId, overlayOpen, sessionId])
+
+  useEffect(
+    () => () => {
+      void rpc.plannotatorPreviewSetVisible(sessionId, chatId, false)
+    },
+    [chatId, sessionId]
+  )
+
+  return (
+    <div className="relative min-h-0 flex-1 bg-editor">
+      <div ref={boundsRef} className="absolute inset-0" />
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] text-dim">
+        Loading Plannotator…
+      </div>
+    </div>
+  )
 }
 
 export function ConversationPane({
@@ -161,6 +204,21 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
+  const plannotatorReviewId = convo.plannotator?.review?.reviewId ?? null
+  const priorPlannotatorReview = useRef<string | null>(null)
+  useEffect(() => {
+    const prior = priorPlannotatorReview.current
+    if (prior !== null && prior !== plannotatorReviewId) {
+      void rpc.plannotatorPreviewClose(session.id, activeChat.id)
+    }
+    priorPlannotatorReview.current = plannotatorReviewId
+  }, [activeChat.id, plannotatorReviewId, session.id])
+  useEffect(
+    () => () => {
+      void rpc.plannotatorPreviewClose(session.id, activeChat.id)
+    },
+    [activeChat.id, session.id]
+  )
   const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
     string | undefined | null
   >(null)
@@ -223,6 +281,15 @@ export function ConversationPane({
       onPlanDraftAvailable()
     }
   }, [activeChat.id, convo.planDraftPresentationNonce, onPlanDraftAvailable])
+  const presentedPlannotatorReview = useRef<string | null>(null)
+  useEffect(() => {
+    const reviewId = convo.plannotator?.review?.reviewId ?? null
+    if (reviewId === null || reviewId === presentedPlannotatorReview.current) return
+    presentedPlannotatorReview.current = reviewId
+    if (onPlanDraftAvailable !== undefined && claimPlanAutoPresentation(activeChat.id)) {
+      onPlanDraftAvailable()
+    }
+  }, [activeChat.id, convo.plannotator?.review?.reviewId, onPlanDraftAvailable])
   const canonicalPlan = usePlanDocument(session.id, activeChat.id)
   const canApprovePlan =
     canonicalPlan.canApprove &&
@@ -940,6 +1007,15 @@ export function ConversationPane({
       }}
     />
   )
+  const planSurface = convo.plannotator?.review
+    ? (
+        <PlannotatorPlanView
+          sessionId={session.id}
+          chatId={activeChat.id}
+          url={convo.plannotator.review.url}
+        />
+      )
+    : planReview
 
   if (view === "plan") {
     return (
@@ -949,7 +1025,7 @@ export function ConversationPane({
         worktreeRoot={session.worktreePath}
       >
         <div className="flex min-h-0 flex-1 flex-col">
-          {planReview}
+          {planSurface}
         </div>
       </OpenAssetProvider>
     )
@@ -1355,7 +1431,7 @@ export function ConversationPane({
             }}
             className="flex min-h-0 flex-none flex-col overflow-hidden border-l border-hairline"
           >
-            {planReview}
+            {planSurface}
           </div>
         </>
       )}

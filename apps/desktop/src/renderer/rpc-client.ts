@@ -1313,6 +1313,27 @@ export const rpc = {
     visible: boolean
   ): Promise<void> =>
     run((c) => c.BrowserPreview.setVisible({ sessionId, chatId, visible })),
+  plannotatorPreviewOpen: (
+    sessionId: string,
+    chatId: string,
+    url: string,
+    bounds: BrowserBounds
+  ): Promise<void> =>
+    run((c) => c.PlannotatorPreview.open({ sessionId, chatId, url, bounds })),
+  plannotatorPreviewSetBounds: (
+    sessionId: string,
+    chatId: string,
+    bounds: BrowserBounds
+  ): Promise<void> =>
+    run((c) => c.PlannotatorPreview.setBounds({ sessionId, chatId, bounds })),
+  plannotatorPreviewSetVisible: (
+    sessionId: string,
+    chatId: string,
+    visible: boolean
+  ): Promise<void> =>
+    run((c) => c.PlannotatorPreview.setVisible({ sessionId, chatId, visible })),
+  plannotatorPreviewClose: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.PlannotatorPreview.close({ sessionId, chatId })),
   // ── Auth ─────────────────────────────────────────────────────────────────
   /** The current authenticated session, or null when signed out. */
   authGetSession: (): Promise<AuthSession | null> =>
