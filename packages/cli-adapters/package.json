@@ -67,7 +67,9 @@
     "@octokit/webhooks": "^14.2.0",
     "effect": "^3.21.4",
     "jiti": "^2.7.0",
+    "jsonc-parser": "^3.3.1",
     "pi-subagents": "0.57.0",
+    "proper-lockfile": "4.1.2",
     "typescript": "^7.0.2",
     "ws": "^8.18.0",
     "xstate": "^5.32.4",
@@ -77,6 +79,7 @@
     "@effect/platform-node": "^0.107.0",
     "@jingler/tsconfig": "workspace:*",
     "@types/node": "^24.0.0",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/ws": "^8.18.1",
     "tsx": "^4.23.1"
   }

@@ -118,6 +118,7 @@ const reconcileSnapshot = (
   for (const node of current.nodes) {
     const clock = clockFor(nodeClocks, node.id)
     if (
+      snapshot.omitted === 0 &&
       ACTIVE_STATUSES.has(node.status) &&
       !activeIds.has(node.id) &&
       (clock?.registryRevision ?? node.registryRevision) <= snapshot.registryRevision

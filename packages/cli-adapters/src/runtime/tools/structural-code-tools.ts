@@ -25,7 +25,7 @@ export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string)
     outputBudget: 32_000,
     cancellable: false,
     idempotency: "safe",
-    execute: ({ symbol, kind }) => Promise.resolve(structuralPreview(cwd, symbol, kind))
+    execute: ({ symbol, kind }, context) => structuralPreview(cwd, symbol, kind, context.signal)
   })
   registry.register({
     id: "structural_edit",
@@ -43,12 +43,11 @@ export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string)
     outputBudget: 16_000,
     cancellable: false,
     idempotency: "keyed",
-    execute: async ({ symbol, kind, newName, previewToken }) => {
-      const preview = structuralPreview(cwd, symbol, kind)
+    execute: async ({ symbol, kind, newName, previewToken }, context) => {
+      const preview = await structuralPreview(cwd, symbol, kind, context.signal)
       if (preview.value.previewToken !== previewToken) throw new Error("Structural preview is stale; run structural_search again")
       return applyIdentifierEdits(cwd, preview.value.matches, symbol, newName, {
-        kind,
-        token: previewToken
+        preview: { kind, token: previewToken }
       })
     }
   })

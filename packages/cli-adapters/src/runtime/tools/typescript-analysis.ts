@@ -1,7 +1,12 @@
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs"
-import { link, lstat, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
+import { realpathSync } from "node:fs"
+import { readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
+import { execFile } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
-import { relative, resolve, sep } from "node:path"
+import { createRequire } from "node:module"
+import { promisify } from "node:util"
+import { basename, dirname, extname, relative, resolve, sep } from "node:path"
+import { parse } from "jsonc-parser"
+import { lock } from "proper-lockfile"
 import { API, DiagnosticCategory, type Project, type TimingInfo } from "typescript/unstable/sync"
 import { ScriptTarget } from "typescript/unstable/ast"
 import { isCallExpression, isIdentifier } from "typescript/unstable/ast/is"
@@ -26,36 +31,164 @@ interface NativeProject {
   readonly api: API
   readonly project: Project
   readonly root: string
+  readonly allowedPaths: ReadonlySet<string> | null
 }
 
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/u
+const PROJECT_RESOURCE = /\.(?:json|[cm]?[jt]sx?)$/u
 const fail = (message: string): ToolError => new ToolError("execution-failed", message)
 const contained = (root: string, path: string): boolean => path === root || path.startsWith(`${root}${sep}`)
 
-const sourcePaths = (root: string): ReadonlyArray<string> => {
+const MAX_WORKSPACE_PATHS = 20_000
+const MAX_SOURCE_BYTES = 512 * 1024 * 1024
+const MAX_SINGLE_SOURCE_BYTES = 25 * 1024 * 1024
+const MAX_DEPENDENCY_FILES = 100_000
+const MAX_DEPENDENCY_BYTES = 1024 * 1024 * 1024
+const MAX_PROJECTS = 64
+const MAX_CONFIG_BYTES = 1024 * 1024
+const execFileAsync = promisify(execFile)
+const EXCLUDED_DIRECTORIES = new Set([".git", ".jingler", "node_modules", "dist", "out", "release"])
+
+const fallbackWorkspacePaths = async (root: string, signal?: AbortSignal): Promise<ReadonlyArray<string>> => {
   const found: string[] = []
-  const visit = (directory: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  const visit = async (directory: string): Promise<void> => {
+    signal?.throwIfAborted()
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (found.length >= MAX_WORKSPACE_PATHS) throw fail(`Workspace analysis exceeds ${MAX_WORKSPACE_PATHS} files`)
       const path = resolve(directory, entry.name)
-      if (entry.isFile() && SOURCE_FILE.test(path)) found.push(path)
-      else if (entry.isDirectory() && ![".git", ".jingler", "node_modules", "dist", "out", "release"].includes(entry.name)) visit(path)
+      if (entry.isFile()) found.push(relative(root, path))
+      else if (entry.isDirectory() && !EXCLUDED_DIRECTORIES.has(entry.name)) await visit(path)
     }
   }
-  visit(root)
+  await visit(root)
   return found.sort()
 }
 
-const configPaths = (root: string, file?: string): ReadonlyArray<string> => {
+const SOURCE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(|\bimport\s*|\brequire\s*\(|<reference\s+path=)\s*["']([^"']+)["']/gu
+const preflightCache = new Map<string, { readonly expiresAt: number; readonly value: Promise<void> }>()
+
+const inspectBoundedSourceTree = async (root: string, signal?: AbortSignal): Promise<void> => {
+  let workspaceFiles = 0
+  let workspaceBytes = 0
+  let dependencyFiles = 0
+  let dependencyBytes = 0
+  const visited = new Set<string>()
+  const inspectFile = async (path: string, dependency: boolean): Promise<void> => {
+    if (!PROJECT_RESOURCE.test(path)) return
+    const size = (await stat(path)).size
+    if (size > MAX_SINGLE_SOURCE_BYTES) throw fail("Workspace is too large for synchronous TypeScript analysis")
+    if (dependency) {
+      dependencyFiles += 1
+      dependencyBytes += size
+      if (dependencyFiles > MAX_DEPENDENCY_FILES || dependencyBytes > MAX_DEPENDENCY_BYTES) {
+        throw fail("TypeScript dependency graph is too large for synchronous analysis")
+      }
+      return
+    }
+    workspaceFiles += 1
+    workspaceBytes += size
+    if (workspaceFiles > MAX_WORKSPACE_PATHS || workspaceBytes > MAX_SOURCE_BYTES) {
+      throw fail("Workspace is too large for synchronous TypeScript analysis")
+    }
+    if (!SOURCE_FILE.test(path)) return
+    const source = await readFile(path, "utf8")
+    for (const match of source.matchAll(SOURCE_IMPORT)) {
+      const specifier = match[1]!
+      if (!(specifier.startsWith(".") || specifier.startsWith("/"))) {
+        if (specifier.startsWith("node:")) continue
+        try {
+          if (!contained(root, await realpath(createRequire(path).resolve(specifier)))) {
+            throw fail("TypeScript dependency resolves outside the workspace")
+          }
+        } catch (cause) {
+          if (cause instanceof ToolError) throw cause
+        }
+        continue
+      }
+      const target = resolve(dirname(path), specifier)
+      if (!contained(root, target)) throw fail("TypeScript source import escapes the workspace")
+      for (const candidate of [target, ...[".ts", ".tsx", ".js", ".jsx", ".json"].map((extension) => `${target}${extension}`)]) {
+        try {
+          if (!contained(root, await realpath(candidate))) throw fail("TypeScript source import resolves outside the workspace")
+          break
+        } catch (cause) {
+          if (cause instanceof ToolError) throw cause
+          if (!(cause instanceof Error && Reflect.get(cause, "code") === "ENOENT")) throw cause
+        }
+      }
+    }
+  }
+  const visit = async (directory: string, dependency: boolean): Promise<void> => {
+    signal?.throwIfAborted()
+    const canonicalDirectory = await realpath(directory)
+    if (!contained(root, canonicalDirectory) || visited.has(canonicalDirectory)) return
+    visited.add(canonicalDirectory)
+    for (const entry of await readdir(canonicalDirectory, { withFileTypes: true })) {
+      if ([".git", ".jingler", ".agents"].includes(entry.name)) continue
+      const path = resolve(canonicalDirectory, entry.name)
+      if (entry.isDirectory()) {
+        await visit(path, dependency || entry.name === "node_modules")
+      } else if (entry.isSymbolicLink()) {
+        const target = await realpath(path)
+        if (!contained(root, target)) throw fail("TypeScript project symlink resolves outside the workspace")
+        const targetStat = await stat(target)
+        if (targetStat.isDirectory()) await visit(target, dependency)
+        else if (targetStat.isFile()) await inspectFile(target, dependency)
+      } else if (entry.isFile()) {
+        await inspectFile(path, dependency)
+      }
+    }
+  }
+  await visit(root, false)
+}
+
+const assertBoundedSourceTree = async (root: string, signal?: AbortSignal): Promise<void> => {
+  const cached = preflightCache.get(root)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  const value = inspectBoundedSourceTree(root, signal)
+  preflightCache.set(root, { expiresAt: Date.now() + 30_000, value })
+  try {
+    await value
+  } catch (cause) {
+    preflightCache.delete(root)
+    throw cause
+  }
+}
+
+const workspacePaths = async (root: string, signal?: AbortSignal): Promise<ReadonlyArray<string>> => {
+  let stdout: string
+  try {
+    ({ stdout } = await execFileAsync(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      { cwd: root, encoding: "utf8", maxBuffer: 4 * 1024 * 1024, signal }
+    ))
+  } catch (cause) {
+    if (signal?.aborted) throw cause
+    return fallbackWorkspacePaths(root, signal)
+  }
+  const paths = stdout.split("\0").filter(Boolean)
+  if (paths.length > MAX_WORKSPACE_PATHS) throw fail(`Workspace analysis exceeds ${MAX_WORKSPACE_PATHS} files`)
+  return paths.sort()
+}
+
+const sourcePaths = async (root: string, signal?: AbortSignal): Promise<ReadonlyArray<string>> =>
+  (await workspacePaths(root, signal)).filter((path) => SOURCE_FILE.test(path)).map((path) => resolve(root, path))
+
+const configPaths = async (root: string, file?: string, signal?: AbortSignal): Promise<ReadonlyArray<string>> => {
   if (file) {
-    const requested = realpathSync(resolve(root, file))
+    const requested = await realpath(resolve(root, file))
     if (!contained(root, requested)) throw fail("Requested source resolves outside the workspace")
     let directory = SOURCE_FILE.test(requested) ? resolve(requested, "..") : requested
     while (contained(root, directory)) {
+      signal?.throwIfAborted()
       const candidate = resolve(directory, "tsconfig.json")
-      if (existsSync(candidate)) {
-        const canonical = realpathSync(candidate)
+      try {
+        const canonical = await realpath(candidate)
         if (!contained(root, canonical)) throw fail("tsconfig.json resolves outside the workspace")
         return [canonical]
+      } catch (cause) {
+        if (!(cause instanceof Error && Reflect.get(cause, "code") === "ENOENT")) throw cause
       }
       const parent = resolve(directory, "..")
       if (parent === directory) break
@@ -63,28 +196,96 @@ const configPaths = (root: string, file?: string): ReadonlyArray<string> => {
     }
     throw fail(`No tsconfig.json contains ${file}`)
   }
-  const found: string[] = []
-  const visit = (directory: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (entry.name === "tsconfig.json") {
-        const canonical = realpathSync(resolve(directory, entry.name))
-        if (!contained(root, canonical)) throw fail("tsconfig.json resolves outside the workspace")
-        found.push(canonical)
-      }
-      else if (entry.isDirectory() && ![".git", ".jingler", "node_modules", "dist", "out", "release"].includes(entry.name)) visit(resolve(directory, entry.name))
-    }
-  }
-  visit(root)
+  const found = await Promise.all((await workspacePaths(root, signal))
+    .filter((path) => basename(path) === "tsconfig.json")
+    .map((path) => realpath(resolve(root, path))))
   if (found.length === 0) throw fail(`No TypeScript project found under ${root}`)
+  if (found.length > MAX_PROJECTS) throw fail(`Workspace analysis exceeds ${MAX_PROJECTS} TypeScript projects`)
+  if (found.some((path) => !contained(root, path))) throw fail("tsconfig.json resolves outside the workspace")
   return found
 }
 
-const withProjects = <Value>(cwd: string, file: string | undefined, run: (projects: ReadonlyArray<NativeProject>) => Value): AnalysisResult<Value> => {
-  const root = realpathSync(cwd)
+const objectRecord = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
+
+const strings = (value: unknown): ReadonlyArray<string> =>
+  typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+
+const validateProjectConfigs = async (
+  root: string,
+  initial: ReadonlyArray<string>,
+  signal?: AbortSignal
+): Promise<void> => {
+  const pending = [...initial]
+  const visited = new Set<string>()
+  let bytes = 0
+  const containedPath = (base: string, path: string): string => {
+    const absolute = resolve(base, path)
+    if (!contained(root, absolute)) throw fail("TypeScript project path escapes the workspace")
+    return absolute
+  }
+  while (pending.length > 0) {
+    signal?.throwIfAborted()
+    const config = await realpath(pending.pop()!)
+    if (!contained(root, config)) throw fail("TypeScript config resolves outside the workspace")
+    if (visited.has(config)) continue
+    visited.add(config)
+    if (visited.size > MAX_PROJECTS) throw fail(`Workspace analysis exceeds ${MAX_PROJECTS} TypeScript projects`)
+    const size = (await stat(config)).size
+    bytes += size
+    if (bytes > MAX_CONFIG_BYTES) throw fail("TypeScript configuration exceeds 1 MB")
+    const source = await readFile(config, "utf8")
+    const parsed = objectRecord(parse(source))
+    const base = dirname(config)
+    for (const value of strings(parsed.extends)) {
+      let target: string
+      if (value.startsWith(".") || value.startsWith("/") || value.startsWith("..")) {
+        target = containedPath(base, value)
+        if (extname(target) === "") target = `${target}.json`
+      } else {
+        target = createRequire(config).resolve(value)
+      }
+      const canonical = await realpath(target)
+      if (!contained(root, canonical)) throw fail("Extended TypeScript config escapes the workspace")
+      pending.push(canonical)
+    }
+    for (const reference of Array.isArray(parsed.references) ? parsed.references : []) {
+      const path = objectRecord(reference).path
+      if (typeof path !== "string") continue
+      const target = containedPath(base, path)
+      pending.push(await realpath(extname(target) === ".json" ? target : resolve(target, "tsconfig.json")))
+    }
+    for (const path of [...strings(parsed.files), ...strings(parsed.include), ...strings(parsed.exclude)]) {
+      containedPath(base, path.replace(/[?*].*$/u, ""))
+    }
+    const compiler = objectRecord(parsed.compilerOptions)
+    for (const key of ["baseUrl", "rootDir", "outDir", "declarationDir"] as const) {
+      for (const path of strings(compiler[key])) containedPath(base, path)
+    }
+    for (const key of ["typeRoots", "rootDirs"] as const) {
+      for (const path of strings(compiler[key])) containedPath(base, path)
+    }
+    for (const targets of Object.values(objectRecord(compiler.paths))) {
+      for (const path of strings(targets)) containedPath(base, path.replace(/[?*].*$/u, ""))
+    }
+  }
+}
+
+const withProjects = async <Value>(
+  cwd: string,
+  file: string | undefined,
+  run: (projects: ReadonlyArray<NativeProject>) => Value,
+  signal?: AbortSignal
+): Promise<AnalysisResult<Value>> => {
+  const root = await realpath(cwd)
+  await assertBoundedSourceTree(root, signal)
+  const configs = await configPaths(root, file, signal)
+  await validateProjectConfigs(root, configs, signal)
   const api = new API({ cwd: root, collectTiming: true })
   try {
-    const snapshot = api.updateSnapshot({ openProjects: [...configPaths(root, file)] })
-    const projects = snapshot.getProjects().map((project) => ({ api, project, root }))
+    const snapshot = api.updateSnapshot({ openProjects: [...configs] })
+    const allowedPaths = file === undefined ? new Set(await workspacePaths(root, signal)) : null
+    const projects = snapshot.getProjects().map((project) => ({ api, project, root, allowedPaths }))
     if (projects.length === 0) throw fail(`No TypeScript project found under ${root}`)
     const value = run(projects)
     return { engine: "typescript-7-native", value, timing: api.getTimingInfo().totals }
@@ -93,8 +294,15 @@ const withProjects = <Value>(cwd: string, file: string | undefined, run: (projec
   }
 }
 
-const withProject = <Value>(cwd: string, file: string, run: (project: NativeProject) => Value): AnalysisResult<Value> =>
-  withProjects(cwd, file, (projects) => run(projects.find(({ project }) => project.program.getSourceFile(resolve(cwd, file))) ?? projects[0]!))
+const withProject = <Value>(
+  cwd: string,
+  file: string,
+  run: (project: NativeProject) => Value,
+  signal?: AbortSignal
+): Promise<AnalysisResult<Value>> => withProjects(cwd, file, (projects) => {
+  const project = projects.find((candidate) => candidate.project.program.getSourceFile(resolve(cwd, file))) ?? projects[0]!
+  return run(project)
+}, signal)
 
 const location = (project: NativeProject, node: Node): CodeLocation => {
   const source = node.getSourceFile()
@@ -122,22 +330,35 @@ const identifiersIn = (source: SourceFile): ReadonlyArray<Identifier> => {
 const projectIdentifiers = (native: NativeProject): ReadonlyArray<Identifier> =>
   native.project.program.getSourceFileNames().flatMap((file) => {
     const source = native.project.program.getSourceFile(file)
-    return source && !source.isDeclarationFile && contained(native.root, resolve(source.fileName))
+    const path = relative(native.root, resolve(file))
+    return source &&
+      !source.isDeclarationFile &&
+      contained(native.root, resolve(source.fileName)) &&
+      (native.allowedPaths === null || native.allowedPaths.has(path))
       ? identifiersIn(source)
       : []
   })
 
-const targetIdentifier = (native: NativeProject, file: string, symbol: string, line?: number): Identifier => {
+const targetIdentifier = (
+  native: NativeProject,
+  file: string,
+  symbol: string,
+  line?: number,
+  column?: number
+): Identifier => {
   const absolute = resolve(native.root, file)
   if (!(contained(native.root, absolute) && SOURCE_FILE.test(absolute))) throw fail("File must be TypeScript or JavaScript inside the workspace")
   const source = native.project.program.getSourceFile(absolute)
   if (!source) throw fail(`File is not part of the TypeScript project: ${file}`)
-  const found = identifiersIn(source).find((node) => {
+  const matches = identifiersIn(source).filter((node) => {
     if (node.text !== symbol) return false
-    return line === undefined || source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1 === line
+    const point = source.getLineAndCharacterOfPosition(node.getStart(source))
+    return (line === undefined || point.line + 1 === line) &&
+      (column === undefined || point.character + 1 === column)
   })
-  if (!found) throw fail(`Symbol not found: ${symbol}`)
-  return found
+  if (matches.length === 0) throw fail(`Symbol not found: ${symbol}`)
+  if (matches.length > 1) throw fail(`Symbol is ambiguous on line ${line}; provide column`)
+  return matches[0]!
 }
 
 const resolvedReferences = (native: NativeProject, target: Identifier): ReadonlyArray<Node> => {
@@ -161,12 +382,26 @@ const resolvedReferences = (native: NativeProject, target: Identifier): Readonly
   return projectIdentifiers(native).filter((node) => native.project.checker.getSymbolAtLocation(node)?.id === symbol.id)
 }
 
-export const semanticReferences = (cwd: string, file: string, symbol: string, line?: number): AnalysisResult<ReadonlyArray<CodeLocation>> =>
-  withProject(cwd, file, (native) => resolvedReferences(native, targetIdentifier(native, file, symbol, line)).map((node) => location(native, node)))
+export const semanticReferences = (
+  cwd: string,
+  file: string,
+  symbol: string,
+  line?: number,
+  column?: number,
+  signal?: AbortSignal
+): Promise<AnalysisResult<ReadonlyArray<CodeLocation>>> =>
+  withProject(cwd, file, (native) => resolvedReferences(native, targetIdentifier(native, file, symbol, line, column)).map((node) => location(native, node)), signal)
 
-export const codeDefinitions = (cwd: string, file: string, symbol: string, line?: number): AnalysisResult<ReadonlyArray<CodeLocation>> =>
+export const codeDefinitions = (
+  cwd: string,
+  file: string,
+  symbol: string,
+  line?: number,
+  column?: number,
+  signal?: AbortSignal
+): Promise<AnalysisResult<ReadonlyArray<CodeLocation>>> =>
   withProject(cwd, file, (native) => {
-    const target = targetIdentifier(native, file, symbol, line)
+    const target = targetIdentifier(native, file, symbol, line, column)
     const queue: Node[] = [target]
     const definitions = new Map<string, Node>()
     for (let depth = 0; depth < 4 && queue.length > 0; depth++) {
@@ -189,17 +424,29 @@ export const codeDefinitions = (cwd: string, file: string, symbol: string, line?
     const resolved = native.project.checker.getSymbolAtLocation(target)
     if (!resolved) throw fail(`TypeScript could not resolve symbol: ${symbol}`)
     return resolved.declarations.map((handle) => handle.resolve(native.project)).filter((node): node is Node => node !== undefined).map((node) => location(native, node))
-  })
+  }, signal)
 
-export const codeHover = (cwd: string, file: string, symbol: string, line?: number): AnalysisResult<{ readonly type: string }> =>
+export const codeHover = (
+  cwd: string,
+  file: string,
+  symbol: string,
+  line?: number,
+  column?: number,
+  signal?: AbortSignal
+): Promise<AnalysisResult<{ readonly type: string }>> =>
   withProject(cwd, file, (native) => {
-    const target = targetIdentifier(native, file, symbol, line)
+    const target = targetIdentifier(native, file, symbol, line, column)
     const type = native.project.checker.getTypeAtLocation(target)
     if (!type) throw fail(`TypeScript could not resolve type: ${symbol}`)
     return { type: native.project.checker.typeToString(type, target) }
-  })
+  }, signal)
 
-export const codeDiagnostics = (cwd: string, file?: string): AnalysisResult<ReadonlyArray<CodeLocation & { readonly category: string; readonly code: number }>> =>
+export const codeDiagnostics = (
+  cwd: string,
+  file?: string,
+  signal?: AbortSignal,
+  limit = 200
+): Promise<AnalysisResult<ReadonlyArray<CodeLocation & { readonly category: string; readonly code: number }>>> =>
   withProjects(cwd, file, (projects) => projects.flatMap((native) => {
     const absolute = file ? resolve(native.root, file) : undefined
     if (absolute && !contained(native.root, absolute)) throw fail("Diagnostic file is outside the workspace")
@@ -219,29 +466,35 @@ export const codeDiagnostics = (cwd: string, file?: string): AnalysisResult<Read
         code: item.code
       }
     })
-  }).slice(0, 200))
+  }).slice(0, limit), signal)
 
-export const structuralMatches = (cwd: string, symbol: string, kind: "identifier" | "call"): AnalysisResult<ReadonlyArray<CodeLocation>> =>
+export const structuralMatches = (
+  cwd: string,
+  symbol: string,
+  kind: "identifier" | "call",
+  signal?: AbortSignal
+): Promise<AnalysisResult<ReadonlyArray<CodeLocation>>> =>
   withProjects(cwd, undefined, (projects) => {
     const matches = projects.flatMap((native) => projectIdentifiers(native)
       .filter((node) => node.text === symbol && (kind === "identifier" || (isCallExpression(node.parent) && node.parent.expression === node)))
       .map((node) => location(native, node)))
     return [...new Map(matches.map((item) => [`${item.path}:${item.line}:${item.column}`, item])).values()]
-  })
+  }, signal)
 
-export const structuralPreview = (
+export const structuralPreview = async (
   cwd: string,
   symbol: string,
-  kind: "identifier" | "call"
-): AnalysisResult<{
+  kind: "identifier" | "call",
+  signal?: AbortSignal
+): Promise<AnalysisResult<{
   readonly matchCount: number
   readonly matches: ReadonlyArray<CodeLocation>
   readonly previewToken: string
-}> => {
-  const result = structuralMatches(cwd, symbol, kind)
-  const root = realpathSync(cwd)
+}>> => {
+  const result = await structuralMatches(cwd, symbol, kind, signal)
+  const root = await realpath(cwd)
   const hash = createHash("sha256").update(JSON.stringify(result.value))
-  for (const path of sourcePaths(root)) hash.update(relative(root, path)).update(readFileSync(path))
+  for (const path of await sourcePaths(root, signal)) hash.update(relative(root, path)).update(await readFile(path))
   return {
     ...result,
     value: {
@@ -252,17 +505,46 @@ export const structuralPreview = (
   }
 }
 
+const acquireEditLocks = async (
+  root: string,
+  paths: ReadonlyArray<string>
+): Promise<() => Promise<void>> => {
+  const releases = await Promise.allSettled([...paths].sort().map((path) => {
+    const absolute = resolve(root, path)
+    if (!contained(root, absolute)) throw fail("Edit path escaped the workspace")
+    return lock(absolute, {
+      lockfilePath: `${absolute}.jingler-edit.lock`,
+      stale: 5_000,
+      update: 1_000,
+      retries: 0,
+      realpath: true
+    })
+  }))
+  const acquired = releases.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
+  const failure = releases.find((result): result is PromiseRejectedResult => result.status === "rejected")
+  if (failure) {
+    await Promise.all(acquired.map((release) => release()))
+    throw fail("Another Jingler edit is already changing these files")
+  }
+  return () => Promise.all(acquired.map((release) => release())).then(() => undefined)
+}
+
 export const applyIdentifierEdits = async (
   cwd: string,
   locations: ReadonlyArray<CodeLocation>,
   oldName: string,
   newName: string,
-  preview?: { readonly kind: "identifier" | "call"; readonly token: string }
+  options?: {
+    readonly preview?: { readonly kind: "identifier" | "call"; readonly token: string }
+    readonly validate?: () => Promise<void>
+  }
 ): Promise<{ readonly files: ReadonlyArray<string>; readonly replacements: number }> => {
   if (!isIdentifierText(newName, ScriptTarget.Latest)) throw new ToolError("invalid-input", "newName must be a valid identifier")
   const grouped = new Map<string, CodeLocation[]>()
   for (const item of locations) grouped.set(item.path, [...(grouped.get(item.path) ?? []), item])
   const root = await realpath(cwd)
+  const releaseLocks = await acquireEditLocks(root, [...grouped.keys()])
+  try {
   const prepared = await Promise.all([...grouped].map(async ([path, entries]) => {
     const absolute = resolve(root, path)
     if (!contained(root, absolute)) throw fail("Edit path escaped the workspace")
@@ -285,67 +567,103 @@ export const applyIdentifierEdits = async (
       backup: `${absolute}.jingler-${process.pid}-${randomUUID()}.backup`
     }
   }))
-  if (preview && structuralPreview(cwd, oldName, preview.kind).value.previewToken !== preview.token) {
+  if (options?.preview && (await structuralPreview(cwd, oldName, options.preview.kind)).value.previewToken !== options.preview.token) {
     throw fail("Structural preview changed before commit; run structural_search again")
   }
   await Promise.all(prepared.map(({ temporary, next, mode }) =>
     writeFile(temporary, next, { encoding: "utf8", flag: "wx", mode })
   ))
-  const linkProbes = await Promise.allSettled(prepared.map(async ({ temporary }) => {
-    const probe = `${temporary}.link-probe`
-    await link(temporary, probe)
-    await rm(probe, { force: true })
-  }))
-  const unsupportedLink = linkProbes.find((result): result is PromiseRejectedResult => result.status === "rejected")
-  if (unsupportedLink) {
-    await Promise.all(prepared.flatMap(({ temporary }) => [
-      rm(temporary, { force: true }),
-      rm(`${temporary}.link-probe`, { force: true })
-    ]))
-    throw fail("Atomic file claiming is unsupported on this filesystem")
+  const backups = await Promise.allSettled(prepared.map(({ backup, original, mode }) =>
+    writeFile(backup, original, { encoding: "utf8", flag: "wx", mode })
+  ))
+  const backupFailure = backups.find((result): result is PromiseRejectedResult => result.status === "rejected")
+  if (backupFailure) {
+    await Promise.all(prepared.flatMap(({ temporary, backup }) => [rm(temporary, { force: true }), rm(backup, { force: true })]))
+    throw fail(backupFailure.reason instanceof Error ? backupFailure.reason.message : "Could not prepare edit backups")
   }
   const restore = async (items: typeof prepared): Promise<void> => {
-    const results = await Promise.allSettled(items.map(async ({ absolute, backup }) => {
-      await link(backup, absolute)
-      await rm(backup, { force: true })
-    }))
+    const results = await Promise.allSettled(items.map(({ absolute, backup }) => rename(backup, absolute)))
     const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
     if (failed) throw fail("Automatic restore failed; original files remain in adjacent .jingler-*.backup files")
   }
-  const claims = await Promise.allSettled(prepared.map(({ absolute, backup }) => rename(absolute, backup)))
-  const claimed = prepared.filter((_, index) => claims[index]?.status === "fulfilled")
-  const claimFailure = claims.find((result): result is PromiseRejectedResult => result.status === "rejected")
-  if (claimFailure) {
-    await restore(claimed)
-    await Promise.all(prepared.map(({ temporary }) => rm(temporary, { force: true })))
-    throw fail(claimFailure.reason instanceof Error ? claimFailure.reason.message : "Could not claim edit files")
-  }
-  const [claimedFiles, claimedContents] = await Promise.all([
-    Promise.all(claimed.map(({ backup }) => lstat(backup))),
-    Promise.all(claimed.map(({ backup }) => readFile(backup, "utf8")))
+  const [currentFiles, currentContents] = await Promise.all([
+    Promise.all(prepared.map(({ absolute }) => stat(absolute))),
+    Promise.all(prepared.map(({ absolute }) => readFile(absolute, "utf8")))
   ])
-  if (claimedContents.some((content, index) => content !== claimed[index]?.original)) {
-    await restore(claimed)
-    await Promise.all(prepared.map(({ temporary }) => rm(temporary, { force: true })))
+  if (currentContents.some((content, index) => content !== prepared[index]?.original) || currentFiles.some((info) => !info.isFile())) {
+    await Promise.all(prepared.flatMap(({ temporary, backup }) => [rm(temporary, { force: true }), rm(backup, { force: true })]))
     throw fail("Edit target changed before commit")
   }
-  if (claimedFiles.some((info) => !info.isFile())) {
-    await restore(claimed)
-    await Promise.all(prepared.map(({ temporary }) => rm(temporary, { force: true })))
-    throw fail("Edit target changed type before commit")
-  }
-  const commits = await Promise.allSettled(prepared.map(({ temporary, absolute }) => link(temporary, absolute)))
+  const commits = await Promise.allSettled(prepared.map(({ temporary, absolute }) => rename(temporary, absolute)))
   const committed = prepared.filter((_, index) => commits[index]?.status === "fulfilled")
   const commitFailure = commits.find((result): result is PromiseRejectedResult => result.status === "rejected")
   if (commitFailure) {
-    await Promise.all(committed.map(({ absolute }) => rm(absolute, { force: true })))
-    await restore(claimed)
-    await Promise.all(prepared.map(({ temporary }) => rm(temporary, { force: true })))
+    await restore(committed)
+    await Promise.all(prepared.flatMap(({ temporary, backup }) => [rm(temporary, { force: true }), rm(backup, { force: true })]))
     throw fail(commitFailure.reason instanceof Error ? commitFailure.reason.message : "Could not commit edits")
+  }
+  try {
+    await options?.validate?.()
+  } catch (cause) {
+    await restore(prepared)
+    throw cause
   }
   await Promise.all(prepared.flatMap(({ temporary, backup }) => [
     rm(temporary, { force: true }),
     rm(backup, { force: true })
   ]))
   return { files: [...grouped.keys()], replacements: locations.length }
+  } finally {
+    await releaseLocks()
+  }
+}
+
+const shiftedLocations = (
+  locations: ReadonlyArray<CodeLocation>,
+  oldName: string,
+  newName: string
+): ReadonlyArray<CodeLocation> => locations.map((location) => ({
+  ...location,
+  column: location.column + locations.filter((candidate) =>
+    candidate.path === location.path &&
+    candidate.line === location.line &&
+    candidate.column < location.column
+  ).length * (newName.length - oldName.length),
+  text: newName
+}))
+
+const locationKeys = (locations: ReadonlyArray<CodeLocation>): ReadonlyArray<string> =>
+  locations.map(({ path, line, column }) => `${path}:${line}:${column}`).sort()
+
+export const semanticRename = async (
+  cwd: string,
+  file: string,
+  symbol: string,
+  line: number,
+  column: number | undefined,
+  newName: string,
+  signal?: AbortSignal
+): Promise<{ readonly files: ReadonlyArray<string>; readonly replacements: number }> => {
+  const references = (await semanticReferences(cwd, file, symbol, line, column, signal)).value
+  const baselineDiagnostics = (await codeDiagnostics(cwd, undefined, signal, Number.MAX_SAFE_INTEGER)).value
+  const expected = shiftedLocations(references, symbol, newName)
+  const targetPath = relative(await realpath(cwd), await realpath(resolve(cwd, file)))
+  const targetIndex = references.findIndex((item) =>
+    item.path === targetPath && item.line === line && (column === undefined || item.column === column)
+  )
+  const target = expected[targetIndex]
+  if (!target) throw fail(`Rename target not found in semantic references: ${symbol}`)
+  return applyIdentifierEdits(cwd, references, symbol, newName, {
+    validate: async () => {
+      const renamed = (await semanticReferences(cwd, file, newName, line, target.column, signal)).value
+      const diagnostics = (await codeDiagnostics(cwd, undefined, signal, Number.MAX_SAFE_INTEGER)).value
+      const baseline = new Set(baselineDiagnostics.map(({ path, line, column, code }) => `${path}:${line}:${column}:${code}`))
+      const introducedDiagnostic = diagnostics.some(({ path, line, column, code }) =>
+        !baseline.has(`${path}:${line}:${column}:${code}`)
+      )
+      if (introducedDiagnostic || JSON.stringify(locationKeys(renamed)) !== JSON.stringify(locationKeys(expected))) {
+        throw fail(`Rename to ${newName} would change symbol binding`)
+      }
+    }
+  })
 }

@@ -27,7 +27,10 @@ describe("security scan tool", () => {
   it("uses the trusted session worktree and parses bounded JSON", async () => {
     const exec = vi.fn(async () => ({ code: 0, stdout: '{"results":[{"path":"a.ts"}]}', stderr: "" }))
     const result = await securityTool({ exec } as Pick<HostContext, "exec">).execute({ action: "scan", scanner: "semgrep" }, context)
-    expect(exec).toHaveBeenCalledWith("semgrep", ["scan", "--json", "--config", "auto", "."], expect.objectContaining({ cwd: "/repo" }))
+    expect(exec).toHaveBeenCalledWith("semgrep", ["scan", "--json", "--config", "auto", "."], expect.objectContaining({
+      cwd: "/repo",
+      maxOutputBytes: 1_000_000
+    }))
     expect(result).toMatchObject({ scanner: "semgrep", findings: { results: [{ path: "a.ts" }] } })
   })
 
@@ -48,6 +51,12 @@ describe("security scan tool", () => {
 
   it("rejects oversized scanner output", async () => {
     const exec = vi.fn(async () => ({ code: 0, stdout: "x".repeat(1_000_001), stderr: "" }))
+    await expect(securityTool({ exec } as Pick<HostContext, "exec">).execute({ action: "scan", scanner: "trivy" }, context))
+      .rejects.toThrow("exceeded 1 MB")
+  })
+
+  it("reports host-enforced output overflow as a size error", async () => {
+    const exec = vi.fn(async () => { throw new Error("`trivy` output exceeded 1000000 bytes") })
     await expect(securityTool({ exec } as Pick<HostContext, "exec">).execute({ action: "scan", scanner: "trivy" }, context))
       .rejects.toThrow("exceeded 1 MB")
   })

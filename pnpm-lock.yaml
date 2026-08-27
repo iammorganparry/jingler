@@ -479,9 +479,15 @@ importers:
       jiti:
         specifier: ^2.7.0
         version: 2.7.0
+      jsonc-parser:
+        specifier: ^3.3.1
+        version: 3.3.1
       pi-subagents:
         specifier: 0.57.0
         version: 0.57.0(patch_hash=991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
+      proper-lockfile:
+        specifier: 4.1.2
+        version: 4.1.2
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -504,6 +510,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      '@types/proper-lockfile':
+        specifier: ^4.1.4
+        version: 4.1.4
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -4668,6 +4677,9 @@ packages:
 
   '@types/plist@3.0.5':
     resolution: {integrity: sha512-E6OCaRmAe4WDmWNsL/9RMqdkkzDCY1etutkflWk4c+AcjDU07Pcz1fQwTX0TQz+Pxqn9i4L1TU3UFpjnrcDgxA==}
+
+  '@types/proper-lockfile@4.1.4':
+    resolution: {integrity: sha512-uo2ABllncSqg9F1D4nugVl9v93RmjxF6LJzQLMLDdPaXCUIDPeOJ21Gbqi43xNKzBi/WQ0Q0dICqufzQbMjipQ==}
 
   '@types/react-dom@19.2.3':
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
@@ -12677,6 +12689,10 @@ snapshots:
       '@types/node': 24.13.3
       xmlbuilder: 15.1.1
     optional: true
+
+  '@types/proper-lockfile@4.1.4':
+    dependencies:
+      '@types/retry': 0.12.0
 
   '@types/react-dom@19.2.3(@types/react@19.2.17)':
     dependencies:

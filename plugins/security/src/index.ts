@@ -25,6 +25,7 @@ const argsFor = (scanner: Scanner): readonly string[] => {
   }
 }
 
+const MAX_OUTPUT_BYTES = 1_000_000
 const SAFE_TEXT_FIELD = /^(?:path|file|filename|ruleid|check_id|id|severity|category|type|scanner|package|name|version|installedversion|fixedversion)$/iu
 const sanitize = (value: unknown, key = ""): unknown => {
   if (typeof value === "string") return SAFE_TEXT_FIELD.test(key) ? value : "[REDACTED]"
@@ -36,7 +37,7 @@ const sanitize = (value: unknown, key = ""): unknown => {
 }
 
 const boundedJson = (stdout: string): unknown => {
-  if (stdout.length > 1_000_000) throw new Error("Scanner output exceeded 1 MB; narrow the scan")
+  if (Buffer.byteLength(stdout, "utf8") > MAX_OUTPUT_BYTES) throw new Error("Scanner output exceeded 1 MB; narrow the scan")
   try {
     return sanitize(JSON.parse(stdout))
   } catch (cause) {
@@ -82,9 +83,13 @@ export const securityTool = (ctx: Pick<HostContext, "exec">): AgentToolDefinitio
     try {
       result = await ctx.exec(scanner, argsFor(scanner), {
         cwd: context.session.repository.path,
-        timeoutMs: 120_000
+        timeoutMs: 120_000,
+        maxOutputBytes: MAX_OUTPUT_BYTES
       })
-    } catch {
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.includes("output exceeded")) {
+        throw new Error("Scanner output exceeded 1 MB; narrow the scan")
+      }
       throw new Error(`${scanner} is unavailable; install it or choose another scanner`)
     }
     if (!validExit(scanner, result.code)) {
