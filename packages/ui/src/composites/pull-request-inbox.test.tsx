@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { PullRequest, PullRequestListItem } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
@@ -70,6 +70,72 @@ describe("PullRequestInbox", () => {
     expect(onSelect).toHaveBeenCalledWith(prs[1])
   })
 
+  it("invokes the selected pull request session action", () => {
+    const onSelect = vi.fn()
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestInbox
+          prs={prs}
+          viewerLogin="morgan"
+          selected={{ repository: "acme/widget", number: 42 }}
+          detail={detail}
+          onSelect={() => {}}
+          sessionAction={{ label: "Create session", onSelect }}
+        />
+      </WidthTierValue>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }))
+    expect(onSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes files locally and submits global pull request actions", async () => {
+    const onOpenFiles = vi.fn()
+    const onComment = vi.fn(async () => undefined)
+    const onClosePr = vi.fn(async () => undefined)
+    const onMerge = vi.fn()
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestInbox
+          prs={prs}
+          viewerLogin="morgan"
+          selected={{ repository: "acme/widget", number: 42 }}
+          detail={detail}
+          onSelect={() => {}}
+          onOpenFiles={onOpenFiles}
+          onComment={onComment}
+          onClosePr={onClosePr}
+          onMerge={onMerge}
+          sessionAction={{ label: "Create session", onSelect: () => {} }}
+        />
+      </WidthTierValue>
+    )
+
+    const sessionButton = screen.getByRole("button", { name: "Create session" })
+    expect(sessionButton.getAttribute("data-slot")).toBe("button")
+    expect(sessionButton.querySelector(".lucide-download")).toBeTruthy()
+    fireEvent.click(screen.getByRole("tab", { name: "Files changed 1" }))
+    expect(onOpenFiles).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(screen.getByPlaceholderText("Leave a comment…"), {
+      target: { value: "Ship it" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }))
+    await waitFor(() => expect(onComment).toHaveBeenCalledWith("Ship it"))
+
+    const mergeButton = screen.getByRole("button", { name: "Merge pull request" })
+    const closeButton = screen.getByRole("button", { name: "Close pull request" })
+    expect(mergeButton.compareDocumentPosition(closeButton) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy()
+    fireEvent.click(closeButton)
+    const closeButtons = screen.getAllByRole("button", { name: "Close pull request" })
+    fireEvent.click(closeButtons.at(-1)!)
+    await waitFor(() => expect(onClosePr).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole("button", { name: "Merge pull request" }))
+    expect(onMerge).toHaveBeenCalledWith("merge")
+  })
+
   it("shows detail request failures instead of a false empty PR state", () => {
     render(
       <WidthTierValue width={1200}>
@@ -81,14 +147,24 @@ describe("PullRequestInbox", () => {
   })
 
   it("replaces the list with detail on small screens and returns", () => {
+    const onCreateSession = vi.fn()
     render(
       <WidthTierValue width={480}>
-        <PullRequestInbox prs={prs} viewerLogin="morgan" selected={{ repository: "acme/widget", number: 42 }} detail={detail} onSelect={() => {}} />
+        <PullRequestInbox
+          prs={prs}
+          viewerLogin="morgan"
+          selected={{ repository: "acme/widget", number: 42 }}
+          detail={detail}
+          onSelect={() => {}}
+          sessionAction={{ label: "Create session", onSelect: onCreateSession }}
+        />
       </WidthTierValue>
     )
 
     fireEvent.click(screen.getByRole("button", { name: FIX_TOKEN_REFRESH }))
     expect(screen.getByRole("button", { name: "Back" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }))
+    expect(onCreateSession).toHaveBeenCalledTimes(1)
     expect(screen.queryByPlaceholderText("Search pull requests")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }))

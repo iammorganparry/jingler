@@ -1,5 +1,5 @@
 import { type ReactNode, useMemo, useState } from "react"
-import type { PullRequest, PullRequestListItem } from "@jingler/core"
+import type { PrMergeMethod, PullRequest, PullRequestListItem } from "@jingler/core"
 import { ArrowLeft, GitPullRequest, MessageSquare } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
@@ -47,6 +47,19 @@ export interface PullRequestInboxProps {
   detail: PullRequest | null
   onSelect: (pr: PullRequestListItem) => void
   onOpenOnGithub?: (url: string) => void
+  onOpenFiles?: () => void
+  onComment?: (body: string) => Promise<void> | void
+  onClosePr?: () => Promise<void> | void
+  onMerge?: (method: PrMergeMethod) => Promise<void> | void
+  closing?: boolean
+  closeError?: string | null
+  merging?: boolean
+  mergeError?: string | null
+  sessionAction?: {
+    readonly label: string
+    readonly onSelect: () => void
+    readonly disabledReason?: string
+  }
   loading?: boolean
   detailLoading?: boolean
   detailError?: string | null
@@ -61,6 +74,15 @@ export function PullRequestInbox({
   detail,
   onSelect,
   onOpenOnGithub,
+  onOpenFiles,
+  onComment,
+  onClosePr,
+  onMerge,
+  closing,
+  closeError,
+  merging,
+  mergeError,
+  sessionAction,
   loading = false,
   detailLoading = false,
   detailError = null,
@@ -88,9 +110,7 @@ export function PullRequestInbox({
               <Badge tone="count" size="xs">{visible.length}</Badge>
             </div>
             <SearchInput value={query} onChange={setQuery} placeholder="Search pull requests" />
-            <div className="overflow-x-auto pb-px">
-              <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />
-            </div>
+            <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -155,13 +175,24 @@ export function PullRequestInbox({
             <InboxMessage>{detailError}</InboxMessage>
           ) : (
             <PullRequestView
+              key={selectedKey ?? "none"}
               pr={detail}
               connected
               busy={detailLoading}
               viewerLogin={viewerLogin}
               readOnly
+              onOpenSession={sessionAction?.onSelect}
+              sessionActionLabel={sessionAction?.label}
+              sessionActionDisabledReason={sessionAction?.disabledReason}
               onOpenOnGithub={detail?.url && onOpenOnGithub ? () => onOpenOnGithub(detail.url) : undefined}
-              onOpenFiles={detail?.url && onOpenOnGithub ? () => onOpenOnGithub(`${detail.url}/files`) : undefined}
+              onOpenFiles={onOpenFiles}
+              onComment={onComment}
+              onClosePr={onClosePr}
+              onMerge={onMerge}
+              closing={closing}
+              closeError={closeError}
+              merging={merging}
+              mergeError={mergeError}
             />
           )}
         </WidthTierProvider>

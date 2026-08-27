@@ -3722,6 +3722,32 @@ export const githubComment = (input: {
     );
   });
 
+export const githubCommentBySlug = (input: {
+  repository: string;
+  number: number;
+  body: string;
+}) =>
+  input.body.trim()
+    ? GitHubApi.prCommentBySlug(input.repository, input.number, input.body.trim())
+    : Effect.fail(
+        new GitHubApiError({
+          reason: "validation",
+          message: "Write a comment before posting.",
+          repository: input.repository,
+        }),
+      );
+
+export const githubCloseBySlug = (input: {
+  repository: string;
+  number: number;
+}) => GitHubApi.prCloseBySlug(input.repository, input.number);
+
+export const githubMergeBySlug = (input: {
+  repository: string;
+  number: number;
+  method: PrMergeMethod;
+}) => GitHubApi.prMergeBySlug(input.repository, input.number, input.method);
+
 /**
  * `Github.submitReview` handler — post the reviewer's drafts as ONE COMMENT
  * review carrying line-anchored inline comments.
@@ -6165,6 +6191,9 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Review.reconcile": ({ sessionId }) => reviewReconcile(sessionId),
   "Github.createPr": ({ sessionId }) => githubPublishRouted(sessionId),
   "Github.comment": (input) => githubComment(input),
+  "Github.commentBySlug": (input) => githubCommentBySlug(input),
+  "Github.closeBySlug": (input) => githubCloseBySlug(input),
+  "Github.mergeBySlug": (input) => githubMergeBySlug(input),
   "Github.review": (input) => githubReview(input),
   "Github.submitReview": (input) => githubSubmitReview(input),
   "Github.resolveThread": (input) => githubResolveThread(input),

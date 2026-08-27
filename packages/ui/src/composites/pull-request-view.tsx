@@ -10,7 +10,7 @@ import type {
   PullRequest,
   ReviewSubmitKind
 } from "@jingler/core"
-import { Check, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
+import { Check, Download, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { relativeTime } from "../lib/relative-time.js"
@@ -18,6 +18,7 @@ import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Card } from "../components/card.js"
+import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { Markdown } from "../components/markdown.js"
 import { Callout } from "../components/callout.js"
 import { Spinner } from "../components/loading.js"
@@ -161,9 +162,17 @@ export interface PullRequestViewProps {
   /** Reply into an inline review thread (`commentId` = the REST databaseId). */
   onReplyToThread?: (commentId: number, body: string) => Promise<void> | void
   onOpenOnGithub?: () => void
+  /** Open an existing session for this PR or start the prefilled creation flow. */
+  onOpenSession?: () => void
+  sessionActionLabel?: string
+  sessionActionDisabledReason?: string
+  onComment?: (body: string) => Promise<void> | void
+  onClosePr?: () => Promise<void> | void
+  closing?: boolean
+  closeError?: string | null
   /** Open this PR's changed files in Jingler or GitHub. */
   onOpenFiles?: () => void
-  onMerge?: (method: PrMergeMethod) => void
+  onMerge?: (method: PrMergeMethod) => Promise<void> | void
   /** A merge is in flight — disables the button and shows a spinner. */
   merging?: boolean
   /** A failed GitHub API merge, shown beneath the merge button. */
@@ -208,6 +217,13 @@ export function PullRequestView({
   onResolveThread,
   onReplyToThread,
   onOpenOnGithub,
+  onOpenSession,
+  sessionActionLabel = "Create session",
+  sessionActionDisabledReason,
+  onComment,
+  onClosePr,
+  closing = false,
+  closeError,
   onOpenFiles,
   onMerge,
   merging = false,
@@ -231,6 +247,7 @@ export function PullRequestView({
   const roomy = atLeast(useWidthTier(), "mid")
   const [railOpen, setRailOpen] = useState(false)
   const [evidence, setEvidence] = useState<PrEvidence>("overview")
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   useEffect(() => {
     if (roomy) setRailOpen(false)
   }, [roomy])
@@ -350,6 +367,24 @@ export function PullRequestView({
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1">
+      {onClosePr && (
+        <ConfirmDialog
+          open={closeConfirmOpen}
+          onOpenChange={setCloseConfirmOpen}
+          title={`Close pull request #${pr.number}?`}
+          description="The pull request can be reopened later on GitHub."
+          confirmLabel="Close pull request"
+          tone="danger"
+          onConfirm={async () => {
+            try {
+              await onClosePr()
+            } catch (cause) {
+              setCloseConfirmOpen(false)
+              throw cause
+            }
+          }}
+        />
+      )}
       {/* Centre column: header + timeline + sticky composer */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/*
@@ -382,6 +417,18 @@ export function PullRequestView({
               <StatePill state={pr.state} />
               <span className="font-mono text-[12px] text-dim">#{pr.number}</span>
               <div className="flex-1" />
+              {onOpenSession && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={Boolean(sessionActionDisabledReason)}
+                  title={sessionActionDisabledReason}
+                  onClick={onOpenSession}
+                >
+                  <Download size={14} aria-hidden />
+                  {sessionActionLabel}
+                </Button>
+              )}
               {onOpenOnGithub && (
                 <button
                   type="button"
@@ -416,22 +463,21 @@ export function PullRequestView({
                 ))}
               </div>
             )}
-            <div className="overflow-x-auto pt-1">
-              <MotionTabs
-                variant="underline"
-                value={evidence}
-                onChange={(value) => {
-                  if (value === "files") onOpenFiles?.()
-                  else setEvidence(value)
-                }}
-                items={[
-                  { value: "overview", label: "Overview" },
-                  { value: "commits", label: `Commits ${pr.commits}` },
-                  { value: "checks", label: `Checks ${pr.checks.length}` },
-                  { value: "files", label: `Files changed ${pr.changedFiles}`, disabled: !onOpenFiles }
-                ]}
-              />
-            </div>
+            <MotionTabs
+              className="pt-1"
+              variant="underline"
+              value={evidence}
+              onChange={(value) => {
+                if (value === "files") onOpenFiles?.()
+                else setEvidence(value)
+              }}
+              items={[
+                { value: "overview", label: "Overview" },
+                { value: "commits", label: `Commits ${pr.commits}` },
+                { value: "checks", label: `Checks ${pr.checks.length}` },
+                { value: "files", label: `Files changed ${pr.changedFiles}`, disabled: !onOpenFiles }
+              ]}
+            />
           </div>
 
           {evidence === "commits" ? (
@@ -502,13 +548,16 @@ export function PullRequestView({
             )
           )}
 
-          {/* Sticky review composer */}
-          {!readOnly && (
+          {/* Sticky review/comment composer */}
+          {(!readOnly || onComment) && (
             <div className="sticky bottom-0 mt-auto pt-2">
               <PrReviewComposer
                 connected={connected}
+                commentOnly={readOnly}
                 selfAuthored={Boolean(viewerLogin) && viewerLogin === pr.author.login}
-                onSubmit={(input) => onSubmitReview?.(input)}
+                onSubmit={(input) =>
+                  readOnly ? onComment?.(input.body) : onSubmitReview?.(input)
+                }
               />
             </div>
           )}
@@ -524,7 +573,13 @@ export function PullRequestView({
           type="button"
           aria-label={railOpen ? "Close pull request details" : "Pull request details"}
           aria-pressed={railOpen}
-          title={railOpen ? "Close details" : readOnly ? "Reviewers and checks" : "Reviewers, checks and merge"}
+          title={
+            railOpen
+              ? "Close details"
+              : readOnly && !onMerge
+                ? "Reviewers and checks"
+                : "Reviewers, checks and merge"
+          }
           onClick={() => setRailOpen((v) => !v)}
           className={cn(
             "absolute right-2 top-2 z-40 flex size-7 items-center justify-center rounded-md border border-line bg-sunken shadow-lg transition-colors",
@@ -545,6 +600,9 @@ export function PullRequestView({
         onMerge={onMerge}
         merging={merging}
         mergeError={mergeError}
+        onClosePr={onClosePr ? () => setCloseConfirmOpen(true) : undefined}
+        closing={closing}
+        closeError={closeError}
         onMarkReady={onMarkReady}
         markingReady={markingReady}
         markReadyError={markReadyError}
@@ -552,7 +610,7 @@ export function PullRequestView({
         updatingBranch={updatingBranch}
         updateBranchError={updateBranchError}
         review={review}
-        readOnly={readOnly}
+        readOnly={readOnly && !onMerge}
       />
     </div>
   )

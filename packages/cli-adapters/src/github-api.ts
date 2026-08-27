@@ -123,6 +123,8 @@ export interface GitHubApiClient {
   readonly prUpdate: (cwd: string, number: number, input: { readonly title: string; readonly body: string }) => Promise<void>
   readonly prUpdateBySlug: (slug: string, number: number, input: { readonly title: string; readonly body: string }) => Promise<void>
   readonly prComment: (cwd: string, number: number, body: string) => Promise<void>
+  readonly prCommentBySlug: (slug: string, number: number, body: string) => Promise<void>
+  readonly prCloseBySlug: (slug: string, number: number) => Promise<void>
   readonly prReviewComments: (
     cwd: string,
     number: number,
@@ -151,6 +153,7 @@ export interface GitHubApiClient {
     body: string
   ) => Promise<void>
   readonly prMerge: (cwd: string, number: number, method?: PrMergeMethod) => Promise<void>
+  readonly prMergeBySlug: (slug: string, number: number, method?: PrMergeMethod) => Promise<void>
   readonly prUpdateBranch: (cwd: string, number: number) => Promise<void>
   readonly prReady: (cwd: string, number: number) => Promise<void>
   readonly issueComment: (cwd: string, number: number, body: string) => Promise<void>
@@ -955,6 +958,17 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         ["pull_requests:write"]
       )
     },
+    prCommentBySlug: (slug, pullNumber, body) =>
+      client.prComment(`github-slug:${slug}`, pullNumber, body),
+    prCloseBySlug: async (slug, pullNumber) => {
+      await repositoryCall(
+        `github-slug:${slug}`,
+        "PATCH",
+        "/repos/{owner}/{repo}/pulls/{pull_number}",
+        { pull_number: pullNumber, state: "closed" },
+        ["pull_requests:write"]
+      )
+    },
     prReviewComments: async (cwd, pullNumber, input) => {
       await repositoryCall(
         cwd,
@@ -1016,6 +1030,8 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         ["contents:write"]
       )
     },
+    prMergeBySlug: (slug, pullNumber, method) =>
+      client.prMerge(`github-slug:${slug}`, pullNumber, method),
     prUpdateBranch: async (cwd, pullNumber) => {
       await repositoryCall(
         cwd,
@@ -1132,6 +1148,10 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       ) => wrap(() => client.prUpdateBySlug(slug, number, input)),
       prComment: (cwd: string, number: number, body: string) =>
         wrap(() => client.prComment(cwd, number, body)),
+      prCommentBySlug: (slug: string, number: number, body: string) =>
+        wrap(() => client.prCommentBySlug(slug, number, body)),
+      prCloseBySlug: (slug: string, number: number) =>
+        wrap(() => client.prCloseBySlug(slug, number)),
       prReviewComments: (
         cwd: string,
         number: number,
@@ -1145,6 +1165,8 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         wrap(() => client.replyToThread(cwd, number, commentId, body)),
       prMerge: (cwd: string, number: number, method?: PrMergeMethod) =>
         wrap(() => client.prMerge(cwd, number, method)),
+      prMergeBySlug: (slug: string, number: number, method?: PrMergeMethod) =>
+        wrap(() => client.prMergeBySlug(slug, number, method)),
       prUpdateBranch: (cwd: string, number: number) =>
         wrap(() => client.prUpdateBranch(cwd, number)),
       prReady: (cwd: string, number: number) => wrap(() => client.prReady(cwd, number)),

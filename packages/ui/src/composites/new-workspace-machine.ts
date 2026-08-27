@@ -67,7 +67,7 @@ export interface NewWorkspaceContext {
 }
 
 type NewWorkspaceEvent =
-  | { type: "OPEN"; projectId?: string }
+  | { type: "OPEN"; projectId?: string; pr?: PrSummary }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
   | { type: "SET_ENVIRONMENT"; environmentId: string }
@@ -231,6 +231,7 @@ export const newWorkspaceMachine = setup({
     seed: assign(({ context, event }) => {
       const deps = context.getDeps()
       const requested = event.type === "OPEN" ? event.projectId : undefined
+      const requestedPr = event.type === "OPEN" ? event.pr : undefined
       const selected = deps.projects.find((project) => project.id === requested) ??
         deps.projects.find((project) => project.id === deps.defaultProjectId) ??
         deps.projects.find((project) => project.availability === "available")
@@ -243,6 +244,14 @@ export const newWorkspaceMachine = setup({
         baseBranch: "",
         branches: [] as ReadonlyArray<string>,
         ...resetSource,
+        ...(requestedPr
+          ? {
+              source: "pr" as const,
+              pullRequests: [requestedPr],
+              selectedPr: requestedPr,
+              baseBranch: requestedPr.baseRefName
+            }
+          : {}),
         draft: "",
         attachments: [] as ReadonlyArray<Attachment>,
         ...provider,
@@ -268,9 +277,14 @@ export const newWorkspaceMachine = setup({
     setMode: assign(({ event }) => event.type === "SET_MODE" ? { mode: event.mode } : {}),
     setReasoning: assign(({ event }) => event.type === "SET_REASONING" ? { reasoning: event.reasoning } : {}),
     setSource: assign(({ event }) => event.type === "SET_SOURCE" ? { ...resetSource, source: event.source, draft: "", error: null } : {}),
-    applyBranches: assign(({ event }) => {
+    applyBranches: assign(({ context, event }) => {
       const output = (event as unknown as { output: { project: Project | null; branches: ReadonlyArray<string> } }).output
-      return { resolvedProject: output.project, branches: output.branches, baseBranch: preferredBranch(output.branches), error: null }
+      return {
+        resolvedProject: output.project,
+        branches: output.branches,
+        baseBranch: context.selectedPr?.baseRefName ?? preferredBranch(output.branches),
+        error: null
+      }
     }),
     applySource: assign(({ event }) => {
       const output = (event as unknown as { output: { pullRequests: ReadonlyArray<PrSummary>; issues: ReadonlyArray<IssueSummary> } }).output

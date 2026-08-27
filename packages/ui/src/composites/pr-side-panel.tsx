@@ -79,9 +79,12 @@ export interface PrSidePanelProps {
   pr: PullRequest
   connected: boolean
   /** Merge with the chosen strategy — the picker below decides which. */
-  onMerge?: (method: PrMergeMethod) => void
+  onMerge?: (method: PrMergeMethod) => Promise<void> | void
   merging?: boolean
   mergeError?: string | null
+  onClosePr?: () => void
+  closing?: boolean
+  closeError?: string | null
   onMarkReady?: () => void
   markingReady?: boolean
   markReadyError?: string | null
@@ -113,6 +116,9 @@ export function PrSidePanel({
   onMerge,
   merging = false,
   mergeError,
+  onClosePr,
+  closing = false,
+  closeError,
   onMarkReady,
   markingReady = false,
   markReadyError,
@@ -210,15 +216,17 @@ export function PrSidePanel({
           <Callout tone="red">This pull request is closed.</Callout>
         ) : draft ? (
           <div className="flex flex-col gap-3">
-            <Callout tone="blue">This pull request is a draft. Mark it ready to request review.</Callout>
-            <Button
-              className="w-full justify-center gap-2"
-              disabled={!connected || markingReady || !onMarkReady}
-              onClick={onMarkReady}
-            >
-              {markingReady && <Spinner size={13} />}
-              {markingReady ? "Marking ready…" : "Ready for review"}
-            </Button>
+            <Callout tone="blue">This pull request is a draft.</Callout>
+            {onMarkReady && (
+              <Button
+                className="w-full justify-center gap-2"
+                disabled={!connected || markingReady}
+                onClick={onMarkReady}
+              >
+                {markingReady && <Spinner size={13} />}
+                {markingReady ? "Marking ready…" : "Ready for review"}
+              </Button>
+            )}
             {markReadyError && (
               <Callout tone="red" className="items-start">
                 {markReadyError}
@@ -314,7 +322,7 @@ export function PrSidePanel({
             <Button
               className="w-full justify-center gap-2"
               disabled={!connected || merging || !onMerge}
-              onClick={() => onMerge?.(method)}
+              onClick={() => void Promise.resolve(onMerge?.(method)).catch(() => {})}
             >
               {merging && <Spinner size={13} />}
               {merging ? "Merging…" : MERGE_METHODS.find((m) => m.method === method)!.action}
@@ -324,6 +332,19 @@ export function PrSidePanel({
                 {mergeError}
               </Callout>
             )}
+          </div>
+        )}
+        {!merged && !closed && onClosePr && (
+          <div className="mt-3 flex flex-col gap-2 border-t border-hairline pt-3">
+            <Button
+              variant="danger"
+              className="w-full justify-center"
+              disabled={!connected || closing}
+              onClick={onClosePr}
+            >
+              {closing ? "Closing…" : "Close pull request"}
+            </Button>
+            {closeError && <Callout tone="red">{closeError}</Callout>}
           </div>
         )}
       </div>}

@@ -382,6 +382,41 @@ describe("newWorkspaceMachine", () => {
     }), [], expect.any(Function))
   })
 
+  it("opens preselected to a requested pull request", async () => {
+    const pr = {
+      number: 42,
+      title: "Restore session sources",
+      headRefName: "feat/session-sources",
+      baseRefName: "develop",
+      author: { login: "morgan", avatarUrl: null },
+      state: "open" as const,
+      isDraft: false,
+      additions: 12,
+      deletions: 3,
+      updatedAt: "2026-08-10T00:00:00.000Z"
+    }
+    const onCreateFromPr = vi.fn(async () => undefined)
+    const actor = actorFor(undefined, { onCreateFromPr }).start()
+
+    actor.send({ type: "OPEN", projectId: "p-local", pr })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+
+    expect(actor.getSnapshot().context).toMatchObject({
+      projectId: "p-local",
+      source: "pr",
+      selectedPr: pr,
+      pullRequests: [pr],
+      baseBranch: "develop"
+    })
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+    expect(onCreateFromPr).toHaveBeenCalledWith(
+      expect.objectContaining({ pr, repoPath: "/repos/local" }),
+      [],
+      expect.any(Function)
+    )
+  })
+
   it("loads and submits a selected pull request with composer settings", async () => {
     const pr = {
       number: 42,
