@@ -27,11 +27,16 @@ export interface GitHubFeedbackRouterOptions {
     readonly chatId: string;
     readonly text: string;
     readonly externalInstruction: ExternalInstructionIdentity;
-  }) => Promise<void>;
+  }) => Promise<{ readonly accepted: Promise<void> }>;
 }
 
 export type GitHubFeedbackRouteResult =
-  | { readonly status: "routed"; readonly sessionId: string }
+  | {
+      readonly status: "routed";
+      readonly sessionId: string;
+      /** Settles after the queued instruction reaches the durable transcript. */
+      readonly completion: Promise<void>;
+    }
   | {
       readonly status: "ignored";
       readonly reason: "not-actionable" | "unlinked" | "duplicate";
@@ -53,9 +58,9 @@ export class GitHubFeedbackRouter {
   ): Promise<GitHubFeedbackRouteResult> {
     const previous = this.serialBySession.get(target.sessionId) ?? Promise.resolve();
     const operation = previous.then(() => this.routeSerial(event, target));
-    // Preserve ordering only within the owning session. An agent holding one
-    // session's acknowledgement must not stall an unrelated session's Durable
-    // Object, socket, or cursor.
+    // Preserve claim and UI-admission order within the owning session. Durable
+    // acceptance lives on the returned completion promise, so one queued item
+    // never holds later relay frames outside the UI.
     const tail = operation.then(
       () => undefined,
       () => undefined,
@@ -87,7 +92,7 @@ export class GitHubFeedbackRouter {
       return { status: "ignored", reason: "duplicate" };
     }
     if (claim === "rejected") return { status: "ignored", reason: "unlinked" };
-    await this.options.dispatch({
+    const { accepted } = await this.options.dispatch({
       sessionId: target.sessionId,
       chatId: target.chatId,
       text: instruction,
@@ -97,9 +102,11 @@ export class GitHubFeedbackRouter {
         semanticKey: event.semanticKey,
       },
     });
-    if (!(await this.options.markDispatched(target, event))) {
-      throw new Error("GitHub feedback dispatch could not be marked durable");
-    }
-    return { status: "routed", sessionId: target.sessionId };
+    const completion = accepted.then(async () => {
+      if (!(await this.options.markDispatched(target, event))) {
+        throw new Error("GitHub feedback dispatch could not be marked durable");
+      }
+    });
+    return { status: "routed", sessionId: target.sessionId, completion };
   }
 }

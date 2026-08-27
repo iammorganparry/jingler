@@ -661,6 +661,39 @@ describe("conversationMachine — queue while busy", () => {
     actor.stop()
   })
 
+  it("keeps every distinct GitHub feedback item visible while the agent is busy", async () => {
+    const actor = start()
+    await waitFor(actor, (s) => s.matches(idle))
+    actor.send({ type: "SEND", text: "current turn" })
+    await waitFor(actor, (s) => s.matches("running"))
+
+    actor.send({
+      type: "SEND",
+      text: "first review comment",
+      externalInstruction: githubIdentity,
+      onExternalAccepted: vi.fn()
+    })
+    actor.send({
+      type: "SEND",
+      text: "second review comment",
+      externalInstruction: {
+        ...githubIdentity,
+        deliveryId: "delivery-2",
+        semanticKey: "semantic-2"
+      },
+      onExternalAccepted: vi.fn()
+    })
+
+    expect(actor.getSnapshot().context.queued).toMatchObject([
+      { text: "first review comment", externalInstruction: githubIdentity },
+      {
+        text: "second review comment",
+        externalInstruction: { deliveryId: "delivery-2", semanticKey: "semantic-2" }
+      }
+    ])
+    actor.stop()
+  })
+
   it("replays a durably accepted external item after a busy restart without steering or duplicating", async () => {
     h.transcript = [
       userMessage("u-existing", "review feedback", "2026-08-05T09:00:00.000Z", [], githubIdentity),

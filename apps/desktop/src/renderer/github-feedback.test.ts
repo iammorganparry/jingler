@@ -59,6 +59,7 @@ const setup = (input?: {
   readonly target?: GitHubFeedbackTarget;
   readonly state?: Map<string, "pending" | "dispatched">;
   readonly failDispatch?: boolean;
+  readonly accepted?: Promise<void>;
 }) => {
   let ledger: GitHubDeliveryLedger = { deliveryIds: [], semanticKeys: [] };
   const state = input?.state ?? new Map<string, "pending" | "dispatched">();
@@ -66,6 +67,7 @@ const setup = (input?: {
   const dispatch = vi.fn(async () => {
     order.push("dispatch");
     if (input?.failDispatch) throw new Error("renderer crashed");
+    return { accepted: input?.accepted ?? Promise.resolve() };
   });
   const invalidate = vi.fn();
   const exactTarget = input?.target ?? target();
@@ -109,10 +111,12 @@ const setup = (input?: {
 describe("GitHubFeedbackRouter", () => {
   it("persists then sends one location-aware instruction through the visible conversation", async () => {
     const h = setup();
-    await expect(h.router.route(event(), h.target)).resolves.toEqual({
+    const routed = await h.router.route(event(), h.target);
+    expect(routed).toMatchObject({
       status: "routed",
       sessionId: "session-1",
     });
+    if (routed.status === "routed") await routed.completion;
     expect(h.order).toEqual(["persist", "dispatch", "mark"]);
     expect(h.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -211,54 +215,58 @@ describe("GitHubFeedbackRouter", () => {
         event({ actor: { ...event().actor, login: "octocat", type: "User" } }),
         h.target,
       ),
-    ).resolves.toEqual({ status: "routed", sessionId: "session-1" });
+    ).resolves.toMatchObject({ status: "routed", sessionId: "session-1" });
     expect(h.dispatch).toHaveBeenCalledOnce();
   });
 
-  it("serializes simultaneous frames so both durable claims are retained", async () => {
+  it("serializes simultaneous claims so both durable ledger entries are retained", async () => {
     const h = setup();
-    await Promise.all([
+    const routed = await Promise.all([
       h.router.route(event(), h.target),
       h.router.route(
         event({ deliveryId: "delivery-2", semanticKey: "semantic-2" }),
         h.target,
       ),
     ]);
+    await Promise.all(
+      routed.map((result) =>
+        result.status === "routed" ? result.completion : Promise.resolve(),
+      ),
+    );
     expect(h.ledger().deliveryIds).toEqual(["delivery-1", "delivery-2"]);
     expect(h.dispatch).toHaveBeenCalledTimes(2);
   });
 
-  it("does not let a busy session block feedback for another session", async () => {
-    let releaseFirst!: () => void;
-    const firstAccepted = new Promise<void>((resolve) => {
-      releaseFirst = resolve;
-    });
+  it("admits every same-session item before an earlier item is accepted", async () => {
+    const accept = new Map<string, () => void>();
     const dispatched: string[] = [];
     const router = new GitHubFeedbackRouter({
       claim: async () => "pending",
       markDispatched: async () => true,
       invalidate: () => {},
-      dispatch: async ({ sessionId }) => {
-        dispatched.push(sessionId);
-        if (sessionId === "session-1") await firstAccepted;
+      dispatch: async ({ externalInstruction }) => {
+        dispatched.push(externalInstruction.semanticKey);
+        return {
+          accepted: new Promise<void>((resolve) => {
+            accept.set(externalInstruction.semanticKey, resolve);
+          }),
+        };
       },
     });
 
-    const blocked = router.route(event(), target());
-    await vi.waitFor(() => expect(dispatched).toEqual(["session-1"]));
-    await expect(
-      router.route(
-        event({ deliveryId: "delivery-2", semanticKey: "semantic-2" }),
-        target({ sessionId: "session-2", chatId: "chat-2" }),
-      ),
-    ).resolves.toEqual({ status: "routed", sessionId: "session-2" });
-    expect(dispatched).toEqual(["session-1", "session-2"]);
+    const first = await router.route(event(), target());
+    const second = await router.route(
+      event({ deliveryId: "delivery-2", semanticKey: "semantic-2" }),
+      target(),
+    );
+    expect(dispatched).toEqual(["semantic-1", "semantic-2"]);
 
-    releaseFirst();
-    await expect(blocked).resolves.toEqual({
-      status: "routed",
-      sessionId: "session-1",
-    });
+    accept.get("semantic-1")?.();
+    accept.get("semantic-2")?.();
+    await Promise.all([
+      first.status === "routed" ? first.completion : Promise.resolve(),
+      second.status === "routed" ? second.completion : Promise.resolve(),
+    ]);
   });
 
   it("retries a pending outbox entry after a crash between persistence and dispatch", async () => {
@@ -270,12 +278,12 @@ describe("GitHubFeedbackRouter", () => {
     expect(state.get("semantic-1")).toBe("pending");
 
     const restarted = setup({ state });
-    await expect(
-      restarted.router.route(event(), restarted.target),
-    ).resolves.toEqual({
+    const routed = await restarted.router.route(event(), restarted.target);
+    expect(routed).toMatchObject({
       status: "routed",
       sessionId: "session-1",
     });
+    if (routed.status === "routed") await routed.completion;
     expect(restarted.order).toEqual(["dispatch", "mark"]);
     expect(state.get("semantic-1")).toBe("dispatched");
   });
