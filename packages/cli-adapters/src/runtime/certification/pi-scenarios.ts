@@ -6,6 +6,7 @@ import {
   event,
   fileChange,
   permission,
+  reportContains,
   resourceClosed,
   resourceOpened,
   toolEffect,
@@ -77,6 +78,34 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
     required: [event("QuestionRequested"), event("PlanProposed"), event("Done")],
     forbidden: [],
     ordering: [before(event("QuestionRequested"), event("PlanProposed"))]
+  }),
+  scenario({
+    id: "quality.semantic-references",
+    capability: "code-intelligence",
+    required: [toolCall("code_intelligence"), reportContains("source.ts"), reportContains("reexport.ts"), event("Done")],
+    forbidden: [reportContains("\"path\":\"use.ts\",\"line\":2")],
+    ordering: []
+  }),
+  scenario({
+    id: "quality.structural-preview",
+    capability: "code-intelligence",
+    required: [toolCall("structural_search"), reportContains("one direct call"), event("Done")],
+    forbidden: [toolCall("structural_edit")],
+    ordering: []
+  }),
+  scenario({
+    id: "quality.semantic-rename",
+    capability: "code-intelligence",
+    required: [toolCall("code_intelligence"), permission("code_rename", "allow"), toolCall("code_rename"), fileChange("M", "source.ts"), event("Done")],
+    forbidden: [toolCall("structural_edit")],
+    ordering: [before(toolCall("code_intelligence"), toolCall("code_rename"))]
+  }),
+  scenario({
+    id: "quality.plain-text-skip",
+    capability: "code-intelligence",
+    required: [reportContains("plain text"), event("Done")],
+    forbidden: [toolCall("code_intelligence"), toolCall("structural_search"), toolCall("code_rename"), toolCall("structural_edit")],
+    ordering: []
   }),
   scenario({
     id: "remote.contract-compatible",
