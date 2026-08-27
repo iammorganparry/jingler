@@ -22,6 +22,7 @@ import type {
   PlanDocument,
   PlanDraft,
   PlanMentionDelivery,
+  PlannotatorProjection,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -95,6 +96,8 @@ export interface Conversation {
   readonly answerQuestion: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
   /** The latest open plan (proposed / revising), for the Plan Review tab, or null. */
   readonly plan: Plan | null
+  /** Disposable native projection of Plannotator's authoritative state. */
+  readonly plannotator: PlannotatorProjection | null
   /** Sanitized, cumulative plan source that has not been promoted yet. */
   readonly planDraft: PlanDraft | null
   /** Changes once per planning turn when its first renderable draft arrives. */
@@ -258,7 +261,7 @@ export function useConversation(
     subagents, subagentFleetEvents, subagentControlOutcomes,
     tokens, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt,
-    planDraft, planDraftPresentationNonce
+    plannotator, planDraft, planDraftPresentationNonce
   } = state.context
 
   const paused = useMemo(() => {
@@ -310,6 +313,7 @@ export function useConversation(
     reviewStartedAt,
     question,
     plan,
+    plannotator: plannotator ?? null,
     planDraft,
     planDraftPresentationNonce,
     planActionError: state.context.planActionError,

@@ -49,6 +49,18 @@ describe("routeOf", () => {
     ).toBe("stream-only")
   })
 
+  it("keeps Plannotator's disposable projection OUT of the transcript", () => {
+    expect(routeOf({
+      _tag: "PlannotatorStateChanged",
+      state: {
+        phase: "planning",
+        planFilePath: "PLAN.md",
+        review: null,
+        checklist: []
+      }
+    })).toBe("stream-only")
+  })
+
   it("sends background-task events to the registry, not the turn", () => {
     // They outlive the turn; persisting one would pin a still-running task to a
     // finished message.

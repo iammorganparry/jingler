@@ -17,7 +17,11 @@ import type {
   SubagentFleetControlOutcome,
   SubagentFleetNode
 } from "@jingler/core"
-import { agentFileActivityOf, clampFontScale } from "@jingler/core"
+import {
+  agentFileActivityOf,
+  clampFontScale,
+  plannotatorProjectionToPlanDocument
+} from "@jingler/core"
 import {
   AttachmentSourceProvider,
   OpenAssetProvider,
@@ -802,17 +806,29 @@ export function ConversationPane({
   // registry (from the actor's own subscription), so they stay correct even
   // while this pane is unmounted for a background session. Nothing to do here.
 
+  const plannotatorDocument = useMemo(
+    () => convo.plannotator
+      ? plannotatorProjectionToPlanDocument(
+          convo.plannotator,
+          session.id,
+          activeChat.id,
+          new Date().toISOString()
+        )
+      : null,
+    [activeChat.id, convo.plannotator, session.id]
+  )
+  const nativePlanDocument = canonicalPlan.document ?? plannotatorDocument
   const planId = canonicalPlan.document?.id ?? convo.plan?.id ?? null
 
   const planReview = (
     <PlanReview
       plan={convo.plan}
-      document={canonicalPlan.document}
+      document={nativePlanDocument}
       streamingDraft={convo.planDraft}
       draft={canonicalPlan.draft}
       syncState={canonicalPlan.state}
       syncError={canonicalPlan.error ?? convo.planActionError}
-      canApprove={canApprovePlan}
+      canApprove={canonicalPlan.document !== null && canApprovePlan}
       compact={view === "split"}
       patch={convo.patch}
       knownFiles={knownFiles}
@@ -1250,7 +1266,7 @@ export function ConversationPane({
           onForkOntoBranch={onForkOntoBranchStable}
           onAdoptBranch={onAdoptBranchStable}
           plan={convo.plan}
-          planDocument={canonicalPlan.document}
+          planDocument={nativePlanDocument}
           draft={draft.text}
           // Merge against the LIVE draft, never the render-time `draft` closure:
           // on send the composer fires onSend → setValue("") → setAttachments([])

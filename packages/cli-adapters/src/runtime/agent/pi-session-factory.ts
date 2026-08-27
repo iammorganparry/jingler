@@ -17,6 +17,7 @@ import type {
   RegisterSubagentCapabilityCeilingOptions,
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
+import { PlannotatorProjection } from "@jingler/core"
 import type {
   Message,
   PiRunSpec,
@@ -24,7 +25,7 @@ import type {
   RuntimeDiagnosticSnapshot,
   StreamEvent
 } from "@jingler/core"
-import { Data, Effect } from "effect"
+import { Data, Effect, Option, Schema } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import type { FileChangeTracker, WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { makePiCredentialStore } from "../auth/pi-credential-store.js"
@@ -105,7 +106,9 @@ const makeExtensionUIContext = (): ExtensionUIContext => ({
 })
 
 const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request"
+const PLANNOTATOR_HOST_STATE_CHANNEL = "plannotator:host-state"
 const PLANNOTATOR_TIMEOUT_MS = 5_000
+const decodePlannotatorProjection = Schema.decodeUnknownOption(PlannotatorProjection)
 interface PlannotatorPlanModeResult {
   readonly phase: "idle" | "planning" | "executing"
 }
@@ -113,8 +116,9 @@ type PlannotatorPlanModeResponse =
   | { readonly status: "handled"; readonly result: PlannotatorPlanModeResult }
   | { readonly status: "unavailable" | "error"; readonly error?: string }
 
-export const enterPlannotatorPlanMode = (
-  events: EventBus
+const requestPlannotatorPlanMode = (
+  events: EventBus,
+  mode: "enter" | "status"
 ): Promise<PlannotatorPlanModeResult> =>
   new Promise((resolve, reject) => {
     const timer = setTimeout(
@@ -124,7 +128,7 @@ export const enterPlannotatorPlanMode = (
     events.emit(PLANNOTATOR_REQUEST_CHANNEL, {
       requestId: randomUUID(),
       action: "plan-mode",
-      payload: { mode: "enter" },
+      payload: { mode },
       respond: (response: PlannotatorPlanModeResponse) => {
         clearTimeout(timer)
         if (response.status === "handled") resolve(response.result)
@@ -132,6 +136,11 @@ export const enterPlannotatorPlanMode = (
       }
     })
   })
+
+export const enterPlannotatorPlanMode = (
+  events: EventBus
+): Promise<PlannotatorPlanModeResult> =>
+  requestPlannotatorPlanMode(events, "enter")
 
 const NATIVE_SUBAGENT_TOOLS = [
   {
@@ -351,6 +360,10 @@ interface EmbeddedSession {
   readonly connection: ProviderConnection
   readonly contextWindow: number
   readonly plannotatorPhase: () => PlannotatorPhase
+  readonly subscribePlannotator: (
+    listener: (state: PlannotatorProjection) => void
+  ) => () => void
+  readonly stopPlannotatorProjection: () => void
   readonly setMemoryReflectionActive: (active: boolean) => void
 }
 
@@ -430,14 +443,36 @@ const createEmbeddedSession = (
         uiContext: makeExtensionUIContext(),
         mode: "rpc"
       })
+      let latestPlannotatorState: PlannotatorProjection | null = null
+      const plannotatorListeners = new Set<
+        (state: PlannotatorProjection) => void
+      >()
+      const stopPlannotatorProjection = events.on(
+        PLANNOTATOR_HOST_STATE_CHANNEL,
+        (candidate) => {
+          const decoded = decodePlannotatorProjection(candidate)
+          if (Option.isNone(decoded)) return
+          latestPlannotatorState = decoded.value
+          for (const listener of plannotatorListeners) listener(decoded.value)
+        }
+      )
       if (spec.mode === "plan") {
         await (options.enterPlannotatorPlanMode ?? enterPlannotatorPlanMode)(events)
+        if (options.enterPlannotatorPlanMode === undefined) {
+          await requestPlannotatorPlanMode(events, "status")
+        }
       }
       return {
         result,
         connection,
         contextWindow: model.contextWindow,
         plannotatorPhase: () => plannotatorPhase(sessionManager),
+        subscribePlannotator: (listener) => {
+          plannotatorListeners.add(listener)
+          if (latestPlannotatorState !== null) listener(latestPlannotatorState)
+          return () => plannotatorListeners.delete(listener)
+        },
+        stopPlannotatorProjection,
         setMemoryReflectionActive: (active) => {
           memoryReflectionActive = active
         }
@@ -490,6 +525,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
     plannotatorPhase: embedded.plannotatorPhase,
+    subscribePlannotator: embedded.subscribePlannotator,
     subscribe: (listener) => session.subscribe((event) => {
       if (
         event.type === "tool_execution_start" &&
@@ -538,6 +574,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     dispose: async () => {
       try {
         lifecycle.stop()
+        embedded.stopPlannotatorProjection()
         Effect.runSync(fleetEvents.clear)
         session.dispose()
       } finally {

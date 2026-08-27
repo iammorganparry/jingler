@@ -124,6 +124,36 @@ describe("PiAgentRuntime", () => {
     expect(events).toEqual([{ _tag: "Failed", message: "model certification is stale" }])
   })
 
+  it("streams Plannotator state as a disposable native projection", async () => {
+    const handle: PiSessionHandle = {
+      ...settlingHandle({ childActive: false }),
+      subscribePlannotator: (listener) => {
+        listener({
+          phase: "planning",
+          planFilePath: "PLAN.md",
+          review: null,
+          checklist: [{ step: 1, text: "Implement", completed: false }]
+        })
+        return vi.fn()
+      }
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+
+    const events = [...await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))]
+
+    expect(events).toContainEqual({
+      _tag: "PlannotatorStateChanged",
+      state: {
+        phase: "planning",
+        planFilePath: "PLAN.md",
+        review: null,
+        checklist: [{ step: 1, text: "Implement", completed: false }]
+      }
+    })
+  })
+
   it("keeps the stream open for Plannotator's automatic execution continuation", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     let phase: "idle" | "planning" | "executing" = "planning"

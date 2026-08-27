@@ -2,6 +2,7 @@ import { Match, Schema } from "effect"
 import { DiffStat } from "./domain.js"
 import type { SessionStatus } from "./domain.js"
 import { FileChangeSet } from "./runtime/file-change.js"
+import { PlannotatorProjection } from "./plannotator-projection.js"
 import { ProviderId } from "./runtime/provider-connection.js"
 import {
   SubagentFleetControlOutcome,
@@ -724,6 +725,10 @@ export const StreamEvent = Schema.Union(
    * `PlanProposed` remains the only event that may create a canonical revision.
    */
   Schema.TaggedStruct("PlanDraft", { draft: PlanDraft }),
+  /** Live-only disposable projection of Plannotator's authoritative state. */
+  Schema.TaggedStruct("PlannotatorStateChanged", {
+    state: PlannotatorProjection
+  }),
   /** The agent proposed a plan (ExitPlanMode) — appends a new interactive Plan part. */
   Schema.TaggedStruct("PlanProposed", { plan: Plan }),
   /** A runner-authoritative update to an existing plan (comment/routed/status sync). */
@@ -1097,7 +1102,7 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
       )
     })),
 
-    Match.tag("SessionIssueLinksChanged", () => msg),
+    Match.tag("SessionIssueLinksChanged", "PlannotatorStateChanged", () => msg),
 
     Match.tag("GateRequested", (e) => {
       const part: GatePart = { _tag: "Gate", gate: e.gate }

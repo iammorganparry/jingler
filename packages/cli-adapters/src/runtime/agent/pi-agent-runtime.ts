@@ -3,6 +3,7 @@ import {
   type FileChangeSet,
   type Message,
   type PiRunSpec,
+  type PlannotatorProjection,
   type StreamEvent,
   type SubagentFleetControlOutcome,
   type SubagentFleetControlRequest,
@@ -24,6 +25,9 @@ export interface PiSessionHandle {
   readonly modelId: string
   readonly contextWindow: number | null
   readonly plannotatorPhase?: () => "idle" | "planning" | "executing"
+  readonly subscribePlannotator?: (
+    listener: (state: PlannotatorProjection) => void
+  ) => () => void
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
   readonly subscribeFleet: (listener: (event: StreamEvent) => void) => () => void
   readonly controlSubagent: (
@@ -152,6 +156,9 @@ const subscribeToSession = (
   sink: EventSink
 ): (() => void) => {
   const unsubscribeFleet = handle.subscribeFleet((event) => sink.emit(event))
+  const unsubscribePlannotator = handle.subscribePlannotator?.((state) =>
+    sink.emit({ _tag: "PlannotatorStateChanged", state })
+  ) ?? (() => {})
   const normalize = createPiEventNormalizer()
   let previousPlanPhase = handle.plannotatorPhase?.() ?? "idle"
   let reflectionStarted = false
@@ -230,6 +237,7 @@ const subscribeToSession = (
   return () => {
     finishReflection()
     unsubscribeFleet()
+    unsubscribePlannotator()
     unsubscribeSession()
   }
 }

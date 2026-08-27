@@ -139,7 +139,16 @@ describe("pi session creation", () => {
     roots.push(root)
     const agentDir = join(root, "agent")
     const captured: CreateAgentSessionOptions[] = []
-    const enterPlanMode = vi.fn(async () => ({ phase: "executing" as const }))
+    const projection = {
+      phase: "executing" as const,
+      planFilePath: "PLAN.md",
+      review: null,
+      checklist: [{ step: 1, text: "Implement", completed: false }]
+    }
+    const enterPlanMode = vi.fn(async (events: EventBus) => {
+      events.emit("plannotator:host-state", projection)
+      return { phase: "executing" as const }
+    })
     const factory = makePiSessionFactory({
       agentDir,
       sessionsDir: join(root, "sessions"),
@@ -167,6 +176,9 @@ describe("pi session creation", () => {
       "jingler_submit_plan"
     )
     expect(handle.plannotatorPhase?.()).toBe("executing")
+    const projected = vi.fn()
+    handle.subscribePlannotator?.(projected)
+    expect(projected).toHaveBeenCalledWith(projection)
     expect(JSON.parse(await readFile(join(agentDir, "plannotator.json"), "utf8")))
       .toMatchObject({ executionMode: "automatic" })
   })

@@ -377,9 +377,7 @@ export function Composer({
     .map((option) => ({
       value: option.id,
       label:
-        option.kind === "plan"
-          ? "Enhanced Plan"
-          : option.label,
+        option.label,
       description: option.description,
     }));
   const reasoningEfforts = selectedModel?.capabilities.reasoning ?? [];

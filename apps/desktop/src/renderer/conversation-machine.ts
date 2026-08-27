@@ -20,6 +20,7 @@ import type {
   PlanApprovalResult,
   PlanComment,
   PlanDraft,
+  PlannotatorProjection,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -245,6 +246,8 @@ export interface ConversationContext {
   readonly sharedPlanChatId: string | null
   /** Canonical plan projected over every transcript page as it is loaded. */
   readonly sharedPlan: Plan | null
+  /** Disposable native projection of Plannotator's authoritative state. */
+  readonly plannotator?: PlannotatorProjection
   /** Volatile sanitized plan source for the current planning turn. */
   readonly planDraft: PlanDraft | null
   /** Prevents a reformat retry from reopening a split the operator closed. */
@@ -1578,6 +1581,9 @@ export const conversationMachine = setup({
           tokens: 0,
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e))
         }
+      }
+      if (e._tag === "PlannotatorStateChanged") {
+        return { plannotator: e.state }
       }
       if (e._tag === "PlanDraft") {
         if (e.draft.phase === "cleared") return { planDraft: null }

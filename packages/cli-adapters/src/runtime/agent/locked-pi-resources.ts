@@ -45,6 +45,7 @@ export const createLockedPiResources = (
 ): Effect.Effect<ResourceLoader, PiResourceError> =>
   Effect.tryPromise({
     try: async () => {
+      process.env.PLANNOTATOR_EMBEDDED = "1"
       if (input.plannotatorExecutionTools !== undefined) {
         await mkdir(input.agentDir, { recursive: true })
         await writeFile(

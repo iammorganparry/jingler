@@ -43,6 +43,7 @@ export const routeOf = (event: StreamEvent): EventRoute => {
     event._tag === "ToolDelta" ||
     event._tag === "SessionIssueLinksChanged" ||
     event._tag === "PlanDraft" ||
+    event._tag === "PlannotatorStateChanged" ||
     event._tag === "SubagentFleetChanged" ||
     event._tag === "SubagentFleetControlAcknowledged"
   ) {

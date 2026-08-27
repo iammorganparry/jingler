@@ -2012,6 +2012,33 @@ describe("conversationMachine — volatile plan drafts", () => {
     actor.stop()
   })
 
+  it("stores Plannotator state outside the transcript", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SEND", text: "plan it" })
+    await waitFor(actor, (snapshot) => snapshot.matches("running"))
+    const messageCount = actor.getSnapshot().context.messages.length
+
+    emit({
+      _tag: "PlannotatorStateChanged",
+      state: {
+        phase: "executing",
+        planFilePath: "PLAN.md",
+        review: null,
+        checklist: [{ step: 1, text: "Implement", completed: false }]
+      }
+    })
+
+    expect(actor.getSnapshot().context.plannotator).toEqual({
+      phase: "executing",
+      planFilePath: "PLAN.md",
+      review: null,
+      checklist: [{ step: 1, text: "Implement", completed: false }]
+    })
+    expect(actor.getSnapshot().context.messages).toHaveLength(messageCount)
+    actor.stop()
+  })
+
   it("tracks cumulative source without touching the transcript and promotes atomically", async () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches(idle))
