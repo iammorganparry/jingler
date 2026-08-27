@@ -56,3 +56,29 @@ export const partitionFindings = (findings: ReadonlyArray<ReviewFinding>): Findi
   toAgent: findings.filter((f) => AGENT_SEVERITIES.has(f.severity)),
   toPr: findings.filter((f) => PR_SEVERITIES.has(f.severity))
 })
+
+export interface CompletionReviewRisk {
+  readonly changedFiles: ReadonlyArray<string>
+  readonly verificationRetries: number
+}
+
+const SENSITIVE_PATH = /(?:^|\/)(?:auth|billing|payments?|security|permissions?|secrets?)(?:\/|\.|$)/iu
+
+/** Deterministic trigger: observable diff risk, never model self-assessment. */
+export const requiresCompletionReview = (risk: CompletionReviewRisk): boolean =>
+  risk.changedFiles.length > 1 ||
+  risk.verificationRetries > 0 ||
+  risk.changedFiles.some((path) => SENSITIVE_PATH.test(path))
+
+export interface CompletionReviewGate {
+  readonly blocked: boolean
+  readonly blocking: ReadonlyArray<ReviewFinding>
+}
+
+/** Critical/major findings block completion; lower severities remain review notes. */
+export const completionReviewGate = (
+  findings: ReadonlyArray<ReviewFinding>
+): CompletionReviewGate => {
+  const blocking = partitionFindings(findings).toAgent
+  return { blocked: blocking.length > 0, blocking }
+}
