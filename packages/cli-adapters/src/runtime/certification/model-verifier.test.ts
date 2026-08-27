@@ -159,6 +159,7 @@ describe("provider model behavior verification", () => {
           return [
             { kind: "tool-call", tool: "structural_search", risk: "read" },
             { kind: "tool-output", tool: "structural_search", text: '{"matchCount":1}' },
+            { kind: "report-text", text: "There is one direct call." },
             { kind: "event", tag: "Done" }
           ] as const
         case "quality.semantic-rename":

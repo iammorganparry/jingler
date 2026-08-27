@@ -8,6 +8,7 @@ import {
   fileContentContains,
   permission,
   reportContains,
+  reportEquals,
   resourceClosed,
   resourceOpened,
   toolEffect,
@@ -96,7 +97,12 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
   scenario({
     id: "quality.structural-preview",
     capability: "code-intelligence",
-    required: [toolCall("structural_search"), toolOutputContains("structural_search", "\"matchCount\":1"), event("Done")],
+    required: [
+      toolCall("structural_search"),
+      toolOutputContains("structural_search", "\"matchCount\":1"),
+      reportContains("one direct call"),
+      event("Done")
+    ],
     forbidden: [toolCall("structural_edit")],
     ordering: []
   }),
@@ -119,7 +125,7 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
   scenario({
     id: "quality.plain-text-skip",
     capability: "code-intelligence",
-    required: [reportContains("plain text"), event("Done")],
+    required: [reportEquals("plain text"), event("Done")],
     forbidden: [toolCall("code_intelligence"), toolCall("structural_search"), toolCall("code_rename"), toolCall("structural_edit")],
     ordering: []
   }),

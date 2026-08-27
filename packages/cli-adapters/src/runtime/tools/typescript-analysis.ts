@@ -608,7 +608,7 @@ export const applyIdentifierEdits = async (
     await restore(prepared)
     throw cause
   }
-  await Promise.all(prepared.flatMap(({ temporary, backup }) => [
+  await Promise.allSettled(prepared.flatMap(({ temporary, backup }) => [
     rm(temporary, { force: true }),
     rm(backup, { force: true })
   ]))

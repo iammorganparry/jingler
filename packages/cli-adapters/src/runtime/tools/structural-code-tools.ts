@@ -1,11 +1,8 @@
 import { Schema } from "effect"
 import type { ToolRegistry } from "./tool-registry.js"
+import { codeReadModes, codeReadRoles, codeWriteModes, codeWriteRoles } from "./code-intelligence-tools.js"
 import { applyIdentifierEdits, structuralPreview } from "./typescript-analysis.js"
 
-const readRoles = ["conversation", "plan", "plan-execution", "review", "background"] as const
-const writeRoles = ["conversation", "plan-execution", "background"] as const
-const readModes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
-const writeModes = ["ask", "accept-edits", "auto"] as const
 const PREVIEW_TOKEN = /^[a-f0-9]{64}$/u
 const MatchInput = {
   symbol: Schema.String.pipe(Schema.minLength(1)),
@@ -19,8 +16,8 @@ export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string)
     description: "Find TypeScript/JavaScript identifiers or direct function calls by syntax, excluding comments and string contents.",
     input: Schema.Struct(MatchInput),
     risk: "read",
-    roles: readRoles,
-    modes: readModes,
+    roles: codeReadRoles,
+    modes: codeReadModes,
     timeoutMs: 30_000,
     outputBudget: 32_000,
     cancellable: false,
@@ -37,8 +34,8 @@ export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string)
       previewToken: Schema.String.pipe(Schema.pattern(PREVIEW_TOKEN))
     }),
     risk: "mutate",
-    roles: writeRoles,
-    modes: writeModes,
+    roles: codeWriteRoles,
+    modes: codeWriteModes,
     timeoutMs: 30_000,
     outputBudget: 16_000,
     cancellable: false,

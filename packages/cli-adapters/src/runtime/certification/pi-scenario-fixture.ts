@@ -12,7 +12,7 @@ const qualityResponses = (scenarioId: string): ReadonlyArray<FauxResponseStep> |
   ]
   if (scenarioId === "quality.structural-preview") return [
     fauxAssistantMessage(fauxToolCall("structural_search", { symbol: "run", kind: "call" }), { stopReason: "toolUse" }),
-    fauxAssistantMessage("Structural preview collected from tool output.")
+    fauxAssistantMessage("There is one direct call.")
   ]
   if (scenarioId === "quality.semantic-rename") return [
     fauxAssistantMessage(fauxToolCall("code_intelligence", { action: "references", file: "source.ts", symbol: "token", line: 1 }), { stopReason: "toolUse" }),

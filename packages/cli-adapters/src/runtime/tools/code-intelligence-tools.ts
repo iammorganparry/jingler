@@ -8,10 +8,10 @@ import {
   semanticRename
 } from "./typescript-analysis.js"
 
-const readRoles = ["conversation", "plan", "plan-execution", "review", "background"] as const
-const writeRoles = ["conversation", "plan-execution", "background"] as const
-const readModes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
-const writeModes = ["ask", "accept-edits", "auto"] as const
+export const codeReadRoles = ["conversation", "plan", "plan-execution", "review", "background"] as const
+export const codeWriteRoles = ["conversation", "plan-execution", "background"] as const
+export const codeReadModes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
+export const codeWriteModes = ["ask", "accept-edits", "auto"] as const
 const SymbolInput = {
   file: Schema.String.pipe(Schema.minLength(1)),
   symbol: Schema.String.pipe(Schema.minLength(1)),
@@ -23,8 +23,8 @@ const readTool = <Input, Encoded>(definition: Pick<ToolDefinition<Input, Encoded
   ...definition,
   version: "1",
   risk: "read",
-  roles: readRoles,
-  modes: readModes,
+  roles: codeReadRoles,
+  modes: codeReadModes,
   timeoutMs: 30_000,
   outputBudget: 32_000,
   cancellable: false,
@@ -54,8 +54,8 @@ export const registerCodeIntelligenceTools = (registry: ToolRegistry, cwd: strin
     description: "Rename one resolved TypeScript/JavaScript symbol across semantic references with staged writes and rollback on failure. Use code_intelligence references first.",
     input: Schema.Struct({ ...SymbolInput, newName: Schema.String.pipe(Schema.minLength(1)) }),
     risk: "mutate",
-    roles: writeRoles,
-    modes: writeModes,
+    roles: codeWriteRoles,
+    modes: codeWriteModes,
     timeoutMs: 30_000,
     outputBudget: 16_000,
     cancellable: false,

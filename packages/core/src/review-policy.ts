@@ -62,7 +62,7 @@ export interface CompletionReviewRisk {
   readonly verificationRetries: number
 }
 
-const SENSITIVE_PATH = /(?:^|[/_.-])(?:auth(?:entication|orization)?|oauth|billing|payments?|security|permissions?|secrets?|credentials?)(?:[/_.-]|$)/u
+const SENSITIVE_PATH = /(?:^|[/_.-])(?:auth(?:entication|orization)?|oauth|billing|payments?|security|permissions?|secrets?|credentials?|crypto|passwords?|login|sessions?|tokens?|jwt|acl|access[/_.-]?control)(?:[/_.-]|$)/u
 const securityTokens = (path: string): string =>
   path
     .replaceAll(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")

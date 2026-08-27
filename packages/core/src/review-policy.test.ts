@@ -92,6 +92,9 @@ describe("completion review", () => {
     expect(requiresCompletionReview({ changedFiles: ["src/paymentProcessor.ts"], verificationRetries: 0 })).toBe(true)
     expect(requiresCompletionReview({ changedFiles: ["src/JWTAuthentication.ts"], verificationRetries: 0 })).toBe(true)
     expect(requiresCompletionReview({ changedFiles: ["src/APIAuthentication.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/password-reset.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/session-token.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/access-control.ts"], verificationRetries: 0 })).toBe(true)
     expect(requiresCompletionReview({ changedFiles: ["src/a.ts"], verificationRetries: 1 })).toBe(true)
   })
 

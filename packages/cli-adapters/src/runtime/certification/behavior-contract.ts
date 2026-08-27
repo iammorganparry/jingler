@@ -129,6 +129,11 @@ export const reportContains = (value: string): EvalMatcher => ({
   matches: (observation) => observation.kind === "report-text" && observation.text.includes(value)
 })
 
+export const reportEquals = (value: string): EvalMatcher => ({
+  description: `report-equals:${value}`,
+  matches: (observation) => observation.kind === "report-text" && observation.text === value
+})
+
 export const toolOutputContains = (tool: string, value: string): EvalMatcher => ({
   description: `tool-output-contains:${tool}:${value}`,
   matches: (observation) =>
