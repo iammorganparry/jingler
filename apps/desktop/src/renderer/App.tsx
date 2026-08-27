@@ -42,6 +42,7 @@ import {
   LoginScreen,
   SetupScreen,
   JinglerApp,
+  PullRequestInbox,
   Select,
   SelectContent,
   SelectItem,
@@ -71,6 +72,7 @@ import {
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js";
 import { PullRequestPane } from "./pull-request-pane.js";
+import { usePullRequestInbox } from "./use-pull-request-inbox.js";
 import { ReviewPane } from "./review-pane.js";
 import { FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
 import { TerminalDockView } from "./terminal-dock-view.js";
@@ -384,6 +386,7 @@ function AuthedApp({
 }) {
   const [state, send] = useMachine(appMachine);
   const github = useGitHubConnection();
+  const pullRequestInbox = usePullRequestInbox(github.connection.connected);
   const [relayError, setRelayError] = useState<string | null>(null);
   const relayStatuses = useRef(
     new Map<string, { mode: string; error: string | null }>(),
@@ -1602,6 +1605,23 @@ function AuthedApp({
         onVisibleSessionsChange={onVisibleSessionsChange}
         sessions={sessions}
         user={user}
+        pullRequestsView={
+          <PullRequestInbox
+            prs={pullRequestInbox.prs}
+            viewerLogin={github.connection.user?.login ?? ""}
+            selected={pullRequestInbox.selected ? {
+              repository: pullRequestInbox.selected.repository,
+              number: pullRequestInbox.selected.number,
+            } : null}
+            detail={pullRequestInbox.detail}
+            onSelect={pullRequestInbox.select}
+            onOpenOnGithub={(url) => void window.jingler.openExternal(url)}
+            loading={pullRequestInbox.loading}
+            detailLoading={pullRequestInbox.detailLoading}
+            detailError={pullRequestInbox.detailError}
+            error={pullRequestInbox.error}
+          />
+        }
         memory={{
           eligible: memory.eligible,
           active: memory.active,
@@ -1922,6 +1942,7 @@ function AuthedApp({
               onConnectGithub={ctx.onConnectGithub}
               onPrLinked={onPrLinked}
               onPublishCheckpoint={onPublishCheckpoint}
+              onOpenFiles={ctx.onSelectReview}
             />
           );
         }}

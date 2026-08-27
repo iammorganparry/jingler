@@ -8,6 +8,7 @@ import {
   Cloud,
   Columns2,
   GitBranch,
+  GitPullRequest,
   Layers,
   LoaderCircle,
   PanelLeft,
@@ -115,6 +116,9 @@ export interface SessionSidebarProps {
   memoryEligible?: boolean
   memoryActive?: boolean
   onOpenMemory?: () => void
+  /** Global open pull requests across the connected GitHub App. */
+  pullRequestsActive?: boolean
+  onOpenPullRequests?: () => void
   pendingEnvironmentSession?: PendingEnvironmentSession | null
   pendingEnvironmentSessionActive?: boolean
   onSelectPendingEnvironmentSession?: () => void
@@ -172,6 +176,8 @@ function SidebarBody({
   memoryEligible = false,
   memoryActive = false,
   onOpenMemory,
+  pullRequestsActive = false,
+  onOpenPullRequests,
   pendingEnvironmentSession,
   pendingEnvironmentSessionActive = false,
   onSelectPendingEnvironmentSession,
@@ -464,6 +470,27 @@ function SidebarBody({
           <Plus size={15} />
         </button>
       </div>
+
+      {onOpenPullRequests && (
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            data-testid="pull-requests-sidebar-item"
+            aria-current={pullRequestsActive ? "page" : undefined}
+            onClick={onOpenPullRequests}
+            className={cn(
+              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              pullRequestsActive
+                ? "bg-surface text-text-bright"
+                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+            )}
+          >
+            <GitPullRequest size={15} className={pullRequestsActive ? "text-green" : undefined} />
+            <span className="flex-1">Pull requests</span>
+            {pullRequestsActive && <span className="text-[10px] text-blue">Open</span>}
+          </button>
+        </div>
+      )}
 
       {memoryEligible && (
         <div className="px-2 pb-2">
@@ -767,6 +794,8 @@ function SessionRail({
   memoryEligible,
   memoryActive,
   onOpenMemory,
+  pullRequestsActive,
+  onOpenPullRequests,
   pendingEnvironmentSession,
   pendingEnvironmentSessionActive,
   onSelectPendingEnvironmentSession,
@@ -781,6 +810,8 @@ function SessionRail({
   memoryEligible?: boolean
   memoryActive?: boolean
   onOpenMemory?: () => void
+  pullRequestsActive?: boolean
+  onOpenPullRequests?: () => void
   pendingEnvironmentSession?: PendingEnvironmentSession | null
   pendingEnvironmentSessionActive?: boolean
   onSelectPendingEnvironmentSession?: () => void
@@ -891,6 +922,24 @@ function SessionRail({
         <Plus size={15} />
       </button>
       <span className="my-1 h-px w-6 flex-none bg-hairline" />
+      {onOpenPullRequests && (
+        <button
+          type="button"
+          data-testid="pull-requests-rail-item"
+          onClick={onOpenPullRequests}
+          aria-current={pullRequestsActive ? "page" : undefined}
+          aria-label="Pull requests"
+          title="Pull requests"
+          className={cn(
+            "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+            pullRequestsActive
+              ? "bg-surface text-green"
+              : "text-dim hover:bg-surface hover:text-text"
+          )}
+        >
+          <GitPullRequest size={16} />
+        </button>
+      )}
       {memoryEligible && (
         <button
           type="button"
@@ -1027,6 +1076,8 @@ export function SessionSidebar(props: SessionSidebarProps) {
       memoryEligible={props.memoryEligible}
       memoryActive={props.memoryActive}
       onOpenMemory={props.onOpenMemory}
+      pullRequestsActive={props.pullRequestsActive}
+      onOpenPullRequests={props.onOpenPullRequests}
       pendingEnvironmentSession={props.pendingEnvironmentSession}
       pendingEnvironmentSessionActive={props.pendingEnvironmentSessionActive}
       onSelectPendingEnvironmentSession={props.onSelectPendingEnvironmentSession}

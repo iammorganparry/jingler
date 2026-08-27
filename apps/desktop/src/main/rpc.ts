@@ -2389,6 +2389,20 @@ export const workspaceRevertLines = (input: {
  * `Github.pr` handler. Returns the linked PR via GitHub APIs or null when the
  * session has no worktree or no linked PR. Exported for tests.
  */
+export const githubPrInbox = () =>
+  Effect.gen(function* () {
+    const repositories = yield* GitHubAuth.repositories();
+    const groups = yield* Effect.forEach(
+      repositories,
+      (repository) => GitHubApi.listInboxPrsBySlug(repository.fullName),
+      { concurrency: 6 },
+    );
+    return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  });
+
+export const githubPrBySlug = (repository: string, number: number) =>
+  GitHubApi.prViewBySlug(repository, number);
+
 export const githubPr = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
@@ -6017,6 +6031,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
 });
 
 const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
+  "Github.inbox": () => githubPrInbox(),
+  "Github.prBySlug": ({ repository, number }) => githubPrBySlug(repository, number),
   "Github.pr": ({ sessionId }) => githubPr(sessionId),
   "Github.prState": ({ sessionId }) => githubPrState(sessionId),
   "Github.listPrs": ({ repoPath, githubSlug, mine, search }) =>

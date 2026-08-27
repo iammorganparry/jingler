@@ -40,6 +40,14 @@ describe("SessionSidebar at shell width", () => {
     expect(onSelect).toHaveBeenCalledWith("b")
   })
 
+  it("keeps Pull Requests reachable from the collapsed rail", () => {
+    const onOpenPullRequests = vi.fn()
+    renderAt(820, { pullRequestsActive: true, onOpenPullRequests })
+    fireEvent.click(screen.getByRole("button", { name: "Pull requests" }))
+    expect(onOpenPullRequests).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("pull-requests-rail-item").getAttribute("aria-current")).toBe("page")
+  })
+
   it("keeps the eligible Memory destination reachable from the collapsed rail", () => {
     const onOpenMemory = vi.fn()
     renderAt(820, { memoryEligible: true, memoryActive: true, onOpenMemory })

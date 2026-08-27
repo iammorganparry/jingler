@@ -75,7 +75,7 @@ export interface SessionSplitProps {
   debugStopSequences?: Readonly<Record<string, number>>
   onOpenSettings?: () => void
   onOpenProviderSettings?: () => void
-  renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void; onSelectReview: () => void }) => ReactNode
   /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
   tabContributions?: ReadonlyArray<TabContribution>
   /** Persist selection of a provider-scoped issue from a pane's right rail. */

@@ -4,6 +4,7 @@ import type {
   IssueSummary,
   PrCheck,
   PrCheckStatus,
+  PrCommit,
   PrFileChange,
   PrLabel,
   PrReviewKind,
@@ -12,6 +13,7 @@ import type {
   PrState,
   PrThreadComment,
   PrSummary,
+  PullRequestListItem,
   PrTimelineItem,
   PullRequest,
   SessionPrStatus
@@ -77,6 +79,16 @@ export const checkStatusOf = (candidate: unknown): PrCheckStatus => {
   return state === "PENDING" ? "running" : "pending"
 }
 
+export const dedupeChecks = (checks: ReadonlyArray<PrCheck>): ReadonlyArray<PrCheck> => {
+  const seen = new Set<string>()
+  return checks.filter((check) => {
+    const key = check.name.trim().toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 export const rollupChecks = (
   checks: ReadonlyArray<{ readonly status: PrCheckStatus }>
 ): PrCheckStatus | null => {
@@ -115,6 +127,21 @@ export const mapCheck = (candidate: unknown): PrCheck => {
   }
 }
 
+export const mapPrCommit = (raw: unknown): PrCommit => {
+  const row = jsonRecord(raw)
+  const commit = jsonRecord(row.commit)
+  const author = jsonRecord(row.author)
+  const commitAuthor = jsonRecord(commit.author)
+  return {
+    sha: text(row.sha) ?? "",
+    message: (text(commit.message) ?? "").split("\n", 1)[0] ?? "",
+    author: text(author.login) ?? text(commitAuthor.name) ?? "unknown",
+    committedAt: text(commitAuthor.date) ?? "",
+    url: text(field(row, "htmlUrl", "html_url")) ?? text(row.url) ?? "",
+    verified: jsonRecord(commit.verification).verified === true
+  }
+}
+
 const labelsOf = (value: unknown): ReadonlyArray<PrLabel> =>
   rows(value).map((label) => ({
     name: text(label.name) ?? "",
@@ -125,7 +152,8 @@ const avatarOf = (value: Json): string | null =>
   text(field(value, "avatarUrl", "avatar_url"))
 
 const mergeStateOf = (pr: Json): string | null => {
-  const explicit = text(field(pr, "mergeStateStatus", "merge_state_status"))
+  const explicit =
+    text(field(pr, "mergeStateStatus", "merge_state_status")) ?? text(pr.mergeable_state)
   if (explicit) return explicit.toUpperCase()
   if (pr.mergeable === false) return "DIRTY"
   if (pr.mergeable === true) return "CLEAN"
@@ -164,7 +192,8 @@ export const mapPrView = (raw: unknown): PullRequest => {
     const login = nestedLogin(review.author ?? review.user)
     const reviewState = text(review.state)?.toUpperCase()
     if (!login || reviewState === "PENDING" || reviewState === "DISMISSED") continue
-    reviewerStates.set(login, reviewKindOf(reviewState ?? null))
+    const kind = reviewKindOf(reviewState ?? null)
+    if (kind !== "commented" || !reviewerStates.has(login)) reviewerStates.set(login, kind)
   }
   for (const requestedReviewer of requested) {
     const login = text(requestedReviewer.login) ?? text(requestedReviewer.name)
@@ -234,13 +263,14 @@ export const mapPrView = (raw: unknown): PullRequest => {
     state,
     title: text(pr.title) ?? "",
     body: text(pr.body),
-    url: text(field(pr, "url", "html_url")) ?? "",
+    url: text(field(pr, "htmlUrl", "html_url")) ?? text(pr.url) ?? "",
     headRefName: text(field(pr, "headRefName", "head_ref")) ?? text(head.ref) ?? "",
     baseRefName: text(field(pr, "baseRefName", "base_ref")) ?? text(base.ref) ?? "",
     isDraft,
     author: { login: text(author.login) ?? "unknown", avatarUrl: avatarOf(author) },
     createdAt: text(field(pr, "createdAt", "created_at")) ?? "",
-    commits: integer(pr.commits) ?? rows(pr.commits).length,
+    commits: integer(pr.commits) ?? rows(pr.commit_items).length,
+    commitItems: rows(pr.commit_items).map(mapPrCommit),
     changedFiles: integer(field(pr, "changedFiles", "changed_files")) ?? files.length,
     additions: integer(pr.additions) ?? 0,
     deletions: integer(pr.deletions) ?? 0,
@@ -359,6 +389,25 @@ export const mapPrSummary = (raw: unknown): PrSummary => {
     additions: integer(pr.additions) ?? 0,
     deletions: integer(pr.deletions) ?? 0,
     updatedAt: text(field(pr, "updatedAt", "updated_at")) ?? ""
+  }
+}
+
+export const mapPullRequestListItem = (
+  raw: unknown,
+  repository: string,
+  viewerLogin: string | null
+): PullRequestListItem => {
+  const pr = jsonRecord(raw)
+  const viewer = viewerLogin?.toLowerCase()
+  const matchesViewer = (candidate: Json) =>
+    viewer !== undefined && text(candidate.login)?.toLowerCase() === viewer
+  return {
+    ...mapPrSummary(pr),
+    repository,
+    labels: labelsOf(pr.labels),
+    comments: (integer(pr.comments) ?? 0) + (integer(field(pr, "reviewComments", "review_comments")) ?? 0),
+    assignedToViewer: rows(pr.assignees).some(matchesViewer),
+    reviewRequestedFromViewer: rows(field(pr, "reviewRequests", "requested_reviewers")).some(matchesViewer)
   }
 }
 

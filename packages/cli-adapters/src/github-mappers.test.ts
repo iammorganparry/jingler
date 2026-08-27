@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
   checkStatusOf,
+  dedupeChecks,
   isGitHubAccessWebhook,
   mapCheck,
+  mapPrCommit,
   mapPrView,
+  mapPullRequestListItem,
   mapReviewThreads,
   postableLines,
   rollupChecks,
@@ -57,6 +60,47 @@ describe("GitHub response mappers", () => {
       "1 failing check",
       "1 change request"
     ])
+  })
+
+  it("prefers browser URLs, preserves decisive reviews, and reads REST merge state", () => {
+    const pull = mapPrView({
+      number: 14,
+      state: "open",
+      title: "Safer auth",
+      url: "https://api.github.com/repos/acme/widget/pulls/14",
+      html_url: "https://github.com/acme/widget/pull/14",
+      mergeable: true,
+      mergeable_state: "behind",
+      reviews: [
+        { id: 1, state: "APPROVED", user: { login: "reviewer" } },
+        { id: 2, state: "COMMENTED", body: "One note", user: { login: "reviewer" } }
+      ]
+    })
+    expect(pull.url).toBe("https://github.com/acme/widget/pull/14")
+    expect(pull.mergeStateStatus).toBe("BEHIND")
+    expect(pull.reviewers).toEqual([{ login: "reviewer", state: "approved" }])
+  })
+
+  it("maps global inbox relationships against the connected viewer", () => {
+    expect(mapPullRequestListItem({
+      number: 14,
+      title: "Safer auth",
+      state: "open",
+      user: { login: "author" },
+      head: { ref: "auth" },
+      base: { ref: "main" },
+      labels: [{ name: "security", color: "d73a4a" }],
+      comments: 2,
+      review_comments: 3,
+      assignees: [{ login: "OCTOCAT" }],
+      requested_reviewers: [{ login: "octocat" }]
+    }, "acme/widget", "octocat")).toMatchObject({
+      repository: "acme/widget",
+      comments: 5,
+      assignedToViewer: true,
+      reviewRequestedFromViewer: true,
+      labels: [{ name: "security", color: "d73a4a" }]
+    })
   })
 
   it("maps inline GraphQL review threads defensively", () => {
@@ -115,6 +159,36 @@ describe("GitHub response mappers", () => {
         ]
       })
     ])
+  })
+
+  it("keeps the newest occurrence of each case-insensitive check name", () => {
+    const check = (name: string, status: "pass" | "fail") => ({ name, status, detailsUrl: null, durationMs: null })
+    expect(dedupeChecks([
+      check("QA Verify", "pass"),
+      check("qa verify", "fail"),
+      check("Typecheck", "pass")
+    ])).toEqual([check("QA Verify", "pass"), check("Typecheck", "pass")])
+  })
+
+  it("maps pull request commit evidence", () => {
+    expect(mapPrCommit({
+      sha: "abc123",
+      url: "https://api.github.com/repos/acme/widget/commits/abc123",
+      html_url: "https://github.com/acme/widget/commit/abc123",
+      author: { login: "octocat" },
+      commit: {
+        message: "fix auth\n\nLong body",
+        author: { name: "Octo Cat", date: "2026-08-26T08:00:00Z" },
+        verification: { verified: true }
+      }
+    })).toEqual({
+      sha: "abc123",
+      message: "fix auth",
+      author: "octocat",
+      committedAt: "2026-08-26T08:00:00Z",
+      url: "https://github.com/acme/widget/commit/abc123",
+      verified: true
+    })
   })
 
   it("normalizes check states and their rollup", () => {

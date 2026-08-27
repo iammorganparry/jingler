@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { type KeyboardEvent, useState } from "react"
 import type { PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@jingler/core"
 import type { BadgeProps } from "../components/badge.js"
 import { cn } from "../lib/cn.js"
@@ -101,6 +101,8 @@ export interface PrSidePanelProps {
    * left the PR body about 88px of reading column after its own 60px gutters.
    */
   width?: number
+  /** Hide session-bound lifecycle and merge controls. */
+  readOnly?: boolean
   /** Extra classes — how the caller turns the rail into a floating sheet. */
   className?: string
 }
@@ -119,12 +121,22 @@ export function PrSidePanel({
   updateBranchError,
   review,
   width = 352,
+  readOnly = false,
   className
 }: PrSidePanelProps) {
   // Merge-commit default, matching GitHub and the previous hardcoded
   // behaviour — a picker that silently changed what the button did would be a
   // worse regression than not having one.
   const [method, setMethod] = useState<PrMergeMethod>("merge")
+  const moveMethod = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return
+    event.preventDefault()
+    const delta = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1
+    const next = (index + delta + MERGE_METHODS.length) % MERGE_METHODS.length
+    const value = MERGE_METHODS[next]!.method
+    setMethod(value)
+    document.querySelector<HTMLButtonElement>(`[data-merge-method="${value}"]`)?.focus()
+  }
   const failing = pr.checks.filter((c) => c.status === "fail").length
   const blocked = pr.mergeBlockers.length > 0
   const behind = pr.mergeStateStatus === "BEHIND"
@@ -191,7 +203,7 @@ export function PrSidePanel({
       </div>
 
       {/* Merge box — outside the scroll container, so it's always in reach. */}
-      <div className="flex-none border-t border-hairline bg-panel p-4">
+      {!readOnly && <div className="flex-none border-t border-hairline bg-panel p-4">
         {merged ? (
           <Callout tone="purple">This pull request has been merged.</Callout>
         ) : closed ? (
@@ -276,15 +288,18 @@ export function PrSidePanel({
               aria-label="Merge method"
               className="flex overflow-hidden rounded-md border border-line"
             >
-              {MERGE_METHODS.map((m) => (
+              {MERGE_METHODS.map((m, index) => (
                 <button
                   key={m.method}
                   type="button"
                   role="radio"
                   aria-checked={method === m.method}
+                  tabIndex={method === m.method ? 0 : -1}
+                  data-merge-method={m.method}
                   title={m.hint}
                   disabled={merging}
                   onClick={() => setMethod(m.method)}
+                  onKeyDown={(event) => moveMethod(event, index)}
                   className={cn(
                     "flex-1 px-2 py-[5px] text-[11.5px] transition-colors disabled:pointer-events-none",
                     method === m.method
@@ -311,7 +326,7 @@ export function PrSidePanel({
             )}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   )
 }

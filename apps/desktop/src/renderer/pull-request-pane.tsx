@@ -19,7 +19,8 @@ export function PullRequestPane({
   connectionActionLabel,
   onConnectGithub,
   onPrLinked,
-  onPublishCheckpoint
+  onPublishCheckpoint,
+  onOpenFiles
 }: {
   session: Session
   connected: boolean
@@ -31,6 +32,7 @@ export function PullRequestPane({
   onConnectGithub: () => void
   onPrLinked: (sessionId: string, prNumber: number) => void
   onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<Session["publish"]>) => void
+  onOpenFiles: () => void
 }) {
   const {
     pr,
@@ -96,6 +98,7 @@ export function PullRequestPane({
       onResolveThread={resolveThread}
       onReplyToThread={replyToThread}
       onOpenOnGithub={openOnGithub}
+      onOpenFiles={onOpenFiles}
       review={{
         review,
         running: reviewRunning,

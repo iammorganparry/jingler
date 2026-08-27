@@ -10,7 +10,7 @@ import type {
   PullRequest,
   ReviewSubmitKind
 } from "@jingler/core"
-import { Check, GitPullRequest, PanelRight } from "lucide-react"
+import { Check, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { relativeTime } from "../lib/relative-time.js"
@@ -19,15 +19,18 @@ import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Card } from "../components/card.js"
 import { Markdown } from "../components/markdown.js"
-import { AsyncButton } from "../components/async-button.js"
 import { Callout } from "../components/callout.js"
 import { Spinner } from "../components/loading.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { StatusDot } from "../components/status-dot.js"
+import { MotionTabs } from "../components/beui/controls.js"
+import { PrCheckRow } from "./pr-check-row.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { PrReviewGroup } from "./pr-review-group.js"
 import { PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
+
+type PrEvidence = "overview" | "commits" | "checks" | "files"
 
 /** Per-state colouring for the header status lozenge. */
 const stateMeta: Record<PrState, { label: string; text: string; bg: string; border: string; dot: string }> = {
@@ -158,6 +161,8 @@ export interface PullRequestViewProps {
   /** Reply into an inline review thread (`commentId` = the REST databaseId). */
   onReplyToThread?: (commentId: number, body: string) => Promise<void> | void
   onOpenOnGithub?: () => void
+  /** Open this PR's changed files in Jingler or GitHub. */
+  onOpenFiles?: () => void
   onMerge?: (method: PrMergeMethod) => void
   /** A merge is in flight — disables the button and shows a spinner. */
   merging?: boolean
@@ -173,6 +178,8 @@ export interface PullRequestViewProps {
   onUpdateBranch?: () => void
   updatingBranch?: boolean
   updateBranchError?: string | null
+  /** Hide session-bound review and merge actions for global/read-only views. */
+  readOnly?: boolean
   /** The adversarial review panel's state + actions (right rail). */
   review?: PrSidePanelProps["review"]
 }
@@ -201,6 +208,7 @@ export function PullRequestView({
   onResolveThread,
   onReplyToThread,
   onOpenOnGithub,
+  onOpenFiles,
   onMerge,
   merging = false,
   mergeError,
@@ -210,6 +218,7 @@ export function PullRequestView({
   onUpdateBranch,
   updatingBranch = false,
   updateBranchError,
+  readOnly = false,
   review
 }: PullRequestViewProps) {
   // Declared ABOVE the early returns below — this component returns early for
@@ -221,9 +230,18 @@ export function PullRequestView({
   // left roughly 88px of it — narrower than the PR title.
   const roomy = atLeast(useWidthTier(), "mid")
   const [railOpen, setRailOpen] = useState(false)
+  const [evidence, setEvidence] = useState<PrEvidence>("overview")
   useEffect(() => {
     if (roomy) setRailOpen(false)
   }, [roomy])
+  useEffect(() => {
+    if (!railOpen) return
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRailOpen(false)
+    }
+    window.addEventListener("keydown", close)
+    return () => window.removeEventListener("keydown", close)
+  }, [railOpen])
 
   // Loading — avoid flashing the "Create PR" empty state before the PR resolves.
   if (pr === null && busy) {
@@ -398,8 +416,30 @@ export function PullRequestView({
                 ))}
               </div>
             )}
+            <div className="overflow-x-auto pt-1">
+              <MotionTabs
+                variant="underline"
+                value={evidence}
+                onChange={(value) => {
+                  if (value === "files") onOpenFiles?.()
+                  else setEvidence(value)
+                }}
+                items={[
+                  { value: "overview", label: "Overview" },
+                  { value: "commits", label: `Commits ${pr.commits}` },
+                  { value: "checks", label: `Checks ${pr.checks.length}` },
+                  { value: "files", label: `Files changed ${pr.changedFiles}`, disabled: !onOpenFiles }
+                ]}
+              />
+            </div>
           </div>
 
+          {evidence === "commits" ? (
+            <CommitEvidence pr={pr} />
+          ) : evidence === "checks" ? (
+            <CheckEvidence pr={pr} />
+          ) : (
+          <>
           {/*
             The PR description — the opening comment, rendered as one.
             `pr.body` was fetched, mapped and carried in the schema all along and
@@ -463,13 +503,17 @@ export function PullRequestView({
           )}
 
           {/* Sticky review composer */}
-          <div className="sticky bottom-0 mt-auto pt-2">
-            <PrReviewComposer
-              connected={connected}
-              selfAuthored={Boolean(viewerLogin) && viewerLogin === pr.author.login}
-              onSubmit={(input) => onSubmitReview?.(input)}
-            />
-          </div>
+          {!readOnly && (
+            <div className="sticky bottom-0 mt-auto pt-2">
+              <PrReviewComposer
+                connected={connected}
+                selfAuthored={Boolean(viewerLogin) && viewerLogin === pr.author.login}
+                onSubmit={(input) => onSubmitReview?.(input)}
+              />
+            </div>
+          )}
+          </>
+          )}
           </div>
         </div>
       </div>
@@ -478,12 +522,12 @@ export function PullRequestView({
       {!roomy && (
         <button
           type="button"
-          aria-label="Pull request details"
+          aria-label={railOpen ? "Close pull request details" : "Pull request details"}
           aria-pressed={railOpen}
-          title="Reviewers, checks and merge"
+          title={railOpen ? "Close details" : readOnly ? "Reviewers and checks" : "Reviewers, checks and merge"}
           onClick={() => setRailOpen((v) => !v)}
           className={cn(
-            "absolute right-2 top-2 z-20 flex size-7 items-center justify-center rounded-md border border-line bg-sunken shadow-lg transition-colors",
+            "absolute right-2 top-2 z-40 flex size-7 items-center justify-center rounded-md border border-line bg-sunken shadow-lg transition-colors",
             railOpen ? "text-blue" : "text-dim hover:text-text-bright"
           )}
         >
@@ -495,7 +539,7 @@ export function PullRequestView({
         // widths — it has to remain reachable, which is what the toggle above is
         // for. Hidden rather than unmounted so its scroll position and merge-
         // method choice survive being closed.
-        className={cn(!roomy && "absolute inset-y-0 right-0 z-30 shadow-2xl", !roomy && !railOpen && "hidden")}
+        className={cn(!roomy && "absolute inset-y-0 right-0 z-30 shadow-2xl", !(roomy || railOpen) && "hidden")}
         pr={pr}
         connected={connected}
         onMerge={onMerge}
@@ -508,7 +552,47 @@ export function PullRequestView({
         updatingBranch={updatingBranch}
         updateBranchError={updateBranchError}
         review={review}
+        readOnly={readOnly}
       />
+    </div>
+  )
+}
+
+function CommitEvidence({ pr }: { pr: PullRequest }) {
+  const commits = pr.commitItems ?? []
+  if (commits.length === 0) {
+    return <p className="text-[13px] text-dim">No commit details reported.</p>
+  }
+  return (
+    <div className="overflow-hidden rounded-lg border border-line bg-panel">
+      {commits.map((commit) => (
+        <a
+          key={commit.sha}
+          href={commit.url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-start gap-3 border-b border-hairline px-4 py-3 last:border-b-0 hover:bg-surface"
+        >
+          <GitCommit className="mt-0.5 size-4 flex-none text-dim" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium text-text-bright">{commit.message}</span>
+            <span className="mt-1 block text-[11px] text-muted-foreground">{commit.author} committed {relativeTime(commit.committedAt)}</span>
+          </span>
+          {commit.verified && <Badge tone="green" size="xs">Verified</Badge>}
+          <code className="font-mono text-[10.5px] text-dim">{commit.sha.slice(0, 7)}</code>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function CheckEvidence({ pr }: { pr: PullRequest }) {
+  if (pr.checks.length === 0) {
+    return <p className="text-[13px] text-dim">No checks reported.</p>
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-line bg-panel p-4">
+      {pr.checks.map((check) => <PrCheckRow key={check.name.toLowerCase()} check={check} />)}
     </div>
   )
 }
