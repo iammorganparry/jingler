@@ -2168,6 +2168,35 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     }
   }),
 
+  /** Post a top-level conversation comment on a global pull request. */
+  Rpc.make("Github.commentBySlug", {
+    error: GitHubApiError,
+    payload: {
+      repository: Schema.String,
+      number: Schema.Number,
+      body: Schema.String
+    }
+  }),
+
+  /** Close a global pull request. */
+  Rpc.make("Github.closeBySlug", {
+    error: GitHubApiError,
+    payload: {
+      repository: Schema.String,
+      number: Schema.Number
+    }
+  }),
+
+  /** Merge a global pull request using the selected method. */
+  Rpc.make("Github.mergeBySlug", {
+    error: GitHubApiError,
+    payload: {
+      repository: Schema.String,
+      number: Schema.Number,
+      method: PrMergeMethod
+    }
+  }),
+
   /**
    * Submit the reviewer's drafts to the session's PR as a COMMENT review
    * carrying real, line-anchored inline comments.

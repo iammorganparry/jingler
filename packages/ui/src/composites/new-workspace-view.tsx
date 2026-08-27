@@ -6,6 +6,7 @@ import type {
   ProviderConnectionId,
   ProviderModelId,
   Project,
+  PrSummary,
 } from "@jingler/core";
 import type { SessionCreationPhase } from "@jingler/contracts";
 import { useMachine } from "@xstate/react";
@@ -301,6 +302,7 @@ export interface NewWorkspaceViewProps {
   defaultMode?: PermissionMode | null;
   defaultProjectId?: string | null;
   requestedProjectId?: string | null;
+  requestedPr?: PrSummary | null;
   prepareProject: NewWorkspaceDeps["prepareProject"];
   loadBranches: NewWorkspaceDeps["loadBranches"];
   issueProviders?: NewWorkspaceDeps["issueProviders"];
@@ -329,9 +331,10 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
         ...(props.requestedProjectId
           ? { projectId: props.requestedProjectId }
           : {}),
+        ...(props.requestedPr ? { pr: props.requestedPr } : {}),
       });
     else send({ type: "CLOSE" });
-  }, [props.open, props.requestedProjectId, send]);
+  }, [props.open, props.requestedPr, props.requestedProjectId, send]);
 
   React.useEffect(() => {
     if (!props.open || state.context.projectId !== "") return;

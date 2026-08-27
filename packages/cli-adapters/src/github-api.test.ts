@@ -611,6 +611,38 @@ describe("GitHubApi typed failures", () => {
 })
 
 describe("GitHubApi writes and fork metadata", () => {
+  it("comments on, closes, and merges a pull request by repository slug", async () => {
+    const { client, seen } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget") && request.method === "GET") {
+        return json(repository)
+      }
+      return json({ merged: true })
+    })
+
+    await client.prCommentBySlug("acme/widget", 7, "ship it")
+    await client.prCloseBySlug("acme/widget", 7)
+    await client.prMergeBySlug("acme/widget", 7, "squash")
+
+    expect(seen.map(({ method, url, body }) => ({ method, path: url.pathname, body })))
+      .toEqual(expect.arrayContaining([
+        {
+          method: "POST",
+          path: "/repos/acme/widget/issues/7/comments",
+          body: { body: "ship it" }
+        },
+        {
+          method: "PATCH",
+          path: "/repos/acme/widget/pulls/7",
+          body: { state: "closed" }
+        },
+        {
+          method: "PUT",
+          path: "/repos/acme/widget/pulls/7/merge",
+          body: { merge_method: "squash" }
+        }
+      ]))
+  })
+
   it("normalizes review payloads and every supported write to typed HTTP requests", async () => {
     const writes: SeenRequest[] = []
     const git = vi.fn(async () => "")

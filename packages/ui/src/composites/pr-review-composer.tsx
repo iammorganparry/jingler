@@ -12,6 +12,7 @@ import { Toggle } from "../components/toggle.js"
 export function PrReviewComposer({
   connected,
   selfAuthored = false,
+  commentOnly = false,
   onSubmit
 }: {
   connected: boolean
@@ -20,10 +21,12 @@ export function PrReviewComposer({
    * your own pull request, so those actions are disabled (Comment stays allowed).
    */
   selfAuthored?: boolean
+  /** Global PR comments do not expose review verdicts or agent routing. */
+  commentOnly?: boolean
   onSubmit: (input: { body: string; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
 }) {
   const [body, setBody] = React.useState("")
-  const [routeToAgent, setRouteToAgent] = React.useState(true)
+  const [routeToAgent, setRouteToAgent] = React.useState(!commentOnly)
   const [error, setError] = React.useState<string | null>(null)
 
   const submit = async (kind: ReviewSubmitKind) => {
@@ -45,7 +48,7 @@ export function PrReviewComposer({
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        placeholder="Leave a review comment…"
+        placeholder={commentOnly ? "Leave a comment…" : "Leave a review comment…"}
         rows={2}
         className="w-full resize-none bg-transparent px-[14px] py-[11px] text-[13.5px] text-text-body outline-none placeholder:text-dim"
       />
@@ -60,14 +63,16 @@ export function PrReviewComposer({
         </div>
       )}
       <div className="flex min-w-0 flex-wrap items-center gap-x-[9px] gap-y-2 border-t border-hairline px-[14px] py-[11px]">
-        <label className="flex items-center gap-2 text-[11.5px] text-text">
-          <Toggle checked={routeToAgent} onCheckedChange={setRouteToAgent} />
-          Route to agent
-        </label>
+        {!commentOnly && (
+          <label className="flex items-center gap-2 text-[11.5px] text-text">
+            <Toggle checked={routeToAgent} onCheckedChange={setRouteToAgent} />
+            Route to agent
+          </label>
+        )}
         <div className="flex-1" />
         <AsyncButton
           variant="secondary"
-          disabled={!connected}
+          disabled={!connected || (commentOnly && body.trim().length === 0)}
           pendingLabel="Posting…"
           successLabel="Commented"
           onClick={() => submit("comment")}
@@ -76,7 +81,7 @@ export function PrReviewComposer({
         </AsyncButton>
         {/* Approve / request-changes are hidden on your own PR — GitHub forbids
             self-approval, so only Comment is offered. */}
-        {!selfAuthored && (
+        {!commentOnly && !selfAuthored && (
           <>
             <AsyncButton
               variant="danger"

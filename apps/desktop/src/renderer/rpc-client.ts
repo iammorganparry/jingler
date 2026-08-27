@@ -1134,6 +1134,20 @@ export const rpc = {
     toGithub: boolean
   ): Promise<void> =>
     run((c) => c.Github.comment({ sessionId, body, toGithub })),
+  githubCommentBySlug: (
+    repository: string,
+    number: number,
+    body: string
+  ): Promise<void> =>
+    run((c) => c.Github.commentBySlug({ repository, number, body })),
+  githubCloseBySlug: (repository: string, number: number): Promise<void> =>
+    run((c) => c.Github.closeBySlug({ repository, number })),
+  githubMergeBySlug: (
+    repository: string,
+    number: number,
+    method: PrMergeMethod
+  ): Promise<void> =>
+    run((c) => c.Github.mergeBySlug({ repository, number, method })),
   githubReview: (
     sessionId: string,
     kind: ReviewSubmitKind,

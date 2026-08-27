@@ -305,6 +305,14 @@ export interface JinglerAppProps {
    */
   selectSessionRequest?: {
     readonly sessionId: string
+    readonly tabId?: TabKey
+    readonly nonce: number
+  } | null
+  /** Open New Session from an external PR screen with its local project selected. */
+  newSessionRequest?: {
+    readonly projectId: string
+    readonly pr: PrSummary
+    readonly tabId?: TabKey
     readonly nonce: number
   } | null
   /**
@@ -519,6 +527,7 @@ export function JinglerApp({
   isBrowserActive,
   activeSessionId,
   selectSessionRequest,
+  newSessionRequest,
   onVisibleSessionsChange,
   patch = SEED_PATCH,
   renderConversation,
@@ -560,6 +569,9 @@ export function JinglerApp({
   const selected = split.activeSessionId
   const setSelected = split.selectSession
   const [newOpen, setNewOpen] = useState(false)
+  const [requestedNewSession, setRequestedNewSession] = useState<
+    JinglerAppProps["newSessionRequest"]
+  >(null)
   const [pullRequestsOpen, setPullRequestsOpen] = useState(false)
   const [environmentStartup, sendEnvironmentStartup] = useMachine(environmentSessionStartupMachine)
   const [createdSessionToSelect, setCreatedSessionToSelect] = useState<string | null>(null)
@@ -569,6 +581,7 @@ export function JinglerApp({
       memory?.onClose()
       setPullRequestsOpen(false)
       setNewOpen(false)
+      setRequestedNewSession(null)
       setSelected(id)
     },
     [memory, setSelected]
@@ -615,6 +628,7 @@ export function JinglerApp({
     memory?.onClose()
     setPullRequestsOpen(false)
     setSettingsOpen(false)
+    setRequestedNewSession(null)
     setNewOpen(true)
   }, [memory])
 
@@ -646,15 +660,30 @@ export function JinglerApp({
   // the operator every time they navigated away from it themselves.
   const requestNonce = selectSessionRequest?.nonce
   const requestId = selectSessionRequest?.sessionId
+  const requestTabId = selectSessionRequest?.tabId
   useEffect(() => {
     if (requestId === undefined) return
+    memory?.onClose()
+    setPullRequestsOpen(false)
     setSelected(requestId)
+    if (requestTabId) setTabRequest({ tabId: requestTabId, nonce: requestNonce ?? 0 })
     setNewOpen(false)
     // Jumping to a session means SHOWING it — a notification that lands the
     // operator behind the Settings dialog has not done its job.
     setSettingsOpen(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce is the trigger
   }, [requestNonce])
+
+  const newSessionRequestNonce = newSessionRequest?.nonce
+  useEffect(() => {
+    if (!newSessionRequest) return
+    memory?.onClose()
+    setPullRequestsOpen(false)
+    setSettingsOpen(false)
+    setRequestedNewSession(newSessionRequest)
+    setNewOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce is the trigger
+  }, [newSessionRequestNonce])
 
   // Publish the selection so the notifier can tell whether a session is the one
   // already on screen (see `active-session.ts` in the desktop renderer).
@@ -1115,6 +1144,12 @@ export function JinglerApp({
     }
     try {
       const session = await create(report)
+      if (requestedNewSession?.tabId) {
+        setTabRequest({
+          tabId: requestedNewSession.tabId,
+          nonce: requestedNewSession.nonce
+        })
+      }
       if (environment) {
         setCreatedSessionToSelect(session.id)
         sendEnvironmentStartup({ type: "COMPLETED" })
@@ -1128,7 +1163,7 @@ export function JinglerApp({
       }
       throw cause
     }
-  }, [environments, sendEnvironmentStartup, setSelected])
+  }, [environments, requestedNewSession, sendEnvironmentStartup, setSelected])
 
   const handleCreate = useCallback(
     async (input: CreateSessionInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => {
@@ -1264,6 +1299,7 @@ export function JinglerApp({
               open={newOpen || pendingEnvironmentSession !== null}
               onClose={() => {
                 setNewOpen(false)
+                setRequestedNewSession(null)
                 if (pendingEnvironmentSession?.error) sendEnvironmentStartup({ type: "DISMISS" })
               }}
               onAddProject={
@@ -1275,6 +1311,8 @@ export function JinglerApp({
               environments={environments}
               environmentStartup={pendingEnvironmentSession}
               defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
+              requestedProjectId={requestedNewSession?.projectId}
+              requestedPr={requestedNewSession?.pr}
               providerCatalog={providerConnections?.catalog}
               defaultConnectionId={providerConnections?.defaultConnectionId}
               defaultModelId={providerConnections?.defaultModelId}

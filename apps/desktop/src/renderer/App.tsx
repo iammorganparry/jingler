@@ -20,6 +20,7 @@ import type {
   NotificationsConfig,
   OffloadComputeSettings,
   PublishCheckpoint,
+  PrSummary,
   Session,
   SessionActivity,
   User,
@@ -72,7 +73,10 @@ import {
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js";
 import { PullRequestPane } from "./pull-request-pane.js";
-import { usePullRequestInbox } from "./use-pull-request-inbox.js";
+import {
+  pullRequestSessionTarget,
+  usePullRequestInbox,
+} from "./use-pull-request-inbox.js";
 import { ReviewPane } from "./review-pane.js";
 import { FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
 import { TerminalDockView } from "./terminal-dock-view.js";
@@ -446,6 +450,13 @@ function AuthedApp({
   // a fresh request — see `selectSessionRequest`.
   const [selectRequest, setSelectRequest] = useState<{
     sessionId: string;
+    tabId?: string;
+    nonce: number;
+  } | null>(null);
+  const [newSessionRequest, setNewSessionRequest] = useState<{
+    projectId: string;
+    pr: PrSummary;
+    tabId?: string;
     nonce: number;
   } | null>(null);
   useEffect(
@@ -1585,6 +1596,39 @@ function AuthedApp({
     );
   }
 
+  const selectedPullRequest = pullRequestInbox.selected;
+  const selectedPullRequestTarget = selectedPullRequest
+    ? pullRequestSessionTarget(
+        selectedPullRequest,
+        repos,
+        projectController.projects,
+        sessions,
+      )
+    : null;
+  const openSelectedPullRequestTarget = (tabId?: string) => {
+    if (!(selectedPullRequest && selectedPullRequestTarget)) return;
+    const existingSession = selectedPullRequestTarget.session;
+    if (existingSession) {
+      setSelectRequest((previous) => ({
+        sessionId: existingSession.id,
+        ...(tabId ? { tabId } : {}),
+        nonce: (previous?.nonce ?? 0) + 1,
+      }));
+      return;
+    }
+    const project = selectedPullRequestTarget.project;
+    if (project) {
+      setNewSessionRequest((previous) => ({
+        projectId: project.id,
+        pr: selectedPullRequest,
+        ...(tabId ? { tabId } : {}),
+        nonce: (previous?.nonce ?? 0) + 1,
+      }));
+    }
+  };
+  const openSelectedPullRequestSession = () => openSelectedPullRequestTarget();
+  const openSelectedPullRequestFiles = () => openSelectedPullRequestTarget("review");
+
   return (
     <>
       {relayError && (
@@ -1602,6 +1646,7 @@ function AuthedApp({
         pluginCommands={pluginCommands}
         onRunPluginCommand={runPluginCommand}
         selectSessionRequest={selectRequest}
+        newSessionRequest={newSessionRequest}
         onVisibleSessionsChange={onVisibleSessionsChange}
         sessions={sessions}
         user={user}
@@ -1616,6 +1661,23 @@ function AuthedApp({
             detail={pullRequestInbox.detail}
             onSelect={pullRequestInbox.select}
             onOpenOnGithub={(url) => void window.jingler.openExternal(url)}
+            onOpenFiles={selectedPullRequestTarget?.session || selectedPullRequestTarget?.project
+              ? openSelectedPullRequestFiles
+              : undefined}
+            onComment={pullRequestInbox.comment}
+            onClosePr={pullRequestInbox.close}
+            onMerge={pullRequestInbox.merge}
+            closing={pullRequestInbox.closing}
+            closeError={pullRequestInbox.closeError}
+            merging={pullRequestInbox.merging}
+            mergeError={pullRequestInbox.mergeError}
+            sessionAction={selectedPullRequestTarget ? {
+              label: selectedPullRequestTarget.session ? "Open session" : "Create session",
+              onSelect: openSelectedPullRequestSession,
+              ...(selectedPullRequestTarget.session || selectedPullRequestTarget.project
+                ? {}
+                : { disabledReason: "Add this repository as a local project to create a session." }),
+            } : undefined}
             loading={pullRequestInbox.loading}
             detailLoading={pullRequestInbox.detailLoading}
             detailError={pullRequestInbox.detailError}

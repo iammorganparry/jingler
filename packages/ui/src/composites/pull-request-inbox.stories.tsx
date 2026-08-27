@@ -120,6 +120,11 @@ function InboxMock({ width }: { width: number }) {
           detail={detailFor(selected)}
           onSelect={setSelected}
           onOpenOnGithub={() => {}}
+          onOpenFiles={() => {}}
+          onComment={async () => {}}
+          onClosePr={async () => {}}
+          onMerge={() => {}}
+          sessionAction={{ label: "Create session", onSelect: () => {} }}
         />
       </div>
     </WidthTierValue>
