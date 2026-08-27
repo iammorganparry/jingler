@@ -1,3 +1,5 @@
+import { dirname } from "node:path"
+import { createRequire } from "node:module"
 import {
   DefaultResourceLoader,
   SettingsManager,
@@ -12,9 +14,15 @@ import {
 } from "../resources/ponytail-resources.js"
 export { PONYTAIL_EXTENSION_PATH, PONYTAIL_SKILLS_PATH } from "../resources/ponytail-resources.js"
 
+const require = createRequire(import.meta.url)
+export const PLANNOTATOR_EXTENSION_PATH = dirname(
+  require.resolve("@plannotator/pi-extension/package.json")
+)
+
 const ALLOWED_EXTENSION_PATHS = new Set([
   PI_SUBAGENTS_EXTENSION_PATH,
-  PONYTAIL_EXTENSION_PATH
+  PONYTAIL_EXTENSION_PATH,
+  PLANNOTATOR_EXTENSION_PATH
 ])
 
 export class PiResourceError extends Data.TaggedError("PiResourceError")<{
@@ -51,7 +59,11 @@ export const createLockedPiResources = (
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        additionalExtensionPaths: [PI_SUBAGENTS_EXTENSION_PATH, PONYTAIL_EXTENSION_PATH],
+        additionalExtensionPaths: [
+          PI_SUBAGENTS_EXTENSION_PATH,
+          PONYTAIL_EXTENSION_PATH,
+          PLANNOTATOR_EXTENSION_PATH
+        ],
         additionalSkillPaths: [PONYTAIL_SKILLS_PATH],
         additionalPromptTemplatePaths: [],
         additionalThemePaths: [],

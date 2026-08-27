@@ -4,8 +4,10 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  Theme,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
+  type ExtensionUIContext,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
 import { createJiti } from "jiti"
@@ -63,6 +65,43 @@ interface CapabilityCeilingModule {
 }
 
 const jiti = createJiti(import.meta.url)
+const hostTheme = new Theme(
+  new Proxy({} as ConstructorParameters<typeof Theme>[0], { get: () => "" }),
+  new Proxy({} as ConstructorParameters<typeof Theme>[1], { get: () => "" }),
+  "truecolor"
+)
+
+const makeExtensionUIContext = (): ExtensionUIContext => ({
+  select: async () => undefined,
+  confirm: async () => false,
+  input: async () => undefined,
+  notify: () => {},
+  onTerminalInput: () => () => {},
+  setStatus: () => {},
+  setWorkingMessage: () => {},
+  setWorkingVisible: () => {},
+  setWorkingIndicator: () => {},
+  setHiddenThinkingLabel: () => {},
+  setWidget: () => {},
+  setFooter: () => {},
+  setHeader: () => {},
+  setTitle: () => {},
+  custom: async () => undefined as never,
+  pasteToEditor: () => {},
+  setEditorText: () => {},
+  getEditorText: () => "",
+  editor: async () => undefined,
+  addAutocompleteProvider: () => {},
+  setEditorComponent: () => {},
+  getEditorComponent: () => undefined,
+  theme: hostTheme,
+  getAllThemes: () => [],
+  getTheme: () => undefined,
+  setTheme: () => ({ success: false, error: "Jingler owns the desktop theme" }),
+  getToolsExpanded: () => false,
+  setToolsExpanded: () => {}
+})
+
 const NATIVE_SUBAGENT_TOOLS = [
   {
     id: "subagent",
@@ -310,6 +349,10 @@ const createEmbeddedSession = (
             : [])
         ],
         customTools
+      })
+      await result.session.bindExtensions({
+        uiContext: makeExtensionUIContext(),
+        mode: "rpc"
       })
       return {
         result,

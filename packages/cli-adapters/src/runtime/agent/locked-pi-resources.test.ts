@@ -46,7 +46,17 @@ describe("locked pi resources", () => {
 
     await Effect.runPromise(assertLockedPiResources(loader, "Jingler owns this prompt"))
     expect(loader.getSystemPrompt()).toBe("Jingler owns this prompt")
-    expect(loader.getExtensions().extensions).toHaveLength(2)
+    expect(loader.getExtensions().extensions).toHaveLength(3)
+    expect(loader.getExtensions().extensions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: expect.stringContaining("plannotator") })
+      ])
+    )
+    const plannotator = loader.getExtensions().extensions.find(({ path }) =>
+      path.includes("@plannotator/pi-extension")
+    )
+    expect([...plannotator!.tools.keys()]).toContain("plannotator_submit_plan")
+    expect([...plannotator!.commands.keys()]).toContain("plannotator-plan-mode")
     expect(loader.getSkills().skills.map(({ name }) => name).sort()).toEqual([
       "ponytail",
       "ponytail-audit",

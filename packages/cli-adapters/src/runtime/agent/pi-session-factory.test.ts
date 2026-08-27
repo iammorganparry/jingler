@@ -100,6 +100,7 @@ const fakeSession = (): AgentSession =>
     sessionFile: "/tmp/pi-session.jsonl",
     sessionId: "pi-session",
     subscribe: vi.fn(() => vi.fn()),
+    bindExtensions: vi.fn(async () => undefined),
     prompt: vi.fn(async () => undefined),
     steer: vi.fn(async () => undefined),
     abort: vi.fn(async () => undefined),
@@ -122,11 +123,12 @@ describe("pi session creation", () => {
       })
     )
     const captured: CreateAgentSessionOptions[] = []
+    const session = fakeSession()
     const createSession = async (
       options: CreateAgentSessionOptions
     ): Promise<CreateAgentSessionResult> => {
       captured.push(options)
-      return { session: fakeSession(), extensionsResult: {} as never }
+      return { session, extensionsResult: {} as never }
     }
     const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)
@@ -158,8 +160,12 @@ describe("pi session creation", () => {
     ])
     expect(received?.resourceLoader?.getExtensions().extensions).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: expect.stringContaining("pi-subagents") }),
-      expect.objectContaining({ path: expect.stringContaining("ponytail") })
+      expect.objectContaining({ path: expect.stringContaining("ponytail") }),
+      expect.objectContaining({ path: expect.stringContaining("plannotator") })
     ]))
+    expect(session.bindExtensions).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "rpc", uiContext: expect.any(Object) })
+    )
     expect(received?.resourceLoader?.getSkills().skills.map(({ name }) => name)).toContain("ponytail")
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
       "Jingler's embedded engineering agent"
