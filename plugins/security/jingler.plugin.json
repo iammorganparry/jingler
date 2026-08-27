@@ -1,0 +1,25 @@
+{
+  "$schema": "../../packages/plugin-sdk/jingler.plugin.schema.json",
+  "id": "security",
+  "name": "Security",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Run an explicitly selected local security scanner and return bounded findings.",
+  "main": "dist/main.js",
+  "capabilities": {
+    "untrustedRepos": {
+      "supported": "limited",
+      "description": "Security scanners execute against repository-controlled files.",
+      "restrictedContributions": ["security.scan"]
+    }
+  },
+  "contributes": {
+    "agentToolsets": [
+      {
+        "id": "security.scan",
+        "label": "Security scan",
+        "description": "Check scanner availability or run an explicitly selected Semgrep, Trivy, or Gitleaks scan."
+      }
+    ]
+  }
+}
