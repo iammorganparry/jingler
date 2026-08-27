@@ -159,6 +159,30 @@ describe("useSubagentFleet reconciliation", () => {
     expect(result.current.nodes).toStrictEqual([])
   })
 
+  it("removes a connected running node missing from the authoritative snapshot", async () => {
+    mocks.snapshot.mockResolvedValue(snapshot)
+    const events: ReadonlyArray<SubagentFleetEvent> = [{
+      _tag: "Upsert",
+      version: 2,
+      eventId: "running",
+      occurredAt: 10,
+      node
+    }]
+    const { result } = renderHook(() => useSubagentFleet({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      piSessionId: "parent",
+      events
+    }))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(result.current.nodes).toEqual([])
+  })
+
   it("keeps completed output after its live tab disappears, even without a session file", async () => {
     mocks.snapshot.mockResolvedValue(snapshot)
     const completed = {
@@ -295,7 +319,7 @@ describe("useSubagentFleet reconciliation", () => {
     expect(mocks.snapshot).toHaveBeenCalledTimes(1)
 
     await act(async () => pending.resolve(snapshot))
-    expect(result.current.nodes.map(({ id }) => id)).toEqual([node.id])
+    expect(result.current.nodes).toEqual([])
 
     await act(async () => {
       window.dispatchEvent(new Event("focus"))
