@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import {
   createAgentSession,
   createEventBus,
@@ -7,6 +8,7 @@ import {
   Theme,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
+  type EventBus,
   type ExtensionUIContext,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
@@ -102,6 +104,35 @@ const makeExtensionUIContext = (): ExtensionUIContext => ({
   setToolsExpanded: () => {}
 })
 
+const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request"
+const PLANNOTATOR_TIMEOUT_MS = 5_000
+interface PlannotatorPlanModeResult {
+  readonly phase: "idle" | "planning" | "executing"
+}
+type PlannotatorPlanModeResponse =
+  | { readonly status: "handled"; readonly result: PlannotatorPlanModeResult }
+  | { readonly status: "unavailable" | "error"; readonly error?: string }
+
+export const enterPlannotatorPlanMode = (
+  events: EventBus
+): Promise<PlannotatorPlanModeResult> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Plannotator plan mode did not respond")),
+      PLANNOTATOR_TIMEOUT_MS
+    )
+    events.emit(PLANNOTATOR_REQUEST_CHANNEL, {
+      requestId: randomUUID(),
+      action: "plan-mode",
+      payload: { mode: "enter" },
+      respond: (response: PlannotatorPlanModeResponse) => {
+        clearTimeout(timer)
+        if (response.status === "handled") resolve(response.result)
+        else reject(new Error(response.error ?? "Plannotator plan mode is unavailable"))
+      }
+    })
+  })
+
 const NATIVE_SUBAGENT_TOOLS = [
   {
     id: "subagent",
@@ -162,9 +193,12 @@ export interface PiSessionFactoryOptions {
   readonly lockedCapabilityFingerprint?: PiSessionFactory["lockedCapabilityFingerprint"]
   readonly promptTokenBudget?: number
   readonly terminalTracker?: FileChangeTracker | ((spec: PiRunSpec) => FileChangeTracker)
-  /** Internal extension point for deterministic providers; production leaves it unset. */
+  /** Internal extension points for deterministic tests; production leaves them unset. */
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
   readonly createSession?: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>
+  readonly enterPlannotatorPlanMode?: (
+    events: EventBus
+  ) => Promise<PlannotatorPlanModeResult>
   readonly recordDiagnostic?: (snapshot: RuntimeDiagnosticSnapshot) => Effect.Effect<void>
   readonly childCredentials?: PiChildCredentials
   readonly subagentBroker?: SubagentCapabilityBroker
@@ -214,6 +248,19 @@ const seedTranscript = (manager: SessionManager, spec: PiRunSpec): void => {
   )
 }
 
+type PlannotatorPhase = "idle" | "planning" | "executing"
+
+const plannotatorPhase = (manager: SessionManager): PlannotatorPhase => {
+  const entry = manager.getBranch().findLast(
+    (candidate) => candidate.type === "custom" && candidate.customType === "plannotator"
+  )
+  if (entry?.type !== "custom" || typeof entry.data !== "object" || entry.data === null) {
+    return "idle"
+  }
+  const phase = "phase" in entry.data ? entry.data.phase : undefined
+  return phase === "planning" || phase === "executing" ? phase : "idle"
+}
+
 const sessionManagerFor = (spec: PiRunSpec, sessionsDir: string): SessionManager => {
   if (spec.piSessionId !== null && spec.seed === null) {
     return SessionManager.open(spec.piSessionId, sessionsDir, spec.cwd)
@@ -236,6 +283,11 @@ const validateConnection = (
         })
       )
 
+const plannotatorExecutionSpec = (spec: PiRunSpec): PiRunSpec =>
+  spec.mode === "plan"
+    ? { ...spec, role: "plan-execution", mode: "auto" }
+    : spec
+
 const createResources = (
   options: PiSessionFactoryOptions,
   spec: PiRunSpec,
@@ -246,6 +298,12 @@ const createResources = (
     ...(registry?.capabilitiesFor(spec.role, spec.mode) ?? []),
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
   ]
+  const executionTools = spec.mode === "plan"
+    ? [
+        ...(registry?.capabilitiesFor("plan-execution", "auto").map(({ id }) => id) ?? []),
+        ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
+      ]
+    : undefined
   const eventBus = createEventBus()
   const compiled = (options.promptCompiler ?? new PromptCompiler()).compile({
     layers: runtimeInvariantLayers(spec.role, spec.mode),
@@ -256,7 +314,10 @@ const createResources = (
     cwd: spec.cwd,
     agentDir: options.agentDir,
     systemPrompt: compiled.text,
-    eventBus
+    eventBus,
+    ...(executionTools === undefined
+      ? {}
+      : { plannotatorExecutionTools: executionTools })
   }).pipe(
     Effect.flatMap((resources) =>
       assertLockedPiResources(resources, compiled.text).pipe(
@@ -279,6 +340,7 @@ interface EmbeddedSessionInput {
   readonly spec: PiRunSpec
   readonly connection: ProviderConnection
   readonly resources: ResourceLoader
+  readonly events: EventBus
   readonly context: AgentRuntimeContext
   readonly registry: ToolRegistry | undefined
   readonly nativeSubagentsEnabled: boolean
@@ -288,6 +350,7 @@ interface EmbeddedSession {
   readonly result: CreateAgentSessionResult
   readonly connection: ProviderConnection
   readonly contextWindow: number
+  readonly plannotatorPhase: () => PlannotatorPhase
   readonly setMemoryReflectionActive: (active: boolean) => void
 }
 
@@ -301,6 +364,7 @@ const createEmbeddedSession = (
         spec,
         connection,
         resources,
+        events,
         context,
         registry,
         nativeSubagentsEnabled
@@ -319,13 +383,30 @@ const createEmbeddedSession = (
         })
       }
       let memoryReflectionActive = false
+      const toolSpec = plannotatorExecutionSpec(spec)
       const customTools = registry
-        ? [...createPiTools(registry, spec, context, {
+        ? [...createPiTools(registry, toolSpec, context, {
             allowTool: (toolId) =>
               !memoryReflectionActive || isMemoryReflectionTool(toolId)
           })]
         : []
       const thinkingLevel = thinkingLevelFor(spec.reasoning)
+      const sessionManager = sessionManagerFor(spec, options.sessionsDir)
+      const initialToolNames = spec.mode === "plan"
+        ? [
+            ...(registry?.capabilitiesFor("plan", "plan").map(({ id }) => id) ?? []),
+            "write",
+            "edit",
+            ...(nativeSubagentsEnabled
+              ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
+              : [])
+          ]
+        : [
+            ...customTools.map((tool) => tool.name),
+            ...(nativeSubagentsEnabled
+              ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
+              : [])
+          ]
       const result = await (options.createSession ?? createAgentSession)({
         cwd: spec.cwd,
         agentDir: options.agentDir,
@@ -333,7 +414,7 @@ const createEmbeddedSession = (
         model,
         ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
         resourceLoader: resources,
-        sessionManager: sessionManagerFor(spec, options.sessionsDir),
+        sessionManager,
         settingsManager: SettingsManager.inMemory({
           packages: [],
           extensions: [],
@@ -342,22 +423,21 @@ const createEmbeddedSession = (
           themes: []
         }),
         noTools: "all",
-        tools: [
-          ...customTools.map((tool) => tool.name),
-          ...(nativeSubagentsEnabled
-            ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
-            : [])
-        ],
+        tools: initialToolNames,
         customTools
       })
       await result.session.bindExtensions({
         uiContext: makeExtensionUIContext(),
         mode: "rpc"
       })
+      if (spec.mode === "plan") {
+        await (options.enterPlannotatorPlanMode ?? enterPlannotatorPlanMode)(events)
+      }
       return {
         result,
         connection,
         contextWindow: model.contextWindow,
+        plannotatorPhase: () => plannotatorPhase(sessionManager),
         setMemoryReflectionActive: (active) => {
           memoryReflectionActive = active
         }
@@ -409,6 +489,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     parentPiSessionId: session.sessionId,
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
+    plannotatorPhase: embedded.plannotatorPhase,
     subscribe: (listener) => session.subscribe((event) => {
       if (
         event.type === "tool_execution_start" &&
@@ -505,7 +586,8 @@ const createSessionHandle = (
       : typeof options.toolRegistry === "function"
         ? options.toolRegistry(context)
         : (options.toolRegistry ?? createJinglerControlTools(context))
-    if (registry.hasMutatingTools(spec.role, spec.mode) && !tracker) {
+    const toolSpec = plannotatorExecutionSpec(spec)
+    if (registry.hasMutatingTools(toolSpec.role, toolSpec.mode) && !tracker) {
       return yield* Effect.fail(
         new AgentRuntimeError({
           reason: "runtime",
@@ -547,6 +629,7 @@ const createSessionHandle = (
       spec,
       connection,
       resources: prepared.loader,
+      events: prepared.eventBus,
       context,
       registry,
       nativeSubagentsEnabled

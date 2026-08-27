@@ -124,6 +124,44 @@ describe("PiAgentRuntime", () => {
     expect(events).toEqual([{ _tag: "Failed", message: "model certification is stale" }])
   })
 
+  it("keeps the stream open for Plannotator's automatic execution continuation", async () => {
+    let listener: ((event: AgentSessionEvent) => void) | null = null
+    let phase: "idle" | "planning" | "executing" = "planning"
+    const handle: PiSessionHandle = {
+      ...fleetSeams,
+      id: "pi-plannotator-session",
+      modelId: "anthropic/claude-sonnet",
+      contextWindow: 200_000,
+      plannotatorPhase: () => phase,
+      subscribe: (next) => {
+        listener = next
+        return vi.fn()
+      },
+      prompt: async () => {
+        phase = "executing"
+        listener?.({ type: "agent_settled" })
+        queueMicrotask(() => {
+          phase = "idle"
+          listener?.({ type: "agent_settled" })
+        })
+      },
+      steer: async () => undefined,
+      interrupt: async () => undefined,
+      dispose: vi.fn(),
+      usage: () => ({ costUsd: 0, tokens: 1 })
+    }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+
+    const events = [...await Effect.runPromise(
+      Stream.runCollect(runtime.run({ ...spec, role: "plan", mode: "plan" }, context))
+    )]
+
+    expect(events.at(-1)).toEqual({ _tag: "Done", costUsd: 0, tokens: 1 })
+    expect(handle.dispose).toHaveBeenCalledOnce()
+  })
+
   it("streams one terminal event and disposes the pi session", async () => {
     let listener: ((event: AgentSessionEvent) => void) | null = null
     let disposed = false
@@ -433,77 +471,6 @@ describe("PiAgentRuntime", () => {
       _tag: "Failed",
       message: "provider unavailable"
     })
-  })
-
-  it("streams schema-validated plan tool arguments as volatile plan drafts", async () => {
-    let listener: ((event: AgentSessionEvent) => void) | null = null
-    const plan = {
-      title: "Refactor auth flow",
-      sections: [],
-      stages: [],
-      annotations: []
-    }
-    const partial = {
-      role: "assistant",
-      content: [
-        {
-          type: "toolCall",
-          id: "plan-call",
-          name: "jingler_submit_plan",
-          arguments: {}
-        }
-      ]
-    } as never
-    const handle: PiSessionHandle = {
-      ...fleetSeams,
-      id: "pi-session-plan-draft",
-      modelId: "anthropic/claude-sonnet",
-      contextWindow: 200_000,
-      subscribe: (next) => {
-        listener = next
-        return vi.fn()
-      },
-      prompt: async () => {
-        listener?.({ type: "message_start", message: partial })
-        listener?.({
-          type: "message_update",
-          message: partial,
-          assistantMessageEvent: {
-            type: "toolcall_delta",
-            contentIndex: 0,
-            delta: '{"plan":{"title":"Refactor auth flow"',
-            partial
-          }
-        } as never)
-        listener?.({
-          type: "message_update",
-          message: partial,
-          assistantMessageEvent: {
-            type: "toolcall_end",
-            contentIndex: 0,
-            toolCall: {
-              type: "toolCall",
-              id: "plan-call",
-              name: "jingler_submit_plan",
-              arguments: { plan }
-            },
-            partial
-          }
-        } as never)
-        listener?.({ type: "agent_settled" })
-      },
-      steer: async () => undefined,
-      interrupt: async () => undefined,
-      dispose: vi.fn(),
-      usage: () => ({ costUsd: 0, tokens: 3 })
-    }
-    const runtime = await Effect.runPromise(
-      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
-    )
-    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
-    expect(
-      events.flatMap((event) => (event._tag === "PlanDraft" ? [event.draft.phase] : []))
-    ).toEqual(["composing", "complete"])
   })
 
   it("retains a detached Fleet across parent settlement and persisted continuation", async () => {

@@ -1,4 +1,5 @@
-import { dirname } from "node:path"
+import { mkdir, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
 import { createRequire } from "node:module"
 import {
   DefaultResourceLoader,
@@ -35,6 +36,7 @@ export interface LockedPiResourceInput {
   readonly agentDir: string
   readonly systemPrompt: string
   readonly eventBus?: EventBus
+  readonly plannotatorExecutionTools?: ReadonlyArray<string>
 }
 
 /** Build a pi loader whose only prompt/resource input is supplied by Jingler. */
@@ -43,6 +45,18 @@ export const createLockedPiResources = (
 ): Effect.Effect<ResourceLoader, PiResourceError> =>
   Effect.tryPromise({
     try: async () => {
+      if (input.plannotatorExecutionTools !== undefined) {
+        await mkdir(input.agentDir, { recursive: true })
+        await writeFile(
+          join(input.agentDir, "plannotator.json"),
+          JSON.stringify({
+            executionMode: "automatic",
+            phases: {
+              executing: { activeTools: input.plannotatorExecutionTools }
+            }
+          })
+        )
+      }
       const loader = new DefaultResourceLoader({
         cwd: input.cwd,
         agentDir: input.agentDir,

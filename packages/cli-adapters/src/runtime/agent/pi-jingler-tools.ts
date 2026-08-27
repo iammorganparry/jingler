@@ -1,6 +1,5 @@
 import {
   ExplanationPayload,
-  PlanPrd,
   QuestionRequest,
   WebSearchError,
   WebSearchQuery
@@ -92,48 +91,11 @@ export const createJinglerControlTools = (
   }
   registry.register(
     controlTool({
-      id: "jingler_save_draft_plan",
-      description: "Save the current structured plan draft without requesting approval.",
-      input: Schema.Struct({ plan: PlanPrd }),
-      roles: ["plan"],
-      execute: ({ plan }) => Effect.runPromise(context.saveDraftPlan(plan))
-    })
-  )
-  registry.register(
-    controlTool({
-      id: "jingler_discard_plan",
-      description:
-        "Discard the session's current plan entirely. The next submitted plan starts fresh (new plan id, operator approval) instead of amending the discarded one.",
-      input: Schema.Struct({}),
-      // An empty Struct's derived JSON Schema is an anyOf with no top-level
-      // `type`, which Codex rejects ("schema must be of type: object"). Every
-      // no-argument tool must pin the provider schema explicitly.
-      providerInputSchema: {
-        type: "object",
-        properties: {},
-        required: [],
-        additionalProperties: false
-      },
-      roles: ["conversation", "plan", "plan-execution"],
-      execute: () => Effect.runPromise(context.discardPlan?.() ?? Effect.void)
-    })
-  )
-  registry.register(
-    controlTool({
       id: "jingler_publish_explanation",
       description: "Publish a focused visual explanation in the session's Explanation view.",
       input: Schema.Struct({ explanation: ExplanationPayload }),
       roles: ["conversation", "plan", "plan-execution"],
       execute: ({ explanation }) => Effect.runPromise(context.publishExplanation?.(explanation) ?? Effect.void)
-    })
-  )
-  registry.register(
-    controlTool({
-      id: "jingler_submit_plan",
-      description: "Submit the structured plan for operator review and approval.",
-      input: Schema.Struct({ plan: PlanPrd }),
-      roles: ["conversation", "plan", "plan-execution"],
-      execute: ({ plan }) => Effect.runPromise(context.proposePlan(plan))
     })
   )
   return registry

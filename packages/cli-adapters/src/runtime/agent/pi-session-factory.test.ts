@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process"
-import { mkdtemp, readdir, rm } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
   AgentSession,
   CreateAgentSessionOptions,
-  CreateAgentSessionResult
+  CreateAgentSessionResult,
+  EventBus
 } from "@earendil-works/pi-coding-agent"
 import {
   CURRENT_RUNTIME_CONTRACTS,
@@ -25,7 +26,10 @@ import {
   makeSubagentCapabilityBroker,
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
-import { makePiSessionFactory } from "./pi-session-factory.js"
+import {
+  enterPlannotatorPlanMode,
+  makePiSessionFactory
+} from "./pi-session-factory.js"
 
 const roots: string[] = []
 const brokers: SubagentCapabilityBroker[] = []
@@ -109,6 +113,64 @@ const fakeSession = (): AgentSession =>
   }) as unknown as AgentSession
 
 describe("pi session creation", () => {
+  it("enters Plannotator plan mode through its documented event contract", async () => {
+    const events: EventBus = {
+      emit: (channel, data) => {
+        expect(channel).toBe("plannotator:request")
+        const request = data as {
+          readonly action: string
+          readonly payload: { readonly mode: string }
+          readonly respond: (response: unknown) => void
+        }
+        expect(request.action).toBe("plan-mode")
+        expect(request.payload.mode).toBe("enter")
+        request.respond({ status: "handled", result: { phase: "planning" } })
+      },
+      on: () => () => {}
+    }
+
+    await expect(enterPlannotatorPlanMode(events)).resolves.toEqual({
+      phase: "planning"
+    })
+  })
+
+  it("configures a Plan session for Plannotator planning and automatic execution", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-plannotator-session-"))
+    roots.push(root)
+    const agentDir = join(root, "agent")
+    const captured: CreateAgentSessionOptions[] = []
+    const enterPlanMode = vi.fn(async () => ({ phase: "executing" as const }))
+    const factory = makePiSessionFactory({
+      agentDir,
+      sessionsDir: join(root, "sessions"),
+      credentials: new InMemoryProviderCredentialStore(),
+      resolveConnection: () => Effect.succeed(connection),
+      enterPlannotatorPlanMode: enterPlanMode,
+      createSession: async (options) => {
+        captured.push(options)
+        options.sessionManager?.appendCustomEntry("plannotator", {
+          phase: "executing"
+        })
+        return { session: fakeSession(), extensionsResult: {} as never }
+      }
+    })
+
+    const handle = await Effect.runPromise(factory.create({
+      ...makeSpec(root),
+      role: "plan",
+      mode: "plan"
+    }, {} as never))
+
+    expect(enterPlanMode).toHaveBeenCalledOnce()
+    expect(captured[0]?.tools).toEqual(expect.arrayContaining(["write", "edit"]))
+    expect(captured[0]?.customTools?.map(({ name }) => name)).not.toContain(
+      "jingler_submit_plan"
+    )
+    expect(handle.plannotatorPhase?.()).toBe("executing")
+    expect(JSON.parse(await readFile(join(agentDir, "plannotator.json"), "utf8")))
+      .toMatchObject({ executionMode: "automatic" })
+  })
+
   it("pins credentials, compiles a locked prompt, and seeds visible history once", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-pi-session-"))
     roots.push(root)
@@ -154,9 +216,7 @@ describe("pi session creation", () => {
     ]))
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([
       "jingler_ask_question",
-      "jingler_discard_plan",
-      "jingler_publish_explanation",
-      "jingler_submit_plan"
+      "jingler_publish_explanation"
     ])
     expect(received?.resourceLoader?.getExtensions().extensions).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: expect.stringContaining("pi-subagents") }),
@@ -214,7 +274,7 @@ describe("pi session creation", () => {
     await Effect.runPromise(factory.create({
       ...makeSpec(root),
       role: "plan",
-      mode: "plan"
+      mode: "read-only"
     }, {} as never))
 
     expect(captured[0]?.tools).toContain("code_intelligence")

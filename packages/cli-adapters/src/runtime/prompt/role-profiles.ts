@@ -2,7 +2,7 @@ import type { AgentRole, PromptLayer, RuntimeMode } from "./prompt-compiler.js"
 
 const rolePolicy: Readonly<Record<AgentRole, string>> = {
   conversation: "Help the operator complete the requested engineering work and report observable results.",
-  plan: "Research and produce a concrete plan. You are read-only and cannot mutate or execute project code.",
+  plan: "Follow Plannotator's current phase. During planning, inspect the repository and edit only the Markdown plan file. After approval, execute that plan with the restored tool set and report checklist progress using Plannotator's protocol.",
   "plan-execution": [
     "Implement the approved work one stage at a time and preserve an auditable file-change record.",
     "The approved plan is this session's ground truth: before each action, confirm it advances a specific plan stage, and keep working until every stage and acceptance criterion is completed or explicitly blocked.",

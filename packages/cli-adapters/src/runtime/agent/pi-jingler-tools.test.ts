@@ -1,4 +1,4 @@
-import { defaultPlan, type ExplanationPayload, WebSearchError } from "@jingler/core"
+import { type ExplanationPayload, WebSearchError } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
@@ -266,49 +266,6 @@ describe("Jingler peer-agent tools", () => {
   })
 })
 
-describe("Jingler plan discard tool", () => {
-  it("discards the canonical plan through the run context", async () => {
-    const discardPlan = vi.fn(() => Effect.void)
-    const registry = createJinglerControlTools(runtimeContext({ discardPlan }))
-    const result = await Effect.runPromise(
-      registry.execute({
-        id: "jingler_discard_plan",
-        arguments: {},
-        role: "conversation",
-        mode: "ask"
-      })
-    )
-    expect(result.status).toBe("success")
-    // A void execute must land as null, never undefined: an undefined value
-    // serialized into the pi session as a text block with NO text, and every
-    // later provider request crashed replaying it ("reading 'length'").
-    expect(result.value).toBeNull()
-    expect(discardPlan).toHaveBeenCalledOnce()
-  })
-
-  it("pins an object provider schema — Codex rejects the empty-struct derivation", () => {
-    // JSONSchema.make(Schema.Struct({})) emits an anyOf with no top-level
-    // `type`; providers require `type: "object"` on tool parameters.
-    const registry = createJinglerControlTools(runtimeContext())
-    expect(registry.providerInputSchemaFor("jingler_discard_plan")).toMatchObject({
-      type: "object"
-    })
-  })
-
-  it("treats discard as a no-op when the run context cannot supply it", async () => {
-    const registry = createJinglerControlTools(runtimeContext({ discardPlan: undefined }))
-    const result = await Effect.runPromise(
-      registry.execute({
-        id: "jingler_discard_plan",
-        arguments: {},
-        role: "plan",
-        mode: "plan"
-      })
-    )
-    expect(result.status).toBe("success")
-  })
-})
-
 describe("Jingler explanation tool containment", () => {
   it("publishes a typed explanation from the main conversation", async () => {
     const publishExplanation = vi.fn(() => Effect.void)
@@ -349,58 +306,5 @@ describe("Jingler explanation tool containment", () => {
     }))
     expect(result.status).toBe("error")
     expect(publishExplanation).not.toHaveBeenCalled()
-  })
-})
-
-describe("Jingler plan tool containment", () => {
-  it("submits the canonical PlanPrd contract in plan mode", async () => {
-    const proposePlan = vi.fn(() => Effect.succeed({ _tag: "Reject" } as const))
-    const registry = createJinglerControlTools(runtimeContext({ proposePlan }))
-    const plan = defaultPlan("Runtime cutover")
-    const result = await Effect.runPromise(
-      registry.execute({
-        id: "jingler_submit_plan",
-        arguments: { plan },
-        role: "plan",
-        mode: "plan"
-      })
-    )
-    expect(result.status).toBe("success")
-    expect(proposePlan).toHaveBeenCalledWith(plan)
-  })
-
-  it("allows a conversation to submit a structured plan", async () => {
-    const proposePlan = vi.fn(() => Effect.succeed({ _tag: "Reject" } as const))
-    const registry = createJinglerControlTools(runtimeContext({ proposePlan }))
-    const plan = defaultPlan("Conversation plan")
-    const result = await Effect.runPromise(
-      registry.execute({
-        id: "jingler_submit_plan",
-        arguments: { plan },
-        role: "conversation",
-        mode: "ask"
-      })
-    )
-    expect(result.status).toBe("success")
-    expect(proposePlan).toHaveBeenCalledWith(plan)
-  })
-
-  it("keeps plan submission available to the producing agent during execution", async () => {
-    const proposePlan = vi.fn(() =>
-      Effect.succeed({ _tag: "Approve" as const, mode: "auto" as const })
-    )
-    const registry = createJinglerControlTools(runtimeContext({ proposePlan }))
-    const plan = defaultPlan("Amended runtime cutover")
-
-    const result = await Effect.runPromise(
-      registry.execute({
-        id: "jingler_submit_plan",
-        arguments: { plan },
-        role: "plan-execution",
-        mode: "auto"
-      })
-    )
-    expect(result.status).toBe("success")
-    expect(proposePlan).toHaveBeenCalledWith(plan)
   })
 })

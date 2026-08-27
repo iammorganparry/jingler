@@ -63,7 +63,7 @@ import {
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { routePeerAgentMessage } from "./peer-agent-coordination.js"
-import { planExecutionNote, planNote } from "./plan-prompt.js"
+import { planExecutionNote } from "./plan-prompt.js"
 import { capturePlanEmission, stripPlanJsonBlock } from "./plan-json.js"
 import {
   planTaskProgressFingerprint,
@@ -1050,7 +1050,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // agent always has exact ids and fingerprints to mark against.
           const planProtocol =
             mode === "plan"
-              ? planNote()
+              ? null
               : activePlanExecutionId !== null
                 ? planExecutionNote(
                     activePlan !== null && activePlan.id === activePlanExecutionId
