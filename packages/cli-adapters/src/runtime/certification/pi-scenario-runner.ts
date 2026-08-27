@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdtemp, mkdir, rename, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -218,7 +218,8 @@ const managedResourceRegistry = async (
 
 const observeStreamEvent = (
   event: StreamEvent,
-  registry: ToolRegistry | undefined
+  registry: ToolRegistry | undefined,
+  toolCalls: Map<string, string>
 ): ReadonlyArray<EvalObservation> => {
   const observations: Array<EvalObservation> = [{ kind: "event", tag: event._tag }]
   if (event._tag === "Failed") {
@@ -228,6 +229,7 @@ const observeStreamEvent = (
     observations.push({ kind: "report-text", text: event.text })
   }
   if (event._tag === "ToolStart") {
+    toolCalls.set(event.id, event.name)
     observations.push({
       kind: "tool-call",
       tool: event.name,
@@ -235,7 +237,11 @@ const observeStreamEvent = (
     })
   }
   if (event._tag === "ToolEnd" && event.output) {
-    observations.push({ kind: "report-text", text: event.output })
+    observations.push({
+      kind: "tool-output",
+      tool: toolCalls.get(event.id) ?? "unknown",
+      text: event.output
+    })
   }
   if (event._tag === "ToolEnd" && event.fileChanges) {
     observations.push(
@@ -405,9 +411,17 @@ const executeScenario = async (input: ScenarioExecution): Promise<EvalTrace> => 
   })
   const runtime = await Effect.runPromise(makePiAgentRuntime(factory))
   const events = await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
-  observations.push(...[...events].flatMap((event) => observeStreamEvent(event, registry)))
+  const toolCalls = new Map<string, string>()
+  observations.push(...[...events].flatMap((event) => observeStreamEvent(event, registry, toolCalls)))
   const assistantText = [...events].flatMap((event) => event._tag === "Assistant" ? [event.text] : []).join("")
   if (assistantText.length > 0) observations.push({ kind: "report-text", text: assistantText })
+  if (scenarioId === "quality.semantic-rename") {
+    observations.push(...await Promise.all(["source.ts", "reexport.ts", "use.ts"].map(async (path) => ({
+      kind: "file-content" as const,
+      path,
+      text: await readFile(join(root, path), "utf8")
+    }))))
+  }
   const usage = [...events].find((event) => event._tag === "Done")
   return {
     scenarioId,

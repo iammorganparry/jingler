@@ -1,4 +1,4 @@
-import type { Activate, AgentToolDefinition, HostContext } from "@jingler/plugin-sdk/host"
+import type { Activate, AgentToolDefinition, ExecResult, HostContext } from "@jingler/plugin-sdk/host"
 
 export const SCANNERS = ["semgrep", "trivy", "gitleaks"] as const
 export type Scanner = typeof SCANNERS[number]
@@ -20,19 +20,32 @@ const decode = (value: unknown): SecurityInput => {
 const argsFor = (scanner: Scanner): readonly string[] => {
   switch (scanner) {
     case "semgrep": return ["scan", "--json", "--config", "auto", "."]
-    case "trivy": return ["fs", "--format", "json", "--scanners", "vuln,secret,misconfig", "."]
-    case "gitleaks": return ["detect", "--no-git", "--report-format", "json", "--report-path", "-"]
+    case "trivy": return ["fs", "--format", "json", "--scanners", "vuln,secret,misconfig", "--redact", "."]
+    case "gitleaks": return ["detect", "--no-git", "--redact", "--report-format", "json", "--report-path", "-"]
   }
+}
+
+const SAFE_TEXT_FIELD = /^(?:path|file|filename|ruleid|check_id|id|severity|category|type|scanner|package|name|version|installedversion|fixedversion)$/iu
+const sanitize = (value: unknown, key = ""): unknown => {
+  if (typeof value === "string") return SAFE_TEXT_FIELD.test(key) ? value : "[REDACTED]"
+  if (Array.isArray(value)) return value.map((item) => sanitize(item))
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, sanitize(item, name)]))
+  }
+  return value
 }
 
 const boundedJson = (stdout: string): unknown => {
   if (stdout.length > 1_000_000) throw new Error("Scanner output exceeded 1 MB; narrow the scan")
   try {
-    return JSON.parse(stdout)
-  } catch {
-    return { output: stdout.slice(0, 32_000) }
+    return sanitize(JSON.parse(stdout))
+  } catch (cause) {
+    if (cause instanceof SyntaxError) throw new Error("Scanner returned invalid JSON")
+    throw cause
   }
 }
+
+const validExit = (scanner: Scanner, code: number): boolean => code === 0 || (scanner === "gitleaks" && code === 1)
 
 export const securityTool = (ctx: Pick<HostContext, "exec">): AgentToolDefinition => ({
   id: "security_scan",
@@ -50,7 +63,7 @@ export const securityTool = (ctx: Pick<HostContext, "exec">): AgentToolDefinitio
   idempotency: "safe",
   timeoutMs: 120_000,
   outputBudget: 32_000,
-  cancellable: true,
+  cancellable: false,
   execute: async (value, context) => {
     const input = decode(value)
     if (input.action === "availability") {
@@ -65,7 +78,7 @@ export const securityTool = (ctx: Pick<HostContext, "exec">): AgentToolDefinitio
       return { available }
     }
     const scanner = input.scanner!
-    let result
+    let result: ExecResult
     try {
       result = await ctx.exec(scanner, argsFor(scanner), {
         cwd: context.session.repository.path,
@@ -74,8 +87,8 @@ export const securityTool = (ctx: Pick<HostContext, "exec">): AgentToolDefinitio
     } catch {
       throw new Error(`${scanner} is unavailable; install it or choose another scanner`)
     }
-    if (result.code !== 0 && result.stdout.trim().length === 0) {
-      throw new Error(`${scanner} failed: ${result.stderr.trim().slice(0, 1_000) || `exit ${result.code}`}`)
+    if (!validExit(scanner, result.code)) {
+      throw new Error(`${scanner} failed with exit ${result.code}; inspect the scanner locally for redacted diagnostics`)
     }
     return { scanner, exitCode: result.code, findings: boundedJson(result.stdout) }
   }

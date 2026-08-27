@@ -85,6 +85,13 @@ describe("completion review", () => {
     expect(requiresCompletionReview({ changedFiles: ["src/a.ts"], verificationRetries: 0 })).toBe(false)
     expect(requiresCompletionReview({ changedFiles: ["src/a.ts", "src/b.ts"], verificationRetries: 0 })).toBe(true)
     expect(requiresCompletionReview({ changedFiles: ["src/auth/session.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/authentication.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/oauth-client.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/credential-store.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/authService.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/paymentProcessor.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/JWTAuthentication.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/APIAuthentication.ts"], verificationRetries: 0 })).toBe(true)
     expect(requiresCompletionReview({ changedFiles: ["src/a.ts"], verificationRetries: 1 })).toBe(true)
   })
 

@@ -1,5 +1,5 @@
 import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
-import { event, reportContains, toolCall, type EvalScenario } from "../behavior-contract.js"
+import { event, toolCall, toolOutputContains, type EvalScenario } from "../behavior-contract.js"
 
 /**
  * Baseline failure: text search cannot distinguish the exported token from a
@@ -10,11 +10,11 @@ export const CODE_INTELLIGENCE_SCENARIOS: ReadonlyArray<EvalScenario> = [{
   capability: "code-intelligence",
   required: [
     toolCall("code_intelligence"),
-    reportContains("source.ts"),
-    reportContains("reexport.ts"),
+    toolOutputContains("code_intelligence", "source.ts"),
+    toolOutputContains("code_intelligence", "reexport.ts"),
     event("Done")
   ],
-  forbidden: [reportContains("shadowed use.ts:2")],
+  forbidden: [toolOutputContains("code_intelligence", "\"path\":\"use.ts\",\"line\":2")],
   ordering: [],
   timeoutMs: 120_000,
   requiredVersions: CURRENT_RUNTIME_CONTRACTS

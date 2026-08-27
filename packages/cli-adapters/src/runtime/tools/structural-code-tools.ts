@@ -1,11 +1,12 @@
 import { Schema } from "effect"
 import type { ToolRegistry } from "./tool-registry.js"
-import { applyIdentifierEdits, structuralMatches } from "./typescript-analysis.js"
+import { applyIdentifierEdits, structuralPreview } from "./typescript-analysis.js"
 
 const readRoles = ["conversation", "plan", "plan-execution", "review", "background"] as const
 const writeRoles = ["conversation", "plan-execution", "background"] as const
 const readModes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 const writeModes = ["ask", "accept-edits", "auto"] as const
+const PREVIEW_TOKEN = /^[a-f0-9]{64}$/u
 const MatchInput = {
   symbol: Schema.String.pipe(Schema.minLength(1)),
   kind: Schema.Literal("identifier", "call")
@@ -22,18 +23,18 @@ export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string)
     modes: readModes,
     timeoutMs: 30_000,
     outputBudget: 32_000,
-    cancellable: true,
+    cancellable: false,
     idempotency: "safe",
-    execute: ({ symbol, kind }) => Promise.resolve(structuralMatches(cwd, symbol, kind))
+    execute: ({ symbol, kind }) => Promise.resolve(structuralPreview(cwd, symbol, kind))
   })
   registry.register({
     id: "structural_edit",
     version: "1",
-    description: "Apply a previewed syntax-aware identifier replacement. Pass expectedMatches from structural_search so stale files fail closed.",
+    description: "Apply a previewed syntax-aware identifier replacement. Pass previewToken from structural_search so moved or changed matches fail closed.",
     input: Schema.Struct({
       ...MatchInput,
       newName: Schema.String.pipe(Schema.minLength(1)),
-      expectedMatches: Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1))
+      previewToken: Schema.String.pipe(Schema.pattern(PREVIEW_TOKEN))
     }),
     risk: "mutate",
     roles: writeRoles,
@@ -42,10 +43,13 @@ export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string)
     outputBudget: 16_000,
     cancellable: false,
     idempotency: "keyed",
-    execute: async ({ symbol, kind, newName, expectedMatches }) => {
-      const matches = structuralMatches(cwd, symbol, kind)
-      if (matches.value.length !== expectedMatches) throw new Error(`Structural preview is stale: expected ${expectedMatches}, found ${matches.value.length}`)
-      return applyIdentifierEdits(cwd, matches.value, symbol, newName)
+    execute: async ({ symbol, kind, newName, previewToken }) => {
+      const preview = structuralPreview(cwd, symbol, kind)
+      if (preview.value.previewToken !== previewToken) throw new Error("Structural preview is stale; run structural_search again")
+      return applyIdentifierEdits(cwd, preview.value.matches, symbol, newName, {
+        kind,
+        token: previewToken
+      })
     }
   })
 }

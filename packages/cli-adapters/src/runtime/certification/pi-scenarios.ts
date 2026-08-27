@@ -5,12 +5,14 @@ import {
   before,
   event,
   fileChange,
+  fileContentContains,
   permission,
   reportContains,
   resourceClosed,
   resourceOpened,
   toolEffect,
   toolCall,
+  toolOutputContains,
   type EvalScenario
 } from "./behavior-contract.js"
 
@@ -82,22 +84,36 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
   scenario({
     id: "quality.semantic-references",
     capability: "code-intelligence",
-    required: [toolCall("code_intelligence"), reportContains("source.ts"), reportContains("reexport.ts"), event("Done")],
-    forbidden: [reportContains("\"path\":\"use.ts\",\"line\":2")],
+    required: [
+      toolCall("code_intelligence"),
+      toolOutputContains("code_intelligence", "source.ts"),
+      toolOutputContains("code_intelligence", "reexport.ts"),
+      event("Done")
+    ],
+    forbidden: [toolOutputContains("code_intelligence", "\"path\":\"use.ts\",\"line\":2")],
     ordering: []
   }),
   scenario({
     id: "quality.structural-preview",
     capability: "code-intelligence",
-    required: [toolCall("structural_search"), reportContains("one direct call"), event("Done")],
+    required: [toolCall("structural_search"), toolOutputContains("structural_search", "\"matchCount\":1"), event("Done")],
     forbidden: [toolCall("structural_edit")],
     ordering: []
   }),
   scenario({
     id: "quality.semantic-rename",
     capability: "code-intelligence",
-    required: [toolCall("code_intelligence"), permission("code_rename", "allow"), toolCall("code_rename"), fileChange("M", "source.ts"), event("Done")],
-    forbidden: [toolCall("structural_edit")],
+    required: [
+      toolCall("code_intelligence"),
+      permission("code_rename", "allow"),
+      toolCall("code_rename"),
+      fileChange("M", "source.ts"),
+      fileContentContains("source.ts", "const credential = 1"),
+      fileContentContains("reexport.ts", "credential as publicToken"),
+      fileContentContains("use.ts", "const token = 2"),
+      event("Done")
+    ],
+    forbidden: [toolCall("structural_edit"), fileContentContains("use.ts", "const credential = 2")],
     ordering: [before(toolCall("code_intelligence"), toolCall("code_rename"))]
   }),
   scenario({

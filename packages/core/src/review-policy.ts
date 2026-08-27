@@ -62,13 +62,18 @@ export interface CompletionReviewRisk {
   readonly verificationRetries: number
 }
 
-const SENSITIVE_PATH = /(?:^|\/)(?:auth|billing|payments?|security|permissions?|secrets?)(?:\/|\.|$)/iu
+const SENSITIVE_PATH = /(?:^|[/_.-])(?:auth(?:entication|orization)?|oauth|billing|payments?|security|permissions?|secrets?|credentials?)(?:[/_.-]|$)/u
+const securityTokens = (path: string): string =>
+  path
+    .replaceAll(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")
+    .replaceAll(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .toLowerCase()
 
 /** Deterministic trigger: observable diff risk, never model self-assessment. */
 export const requiresCompletionReview = (risk: CompletionReviewRisk): boolean =>
   risk.changedFiles.length > 1 ||
   risk.verificationRetries > 0 ||
-  risk.changedFiles.some((path) => SENSITIVE_PATH.test(path))
+  risk.changedFiles.some((path) => SENSITIVE_PATH.test(securityTokens(path)))
 
 export interface CompletionReviewGate {
   readonly blocked: boolean
