@@ -1042,18 +1042,21 @@ function AuthedApp({
                 message.externalInstruction?.semanticKey ===
                   externalInstruction.semanticKey,
             );
-          if (alreadyDurable) return;
+          if (alreadyDurable) return { accepted: Promise.resolve() };
           // SEND is the same visible conversation intent used by the composer.
           // While an agent is running, the conversation machine owns steering
           // or FIFO queueing; this never starts a hidden parallel run.
-          await new Promise<void>((resolve) => {
-            conversation.send({
-              type: "SEND",
-              text,
-              externalInstruction,
-              onExternalAccepted: resolve,
-            });
+          let accept = () => {};
+          const accepted = new Promise<void>((resolve) => {
+            accept = resolve;
           });
+          conversation.send({
+            type: "SEND",
+            text,
+            externalInstruction,
+            onExternalAccepted: accept,
+          });
+          return { accepted };
         },
       }),
     [qc],
@@ -1085,7 +1088,17 @@ function AuthedApp({
             .route(delivery.event, target)
             // Main selected this exact session from its opaque relay connection;
             // renderer never searches by repository or pull-request payload.
-            .then(() => rpc.githubAckEvent(delivery.clientId, delivery.cursor))
+            .then((result) => {
+              if (result.status === "routed") {
+                void result.completion.catch((cause: unknown) => {
+                  console.error(
+                    "GitHub feedback stayed pending after UI admission; the outbox will replay it:",
+                    cause,
+                  );
+                });
+              }
+              return rpc.githubAckEvent(delivery.clientId, delivery.cursor);
+            })
             .catch((cause: unknown) => {
               // A routing failure must not hold the cursor hostage: every later
               // event for this session queues behind an acknowledgement that

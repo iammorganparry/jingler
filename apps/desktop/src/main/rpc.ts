@@ -2934,10 +2934,11 @@ export const reconcileRelaySessionRoutes = async (
 /**
  * How long a delivery may sit un-acknowledged before it is treated as failed.
  *
- * The renderer's acknowledgement can legitimately take a while (the target
- * conversation may still be loading, or the instruction may be queued behind a
- * running turn), but it must not take forever: an acknowledgement that never
- * comes wedges the connection's serial delivery chain, freezes the cursor, and
+ * The renderer's acknowledgement can legitimately take a while while the target
+ * conversation loads and admits the instruction to its visible queue. It must
+ * not wait for that item to run: doing so hides every later relay frame behind
+ * the current agent turn. An acknowledgement that never comes still wedges the
+ * connection's serial delivery chain, freezes the cursor, and
  * silently blocks every later event for that session until the app restarts.
  * Timing out rejects instead, which closes the socket and replays the frame.
  */

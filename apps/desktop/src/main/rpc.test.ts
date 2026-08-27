@@ -264,8 +264,8 @@ describe("relay acknowledgement lifetime", () => {
       settled = true;
     });
 
-    // A legitimate acknowledgement can take a while (the target conversation
-    // may be loading, or the instruction queued behind a running turn).
+    // A legitimate acknowledgement can take a while while the target
+    // conversation loads and admits the instruction to its visible queue.
     await vi.advanceTimersByTimeAsync(4 * 60_000);
     expect(settled).toBe(false);
 
