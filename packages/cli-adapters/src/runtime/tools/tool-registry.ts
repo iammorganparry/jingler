@@ -11,6 +11,11 @@ import { Effect, Either, Schema } from "effect"
 export type ToolRisk = "read" | "network" | "mutate" | "execute"
 export type ToolIdempotency = "safe" | "keyed" | "unsafe"
 
+export const codeReadRoles = ["conversation", "plan", "plan-execution", "review", "background"] as const
+export const codeWriteRoles = ["conversation", "plan-execution", "background"] as const
+export const codeReadModes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
+export const codeWriteModes = ["ask", "accept-edits", "auto"] as const
+
 const ProviderToolId = Schema.String.pipe(
   Schema.minLength(1),
   Schema.maxLength(64),

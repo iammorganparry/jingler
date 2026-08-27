@@ -7,7 +7,6 @@ import {
   fileChange,
   fileContentContains,
   permission,
-  reportContains,
   reportEquals,
   resourceClosed,
   resourceOpened,
@@ -100,7 +99,7 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
     required: [
       toolCall("structural_search"),
       toolOutputContains("structural_search", "\"matchCount\":1"),
-      reportContains("one direct call"),
+      reportEquals("There is one direct call."),
       event("Done")
     ],
     forbidden: [toolCall("structural_edit")],

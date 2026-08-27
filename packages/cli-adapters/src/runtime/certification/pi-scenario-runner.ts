@@ -52,7 +52,7 @@ const promptFor = (scenarioId: string): string => {
     case "quality.semantic-references":
       return "Find every semantic reference to token declared on source.ts line 1. Use code intelligence, include source.ts and reexport.ts evidence, and exclude the shadowed local in use.ts."
     case "quality.structural-preview":
-      return "Count direct calls named run using structural syntax search. Do not edit. Report that there is one direct call."
+      return "Count direct calls named run using structural syntax search. Do not edit. Reply exactly: There is one direct call."
     case "quality.semantic-rename":
       return "Use semantic references first, then rename token on source.ts line 1 to credential. Do not use structural edit."
     case "quality.plain-text-skip":

@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { codeReadModes, codeReadRoles, codeWriteModes, codeWriteRoles } from "./tool-registry.js"
 import type { ToolDefinition, ToolRegistry } from "./tool-registry.js"
 import {
   codeDefinitions,
@@ -8,10 +9,6 @@ import {
   semanticRename
 } from "./typescript-analysis.js"
 
-export const codeReadRoles = ["conversation", "plan", "plan-execution", "review", "background"] as const
-export const codeWriteRoles = ["conversation", "plan-execution", "background"] as const
-export const codeReadModes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
-export const codeWriteModes = ["ask", "accept-edits", "auto"] as const
 const SymbolInput = {
   file: Schema.String.pipe(Schema.minLength(1)),
   symbol: Schema.String.pipe(Schema.minLength(1)),

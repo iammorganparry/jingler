@@ -529,6 +529,12 @@ const acquireEditLocks = async (
   return () => Promise.all(acquired.map((release) => release())).then(() => undefined)
 }
 
+interface EditReceipt {
+  readonly files: ReadonlyArray<string>
+  readonly replacements: number
+  readonly cleanupWarning?: string
+}
+
 export const applyIdentifierEdits = async (
   cwd: string,
   locations: ReadonlyArray<CodeLocation>,
@@ -538,7 +544,7 @@ export const applyIdentifierEdits = async (
     readonly preview?: { readonly kind: "identifier" | "call"; readonly token: string }
     readonly validate?: () => Promise<void>
   }
-): Promise<{ readonly files: ReadonlyArray<string>; readonly replacements: number }> => {
+): Promise<EditReceipt> => {
   if (!isIdentifierText(newName, ScriptTarget.Latest)) throw new ToolError("invalid-input", "newName must be a valid identifier")
   const grouped = new Map<string, CodeLocation[]>()
   for (const item of locations) grouped.set(item.path, [...(grouped.get(item.path) ?? []), item])
@@ -608,11 +614,18 @@ export const applyIdentifierEdits = async (
     await restore(prepared)
     throw cause
   }
-  await Promise.allSettled(prepared.flatMap(({ temporary, backup }) => [
+  const cleanup = await Promise.allSettled(prepared.flatMap(({ temporary, backup }) => [
     rm(temporary, { force: true }),
     rm(backup, { force: true })
   ]))
-  return { files: [...grouped.keys()], replacements: locations.length }
+  const cleanupFailures = cleanup.filter((result) => result.status === "rejected").length
+  return {
+    files: [...grouped.keys()],
+    replacements: locations.length,
+    ...(cleanupFailures > 0
+      ? { cleanupWarning: `Source edits succeeded, but ${cleanupFailures} temporary or backup file${cleanupFailures === 1 ? "" : "s"} could not be removed` }
+      : {})
+  }
   } finally {
     await releaseLocks()
   }
@@ -643,7 +656,7 @@ export const semanticRename = async (
   column: number | undefined,
   newName: string,
   signal?: AbortSignal
-): Promise<{ readonly files: ReadonlyArray<string>; readonly replacements: number }> => {
+): Promise<EditReceipt> => {
   const references = (await semanticReferences(cwd, file, symbol, line, column, signal)).value
   const baselineDiagnostics = (await codeDiagnostics(cwd, undefined, signal, Number.MAX_SAFE_INTEGER)).value
   const expected = shiftedLocations(references, symbol, newName)

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect } from "effect"
@@ -156,6 +156,29 @@ describe("code intelligence tools", () => {
     await expect(applyIdentifierEdits(root, references.value, "token", "not-valid-name"))
       .rejects.toMatchObject({ code: "invalid-input" })
     expect(await readFile(join(root, "source.ts"), "utf8")).toBe(before)
+  })
+
+  it("reports cleanup failure without failing an applied edit", async () => {
+    const root = await project()
+    const receipt = await applyIdentifierEdits(
+      root,
+      [{ path: "source.ts", line: 1, column: 14, text: "token" }],
+      "token",
+      "credential",
+      {
+        validate: async () => {
+          const backup = (await readdir(root)).find((path) => path.endsWith(".backup"))!
+          await rm(join(root, backup))
+          await mkdir(join(root, backup))
+        }
+      }
+    )
+
+    expect(receipt).toMatchObject({
+      replacements: 1,
+      cleanupWarning: "Source edits succeeded, but 1 temporary or backup file could not be removed"
+    })
+    expect(await readFile(join(root, "source.ts"), "utf8")).toContain("credential")
   })
 
   it("applies all resolved references and leaves strings and shadowed names unchanged", async () => {

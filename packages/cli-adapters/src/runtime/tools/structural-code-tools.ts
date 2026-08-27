@@ -1,6 +1,6 @@
 import { Schema } from "effect"
+import { codeReadModes, codeReadRoles, codeWriteModes, codeWriteRoles } from "./tool-registry.js"
 import type { ToolRegistry } from "./tool-registry.js"
-import { codeReadModes, codeReadRoles, codeWriteModes, codeWriteRoles } from "./code-intelligence-tools.js"
 import { applyIdentifierEdits, structuralPreview } from "./typescript-analysis.js"
 
 const PREVIEW_TOKEN = /^[a-f0-9]{64}$/u
