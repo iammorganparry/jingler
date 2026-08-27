@@ -142,7 +142,10 @@ describe("pi session creation", () => {
     const projection = {
       phase: "executing" as const,
       planFilePath: "PLAN.md",
-      review: null,
+      review: {
+        reviewId: "review-1",
+        url: "http://localhost:19432"
+      },
       checklist: [{ step: 1, text: "Implement", completed: false }]
     }
     const enterPlanMode = vi.fn(async (events: EventBus) => {
