@@ -298,7 +298,8 @@ const buildContext = (plugin: LivePlugin): HostContext => ({
       cwd: options.cwd,
       env: options.env,
       input: options.input,
-      timeoutMs: options.timeoutMs
+      timeoutMs: options.timeoutMs,
+      maxOutputBytes: options.maxOutputBytes
     } satisfies ExecRequest),
 
   log: {

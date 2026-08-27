@@ -82,10 +82,12 @@ export function useSubagentFleet(input: {
         )
         if (!active) return
         const snapshotIds = new Set(snapshot.nodes.map((node) => node.id))
-        const completedDurable = actor.getSnapshot().context.tree.nodes
-          .filter((node) =>
-            node.health === "unknown" && !snapshotIds.has(node.id)
+        const missingActive = (snapshot.omitted === 0
+          ? actor.getSnapshot().context.tree.nodes.filter((node) =>
+            ["queued", "running", "paused", "needs-attention"].includes(node.status) &&
+            !snapshotIds.has(node.id)
           )
+          : [])
           .map((node): SubagentFleetEvent => ({
             _tag: "Remove",
             version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -103,7 +105,7 @@ export function useSubagentFleet(input: {
           type: "SYNC",
           events: [
             ...eventsRef.current,
-            ...completedDurable,
+            ...missingActive,
             {
               _tag: "Snapshot",
               version: SUBAGENT_FLEET_PROTOCOL_VERSION,

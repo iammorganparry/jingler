@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest"
 import type { ReviewFinding, ReviewSeverity } from "./domain.js"
 import { ReviewSeverity as ReviewSeveritySchema } from "./domain.js"
-import { AGENT_SEVERITIES, PR_SEVERITIES, destinationOf, partitionFindings } from "./review-policy.js"
+import {
+  AGENT_SEVERITIES,
+  PR_SEVERITIES,
+  completionReviewGate,
+  destinationOf,
+  partitionFindings,
+  requiresCompletionReview
+} from "./review-policy.js"
 
 /**
  * This module decides where a paid-for finding ends up. The behaviour that
@@ -70,6 +77,32 @@ describe("partitionFindings", () => {
 
   it("splits an empty review into two empty halves", () => {
     expect(partitionFindings([])).toStrictEqual({ toAgent: [], toPr: [] })
+  })
+})
+
+describe("completion review", () => {
+  it("reviews multi-file, sensitive, or retried work and skips one trivial file", () => {
+    expect(requiresCompletionReview({ changedFiles: ["src/a.ts"], verificationRetries: 0 })).toBe(false)
+    expect(requiresCompletionReview({ changedFiles: ["src/a.ts", "src/b.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/auth/session.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/authentication.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/oauth-client.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/credential-store.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/authService.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/paymentProcessor.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/JWTAuthentication.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/APIAuthentication.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/password-reset.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/session-token.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/access-control.ts"], verificationRetries: 0 })).toBe(true)
+    expect(requiresCompletionReview({ changedFiles: ["src/a.ts"], verificationRetries: 1 })).toBe(true)
+  })
+
+  it("blocks only critical and major findings with their evidence intact", () => {
+    const major = finding("major", "major")
+    const minor = finding("minor", "minor")
+    expect(completionReviewGate([major, minor])).toStrictEqual({ blocked: true, blocking: [major] })
+    expect(completionReviewGate([minor])).toStrictEqual({ blocked: false, blocking: [] })
   })
 })
 

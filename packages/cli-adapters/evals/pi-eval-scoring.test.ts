@@ -66,6 +66,20 @@ describe("pi behavior scoring", () => {
     expect(scoreScenario(scenario("permission.denied-edit"), trace("permission.denied-edit", observations)).status).toBe("failed")
   })
 
+  it("fails structural preview when the reported count is wrong", () => {
+    const observations: ReadonlyArray<EvalObservation> = [
+      { kind: "tool-call", tool: "structural_search", risk: "read" },
+      { kind: "tool-output", tool: "structural_search", text: '{"matchCount":1}' },
+      { kind: "report-text", text: "There are two direct calls." },
+      { kind: "event", tag: "Done" }
+    ]
+
+    expect(scoreScenario(
+      scenario("quality.structural-preview"),
+      trace("quality.structural-preview", observations)
+    ).status).toBe("failed")
+  })
+
   it("fails when a stream has no terminal event", () => {
     const result = scoreScenario(scenario("lifecycle.complete"), trace("lifecycle.complete", [{ kind: "event", tag: "Started" }]))
     expect(result.failures).toContain("expected exactly one terminal event")

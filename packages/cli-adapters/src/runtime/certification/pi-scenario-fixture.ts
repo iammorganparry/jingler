@@ -5,6 +5,23 @@ import {
 } from "@earendil-works/pi-ai"
 import { defaultPlan } from "@jingler/core"
 
+const qualityResponses = (scenarioId: string): ReadonlyArray<FauxResponseStep> | null => {
+  if (scenarioId === "quality.semantic-references") return [
+    fauxAssistantMessage(fauxToolCall("code_intelligence", { action: "references", file: "source.ts", symbol: "token", line: 1 }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("References collected from tool output.")
+  ]
+  if (scenarioId === "quality.structural-preview") return [
+    fauxAssistantMessage(fauxToolCall("structural_search", { symbol: "run", kind: "call" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("There is one direct call.")
+  ]
+  if (scenarioId === "quality.semantic-rename") return [
+    fauxAssistantMessage(fauxToolCall("code_intelligence", { action: "references", file: "source.ts", symbol: "token", line: 1 }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(fauxToolCall("code_rename", { file: "source.ts", symbol: "token", line: 1, newName: "credential" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("Renamed the semantic symbol.")
+  ]
+  return scenarioId === "quality.plain-text-skip" ? [fauxAssistantMessage("plain text")] : null
+}
+
 /** Scripted model responses shared by deterministic and Electron certification. */
 export const scriptedPiScenarioResponses = (
   scenarioId: string
@@ -26,6 +43,8 @@ export const scriptedPiScenarioResponses = (
       fauxAssistantMessage("complete")
     ]
   }
+  const quality = qualityResponses(scenarioId)
+  if (quality) return quality
   if (scenarioId === "structured.question-plan") {
     return [
       fauxAssistantMessage(

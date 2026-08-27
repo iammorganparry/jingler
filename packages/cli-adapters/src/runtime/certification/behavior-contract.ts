@@ -34,7 +34,9 @@ export const EvalObservation = Schema.Union(
     name: Schema.String,
     state: Schema.Literal("opened", "closed")
   }),
-  Schema.Struct({ kind: Schema.Literal("report-text"), text: Schema.String })
+  Schema.Struct({ kind: Schema.Literal("report-text"), text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("tool-output"), tool: Schema.String, text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("file-content"), path: Schema.String, text: Schema.String })
 )
 export type EvalObservation = Schema.Schema.Type<typeof EvalObservation>
 
@@ -125,6 +127,23 @@ export const resourceClosed = (name: string): EvalMatcher => ({
 export const reportContains = (value: string): EvalMatcher => ({
   description: `report-contains:${value}`,
   matches: (observation) => observation.kind === "report-text" && observation.text.includes(value)
+})
+
+export const reportEquals = (value: string): EvalMatcher => ({
+  description: `report-equals:${value}`,
+  matches: (observation) => observation.kind === "report-text" && observation.text === value
+})
+
+export const toolOutputContains = (tool: string, value: string): EvalMatcher => ({
+  description: `tool-output-contains:${tool}:${value}`,
+  matches: (observation) =>
+    observation.kind === "tool-output" && observation.tool === tool && observation.text.includes(value)
+})
+
+export const fileContentContains = (path: string, value: string): EvalMatcher => ({
+  description: `file-content-contains:${path}:${value}`,
+  matches: (observation) =>
+    observation.kind === "file-content" && observation.path === path && observation.text.includes(value)
 })
 
 export const before = (first: EvalMatcher, second: EvalMatcher): EvalOrdering => ({

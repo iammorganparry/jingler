@@ -24,6 +24,8 @@ import {
   type WorkspaceInspectionPort
 } from "../tools/workspace-tools.js"
 import type { WebSearchServiceShape } from "../../web-search.js"
+import { registerCodeIntelligenceTools } from "../tools/code-intelligence-tools.js"
+import { registerStructuralCodeTools } from "../tools/structural-code-tools.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 
 const roles = ["conversation", "plan", "plan-execution", "background"] as const
@@ -245,6 +247,8 @@ export const createJinglerTools = (
     if (input.workspace) {
       registerWorkspaceInspectionTools(registry, input.cwd, input.workspace)
     }
+    registerCodeIntelligenceTools(registry, input.cwd)
+    registerStructuralCodeTools(registry, input.cwd)
     if (input.webSearch) {
       registerWebSearchTool(
         registry,

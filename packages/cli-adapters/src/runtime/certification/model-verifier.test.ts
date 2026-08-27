@@ -8,6 +8,7 @@ import { Effect, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
 import { verifyProviderModelBehavior } from "./model-verifier.js"
+import { CORE_PI_SCENARIOS } from "./pi-scenarios.js"
 
 const connection = (): ProviderConnectionType =>
   Schema.decodeUnknownSync(ProviderConnection)({
@@ -148,6 +149,32 @@ describe("provider model behavior verification", () => {
             { kind: "event", tag: "PlanProposed" },
             { kind: "event", tag: "Done" }
           ] as const
+        case "quality.semantic-references":
+          return [
+            { kind: "tool-call", tool: "code_intelligence", risk: "read" },
+            { kind: "tool-output", tool: "code_intelligence", text: "source.ts reexport.ts" },
+            { kind: "event", tag: "Done" }
+          ] as const
+        case "quality.structural-preview":
+          return [
+            { kind: "tool-call", tool: "structural_search", risk: "read" },
+            { kind: "tool-output", tool: "structural_search", text: '{"matchCount":1}' },
+            { kind: "report-text", text: "There is one direct call." },
+            { kind: "event", tag: "Done" }
+          ] as const
+        case "quality.semantic-rename":
+          return [
+            { kind: "tool-call", tool: "code_intelligence", risk: "read" },
+            { kind: "permission", tool: "code_rename", decision: "allow" },
+            { kind: "tool-call", tool: "code_rename", risk: "mutate" },
+            { kind: "file-change", status: "M", path: "source.ts", oldPath: null },
+            { kind: "file-content", path: "source.ts", text: "export const credential = 1" },
+            { kind: "file-content", path: "reexport.ts", text: "export { credential as publicToken }" },
+            { kind: "file-content", path: "use.ts", text: "const token = 2" },
+            { kind: "event", tag: "Done" }
+          ] as const
+        case "quality.plain-text-skip":
+          return [{ kind: "report-text", text: "plain text" }, { kind: "event", tag: "Done" }] as const
         case "remote.contract-compatible":
           return [
             { kind: "event", tag: "RemoteContractAccepted" },
@@ -185,7 +212,7 @@ describe("provider model behavior verification", () => {
       })
     )
 
-    expect(runScenario).toHaveBeenCalledTimes(7)
+    expect(runScenario).toHaveBeenCalledTimes(CORE_PI_SCENARIOS.length)
     expect(certification).toMatchObject({
       providerId: "anthropic",
       modelId: "anthropic/claude-sonnet",
@@ -199,7 +226,7 @@ describe("provider model behavior verification", () => {
       capabilityProfiles: ["core"],
       certifiedAt: "2026-08-12T12:00:00.000Z"
     })
-    expect(certification.results).toHaveLength(7)
+    expect(certification.results).toHaveLength(CORE_PI_SCENARIOS.length)
     expect(certification.results.every((result) => result.status === "passed")).toBe(true)
   })
 })

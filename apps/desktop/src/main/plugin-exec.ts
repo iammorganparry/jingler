@@ -58,12 +58,19 @@ export const clampTimeout = (asked: number | undefined): number =>
     ? DEFAULT_TIMEOUT_MS
     : Math.min(asked, DEFAULT_TIMEOUT_MS)
 
+export const clampOutputBytes = (asked: number | undefined): number =>
+  asked === undefined || !Number.isFinite(asked) || asked <= 0
+    ? MAX_STREAM_BYTES
+    : Math.min(Math.floor(asked), MAX_STREAM_BYTES)
+
 export const runShell = (
   request: ExecRequest,
   defaultCwd: string | undefined
 ): Promise<ExecReply> =>
   new Promise<ExecReply>((resolve, reject) => {
     const timeoutMs = clampTimeout(request.timeoutMs)
+    const maxStreamBytes = clampOutputBytes(request.maxOutputBytes)
+    const rejectOnOverflow = request.maxOutputBytes !== undefined
 
     const child = spawn(request.command, [...request.args], {
       cwd: request.cwd ?? defaultCwd,
@@ -96,6 +103,15 @@ export const runShell = (
     let outTruncated = false
     let errTruncated = false
     let settled = false
+    let timer: ReturnType<typeof setTimeout>
+
+    const overflow = (): void => {
+      if (!rejectOnOverflow || settled) return
+      settled = true
+      clearTimeout(timer)
+      child.kill("SIGKILL")
+      reject(new Error(`\`${request.command}\` output exceeded ${maxStreamBytes} bytes`))
+    }
 
     const capture = (chunk: Buffer, into: "out" | "err") => {
       const used = into === "out" ? outBytes : errBytes
@@ -103,16 +119,20 @@ export const runShell = (
         if (into === "out") outTruncated = true
         else errTruncated = true
       }
-      if (used >= MAX_STREAM_BYTES) {
+      if (used >= maxStreamBytes) {
         markTruncated()
+        overflow()
         return
       }
       // Trim the chunk rather than dropping it whole: the cap is a ceiling on
       // what is kept, and checking only before the append let one oversized
       // chunk through in full.
-      const room = MAX_STREAM_BYTES - used
+      const room = maxStreamBytes - used
       const kept = chunk.byteLength > room ? chunk.subarray(0, room) : chunk
-      if (kept.byteLength < chunk.byteLength) markTruncated()
+      if (kept.byteLength < chunk.byteLength) {
+        markTruncated()
+        overflow()
+      }
 
       if (into === "out") {
         out.push(kept)
@@ -126,7 +146,7 @@ export const runShell = (
     child.stdout?.on("data", (chunk: Buffer) => capture(chunk, "out"))
     child.stderr?.on("data", (chunk: Buffer) => capture(chunk, "err"))
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       if (settled) return
       settled = true
       child.kill("SIGKILL")

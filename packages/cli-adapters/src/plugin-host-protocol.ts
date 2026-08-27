@@ -232,6 +232,7 @@ export interface ExecRequest {
   readonly env?: Readonly<Record<string, string>>
   readonly input?: string
   readonly timeoutMs?: number
+  readonly maxOutputBytes?: number
 }
 
 export interface ExecReply {

@@ -85,6 +85,12 @@ extraResources:
       - jingler.plugin.json
       - dist/**
       - "!dist/**/*.map"
+  - from: ../../plugins/security
+    to: plugins/security
+    filter:
+      - jingler.plugin.json
+      - dist/**
+      - "!dist/**/*.map"
   # Versioned managed runtime copied to a paired host during SSH bootstrap.
   # It contains the device agent plus the exact Pi CLI and pi-subagents package
   # tree, so remote delegation never depends on an ambient installation.

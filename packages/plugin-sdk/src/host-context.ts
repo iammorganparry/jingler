@@ -433,6 +433,11 @@ export interface ExecOptions {
    * mysteriously timing out.
    */
   readonly timeoutMs?: number
+  /**
+   * Kill the child if either output stream exceeds this many UTF-8 bytes.
+   * Capped at 8 MiB per stream; omitted output is captured up to that host ceiling.
+   */
+  readonly maxOutputBytes?: number
 }
 
 /**

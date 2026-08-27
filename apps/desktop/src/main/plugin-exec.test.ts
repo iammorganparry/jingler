@@ -10,7 +10,7 @@
  * `spawn` would be a test of the fake.
  */
 import { describe, expect, it } from "vitest"
-import { clampTimeout, runShell } from "./plugin-exec.js"
+import { clampOutputBytes, clampTimeout, runShell } from "./plugin-exec.js"
 
 const node = process.execPath
 
@@ -68,6 +68,17 @@ describe("timeoutMs clamping", () => {
     // immediately — the same instant-kill as 0, by a different route.
     expect(clampTimeout(undefined)).toBe(120_000)
     expect(clampTimeout(Number.NaN)).toBe(120_000)
+  })
+})
+
+describe("requested output limits", () => {
+  it("kills a child as soon as UTF-8 output exceeds the requested byte cap", async () => {
+    await expect(run("process.stdout.write('😀'.repeat(100))", { maxOutputBytes: 100 }))
+      .rejects.toThrow("output exceeded 100 bytes")
+  })
+
+  it("caps requests at the host ceiling", () => {
+    expect(clampOutputBytes(20 * 1024 * 1024)).toBe(8 * 1024 * 1024)
   })
 })
 

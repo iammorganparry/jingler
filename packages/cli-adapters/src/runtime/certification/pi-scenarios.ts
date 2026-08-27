@@ -5,11 +5,14 @@ import {
   before,
   event,
   fileChange,
+  fileContentContains,
   permission,
+  reportEquals,
   resourceClosed,
   resourceOpened,
   toolEffect,
   toolCall,
+  toolOutputContains,
   type EvalScenario
 } from "./behavior-contract.js"
 
@@ -77,6 +80,53 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
     required: [event("QuestionRequested"), event("PlanProposed"), event("Done")],
     forbidden: [],
     ordering: [before(event("QuestionRequested"), event("PlanProposed"))]
+  }),
+  scenario({
+    id: "quality.semantic-references",
+    capability: "code-intelligence",
+    required: [
+      toolCall("code_intelligence"),
+      toolOutputContains("code_intelligence", "source.ts"),
+      toolOutputContains("code_intelligence", "reexport.ts"),
+      event("Done")
+    ],
+    forbidden: [toolOutputContains("code_intelligence", "\"path\":\"use.ts\",\"line\":2")],
+    ordering: []
+  }),
+  scenario({
+    id: "quality.structural-preview",
+    capability: "code-intelligence",
+    required: [
+      toolCall("structural_search"),
+      toolOutputContains("structural_search", "\"matchCount\":1"),
+      reportEquals("There is one direct call."),
+      event("Done")
+    ],
+    forbidden: [toolCall("structural_edit")],
+    ordering: []
+  }),
+  scenario({
+    id: "quality.semantic-rename",
+    capability: "code-intelligence",
+    required: [
+      toolCall("code_intelligence"),
+      permission("code_rename", "allow"),
+      toolCall("code_rename"),
+      fileChange("M", "source.ts"),
+      fileContentContains("source.ts", "const credential = 1"),
+      fileContentContains("reexport.ts", "credential as publicToken"),
+      fileContentContains("use.ts", "const token = 2"),
+      event("Done")
+    ],
+    forbidden: [toolCall("structural_edit"), fileContentContains("use.ts", "const credential = 2")],
+    ordering: [before(toolCall("code_intelligence"), toolCall("code_rename"))]
+  }),
+  scenario({
+    id: "quality.plain-text-skip",
+    capability: "code-intelligence",
+    required: [reportEquals("plain text"), event("Done")],
+    forbidden: [toolCall("code_intelligence"), toolCall("structural_search"), toolCall("code_rename"), toolCall("structural_edit")],
+    ordering: []
   }),
   scenario({
     id: "remote.contract-compatible",
