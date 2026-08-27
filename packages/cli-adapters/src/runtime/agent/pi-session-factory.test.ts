@@ -19,6 +19,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
+import { registerCodeIntelligenceTools } from "../tools/code-intelligence-tools.js"
+import { ToolRegistry } from "../tools/tool-registry.js"
 import {
   makeSubagentCapabilityBroker,
   type SubagentCapabilityBroker
@@ -183,6 +185,36 @@ describe("pi session creation", () => {
       })
     ])
     await handle.dispose()
+  })
+
+  it("bridges a selectively registered semantic tool without enabling ambient pi tools", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-pi-code-tools-"))
+    roots.push(root)
+    const captured: CreateAgentSessionOptions[] = []
+    const registry = new ToolRegistry()
+    registerCodeIntelligenceTools(registry, root)
+    const factory = makePiSessionFactory({
+      agentDir: join(root, "agent"),
+      sessionsDir: join(root, "sessions"),
+      credentials: new InMemoryProviderCredentialStore(),
+      resolveConnection: () => Effect.succeed(connection),
+      toolRegistry: registry,
+      createSession: async (options) => {
+        captured.push(options)
+        return { session: fakeSession(), extensionsResult: {} as never }
+      }
+    })
+
+    await Effect.runPromise(factory.create({
+      ...makeSpec(root),
+      role: "plan",
+      mode: "plan"
+    }, {} as never))
+
+    expect(captured[0]?.tools).toContain("code_intelligence")
+    expect(captured[0]?.customTools?.map(({ name }) => name)).toContain("code_intelligence")
+    expect(captured[0]?.tools).not.toContain("bash")
+    expect(captured[0]?.tools).not.toContain("lsp")
   })
 
   it("forwards the operator's model-native reasoning choice into pi", async () => {
