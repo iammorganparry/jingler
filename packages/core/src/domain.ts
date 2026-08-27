@@ -1652,6 +1652,17 @@ export const PrFileChange = Schema.Struct({
 });
 export type PrFileChange = Schema.Schema.Type<typeof PrFileChange>;
 
+/** One commit in a pull request's commit history. */
+export const PrCommit = Schema.Struct({
+  sha: Schema.String,
+  message: Schema.String,
+  author: Schema.String,
+  committedAt: Schema.String,
+  url: Schema.String,
+  verified: Schema.Boolean,
+});
+export type PrCommit = Schema.Schema.Type<typeof PrCommit>;
+
 /**
  * A pull request linked to a session, assembled from GitHub REST and GraphQL
  * responses. Read-only view model for the Pull Request tab.
@@ -1670,6 +1681,7 @@ export const PullRequest = Schema.Struct({
   author: GithubUser,
   createdAt: Schema.String,
   commits: Schema.Number,
+  commitItems: Schema.optional(Schema.Array(PrCommit)),
   changedFiles: Schema.Number,
   additions: Schema.Number,
   deletions: Schema.Number,
@@ -1709,6 +1721,19 @@ export const PrSummary = Schema.Struct({
   updatedAt: Schema.String,
 });
 export type PrSummary = Schema.Schema.Type<typeof PrSummary>;
+
+/** One row in the global pull-request inbox. */
+export const PullRequestListItem = Schema.extend(
+  PrSummary,
+  Schema.Struct({
+    repository: Schema.String,
+    labels: Schema.Array(PrLabel),
+    comments: Schema.Number,
+    assignedToViewer: Schema.Boolean,
+    reviewRequestedFromViewer: Schema.Boolean,
+  }),
+);
+export type PullRequestListItem = Schema.Schema.Type<typeof PullRequestListItem>;
 
 /** A provider-neutral person reference used by issue metadata. */
 export const IssueActor = Schema.Struct({

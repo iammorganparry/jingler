@@ -204,7 +204,7 @@ export interface SessionPaneProps {
   /** Open provider settings for runtime connection recovery. */
   onOpenProviderSettings?: () => void
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
-  renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void; onSelectReview: () => void }) => ReactNode
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
@@ -542,7 +542,8 @@ function SessionPaneBody(props: SessionPaneProps) {
       explanation: (session) => props.renderExplanation?.(session),
       pullRequest: (session, ctx) =>
         props.renderPullRequest?.(session, {
-          onConnectGithub: ctx.onConnectGithub
+          onConnectGithub: ctx.onConnectGithub,
+          onSelectReview: () => ctx.onSelectTab(BUILTIN_TAB.review)
         }),
       review: (session, ctx) =>
         props.renderReview?.(session, { onConnectGithub: ctx.onConnectGithub }),

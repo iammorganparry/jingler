@@ -176,6 +176,10 @@ export interface SessionConversationProps {
   memoryEligible?: boolean
   memoryActive?: boolean
   onOpenMemory?: () => void
+  /** Global Pull Requests takeover. */
+  pullRequestsView?: ReactNode
+  pullRequestsActive?: boolean
+  onOpenPullRequests?: () => void
   /** Whether GitHub is connected (drives the sidebar cog's status dot). */
   ghConnected?: boolean
   /** Repo names (sidebar group keys) that are starred — pinned to the top. */
@@ -187,7 +191,7 @@ export interface SessionConversationProps {
   /** Toggle a repo group's collapsed state from its sidebar header. */
   onToggleCollapsed?: (repoName: string) => void | Promise<void>
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
-  renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void; onSelectReview: () => void }) => ReactNode
   /** Tabs contributed by plugins, merged with the built-ins in `SessionPane`. */
   tabContributions?: ReadonlyArray<TabContribution>
   /** Persist selection of a provider-scoped issue from a pane's right rail. */
@@ -280,6 +284,8 @@ export function SessionConversation(props: SessionConversationProps) {
         memoryEligible={props.memoryEligible}
         memoryActive={props.memoryActive}
         onOpenMemory={props.onOpenMemory}
+        pullRequestsActive={props.pullRequestsActive}
+        onOpenPullRequests={props.onOpenPullRequests}
         pendingEnvironmentSession={props.pendingEnvironmentSession}
         pendingEnvironmentSessionActive={props.newSessionViewActive}
         onSelectPendingEnvironmentSession={props.onSelectPendingEnvironmentSession}
@@ -291,7 +297,9 @@ export function SessionConversation(props: SessionConversationProps) {
             {props.newSessionView}
           </div>
         )}
-        {!props.newSessionViewActive && (props.memoryView ? (
+        {!props.newSessionViewActive && (props.pullRequestsView ? (
+          props.pullRequestsView
+        ) : props.memoryView ? (
           props.memoryView
         ) : props.settingsView ? (
           props.settingsView

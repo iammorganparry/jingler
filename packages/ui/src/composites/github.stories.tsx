@@ -28,7 +28,11 @@ const pr: PullRequestData = {
   isDraft: false,
   author: { login: "claude-agent", avatarUrl: null },
   createdAt: "2026-07-11T08:00:00.000Z",
-  commits: 6,
+  commits: 2,
+  commitItems: [
+    { sha: "c8e0c69a1", message: "fix: refresh before retrying", author: "claude-agent", committedAt: "2026-07-11T10:20:00.000Z", url: "https://github.com/acme/x/commit/c8e0c69a1", verified: true },
+    { sha: "0eaa191b2", message: "test: cover expired tokens", author: "claude-agent", committedAt: "2026-07-11T09:40:00.000Z", url: "https://github.com/acme/x/commit/0eaa191b2", verified: true }
+  ],
   changedFiles: 4,
   additions: 128,
   deletions: 32,

@@ -244,7 +244,7 @@ export interface JinglerAppProps {
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (
     session: Session,
-    ctx: { onConnectGithub: () => void }
+    ctx: { onConnectGithub: () => void; onSelectReview: () => void }
   ) => ReactNode
   /**
    * Tabs contributed by plugins.
@@ -421,6 +421,8 @@ export interface JinglerAppProps {
   onRunPluginCommand?: (pluginId: string, commandId: string) => void
   /** App version (from `__APP_VERSION__`), shown in the sidebar footer. */
   version?: string
+  /** Global pull-request inbox, rendered as a sidebar takeover. */
+  pullRequestsView?: ReactNode
   /** First-class paid-team Memory destination, rendered as a sidebar takeover. */
   memory?: {
     readonly eligible: boolean
@@ -544,6 +546,7 @@ export function JinglerApp({
   onRestoreSession,
   onDeleteSession,
   version,
+  pullRequestsView,
   memory
 }: JinglerAppProps) {
   // The split replaces what used to be a single `selected` useState. The focused
@@ -557,12 +560,14 @@ export function JinglerApp({
   const selected = split.activeSessionId
   const setSelected = split.selectSession
   const [newOpen, setNewOpen] = useState(false)
+  const [pullRequestsOpen, setPullRequestsOpen] = useState(false)
   const [environmentStartup, sendEnvironmentStartup] = useMachine(environmentSessionStartupMachine)
   const [createdSessionToSelect, setCreatedSessionToSelect] = useState<string | null>(null)
   const pendingEnvironmentSession = environmentStartup.context.pending
   const selectSession = useCallback(
     (id: string) => {
       memory?.onClose()
+      setPullRequestsOpen(false)
       setNewOpen(false)
       setSelected(id)
     },
@@ -579,6 +584,7 @@ export function JinglerApp({
   const openSettings = useCallback(
     (section: typeof settingsSection = settingsSection) => {
       memory?.onClose()
+      setPullRequestsOpen(false)
       setNewOpen(false)
       setSettingsSection(section)
       if (section === "providers") providerConnections?.onReload?.()
@@ -607,12 +613,14 @@ export function JinglerApp({
   const clearTabRequest = useCallback(() => setTabRequest(null), [])
   const openNewSession = useCallback(() => {
     memory?.onClose()
+    setPullRequestsOpen(false)
     setSettingsOpen(false)
     setNewOpen(true)
   }, [memory])
 
   const openPendingEnvironmentSession = useCallback(() => {
     memory?.onClose()
+    setPullRequestsOpen(false)
     setSettingsOpen(false)
     setNewOpen(true)
   }, [memory])
@@ -1224,11 +1232,24 @@ export function JinglerApp({
         onOpenGithubSettings={
           providerConnections ? () => openSettings("github") : undefined
         }
+        pullRequestsActive={pullRequestsOpen}
+        onOpenPullRequests={
+          pullRequestsView
+            ? () => {
+                memory?.onClose()
+                setSettingsOpen(false)
+                setNewOpen(false)
+                setPullRequestsOpen(true)
+              }
+            : undefined
+        }
+        pullRequestsView={pullRequestsOpen ? pullRequestsView : undefined}
         memoryEligible={memory?.eligible}
         memoryActive={memory?.active}
         onOpenMemory={
           memory
             ? () => {
+              setPullRequestsOpen(false)
               setSettingsOpen(false)
               setNewOpen(false)
               memory.onOpen()

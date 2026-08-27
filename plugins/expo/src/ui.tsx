@@ -158,6 +158,7 @@ function usePreviewModel(session: SessionSnapshot, host: HostBridge): PreviewMod
     [host, input]
   )
 
+  useEffect(() => setBusy(false), [session.id])
   useInitialStatus(host, input, setStatus, setError, resetFrame)
   useStatusPolling(host, input, status, setStatus, setError)
   useFramePolling(host, input, status, setStatus, setFrame, setFrameError)

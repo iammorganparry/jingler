@@ -77,6 +77,7 @@ import {
   ProjectDirectoryListing,
   PublishCheckpoint,
   PullRequest,
+  PullRequestListItem,
   QuestionAnswer,
   ReasoningSetting,
   Repo,
@@ -2050,6 +2051,19 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.NullOr(PullRequest),
     error: GitHubApiError,
     payload: { sessionId: Schema.String }
+  }),
+
+  /** Open PRs across every repository granted to the GitHub App. */
+  Rpc.make("Github.inbox", {
+    success: Schema.Array(PullRequestListItem),
+    error: GitHubApiError
+  }),
+
+  /** Read one PR without requiring a linked Jingler session. */
+  Rpc.make("Github.prBySlug", {
+    success: Schema.NullOr(PullRequest),
+    error: GitHubApiError,
+    payload: { repository: Schema.String, number: Schema.Number }
   }),
 
   /**

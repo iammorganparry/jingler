@@ -7,6 +7,7 @@ import type {
   PrMergeMethod,
   PrSummary,
   PullRequest,
+  PullRequestListItem,
   ReviewSubmitKind,
   SessionPrStatus
 } from "@jingler/core"
@@ -20,12 +21,14 @@ import { GitHubAuth, type GitHubInstallationCredential } from "./github-auth.js"
 import { parseGitHubRemote } from "./github-remote.js"
 export { parseGitHubRemote } from "./github-remote.js"
 import {
+  dedupeChecks,
   mapApiFiles,
   mapCheck,
   mapIssue,
   mapIssueSummary,
   mapPrState,
   mapPrSummary,
+  mapPullRequestListItem,
   mapPrView,
   mapRateLimit,
   mapReviewThreads,
@@ -91,6 +94,7 @@ export interface GitHubApiClient {
     slug: string,
     options: { readonly mine: boolean; readonly search: string }
   ) => Promise<ReadonlyArray<PrSummary>>
+  readonly listInboxPrsBySlug: (slug: string) => Promise<ReadonlyArray<PullRequestListItem>>
   readonly listIssues: (
     cwd: string,
     options: { readonly mine: boolean; readonly search: string }
@@ -103,6 +107,7 @@ export interface GitHubApiClient {
   readonly prState: (cwd: string, number: number) => Promise<SessionPrStatus | null>
   readonly prHeadSha: (cwd: string, number: number) => Promise<string | null>
   readonly prView: (cwd: string, number: number) => Promise<PullRequest | null>
+  readonly prViewBySlug: (slug: string, number: number) => Promise<PullRequest | null>
   readonly prFiles: (cwd: string, number: number) => Promise<ReadonlyArray<PrFileChange>>
   readonly prDiff: (cwd: string, number: number) => Promise<string>
   readonly prCheckout: (cwd: string, number: number) => Promise<GitHubPullRequestHead>
@@ -531,7 +536,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         cwd,
         "GET",
         "/repos/{owner}/{repo}/commits/{ref}/check-runs",
-        { ref: sha, per_page: PAGE_SIZE, page },
+        { ref: sha, filter: "latest", per_page: PAGE_SIZE, page },
         ["checks:read"]
       )
       const pageRows = records(response.data.check_runs)
@@ -558,7 +563,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
       if (pageRows.length < PAGE_SIZE) break
       if (page === MAX_PAGES) throw paginationLimitError("commit statuses")
     }
-    return checks
+    return dedupeChecks(checks)
   }
 
   const reviewThreads = async (
@@ -655,6 +660,16 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     },
     listPrsBySlug: (slug, listOptions) =>
       client.listPrs(`github-slug:${slug}`, listOptions),
+    listInboxPrsBySlug: async (slug) => {
+      const pulls = await paginate(
+        `github-slug:${slug}`,
+        "/repos/{owner}/{repo}/pulls",
+        { state: "open" },
+        ["pull_requests:read"]
+      )
+      const viewer = await options.auth.viewerLogin()
+      return pulls.map((pr) => mapPullRequestListItem(pr, slug, viewer))
+    },
     listIssues: async (cwd, listOptions) => {
       const issues = await paginate(
         cwd,
@@ -734,8 +749,11 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         const repository = await resolveRepository(cwd)
         const pr = await pull(cwd, pullNumber)
         const sha = text(record(pr.head).sha)
-        const [files, reviews, comments, requested, checks, threads] = await Promise.all([
+        const [files, commits, reviews, comments, requested, checks, threads] = await Promise.all([
           prFiles(cwd, pullNumber),
+          paginate(cwd, "/repos/{owner}/{repo}/pulls/{pull_number}/commits", {
+            pull_number: pullNumber
+          }, ["pull_requests:read"]),
           paginate(cwd, "/repos/{owner}/{repo}/pulls/{pull_number}/reviews", {
             pull_number: pullNumber
           }, ["pull_requests:read"]),
@@ -756,6 +774,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
           ...mapPrView({
             ...pr,
             files,
+            commit_items: commits,
             reviews,
             comments,
             requested_reviewers: requested,
@@ -768,6 +787,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         throw error
       }
     },
+    prViewBySlug: (slug, pullNumber) => client.prView(`github-slug:${slug}`, pullNumber),
     prFiles,
     prDiff: async (cwd, pullNumber) => {
       try {
@@ -1083,6 +1103,7 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         wrap(() => client.listPrs(cwd, options)),
       listPrsBySlug: (slug: string, options: { readonly mine: boolean; readonly search: string }) =>
         wrap(() => client.listPrsBySlug(slug, options)),
+      listInboxPrsBySlug: (slug: string) => wrap(() => client.listInboxPrsBySlug(slug)),
       listIssues: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
         wrap(() => client.listIssues(cwd, options)),
       listIssuesBySlug: (slug: string, options: { readonly mine: boolean; readonly search: string }) =>
@@ -1091,6 +1112,7 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       prState: (cwd: string, number: number) => wrap(() => client.prState(cwd, number)),
       prHeadSha: (cwd: string, number: number) => wrap(() => client.prHeadSha(cwd, number)),
       prView: (cwd: string, number: number) => wrap(() => client.prView(cwd, number)),
+      prViewBySlug: (slug: string, number: number) => wrap(() => client.prViewBySlug(slug, number)),
       prFiles: (cwd: string, number: number) => wrap(() => client.prFiles(cwd, number)),
       prDiff: (cwd: string, number: number) => wrap(() => client.prDiff(cwd, number)),
       prCheckout: (cwd: string, number: number) => wrap(() => client.prCheckout(cwd, number)),

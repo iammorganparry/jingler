@@ -201,6 +201,24 @@ describe("SessionSidebar archived sessions", () => {
   })
 })
 
+describe("SessionSidebar global destinations", () => {
+  it("opens and marks Pull Requests active", () => {
+    const open = vi.fn()
+    render(
+      <SessionSidebar
+        activeSessionId="session"
+        onSelect={() => {}}
+        sessions={[session({ id: "session" })]}
+        pullRequestsActive
+        onOpenPullRequests={open}
+      />
+    )
+    fireEvent.click(screen.getByTestId("pull-requests-sidebar-item"))
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("pull-requests-sidebar-item").getAttribute("aria-current")).toBe("page")
+  })
+})
+
 describe("SessionSidebar Memory destination", () => {
   it("shows Memory only for eligible team members and marks it active without selecting a session", () => {
     const open = vi.fn()

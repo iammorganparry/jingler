@@ -75,6 +75,7 @@ import type {
   PrSummary,
   PublishCheckpoint,
   PullRequest,
+  PullRequestListItem,
   QuestionAnswer,
   ReasoningSetting,
   Repo,
@@ -1015,6 +1016,10 @@ export const rpc = {
     run((c) => c.Github.pr({ sessionId })),
   githubPrState: (sessionId: string): Promise<SessionPrStatus | null> =>
     run((c) => c.Github.prState({ sessionId })),
+  githubPrInbox: (): Promise<ReadonlyArray<PullRequestListItem>> =>
+    run((c) => c.Github.inbox()),
+  githubPrBySlug: (repository: string, number: number): Promise<PullRequest | null> =>
+    run((c) => c.Github.prBySlug({ repository, number })),
   githubListPrs: (
     repoPath: string,
     opts: { mine: boolean; search: string; githubSlug?: string }

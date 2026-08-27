@@ -392,6 +392,31 @@ describe("GitHubApi installation permission scopes", () => {
     )
   })
 
+  it("loads inbox rows by repository slug with viewer relationships", async () => {
+    const { client, seen } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget")) return json(repository)
+      if (pathIs(request, "/repos/acme/widget/pulls")) return json([{
+        number: 7,
+        title: "Review auth",
+        state: "open",
+        user: { login: "author" },
+        assignees: [{ login: "octocat" }],
+        requested_reviewers: [{ login: "octocat" }]
+      }])
+      throw new Error(`unexpected ${request.method} ${request.url}`)
+    })
+
+    await expect(client.listInboxPrsBySlug("acme/widget")).resolves.toEqual([
+      expect.objectContaining({
+        repository: "acme/widget",
+        number: 7,
+        assignedToViewer: true,
+        reviewRequestedFromViewer: true
+      })
+    ])
+    expect(seen.some((request) => request.url.pathname === "/user")).toBe(false)
+  })
+
   it("does not broaden Mine results when the connected identity is unavailable", async () => {
     const { client, seen } = makeClient(
       (request) => {
@@ -416,6 +441,32 @@ describe("GitHubApi installation permission scopes", () => {
 
     await expect(client.listPrs("/repo", { mine: true, search: "" })).resolves.toEqual([])
     expect(seen.some((request) => request.url.pathname === "/user")).toBe(false)
+  })
+
+  it("deduplicates repeated check names across checks and statuses", async () => {
+    const { client, seen } = makeClient((request) => {
+      if (pathIs(request, "/repos/acme/widget")) return json(repository)
+      if (pathIs(request, "/repos/acme/widget/pulls/7")) {
+        return json({ number: 7, state: "open", head: { sha: "abc123" } })
+      }
+      if (pathIs(request, "/repos/acme/widget/commits/abc123/check-runs")) {
+        return json({ check_runs: [
+          { name: "QA Verify", status: "completed", conclusion: "success" },
+          { name: "qa verify", status: "completed", conclusion: "failure" }
+        ] })
+      }
+      if (pathIs(request, "/repos/acme/widget/commits/abc123/status")) {
+        return json({ statuses: [
+          { context: "QA Verify", state: "failure" },
+          { context: "Typecheck", state: "success" }
+        ] })
+      }
+      throw new Error(`unexpected ${request.method} ${request.url}`)
+    })
+
+    await expect(client.prState("/repo", 7)).resolves.toMatchObject({ checks: "pass" })
+    const checkRequest = seen.find((request) => request.url.pathname.endsWith("/check-runs"))
+    expect(checkRequest?.url.searchParams.get("filter")).toBe("latest")
   })
 
   it("mints separate pull-request, checks, and status credentials for PR state", async () => {
