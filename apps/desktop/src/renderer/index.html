@@ -27,10 +27,18 @@
       plugin's renderer half cannot reach the network however much code it
       runs — anything outbound goes through the extension host, where the
       operator's consent is recorded. No remote script origin is allowed, ever.
+
+      `wasm-unsafe-eval` is NOT `unsafe-eval`: it permits compiling
+      WebAssembly and nothing else — `eval()`/`new Function` stay blocked, and
+      where script may LOAD from is unchanged. Without it, shiki's oniguruma
+      engine (inlined WASM, loaded by Streamdown the first time a streamed
+      code fence gets highlighted) throws `CompileError` on every highlight;
+      one of those surfacing during a render unmounted the entire React root —
+      a healthy renderer behind a black window, mid agent session.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-lrDvDoT6FYa2mhYaXuzEP4sY9g0/IWo3npmzl1XD4TI=' jingler-plugin:; font-src 'self' data:; img-src 'self' data: blob: jingler-plugin: https://github.com https://*.githubusercontent.com https://linear.app https://*.linear.app https://www.google.com https://*.gstatic.com"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-lrDvDoT6FYa2mhYaXuzEP4sY9g0/IWo3npmzl1XD4TI=' 'wasm-unsafe-eval' jingler-plugin:; font-src 'self' data:; img-src 'self' data: blob: jingler-plugin: https://github.com https://*.githubusercontent.com https://linear.app https://*.linear.app https://www.google.com https://*.gstatic.com"
     />
     <title>Jingler</title>
     <!--

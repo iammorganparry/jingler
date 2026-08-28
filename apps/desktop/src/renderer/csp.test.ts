@@ -77,8 +77,11 @@ describe("renderer CSP", () => {
     // never do — cannot happen without deleting this assertion first.
     const importmap = /<script type="importmap">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? ""
     const importmapHash = createHash("sha256").update(importmap).digest("base64")
+    // `wasm-unsafe-eval` is deliberate and is NOT `unsafe-eval`: it only
+    // permits WebAssembly compilation (shiki's oniguruma highlighter engine);
+    // eval()/new Function stay blocked and no script ORIGIN is widened.
     expect(directive("script-src")).toBe(
-      `script-src 'self' 'sha256-${importmapHash}' jingler-plugin:`
+      `script-src 'self' 'sha256-${importmapHash}' 'wasm-unsafe-eval' jingler-plugin:`
     )
     expect(directive("default-src")).toBe("default-src 'self'")
   })

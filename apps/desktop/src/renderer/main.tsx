@@ -9,6 +9,7 @@ import "./index.css"
 // `undefined` — see plugin-runtime.ts.
 import "./plugin-runtime.js"
 import { App } from "./App.js"
+import { RootErrorBoundary } from "./root-error-boundary.js"
 import { queryClient } from "./query-client.js"
 import { installExplanationQueryBridge } from "./use-explanation-document.js"
 
@@ -46,8 +47,10 @@ if (import.meta.env.DEV) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
+    <RootErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </RootErrorBoundary>
   </StrictMode>
 )
