@@ -18,6 +18,31 @@ for the full architecture guide; this file is the short list of standing rules.
 - **Never hardcode a colour in a component** — use the `--sb-*` theme tokens
   (see the Theming section of `CLAUDE.md`).
 
+- **Investigating memory or performance? Measure with the built-in monitor,
+  don't guess.** Every dev launch (`pnpm dev`, never packaged builds) runs a
+  perf monitor that samples process + renderer counters every ~20s and serves
+  an agent API over loopback HTTP (discovery:
+  `~/jingler/diagnostics/perf/endpoint.json`, bearer token inside — never
+  print or commit it). Drive it with `pnpm perf <cmd>` — plain Node + curl
+  under the hood, so it works from any agent harness or shell:
+
+  - `pnpm perf status` — monitor health; `cdpAttached: false` means DevTools
+    holds the renderer's only debugger slot.
+  - `pnpm perf watch` / `pnpm perf history` — live counters, and an automated
+    leak verdict (`blink-dom-leak`, `listener-leak`, `detached-documents`,
+    `actor-eviction-failure`, `js-heap-leak`, `native-churn`, or `stable`).
+  - `pnpm perf snapshot` · `cpu-profile [s]` · `alloc [s]` — heap snapshot /
+    CPU profile / allocation-site sampling, written under
+    `~/jingler/diagnostics/perf/`.
+  - `pnpm perf renders start|stop|report` — per-component React render counts
+    with unnecessary renders flagged.
+  - `pnpm perf leak-check --warmup 60` — baseline/target/final heap-snapshot
+    protocol; reproduce the leak during the warmup window and memlab names
+    the leaking constructors and retainer paths.
+
+  Full workflow and how to read the numbers (StrictMode double-mounts, GC
+  sawtooth vs ratchet): `skills/perf-monitor/SKILL.md`.
+
 - **When renderer state starts adding up, model it as an XState machine.** A
   couple of independent `useState`s is fine. Reach for a machine in
   `apps/desktop/src/renderer/*-machine.ts` as soon as any of these is true:
