@@ -29,7 +29,7 @@ import type { ActorRefFrom, SnapshotFrom } from "xstate"
 import { createActor } from "xstate"
 import { useSyncExternalStore } from "react"
 import type { ActivityPhase, AgentFileActivity, Session, SessionActivity } from "@jingler/core"
-import { activityOf, agentFileActivityOf, latestPlan } from "@jingler/core"
+import { activityOf, agentFileActivityOf } from "@jingler/core"
 import { conversationMachine } from "./conversation-machine.js"
 import { setSessionActivity } from "./session-activity.js"
 import { setPlanPresent } from "./plan-presence.js"
@@ -148,9 +148,7 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
     if (!key.startsWith(`${sessionId}:`)) continue
     setPlanPresent(
       key.slice(sessionId.length + 1),
-      snapshot.context.planDraft !== null ||
-        latestPlan(snapshot.context.messages) !== null ||
-        snapshot.context.plannotator?.planFilePath !== null &&
+      snapshot.context.plannotator?.planFilePath !== null &&
           snapshot.context.plannotator?.planFilePath !== undefined
     )
   }

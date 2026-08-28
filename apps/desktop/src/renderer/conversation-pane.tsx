@@ -9,7 +9,6 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   Environment,
-  ExecutionMode,
   Message,
   ProviderCatalog,
   Session,
@@ -57,12 +56,6 @@ import {
   releaseSubagentTabController,
   useSubagentTabSelection
 } from "./subagent-tab-store.js"
-import { usePlanDocument } from "./use-plan-document.js"
-import { matchesCanonicalPlan } from "./plan-document-machine.js"
-import {
-  runWithDirectPlanThreadDispatch,
-  shouldRecoverPendingPlanMessage
-} from "./plan-thread-dispatch.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import {
@@ -74,7 +67,6 @@ import {
 import { claimPlanAutoPresentation } from "./plan-presence.js"
 import {
   rpcFailureMessage,
-  rpcFailureNumber,
   rpcFailureReason,
   rpcFailureTag
 } from "./rpc-failure.js"
@@ -265,22 +257,6 @@ export function ConversationPane({
     },
     [fileBrowser.disableFollow, fileBrowser.enableFollow, onSelectFiles]
   )
-  const handledPlanDraftPresentation = useRef(0)
-  useEffect(() => {
-    if (
-      convo.planDraftPresentationNonce === 0 ||
-      convo.planDraftPresentationNonce <= handledPlanDraftPresentation.current
-    ) {
-      return
-    }
-    handledPlanDraftPresentation.current = convo.planDraftPresentationNonce
-    if (
-      onPlanDraftAvailable !== undefined &&
-      claimPlanAutoPresentation(activeChat.id)
-    ) {
-      onPlanDraftAvailable()
-    }
-  }, [activeChat.id, convo.planDraftPresentationNonce, onPlanDraftAvailable])
   const presentedPlannotatorReview = useRef<string | null>(null)
   useEffect(() => {
     const reviewId = convo.plannotator?.review?.reviewId ?? null
@@ -290,39 +266,6 @@ export function ConversationPane({
       onPlanDraftAvailable()
     }
   }, [activeChat.id, convo.plannotator?.review?.reviewId, onPlanDraftAvailable])
-  const canonicalPlan = usePlanDocument(session.id, activeChat.id)
-  const canApprovePlan =
-    canonicalPlan.canApprove &&
-    matchesCanonicalPlan(canonicalPlan.document, convo.plan)
-  // Stable identities for the handlers that reach `MessageTurn` (its memo is
-  // what keeps settled turns from re-rendering per streamed token). These
-  // change only when approval eligibility or the plan revision actually moves.
-  const planRevision = canonicalPlan.document?.revision
-  const approvePlanForRevision = canApprovePlan && canonicalPlan.document !== null
-  const onApprovePlanStable = useMemo(
-    () =>
-      approvePlanForRevision
-        ? (id: string, executionMode?: ExecutionMode) =>
-            convo.approvePlan(id, executionMode, planRevision)
-        : undefined,
-    [approvePlanForRevision, convo.approvePlan, planRevision]
-  )
-  // Same discard as Plan Review's floating action: deleting the canonical file
-  // flows back through Plan.watch as a null emission, clearing every surface.
-  // Keyed only on the session id so MessageTurn's memo holds across tokens.
-  const onDiscardPlanStable = useMemo(
-    () => () => {
-      rpc.planDiscard(session.id, activeChat.id).catch(() => {})
-    },
-    [session.id, activeChat.id]
-  )
-  const onResumePlanStable = useMemo(
-    () =>
-      approvePlanForRevision
-        ? (id: string) => convo.resumePlan(id, planRevision)
-        : undefined,
-    [approvePlanForRevision, convo.resumePlan, planRevision]
-  )
   // Branch-drift recovery (the `BranchDrift` banner). Stable per session so the
   // memoised transcript turns don't re-render while a turn streams. Adopt updates
   // this session in place; fork publishes a NEW worktree session into the sidebar
@@ -340,65 +283,6 @@ export function ConversationPane({
         .then(() => {}),
     [session.id]
   )
-  const initialThreadDispatches = useRef(new Set<string>())
-  // A direct reply RPC persists its pending message before it finishes routing.
-  // Plan.watch can publish that intermediate revision, so tell the recovery
-  // effect which thread already has a dispatcher. Threads accept one pending
-  // reply at a time, making the annotation id the correct local lease key.
-  useEffect(() => {
-    const document = canonicalPlan.document
-    if (document === null) return
-    const pending = document.plan.annotations
-      .flatMap((annotation) =>
-        annotation.messages.map((message) => ({ annotation, message }))
-      )
-      .find(
-        ({ annotation, message }) =>
-          shouldRecoverPendingPlanMessage({
-            planId: document.id,
-            annotationId: annotation.id,
-            message,
-            recoveredMessageDispatches: initialThreadDispatches.current
-          })
-      )
-    if (pending === undefined) return
-    const key = `${document.id}:${pending.message.id}`
-    initialThreadDispatches.current.add(key)
-    void rpc
-      .planDispatchExistingMessage({
-        sessionId: session.id,
-        chatId: activeChat.id,
-        planId: document.id,
-        baseRevision: document.revision,
-        annotationId: pending.annotation.id,
-        messageId: pending.message.id
-      })
-      .catch(async () => {
-        initialThreadDispatches.current.delete(key)
-        const latest = await rpc.planCurrent(session.id, activeChat.id).catch(() => null)
-        const stillPending = latest?.plan.annotations
-          .find((annotation) => annotation.id === pending.annotation.id)
-          ?.messages.find((message) => message.id === pending.message.id)
-        if (latest === null || stillPending?.deliveryState !== "pending") return
-        await rpc
-          .planUpdateMessageDelivery({
-            sessionId: session.id,
-            chatId: activeChat.id,
-            planId: latest.id,
-            baseRevision: latest.revision,
-            annotationId: pending.annotation.id,
-            messageId: pending.message.id,
-            deliveryState: "failed",
-            author: "user"
-          })
-          .catch(() => {})
-      })
-    // Keyed on id+revision, not the document object: `Plan.watch` republishes
-    // a fresh document object per emission, and this effect scans every
-    // annotation's messages — running it per emission instead of per revision
-    // was measurable during plan editing.
-  }, [canonicalPlan.document?.id, canonicalPlan.document?.revision, session.id])
-
   // Everything the transcript needs to turn a path into a link. `convo.files` is
   // the worktree's tracked-file list, already fetched for the composer's `@`
   // menu — reusing it is what keeps the false-positive gate free.
@@ -884,127 +768,18 @@ export function ConversationPane({
       : null,
     [activeChat.id, convo.plannotator, session.id]
   )
-  const nativePlanDocument = canonicalPlan.document ?? plannotatorDocument
-  const planId = canonicalPlan.document?.id ?? convo.plan?.id ?? null
-
+  const nativePlanDocument = plannotatorDocument
   const planReview = (
     <PlanReview
-      plan={convo.plan}
+      plan={null}
       document={nativePlanDocument}
-      streamingDraft={convo.planDraft}
-      draft={canonicalPlan.draft}
-      syncState={canonicalPlan.state}
-      syncError={canonicalPlan.error ?? convo.planActionError}
-      canApprove={canonicalPlan.document !== null && canApprovePlan}
+      canApprove={false}
       compact={view === "split"}
       patch={convo.patch}
       knownFiles={knownFiles}
       onOpenFile={openAsset}
       selectedStepId={planStepId}
-      revisionTarget={canonicalPlan.revisionTarget}
       onSelectStep={onPlanStepSelected}
-      onApprove={(executionMode) =>
-        planId &&
-        convo.approvePlan(planId, executionMode, canonicalPlan.document?.revision)
-      }
-      onResume={() =>
-        planId && convo.resumePlan(planId, canonicalPlan.document?.revision)
-      }
-      onRevise={() => {
-        if (!planId) return
-        canonicalPlan.beginRevision(null)
-        convo.revisePlan(planId)
-      }}
-      onDiscard={() => {
-        // Deleting the canonical file flows back through Plan.watch as a null
-        // emission, which clears the drawer and this overview together.
-        rpc.planDiscard(session.id, activeChat.id).catch(() => {})
-      }}
-      onComment={(stepId, body) => planId && convo.commentPlanStep(planId, stepId, body)}
-      onAddComment={(target, body) => {
-        if (!planId) return
-        canonicalPlan.beginRevision(target.stageId ?? null)
-        convo.commentPlanStep(planId, target.stageId ?? "", body, target.anchor)
-      }}
-      onStartDraft={canonicalPlan.startDraft}
-      onSendToAgent={() => {
-        // Hand the draft to the agent as a plan-mode turn: switch into plan mode
-        // and send the draft plan (the structured DTO) as the starting point. The
-        // agent proposes a refined plan, which replaces the draft as canonical.
-        const source =
-          canonicalPlan.draft ??
-          (canonicalPlan.document ? JSON.stringify(canonicalPlan.document.plan, null, 2) : "")
-        convo.setMode("plan")
-        convo.sendPrompt(
-          [
-            "I've drafted the plan below. Treat it as the starting point:",
-            "review it, fill in the gaps, and propose a complete plan.",
-            "",
-            "```json",
-            source.trim(),
-            "```"
-          ].join("\n")
-        )
-      }}
-      onRetryDocument={canonicalPlan.retry}
-      onReplyThread={async (annotationId, body, mentionedParticipantIds) => {
-        const document = canonicalPlan.document
-        if (document === null) return
-        await runWithDirectPlanThreadDispatch(
-          document.id,
-          annotationId,
-          () => convo.dispatchPlanMessage({
-            planId: document.id,
-            baseRevision: document.revision,
-            annotationId,
-            body,
-            authorId: "operator",
-            mentionedParticipantIds
-          })
-        )
-      }}
-      onRetryThread={async (annotationId, message) => {
-        const document = canonicalPlan.document
-        if (document === null) return
-        await rpc.planDispatchExistingMessage({
-          sessionId: session.id,
-          chatId: activeChat.id,
-          planId: document.id,
-          baseRevision: document.revision,
-          annotationId,
-          messageId: message.id
-        })
-      }}
-      onSetThreadResolved={async (annotationId, resolved) => {
-        const document = canonicalPlan.document
-        if (document === null) return
-        const setResolved = (baseRevision: number) =>
-          rpc.planSetThreadResolved({
-            sessionId: session.id,
-            chatId: activeChat.id,
-            planId: document.id,
-            baseRevision,
-            annotationId,
-            resolved,
-            author: "user"
-          })
-        try {
-          await setResolved(document.revision)
-        } catch (error) {
-          const latestRevision = rpcFailureNumber(error, "latestRevision")
-          if (
-            rpcFailureTag(error) !== "PlanConflictError" ||
-            latestRevision === undefined
-          ) {
-            throw error
-          }
-          // Setting a thread's resolved state is idempotent. Plan.watch can
-          // briefly lag the mutation response, so retry this one safe write at
-          // the server-provided canonical revision instead of surfacing a
-          // conflict for a revision the user never edited directly.
-          await setResolved(latestRevision)
-        }
-      }}
     />
   )
   const planSurface = convo.plannotator?.review
@@ -1335,13 +1110,9 @@ export function ConversationPane({
           onSetReasoning={convo.setReasoning}
           question={convo.question}
           onAnswerQuestion={convo.answerQuestion}
-          onApprovePlan={onApprovePlanStable}
-          onResumePlan={onResumePlanStable}
           onOpenPlanReview={onOpenPlanReview}
-          onDiscardPlan={onDiscardPlanStable}
           onForkOntoBranch={onForkOntoBranchStable}
           onAdoptBranch={onAdoptBranchStable}
-          plan={convo.plan}
           planDocument={nativePlanDocument}
           draft={draft.text}
           // Merge against the LIVE draft, never the render-time `draft` closure:

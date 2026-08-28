@@ -193,7 +193,6 @@ export const ConversationDuringExecution: Story = {
       <ConversationView
         messages={SEED_CONVERSATION}
         mode="accept-edits"
-        plan={basePlan({ status: "approved" })}
         onOpenPlanReview={(stepId) => console.log("open plan review at", stepId)}
       />
     </div>

@@ -13,15 +13,9 @@ import { useEffect, useMemo } from "react"
 import { useSelector } from "@xstate/react"
 import type {
   Attachment,
-  ExecutionMode,
   GateDecision,
   Message,
   PermissionMode,
-  Plan,
-  PlanAnnotationAnchor,
-  PlanDocument,
-  PlanDraft,
-  PlanMentionDelivery,
   PlannotatorProjection,
   ProviderConnectionId,
   ProviderId,
@@ -37,7 +31,7 @@ import type {
   SubagentFleetControlOutcome,
   SubagentFleetEvent
 } from "@jingler/core"
-import { latestPlan, pendingPlan, pendingQuestion } from "@jingler/core"
+import { pendingQuestion } from "@jingler/core"
 import type { QueuedMessage } from "./conversation-machine.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { rpc } from "./rpc-client.js"
@@ -94,41 +88,8 @@ export interface Conversation {
   /** A pending AskUserQuestion group (the composer is replaced while set), or null. */
   readonly question: QuestionRequest | null
   readonly answerQuestion: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
-  /** The latest open plan (proposed / revising), for the Plan Review tab, or null. */
-  readonly plan: Plan | null
   /** Disposable native projection of Plannotator's authoritative state. */
   readonly plannotator: PlannotatorProjection | null
-  /** Sanitized, cumulative plan source that has not been promoted yet. */
-  readonly planDraft: PlanDraft | null
-  /** Changes once per planning turn when its first renderable draft arrives. */
-  readonly planDraftPresentationNonce: number
-  /** A rejected exact-revision approval, shown in the Plan workspace. */
-  readonly planActionError: string | null
-  readonly commentPlanStep: (
-    planId: string,
-    stepId: string,
-    body: string,
-    anchor?: PlanAnnotationAnchor
-  ) => void
-  readonly dispatchPlanMessage: (input: {
-    readonly planId: string
-    readonly baseRevision: number
-    readonly annotationId: string
-    readonly body: string
-    readonly authorId: string
-    readonly mentionedParticipantIds: ReadonlyArray<string>
-  }) => Promise<{
-    readonly document: PlanDocument
-    readonly messageId: string
-    readonly deliveries: ReadonlyArray<PlanMentionDelivery>
-  }>
-  readonly revisePlan: (planId: string) => void
-  readonly approvePlan: (
-    planId: string,
-    executionMode?: ExecutionMode,
-    revision?: number
-  ) => void
-  readonly resumePlan: (planId: string, revision?: number) => void
   /** Live status for the sidebar/tab bar, or null when idle (use persisted). */
   readonly status: SessionStatus | null
   readonly sendPrompt: (
@@ -196,21 +157,6 @@ export function useConversation(
         unqueue: (id) => actor.send({ type: "UNQUEUE", id }),
         sendNow: (id) => actor.send({ type: "SEND_NOW", id }),
         editQueued: (id, text) => actor.send({ type: "EDIT_QUEUED", id, text }),
-        commentPlanStep: (planId, stepId, body, anchor) =>
-          actor.send({
-            type: "COMMENT_PLAN_STEP",
-            planId,
-            stepId,
-            body,
-            ...(anchor ? { anchor } : {})
-          }),
-        dispatchPlanMessage: (input) =>
-          rpc.planDispatchMessage({ sessionId: session.id, chatId, ...input }),
-        revisePlan: (planId) => actor.send({ type: "REVISE_PLAN", planId }),
-        approvePlan: (planId, executionMode, revision) =>
-          actor.send({ type: "APPROVE_PLAN", planId, executionMode, revision }),
-        resumePlan: (planId, revision) =>
-          actor.send({ type: "RESUME_PLAN", planId, revision }),
         sendPrompt: (text, images, agentContext) =>
           actor.send({ type: "SEND", text, images, agentContext }),
         decideGate: (gateId, decision) =>
@@ -237,11 +183,6 @@ export function useConversation(
         | "unqueue"
         | "sendNow"
         | "editQueued"
-        | "commentPlanStep"
-        | "dispatchPlanMessage"
-        | "revisePlan"
-        | "approvePlan"
-        | "resumePlan"
         | "sendPrompt"
         | "decideGate"
         | "answerQuestion"
@@ -261,7 +202,7 @@ export function useConversation(
     subagents, subagentFleetEvents, subagentControlOutcomes,
     tokens, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt,
-    plannotator, planDraft, planDraftPresentationNonce
+    plannotator
   } = state.context
 
   const paused = useMemo(() => {
@@ -273,10 +214,6 @@ export function useConversation(
   }, [messages])
 
   const question = useMemo(() => pendingQuestion(messages), [messages])
-  // `plan` (any status) drives the Plan Review view; `openPlan` (proposed/revising)
-  // drives the actionable "needs-input" status.
-  const plan = useMemo(() => latestPlan(messages), [messages])
-  const openPlan = useMemo(() => pendingPlan(messages), [messages])
   // Busy through the stop and the diff refresh too, so the composer keeps
   // queueing across the gap between a turn ending and the next queued turn
   // starting. `stopping` in particular is a state the operator often types
@@ -284,7 +221,7 @@ export function useConversation(
   const busy =
     state.matches("running") || state.matches("stopping") || state.matches("refreshingDiff")
   const status: SessionStatus | null =
-    paused || question || openPlan ? "needs-input" : busy ? "thinking" : null
+    paused || question || plannotator?.review != null ? "needs-input" : busy ? "thinking" : null
 
   return {
     ...commands,
@@ -312,11 +249,7 @@ export function useConversation(
     reviewPhase,
     reviewStartedAt,
     question,
-    plan,
     plannotator: plannotator ?? null,
-    planDraft,
-    planDraftPresentationNonce,
-    planActionError: state.context.planActionError,
     status
   }
 }
