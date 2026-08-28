@@ -45,6 +45,29 @@ import { RunStats } from "../composites/run-stats.js"
  */
 const QUEUE_PREVIEW = 5
 
+/**
+ * How much raw text feeds one rail preview. The rail shows at most ~144
+ * normalized chars (title + description), so collecting more per message is
+ * pure waste — and that waste was load-bearing: `messages` gets a new identity
+ * on every streamed token, the rail memo re-runs each time, and joining every
+ * Text part of every turn made it O(full transcript) per token — megabytes of
+ * string churn a second on the 5MB transcripts this view is benchmarked
+ * against. Generous headroom because createMessageRailPreview collapses
+ * whitespace after us.
+ */
+const RAIL_PREVIEW_SOURCE_CHARS = 400
+
+/** First `RAIL_PREVIEW_SOURCE_CHARS` chars of a turn's Text parts, joined. */
+const railText = (message: Message): string => {
+  let text = ""
+  for (const part of message.parts) {
+    if (part._tag !== "Text") continue
+    text = text.length > 0 ? `${text} ${part.text}` : part.text
+    if (text.length >= RAIL_PREVIEW_SOURCE_CHARS) return text.slice(0, RAIL_PREVIEW_SOURCE_CHARS)
+  }
+  return text
+}
+
 /** Shift+Tab cycles Jingler's provider-neutral permission modes. */
 const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
 const MODE_CYCLE_WITH_PLAN: ReadonlyArray<PermissionMode> = [...MODE_CYCLE, "plan"]
@@ -352,13 +375,13 @@ export function ConversationView({
   }
   const itemKeys = itemKeyState.current.keys
   const messageRailItems = useMemo(() => messages.map((message, index) => {
-    const text = message.parts.filter(part => part._tag === "Text").map(part => part.text).join(" ")
-    const response = message.role === "user"
-      ? messages.slice(index + 1).find(candidate => candidate.role === "assistant")?.parts.filter(part => part._tag === "Text").map(part => part.text).join(" ") ?? ""
-      : ""
+    const text = railText(message)
+    const responseTurn = message.role === "user"
+      ? messages.slice(index + 1).find(candidate => candidate.role === "assistant")
+      : undefined
     return {
       id: itemKeys[index]!,
-      ...createMessageRailPreview(text, response),
+      ...createMessageRailPreview(text, responseTurn ? railText(responseTurn) : ""),
       ariaLabel: `Go to ${message.role} message ${index + 1} of ${messages.length}`
     }
   }), [itemKeys, messages])

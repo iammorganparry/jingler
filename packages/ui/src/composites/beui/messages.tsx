@@ -163,17 +163,34 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
   const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
     const viewport = viewportRef.current
     if (!viewport) return
+    // Already pinned to the live edge: issuing another scrollTo would only
+    // spawn a fresh scroll animation and a scroll event for handleScroll to
+    // interpret. This early-out is the brake that lets the
+    // resize → scroll → virtualizer-measure → resize cycle converge instead of
+    // cycling forever (a runaway renderer leaked gigabytes through it).
+    if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1) return
     programmaticScrollRef.current = true
     if (typeof viewport.scrollTo === "function") viewport.scrollTo({ top: viewport.scrollHeight, behavior })
     else viewport.scrollTop = viewport.scrollHeight
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current)
-    scrollTimerRef.current = window.setTimeout(() => { programmaticScrollRef.current = false }, behavior === "smooth" ? 320 : 0)
+    scrollTimerRef.current = window.setTimeout(() => { programmaticScrollRef.current = false }, behavior === "smooth" ? 320 : 100)
   }, [])
 
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current
-    if (!viewport || programmaticScrollRef.current) return
+    if (!viewport) return
     const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+    if (programmaticScrollRef.current) {
+      // Our own catch-up scroll in flight. Scroll events dispatch on the frame
+      // AFTER scrollTo, so a timer alone races them — an instant scroll's 0ms
+      // timer could clear the flag first, and this handler then read the jump
+      // as the user scrolling and flapped `following`. Landing at the bottom is
+      // the reliable completion signal; the timer stays as a backstop for
+      // scrolls that get cancelled before they land.
+      if (distance <= 1) programmaticScrollRef.current = false
+      updateActiveRailItem()
+      return
+    }
     setFollowing(distance <= followThreshold)
     updateActiveRailItem()
   }, [followThreshold, setFollowing, updateActiveRailItem])
@@ -190,11 +207,18 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
     if (!content || typeof ResizeObserver === "undefined") return
     const observer = new ResizeObserver(() => {
       scheduleRailSync()
-      if (followOutput && followingRef.current) scrollToEnd(reduce || !smooth ? "auto" : "smooth")
+      // Instant, never smooth: while a turn streams, content resizes up to
+      // once per frame (every token, every virtualizer re-measure), and
+      // restarting a smooth animation on each resize kept the viewport
+      // permanently mid-scroll — mounting and unmounting virtualized rows
+      // along the animation path on every frame, indefinitely. An instant pin
+      // converges in one hop; smooth catch-up remains for the one-shot rail
+      // jump in scrollToRailItem, where it is a single user-visible motion.
+      if (followOutput && followingRef.current) scrollToEnd("auto")
     })
     observer.observe(content)
     return () => observer.disconnect()
-  }, [followOutput, reduce, scheduleRailSync, scrollToEnd, smooth])
+  }, [followOutput, scheduleRailSync, scrollToEnd])
 
   useEffect(() => {
     if (navigation !== "rail" || controlledRail) { railTargetsRef.current.clear(); setRailItems([]); setRailOverflowing(false); return }
