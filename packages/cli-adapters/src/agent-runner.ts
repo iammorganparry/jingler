@@ -819,19 +819,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const eventCount = yield* Ref.make(0)
           const lastEvent = yield* Ref.make<string>("<none>")
           const wasInterrupted = yield* Ref.make(false)
-          const persistedTaskMarkers = yield* Ref.make(new Set<string>())
-          /**
-           * Per-worker accumulated assistant text, keyed by `agentId`.
-           *
-           * Delegated workers execute plan stages for MINUTES while the main
-           * agent idles in "Wait for subagents" — and a worker's PLAN_TASK /
-           * PLAN_RESULT checkpoints used to vanish: sub-agent events route to
-           * the renderer and return before the marker parser runs, so the plan
-           * panel sat at "0 of N completed" until the whole delegation ended.
-           * Worker text is accumulated here (markers split across deltas) and
-           * fed through the SAME validated pipeline as the main agent's —
-           * id validation, dedupe, dropped-marker steer all included.
-           */
           // Fold each event into the assistant message + persist, then surface it.
           // Native steering enters from an RPC fiber, so serialize it with the
           // adapter's event producer. A turn/completed notification arriving in
@@ -1125,8 +1112,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               return yield* Effect.forEach(
                 currentSession.chats.filter((chat) => chat.id !== chatId),
                 (chat) =>
-                  Effect.gen(function* () {
-                  return {
+                  Effect.succeed({
                     chatId: chat.id,
                     title: chat.title ?? "Untitled agent",
                     status: running.has(chat.id) ? "running" as const : "idle" as const,
@@ -1134,8 +1120,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     planStage: null,
                     touchedFiles: [...(files.get(chat.id) ?? [])],
                     updatedAt: chat.updatedAt
-                  }
-                })
+                  })
               )
             }).pipe(
               Effect.provide(env),
