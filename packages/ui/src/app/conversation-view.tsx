@@ -31,6 +31,7 @@ import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import { MessageTurn, ToolStopContext } from "../composites/message-turn.js"
 import { PlanApprovalCard } from "../composites/plan-card.js"
 import { createMessageRailPreview, MessageScroller } from "../composites/beui/messages.js"
+import type { PreviewRailItem } from "../components/beui/overlays.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
 import { RunStats } from "../composites/run-stats.js"
@@ -374,17 +375,41 @@ export function ConversationView({
     itemKeyState.current = { messages, keys, next: previousKeys.next }
   }
   const itemKeys = itemKeyState.current.keys
-  const messageRailItems = useMemo(() => messages.map((message, index) => {
-    const text = railText(message)
-    const responseTurn = message.role === "user"
-      ? messages.slice(index + 1).find(candidate => candidate.role === "assistant")
-      : undefined
-    return {
-      id: itemKeys[index]!,
-      ...createMessageRailPreview(text, responseTurn ? railText(responseTurn) : ""),
-      ariaLabel: `Go to ${message.role} message ${index + 1} of ${messages.length}`
-    }
-  }), [itemKeys, messages])
+  // Per-item identity reuse: `messages` gets a new identity on every streamed
+  // token, so this memo re-runs per token — but only the LIVE turn's preview
+  // text actually changes. Reusing the previous item object (and, when nothing
+  // changed at all, the previous array) keeps the rail's props referentially
+  // stable, so the memoised PreviewRail skips per-token re-renders of its
+  // tick + preview-card tree.
+  const previousRailItems = useRef<ReadonlyArray<PreviewRailItem>>([])
+  const messageRailItems = useMemo(() => {
+    const previous = previousRailItems.current
+    let reusedAll = previous.length === messages.length
+    const next = messages.map((message, index) => {
+      const text = railText(message)
+      const responseTurn = message.role === "user"
+        ? messages.slice(index + 1).find(candidate => candidate.role === "assistant")
+        : undefined
+      const item = {
+        id: itemKeys[index]!,
+        ...createMessageRailPreview(text, responseTurn ? railText(responseTurn) : ""),
+        ariaLabel: `Go to ${message.role} message ${index + 1} of ${messages.length}`
+      }
+      const old = previous[index]
+      if (
+        old !== undefined &&
+        old.id === item.id &&
+        old.label === item.label &&
+        old.description === item.description &&
+        old.ariaLabel === item.ariaLabel
+      ) return old
+      reusedAll = false
+      return item
+    })
+    const result = reusedAll ? previous : next
+    previousRailItems.current = result
+    return result
+  }, [itemKeys, messages])
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
@@ -410,6 +435,16 @@ export function ConversationView({
           )
     : virtualItems[0]
   const activeRailId = activeVirtualItem ? itemKeys[activeVirtualItem.index] : itemKeys[0]
+
+  // Referentially stable so the memoised PreviewRail isn't defeated by a fresh
+  // closure per render. `virtualizer` is a stable instance across renders.
+  const handleRailSelect = useCallback((item: PreviewRailItem) => {
+    const index = itemKeys.indexOf(item.id)
+    if (index < 0) return
+    const last = index === messages.length - 1
+    setFollowing(last)
+    virtualizer.scrollToIndex(index, { align: last ? "end" : "center" })
+  }, [itemKeys, messages.length, virtualizer])
 
   // Preserve the viewport across a "Load earlier" prepend: capture the scroll
   // metrics at click, then after the older page lands add back exactly the height
@@ -451,13 +486,7 @@ export function ConversationView({
           navigation="rail"
           navigationItems={messageRailItems}
           navigationActiveId={activeRailId}
-          onNavigationSelect={item => {
-            const index = itemKeys.indexOf(item.id)
-            if (index < 0) return
-            const last = index === messages.length - 1
-            setFollowing(last)
-            virtualizer.scrollToIndex(index, { align: last ? "end" : "center" })
-          }}
+          onNavigationSelect={handleRailSelect}
           followOutput={following}
           onFollowChange={setFollowing}
           busy={busy}

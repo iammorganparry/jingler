@@ -146,7 +146,18 @@ const emptyBodyNote = (tool: ToolCallModel): string => {
     : "No output."
 }
 
-function ToolCardView({ tool }: { tool: ToolCallModel }) {
+/**
+ * Memoised (like every part renderer below): the streaming turn's whole part
+ * list re-renders on EVERY token, and `applyStreamEvent` replaces only the part
+ * an event addresses — settled parts keep their object identity across folds.
+ * Memo therefore skips every settled card per token; only the live tail (the
+ * streaming Text/Thinking part, a running tool absorbing deltas) re-renders.
+ * Without this, a visible mega-turn tail re-ran up to 80 markdown pipelines and
+ * tool cards per token — the dominant renderer allocation churn while an agent
+ * streams. Handler props are stable per actor (useConversation memoises them),
+ * which this depends on.
+ */
+const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel }) {
   const stopTool = useContext(ToolStopContext)
   const [expanded, setExpanded] = useState(tool.status === "running")
   const canonicalChanges = tool.fileChanges?.changes ?? []
@@ -236,13 +247,21 @@ function ToolCardView({ tool }: { tool: ToolCallModel }) {
       )}
     </ToolCall>
   )
-}
+})
+
+/** Element-wise identity: the grouping arrays are rebuilt every render, but
+ * their MEMBERS only change identity when an event actually touches them. */
+const sameMembers = <T,>(a: ReadonlyArray<T>, b: ReadonlyArray<T>): boolean =>
+  a.length === b.length && a.every((item, i) => item === b[i])
 
 /**
  * A run of consecutive tool calls, collapsed to the latest one with a "+ N more"
  * toggle above it — so a storm of Reads/greps doesn't drown the conversation.
+ *
+ * Memoised on the tools' identities, not the array's: renderParts rebuilds the
+ * array each render (see sameMembers).
  */
-function ToolGroup({ tools }: { tools: ReadonlyArray<ToolCallModel> }) {
+const ToolGroup = memo(function ToolGroup({ tools }: { tools: ReadonlyArray<ToolCallModel> }) {
   const [expanded, setExpanded] = useState(false)
   const hidden = tools.length - 1
   return (
@@ -264,7 +283,7 @@ function ToolGroup({ tools }: { tools: ReadonlyArray<ToolCallModel> }) {
       )}
     </div>
   )
-}
+}, (prev, next) => sameMembers(prev.tools, next.tools))
 
 /**
  * One or more consecutive reasoning parts compiled into a single thought pill.
@@ -272,7 +291,7 @@ function ToolGroup({ tools }: { tools: ReadonlyArray<ToolCallModel> }) {
  * as one thought, so it renders as one: durations sum, and the body joins the
  * texts in order.
  */
-function MergedThoughts({ parts }: { parts: ReadonlyArray<ThinkingPart> }) {
+const MergedThoughts = memo(function MergedThoughts({ parts }: { parts: ReadonlyArray<ThinkingPart> }) {
   const known = parts
     .map((part) => part.seconds)
     .filter((seconds): seconds is number => seconds !== null)
@@ -291,9 +310,9 @@ function MergedThoughts({ parts }: { parts: ReadonlyArray<ThinkingPart> }) {
       ) : null}
     </ThoughtBlock>
   )
-}
+}, (prev, next) => sameMembers(prev.parts, next.parts))
 
-function PartView({
+const PartView = memo(function PartView({
   part,
   markdown,
   onDecideGate,
@@ -359,7 +378,7 @@ function PartView({
         />
       )
   }
-}
+})
 
 /**
  * Render a turn's parts, collapsing runs of ≥ `COLLAPSE_MIN` consecutive tool
