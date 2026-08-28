@@ -16,7 +16,7 @@ import {
   type PiRunSpec
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
@@ -40,6 +40,9 @@ const originalEnvironment = {
   JINGLER_SUBAGENT_CREDENTIAL_ROOT: process.env.JINGLER_SUBAGENT_CREDENTIAL_ROOT,
   JINGLER_SUBAGENT_NODE: process.env.JINGLER_SUBAGENT_NODE
 }
+beforeEach(() => {
+  for (const name of Object.keys(originalEnvironment)) delete process.env[name]
+})
 afterEach(async () => {
   for (const [name, value] of Object.entries(originalEnvironment)) {
     if (value === undefined) delete process.env[name]

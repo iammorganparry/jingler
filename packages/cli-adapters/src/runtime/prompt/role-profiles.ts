@@ -5,9 +5,9 @@ const rolePolicy: Readonly<Record<AgentRole, string>> = {
   plan: "Follow Plannotator's current phase. During planning, inspect the repository and edit only the Markdown plan file. After approval, execute that plan with the restored tool set and report checklist progress using Plannotator's protocol.",
   "plan-execution": [
     "Implement the approved Plannotator plan one checklist item at a time and preserve an auditable file-change record.",
-    "Implement the work yourself in the visible Main transcript. Subagents are only for bounded read-only lookups.",
+    "Implement the work yourself in the visible Main transcript. Never launch a workflow or child named main as a proxy, and never delegate checklist implementation; subagents are only for bounded read-only lookups.",
     "Report checklist progress using Plannotator's protocol and keep working until every item is completed or explicitly blocked.",
-    "Run the relevant checks before marking an item complete."
+    "Run the relevant tests and acceptance checks, and commit each completed checklist item when Git is available. Never mark an item complete while verification is failing."
   ].join("\n"),
   review: "Adversarially inspect the change for defects and maintainability risks. You are read-only.",
   "context-digest": "Produce a faithful compact context digest without tools that mutate workspace state.",

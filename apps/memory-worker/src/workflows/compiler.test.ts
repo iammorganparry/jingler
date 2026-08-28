@@ -293,7 +293,7 @@ describe("durable memory compiler workflow", () => {
     expect(extractCompilerClaims([
       "RECENT WORK:",
       "- Ran pnpm test successfully.",
-      "PLAN_TASK stage=one task=test status=completed",
+      "Completed task implementation.",
       "Running migrations must hold the deployment lock.",
       "Completed orders must remain immutable.",
       "Refund retries must preserve one idempotency key across every network attempt."
@@ -312,7 +312,7 @@ describe("durable memory compiler workflow", () => {
     ))
     await run(vault.ingestSource(
       compilerSource,
-      "RECENT WORK:\n- Ran pnpm test successfully.\nPLAN_TASK stage=one task=test status=completed"
+      "RECENT WORK:\n- Ran pnpm test successfully.\nCompleted task implementation."
     ))
 
     const result = await runCompilerWorkflow(

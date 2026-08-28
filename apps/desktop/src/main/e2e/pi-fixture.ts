@@ -842,16 +842,14 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
 
 export const configureE2ePiProvider = (fixture: E2ePiFixture) => {
   const tokenSize =
-    fixture.scenarioId === "plan-draft-stream"
-      ? { min: 128, max: 128 }
-      : fixture.scenarioId === "plan-mode" || fixture.scenarioId === "context-compaction"
-        ? { min: 4_096, max: 4_096 }
-        : null
+    fixture.scenarioId === "plan-mode" || fixture.scenarioId === "context-compaction"
+      ? { min: 4_096, max: 4_096 }
+      : null
   const provider = fauxProvider({
     provider: PROVIDER_ID,
     api: "jingler-e2e-api",
     models: [{ id: "eval-model", contextWindow: E2E_CONTEXT_WINDOW }],
-    tokensPerSecond: fixture.scenarioId === "plan-draft-stream" ? 128 : 0,
+    tokensPerSecond: 0,
     ...(tokenSize === null ? {} : { tokenSize })
   })
   provider.setResponses([...responsesFor(fixture)])

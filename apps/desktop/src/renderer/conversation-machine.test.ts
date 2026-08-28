@@ -1,7 +1,5 @@
 import type {
   Message,
-  Plan,
-  PlanDocument,
   Session,
   SessionEventEnvelope,
   StreamEvent
@@ -9,7 +7,6 @@ import type {
 import {
   applyStreamEvent,
   assistantMessage,
-  latestPlan,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -48,7 +45,6 @@ const h = vi.hoisted(() => ({
     images: unknown
     options: unknown
   }>,
-  resumeCalls: [] as Array<{ sessionId: string; planId: string; revision: number | undefined }>,
   diffValue: "diff-0",
   diffCalls: 0,
   // Lets a test hold `refreshingDiff` open, to observe what happens INSIDE the
@@ -72,21 +68,17 @@ const h = vi.hoisted(() => ({
   reviewCb: null as null | ((event: unknown) => void),
   // Same, for the skills probe — it spawns the harness, so nothing may wait on it.
   skillsGate: Promise.resolve() as Promise<void>,
-  approvalRefused: false,
   // Lets a test hold the transcript load, to drive the "typed before it lands" race.
   transcriptGate: Promise.resolve() as Promise<void>,
   filesGate: Promise.resolve() as Promise<void>,
   transcript: [] as ReadonlyArray<Message>,
   transcriptPageCalls: [] as Array<{ before: string | undefined; limit: number }>,
-  currentPlan: null as PlanDocument | null,
   setModelCalls: [] as Array<{
     sessionId: string
     connectionId: string
     providerId: string
     modelId: string
   }>,
-  planCommentCalls: [] as Array<{ planId: string; stepId: string; body: string }>,
-  planReviseCalls: [] as Array<string>,
   reasoningCalls: [] as Array<unknown>
 }))
 
@@ -114,7 +106,7 @@ vi.mock("./rpc-client.js", () => ({
         ...(start > 0 ? { cursor: `v1:${start}` } : {})
       }
     },
-    planCurrent: async () => h.currentPlan,
+    planCurrent: async () => null,
     skillsList: async () => {
       h.skillsListCalls += 1
       await h.skillsGate
@@ -144,19 +136,7 @@ vi.mock("./rpc-client.js", () => ({
         h.streamCb = null
       }
     },
-    agentResumePlan: (
-      sessionId: string,
-      _chatId: string,
-      planId: string,
-      revision: number | undefined,
-      onEvent: (event: unknown) => void
-    ) => {
-      h.resumeCalls.push({ sessionId, planId, revision })
-      h.streamCb = onEvent
-      return () => {
-        h.streamCb = null
-      }
-    },
+    agentResumePlan: () => () => {},
     reviewWatch: (_sessionId: string, _chatId: string, onEvent: (event: unknown) => void) => {
       h.reviewCb = onEvent
       return () => {
@@ -178,25 +158,9 @@ vi.mock("./rpc-client.js", () => ({
     ) => {
       h.setModelCalls.push({ sessionId, connectionId, providerId, modelId })
     },
-    agentCommentPlanStep: async (
-      _sessionId: string,
-      planId: string,
-      stepId: string,
-      body: string
-    ) => {
-      h.planCommentCalls.push({ planId, stepId, body })
-    },
-    agentRevisePlan: async (_sessionId: string, planId: string) => {
-      h.planReviseCalls.push(planId)
-    },
-    agentApprovePlan: async () =>
-      h.approvalRefused
-        ? {
-            status: "refused",
-            message: "Canonical revision 2 replaced reviewed revision 1.",
-            latestRevision: 2
-          }
-        : { status: "accepted" },
+    agentCommentPlanStep: async () => {},
+    agentRevisePlan: async () => {},
+    agentApprovePlan: async () => ({ status: "refused", message: "Plannotator owns approval", latestRevision: 0 }),
     agentSteer: async (sessionId: string, chatId: string, text: string) => {
       h.steerCalls.push({ sessionId, chatId, text })
       // Lets a test hold the reply so the turn's terminal event overtakes it —
@@ -274,7 +238,6 @@ const githubIdentity = {
 
 beforeEach(() => {
   h.streamCb = null
-  h.approvalRefused = false
   h.agentRunCalls.length = 0
   h.diffValue = "diff-0"
   h.diffCalls = 0
@@ -296,12 +259,8 @@ beforeEach(() => {
   h.filesGate = Promise.resolve()
   h.transcript = []
   h.transcriptPageCalls.length = 0
-  h.currentPlan = null
-  h.planCommentCalls.length = 0
-  h.planReviseCalls.length = 0
   h.reviewCb = null
   h.reasoningCalls.length = 0
-  h.resumeCalls.length = 0
 })
 
 describe("conversationMachine — remote session envelopes", () => {
@@ -1903,115 +1862,7 @@ describe("conversationMachine — persisted status", () => {
   })
 })
 
-describe("conversationMachine — volatile plan drafts", () => {
-  const proposedPlan = {
-    id: "plan_live_1",
-    summary: "Live plan",
-    structured: true,
-    graph: null,
-    comments: [],
-    status: "proposed",
-    raw: "<h1>PRD: Live plan</h1>",
-    steps: []
-  } as unknown as Plan
-
-  it("routes a composer message into the parked plan as revision feedback", async () => {
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (snapshot) => snapshot.matches("running"))
-    emit({ _tag: "PlanProposed", plan: proposedPlan })
-
-    actor.send({ type: "SEND", text: "Use durable objects for concurrency." })
-
-    expect(actor.getSnapshot().context.queued).toStrictEqual([])
-    expect(actor.getSnapshot().context.sharedPlan).toMatchObject({
-      id: proposedPlan.id,
-      status: "revising",
-      comments: [{ body: "Use durable objects for concurrency.", routed: true }]
-    })
-    await vi.waitFor(() => {
-      expect(h.planCommentCalls).toStrictEqual([{
-        planId: proposedPlan.id,
-        stepId: "",
-        body: "Use durable objects for concurrency."
-      }])
-      expect(h.planReviseCalls).toStrictEqual([proposedPlan.id])
-    })
-    expect(h.steerCalls).toStrictEqual([])
-    actor.stop()
-  })
-
-  it("makes Send now route an already-queued message into the parked plan", async () => {
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (snapshot) => snapshot.matches("running"))
-
-    // The message landed a beat before PlanProposed, so it took the ordinary
-    // queue path. Once the plan appears, its existing Send now affordance must
-    // still become a revision action rather than a permanently deferred steer.
-    actor.send({ type: "SEND", text: "Research the newest MCP transport." })
-    const id = queuedId(actor, 0)
-    emit({ _tag: "PlanProposed", plan: proposedPlan })
-    actor.send({ type: "SEND_NOW", id })
-
-    expect(actor.getSnapshot().context.queued).toStrictEqual([])
-    await vi.waitFor(() => {
-      expect(h.planReviseCalls).toStrictEqual([proposedPlan.id])
-    })
-    expect(h.steerCalls).toStrictEqual([])
-    actor.stop()
-  })
-
-  it("routes an image-bearing composer message into the parked plan, marking the dropped attachment", async () => {
-    // Plan feedback is text-only, but excluding attachment-bearing sends parked
-    // them until the whole review resolved — steering a parked plan IS revising.
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (snapshot) => snapshot.matches("running"))
-    emit({ _tag: "PlanProposed", plan: proposedPlan })
-
-    const image = { id: "i1", name: "shot.png", mediaType: "image/png", data: "aGk=" }
-    actor.send({ type: "SEND", text: "The drawer never appears.", images: [image] })
-
-    expect(actor.getSnapshot().context.queued).toStrictEqual([])
-    await vi.waitFor(() => {
-      expect(h.planCommentCalls).toStrictEqual([{
-        planId: proposedPlan.id,
-        stepId: "",
-        body: "The drawer never appears.\n\n[1 attached image not delivered — plan feedback is text-only]"
-      }])
-      expect(h.planReviseCalls).toStrictEqual([proposedPlan.id])
-    })
-    expect(h.steerCalls).toStrictEqual([])
-    actor.stop()
-  })
-
-  it("makes Send now on an image-bearing queued message revise the parked plan instead of stopping the run", async () => {
-    // The steer fallback for `unsupported` stops the turn — during a parked plan
-    // that would kill the plan gate itself. Revision is the only safe "now".
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (snapshot) => snapshot.matches("running"))
-
-    const image = { id: "i1", name: "shot.png", mediaType: "image/png", data: "aGk=" }
-    actor.send({ type: "SEND", text: "Composer must stay docked.", images: [image] })
-    const id = queuedId(actor, 0)
-    emit({ _tag: "PlanProposed", plan: proposedPlan })
-    actor.send({ type: "SEND_NOW", id })
-
-    expect(actor.getSnapshot().context.queued).toStrictEqual([])
-    await vi.waitFor(() => {
-      expect(h.planReviseCalls).toStrictEqual([proposedPlan.id])
-    })
-    expect(h.steerCalls).toStrictEqual([])
-    expect(h.stopCalls).toStrictEqual([])
-    actor.stop()
-  })
-
+describe("conversationMachine — Plannotator projection", () => {
   it("stores Plannotator state outside the transcript", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
@@ -2036,434 +1887,6 @@ describe("conversationMachine — volatile plan drafts", () => {
       checklist: [{ step: 1, text: "Implement", completed: false }]
     })
     expect(actor.getSnapshot().context.messages).toHaveLength(messageCount)
-    actor.stop()
-  })
-
-  it("tracks cumulative source without touching the transcript and promotes atomically", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    emit({
-      _tag: "PlanDraft",
-      draft: {
-        id: "plan_live_1",
-        source: "<h1>PRD: Live</h1>",
-        phase: "composing"
-      }
-    })
-    expect(actor.getSnapshot().context.planDraft?.source).toContain("PRD: Live")
-    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
-    expect(latestPlan(actor.getSnapshot().context.messages)).toBeNull()
-
-    emit({
-      _tag: "PlanDraft",
-      draft: {
-        id: "plan_live_1",
-        source: "<h1>PRD: Live plan</h1><p>More</p>",
-        phase: "complete"
-      }
-    })
-    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
-
-    emit({ _tag: "PlanProposed", plan: proposedPlan })
-    const promoted = actor.getSnapshot().context
-    expect(promoted.planDraft).toBeNull()
-    expect(latestPlan(promoted.messages)?.raw).toBe(
-      "<h1>PRD: Live plan</h1>"
-    )
-    actor.stop()
-  })
-
-  it("drops a stale complete draft that drains after the proposal cleared it", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    // Draft events travel the pi event queue; PlanProposed is emitted directly
-    // from the submit tool's fiber. Nothing orders the two pipes, so the
-    // proposal can land FIRST and the draft's final "complete" snapshot drain
-    // afterwards. Re-arming the draft here pinned Plan Review on "Validating
-    // plan" — hiding the Approve button the parked backend was waiting on.
-    emit({
-      _tag: "PlanDraft",
-      draft: { id: "plan_live_1", source: "<h1>PRD: Racy</h1>", phase: "composing" }
-    })
-    emit({ _tag: "PlanProposed", plan: proposedPlan })
-    expect(actor.getSnapshot().context.planDraft).toBeNull()
-
-    emit({
-      _tag: "PlanDraft",
-      draft: { id: "plan_live_1", source: "<h1>PRD: Racy</h1>", phase: "complete" }
-    })
-    expect(actor.getSnapshot().context.planDraft).toBeNull()
-
-    // A genuinely new submission opens with "composing" and must still land.
-    emit({
-      _tag: "PlanDraft",
-      draft: { id: "plan_live_2", source: "<h1>PRD: Next</h1>", phase: "composing" }
-    })
-    expect(actor.getSnapshot().context.planDraft?.source).toContain("PRD: Next")
-    emit({
-      _tag: "PlanDraft",
-      draft: { id: "plan_live_2", source: "<h1>PRD: Next</h1>", phase: "complete" }
-    })
-    expect(actor.getSnapshot().context.planDraft?.phase).toBe("complete")
-    actor.stop()
-  })
-
-  it("requests presentation from the proposal itself when no draft was observed", async () => {
-    // Codex can deliver jingler_submit_plan without a composing draft ever
-    // reaching this machine (atomic tool arguments, throttled deltas, or the
-    // proposal winning the cross-pipe race). The gated plan must still present
-    // — the backend is parked on approval behind it.
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    emit({ _tag: "PlanProposed", plan: proposedPlan })
-    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
-
-    // The stale trailing "complete" from the losing draft pipe stays dropped.
-    emit({
-      _tag: "PlanDraft",
-      draft: { id: "plan_live_1", source: "<h1>PRD: Live plan</h1>", phase: "complete" }
-    })
-    expect(actor.getSnapshot().context.planDraft).toBeNull()
-    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
-    actor.stop()
-  })
-
-  it("presents a gated revision via PlanUpdated but never an executing update", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SEND", text: "continue" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    // Progress/status sync on an approved plan must not yank the split open.
-    emit({
-      _tag: "PlanUpdated",
-      plan: { ...proposedPlan, status: "approved" } as unknown as Plan
-    })
-    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(0)
-
-    // A revision awaiting scrutiny is a gated wait exactly like a proposal.
-    emit({
-      _tag: "PlanUpdated",
-      plan: { ...proposedPlan, status: "revising" } as unknown as Plan
-    })
-    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
-    actor.stop()
-  })
-
-  it("does not request presentation again after a reformat clear in the same turn", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (s) => s.matches("running"))
-
-    emit({
-      _tag: "PlanDraft",
-      draft: {
-        id: "plan_live_1",
-        source: "<h1>PRD: First</h1>",
-        phase: "composing"
-      }
-    })
-    emit({
-      _tag: "PlanDraft",
-      draft: { id: "plan_live_1", source: "", phase: "cleared" }
-    })
-    emit({
-      _tag: "PlanDraft",
-      draft: {
-        id: "plan_live_1",
-        source: "<h1>PRD: Reformatted</h1>",
-        phase: "composing"
-      }
-    })
-
-    expect(actor.getSnapshot().context.planDraftPresentationNonce).toBe(1)
-    expect(actor.getSnapshot().context.planDraft?.source).toContain(
-      "Reformatted"
-    )
-    actor.stop()
-  })
-
-  it("clears a volatile draft on failure and operator cancellation", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (s) => s.matches("running"))
-    emit({
-      _tag: "PlanDraft",
-      draft: {
-        id: "plan_live_1",
-        source: "<h1>PRD: Partial</h1>",
-        phase: "composing"
-      }
-    })
-    emit({ _tag: "Failed", message: "Malformed plan." })
-    expect(actor.getSnapshot().context.planDraft).toBeNull()
-
-    await waitFor(actor, (s) => s.matches(idle))
-    actor.send({ type: "SEND", text: "try again" })
-    await waitFor(actor, (s) => s.matches("running"))
-    emit({
-      _tag: "PlanDraft",
-      draft: {
-        id: "plan_live_2",
-        source: "<h1>PRD: Partial again</h1>",
-        phase: "composing"
-      }
-    })
-    actor.send({ type: "STOP" })
-    expect(actor.getSnapshot().context.planDraft).toBeNull()
-    actor.stop()
-  })
-})
-
-describe("conversationMachine — PlanUpdated across turns", () => {
-  /** A minimal one-step plan; only the id/status/steps matter to the fold. */
-  const planFixture = (stepStatus: "proposed" | "done"): Plan =>
-    ({
-      id: "plan_1",
-      summary: "Refactor auth",
-      structured: true,
-      graph: null,
-      comments: [],
-      status: "approved",
-      raw: "# Refactor auth",
-      steps: [
-        {
-          id: "s_01",
-          number: "01",
-          title: "Create TokenStore",
-          intent: "A dedicated store.",
-          approach: [],
-          kind: "step",
-          condition: null,
-          parentId: null,
-          dependsOn: [],
-          blocks: [],
-          files: [{ path: "src/auth/token-store.ts", change: "A", added: 40, removed: 0 }],
-          guards: [],
-          code: null,
-          diff: null,
-          status: stepStatus,
-          flagged: false
-        }
-      ]
-    }) as unknown as Plan
-
-  const documentFixture = (
-    stepStatus: "proposed" | "done",
-    producingChatId = session.id,
-    revision = 1
-  ): PlanDocument => ({
-    id: "plan_1",
-    sessionId: session.id,
-    producingChatId,
-    revision,
-    status: stepStatus === "done" ? "done" : "proposed",
-    plan: {
-      title: "PRD: Refactor auth",
-      sections: [],
-      stages: [
-        {
-          id: "s_01",
-          title: "Create TokenStore",
-          intent: "A dedicated store.",
-          approach: [],
-          files: [],
-          diagrams: [],
-          notes: [],
-          acceptance: [
-            {
-              id: "a1",
-              text: "Done",
-              status: stepStatus === "done" ? "passed" : "pending",
-              evidence: null
-            }
-          ]
-        }
-      ],
-      annotations: []
-    },
-    updatedBy: "agent",
-    updatedAt: "2026-07-25T00:01:00.000Z"
-  })
-
-  it("applies a PlanUpdated to the plan's own message, not the latest one", async () => {
-    const actor = start()
-    await waitFor(actor, (s) => s.matches(idle))
-
-    // Turn 1: the plan lands in this turn's assistant message.
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (s) => s.matches("running"))
-    emit({ _tag: "PlanProposed", plan: planFixture("proposed") })
-    emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-    await waitFor(actor, (s) => s.matches(idle))
-
-    // Turn 2: a fresh assistant message — the plan part is now behind us, which
-    // is exactly when a patchLast fold would silently drop the update.
-    actor.send({ type: "SEND", text: "implement it" })
-    await waitFor(actor, (s) => s.matches("running"))
-    emit({ _tag: "PlanUpdated", plan: planFixture("done") })
-
-    const plan = latestPlan(actor.getSnapshot().context.messages)
-    expect(plan?.steps[0]!.status).toBe("done")
-    actor.stop()
-  })
-
-  it("uses the shared artifact revision when the transcript has the same plan id", async () => {
-    h.transcript = [
-      applyStreamEvent(
-        assistantMessage("a_plan", "2026-07-25T00:00:00.000Z"),
-        { _tag: "PlanProposed", plan: planFixture("proposed") }
-      )
-    ]
-    h.currentPlan = documentFixture("done")
-
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-
-    expect(latestPlan(actor.getSnapshot().context.messages)?.steps[0]?.status).toBe("done")
-    actor.stop()
-  })
-
-  /**
-   * The other half of the graft. A chat that never proposed the plan has no
-   * message to graft onto, so the artifact has to arrive as one — otherwise the
-   * Plan tab is empty in every chat but the one that produced it.
-   *
-   * Pinned because the load walk decides this from a flag it sets DURING the
-   * walk (`grafted`), rather than by re-scanning the transcript afterwards. A
-   * flag that was set eagerly, or never reset, would take this branch away and
-   * the loss would be silent — a missing tab, not an error.
-   */
-  it("appends the shared artifact when no message in the transcript carries it", async () => {
-    h.transcript = [userMessage("u_1", "morning", "2026-07-25T00:00:00.000Z")]
-    h.currentPlan = documentFixture("done", "c_other", 3)
-
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-
-    const { messages } = actor.getSnapshot().context
-    expect(messages).toHaveLength(2)
-    expect(messages[1]!.id).toBe("a_shared_plan_3")
-    expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
-    expect(actor.getSnapshot().context.sharedPlanChatId).toBe("c_other")
-    actor.stop()
-  })
-
-  it("replaces the synthetic plan when paging reaches its original message", async () => {
-    const original = applyStreamEvent(
-      assistantMessage("a_original_plan", "2026-07-25T00:00:00.000Z"),
-      { _tag: "PlanProposed", plan: planFixture("proposed") }
-    )
-    h.transcript = [
-      original,
-      ...Array.from({ length: 299 }, (_, index) =>
-        userMessage(
-          `u_${index}`,
-          `turn ${index}`,
-          "2026-07-25T00:00:00.000Z"
-        )
-      )
-    ]
-    h.currentPlan = documentFixture("done", "c_other", 4)
-
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-    expect(
-      actor.getSnapshot().context.messages.filter((message) =>
-        message.id.startsWith("a_shared_plan_")
-      )
-    ).toHaveLength(1)
-
-    actor.send({ type: "LOAD_OLDER" })
-    await waitFor(actor, (snapshot) => snapshot.context.messages.length === 300)
-
-    const messages = actor.getSnapshot().context.messages
-    expect(
-      messages.filter((message) => message.id.startsWith("a_shared_plan_"))
-    ).toHaveLength(0)
-    expect(
-      messages.flatMap((message) => message.parts).filter(
-        (part) => part._tag === "Plan" && part.plan.id === "plan_1"
-      )
-    ).toHaveLength(1)
-    expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
-    actor.stop()
-  })
-
-  /**
-   * The load walk must not COPY a message it has nothing to change.
-   *
-   * Identity, not equality, is the assertion that means anything here: the walk
-   * used to spread every message and rebuild every `parts` array to replace a
-   * single Plan part, and transcripts on disk reach 44MB. Deep-equal would pass
-   * against exactly that. The renderer's footprint is a high-water mark of these
-   * loads — neither V8 nor PartitionAlloc return a spike's pages to the OS — so
-   * a copy nobody needed is paid for permanently.
-   */
-  it("passes messages the artifact does not touch through by reference", async () => {
-    const untouched = userMessage("u_1", "morning", "2026-07-25T00:00:00.000Z")
-    const carrier = applyStreamEvent(
-      assistantMessage("a_plan", "2026-07-25T00:00:30.000Z"),
-      { _tag: "PlanProposed", plan: planFixture("proposed") }
-    )
-    h.transcript = [untouched, carrier]
-    h.currentPlan = documentFixture("done")
-
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-
-    const { messages } = actor.getSnapshot().context
-    // Nothing to settle and no plan of the artifact's id: the SAME object.
-    expect(messages[0]).toBe(untouched)
-    // The one that does carry it is rebuilt, and carries the newer revision.
-    expect(messages[1]).not.toBe(carrier)
-    expect(latestPlan(messages)?.steps[0]?.status).toBe("done")
-    actor.stop()
-  })
-
-  it("applies a shared plan broadcast to an existing chat actor", async () => {
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-
-    actor.send({
-      type: "SHARED_PLAN_UPDATED",
-      plan: planFixture("done"),
-      producingChatId: "c_other"
-    })
-
-    expect(latestPlan(actor.getSnapshot().context.messages)?.steps[0]?.status).toBe("done")
-    expect(actor.getSnapshot().context.sharedPlanChatId).toBe("c_other")
-    actor.stop()
-  })
-
-  it("rolls back an optimistic live approval when the canonical revision is stale", async () => {
-    const actor = start()
-    await waitFor(actor, (snapshot) => snapshot.matches(idle))
-
-    actor.send({ type: "SEND", text: "plan it" })
-    await waitFor(actor, (snapshot) => snapshot.matches("running"))
-    emit({ _tag: "PlanProposed", plan: planFixture("proposed") })
-
-    h.approvalRefused = true
-    actor.send({ type: "APPROVE_PLAN", planId: "plan_1", revision: 1 })
-
-    await waitFor(actor, (snapshot) => snapshot.context.planActionError !== null)
-    expect(actor.getSnapshot().matches("running")).toBe(true)
-    expect(actor.getSnapshot().context.planActionError).toBe(
-      "Canonical revision 2 replaced reviewed revision 1."
-    )
-    expect(latestPlan(actor.getSnapshot().context.messages)?.status).toBe("proposed")
     actor.stop()
   })
 })
