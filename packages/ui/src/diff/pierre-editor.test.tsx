@@ -53,6 +53,7 @@ interface MockCodeViewProps {
 
 const pierre = vi.hoisted<{
   codeViewProps?: MockCodeViewProps
+  editProviderCreateEditor?: (options: MockEditorOptions) => unknown
   editorOptions: MockEditorOptions[]
 }>(() => ({ editorOptions: [] }))
 
@@ -65,6 +66,21 @@ vi.mock("@pierre/diffs/react", () => ({
       </div>
     )
   },
+  // The REAL EditProvider is the only channel the runtime reads the editor
+  // factory from (CodeView's `createEditor` prop is declared in the d.ts but
+  // ignored by the implementation) — mirror that contract here so a
+  // regression back to prop-passing fails this suite instead of black-
+  // screening the app the first time the file editor opens.
+  EditProvider: ({
+    children,
+    createEditor
+  }: {
+    readonly children: ReactNode
+    readonly createEditor: (options: MockEditorOptions) => unknown
+  }) => {
+    pierre.editProviderCreateEditor = createEditor
+    return children
+  },
   File: () => null,
   FileDiff: () => null,
   Virtualizer: ({ children }: { readonly children: ReactNode }) => children,
@@ -76,7 +92,7 @@ vi.mock("@pierre/diffs/react", () => ({
   useWorkerPool: () => undefined
 }))
 
-vi.mock("@pierre/diffs/editor", () => ({
+vi.mock("@pierre/diffs/edit", () => ({
   Editor: class {
     constructor(options: MockEditorOptions) {
       pierre.editorOptions.push(options)
@@ -87,6 +103,7 @@ vi.mock("@pierre/diffs/editor", () => ({
 afterEach(() => {
   cleanup()
   pierre.codeViewProps = undefined
+  pierre.editProviderCreateEditor = undefined
   pierre.editorOptions.length = 0
 })
 
@@ -162,8 +179,13 @@ describe("PierreEditor", () => {
       endSide: "new"
     })
 
+    // The factory must arrive through EditProvider (context), NOT the
+    // CodeView prop — the runtime ignores the prop, and shipping it that way
+    // crashed the app with "createEditor is required for items with
+    // edit: true" the first time an item was marked editable.
+    expect(props.createEditor).toBeUndefined()
     const editorChange = vi.fn()
-    expect(props.createEditor?.({ onChange: editorChange })).toBeTruthy()
+    expect(pierre.editProviderCreateEditor?.({ onChange: editorChange })).toBeTruthy()
     expect(pierre.editorOptions).toEqual([{ onChange: editorChange }])
 
     const first = { ...item.file, contents: "first edit\n" }

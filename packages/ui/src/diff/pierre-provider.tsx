@@ -1,13 +1,13 @@
 import type { ThemeTokens, VsCodeTheme } from "@jingler/core"
 import {
   CodeView as PierreCodeViewPrimitive,
+  EditProvider as PierreEditProvider,
   File as PierreFilePrimitive,
   FileDiff as PierreFileDiffPrimitive,
   Virtualizer as PierreVirtualizerPrimitive,
   WorkerPoolContextProvider,
   useWorkerPool,
   type CodeViewHandle,
-  type CodeViewCreateEditorOptions,
   type CodeViewItem,
   type TokenEventBase,
   type DiffLineAnnotation,
@@ -17,7 +17,10 @@ import {
   type SelectedLineRange,
   type SupportedLanguages
 } from "@pierre/diffs/react"
-import { Editor as PierreEditorPrimitive } from "@pierre/diffs/editor"
+import {
+  Editor as PierreEditorPrimitive,
+  type EditorOptions as PierreEditorOptions
+} from "@pierre/diffs/edit"
 import {
   createContext,
   useCallback,
@@ -460,7 +463,7 @@ export interface PierreEditorProps extends PierreCodeViewProps {
 
 interface PierreCodeViewEditorCallbacks {
   readonly create: (
-    options: CodeViewCreateEditorOptions<PierreAnnotationMetadata>
+    options: PierreEditorOptions<PierreAnnotationMetadata>
   ) => PierreEditorPrimitive<PierreAnnotationMetadata>
   readonly onChange: (
     item: CodeViewItem<PierreAnnotationMetadata>,
@@ -584,7 +587,7 @@ export function PierreEditor({
     [activeItemId, items]
   )
   const create = useCallback(
-    (options: CodeViewCreateEditorOptions<PierreAnnotationMetadata>) =>
+    (options: PierreEditorOptions<PierreAnnotationMetadata>) =>
       new PierreEditorPrimitive<PierreAnnotationMetadata>(options),
     []
   )
@@ -713,17 +716,16 @@ function PierreCodeViewContent({
     [items, onActivePathChange]
   )
 
-  return (
-    <section
-      aria-label={label}
-      data-jingler-pierre-view="code-view"
-      className={cn(PIERRE_HOST_CLASS, className)}
-      style={style}
-    >
+  // The React CodeView reads its editor factory from EditContext ONLY —
+  // there is deliberately no `createEditor` prop (the 1.3.0 betas declared
+  // one in the d.ts that the implementation ignored; shipping the factory
+  // that way crashed the app with "createEditor is required for items with
+  // edit: true" the first time the file editor opened). The factory must
+  // arrive via EditProvider.
+  const view = (
       <PierreCodeViewPrimitive<PierreAnnotationMetadata>
         ref={viewRef}
         items={items}
-        createEditor={editor?.create}
         onItemEditChange={editor?.onChange}
         onItemEditComplete={editor?.onComplete}
         selectedLines={upstreamSelection}
@@ -739,7 +741,6 @@ function PierreCodeViewContent({
           collapsedContextThreshold: options?.collapsedContextThreshold,
           hunkSeparators: options?.hunkSeparators ?? "line-info",
           enableLineSelection: onSelectionChange !== undefined,
-          controlledSelection: true,
           stickyHeaders: options?.stickyHeader ?? true,
           onTokenEnter,
           onTokenLeave
@@ -753,6 +754,20 @@ function PierreCodeViewContent({
                 renderAnnotation(annotation.metadata.payload, item)
         }
       />
+  )
+
+  return (
+    <section
+      aria-label={label}
+      data-jingler-pierre-view="code-view"
+      className={cn(PIERRE_HOST_CLASS, className)}
+      style={style}
+    >
+      {editor === undefined ? (
+        view
+      ) : (
+        <PierreEditProvider createEditor={editor.create}>{view}</PierreEditProvider>
+      )}
     </section>
   )
 }
