@@ -1,9 +1,9 @@
 /**
  * Bridges the renderer's conversation machine to the presentational
- * `ConversationView` / `PlanReview`. Mounted keyed by session id (see
- * `JinglerApp`), so each session drives its own machine instance. The machine
- * lives here — above the Conversation ↔ Plan Review view switch — so switching to
- * the Plan tab does NOT unmount the agent stream (which would abort a parked plan).
+ * `ConversationView` and embedded Plannotator review. Mounted keyed by session
+ * id (see `JinglerApp`), so each session drives its own machine instance. The
+ * machine lives above the Conversation ↔ Plan switch, so opening Plannotator
+ * does not unmount the agent stream.
  */
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -13,6 +13,7 @@ import type {
   ProviderCatalog,
   Session,
   SubagentFleetControlAction,
+  ThemeTokens,
   SubagentFleetControlOutcome,
   SubagentFleetNode
 } from "@jingler/core"
@@ -29,11 +30,11 @@ import {
   Composer,
   ConversationView,
   FleetAgentView,
-  PlanReview,
   ResizeHandle,
   RuntimeRecoveryCard,
   useContainerWidth,
-  useHasNativeEclipsingOverlay
+  useHasNativeEclipsingOverlay,
+  useThemeTokens
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import { publishFleetAgentFileActivity } from "./agent-file-activity.js"
@@ -86,6 +87,51 @@ const initialPlanSplitRatio = (): number => {
   }
 }
 
+const PLANNOTATOR_CSS_VARIABLE = /(--[\w-]+:\s*[^;]+);/g
+
+const plannotatorThemeCss = (tokens: ThemeTokens): string => {
+  const scheme = tokens.kind === "light" ? "light" : "dark"
+  return `
+:root, .dark, [data-theme="light"] {
+  color-scheme: ${scheme};
+  --background: ${tokens.canvas};
+  --foreground: ${tokens.textBody};
+  --card: ${tokens.panel};
+  --card-foreground: ${tokens.textBright};
+  --popover: ${tokens.panel};
+  --popover-foreground: ${tokens.textBright};
+  --primary: ${tokens.brand};
+  --primary-foreground: ${tokens.canvas};
+  --secondary: ${tokens.surface};
+  --secondary-foreground: ${tokens.textBody};
+  --muted: ${tokens.surface};
+  --muted-foreground: ${tokens.muted};
+  --accent: ${tokens.brand};
+  --accent-foreground: ${tokens.canvas};
+  --destructive: ${tokens.red};
+  --success: ${tokens.green};
+  --warning: ${tokens.yellow};
+  --border: ${tokens.line};
+  --input: ${tokens.line};
+  --ring: ${tokens.brand};
+  --code-bg: ${tokens.editor};
+  --focus-highlight: ${tokens.selection};
+  --surface-0: ${tokens.canvas};
+  --surface-1: ${tokens.panel};
+  --surface-2: ${tokens.surface};
+  --atomic-editor-bg: ${tokens.editor};
+  --atomic-editor-bg-panel: ${tokens.panel};
+  --atomic-editor-bg-surface: ${tokens.surface};
+  --atomic-editor-border: ${tokens.line};
+  --atomic-editor-accent: ${tokens.brand};
+  --atomic-editor-fg: ${tokens.textBody};
+  --atomic-editor-fg-muted: ${tokens.muted};
+  --atomic-editor-fg-faint: ${tokens.dim};
+}
+body { background: ${tokens.canvas}; color: ${tokens.textBody}; }
+`.replace(PLANNOTATOR_CSS_VARIABLE, "$1 !important;")
+}
+
 function PlannotatorPlanView({
   sessionId,
   chatId,
@@ -96,10 +142,26 @@ function PlannotatorPlanView({
   readonly url: string
 }) {
   const overlayOpen = useHasNativeEclipsingOverlay()
+  const themeTokens = useThemeTokens()
+  const themeCss = useMemo(() => plannotatorThemeCss(themeTokens), [themeTokens])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const loadId = useRef(0)
+  const appliedThemeCss = useRef(themeCss)
   const boundsRef = useNativeViewBounds({
     active: true,
     onFirstPaintableRect: (rect) => {
-      void rpc.plannotatorPreviewOpen(sessionId, chatId, url, rect).catch(() => {})
+      const id = ++loadId.current
+      setLoadError(null)
+      setLoaded(false)
+      appliedThemeCss.current = themeCss
+      void rpc.plannotatorPreviewOpen(sessionId, chatId, url, rect, themeCss).then(() => {
+        if (loadId.current === id) setLoaded(true)
+      }).catch((error: unknown) => {
+        if (loadId.current !== id) return
+        setLoadError(error instanceof Error ? error.message : "Plannotator failed to load")
+        void rpc.plannotatorPreviewClose(sessionId, chatId)
+      })
     },
     onBoundsChanged: (rect) => {
       void rpc.plannotatorPreviewSetBounds(sessionId, chatId, rect)
@@ -107,11 +169,28 @@ function PlannotatorPlanView({
   })
 
   useEffect(() => {
-    void rpc.plannotatorPreviewSetVisible(sessionId, chatId, !overlayOpen)
-  }, [chatId, overlayOpen, sessionId])
+    loadId.current += 1
+    setLoadError(null)
+    setLoaded(false)
+  }, [url])
+
+  useEffect(() => {
+    if (!loaded || appliedThemeCss.current === themeCss) return
+    appliedThemeCss.current = themeCss
+    void rpc.plannotatorPreviewSetTheme(sessionId, chatId, themeCss)
+  }, [chatId, loaded, sessionId, themeCss])
+
+  useEffect(() => {
+    void rpc.plannotatorPreviewSetVisible(
+      sessionId,
+      chatId,
+      !overlayOpen && loaded && loadError === null
+    )
+  }, [chatId, loadError, loaded, overlayOpen, sessionId])
 
   useEffect(
     () => () => {
+      loadId.current += 1
       void rpc.plannotatorPreviewSetVisible(sessionId, chatId, false)
     },
     [chatId, sessionId]
@@ -120,9 +199,13 @@ function PlannotatorPlanView({
   return (
     <div className="relative min-h-0 flex-1 bg-editor">
       <div ref={boundsRef} className="absolute inset-0" />
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] text-dim">
-        Loading Plannotator…
-      </div>
+      {!loaded && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8 text-center text-[12px] text-dim">
+          {loadError === null
+            ? "Loading Plannotator…"
+            : `Could not open Plannotator. ${loadError}`}
+        </div>
+      )}
     </div>
   )
 }
@@ -132,8 +215,6 @@ export function ConversationPane({
   view = "conversation",
   onOpenPlanReview,
   onPlanDraftAvailable,
-  planStepId,
-  onPlanStepSelected,
   onRestore,
   onDelete,
   onInitialPromptConsumed,
@@ -157,17 +238,10 @@ export function ConversationPane({
    * toggling it can never remount (and so never abort) a live run.
    */
   view?: "conversation" | "plan" | "split"
-  /**
-   * Switch the pane to the Plan Review view — bare from the inline plan card, or
-   * with a stage id from the composer progress dock (a deep link).
-   */
+  /** Switch the pane to the active embedded Plannotator review. */
   onOpenPlanReview?: (stepId?: string) => void
-  /** Auto-present the first renderable plan draft at the host's responsive width. */
+  /** Auto-present a newly active Plannotator review at the host's responsive width. */
   onPlanDraftAvailable?: () => void
-  /** The stage Plan Review should open at (a pending deep link from the dock). */
-  planStepId?: string | null
-  /** Plan Review's selection moved — lets the host retire a spent deep link. */
-  onPlanStepSelected?: () => void
   /** Restore this session from archived (the banner + locked composer). */
   onRestore?: (sessionId: string) => void
   /** Permanently delete this session (the banner). */
@@ -769,28 +843,16 @@ export function ConversationPane({
     [activeChat.id, convo.plannotator, session.id]
   )
   const nativePlanDocument = plannotatorDocument
-  const planReview = (
-    <PlanReview
-      plan={null}
-      document={nativePlanDocument}
-      canApprove={false}
-      compact={view === "split"}
-      patch={convo.patch}
-      knownFiles={knownFiles}
-      onOpenFile={openAsset}
-      selectedStepId={planStepId}
-      onSelectStep={onPlanStepSelected}
-    />
-  )
   const planSurface = convo.plannotator?.review
     ? (
         <PlannotatorPlanView
+          key={convo.plannotator.review.reviewId}
           sessionId={session.id}
           chatId={activeChat.id}
           url={convo.plannotator.review.url}
         />
       )
-    : planReview
+    : null
 
   if (view === "plan") {
     return (

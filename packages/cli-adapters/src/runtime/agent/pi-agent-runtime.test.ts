@@ -122,7 +122,7 @@ describe("PiAgentRuntime", () => {
     expect(events).toEqual([{ _tag: "Failed", message: "model certification is stale" }])
   })
 
-  it("streams Plannotator state as a disposable native projection", async () => {
+  it("streams Plannotator state and notices as disposable native projections", async () => {
     const handle: PiSessionHandle = {
       ...settlingHandle({ childActive: false }),
       subscribePlannotator: (listener) => {
@@ -132,6 +132,10 @@ describe("PiAgentRuntime", () => {
           review: null,
           checklist: [{ step: 1, text: "Implement", completed: false }]
         })
+        return vi.fn()
+      },
+      subscribePlannotatorNotice: (listener) => {
+        listener("Plan review failed closed.")
         return vi.fn()
       }
     }
@@ -150,6 +154,7 @@ describe("PiAgentRuntime", () => {
         checklist: [{ step: 1, text: "Implement", completed: false }]
       }
     })
+    expect(events).toContainEqual({ _tag: "Failed", message: "Plan review failed closed." })
   })
 
   it("keeps the stream open for Plannotator's automatic execution continuation", async () => {

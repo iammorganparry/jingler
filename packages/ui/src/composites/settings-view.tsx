@@ -1141,8 +1141,8 @@ function GeneralSection({
         </div>
         <div className="divide-y divide-hairline">
           <ToggleRow
-            label="Run commands while planning"
-            description="Plan mode can't edit files, so its commands only read — git history, search, and file inspection. Leave this on and planning runs uninterrupted; switch it off to approve each command."
+            label="Run read-only commands in Plannotator Plan mode"
+            description="This controls approval for exploration commands such as git history, search, and file inspection. Plannotator still owns plan review and approval."
             checked={planDraft}
             onChange={(next) => {
               setPlanDraft(next)

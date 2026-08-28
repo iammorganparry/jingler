@@ -5904,9 +5904,13 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     Effect.flatMap(PreviewViewService, (b) => b.reload(sessionId, chatId)),
   "BrowserPreview.setVisible": ({ sessionId, chatId, visible }) =>
     Effect.flatMap(PreviewViewService, (b) => b.setVisible(sessionId, chatId, visible)),
-  "PlannotatorPreview.open": ({ sessionId, chatId, url, bounds }) =>
+  "PlannotatorPreview.open": ({ sessionId, chatId, url, bounds, themeCss }) =>
     Effect.flatMap(PreviewViewService, (preview) =>
-      preview.openPlan(sessionId, chatId, url, bounds)
+      preview.openPlan(sessionId, chatId, url, bounds, themeCss)
+    ),
+  "PlannotatorPreview.setTheme": ({ sessionId, chatId, themeCss }) =>
+    Effect.flatMap(PreviewViewService, (preview) =>
+      preview.setPlanTheme(sessionId, chatId, themeCss)
     ),
   "PlannotatorPreview.setBounds": ({ sessionId, chatId, bounds }) =>
     Effect.flatMap(PreviewViewService, (preview) =>

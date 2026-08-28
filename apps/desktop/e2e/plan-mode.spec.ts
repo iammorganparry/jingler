@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs"
+import { existsSync, rmSync, writeFileSync } from "node:fs"
+import { createServer } from "node:net"
 import { join } from "node:path"
 import type { ElectronApplication } from "@playwright/test"
 import { appShell, expect, type SeedSession, test } from "./fixtures.js"
@@ -46,6 +47,13 @@ const reviewScript = (app: ElectronApplication, expression: string) =>
     return page?.executeJavaScript(source) ?? null
   }, expression)
 
+const reviewUrls = (app: ElectronApplication) =>
+  app.evaluate(async ({ webContents }) =>
+    webContents.getAllWebContents()
+      .map((contents) => contents.getURL())
+      .filter((url) => url.startsWith("http://localhost:"))
+  )
+
 test("Plannotator reviews inside the Plan tab and drives native progress", async ({
   launchApp
 }) => {
@@ -91,6 +99,14 @@ test("Plannotator reviews inside the Plan tab and drives native progress", async
     contextIsolation: true,
     nodeIntegration: false
   })
+  const hostBackground = await launched.window.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue("--sb-canvas").trim()
+  )
+  const reviewBackground = await reviewScript(
+    launched.app,
+    "getComputedStyle(document.documentElement).getPropertyValue('--background').trim()"
+  )
+  expect(reviewBackground).toBe(hostBackground)
 
   await launched.app.evaluate(async ({ webContents }) => {
     const page = webContents.getAllWebContents().find((contents) =>
@@ -125,6 +141,8 @@ test("Plannotator reviews inside the Plan tab and drives native progress", async
   await expect(
     launched.window.getByText("Implemented and verified the approved plan.").first()
   ).toBeVisible({ timeout: 30_000 })
+  await expect(launched.window.locator("[data-mode='auto']")).toContainText("Auto")
+  await expect(launched.window.getByRole("button", { name: "Plan Review" })).toHaveCount(0)
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
   await expect.poll(async () =>
     (await reviewPages()).filter(({ url }) => url.startsWith("http://localhost:")).length,
@@ -239,6 +257,8 @@ test("a pending Plannotator review reopens after an Electron restart", async ({ 
     )
     return page?.executeJavaScript("document.body?.innerText ?? ''") ?? ""
   }), { timeout: 30_000 }).toContain("Implement the auth change")
+  const [reviewUrl] = await reviewUrls(reopened.app)
+  expect(reviewUrl).toMatch(/^http:\/\/localhost:/)
   await reopened.window.getByTestId("active-chat-tab").first().click()
   await expect(reopened.window.getByText("0/2")).toBeVisible({ timeout: 20_000 })
   const transcriptCard = reopened.window.getByTestId("plannotator-transcript-card")
@@ -248,4 +268,117 @@ test("a pending Plannotator review reopens after an Electron restart", async ({ 
   const planDrawer = reopened.window.getByTestId("plan-task-list")
   await expect(planDrawer).toContainText("Implement the auth change")
   await expect(planDrawer).toContainText("Verify the auth change")
+
+  await planTab.click()
+  await expect.poll(() => reviewUrls(reopened.app)).toEqual([reviewUrl])
+})
+
+for (const recoveryCase of [
+  {
+    name: "missing",
+    prepare: (path: string) => rmSync(path),
+    message: "Cannot resume plan review: PLAN.md no longer exists."
+  },
+  {
+    name: "empty",
+    prepare: (path: string) => writeFileSync(path, ""),
+    message: "Cannot resume plan review: PLAN.md is empty."
+  }
+]) {
+  test(`pending review fails closed when PLAN.md is ${recoveryCase.name}`, async ({ launchApp }) => {
+    const first = await launchApp({
+      configured: true,
+      withRepo: true,
+      piFixture: PI_FIXTURE,
+      sessions
+    })
+    await expect(appShell(first.window)).toBeVisible()
+
+    const composer = first.window.getByPlaceholder(/Message .+…/)
+    await composer.click()
+    await first.window.keyboard.press("Shift+Tab")
+    await first.window.keyboard.press("Shift+Tab")
+    await composer.fill("[[plan]] replace auth")
+    await composer.press("Enter")
+    await expect(first.window.getByRole("button", { name: "Plan Review" }).first())
+      .toBeVisible({ timeout: 20_000 })
+    await first.app.close()
+
+    recoveryCase.prepare(join(first.repoPath, "PLAN.md"))
+    const reopened = await launchApp({
+      configured: true,
+      withRepo: true,
+      home: first.home,
+      reposDir: first.reposDir,
+      userDataDir: first.userDataDir,
+      authServer: first.authServer,
+      githubServer: first.githubServer,
+      githubRelay: first.githubRelay
+    })
+    await expect(appShell(reopened.window)).toBeVisible()
+    await expect(reopened.window.getByText(recoveryCase.message)).toBeVisible({ timeout: 20_000 })
+    await expect(reopened.window.getByText("Implemented and verified the approved plan."))
+      .toHaveCount(0)
+    await expect(reopened.window.getByRole("button", { name: "Plan Review" })).toHaveCount(0)
+    await expect(reopened.window.getByTestId("plan-task-list")).toHaveCount(0)
+    await expect.poll(() => reviewUrls(reopened.app)).toEqual([])
+  })
+}
+
+test("review startup failure stays unapproved and does not loop after restart", async ({
+  launchApp
+}) => {
+  const blocker = createServer()
+  await new Promise<void>((resolve, reject) => {
+    blocker.once("error", reject)
+    blocker.listen(0, "127.0.0.1", resolve)
+  })
+  const address = blocker.address()
+  if (address === null || typeof address === "string") {
+    throw new Error("Expected a bound TCP port")
+  }
+  const e2eEnv = { PLANNOTATOR_PORT: String(address.port) }
+
+  try {
+    const first = await launchApp({
+      configured: true,
+      withRepo: true,
+      piFixture: PI_FIXTURE,
+      sessions,
+      e2eEnv
+    })
+    await expect(appShell(first.window)).toBeVisible()
+
+    const composer = first.window.getByPlaceholder(/Message .+…/)
+    await composer.click()
+    await first.window.keyboard.press("Shift+Tab")
+    await first.window.keyboard.press("Shift+Tab")
+    await composer.fill("[[plan]] replace auth")
+    await composer.press("Enter")
+    await expect(first.window.getByText(/Failed to start plan review UI:/))
+      .toBeVisible({ timeout: 20_000 })
+    await expect(first.window.getByText("Implemented and verified the approved plan."))
+      .toHaveCount(0)
+    await expect.poll(() => reviewUrls(first.app)).toEqual([])
+    await first.app.close()
+
+    const reopened = await launchApp({
+      configured: true,
+      withRepo: true,
+      home: first.home,
+      reposDir: first.reposDir,
+      userDataDir: first.userDataDir,
+      authServer: first.authServer,
+      githubServer: first.githubServer,
+      githubRelay: first.githubRelay,
+      e2eEnv
+    })
+    await expect(appShell(reopened.window)).toBeVisible()
+    await expect(reopened.window.getByRole("button", { name: "Plan Review" })).toHaveCount(0)
+    await expect(reopened.window.getByText("Implemented and verified the approved plan."))
+      .toHaveCount(0)
+    await expect.poll(() => reviewUrls(reopened.app)).toEqual([])
+  } finally {
+    await new Promise<void>((resolve) => blocker.close(() => resolve()))
+  }
 })

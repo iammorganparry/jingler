@@ -16,10 +16,6 @@ import type {
   Message,
   PermissionMode,
   Plan,
-  PlanAnnotationAnchor,
-  PlanApprovalResult,
-  PlanComment,
-  PlanDraft,
   PlannotatorProjection,
   ProviderConnectionId,
   ProviderId,
@@ -41,7 +37,6 @@ import type {
 import {
   activityOf,
   admitSessionEvent,
-  addPlanComment,
   applyReviewEvent,
   applyStreamEvent,
   applySubagentEvent,
@@ -52,7 +47,6 @@ import {
   isSubagentEvent,
   retractSubagent,
   setGateStatus,
-  setPlanStatus,
   setQuestionAnswers,
   settleLoaded,
   settleStreaming,
@@ -233,27 +227,11 @@ export interface ConversationContext {
    * `COMPACT_EVERY_N_FOLDS` events so a never-settling turn stays bounded.
    */
   readonly foldsSinceCompaction: number
-  /**
-   * When set, the running turn is a stale-plan re-drive (`Agent.resumePlan`) for
-   * this plan id rather than a normal `Agent.run`; cleared when the next normal
-   * turn starts.
-   */
-  readonly resumePlanId: string | null
-  /** Exact canonical revision the operator reviewed. */
-  readonly resumePlanRevision: number | null
-  /** A revision/persistence refusal from the most recent live approval attempt. */
-  readonly planActionError: string | null
   readonly sharedPlanChatId: string | null
   /** Canonical plan projected over every transcript page as it is loaded. */
   readonly sharedPlan: Plan | null
   /** Disposable native projection of Plannotator's authoritative state. */
   readonly plannotator?: PlannotatorProjection
-  /** Volatile sanitized plan source for the current planning turn. */
-  readonly planDraft: PlanDraft | null
-  /** Prevents a reformat retry from reopening a split the operator closed. */
-  readonly planDraftPresentationRequested: boolean
-  /** One-shot signal consumed by the responsive session pane. */
-  readonly planDraftPresentationNonce: number
   /** Tokens currently occupying the main agent's context window. */
   readonly tokens: number
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
@@ -384,17 +362,6 @@ type ConversationEvent =
   | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
   | { type: "REVIEW_EVENT"; event: StreamEvent }
-  | {
-      type: "COMMENT_PLAN_STEP"
-      planId: string
-      stepId: string
-      body: string
-      anchor?: PlanAnnotationAnchor
-    }
-  | { type: "REVISE_PLAN"; planId: string }
-  | { type: "APPROVE_PLAN"; planId: string; executionMode?: ExecutionMode; revision?: number }
-  | { type: "PLAN_APPROVAL_RESULT"; planId: string; result: PlanApprovalResult }
-  | { type: "RESUME_PLAN"; planId: string; revision?: number }
   | { type: "REFRESH_DIFF" }
   | { type: "STOP" }
   /** Kill ONE live sub-agent (its tab's ×), leaving the turn running. */
@@ -678,12 +645,9 @@ const agentStream = fromCallback<
   {
     sessionId: string
     chatId: string
-    resumeChatId: string
     text: string
     displayText: string
     images: ReadonlyArray<Attachment>
-    resumePlanId: string | null
-    resumePlanRevision: number | null
     reasoning?: ReasoningSetting
     externalInstruction: ExternalInstructionIdentity | null
   }
@@ -739,71 +703,6 @@ const sameExternalInstruction = (
   right: ExternalInstructionIdentity
 ): boolean =>
   left?.deliveryId === right.deliveryId || left?.semanticKey === right.semanticKey
-
-type PlanFeedback = {
-  readonly plan: Plan
-  readonly text: string
-  readonly queuedId: string | null
-}
-
-/**
- * Turn an ordinary composer send into feedback while a proposed plan is parked.
- *
- * A parked plan still owns the live run, but it has no Codex steer handle: the
- * old generic queue path therefore reported `deferred` forever when the operator
- * clicked Send now. Plan feedback already has a durable route — a global plan
- * comment followed by `revisePlan` — so use that instead of pretending the held
- * run is an ordinary streaming turn.
- */
-/**
- * Plan annotations are text-only, but a parked plan has no OTHER live channel:
- * excluding attachment-bearing sends "to preserve their images" really parked
- * them until the whole review resolved — and Send now on one fell through to
- * the steer path, whose `unsupported` fallback stops the run and kills the
- * plan gate. Steering a parked plan means revising it, images or not; the
- * marker keeps the dropped screenshots visible to the operator AND the agent
- * instead of pretending they travelled.
- */
-const planFeedbackText = (text: string, imageCount: number): string =>
-  imageCount === 0
-    ? text
-    : `${text}\n\n[${imageCount} attached image${
-        imageCount === 1 ? "" : "s"
-      } not delivered — plan feedback is text-only]`
-
-const planFeedbackFor = (
-  context: ConversationContext,
-  event: ConversationEvent
-): PlanFeedback | null => {
-  const plan = context.sharedPlan
-  if (plan === null || plan.status !== "proposed") return null
-
-  if (event.type === "SEND") {
-    if (event.externalInstruction !== undefined || (event.agentContext ?? "") !== "") return null
-    const text = event.text.trim()
-    if (text.length === 0) return null
-    return {
-      plan,
-      text: planFeedbackText(text, event.images?.length ?? 0),
-      queuedId: null
-    }
-  }
-
-  if (event.type !== "SEND_NOW" || context.steeringId !== null) return null
-  const queued = context.queued.find((item) => item.id === event.id)
-  if (
-    queued === undefined ||
-    requiresFreshTurn(queued) ||
-    queued.text.trim().length === 0
-  ) {
-    return null
-  }
-  return {
-    plan,
-    text: planFeedbackText(queued.text.trim(), queued.images.length),
-    queuedId: queued.id
-  }
-}
 
 /**
  * Hand a queued message to the live turn, and report back as `STEER_RESULT`.
@@ -989,10 +888,7 @@ export const conversationMachine = setup({
       if (context.steeringId !== null || context.queued.length === 0) return false
       // A parked queue is inert until the operator acts on it — see `queueParked`.
       if (context.queueParked) return false
-      return (
-        context.resumePlanId === null &&
-        !requiresFreshTurn(context.queued[0]!)
-      )
+      return !requiresFreshTurn(context.queued[0]!)
     },
     canSteerQueued: ({ context, event }) => {
       if (event.type !== "SEND_NOW" || context.steeringId !== null) return false
@@ -1025,8 +921,6 @@ export const conversationMachine = setup({
     hasQueuedMessage: ({ context, event }) =>
       event.type === "SEND_NOW" &&
       context.queued.some((item) => item.id === event.id),
-    canRoutePlanFeedback: ({ context, event }) =>
-      planFeedbackFor(context, event) !== null,
     canCoalesceExternalSend: ({ context, event }) =>
       event.type === "SEND" &&
       event.externalInstruction !== undefined &&
@@ -1170,10 +1064,6 @@ export const conversationMachine = setup({
         // A fresh turn starts with no sub-agents (any from a prior turn are gone).
         subagents: [],
         reviewer: keepReviewer(context.reviewer),
-        resumePlanId: null,
-        resumePlanRevision: null,
-        planDraft: null,
-        planDraftPresentationRequested: false,
         // Context occupancy belongs to the resumed harness conversation, not to
         // one run. Keep the last reading visible until Usage replaces it.
         runStartedAt: Date.now(),
@@ -1181,40 +1071,6 @@ export const conversationMachine = setup({
         messages: [
           ...context.messages,
           userMessage(`u_local_${id}`, text, now, images),
-          assistantMessage(`a_local_${id}`, now)
-        ]
-      }
-    }),
-    // Start a stale-plan re-drive: mark the plan approved, append a human-readable
-    // turn, and flag the run so `agentStream` calls `resumePlan` (which restores
-    // the exec mode + prompts the agent with the plan embedded).
-    startResumePlan: assign(({ context, event }) => {
-      // Also the fallback for APPROVE_PLAN on a plan with no per-step
-      // assignees — an ordinary plan approved in an ordinary mode. Re-driving it
-      // on the session's own harness is the honest behaviour; dropping the click
-      // is not.
-      if (event.type !== "RESUME_PLAN" && event.type !== "APPROVE_PLAN") return {}
-      const now = new Date().toISOString()
-      const id = stamp()
-      return {
-        resumePlanId: event.planId,
-        resumePlanRevision: event.revision ?? null,
-        planDraft: null,
-        planDraftPresentationRequested: false,
-        planActionError: null,
-        pendingText: "",
-        pendingAgentContext: "",
-        pendingImages: [],
-        pendingExternalInstruction: null,
-        pendingExternalAcceptances: [],
-        // A fresh run (the plan re-drive) starts with no sub-agents carried over.
-        subagents: [],
-        reviewer: keepReviewer(context.reviewer),
-        runStartedAt: Date.now(),
-        lastOutcome: null,
-        messages: [
-          ...context.messages.map((m) => setPlanStatus(m, event.planId, "approved")),
-          userMessage(`u_local_${id}`, "Approved — implement the plan.", now),
           assistantMessage(`a_local_${id}`, now)
         ]
       }
@@ -1355,42 +1211,6 @@ export const conversationMachine = setup({
       beginSteer(context, self, picked, false)
       return { queued: [picked, ...rest], steeringId: picked.id, queueParked: false }
     }),
-    routePlanFeedback: assign(({ context, event }) => {
-      const feedback = planFeedbackFor(context, event)
-      if (feedback === null) return {}
-
-      const comment: PlanComment = {
-        id: `pc_local_${stamp()}`,
-        stepId: "",
-        body: feedback.text,
-        author: "user",
-        createdAt: new Date().toISOString(),
-        // This path routes the comment immediately rather than leaving it open in
-        // Plan Review, so the optimistic projection should say the same thing.
-        routed: true
-      }
-      return {
-        queued:
-          feedback.queuedId === null
-            ? context.queued
-            : context.queued.filter((item) => item.id !== feedback.queuedId),
-        messages: context.messages.map((message) =>
-          setPlanStatus(
-            addPlanComment(message, feedback.plan.id, comment),
-            feedback.plan.id,
-            "revising"
-          )
-        ),
-        sharedPlan:
-          context.sharedPlan?.id === feedback.plan.id
-            ? {
-                ...context.sharedPlan,
-                status: "revising" as const,
-                comments: [...context.sharedPlan.comments, comment]
-              }
-            : context.sharedPlan
-      }
-    }),
     /**
      * Hand the HEAD of the queue to the live turn at a tool boundary — the
      * Claude-Code feel the queue was missing.
@@ -1491,10 +1311,6 @@ export const conversationMachine = setup({
         queueParked: false,
         subagents: [],
         reviewer: keepReviewer(context.reviewer),
-        resumePlanId: null,
-        resumePlanRevision: null,
-        planDraft: null,
-        planDraftPresentationRequested: false,
         runStartedAt: Date.now(),
         lastOutcome: null,
         messages: [
@@ -1504,7 +1320,7 @@ export const conversationMachine = setup({
         ]
       }
     }),
-    foldEvent: assign(({ context, event }) => {
+    foldEvent: assign(({ context, event, self }) => {
       if (event.type !== "STREAM_EVENT") return {}
       const e = event.event
       // The harness has revealed that a task we already opened a tab for is
@@ -1565,46 +1381,16 @@ export const conversationMachine = setup({
         }
       }
       if (e._tag === "PlannotatorStateChanged") {
+        if (e.state.phase === "executing" && context.mode === "plan") {
+          self.send({ type: "SET_MODE", mode: "auto" })
+        }
         return { plannotator: e.state }
       }
-      if (e._tag === "PlanDraft") {
-        if (e.draft.phase === "cleared") return { planDraft: null }
-        // Drop a "complete" draft that arrives with no draft in flight. Draft
-        // events travel the pi event queue while `PlanProposed`/`PlanUpdated`
-        // are emitted directly from the submit tool's fiber, and nothing
-        // orders the two pipes: the proposal can win the race, clear the
-        // draft, and THEN the stale "complete" drains from the queue — which
-        // re-arms the draft, pins Plan Review on "Validating plan", and hides
-        // the Approve button the parked backend is waiting on. A genuine
-        // submission always streams "composing" deltas first, so a bare
-        // "complete" here is that stale tail, not a new draft.
-        if (e.draft.phase === "complete" && context.planDraft === null) return {}
-        const first = !context.planDraftPresentationRequested
-        return {
-          planDraft: e.draft,
-          planDraftPresentationRequested: true,
-          planDraftPresentationNonce:
-            context.planDraftPresentationNonce + (first ? 1 : 0)
-        }
-      }
       if (e._tag === "PlanProposed") {
-        // A proposal must be able to request presentation ITSELF. The draft
-        // pipe usually got there first (its "composing" snapshot bumped the
-        // nonce), but nothing guarantees it: atomic tool arguments, deltas
-        // coalesced under the draft throttle before a candidate formed, or the
-        // proposal winning the cross-pipe race all deliver a gated plan with
-        // the nonce never armed — the backend then parks on approval behind a
-        // surface that never opened. Deduped per run by the same flag the
-        // draft path sets, so a draft-then-proposal still presents once.
-        const first = !context.planDraftPresentationRequested
         return {
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e)),
           sharedPlanChatId: context.chatId,
-          sharedPlan: e.plan,
-          planDraft: null,
-          planDraftPresentationRequested: true,
-          planDraftPresentationNonce:
-            context.planDraftPresentationNonce + (first ? 1 : 0)
+          sharedPlan: e.plan
         }
       }
       // A `PlanUpdated` addresses a plan by id, and that plan part lives in the
@@ -1613,23 +1399,13 @@ export const conversationMachine = setup({
       // targets a message holding no plan, so every cross-turn progress tick is
       // silently dropped. Address the plan's own message instead.
       if (e._tag === "PlanUpdated") {
-        // A revision the operator must scrutinise (proposed/revising) is a
-        // gated wait exactly like a fresh proposal — it must also be able to
-        // present. Executing/progress updates stay silent: auto-opening on
-        // every tick would override an operator who closed the split.
-        const gated = e.plan.status === "proposed" || e.plan.status === "revising"
-        const first = gated && !context.planDraftPresentationRequested
         return {
           messages: context.messages.map((m) =>
             m.parts.some((p) => p._tag === "Plan" && p.plan.id === e.plan.id)
               ? applyStreamEvent(m, e)
               : m
           ),
-          sharedPlan: e.plan,
-          planDraft: null,
-          ...(gated ? { planDraftPresentationRequested: true } : {}),
-          planDraftPresentationNonce:
-            context.planDraftPresentationNonce + (first ? 1 : 0)
+          sharedPlan: e.plan
         }
       }
       const folded = patchLast(context.messages, (last) => applyStreamEvent(last, e))
@@ -1675,7 +1451,6 @@ export const conversationMachine = setup({
           subagents: settled,
           runStartedAt: null,
           lastOutcome: "done" as const,
-          planDraft: null,
           pendingExternalInstruction: null,
           pendingExternalAcceptances: []
         }
@@ -1687,7 +1462,6 @@ export const conversationMachine = setup({
           subagents: settled,
           runStartedAt: null,
           lastOutcome: "failed" as const,
-          planDraft: null,
           pendingExternalInstruction: null,
           pendingExternalAcceptances: []
         }
@@ -1961,52 +1735,6 @@ export const conversationMachine = setup({
         sharedPlan: event.plan
       }
     }),
-    // Plan mode (optimistic + fire-and-forget, like the gate/question actions).
-    // The runner echoes a `PlanUpdated` so the authoritative state reconciles.
-    optimisticPlanComment: assign(({ context, event }) => {
-      if (event.type !== "COMMENT_PLAN_STEP") return {}
-      const comment: PlanComment = {
-        id: `pc_local_${stamp()}`,
-        stepId: event.stepId,
-        body: event.body,
-        author: "user",
-        createdAt: new Date().toISOString(),
-        routed: true
-      }
-      return {
-        messages: context.messages.map((message) =>
-          setPlanStatus(
-            addPlanComment(message, event.planId, comment),
-            event.planId,
-            "revising"
-          )
-        )
-      }
-    }),
-    optimisticPlanRevise: assign(({ context, event }) => {
-      if (event.type !== "REVISE_PLAN") return {}
-      return { messages: context.messages.map((m) => setPlanStatus(m, event.planId, "revising")) }
-    }),
-    optimisticPlanApprove: assign(({ context, event }) => {
-      if (event.type !== "APPROVE_PLAN") return {}
-      const executionMode = event.executionMode ?? context.executionMode
-      return {
-        mode: executionMode,
-        executionMode,
-        planActionError: null,
-        messages: context.messages.map((m) => setPlanStatus(m, event.planId, "approved"))
-      }
-    }),
-    reconcilePlanApproval: assign(({ context, event }) => {
-      if (event.type !== "PLAN_APPROVAL_RESULT") return {}
-      if (event.result.status === "accepted") return { planActionError: null }
-      return {
-        planActionError: event.result.message,
-        messages: context.messages.map((message) =>
-          setPlanStatus(message, event.planId, "proposed")
-        )
-      }
-    }),
     persistProviderModel: assign(({ context, event }) => {
       if (event.type !== "SET_MODEL") return {}
       const session = withProviderModel(
@@ -2149,7 +1877,6 @@ export const conversationMachine = setup({
         applyStreamEvent(last, { _tag: "Failed", message: STOPPED_NOTE })
       ),
       runStartedAt: null,
-      planDraft: null,
       pendingExternalInstruction: null,
       pendingExternalAcceptances: [],
       // The OPERATOR stopped this run. Recording it as `failed` would notify
@@ -2260,14 +1987,8 @@ export const conversationMachine = setup({
       subagentFleetEvents: [],
       subagentControlOutcomes: [],
       foldsSinceCompaction: 0,
-      resumePlanId: null,
-      resumePlanRevision: null,
-      planActionError: null,
       sharedPlanChatId: null,
       sharedPlan: null,
-      planDraft: null,
-      planDraftPresentationRequested: false,
-      planDraftPresentationNonce: 0,
       // Rehydrate the last measured working set immediately. ContextManager owns
       // the trigger/phase snapshot, but the view reads this live field for the
       // meter's numerator; starting at zero hid the whole component after every
@@ -2436,12 +2157,9 @@ export const conversationMachine = setup({
         input: ({ context }) => ({
           sessionId: context.session.id,
           chatId: context.chatId,
-          resumeChatId: context.sharedPlanChatId ?? context.chatId,
           text: agentPrompt(context.pendingText, context.pendingAgentContext),
           displayText: context.pendingText,
           images: context.pendingImages,
-          resumePlanId: context.resumePlanId,
-          resumePlanRevision: context.resumePlanRevision,
           reasoning: context.reasoning,
           externalInstruction: context.pendingExternalInstruction
         })

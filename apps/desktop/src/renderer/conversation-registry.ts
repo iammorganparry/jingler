@@ -148,8 +148,8 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
     if (!key.startsWith(`${sessionId}:`)) continue
     setPlanPresent(
       key.slice(sessionId.length + 1),
-      snapshot.context.plannotator?.planFilePath !== null &&
-          snapshot.context.plannotator?.planFilePath !== undefined
+      snapshot.context.plannotator?.review !== null &&
+        snapshot.context.plannotator?.review !== undefined
     )
   }
   // The diff describes the WORKTREE, which every chat in the session shares —

@@ -96,13 +96,10 @@ describe("visibleTabs", () => {
     expect(ids[1]).toBe("github-issues.issue")
   })
 
-  it("shows Plan for any worktree-backed session, even before a plan exists", () => {
-    // The tab is now always present for a worktree session so the operator can
-    // author a plan for the agent; it needs a worktree to hold current-plan.mdx.
+  it("shows Plan only while an embedded review is active", () => {
     const s = session({ id: "a" })
-    expect(idsFor(s, { hasPlan: false })).toContain("plan")
+    expect(idsFor(s, { hasPlan: false })).not.toContain("plan")
     expect(idsFor(s, { hasPlan: true })).toContain("plan")
-    expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("plan")
   })
 
   it("shows Explanation only when a published artifact is present", () => {
@@ -492,19 +489,15 @@ describe("mount groups", () => {
     expect(screen.getByTestId("plan-presentation").textContent).toBe("conversation")
   })
 
-  it("opens empty Plan Review full-width so a roomy pane can start its first plan", () => {
+  it("hides Plan Review when no embedded review is active", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
         planSessions={new Set()}
-        renderConversation={(_session, view) => (
-          <span data-testid="plan-presentation">{view}</span>
-        )}
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
-    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    expect(screen.queryByRole("button", { name: "Plan Review" })).toBeNull()
   })
 
   it("opens the first streamed draft beside a roomy conversation", () => {

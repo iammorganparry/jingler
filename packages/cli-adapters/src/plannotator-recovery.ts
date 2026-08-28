@@ -1,20 +1,30 @@
-import { readFile } from "node:fs/promises"
-import { relative, resolve } from "node:path"
+import { readFile, realpath } from "node:fs/promises"
+import { isAbsolute, relative, resolve } from "node:path"
 
 type JsonRecord = Readonly<Record<string, unknown>>
 
-const record = (value: unknown): JsonRecord | null =>
-  typeof value === "object" && value !== null ? value as JsonRecord : null
+const isRecord = (value: unknown): value is JsonRecord =>
+  typeof value === "object" && value !== null
 
 export const plannotatorReviewPending = async (
   sessionFile: string | undefined,
   sessionsDir: string
 ): Promise<boolean> => {
   if (!sessionFile) return false
-  const root = resolve(sessionsDir)
-  const file = resolve(sessionFile)
+
+  let root: string
+  let file: string
+  try {
+    ;[root, file] = await Promise.all([
+      realpath(resolve(sessionsDir)),
+      realpath(resolve(sessionFile))
+    ])
+  } catch {
+    return false
+  }
+
   const rel = relative(root, file)
-  if (rel.startsWith("..") || rel === "" || file === root) return false
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false
 
   let source: string
   try {
@@ -27,10 +37,13 @@ export const plannotatorReviewPending = async (
   for (const line of source.split("\n")) {
     if (!line.trim()) continue
     try {
-      const entry = record(JSON.parse(line))
-      if (entry?.type !== "custom" || entry.customType !== "plannotator") continue
-      const data = record(entry.data)
-      pending = data?.phase === "planning" && data.reviewPending === true
+      const entry: unknown = JSON.parse(line)
+      if (!isRecord(entry) || entry.type !== "custom" || entry.customType !== "plannotator") {
+        continue
+      }
+      pending = isRecord(entry.data) &&
+        entry.data.phase === "planning" &&
+        entry.data.reviewPending === true
     } catch {
       return false
     }

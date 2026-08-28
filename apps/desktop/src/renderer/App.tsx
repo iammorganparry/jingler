@@ -1926,8 +1926,6 @@ function AuthedApp({
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}
-            planStepId={ctx.planStepId}
-            onPlanStepSelected={ctx.onPlanStepSelected}
             onRestore={restoreSession}
             onDelete={deleteSession}
             onInitialPromptConsumed={consumeInitialPrompt}

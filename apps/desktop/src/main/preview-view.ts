@@ -95,7 +95,8 @@ export interface PreviewViewServiceShape {
   /** Show the browser view and load `url` at `bounds`. Rejects non-http(s) URLs. */
   readonly openBrowser: (sessionId: string, chatId: string, url: string, bounds: BrowserBounds) => Effect.Effect<void, BrowserPreviewError>
   /** Show Plannotator's loopback-only review app in the Plan tab. */
-  readonly openPlan: (sessionId: string, chatId: string, url: string, bounds: BrowserBounds) => Effect.Effect<void, BrowserPreviewError>
+  readonly openPlan: (sessionId: string, chatId: string, url: string, bounds: BrowserBounds, themeCss: string) => Effect.Effect<void, BrowserPreviewError>
+  readonly setPlanTheme: (sessionId: string, chatId: string, themeCss: string) => Effect.Effect<void>
   readonly setPlanBounds: (sessionId: string, chatId: string, bounds: BrowserBounds) => Effect.Effect<void>
   readonly setPlanVisible: (sessionId: string, chatId: string, visible: boolean) => Effect.Effect<void>
   readonly closePlan: (sessionId: string, chatId: string) => Effect.Effect<void>
@@ -460,19 +461,54 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
           })
         : rejectBadUrl(url),
 
-    openPlan: (sessionId, chatId, url, bounds) =>
+    openPlan: (sessionId, chatId, url, bounds, themeCss) =>
       isLoopbackHttpUrl(url)
-        ? Effect.sync(() => {
+        ? Effect.gen(function* () {
             const key = browserOwnerKey(sessionId, chatId)
             const view = ensurePlan(sessionId, chatId)
-            if (!view) return
+            if (!view) {
+              return yield* Effect.fail(
+                new BrowserPreviewError({ message: "No application window to attach Plannotator" })
+              )
+            }
             const origin = new URL(url).origin
             planOrigins.set(key, origin)
             view.setBounds(toRect(bounds))
-            if (view.webContents.getURL() !== url) load(view, url)
+            if (view.webContents.getURL() !== url) {
+              yield* Effect.tryPromise({
+                try: async () => {
+                  try {
+                    await view.webContents.loadURL(url)
+                  } catch {
+                    await new Promise((resolve) => setTimeout(resolve, 100))
+                    await view.webContents.loadURL(url)
+                  }
+                },
+                catch: (cause) => {
+                  destroy(view)
+                  planViews.delete(key)
+                  planOrigins.delete(key)
+                  visiblePlanSessions.delete(key)
+                  return new BrowserPreviewError({
+                    message: cause instanceof Error
+                      ? `Plannotator failed to load: ${cause.message}`
+                      : "Plannotator failed to load"
+                  })
+                }
+              })
+            }
+            yield* Effect.promise(() =>
+              view.webContents.insertCSS(themeCss, { cssOrigin: "user" }).then(() => undefined).catch(() => undefined)
+            )
             setOwnerVisible(planViews, visiblePlanSessions, key, true)
           })
         : rejectBadPlanUrl(url),
+
+    setPlanTheme: (sessionId, chatId, themeCss) => Effect.promise(() => {
+      const view = planViews.get(browserOwnerKey(sessionId, chatId))
+      return view?.webContents.insertCSS(themeCss, { cssOrigin: "user" }).then(() => undefined).catch(() => undefined) ??
+        Promise.resolve()
+    }),
 
     setPlanBounds: (sessionId, chatId, bounds) => Effect.sync(() => {
       const key = browserOwnerKey(sessionId, chatId)

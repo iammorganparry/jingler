@@ -364,10 +364,7 @@ export const builtinTabContributions = (
     {
       id: BUILTIN_TAB.plan,
       ...meta.plan,
-      // Always present for a worktree-backed session, so the operator can open
-      // it and author a plan for the agent before any run has proposed one. The
-      // PlanReview screen renders a "Start a plan" empty state when none exists.
-      when: ({ session }) => session.worktreePath != null,
+      when: ({ hasPlan }) => hasPlan,
       mountGroup: CONVERSATION_GROUP,
       render: renderers.conversation
     },

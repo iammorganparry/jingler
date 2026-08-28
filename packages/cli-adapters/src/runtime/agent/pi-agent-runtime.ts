@@ -28,6 +28,7 @@ export interface PiSessionHandle {
   readonly subscribePlannotator?: (
     listener: (state: PlannotatorProjection) => void
   ) => () => void
+  readonly subscribePlannotatorNotice?: (listener: (message: string) => void) => () => void
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
   readonly subscribeFleet: (listener: (event: StreamEvent) => void) => () => void
   readonly controlSubagent: (
@@ -159,6 +160,9 @@ const subscribeToSession = (
   const unsubscribePlannotator = handle.subscribePlannotator?.((state) =>
     sink.emit({ _tag: "PlannotatorStateChanged", state })
   ) ?? (() => {})
+  const unsubscribePlannotatorNotice = handle.subscribePlannotatorNotice?.((message) =>
+    sink.emit({ _tag: "Failed", message })
+  ) ?? (() => {})
   const normalize = createPiEventNormalizer()
   let previousPlanPhase = handle.plannotatorPhase?.() ?? "idle"
   let reflectionStarted = false
@@ -238,6 +242,7 @@ const subscribeToSession = (
     finishReflection()
     unsubscribeFleet()
     unsubscribePlannotator()
+    unsubscribePlannotatorNotice()
     unsubscribeSession()
   }
 }

@@ -1,6 +1,6 @@
 /**
  * A tiny cross-component store of which sessions currently warrant a Plan Review
- * tab — i.e. the session has a streamed draft or a proposed plan in its transcript.
+ * tab — i.e. the session has an active embedded Plannotator review.
  * The conversation pane writes to it (it owns the live plan state); the tab bar
  * reads it to decide whether to surface the Plan tab. Mirrors `session-status.ts`.
  *

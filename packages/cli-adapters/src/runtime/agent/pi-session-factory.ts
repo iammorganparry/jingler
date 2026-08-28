@@ -115,6 +115,7 @@ const makeExtensionUIContext = (): ExtensionUIContext => ({
 
 const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request"
 const PLANNOTATOR_HOST_STATE_CHANNEL = "plannotator:host-state"
+const PLANNOTATOR_HOST_NOTICE_CHANNEL = "plannotator:host-notice"
 const PLANNOTATOR_TIMEOUT_MS = 5_000
 const decodePlannotatorProjection = Schema.decodeUnknownOption(PlannotatorProjection)
 interface PlannotatorPlanModeResult {
@@ -371,6 +372,7 @@ interface EmbeddedSession {
   readonly subscribePlannotator: (
     listener: (state: PlannotatorProjection) => void
   ) => () => void
+  readonly subscribePlannotatorNotice: (listener: (message: string) => void) => () => void
   readonly stopPlannotatorProjection: () => void
   readonly setMemoryReflectionActive: (active: boolean) => void
 }
@@ -448,15 +450,11 @@ const createEmbeddedSession = (
         tools: initialToolNames,
         customTools
       })
-      await result.session.bindExtensions({
-        uiContext: makeExtensionUIContext(),
-        mode: "rpc"
-      })
       let latestPlannotatorState: PlannotatorProjection | null = null
       const plannotatorListeners = new Set<
         (state: PlannotatorProjection) => void
       >()
-      const stopPlannotatorProjection = events.on(
+      const stopPlannotatorState = events.on(
         PLANNOTATOR_HOST_STATE_CHANNEL,
         (candidate) => {
           const decoded = decodePlannotatorProjection(candidate)
@@ -465,6 +463,28 @@ const createEmbeddedSession = (
           for (const listener of plannotatorListeners) listener(decoded.value)
         }
       )
+      const pendingPlannotatorNotices: string[] = []
+      const plannotatorNoticeListeners = new Set<(message: string) => void>()
+      const stopPlannotatorNotice = events.on(
+        PLANNOTATOR_HOST_NOTICE_CHANNEL,
+        (candidate) => {
+          if (
+            typeof candidate !== "object" ||
+            candidate === null ||
+            !("message" in candidate) ||
+            typeof candidate.message !== "string"
+          ) return
+          if (plannotatorNoticeListeners.size === 0) {
+            pendingPlannotatorNotices.push(candidate.message)
+            return
+          }
+          for (const listener of plannotatorNoticeListeners) listener(candidate.message)
+        }
+      )
+      await result.session.bindExtensions({
+        uiContext: makeExtensionUIContext(),
+        mode: "rpc"
+      })
       if (spec.mode === "plan") {
         await (options.enterPlannotatorPlanMode ?? enterPlannotatorPlanMode)(events)
         if (options.enterPlannotatorPlanMode === undefined) {
@@ -481,7 +501,15 @@ const createEmbeddedSession = (
           if (latestPlannotatorState !== null) listener(latestPlannotatorState)
           return () => plannotatorListeners.delete(listener)
         },
-        stopPlannotatorProjection,
+        subscribePlannotatorNotice: (listener) => {
+          plannotatorNoticeListeners.add(listener)
+          for (const message of pendingPlannotatorNotices.splice(0)) listener(message)
+          return () => plannotatorNoticeListeners.delete(listener)
+        },
+        stopPlannotatorProjection: () => {
+          stopPlannotatorState()
+          stopPlannotatorNotice()
+        },
         setMemoryReflectionActive: (active) => {
           memoryReflectionActive = active
         }
@@ -535,27 +563,31 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     contextWindow: embedded.contextWindow,
     plannotatorPhase: embedded.plannotatorPhase,
     subscribePlannotator: embedded.subscribePlannotator,
-    subscribe: (listener) => session.subscribe((event) => {
-      if (
-        event.type === "tool_execution_start" &&
-        event.toolName === "subagent" &&
-        typeof event.args === "object" &&
-        event.args !== null &&
-        "task" in event.args &&
-        typeof event.args.task === "string"
-      ) {
-        subagentTasks.set(event.toolCallId, event.args.task)
-      }
-      const progress = piSubagentProgress(
-        event,
-        "toolCallId" in event ? subagentTasks.get(event.toolCallId) : undefined
-      )
-      if (event.type === "tool_execution_end") subagentTasks.delete(event.toolCallId)
-      if (progress) lifecycle.progress(progress)
-      const attention = piSupervisorAttention(event)
-      if (attention) lifecycle.attention(attention)
-      listener(event)
-    }),
+    subscribePlannotatorNotice: embedded.subscribePlannotatorNotice,
+    subscribe: (listener) => {
+      const unsubscribeSession = session.subscribe((event) => {
+        if (
+          event.type === "tool_execution_start" &&
+          event.toolName === "subagent" &&
+          typeof event.args === "object" &&
+          event.args !== null &&
+          "task" in event.args &&
+          typeof event.args.task === "string"
+        ) {
+          subagentTasks.set(event.toolCallId, event.args.task)
+        }
+        const progress = piSubagentProgress(
+          event,
+          "toolCallId" in event ? subagentTasks.get(event.toolCallId) : undefined
+        )
+        if (event.type === "tool_execution_end") subagentTasks.delete(event.toolCallId)
+        if (progress) lifecycle.progress(progress)
+        const attention = piSupervisorAttention(event)
+        if (attention) lifecycle.attention(attention)
+        listener(event)
+      })
+      return unsubscribeSession
+    },
     subscribeFleet: (listener) => {
       const unsubscribe = Effect.runSync(fleetEvents.subscribe(listener))
       for (const event of lifecycle.replay()) {

@@ -588,8 +588,6 @@ function SessionPaneBody(props: SessionPaneProps) {
   // into a sliver.
   const splitAvailable =
     activeTab === BUILTIN_TAB.conversation &&
-    // The plan tab is now always present; only offer the split once there is an
-    // actual plan to show beside the conversation.
     (tabCtx.hasPlan || draftPlanSessionId === active.id) &&
     supportsAuxiliarySplit
   const splitOpen = split && splitAvailable

@@ -153,6 +153,7 @@ describe("pi session creation", () => {
     }
     const enterPlanMode = vi.fn(async (events: EventBus) => {
       events.emit("plannotator:host-state", projection)
+      events.emit("plannotator:host-notice", { message: "Plan review failed closed." })
       return { phase: "executing" as const }
     })
     const factory = makePiSessionFactory({
@@ -187,6 +188,9 @@ describe("pi session creation", () => {
     const projected = vi.fn()
     handle.subscribePlannotator?.(projected)
     expect(projected).toHaveBeenCalledWith(projection)
+    const notified = vi.fn()
+    handle.subscribePlannotatorNotice?.(notified)
+    expect(notified).toHaveBeenCalledWith("Plan review failed closed.")
     expect(JSON.parse(await readFile(join(agentDir, "plannotator.json"), "utf8")))
       .toMatchObject({ executionMode: "automatic" })
   })

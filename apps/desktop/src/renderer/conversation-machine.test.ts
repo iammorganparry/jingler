@@ -1863,9 +1863,11 @@ describe("conversationMachine — persisted status", () => {
 })
 
 describe("conversationMachine — Plannotator projection", () => {
-  it("stores Plannotator state outside the transcript", async () => {
+  it("stores Plannotator state outside the transcript and enters auto for execution", async () => {
     const actor = start()
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SET_MODE", mode: "plan" })
+    expect(actor.getSnapshot().context.mode).toBe("plan")
     actor.send({ type: "SEND", text: "plan it" })
     await waitFor(actor, (snapshot) => snapshot.matches("running"))
     const messageCount = actor.getSnapshot().context.messages.length
@@ -1887,6 +1889,8 @@ describe("conversationMachine — Plannotator projection", () => {
       checklist: [{ step: 1, text: "Implement", completed: false }]
     })
     expect(actor.getSnapshot().context.messages).toHaveLength(messageCount)
+    await waitFor(actor, (snapshot) => snapshot.context.mode === "auto")
+    expect(actor.getSnapshot().context.executionMode).toBe("auto")
     actor.stop()
   })
 })

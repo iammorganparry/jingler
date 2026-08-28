@@ -9,7 +9,7 @@ patchedDependencies:
     hash: 5d0da83f10c372826d076676ae0aa74bb85c68ef97323f793c3e2fb6e9e27845
     path: patches/@pierre__diffs@1.3.0-beta.11.patch
   '@plannotator/pi-extension@0.27.8':
-    hash: e41064a1afa6d9a7225dcd4ff053b40f71109a02ba1ef556800476625be32b53
+    hash: 34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce
     path: patches/@plannotator__pi-extension@0.27.8.patch
   pi-subagents@0.57.0:
     hash: 991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d
@@ -100,7 +100,7 @@ importers:
         version: 0.13.1
       '@plannotator/pi-extension':
         specifier: 0.27.8
-        version: 0.27.8(patch_hash=e41064a1afa6d9a7225dcd4ff053b40f71109a02ba1ef556800476625be32b53)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 0.27.8(patch_hash=34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-query':
         specifier: ^5.101.2
         version: 5.101.2(react@19.2.7)
@@ -484,7 +484,7 @@ importers:
         version: 14.2.0
       '@plannotator/pi-extension':
         specifier: 0.27.8
-        version: 0.27.8(patch_hash=e41064a1afa6d9a7225dcd4ff053b40f71109a02ba1ef556800476625be32b53)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 0.27.8(patch_hash=34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       effect:
         specifier: ^3.21.4
         version: 3.21.4
@@ -12814,7 +12814,7 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
-  '@plannotator/pi-extension@0.27.8(patch_hash=e41064a1afa6d9a7225dcd4ff053b40f71109a02ba1ef556800476625be32b53)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@plannotator/pi-extension@0.27.8(patch_hash=34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@earendil-works/pi-coding-agent': 0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
       '@joplin/turndown-plugin-gfm': 1.0.67

@@ -2279,8 +2279,12 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       chatId: Schema.String,
       url: Schema.String,
-      bounds: BrowserBounds
+      bounds: BrowserBounds,
+      themeCss: Schema.String
     }
+  }),
+  Rpc.make("PlannotatorPreview.setTheme", {
+    payload: { sessionId: Schema.String, chatId: Schema.String, themeCss: Schema.String }
   }),
   Rpc.make("PlannotatorPreview.setBounds", {
     payload: { sessionId: Schema.String, chatId: Schema.String, bounds: BrowserBounds }

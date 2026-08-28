@@ -1263,9 +1263,16 @@ export const rpc = {
     sessionId: string,
     chatId: string,
     url: string,
-    bounds: BrowserBounds
+    bounds: BrowserBounds,
+    themeCss: string
   ): Promise<void> =>
-    run((c) => c.PlannotatorPreview.open({ sessionId, chatId, url, bounds })),
+    run((c) => c.PlannotatorPreview.open({ sessionId, chatId, url, bounds, themeCss })),
+  plannotatorPreviewSetTheme: (
+    sessionId: string,
+    chatId: string,
+    themeCss: string
+  ): Promise<void> =>
+    run((c) => c.PlannotatorPreview.setTheme({ sessionId, chatId, themeCss })),
   plannotatorPreviewSetBounds: (
     sessionId: string,
     chatId: string,

@@ -689,19 +689,21 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             // turned `/babysit-pr …` into prose, and the turn came back instantly
             // with nothing to say — the empty "CLAUDE" block. When the operator
             // opens with a command, the context rides along AFTER it instead.
-            prompt: composeTurnPrompt(
-              promptText,
-              {
-                primer,
-                planPointer,
-                adhd,
-                tools: managedToolsNote(),
-                research: researchFirstNote(),
-                ask,
-                planProtocol
-              },
-              { leadWithText: leadsWithCommand(promptText) }
-            ),
+            prompt: promptText.trim() === "/plannotator-resume-review"
+              ? "/plannotator-resume-review"
+              : composeTurnPrompt(
+                  promptText,
+                  {
+                    primer,
+                    planPointer,
+                    adhd,
+                    tools: managedToolsNote(),
+                    research: researchFirstNote(),
+                    ask,
+                    planProtocol
+                  },
+                  { leadWithText: leadsWithCommand(promptText) }
+                ),
             images,
             mode,
             reasoning: reasoning ?? chat.reasoning ?? null,
