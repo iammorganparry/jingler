@@ -2,11 +2,8 @@ import type {
   Message,
   AgentRosterEntry,
   PeerAgentMessageResult,
-  PermissionMode,
   PiRunSpec,
   ExplanationPayload,
-  Plan,
-  PlanPrd,
   QuestionAnswer,
   QuestionRequest,
   StreamEvent,
@@ -44,15 +41,6 @@ export const inactiveRuntimeActivity = {
   registerBackgroundStop: (_stop: RuntimeBackgroundStop) => Effect.void
 } satisfies Pick<AgentRuntimeContext, "publishEvent" | "registerBackgroundStop">
 
-export type RuntimePlanDecision =
-  | {
-      readonly _tag: "Approve"
-      readonly mode: PermissionMode
-      readonly plan?: Plan
-    }
-  | { readonly _tag: "Revise"; readonly feedback: string }
-  | { readonly _tag: "Reject" }
-
 export interface AgentRuntimeContext {
   /** Main-process-only capability attachments for this run. */
   readonly mcp?: JinglerMcpAttachments
@@ -66,12 +54,8 @@ export interface AgentRuntimeContext {
     request: RuntimePermissionRequest
   ) => Effect.Effect<RuntimePermissionDecision>
   readonly askQuestion: (request: QuestionRequest) => Effect.Effect<ReadonlyArray<QuestionAnswer>>
-  readonly saveDraftPlan: (plan: PlanPrd) => Effect.Effect<void>
   /** Publish or replace the session's focused visual explanation. */
   readonly publishExplanation?: (explanation: ExplanationPayload) => Effect.Effect<void, Error>
-  /** Discard the canonical plan; the next submission proposes fresh. Optional: only `AgentRunner` supplies it. */
-  readonly discardPlan?: () => Effect.Effect<void>
-  readonly proposePlan: (plan: PlanPrd) => Effect.Effect<RuntimePlanDecision>
   readonly listPeerAgents?: () => Effect.Effect<ReadonlyArray<AgentRosterEntry>>
   readonly messagePeerAgent?: (
     targetChatId: string,

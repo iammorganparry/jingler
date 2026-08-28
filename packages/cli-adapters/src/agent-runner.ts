@@ -3,18 +3,12 @@ import type {
   AgentRosterEntry,
   ApprovalGate,
   Attachment,
-  ContentPart,
-  ExecutionMode,
   ExplanationPayload,
   ExternalInstructionIdentity,
   GateDecision,
   Message,
   PeerAgentMessageResult,
   PermissionMode,
-  Plan,
-  PlanApprovalResult,
-  PlanComment,
-  PlanPrdStage,
   QuestionAnswer,
   QuestionRequest,
   ReasoningSetting,
@@ -29,53 +23,36 @@ import {
   BranchDriftError,
   CURRENT_RUNTIME_CONTRACTS,
   defaultModeFor,
-  findApprovedPlan,
   isBackgroundTaskEvent,
   isFileMutationTool,
   isSubagentEvent,
-  planDocumentToPlan,
-  planStageSemanticFingerprint,
-  planTaskProtocolTokens,
   MEMORY_CONFIG_DEFAULT,
   PLAN_AUTO_RUN_DEFAULT,
-  resumePlanPrompt,
   setQuestionAnswers,
   settleStreaming,
   STOPPED_NOTE,
-  stripPlanResultProtocol,
   userMessage,
-  workspaceModeOf,
-  type PlanPrd
+  workspaceModeOf
 } from "@jingler/core"
 import { FileSystem, type Path } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import { Cause, Deferred, Effect, Fiber, Mailbox, Option, Ref, Stream } from "effect"
 import { adhdNote } from "./adhd-prompt.js"
-import { modeOnApproval, modeToRestore } from "./exec-mode.js"
+import { modeToRestore } from "./exec-mode.js"
 import { isTerminal, routeOf } from "./turn-events.js"
 import {
   composeTurnPrompt,
   leadsWithCommand,
   managedToolsNote,
-  planPointerNote,
   researchFirstNote
 } from "./turn-prompt.js"
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { routePeerAgentMessage } from "./peer-agent-coordination.js"
-import { planExecutionNote } from "./plan-prompt.js"
-import { capturePlanEmission, stripPlanJsonBlock } from "./plan-json.js"
-import {
-  planTaskProgressFingerprint,
-  planTaskProgressFromText,
-  planExecutionCheckpoints,
-  planWithExecutionProgress,
-  resumeCanonicalPlanPrompt
-} from "./plan-task-progress.js"
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
-import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
+import { AgentTurnDriver } from "./agent-turn-driver.js"
 import type {
   PermissionDecision,
   PermissionRequest,
@@ -100,9 +77,7 @@ import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
-import { PlanStore } from "./plan-store.js"
 import { ExplanationStore } from "./explanation-store.js"
-import { resolveAnnotations } from "./plan-mutations.js"
 import {
   appendSteeredReply,
   collectSteeredReply,
@@ -117,45 +92,6 @@ import {
   releaseSessionRun,
   reserveSessionRun
 } from "./run-coordinator.js"
-
-const approvalAccepted: PlanApprovalResult = { status: "accepted" }
-const approvalRefused = (
-  message: string,
-  latestRevision: number
-): PlanApprovalResult => ({
-  status: "refused",
-  message,
-  latestRevision
-})
-const failedStream = (message: string): Stream.Stream<StreamEvent> => {
-  const event: StreamEvent = { _tag: "Failed", message }
-  return Stream.make(event)
-}
-
-/** Keep planner advertisement and approval validation on one live route set. */
-export interface PlanEvidenceMarker {
-  readonly criterionId: string
-  readonly status: "passed" | "failed"
-  readonly evidence: string
-}
-
-/** Parse the deliberately line-oriented evidence protocol from an agent reply. */
-export const planEvidenceFromText = (text: string): ReadonlyArray<PlanEvidenceMarker> =>
-  text.split(/\r?\n/).flatMap((line) => {
-    const match =
-      /^\s*PLAN_RESULT\s+criterion=(\S+)\s+status=(passed|failed)\s+evidence=(\S[\s\S]*?)\s*$/.exec(
-        line
-      )
-    return match === null
-      ? []
-      : [
-          {
-            criterionId: match[1]!,
-            status: match[2]! as "passed" | "failed",
-            evidence: match[3]!
-          }
-        ]
-  })
 
 /**
  * How long `stop` waits for an interrupted run to finish unwinding before it
@@ -200,6 +136,11 @@ export const isContextOverflowFailure = (message: string): boolean =>
   )
 
 
+type RunReplyWaiter = SteeredReplyWaiter
+
+/** Windows separators → POSIX for stable touched-file reporting. */
+const normalizePath = (path: string): string => path.replace(/\\/g, "/")
+
 /** An opaque per-run identity — object identity is the whole point. */
 type RunToken = Record<never, never>
 
@@ -228,9 +169,6 @@ interface RunFiber {
  * transcript, and pushing a `PlanUpdated` so an attached renderer stays in sync.
  */
 interface ActiveRun {
-  readonly readPlan: (planId: string) => Effect.Effect<Plan | null>
-  readonly applyPlan: (planId: string, f: (plan: Plan) => Plan) => Effect.Effect<void>
-  readonly markPlanExecution: (planId: string) => Effect.Effect<void>
   readonly steer: (
     text: string,
     images: ReadonlyArray<Attachment>,
@@ -248,48 +186,12 @@ interface ActiveRun {
   readonly replyGate: Effect.Semaphore
 }
 
-const PLAN_HTML_SUBMISSION_OPENING = /(?:^|\n)````html[ \t]*(?:\r?\n|$)/i
-
-type RunReplyWaiter = SteeredReplyWaiter
-
-/** Windows separators → POSIX, so path comparison has one shape to reason about. */
-const normalizePath = (p: string): string => p.replace(/\\/g, "/")
-
-/**
- * Do two paths name the same file? One side is typically an absolute worktree
- * path (the tool's edit target), the other a repo-relative path (a plan step's
- * declared `files:`), so a suffix match is right — but ONLY anchored at a
- * separator. An unanchored `endsWith` makes "a.ts" match "src/schema.ts" and
- * ticks a step that had nothing to do with the edit.
- */
-const samePath = (a: string, b: string): boolean =>
-  a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
-
-const findPlan = (msg: Message, planId: string): Plan | null => {
-  for (const p of msg.parts) if (p._tag === "Plan" && p.plan.id === planId) return p.plan
-  return null
-}
-
-/** Bundle the operator's un-routed step comments into a plain revision instruction. */
-const revisionText = (plan: Plan, comments: ReadonlyArray<PlanComment>): string => {
-  const lines = [
-    "I've reviewed the plan. Please revise it to address these comments, then call ExitPlanMode again with the updated plan:"
-  ]
-  for (const c of comments) {
-    const step = plan.steps.find((s) => s.id === c.stepId)
-    const where = step ? `Step ${step.number} (${step.title})` : "General"
-    lines.push(`- ${where}: ${c.body}`)
-  }
-  return lines.join("\n")
-}
-
 type PromptEnv =
   | AgentTurnDriver
   | ConfigService
   | SessionStore
   | TranscriptStore
   | BackgroundTaskStore
-  | PlanStore
   | ContextManager
   | OpenConnectorService
   | BrowserControlMcpService
@@ -440,312 +342,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         yield* approvals.answer(sessionId, chatId, requestId, answers)
       })
 
-    /** Resolve a session's pending plan (guards session ownership). */
-    const resolvePlan = (sessionId: string, planId: string, decision: PlanDecision) =>
-      approvals.settlePlan(sessionId, planId, decision)
-
-    /**
-     * A pending plan (by id) and its live run, gated on session ownership — the
-     * lookup the comment / revise / approve handlers all begin with. `run` is
-     * undefined when the plan isn't this session's or its run has already gone.
-     */
-    const pendingPlanRun = (sessionId: string, planId: string) =>
-      Effect.gen(function* () {
-        const pending = yield* approvals.pendingPlan(planId)
-        const run =
-          pending?.sessionId === sessionId
-            ? (yield* Ref.get(active)).get(pending.chatId)
-            : undefined
-        return { pending, run } as const
-      })
-
-    const canonicalPlan = (sessionId: string, chatId: string, planId: string) =>
-      Effect.gen(function* () {
-        const session = yield* SessionStore.get(sessionId).pipe(
-          Effect.orElseSucceed(() => null)
-        )
-        if (session?.worktreePath == null) return null
-        const document = yield* PlanStore.readDocument(
-          session.worktreePath,
-          session.id,
-          chatId
-        )
-        return document?.id === planId
-          ? { document, worktreePath: session.worktreePath }
-          : null
-      })
-
-    /** Thread a comment onto a plan step (persisted + streamed); doesn't resume the agent. */
-    const commentPlanStep = (
-      sessionId: string,
-      planId: string,
-      stepId: string,
-      body: string,
-      anchor?: { readonly quote: string; readonly prefix: string; readonly suffix: string }
-    ) =>
-      Effect.gen(function* () {
-        const { pending, run } = yield* pendingPlanRun(sessionId, planId)
-        if (pending === null || run === undefined) return
-        const canonical = yield* canonicalPlan(sessionId, pending.chatId, planId)
-        const saved =
-          canonical === null
-            ? Option.none()
-            : yield* PlanStore.addAnnotation(canonical.worktreePath, {
-                sessionId: canonical.document.sessionId,
-                producingChatId: canonical.document.producingChatId,
-                planId,
-                baseRevision: canonical.document.revision,
-                // "" targets a section/global comment (no stage).
-                stageId: stepId === "" ? null : stepId,
-                body,
-                author: "user",
-                ...(anchor ? { anchor } : {})
-              }).pipe(Effect.option)
-        const persisted = Option.isSome(saved)
-          ? planDocumentToPlan(saved.value).comments.at(-1)
-          : undefined
-        const cn = yield* nextId
-        const now = yield* Effect.sync(() => new Date().toISOString())
-        const comment: PlanComment =
-          persisted ?? {
-            id: `pc_${sessionId}_${cn}`,
-            stepId,
-            body,
-            author: "user",
-            createdAt: now,
-            routed: false
-          }
-        yield* run.applyPlan(planId, (plan) => ({
-          ...plan,
-          comments: [...plan.comments, comment],
-          steps: plan.steps.map((s) => (s.id === stepId ? { ...s, flagged: true } : s))
-        }))
-      })
-
-    /** Route the open comments back to the agent as a revision and resume planning. */
-    const revisePlan = (sessionId: string, planId: string) =>
-      Effect.gen(function* () {
-        const { pending, run } = yield* pendingPlanRun(sessionId, planId)
-        if (pending === null || run === undefined) return
-        const canonical = yield* canonicalPlan(sessionId, pending.chatId, planId)
-        const plan =
-          canonical === null
-            ? yield* run.readPlan(planId)
-            : planDocumentToPlan(canonical.document)
-        if (plan === null) return
-        const open = plan.comments.filter((c) => !c.routed && c.author === "user")
-        const routedIds = new Set(open.map((comment) => comment.id))
-        const routedPlan =
-          canonical === null
-            ? null
-            : resolveAnnotations(canonical.document.plan, routedIds)
-        const feedback =
-          canonical === null || routedPlan === null
-            ? revisionText(plan, open)
-            : [
-                `Revise canonical plan revision ${canonical.document.revision}.`,
-                "Treat the full plan below, including human edits and annotations, as the source of truth.",
-                'Return a complete replacement as one ```json block with "mode":"submit".',
-                "",
-                "```json",
-                JSON.stringify({ mode: "submit", plan: routedPlan }, null, 2),
-                "```"
-              ].join("\n")
-        if (canonical !== null && routedPlan !== null) {
-          yield* PlanStore.updateDocument(canonical.worktreePath, {
-            sessionId: canonical.document.sessionId,
-            producingChatId: canonical.document.producingChatId,
-            planId,
-            baseRevision: canonical.document.revision,
-            plan: routedPlan,
-            author: "user",
-            // A status-only mutation (comments flushed to resolved). Skip the
-            // user-edit reconcile: its `mergeAnnotation` keeps the PRIOR thread
-            // authoritative and would discard the just-resolved status.
-            semantic: false,
-            status: "revising"
-          }).pipe(Effect.ignore)
-        }
-        // Mark the plan under revision + flush its comments as routed.
-        yield* run.applyPlan(planId, () => ({
-          ...plan,
-          status: "revising",
-          comments: plan.comments.map((c) => (c.routed ? c : { ...c, routed: true }))
-        }))
-        yield* resolvePlan(sessionId, planId, PlanDecision.Revise({ feedback }))
-      })
-
-    /** Approve a plan: mark it approved, restore the exec mode, and start execution. */
-    const approvePlan = (
-      sessionId: string,
-      planId: string,
-      executionMode?: ExecutionMode,
-      expectedRevision?: number
-    ) =>
-      Effect.gen(function* () {
-        const { pending, run } = yield* pendingPlanRun(sessionId, planId)
-        const canonical = pending === null
-          ? null
-          : yield* canonicalPlan(sessionId, pending.chatId, planId)
-        if (
-          canonical !== null &&
-          expectedRevision !== undefined &&
-          canonical.document.revision !== expectedRevision
-        ) {
-          return approvalRefused(
-            `Approval refused because canonical plan revision ${canonical.document.revision} replaced reviewed revision ${expectedRevision}. Review the latest revision and approve again.`,
-            canonical.document.revision
-          )
-        }
-        const exactPlan =
-          canonical === null
-            ? run === undefined
-              ? null
-              : yield* run.readPlan(planId)
-            : planWithExecutionProgress(canonical.document)
-        if (exactPlan === null) {
-          return approvalRefused(
-            "Approval refused because the plan is no longer available.",
-            canonical?.document.revision ?? 0
-          )
-        }
-        if (canonical !== null) {
-          const approval = yield* PlanStore.updateDocument(canonical.worktreePath, {
-            sessionId: canonical.document.sessionId,
-            producingChatId: canonical.document.producingChatId,
-            planId,
-            baseRevision: canonical.document.revision,
-            plan: canonical.document.plan,
-            author: "user",
-            status: "executing"
-          }).pipe(Effect.either)
-          if (approval._tag === "Left") {
-            return approvalRefused(
-              approval.left.message,
-              approval.left._tag === "PlanConflictError"
-                ? approval.left.latestRevision
-                : canonical.document.revision
-            )
-          }
-        }
-        if (run !== undefined) {
-          yield* run.applyPlan(planId, () => ({ ...exactPlan, status: "approved" }))
-          yield* run.markPlanExecution(planId)
-        }
-        // Precedence lives in `exec-mode.ts`, where the reason `prior` must beat
-        // `configDefault` is stated once — getting that pair the wrong way round
-        // re-gates every command of the execution just approved.
-        const mode = modeOnApproval({
-          explicit: executionMode,
-          prior: pending ? (yield* Ref.get(priorModes)).get(pending.chatId) : undefined,
-          configDefault: pending ? (yield* Ref.get(execDefaults)).get(pending.chatId) : undefined
-        })
-        // Restore the exec mode live (canUseTool re-reads it) and persist it.
-        if (pending) yield* setMode(sessionId, pending.chatId, mode)
-        yield* resolvePlan(
-          sessionId,
-          planId,
-          PlanDecision.Approve({
-            mode,
-            plan: { ...exactPlan, status: "approved" }
-          })
-        )
-        return approvalAccepted
-      })
-
-    /** Jingler's provider-independent execution fallback. */
-    const resolveExecMode = (): Effect.Effect<PermissionMode> =>
-      Effect.succeed(defaultModeFor())
-
-    /** The plan with `planId` from a session's persisted transcript, or null. */
-    const sessionPlan = (chatId: string, planId: string): Effect.Effect<Plan | null, never, PromptEnv> =>
-      TranscriptStore.list(chatId).pipe(
-        Effect.orElseSucceed(() => [] as ReadonlyArray<Message>),
-        Effect.map((messages) => messages.reduce<Plan | null>((found, m) => findPlan(m, planId) ?? found, null))
-      )
-
-    /**
-     * Approve a plan whose original run is gone (e.g. after an app restart, when
-     * the plan is "stale"): there's no parked Deferred to resume, so re-drive
-     * execution as a FRESH run. Set the session's default exec mode, then prompt
-     * the agent with the plan embedded (the harness has no memory of the prior
-     * planning conversation across a restart). Returns the run's event stream.
-     */
-    function resumePlan(
-      sessionId: string,
-      planId: string
-    ): Stream.Stream<StreamEvent, never, PromptEnv>
-    function resumePlan(
-      sessionId: string,
-      chatId: string,
-      planId: string,
-      expectedRevision?: number
-    ): Stream.Stream<StreamEvent, never, PromptEnv>
-    function resumePlan(
-      sessionId: string,
-      chatIdOrPlanId: string,
-      maybePlanId?: string,
-      expectedRevision?: number
-    ): Stream.Stream<StreamEvent, never, PromptEnv> {
-      const chatId = maybePlanId === undefined ? sessionId : chatIdOrPlanId
-      const planId = maybePlanId ?? chatIdOrPlanId
-      return Stream.unwrap(
-        Effect.gen(function* () {
-          const canonical = yield* canonicalPlan(sessionId, chatId, planId)
-          if (
-            canonical !== null &&
-            expectedRevision !== undefined &&
-            canonical.document.revision !== expectedRevision
-          ) {
-            return failedStream(
-              `Plan execution refused because canonical revision ${canonical.document.revision} replaced reviewed revision ${expectedRevision}. Review the latest revision and approve again.`
-            )
-          }
-          const plan =
-            canonical === null
-              ? yield* sessionPlan(chatId, planId)
-              : planDocumentToPlan(canonical.document)
-          if (plan === null) return Stream.empty
-          if (canonical !== null) {
-            const execution = yield* PlanStore.updateDocument(canonical.worktreePath, {
-              sessionId: canonical.document.sessionId,
-              producingChatId: canonical.document.producingChatId,
-              planId,
-              baseRevision: canonical.document.revision,
-              plan: canonical.document.plan,
-              author: "user",
-              status: "executing"
-            }).pipe(Effect.either)
-            if (execution._tag === "Left") {
-              return failedStream(
-                `Plan execution could not start: ${execution.left.message}`
-              )
-            }
-          }
-          // Restore the mode the operator actually runs this session in. Plan mode
-          // is never persisted, so `session.mode` is their real exec mode (e.g.
-          // "auto"); fall back to the CLI-config default only if it's absent or a
-          // legacy "plan". This keeps a stale-plan re-drive from re-gating.
-          const persisted = (yield* getSessionOrNull(sessionId))?.chats.find(
-            (chat) => chat.id === chatId
-          )?.mode
-          const restore =
-            persisted && persisted !== "plan" ? persisted : yield* resolveExecMode()
-          yield* setMode(sessionId, chatId, restore)
-          return prompt(
-            sessionId,
-            chatId,
-            canonical === null
-              ? resumePlanPrompt(plan)
-              : resumeCanonicalPlanPrompt(canonical.document),
-            [],
-            undefined,
-            plan.id
-          )
-        })
-      )
-    }
-
     /**
      * Halt a session's agent: settle whatever it's blocked on, then interrupt the
      * run itself.
@@ -770,21 +366,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         const chatId = requestedChatId ?? sessionId
         // A stopped agent must not stay parked: gates deny, questions answer empty.
         yield* approvals.releaseChat(sessionId, chatId)
-        // Plans reject, and the rejection is marked on the live turn first so the
-        // transcript says what happened. The registry answers WHICH plans; marking
-        // them stays here, where the run's accumulator lives.
-        const run = (yield* Ref.get(active)).get(chatId)
-        yield* Effect.forEach(
-          yield* approvals.pendingPlanIds(sessionId, chatId),
-          (planId) =>
-            (run
-              ? run.applyPlan(planId, (pl) => ({ ...pl, status: "rejected" }))
-              : Effect.void
-            ).pipe(
-              Effect.zipRight(approvals.settlePlan(sessionId, planId, PlanDecision.Reject()))
-            ),
-          { discard: true }
-        )
         // Now kill the run. `Fiber.interrupt` awaits the finalizers, so once this
         // returns the agent is genuinely stopped — not merely asked to stop.
         //
@@ -897,7 +478,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT
           // Cache the user's configured default exec mode so approving a plan can
           // restore it.
-          const execDefault = yield* resolveExecMode()
+          const execDefault = defaultModeFor()
           yield* Ref.update(execDefaults, (m) => new Map(m).set(chatId, execDefault))
           // The agent always runs in the session's recorded working checkout.
           //
@@ -963,12 +544,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               )
             }
           }
-          // Saved plans for this worktree, so a "implement/continue the plan" turn
-          // can be pointed at the plan file on disk (best-effort — never blocks).
-          const savedPlans =
-            worktreePath.length > 0
-              ? yield* PlanStore.list(worktreePath).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
-              : []
           const mode: PermissionMode = sessionMode
           yield* ContextManager.bindContext(chatId, sessionId)
           /**
@@ -1008,7 +583,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           // Renamed from `planNote` when the plan-mode protocol note arrived: two
           // different plan-related prefixes with one name is a trap.
-          const planPointer = savedPlans.length > 0 ? planPointerNote(worktreePath, savedPlans) : null
+          const planPointer = null
           const primer = digest === null ? null : renderPrimer(digest, tail)
           // ADHD mode rides in the same per-turn prefix as the primer and plan
           // pointer so a Settings change applies immediately. Its own scope makes
@@ -1031,33 +606,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const priorMessages = yield* TranscriptStore.list(chatId).pipe(
             Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
           )
-          const activePlan = worktreePath.length === 0
-            ? null
-            : yield* PlanStore.readDocument(
-                worktreePath,
-                sessionId,
-                chatId
-              ).pipe(Effect.orElseSucceed(() => null))
-          const activePlanExecutionId =
-            planExecutionId ??
-            (activePlan !== null &&
-            activePlan.producingChatId === chatId &&
-            ["approved", "executing", "needs-verification"].includes(activePlan.status)
-              ? activePlan.id
-              : null)
-          // An operator message mid-execution folds into the plan rather than
-          // derailing it; the note carries the live checkpoint state so the
-          // agent always has exact ids and fingerprints to mark against.
-          const planProtocol =
-            mode === "plan"
-              ? null
-              : activePlanExecutionId !== null
-                ? planExecutionNote(
-                    activePlan !== null && activePlan.id === activePlanExecutionId
-                      ? planExecutionCheckpoints(activePlan)
-                      : []
-                  )
-                : null
+          const activePlanExecutionId = null
+          const planProtocol = null
           const operatorText = displayText ?? text
           const promptText = text
           // Resolve every remote MCP source once, here, where the full service
@@ -1175,7 +725,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const env = yield* Effect.context<
             | TranscriptStore
             | SessionStore
-            | PlanStore
             | BackgroundTaskStore
             // `emit` hands every context reading to the manager, which may fork a
             // digest run — so the manager's own dependencies have to be captured
@@ -1226,27 +775,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             }])
           }
           const acc = yield* Ref.make(assistant)
-          // The exact ```json blocks `saveDraftPlan` captured this turn, scrubbed
-          // from the reply on settle (the plan lives in Plan Review, not the chat).
-          const savedDraftBlocks = yield* Ref.make<ReadonlyArray<string>>([])
           const turnSteer = yield* Ref.make<SteerTurn | null>(null)
           const steeredReply = yield* Ref.make<RunReplyWaiter | null>(null)
           const replyGate = yield* Effect.makeSemaphore(1)
           const turnMutation = yield* Effect.makeSemaphore(1)
-          // Seeded from the approval turn's explicit id OR the derived active
-          // plan: a follow-up operator message mid-execution is still a
-          // plan-execution turn, and its PLAN_TASK/PLAN_RESULT markers must
-          // persist exactly like the approval turn's. Leaving this null for
-          // follow-ups silently dropped every status the agent reported.
-          const executingPlanId = yield* Ref.make<string | null>(
-            planExecutionId ?? activePlanExecutionId
-          )
-          // Status settling stays EXPLICIT: only a turn that was started as an
-          // execution run (or promoted one mid-turn) may flip executing →
-          // needs-verification/done on settle. A chat message that merely rode
-          // along during execution reports progress but never ends the run.
-          const settlingPlanId = yield* Ref.make<string | null>(planExecutionId ?? null)
-
           const out = yield* Mailbox.make<StreamEvent>()
           if (externalInstruction !== undefined) {
             yield* out.offer({
@@ -1300,303 +832,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * fed through the SAME validated pipeline as the main agent's —
            * id validation, dedupe, dropped-marker steer all included.
            */
-          const subagentPlanText = yield* Ref.make(new Map<string, string>())
-          // Marker keys already reported as dropped — the accumulated text
-          // re-parses on every delta, so without this one bad marker would warn
-          // hundreds of times per turn. Gates the warning only, never the
-          // apply: once the plan is amended the marker persists normally.
-          const droppedTaskMarkers = yield* Ref.make(new Set<string>())
-          // Unknown ids already steered back to the agent this run.
-          const steeredUnknownPlanIds = yield* Ref.make(new Set<string>())
-
-          // toolUseId → the file an edit tool is writing, remembered at ToolStart so
-          // its ToolEnd can mark the matching plan step done (see markPlanProgress).
-          const editTargets = yield* Ref.make(new Map<string, string>())
-
-          // The whole transcript, best-effort — the plan under execution usually
-          // lives in an EARLIER message than this turn's accumulator.
-          const allMessages: Effect.Effect<ReadonlyArray<Message>> = TranscriptStore.list(chatId).pipe(
-            Effect.provide(env),
-            Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
-          )
-
-          // Find a plan and the message holding it. A plan part stays in the
-          // message of the turn it was PROPOSED in, while execution runs on over
-          // later turns — each with its own accumulator. So looking only at `acc`
-          // finds the plan on the proposing turn and never again. Accumulator
-          // first (it's the freshest copy of this turn's message), then the
-          // persisted transcript.
-          const locatePlan = (
-            planId: string
-          ): Effect.Effect<{ readonly plan: Plan; readonly messageId: string } | null> =>
-            Effect.gen(function* () {
-              const cur = yield* Ref.get(acc)
-              const inAcc = findPlan(cur, planId)
-              if (inAcc !== null) return { plan: inAcc, messageId: cur.id }
-              const msgs = yield* allMessages
-              for (let i = msgs.length - 1; i >= 0; i--) {
-                const found = findPlan(msgs[i]!, planId)
-                if (found !== null) return { plan: found, messageId: msgs[i]!.id }
-              }
-              return null
-            })
-
-          // Read the current plan, wherever in the transcript it lives.
-          const readPlan = (planId: string): Effect.Effect<Plan | null> =>
-            Effect.map(locatePlan(planId), (located) => located?.plan ?? null)
-
-          // Replace a plan part in place: update the accumulator + persisted
-          // transcript, and push a `PlanUpdated` so an attached renderer syncs.
-          // Addresses the plan's OWN message — `patchLast` would hit this turn's
-          // message, which for a plan proposed on an earlier turn holds no plan.
-          const applyPlan = (planId: string, f: (plan: Plan) => Plan): Effect.Effect<void> =>
-            Effect.gen(function* () {
-              const located = yield* locatePlan(planId)
-              if (located === null) return
-              const nextPlan = f(located.plan)
-              const patch = (m: Message): Message => ({
-                ...m,
-                parts: m.parts.map((p) =>
-                  p._tag === "Plan" && p.plan.id === planId ? { _tag: "Plan", plan: nextPlan } : p
-                )
-              })
-              const cur = yield* Ref.get(acc)
-              if (located.messageId === cur.id) {
-                const next = patch(cur)
-                yield* Ref.set(acc, next)
-                yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
-              } else {
-                // The plan is behind us: patch its message directly and leave the
-                // accumulator alone (it holds a different, later message).
-                yield* TranscriptStore.patchById(chatId, located.messageId, patch).pipe(Effect.ignore)
-              }
-              // The transcript is a projection. Canonical HTML writes happen
-              // through revision-aware PlanStore operations at the intent that
-              // caused them; deriving HTML back from this legacy card would lose
-              // operator-authored PRD sections.
-              yield* out.offer({ _tag: "PlanUpdated", plan: nextPlan })
-            }).pipe(Effect.provide(env), Effect.asVoid)
-
-          // When an edit lands during execution of an approved plan, mark the plan
-          // step whose proposed files include the edited path as "done" — tying live
-          // progress back to the plan. Path matching is suffix-based so an absolute
-          // worktree path matches a step's repo-relative file.
-          const markPlanProgress = (toolId: string): Effect.Effect<void> =>
-            Effect.gen(function* () {
-              const target = (yield* Ref.get(editTargets)).get(toolId)
-              if (target === undefined) return
-              // Accumulator first (the plan was proposed this turn), else the
-              // transcript (it was proposed earlier and execution has moved on).
-              const cur = yield* Ref.get(acc)
-              const inAcc = cur.parts.find((p) => p._tag === "Plan" && p.plan.status === "approved")
-              const executing =
-                inAcc !== undefined && inAcc._tag === "Plan"
-                  ? { plan: inAcc.plan, messageId: cur.id }
-                  : findApprovedPlan(yield* allMessages)
-              if (executing === null) return
-              const t = normalizePath(target)
-              const step = executing.plan.steps.find(
-                (s) => s.status !== "done" && s.files.some((f) => samePath(t, normalizePath(f.path)))
-              )
-              if (step === undefined) return
-              yield* applyPlan(executing.plan.id, (pl) => ({
-                ...pl,
-                steps: pl.steps.map((s) => (s.id === step.id ? { ...s, status: "done" as const } : s))
-              }))
-            })
-
-          const recordPlanEvidence = (text: string): Effect.Effect<void> =>
-            Effect.gen(function* () {
-              if (worktreePath.length === 0) return
-              const activePlanId = yield* Ref.get(executingPlanId)
-              if (activePlanId === null) return
-              const markers = planEvidenceFromText(text)
-              if (markers.length === 0) return
-              const initial = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
-              if (
-                initial === null ||
-                initial.id !== activePlanId ||
-                !["approved", "executing", "needs-verification"].includes(initial.status)
-              ) return
-              let document: NonNullable<typeof initial> = initial
-              for (const marker of markers) {
-                if (
-                  !document.plan.stages.some((stage) =>
-                    stage.acceptance.some((criterion) => criterion.id === marker.criterionId)
-                  )
-                ) continue
-                const updated = yield* PlanStore.setCriterionStatus(worktreePath, {
-                  sessionId,
-                  producingChatId: chatId,
-                  planId: document.id,
-                  baseRevision: document.revision,
-                  criterionId: marker.criterionId,
-                  status: marker.status,
-                  evidence: marker.evidence,
-                  author: "agent"
-                }).pipe(Effect.either)
-                if (updated._tag === "Right") document = updated.right
-              }
-              const complete = document.plan.stages.every((stage) =>
-                stage.acceptance.every(
-                  (criterion) =>
-                    criterion.status === "passed" || criterion.status === "waived"
-                )
-              )
-              if (complete) {
-                yield* PlanStore.updateDocument(worktreePath, {
-                  sessionId,
-                  producingChatId: chatId,
-                  planId: document.id,
-                  baseRevision: document.revision,
-                  plan: document.plan,
-                  author: "agent",
-                  status: "done"
-                }).pipe(Effect.ignore)
-              }
-            }).pipe(Effect.provide(env), Effect.ignore)
-
-          /**
-           * Persist task checkpoints from accumulated assistant output as soon
-           * as a complete marker arrives. The provider may split one line across
-           * arbitrary deltas, so parsing individual events would lose progress
-           * if the app stopped before the terminal response.
-           */
-          /**
-           * A dropped marker is invisible progress: warn once per unique marker
-           * (not per stream delta), and close the loop with the agent — steer a
-           * one-time corrective so it amends the canonical plan via
-           * jingler_submit_plan instead of silently losing the checkpoint.
-           */
-          const reportDroppedTaskMarker = (
-            key: string,
-            warning: string,
-            unknownId: string
-          ): Effect.Effect<void> =>
-            Effect.gen(function* () {
-              const dropped = yield* Ref.get(droppedTaskMarkers)
-              if (dropped.has(key)) return
-              yield* Ref.update(droppedTaskMarkers, (s) => new Set(s).add(key))
-              yield* Effect.logWarning(warning)
-              const steered = yield* Ref.get(steeredUnknownPlanIds)
-              if (steered.has(unknownId)) return
-              yield* Ref.update(steeredUnknownPlanIds, (s) => new Set(s).add(unknownId))
-              const handler = yield* Ref.get(turnSteer)
-              if (handler === null) return
-              // Forked: this runs on the event-processing path, and a slow
-              // steer channel must never stall the stream behind its timeout.
-              yield* invokeSteer(
-                handler,
-                [
-                  // Deliberately avoids the literal marker token: display
-                  // stripping scrubs protocol text from transcripts, and this
-                  // notice may be echoed into one.
-                  `[plan-sync] Your plan checkpoint marker referenced "${unknownId}", which is not in the canonical plan — the marker was dropped and the operator cannot see that progress.`,
-                  "Call jingler_submit_plan with the COMPLETE updated plan (mid-execution amendments apply immediately, no re-approval), then re-emit the checkpoint using the updated plan's ids."
-                ].join("\n"),
-                []
-              ).pipe(Effect.asVoid, Effect.forkDaemon, Effect.asVoid)
-            })
-
-          const recordPlanTaskProgress = (text: string): Effect.Effect<void> =>
-            Effect.gen(function* () {
-              if (worktreePath.length === 0) return
-              const activePlanId = yield* Ref.get(executingPlanId)
-              if (activePlanId === null) return
-              const canonical = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
-              if (canonical === null || canonical.id !== activePlanId) return
-              const seen = yield* Ref.get(persistedTaskMarkers)
-              for (const marker of planTaskProgressFromText(text)) {
-                const key = [
-                  marker.stageId,
-                  marker.stageFingerprint,
-                  marker.taskId,
-                  marker.status
-                ].join("\u0000")
-                if (seen.has(key)) continue
-                const stage = canonical.plan.stages.find(
-                  (candidate) => candidate.id === marker.stageId
-                )
-                if (stage === undefined) {
-                  yield* reportDroppedTaskMarker(
-                    key,
-                    `Plan task marker names unknown stage ${marker.stageId}; dropped.`,
-                    `stage ${marker.stageId}`
-                  )
-                  continue
-                }
-                if ((stage.tasks ?? []).every((task) => task.id !== marker.taskId)) {
-                  yield* reportDroppedTaskMarker(
-                    key,
-                    `Plan task marker names unknown task ${marker.taskId} in stage ${marker.stageId}; dropped.`,
-                    `task ${marker.taskId} in stage ${marker.stageId}`
-                  )
-                  continue
-                }
-                // Stage + task ids are the identity; a stale or missing
-                // fingerprint downgrades to a warning instead of a silent drop
-                // — an invisible status was exactly the failure mode reported.
-                if (
-                  marker.stageFingerprint.length > 0 &&
-                  planTaskProgressFingerprint(stage) !== marker.stageFingerprint
-                ) {
-                  yield* Effect.logWarning(
-                    `Plan task marker fingerprint for stage ${marker.stageId} does not match the current revision; applying by id.`
-                  )
-                }
-                const persisted = yield* PlanStore.setTaskStatusLatest(
-                  worktreePath,
-                  {
-                    sessionId,
-                    producingChatId: chatId,
-                    planId: activePlanId,
-                    stageId: marker.stageId,
-                    taskId: marker.taskId,
-                    status: marker.status,
-                    expectedStageFingerprint: planStageSemanticFingerprint(stage)
-                  }
-                ).pipe(Effect.either)
-                if (persisted._tag === "Right") {
-                  yield* Ref.update(
-                    persistedTaskMarkers,
-                    (current) => new Set(current).add(key)
-                  )
-                } else {
-                  yield* Effect.logError(
-                    `Could not persist plan task ${marker.taskId}: ${persisted.left.message}`
-                  )
-                }
-              }
-            }).pipe(Effect.provide(env), Effect.ignore)
-
-          const finalizePlanVerification = (): Effect.Effect<void> =>
-            Effect.gen(function* () {
-              if (worktreePath.length === 0) return
-              const activePlanId = yield* Ref.get(settlingPlanId)
-              if (activePlanId === null) return
-              const document = yield* PlanStore.readDocument(worktreePath, sessionId, chatId)
-              if (
-                document === null ||
-                document.id !== activePlanId ||
-                document.status !== "executing"
-              ) return
-              const complete = document.plan.stages.every((stage) =>
-                stage.acceptance.every(
-                  (criterion) =>
-                    criterion.status === "passed" || criterion.status === "waived"
-                )
-              )
-              yield* PlanStore.updateDocument(worktreePath, {
-                sessionId,
-                producingChatId: chatId,
-                planId: document.id,
-                baseRevision: document.revision,
-                plan: document.plan,
-                author: "agent",
-                status: complete ? "done" : "needs-verification"
-              }).pipe(Effect.ignore)
-            }).pipe(Effect.provide(env), Effect.ignore)
-
           // Fold each event into the assistant message + persist, then surface it.
           // Native steering enters from an RPC fiber, so serialize it with the
           // adapter's event producer. A turn/completed notification arriving in
@@ -1634,41 +869,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 return
               }
               if (route === "subagent" || route === "stream-only") {
-                // Renderer only. Neither belongs on the persisted main turn —
-                // but a delegated WORKER's plan checkpoints must still reach
-                // the plan, or the panel sits frozen for the whole delegation.
-                // Parsed here, from per-worker accumulated text, through the
-                // same validated pipeline as the main agent's markers; the
-                // event itself still bypasses the persisted turn unchanged.
-                if (
-                  route === "subagent" &&
-                  event._tag === "Assistant" &&
-                  event.agentId !== undefined
-                ) {
-                  const agentId = event.agentId
-                  const accumulated = yield* Ref.modify(subagentPlanText, (current) => {
-                    const previous = current.get(agentId) ?? ""
-                    // Bounded: only the tail can hold an unfinished marker, and
-                    // the dedupe set already remembers every applied one.
-                    const text = (previous + event.text).slice(-65_536)
-                    const next = new Map(current)
-                    next.set(agentId, text)
-                    return [text, next] as const
-                  })
-                  yield* recordPlanTaskProgress(accumulated)
-                }
-                if (event._tag === "SubagentEnded") {
-                  const settled = (yield* Ref.get(subagentPlanText)).get(event.id)
-                  if (settled !== undefined) {
-                    yield* recordPlanTaskProgress(settled)
-                    yield* recordPlanEvidence(settled)
-                    yield* Ref.update(subagentPlanText, (current) => {
-                      const next = new Map(current)
-                      next.delete(event.id)
-                      return next
-                    })
-                  }
-                }
                 yield* out.offer(event)
                 return
               }
@@ -1682,67 +882,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   tokens: event.tokens
                 }).pipe(Effect.provide(env), Effect.ignore)
               }
-              let next = applyStreamEvent(yield* Ref.get(acc), event)
-              if (event._tag === "Assistant") {
-                const accumulatedText = next.parts
-                  .filter((part) => part._tag === "Text")
-                  .map((part) => part.text)
-                  .join("\n")
-                yield* recordPlanTaskProgress(accumulatedText)
-              }
-              if (event._tag === "Done") {
-                const settledText = next.parts
-                  .filter((part) => part._tag === "Text")
-                  .map((part) => part.text)
-                  .join("\n")
-                yield* recordPlanTaskProgress(settledText)
-                yield* recordPlanEvidence(settledText)
-              }
-              if (
-                (event._tag === "Done" || event._tag === "Failed") &&
-                (yield* Ref.get(executingPlanId)) !== null
-              ) {
-                next = {
-                  ...next,
-                  parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
-                    if (part._tag !== "Text") return [part]
-                    return planTaskProtocolTokens(stripPlanResultProtocol(part.text)).flatMap(
-                      (token): ReadonlyArray<ContentPart> =>
-                        token.kind === "progress"
-                          ? [{
-                              _tag: "PlanTaskProgress",
-                              stageId: token.progress.stageId,
-                              taskId: token.progress.taskId,
-                              status: token.progress.status
-                            }]
-                          : token.text.length === 0
-                            ? []
-                            : [{ ...part, text: token.text }]
-                    )
-                  })
-                }
-              }
-              // A "draft" emission mirrors into Plan Review but leaves its raw
-              // ```json block in the reply (submit blocks are scrubbed at promotion).
-              // On settle, remove exactly the blocks `saveDraftPlan` captured this
-              // turn — never a plan the agent merely quoted — so the transcript
-              // reads as prose, not a wall of JSON.
-              if (event._tag === "Done") {
-                const draftBlocks = yield* Ref.get(savedDraftBlocks)
-                if (draftBlocks.length > 0) {
-                  next = {
-                    ...next,
-                    parts: next.parts.flatMap((part): ReadonlyArray<ContentPart> => {
-                      if (part._tag !== "Text") return [part]
-                      const text = draftBlocks.reduce(
-                        (acc, block) => stripPlanJsonBlock(acc, block),
-                        part.text
-                      )
-                      return text.length === 0 ? [] : [{ ...part, text }]
-                    })
-                  }
-                }
-              }
+              const next = applyStreamEvent(yield* Ref.get(acc), event)
               yield* Ref.set(acc, next)
               yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
               // Persist the pi session id (carried on Started) so the NEXT
@@ -1758,7 +898,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }
               // Remember an edit's target path so its ToolEnd can tie back to a step.
               if (event._tag === "ToolStart" && isFileMutationTool(event.name) && event.target) {
-                yield* Ref.update(editTargets, (m) => new Map(m).set(event.id, event.target!))
                 const path = normalizePath(event.target).replace(
                   `${normalizePath(worktreePath).replace(/\/$/, "")}/`,
                   ""
@@ -1777,7 +916,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // `approved`/`executing`.
               if (event._tag === "Done") {
                 yield* ContextManager.settle(chatId).pipe(Effect.ignore)
-                yield* finalizePlanVerification()
                 const assistantText = next.parts
                   .filter((part) => part._tag === "Text")
                   .map((part) => part.text)
@@ -1793,10 +931,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }).pipe(Effect.ignore)
               }
               yield* out.offer(event)
-              // After the tool card lands, reconcile plan progress off a successful edit.
-              if (event._tag === "ToolEnd" && event.status === "success") {
-                yield* markPlanProgress(event.id)
-              }
               // Hand every context reading to the manager, but only let a SETTLED
               // turn start a digest.
               //
@@ -1878,208 +1012,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               return answers
             })
 
-          const proposePlan = (
-            plan: PlanPrd,
-            submittedBlock?: string
-          ): Effect.Effect<PlanDecision> =>
-            Effect.gen(function* () {
-              let basePlanId: string | undefined
-              let automaticAmendment = false
-              if (worktreePath.length > 0) {
-                const current = yield* PlanStore.readDocument(
-                  worktreePath,
-                  sessionId,
-                  chatId
-                ).pipe(Effect.provide(env))
-                automaticAmendment =
-                  current !== null &&
-                  current.producingChatId === chatId &&
-                  ["approved", "executing", "needs-verification"].includes(current.status)
-                basePlanId =
-                  current !== null &&
-                  current.producingChatId === chatId &&
-                  current.status !== "rejected" &&
-                  current.status !== "done"
-                    ? current.id
-                    : undefined
-              }
-              const proposedPlan = plan
-              const approvalPlanId = basePlanId ?? randomUUID()
-              const revisingCanonicalPlan = basePlanId !== undefined
-              // The Plan-shaped card emitted to the transcript; replaced by the
-              // exact canonical projection once PlanStore promotes it.
-              let canonicalPlan: Plan = planDocumentToPlan({
-                id: approvalPlanId,
-                sessionId,
-                producingChatId: chatId,
-                revision: 1,
-                status: "proposed",
-                plan: proposedPlan,
-                updatedAt: new Date().toISOString(),
-                updatedBy: "agent"
-              })
-              // Once the operator has approved this agent's canonical plan, a
-              // complete re-emission is an amendment, not a second proposal.
-              // Reconcile it immediately and keep execution with the producing
-              // agent; the first approval is the only approval gate.
-              if (automaticAmendment && basePlanId !== undefined && worktreePath.length > 0) {
-                const promotion = yield* PlanStore.promote(
-                  sessionId,
-                  worktreePath,
-                  chatId,
-                  proposedPlan,
-                  { id: approvalPlanId, basePlanId, status: "executing" }
-                ).pipe(Effect.provide(env), Effect.either)
-                if (promotion._tag === "Left") {
-                  yield* emit({ _tag: "Failed", message: promotion.left.message })
-                  return PlanDecision.Reject()
-                }
-                canonicalPlan = promotion.right.plan
-                yield* Ref.set(executingPlanId, canonicalPlan.id)
-                yield* Ref.set(settlingPlanId, canonicalPlan.id)
-                if (submittedBlock !== undefined) {
-                  yield* turnMutation.withPermits(1)(
-                    Effect.gen(function* () {
-                      const current = yield* Ref.get(acc)
-                      const next = {
-                        ...current,
-                        parts: current.parts.flatMap((part): ReadonlyArray<ContentPart> => {
-                          if (part._tag !== "Text") return [part]
-                          const text = stripPlanJsonBlock(part.text, submittedBlock)
-                          return text.length === 0 ? [] : [{ ...part, text }]
-                        })
-                      }
-                      yield* Ref.set(acc, next)
-                      yield* TranscriptStore.patchLast(chatId, () => next).pipe(
-                        Effect.provide(env),
-                        Effect.ignore
-                      )
-                    })
-                  )
-                }
-                yield* emit({ _tag: "PlanUpdated", plan: canonicalPlan })
-                // Replay checkpoints against the amended plan: a marker emitted
-                // BEFORE the amendment landed was dropped against the old
-                // revision, and if no further assistant delta arrives it would
-                // stay lost. The dedup sets gate warnings only, never applies.
-                const amendedText = (yield* Ref.get(acc)).parts
-                  .filter((part) => part._tag === "Text")
-                  .map((part) => part.text)
-                  .join("\n")
-                yield* recordPlanTaskProgress(amendedText)
-                return PlanDecision.Approve({
-                  mode: modeOnApproval({
-                    prior: mode === "plan" ? undefined : mode,
-                    configDefault: execDefault
-                  }),
-                  plan: canonicalPlan
-                })
-              }
-              // Register the approval waiter BEFORE PlanStore makes the proposal
-              // visible to file watchers. The announce effect then promotes and
-              // publishes the exact canonical projection while the gate is live.
-              return yield* approvals.awaitPlan(
-                sessionId,
-                chatId,
-                approvalPlanId,
-                Effect.gen(function* () {
-                  if (worktreePath.length > 0) {
-                    const promotion = yield* PlanStore.promote(
-                      sessionId,
-                      worktreePath,
-                      chatId,
-                      proposedPlan,
-                      {
-                        id: approvalPlanId,
-                        ...(basePlanId === undefined ? {} : { basePlanId }),
-                        status: "proposed"
-                      }
-                    ).pipe(Effect.provide(env), Effect.either)
-                    if (promotion._tag === "Left") {
-                      yield* emit({
-                        _tag: "Failed",
-                        message: promotion.left.message
-                      })
-                      return yield* Effect.interrupt
-                    }
-                    // PlanStore owns validation and amendment reconciliation.
-                    // Publish exactly its projection so transcript and Plan Review
-                    // share one identity.
-                    canonicalPlan = promotion.right.plan
-                  }
-                  // The agent streams the plan's JSON block before we promote it.
-                  // Once the canonical Plan card owns the document, remove only that
-                  // exact visible transport. Payload-only plans omit `submittedBlock`.
-                  if (submittedBlock !== undefined) {
-                    yield* turnMutation.withPermits(1)(
-                      Effect.gen(function* () {
-                        const current = yield* Ref.get(acc)
-                        const next = {
-                          ...current,
-                          parts: current.parts.flatMap(
-                            (part): ReadonlyArray<ContentPart> => {
-                              if (part._tag !== "Text") return [part]
-                              const text = stripPlanJsonBlock(part.text, submittedBlock)
-                              return text.length === 0 ? [] : [{ ...part, text }]
-                            }
-                          )
-                        }
-                        yield* Ref.set(acc, next)
-                        yield* TranscriptStore.patchLast(chatId, () => next).pipe(
-                          Effect.provide(env),
-                          Effect.ignore
-                        )
-                      })
-                    )
-                  }
-                  yield* emit(
-                    revisingCanonicalPlan
-                      ? { _tag: "PlanUpdated", plan: canonicalPlan }
-                      : { _tag: "PlanProposed", plan: canonicalPlan }
-                  )
-                })
-              )
-            })
-
-          // The marker-free DRAFT path: persist an emitted plan as a draft
-          // `PlanDocument` so Plan Review populates for iteration, WITHOUT the
-          // `approvals.awaitPlan` gate `proposePlan` parks on. The file write is
-          // all it takes — `Plan.watch` streams the canonical doc to the
-          // renderer. Never downgrade a real plan the operator already owns: only
-          // fill an empty slot, or refresh an existing AGENT draft (amend, so the
-          // revision advances as the selected agent iterates). A user-authored draft
-          // is the operator actively editing — an agent draft must not reconcile
-          // over it and silently discard their content. Best-effort — a plan write
-          // must never fail the turn.
-          const saveDraftPlan = (plan: PlanPrd, block?: string): Effect.Effect<void> =>
-            worktreePath.length === 0
-              ? Effect.void
-              : PlanStore.readDocument(worktreePath, sessionId, chatId).pipe(
-                  Effect.provide(env),
-                  Effect.orElseSucceed(() => null),
-                  Effect.flatMap((current) =>
-                    current !== null &&
-                    (current.status !== "draft" || current.updatedBy === "user")
-                      ? Effect.void
-                      : PlanStore.promoteDocument(worktreePath, {
-                          sessionId,
-                          producingChatId: chatId,
-                          plan,
-                          status: "draft",
-                          author: "agent",
-                          ...(current !== null
-                            ? { basePlanId: current.id }
-                            : {})
-                        }).pipe(Effect.provide(env), Effect.ignore)
-                  ),
-                  // Record the captured transport so the settle handler scrubs
-                  // exactly this block from the reply (never a quoted example).
-                  Effect.zipRight(
-                    block === undefined
-                      ? Effect.void
-                      : Ref.update(savedDraftBlocks, (blocks) => [...blocks, block])
-                  )
-                )
 
           const publishExplanation = (explanation: ExplanationPayload) =>
             worktreePath.length === 0
@@ -2090,20 +1022,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   chatId,
                   explanation
                 ).pipe(Effect.provide(env), Effect.asVoid)
-
-          // Discard the canonical plan document so the NEXT submission takes the
-          // fresh-proposal path (new plan id, approval gate) instead of amending
-          // the discarded one. Clears this run's execution/settle plan refs; the
-          // watch stream tells every renderer surface the plan is gone.
-          const discardPlan = (): Effect.Effect<void> =>
-            worktreePath.length === 0
-              ? Effect.void
-              : PlanStore.discard(worktreePath, sessionId, chatId).pipe(
-                  Effect.provide(env),
-                  Effect.ignore,
-                  Effect.zipRight(Ref.set(executingPlanId, null)),
-                  Effect.zipRight(Ref.set(settlingPlanId, null))
-                )
 
           // Publish live handles so comment/revise/approve can reach this run;
           // torn down when the run ends so out-of-band calls become no-ops.
@@ -2169,12 +1087,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
           yield* Ref.update(active, (m) =>
             new Map(m).set(chatId, {
-              readPlan,
-              applyPlan,
-              markPlanExecution: (planId) =>
-                Ref.set(executingPlanId, planId).pipe(
-                  Effect.zipRight(Ref.set(settlingPlanId, planId))
-                ),
               steer,
               clearReplyWaiter: (waiter) =>
                 Ref.update(steeredReply, (current) =>
@@ -2214,23 +1126,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 currentSession.chats.filter((chat) => chat.id !== chatId),
                 (chat) =>
                   Effect.gen(function* () {
-                  const document = currentSession.worktreePath
-                    ? yield* PlanStore.readDocument(
-                        currentSession.worktreePath,
-                        sessionId,
-                        chat.id
-                      )
-                    : null
-                  const stage = document?.plan.stages.find(
-                    (candidate) =>
-                      candidate.tasks?.some((task) => task.status === "in-progress")
-                  )
                   return {
                     chatId: chat.id,
                     title: chat.title ?? "Untitled agent",
                     status: running.has(chat.id) ? "running" as const : "idle" as const,
                     task: chat.title,
-                    planStage: stage?.title ?? null,
+                    planStage: null,
                     touchedFiles: [...(files.get(chat.id) ?? [])],
                     updatedAt: chat.updatedAt
                   }
@@ -2276,10 +1177,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             emit,
             canUseTool,
             askQuestion,
-            proposePlan,
-            saveDraftPlan,
             publishExplanation,
-            discardPlan,
             listPeerAgents,
             messagePeerAgent,
             registerBackgroundStop,
@@ -2729,10 +1627,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       setMode,
       steer,
       stop,
-      commentPlanStep,
-      revisePlan,
-      approvePlan,
-      resumePlan,
+      commentPlanStep: (..._args: ReadonlyArray<unknown>) => Effect.void,
+      revisePlan: (..._args: ReadonlyArray<unknown>) => Effect.void,
+      approvePlan: (..._args: ReadonlyArray<unknown>) => Effect.succeed({
+        status: "refused" as const,
+        message: "Plannotator owns plan approval.",
+        latestRevision: 0
+      }),
+      resumePlan: (..._args: ReadonlyArray<unknown>) =>
+        Stream.fromIterable<StreamEvent>([{
+          _tag: "Failed",
+          message: "Plannotator owns plan execution."
+        }]),
       forgetChat
     } as const
   })

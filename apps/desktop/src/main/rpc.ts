@@ -42,7 +42,6 @@ import {
   type SecretStore,
   SecretStoreUnavailable,
   planDraftPost,
-  PlanStore,
   PluginRegistry,
   PluginSecretStore,
   type PluginSecretStoreUnavailable,
@@ -102,9 +101,6 @@ import {
   type IssueReference,
   IssueSummary,
   issueReferenceForProvider,
-  PlanConflictError,
-  PlanPersistenceError,
-  type PlanValidationError,
   resolveFindings,
   ReviewError,
   PluginError,
@@ -141,10 +137,6 @@ import type {
   CreateSessionInput,
   IssueAutomations,
   Message,
-  PlanCommentMentionDelivery,
-  PlanCommentMessageDeliveryState,
-  PlanDocument,
-  PlanMentionDelivery,
   PermissionMode,
   PluginCatalog,
   LoadedPlugin,
@@ -895,13 +887,6 @@ export const sessionCreationOptions = (
   defaultReasoning: input.reasoning ?? undefined,
 });
 
-const planMutationConflict = (message: string): PlanConflictError =>
-  new PlanConflictError({
-    message,
-    latestRevision: 0,
-    latest: null,
-  });
-
 /** `Explanation.watch` handler, shared with the RPC integration test. */
 export const explanationWatch = (sessionId: string) =>
   Stream.unwrap(
@@ -913,227 +898,6 @@ export const explanationWatch = (sessionId: string) =>
       const store = yield* ExplanationStore;
       return store.watch(session.worktreePath, session.id);
     }),
-  );
-
-/** `Plan.watch` handler, shared with the RPC integration test. */
-export const planWatch = (sessionId: string, chatId: string) =>
-  Stream.unwrap(
-    Effect.gen(function* () {
-      const session = yield* SessionStore.get(sessionId).pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      if (session === null || !session.worktreePath) return Stream.empty;
-      const store = yield* PlanStore;
-      return store.watch(
-        session.worktreePath,
-        session.id,
-        chatId,
-      );
-    }),
-  );
-
-/** Internal ordered append used by dispatch/relay flows and their CAS tests. */
-export const planAppendMessage = (input: {
-  readonly sessionId: string;
-  readonly chatId: string;
-  readonly planId: string;
-  readonly baseRevision: number;
-  readonly annotationId: string;
-  readonly body: string;
-  readonly authorKind: "user" | "agent";
-  readonly authorId: string;
-  readonly mentionedParticipantIds: ReadonlyArray<string>;
-  readonly deliveryState: PlanCommentMessageDeliveryState;
-}) =>
-  SessionStore.get(input.sessionId).pipe(
-    Effect.flatMap((session) =>
-      session.worktreePath == null
-        ? Effect.fail(
-            planMutationConflict("This session has no plan worktree."),
-          )
-        : PlanStore.appendAnnotationMessage(session.worktreePath, {
-            ...input,
-            producingChatId: input.chatId,
-          }),
-    ),
-    Effect.catchTag("SessionNotFoundError", () =>
-      Effect.fail(planMutationConflict("The plan session no longer exists.")),
-    ),
-  );
-
-/** `Plan.updateMessageDelivery` handler. */
-export const planUpdateMessageDelivery = (input: {
-  readonly sessionId: string;
-  readonly chatId: string;
-  readonly planId: string;
-  readonly baseRevision: number;
-  readonly annotationId: string;
-  readonly messageId: string;
-  readonly deliveryState: PlanCommentMessageDeliveryState;
-  readonly author: "user" | "agent";
-}) =>
-  SessionStore.get(input.sessionId).pipe(
-    Effect.flatMap((session) =>
-      session.worktreePath == null
-        ? Effect.fail(
-            planMutationConflict("This session has no plan worktree."),
-          )
-        : PlanStore.updateAnnotationMessageDelivery(
-            session.worktreePath,
-            { ...input, producingChatId: input.chatId },
-          ),
-    ),
-    Effect.catchTag("SessionNotFoundError", () =>
-      Effect.fail(planMutationConflict("The plan session no longer exists.")),
-    ),
-  );
-
-const planUpdateMentionDeliveries = (input: {
-  readonly sessionId: string;
-  readonly chatId: string;
-  readonly planId: string;
-  readonly baseRevision: number;
-  readonly annotationId: string;
-  readonly messageId: string;
-  readonly deliveries: ReadonlyArray<PlanCommentMentionDelivery>;
-  readonly deliveryState: PlanCommentMessageDeliveryState;
-  readonly author: "user" | "agent";
-}) =>
-  SessionStore.get(input.sessionId).pipe(
-    Effect.flatMap((session) =>
-      session.worktreePath == null
-        ? Effect.fail(
-            planMutationConflict("This session has no plan worktree."),
-          )
-        : PlanStore.updateAnnotationMentionDeliveries(
-            session.worktreePath,
-            { ...input, producingChatId: input.chatId },
-          ),
-    ),
-    Effect.catchTag("SessionNotFoundError", () =>
-      Effect.fail(planMutationConflict("The plan session no longer exists.")),
-    ),
-  );
-
-/** `Plan.setThreadResolved` handler. */
-export const planSetThreadResolved = (input: {
-  readonly sessionId: string;
-  readonly chatId: string;
-  readonly planId: string;
-  readonly baseRevision: number;
-  readonly annotationId: string;
-  readonly resolved: boolean;
-  readonly author: "user" | "agent";
-}) =>
-  SessionStore.get(input.sessionId).pipe(
-    Effect.flatMap((session) =>
-      session.worktreePath == null
-        ? Effect.fail(
-            planMutationConflict("This session has no plan worktree."),
-          )
-        : PlanStore.setAnnotationResolved(session.worktreePath, {
-            ...input,
-            producingChatId: input.chatId,
-          }),
-    ),
-    Effect.catchTag("SessionNotFoundError", () =>
-      Effect.fail(planMutationConflict("The plan session no longer exists.")),
-    ),
-  );
-
-interface PlanDispatchMessageInput {
-  readonly sessionId: string;
-  readonly chatId: string;
-  readonly planId: string;
-  readonly baseRevision: number;
-  readonly annotationId: string;
-  readonly body: string;
-  readonly authorId: string;
-  readonly mentionedParticipantIds: ReadonlyArray<string>;
-}
-
-/**
- * Append a comment to the canonical plan. Plan comments now belong to the
- * selected workspace agent, so there is no participant fan-out or worker relay.
- */
-export const planDispatchMessage = (input: PlanDispatchMessageInput) =>
-  planAppendMessage({
-    ...input,
-    authorKind: "user",
-    mentionedParticipantIds: [],
-    deliveryState: "sent",
-  }).pipe(
-    Effect.flatMap((document) => {
-      const messageId = document.plan.annotations
-        .find((annotation) => annotation.id === input.annotationId)
-        ?.messages.at(-1)?.id;
-      if (messageId === undefined) {
-        return Effect.fail(
-          planMutationConflict(
-            "The recorded plan comment is no longer available.",
-          ),
-        );
-      }
-      return Effect.succeed({
-        document,
-        messageId,
-        deliveries: [] as ReadonlyArray<PlanMentionDelivery>,
-      });
-    }),
-  );
-
-interface PlanDispatchExistingMessageInput {
-  readonly sessionId: string;
-  readonly chatId: string;
-  readonly planId: string;
-  readonly baseRevision: number;
-  readonly annotationId: string;
-  readonly messageId: string;
-}
-
-/** Existing comments need no separate dispatch in the single-agent model. */
-export const planDispatchExistingMessage = (
-  input: PlanDispatchExistingMessageInput,
-) =>
-  SessionStore.get(input.sessionId).pipe(
-    Effect.flatMap((session) =>
-      session.worktreePath == null
-        ? Effect.fail(
-            planMutationConflict("This session has no plan worktree."),
-          )
-        : PlanStore.readDocument(session.worktreePath, session.id, input.chatId),
-    ),
-    Effect.flatMap((document) =>
-      document === null ||
-      document.id !== input.planId ||
-      document.revision !== input.baseRevision
-        ? Effect.fail(
-            planMutationConflict(
-              "The canonical plan changed before the comment could be recorded.",
-            ),
-          )
-        : (() => {
-            const message = document.plan.annotations
-              .find((annotation) => annotation.id === input.annotationId)
-              ?.messages.find((candidate) => candidate.id === input.messageId);
-            return message === undefined ||
-              (message.deliveryState !== "pending" &&
-                message.deliveryState !== "failed")
-              ? Effect.fail(
-                  planMutationConflict(
-                    `Retryable comment message "${input.messageId}" is no longer available.`,
-                  ),
-                )
-              : Effect.succeed({
-                  document,
-                  messageId: message.id,
-                  deliveries: [] as ReadonlyArray<PlanMentionDelivery>,
-                });
-          })(),
-    ),
-    Effect.catchTag("SessionNotFoundError", () =>
-      Effect.fail(planMutationConflict("The plan session no longer exists.")),
-    ),
   );
 
 /** Resolve a session only when it has an active pull request. */
@@ -5300,7 +5064,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         yield* runner.forgetChat(chat.id);
       }
       if (session?.worktreePath) {
-        yield* PlanStore.removeAll(session.worktreePath);
         yield* ExplanationStore.removeAll(session.worktreePath, session.id);
       }
       yield* ReviewStore.clear(sessionId);
@@ -5638,24 +5401,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Agent.setReasoning": ({ sessionId, chatId, reasoning }) =>
     setReasoning(sessionId, chatId, reasoning),
-  "Agent.commentPlanStep": ({ sessionId, planId, stepId, body, anchor }) =>
-    Effect.flatMap(AgentRunner, (runner) =>
-      runner.commentPlanStep(sessionId, planId, stepId, body, anchor),
-    ),
-  "Agent.revisePlan": ({ sessionId, planId }) =>
-    Effect.flatMap(AgentRunner, (runner) =>
-      runner.revisePlan(sessionId, planId),
-    ),
-  "Agent.approvePlan": ({ sessionId, planId, executionMode, revision }) =>
-    Effect.flatMap(AgentRunner, (runner) =>
-      runner.approvePlan(sessionId, planId, executionMode, revision),
-    ),
-  "Agent.resumePlan": ({ sessionId, chatId, planId, revision }) =>
-    Stream.unwrap(
-      Effect.map(AgentRunner, (runner) =>
-        runner.resumePlan(sessionId, chatId, planId, revision),
-      ),
-    ),
   "Agent.setModel": ({
     sessionId,
     chatId,
@@ -6089,98 +5834,6 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     ),
   "Explanation.watch": ({ sessionId }) =>
     interruptOnPageGone(explanationWatch(sessionId)),
-  "Plan.current": ({ sessionId, chatId }) =>
-    SessionStore.get(sessionId).pipe(
-      Effect.flatMap((session) =>
-        session.worktreePath
-          ? PlanStore.readDocument(session.worktreePath, session.id, chatId)
-          : Effect.succeed(null),
-      ),
-      Effect.orElseSucceed(() => null),
-    ),
-  "Plan.discard": ({ sessionId, chatId }) =>
-    SessionStore.get(sessionId).pipe(
-      Effect.catchAll(() =>
-        Effect.fail(
-          new PlanPersistenceError({
-            message: "This session has no plan worktree.",
-            cause: "no-session",
-          }),
-        ),
-      ),
-      Effect.flatMap((session) =>
-        session.worktreePath
-          ? PlanStore.discard(session.worktreePath, session.id, chatId)
-          : // Discard is idempotent: a session that never had a plan worktree
-            // has nothing to discard.
-            Effect.void,
-      ),
-      Effect.as(null),
-    ),
-  "Plan.startDraft": ({ sessionId, chatId }) =>
-    SessionStore.get(sessionId).pipe(
-      // Collapse a missing session into the RPC's declared error union
-      // (SessionNotFoundError is not part of it).
-      Effect.catchAll(() =>
-        Effect.fail(
-          new PlanPersistenceError({
-            message: "This session has no plan worktree.",
-            cause: "no-session",
-          }),
-        ),
-      ),
-      Effect.flatMap((session) =>
-        session.worktreePath
-          ? PlanStore.startDraft(
-              session.worktreePath,
-              session.id,
-              chatId,
-            )
-          : Effect.fail(
-              new PlanPersistenceError({
-                message: "This session has no plan worktree.",
-                cause: "no-worktree",
-              }),
-            ),
-      ),
-    ),
-  "Plan.watch": ({ sessionId, chatId }) =>
-    interruptOnPageGone(planWatch(sessionId, chatId)),
-  "Plan.updateDocument": ({ sessionId, chatId, planId, baseRevision, plan, author }) =>
-    SessionStore.get(sessionId).pipe(
-      Effect.map((session) => session.worktreePath),
-      Effect.flatMap((worktreePath) =>
-        worktreePath == null
-          ? Effect.fail(
-              new PlanConflictError({
-                message: "This session has no plan worktree.",
-                latestRevision: 0,
-                latest: null,
-              }),
-            )
-          : PlanStore.updateDocument(worktreePath, {
-              sessionId,
-              producingChatId: chatId,
-              planId,
-              baseRevision,
-              plan,
-              author,
-            }),
-      ),
-      Effect.catchTag("SessionNotFoundError", () =>
-        Effect.fail(
-          new PlanConflictError({
-            message: "The plan session no longer exists.",
-            latestRevision: 0,
-            latest: null,
-          }),
-        ),
-      ),
-    ),
-  "Plan.dispatchMessage": (input) => planDispatchMessage(input),
-  "Plan.dispatchExistingMessage": (input) => planDispatchExistingMessage(input),
-  "Plan.updateMessageDelivery": (input) => planUpdateMessageDelivery(input),
-  "Plan.setThreadResolved": (input) => planSetThreadResolved(input),
   "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),
   // Unwrapped from the service like `Terminal.attach` — the reviewer outlives any
   // one watcher, so the stream attaches to it rather than starting it.
@@ -6764,7 +6417,6 @@ export type RpcServerRequirements =
   | OpenConnectorApi
   | OpenConnectorService
   | Path.Path
-  | PlanStore
   | PluginAuth
   | PluginHost
   | PluginRegistry

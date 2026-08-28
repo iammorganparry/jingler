@@ -30,9 +30,7 @@ import type { ToolRegistry, ToolResultEnvelope, ToolRisk } from "../tools/tool-r
 const MAX_BODY_BYTES = 1024 * 1024
 const PARENT_ONLY_TOOLS = new Set([
   "jingler_ask_question",
-  "jingler_save_draft_plan",
-  "jingler_publish_explanation",
-  "jingler_submit_plan"
+  "jingler_publish_explanation"
 ])
 const READ_ONLY_AGENTS = new Set(["advisor", "oracle", "reviewer"])
 const SAFE_AGENT_NAME = /^[a-z][a-z0-9-]*$/u

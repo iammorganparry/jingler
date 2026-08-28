@@ -12,7 +12,6 @@ import { ConfigService } from "./config.js"
 import { InMemorySecretStoreLive } from "./secret-store.js"
 import { OpenConnectorService } from "./open-connector.js"
 import { ContextManager } from "./context-manager.js"
-import { PlanStore } from "./plan-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { fakeCommandExecutor, withTempRoot } from "./test-support.js"
@@ -95,7 +94,6 @@ const layers = () =>
     SessionStore.Default,
     TranscriptStore.Default,
     BackgroundTaskStore.Default,
-    PlanStore.Default,
     ConfigService.Default,
     adapter,
     fakeCommandExecutor(installed),

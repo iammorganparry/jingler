@@ -26,7 +26,6 @@ import {
   MemoryAttachmentServiceLive,
   makePiAgentRuntimeLive,
   PiAgentRuntimeLive,
-  PlanStore,
   ExplanationStore,
   PluginRegistry,
   PluginHost,
@@ -87,7 +86,6 @@ const PluginSecretStoreLayer =
 const StoreLayers = Layer.mergeAll(
   TranscriptStore.Default,
   BackgroundTaskStore.Default,
-  PlanStore.Default,
   ExplanationStore.Default,
   ReviewStore.Default
 )

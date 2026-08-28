@@ -18,7 +18,6 @@
     "./github-auth": "./src/github-auth.ts",
     "./open-connector": "./src/open-connector.ts",
     "./offload-snapshot": "./src/offload-snapshot.ts",
-    "./plan-store": "./src/plan-store.ts",
     "./plugin-host": "./src/plugin-host.ts",
     "./plugins": "./src/plugins.ts",
     "./projects": "./src/projects.ts",

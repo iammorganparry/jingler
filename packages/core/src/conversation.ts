@@ -1936,69 +1936,6 @@ export const displayStatusOf = (
 }
 
 /**
- * The prompt that re-drives an approved plan as a fresh execution turn. Used when
- * approving a plan whose original run is gone (e.g. after an app restart): the
- * resumed harness has no memory of the planning conversation, so the plan is
- * embedded here in full. Deterministic given the plan.
- */
-export const PLAN_EVIDENCE_INSTRUCTIONS: ReadonlyArray<string> = [
-  "In your final response, emit one evidence line for every acceptance criterion you verified:",
-  "PLAN_RESULT criterion=<id> status=<passed|failed> evidence=<concise observable evidence>",
-  "Do not claim passed without evidence. Unreported criteria remain pending and keep the plan in needs-verification."
-]
-
-/**
- * Remove the line-oriented plan evidence protocol from user-facing prose.
- *
- * PLAN_RESULT is a machine channel: AgentRunner parses it into the canonical
- * plan before this text is persisted, and Plan.watch drives the progress UI
- * from that structured state. Keeping the marker in the transcript exposes an
- * implementation detail and makes a completed turn read like a log dump.
- *
- * A trailing partial protocol prefix is removed too. Assistant output is
- * streamed in arbitrary chunks, so the renderer can briefly receive
- * `PLAN_RES` before the remainder of the marker arrives.
- */
-export const stripPlanResultProtocol = (text: string): string => {
-  const protocol = "PLAN_RESULT"
-  const lines = text.split(/\r?\n/)
-  return lines
-    .filter((line) => {
-      const trimmed = line.trimStart()
-      return !(
-        trimmed.startsWith(protocol) ||
-        (trimmed.startsWith("PLAN_") && protocol.startsWith(trimmed))
-      )
-    })
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd()
-}
-
-export const resumePlanPrompt = (plan: Plan): string => {
-  const steps = plan.steps
-    .filter((s) => s.kind !== "branch-arm")
-    .map((s) => `${s.number}. ${s.title}${s.intent ? ` — ${s.intent}` : ""}`)
-    .join("\n")
-  return [
-    "The plan below was approved. Implement it now — make the actual code changes and run what's needed.",
-    "Do NOT re-plan or ask to enter plan mode again; proceed with the implementation.",
-    "The plan's end state is your target: after each stage, re-read the remaining stages and acceptance criteria, and keep working until every one is completed or explicitly blocked.",
-    "Continue from the supplied execution checkpoints. Do not repeat tasks already marked completed.",
-    "Whenever a listed task changes state, emit this exact checkpoint line immediately:",
-    "PLAN_TASK stage=<stage-id> fingerprint=<fingerprint> task=<task-id> status=<in-progress|completed|blocked>",
-    "Mark a task in-progress the moment you begin its work and completed immediately after it verifies — never retroactively at the end of the turn.",
-    "Use only the exact stage, fingerprint, and task ids supplied below. Do not repeat an unchanged status. A marker naming a stage or task id that is not in the current plan is dropped — the operator never sees that progress.",
-    "If the operator asks for something new while you execute — or you discover work the plan is missing — fold it into the plan: FIRST call jingler_submit_plan with the complete updated plan (while a plan is executing it applies immediately, no re-approval), say where the addition landed, THEN emit PLAN_TASK markers using the updated plan's ids, and keep driving the plan to completion.",
-    ...PLAN_EVIDENCE_INSTRUCTIONS,
-    "",
-    `Plan: ${plan.summary}`,
-    ...(steps ? ["", "Steps:", steps] : []),
-    ...(plan.raw ? ["", "Full plan:", plan.raw] : [])
-  ].join("\n")
-}
-
-/**
  * How far a running adversarial review has got. Derived from the reviewer's own
  * `StreamEvent`s — there is no percentage to report and nothing announces a
  * total, so this names what the agent is *actually doing* rather than inventing

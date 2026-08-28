@@ -336,14 +336,6 @@ const contextFor = (
         observations.push({ kind: "event", tag: "QuestionRequested" })
         return [{ selected: ["Yes"], other: null }]
       }),
-    saveDraftPlan: () => Effect.void,
-    proposePlan: () =>
-      Effect.sync(() => {
-        observations.push({ kind: "event", tag: "PlanProposed" })
-        return scenarioId === "structured.question-plan"
-          ? ({ _tag: "Approve", mode: "auto" } as const)
-          : ({ _tag: "Reject" } as const)
-      })
   }
 }
 

@@ -1,8 +1,7 @@
 import {
   inactiveRuntimeActivity,
   type AgentRuntimeContext,
-  type RuntimePermissionDecision,
-  type RuntimePlanDecision
+  type RuntimePermissionDecision
 } from "../agent/agent-runtime.js"
 import { Effect, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -28,11 +27,6 @@ const context = (
   ...inactiveRuntimeActivity,
   canUseTool: vi.fn(() => Effect.succeed(permission)),
   askQuestion: vi.fn(() => Effect.succeed([])),
-  saveDraftPlan: vi.fn(() => Effect.void),
-  proposePlan: vi.fn(() => Effect.succeed({
-    _tag: "Approve",
-    mode: "auto"
-  } satisfies RuntimePlanDecision))
 })
 
 type Capabilities = ReadonlyArray<SubagentCapability>

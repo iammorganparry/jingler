@@ -7,7 +7,6 @@ import type {
   Message,
   PermissionMode,
   Plan,
-  PlanPrd,
   Session,
   StreamEvent
 } from "@jingler/core"
@@ -24,9 +23,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   AgentTurnDriver,
   makeScriptedAgentTurnDriver,
-  scriptedPlan,
-  scriptedPlanEmission,
-  scriptedPlanPrd
 } from "./agent-turn-driver.js"
 import type {
   AgentTurnDriverShape,
@@ -43,14 +39,12 @@ import { OpenConnectorService } from "./open-connector.js"
 import {
   AgentRunner,
   isContextOverflowFailure,
-  planEvidenceFromText
 } from "./agent-runner.js"
 import { composeRemoteMcpServers } from "./runtime/mcp/attachment.js"
 import { ContextManager } from "./context-manager.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
-import { PlanStore, type PlanStoreEnv } from "./plan-store.js"
 import { reserveSessionRun } from "./run-coordinator.js"
 import { initGitRepo, withTempRoot } from "./test-support.js"
 import {
@@ -125,52 +119,6 @@ afterEach(() => {
 
 const SESSION = "s_test"
 
-/** A minimal structured plan fixture (replaces the former HTML `SOURCE` strings). */
-const mkPlan = (
-  title: string,
-  acceptanceText: string,
-  status: "pending" | "passed" = "pending"
-): PlanPrd => ({
-  title,
-  sections: [],
-  stages: [
-    {
-      id: "01",
-      title: "Stage",
-      intent: "Do it.",
-      approach: [],
-      files: [],
-      diagrams: [],
-      notes: [],
-      acceptance: [
-        { id: "01.1", text: acceptanceText, status, evidence: status === "passed" ? "done" : null }
-      ],
-      dependencies: []
-    }
-  ],
-  annotations: []
-})
-
-/** An approved plan whose sole stage already has durable evidence. */
-const EXISTING_DELEGATION: PlanPrd = {
-  title: "PRD: Existing delegation",
-  sections: [],
-  stages: [
-    {
-      id: "01",
-      title: "Existing",
-      intent: "Existing.",
-      approach: [],
-      files: [{ path: "src/existing.ts", change: "M" }],
-      diagrams: [],
-      notes: [],
-      acceptance: [{ id: "01.1", text: "Existing work is verified.", status: "passed", evidence: "verified" }],
-      dependencies: [],
-      complexity: "medium"
-    }
-  ],
-  annotations: []
-}
 const chatForSession = (
   updatedAt: string,
   fields: Partial<Session["chats"][number]> = {}
@@ -194,7 +142,6 @@ const runPrompt = (mode: PermissionMode, decision: GateDecision) => {
     SessionStore.Default,
     TranscriptStore.Default,
     BackgroundTaskStore.Default,
-    PlanStore.Default,
     makeScriptedAgentTurnDriver(0),
     ContextManager.Default,
     temp.layer
@@ -234,207 +181,6 @@ describe("isContextOverflowFailure", () => {
   })
 })
 
-describe("planEvidenceFromText", () => {
-  it("accepts only evidence-bearing passed or failed criterion markers", () => {
-    expect(
-      planEvidenceFromText(
-        [
-          "Implementation complete.",
-          "PLAN_RESULT criterion=stage-1.tests status=passed evidence=pnpm test passed.",
-          "PLAN_RESULT criterion=stage-1.types status=failed evidence=Typecheck reports TS2322.",
-          "PLAN_RESULT criterion=stage-1.bad status=waived evidence=not agent-authorised",
-          "PLAN_RESULT criterion=stage-1.empty status=passed evidence="
-        ].join("\n")
-      )
-    ).toStrictEqual([
-      {
-        criterionId: "stage-1.tests",
-        status: "passed",
-        evidence: "pnpm test passed."
-      },
-      {
-        criterionId: "stage-1.types",
-        status: "failed",
-        evidence: "Typecheck reports TS2322."
-      }
-    ])
-  })
-})
-
-describe("AgentRunner saveDraftPlan", () => {
-  const VALID_PLAN: PlanPrd = {
-    title: "PRD: Draft persist",
-    sections: [],
-    stages: [
-      {
-        id: "01",
-        title: "Persist",
-        intent: "Persist the draft.",
-        approach: [],
-        files: [],
-        diagrams: [],
-        notes: [],
-        acceptance: [{ id: "01.1", text: "Draft persists.", status: "pending", evidence: null }],
-        dependencies: []
-      }
-    ],
-    annotations: []
-  }
-
-  const draftingAdapter = (plan: PlanPrd): Layer.Layer<AgentTurnDriver> =>
-    Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (_sessionId, _spec, ctx) =>
-          (ctx.saveDraftPlan ?? (() => Effect.void))(plan).pipe(
-            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
-          ) as ReturnType<AgentTurnDriverShape["run"]>,
-        stop: () => Effect.void
-      })
-    )
-
-  const runWith = (
-    adapter: Layer.Layer<AgentTurnDriver>,
-    seed?: Effect.Effect<unknown, never, PlanStore | PlanStoreEnv>
-  ) =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        if (seed !== undefined) yield* seed
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner
-          .prompt(SESSION, SESSION, "Plan it.")
-          .pipe(Stream.runDrain)
-        return yield* PlanStore.readDocument(temp.root, SESSION, SESSION)
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            AgentRunner.Default,
-            OpenConnectorService.Default,
-            BrowserControlMcpServiceTest,
-            InMemorySecretStoreLive,
-            ConfigService.Default,
-            SessionStore.Default,
-            TranscriptStore.Default,
-            BackgroundTaskStore.Default,
-            PlanStore.Default,
-            adapter,
-            ContextManager.Default,
-            temp.layer
-          )
-        )
-      )
-    )
-
-  it("persists an emitted plan as a draft document (no approval gate)", async () => {
-    const doc = await runWith(draftingAdapter(VALID_PLAN))
-    expect(doc?.status).toBe("draft")
-    expect(doc?.updatedBy).toBe("agent")
-    expect(doc?.plan.title).toBe("PRD: Draft persist")
-  })
-
-  it("never clobbers a real (non-draft) plan the operator already owns", async () => {
-    const proposed: PlanPrd = {
-      title: "PRD: Approved work",
-      sections: [],
-      stages: [
-        {
-          id: "01",
-          title: "Ship",
-          intent: "Ship it.",
-          approach: [],
-          files: [],
-          diagrams: [],
-          notes: [],
-          acceptance: [{ id: "01.1", text: "Ships.", status: "pending", evidence: null }],
-          dependencies: []
-        }
-      ],
-      annotations: []
-    }
-    const doc = await runWith(
-      draftingAdapter(VALID_PLAN),
-      // A proposed plan already exists when the selected agent re-emits a plan.
-      PlanStore.promoteDocument(temp.root, {
-        sessionId: SESSION,
-        producingChatId: SESSION,
-        plan: proposed,
-        status: "proposed",
-        author: "agent"
-      }).pipe(Effect.orElseSucceed(() => null))
-    )
-    // The draft write is a no-op — the proposed plan stands untouched.
-    expect(doc?.status).toBe("proposed")
-    expect(doc?.plan.title).toBe("PRD: Approved work")
-  })
-
-  it("scrubs the draft's raw JSON block from the transcript, keeping the prose", async () => {
-    const block = ["```json", JSON.stringify({ mode: "draft", plan: VALID_PLAN }), "```"].join("\n")
-    const emittingDraftAdapter = Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (_sessionId, _spec, ctx) =>
-          Effect.gen(function* () {
-            yield* ctx.emit({ _tag: "Assistant", text: `Here is the draft.\n\n${block}` })
-            yield* (ctx.saveDraftPlan ?? (() => Effect.void))(VALID_PLAN, block)
-            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<AgentTurnDriverShape["run"]>,
-        stop: () => Effect.void
-      })
-    )
-    await runWith(emittingDraftAdapter)
-    const transcript = await Effect.runPromise(
-      TranscriptStore.list(SESSION).pipe(
-        Effect.provide(Layer.mergeAll(TranscriptStore.Default, temp.layer))
-      )
-    )
-    const visible = transcript
-      .flatMap((message) => message.parts)
-      .filter((part) => part._tag === "Text")
-      .map((part) => part.text)
-      .join("\n")
-    expect(visible).toContain("Here is the draft.")
-    expect(visible).not.toContain('"mode"')
-    expect(visible).not.toContain("```json")
-  })
-
-  it("never clobbers a USER-authored draft the operator is editing", async () => {
-    const userDraft: PlanPrd = {
-      title: "PRD: Operator's own draft",
-      sections: [],
-      stages: [
-        {
-          id: "01",
-          title: "Author",
-          intent: "The operator is drafting this.",
-          approach: [],
-          files: [],
-          diagrams: [],
-          notes: [],
-          acceptance: [{ id: "01.1", text: "Kept.", status: "pending", evidence: null }],
-          dependencies: []
-        }
-      ],
-      annotations: []
-    }
-    const doc = await runWith(
-      draftingAdapter(VALID_PLAN),
-      // The operator started their own draft; an agent draft must not reconcile
-      // over it and discard their content.
-      PlanStore.promoteDocument(temp.root, {
-        sessionId: SESSION,
-        producingChatId: SESSION,
-        plan: userDraft,
-        status: "draft",
-        author: "user"
-      }).pipe(Effect.orElseSucceed(() => null))
-    )
-    expect(doc?.status).toBe("draft")
-    expect(doc?.updatedBy).toBe("user")
-    expect(doc?.plan.title).toBe("PRD: Operator's own draft")
-  })
-})
-
 describe("AgentRunner remote MCP attachments", () => {
   it("supplies configured and Preview HTTP entries without persisting their bearers", async () => {
     const captured: AgentTurnSpec[] = []
@@ -457,7 +203,6 @@ describe("AgentRunner remote MCP attachments", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       recordingAdapter,
       ContextManager.Default,
       temp.layer
@@ -599,7 +344,6 @@ describe("AgentRunner team memory", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       recordingAdapter,
       ContextManager.Default,
       temp.layer
@@ -674,7 +418,6 @@ describe("AgentRunner team memory", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       failedAdapter,
       ContextManager.Default,
       temp.layer
@@ -712,7 +455,6 @@ describe("AgentRunner team memory", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       pendingAdapter,
       ContextManager.Default,
       temp.layer
@@ -805,7 +547,6 @@ describe("AgentRunner HITL gating", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       probeAdapter(out),
       ContextManager.Default,
       temp.layer
@@ -926,7 +667,6 @@ describe("AgentRunner sub-agents", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       adapter,
       ContextManager.Default,
       ConfigService.Default,
@@ -996,7 +736,6 @@ describe("AgentRunner image attachments", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       ConfigService.Default,
@@ -1031,7 +770,6 @@ describe("AgentRunner hidden prompt context", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       temp.layer
@@ -1074,7 +812,6 @@ describe("AgentRunner AskUserQuestion", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       ConfigService.Default,
@@ -1128,7 +865,6 @@ describe("AgentRunner ids", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       makeScriptedAgentTurnDriver(0),
       ContextManager.Default,
       ConfigService.Default,
@@ -1168,7 +904,6 @@ describe("AgentRunner allowlist", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       makeScriptedAgentTurnDriver(0),
     ContextManager.Default,
     ConfigService.Default,
@@ -1196,638 +931,6 @@ describe("AgentRunner allowlist", () => {
     const events = await Effect.runPromise(program.pipe(Effect.provide(base)))
     expect(gates(events)).toHaveLength(0)
     expect(ranTool(events, "bash-1")).toBe(true)
-  })
-})
-
-describe("AgentRunner plan mode", () => {
-  const base = () =>
-    Layer.mergeAll(
-      AgentRunner.Default,
-    OpenConnectorService.Default,
-    BrowserControlMcpServiceTest,
-    InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      makeScriptedAgentTurnDriver(0),
-      ContextManager.Default,
-      ConfigService.Default,
-      temp.layer
-    )
-
-  const planParts = (transcript: ReadonlyArray<Message>) => {
-    const out: Array<Extract<Message["parts"][number], { _tag: "Plan" }>> = []
-    for (const m of transcript) for (const p of m.parts) if (p._tag === "Plan") out.push(p)
-    return out
-  }
-
-  /** Seed a session on disk so `SessionStore.get`/`setMode` have a record to patch. */
-  const seedSession = (mode: PermissionMode) => {
-    const session: Session = {
-      id: SESSION,
-      repo: "r",
-      branch: "b",
-      title: "t",
-      status: "idle",
-      ...TEST_RUNTIME,
-      diff: { added: 0, removed: 0 },
-      prNumber: null,
-      costUsd: 0,
-      tokens: 0,
-      updatedAt: "2026-07-11T10:00:00.000Z",
-      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode })],
-      activeChatId: SESSION,
-      mode
-    }
-    mkdirSync(temp.root, { recursive: true })
-    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
-  }
-
-  it("proposes a plan, records a step comment, and executes on approval", async () => {
-    const program = Effect.gen(function* () {
-      const runner = yield* AgentRunner
-      yield* runner.setMode(SESSION, "plan")
-      const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-        Stream.tap((ev) =>
-          ev._tag === "PlanProposed"
-            ? runner
-                .commentPlanStep(SESSION, ev.plan.id, "s_04", "Guard the refresh loop.")
-                .pipe(Effect.zipRight(runner.approvePlan(SESSION, ev.plan.id)))
-            : Effect.void
-        ),
-        Stream.runForEach((e) => Effect.sync(() => events.push(e)))
-      )
-      const transcript = yield* TranscriptStore.list(SESSION)
-      return { events, transcript }
-    })
-    const { events, transcript } = await Effect.runPromise(program.pipe(Effect.provide(base())))
-
-    expect(events.some((e) => e._tag === "PlanProposed")).toBe(true)
-    // Execution started only after approval.
-    expect(ranTool(events, "plan-edit-1")).toBe(true)
-    expect(events.some((e) => e._tag === "Done")).toBe(true)
-
-    const parts = planParts(transcript)
-    expect(parts).toHaveLength(1)
-    const plan = parts[0]!.plan
-    expect(plan.status).toBe("approved")
-    expect(plan.comments.map((c) => c.body)).toContain("Guard the refresh loop.")
-    expect(plan.steps.find((s) => s.id === "s_04")?.flagged).toBe(true)
-  })
-
-  it("registers the approval gate before the canonical proposal becomes visible", async () => {
-    let approvalStatus: string | null = null
-    let promotionObserved = false
-    let revealPromotion!: (planId: string) => void
-    let releasePromotion!: () => void
-    const visiblePromotion = new Promise<string>((resolve) => {
-      revealPromotion = resolve
-    })
-    const promotionReleased = new Promise<void>((resolve) => {
-      releasePromotion = resolve
-    })
-    const realPlanStore = await Effect.runPromise(
-      Effect.gen(function* () {
-        return yield* PlanStore
-      }).pipe(
-        Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
-      )
-    )
-    const planStoreWithImmediateWatcher = Layer.succeed(
-      PlanStore,
-      {
-        ...realPlanStore,
-        promote: (
-          ...args: Parameters<typeof realPlanStore.promote>
-        ): ReturnType<typeof realPlanStore.promote> =>
-          realPlanStore.promote(...args).pipe(
-            Effect.tap((artifact) =>
-              Effect.sync(() => {
-                promotionObserved = true
-                revealPromotion(artifact.plan.id)
-              })
-            ),
-            Effect.tap(() => Effect.promise(() => promotionReleased))
-          )
-      }
-    )
-    const testLayer = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      planStoreWithImmediateWatcher,
-      makeScriptedAgentTurnDriver(0),
-      ContextManager.Default,
-      temp.layer
-    )
-
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* Effect.fork(
-          Effect.promise(() => visiblePromotion).pipe(
-            Effect.flatMap((planId) =>
-              runner.approvePlan(SESSION, planId)
-            ),
-            Effect.tap((approval) =>
-              Effect.sync(() => {
-                approvalStatus = approval.status
-              })
-            ),
-            Effect.ensuring(
-              Effect.sync(() => {
-                releasePromotion()
-              })
-            )
-          )
-        )
-        yield* runner.setMode(SESSION, "plan")
-        const out: StreamEvent[] = []
-        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-          Stream.runForEach((event) =>
-            Effect.sync(() => {
-              out.push(event)
-            })
-          )
-        )
-        return out
-      }).pipe(
-        Effect.provide(testLayer),
-        Effect.timeout("10 seconds"),
-        Effect.either
-      )
-    )
-
-    expect(promotionObserved).toBe(true)
-    expect(approvalStatus).toBe("accepted")
-    expect(result._tag).toBe("Right")
-    if (result._tag === "Left") return
-    const events = result.right
-    expect(events.some((event) => event._tag === "PlanProposed")).toBe(true)
-    expect(ranTool(events, "plan-edit-1")).toBe(true)
-  })
-
-  it("steers a corrective for an unknown-stage checkpoint and replays it once the plan is amended", async () => {
-    const program = Effect.gen(function* () {
-      const runner = yield* AgentRunner
-      yield* runner.setMode(SESSION, "plan")
-      yield* runner.prompt(SESSION, SESSION, "[[plan]] [[plan-unknown-stage]] refactor auth").pipe(
-        Stream.tap((event) =>
-          event._tag === "PlanProposed"
-            ? runner.approvePlan(SESSION, event.plan.id).pipe(Effect.asVoid)
-            : Effect.void
-        ),
-        Stream.runDrain
-      )
-      return {
-        transcript: yield* TranscriptStore.list(SESSION),
-        document: yield* PlanStore.readDocument(temp.root)
-      }
-    })
-    const result = await Effect.runPromise(program.pipe(Effect.provide(base())))
-
-    // The runner told the agent its checkpoint was dropped and how to recover.
-    const assistantText = result.transcript
-      .flatMap((message) => message.parts)
-      .filter((part) => part._tag === "Text")
-      .map((part) => part.text)
-      .join("\n")
-    expect(assistantText).toContain("Corrective received:")
-    expect(assistantText).toContain("[plan-sync]")
-    expect(assistantText).toContain("jingler_submit_plan")
-    // The amendment landed as a new canonical stage, and the checkpoint that
-    // was dropped against the old revision applied on replay — the driver
-    // never re-emits the marker after amending.
-    const ghost = result.document?.plan.stages.find((stage) => stage.id === "s_99")
-    expect(ghost).toBeDefined()
-    expect((ghost?.tasks ?? []).map((task) => task.status)).toEqual(["completed"])
-  })
-
-  it("approves the exact edited canonical revision and completes only from criterion evidence", async () => {
-    const observed: {
-      staleApprovalStatus: string | null
-      approvedRevision: number | null
-      staleApprovalResult: string | null
-      exactApprovalResult: string | null
-    } = {
-      staleApprovalStatus: null,
-      approvedRevision: null,
-      staleApprovalResult: null,
-      exactApprovalResult: null
-    }
-    const program = Effect.gen(function* () {
-      const runner = yield* AgentRunner
-      yield* runner.setMode(SESSION, "plan")
-      const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-        Stream.tap((event) => {
-          if (event._tag !== "PlanProposed") return Effect.void
-          return Effect.gen(function* () {
-            const proposed = yield* PlanStore.readDocument(temp.root)
-            expect(proposed).not.toBeNull()
-            const edited = yield* PlanStore.updateDocument(temp.root, {
-              sessionId: SESSION,
-              producingChatId: SESSION,
-              planId: proposed!.id,
-              baseRevision: proposed!.revision,
-              plan: { ...proposed!.plan, title: `${proposed!.plan.title} (operator edit)` },
-              author: "user"
-            })
-            observed.staleApprovalResult = (
-              yield* runner.approvePlan(
-                SESSION,
-                event.plan.id,
-                "auto",
-                proposed!.revision
-              )
-            ).status
-            observed.staleApprovalStatus =
-              (yield* PlanStore.readDocument(temp.root))?.status ?? null
-            observed.approvedRevision = edited.revision
-            observed.exactApprovalResult = (
-              yield* runner.approvePlan(
-                SESSION,
-                event.plan.id,
-                "auto",
-                edited.revision
-              )
-            ).status
-          })
-        }),
-        Stream.runForEach((event) => Effect.sync(() => events.push(event)))
-      )
-      return {
-        events,
-        transcript: yield* TranscriptStore.list(SESSION),
-        document: yield* PlanStore.readDocument(temp.root)
-      }
-    })
-    const result = await Effect.runPromise(program.pipe(Effect.provide(base())))
-
-    expect(observed.staleApprovalStatus).toBe("proposed")
-    expect(observed.staleApprovalResult).toBe("refused")
-    expect(observed.exactApprovalResult).toBe("accepted")
-    expect(observed.approvedRevision).toBe(2)
-    expect(ranTool(result.events, "plan-edit-1")).toBe(true)
-    // The exact edited revision (title carries the operator's edit) is the one
-    // that reached execution — proof rev 2, not the original rev 1, is canonical.
-    expect(planParts(result.transcript)[0]!.plan.raw).toContain("(operator edit)")
-    expect(result.document?.status).toBe("done")
-    const criteria =
-      result.document?.plan.stages.flatMap((stage) => stage.acceptance) ?? []
-    expect(
-      criteria.every((criterion) =>
-        criterion.status === "passed" || criterion.status === "waived"
-      )
-    ).toBe(true)
-    expect(
-      result.document?.plan.stages.map((stage) => ({
-        id: stage.id,
-        tasks: (stage.tasks ?? []).map((task) => task.status)
-      }))
-    ).toEqual(
-      result.document?.plan.stages.map((stage) => ({
-        id: stage.id,
-        tasks: (stage.tasks ?? []).map(() => "completed")
-      }))
-    )
-    const assistantText = result.transcript
-      .flatMap((message) => message.parts)
-      .filter((part) => part._tag === "Text")
-      .map((part) => part.text)
-      .join("\n")
-    expect(assistantText).toContain("Steps 2, 3 and 5 are done.")
-    expect(assistantText).not.toContain("PLAN_RESULT")
-    expect(assistantText).not.toContain("PLAN_TASK")
-    expect(
-      result.transcript
-        .flatMap((message) => message.parts)
-        .filter((part) => part._tag === "PlanTaskProgress").length
-    ).toBeGreaterThan(0)
-  })
-
-  it("marks a plan step done when an executed edit touches one of its files", async () => {
-    const program = Effect.gen(function* () {
-      const runner = yield* AgentRunner
-      yield* runner.setMode(SESSION, "plan")
-      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-        Stream.tap((ev) => (ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void)),
-        Stream.runDrain
-      )
-      return yield* TranscriptStore.list(SESSION)
-    })
-    const transcript = await Effect.runPromise(program.pipe(Effect.provide(base())))
-    const plan = planParts(transcript)[0]!.plan
-    const statusOf = (id: string) => plan.steps.find((s) => s.id === id)?.status
-    // The scripted approval writes token-store.ts (02), session.ts (03) and
-    // session.test.ts (05) — each ties back to its step.
-    expect(statusOf("s_02")).toBe("done")
-    expect(statusOf("s_03")).toBe("done")
-    expect(statusOf("s_05")).toBe("done")
-    // A step whose files were never edited stays proposed.
-    expect(statusOf("s_06")).toBe("proposed")
-  })
-
-  it("restores the exec mode on approval so edits then run without a plan gate", async () => {
-    seedSession("accept-edits")
-    const mode = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        // Start in accept-edits, switch to plan (captures accept-edits as prior).
-        yield* runner.setMode(SESSION, "accept-edits")
-        yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-          Stream.tap((ev) =>
-            ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void
-          ),
-          Stream.runDrain
-        )
-        const session = yield* SessionStore.get(SESSION)
-        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
-      }).pipe(Effect.provide(base()))
-    )
-    expect(mode).toBe("accept-edits")
-  })
-
-  it("restores the operator's PRE-PLAN mode (auto), not the CLI-config default", async () => {
-    // Regression: execDefaults (CLI config → "accept-edits" fallback) used to win
-    // over priorModes, silently re-gating commands after approving a plan even
-    // though the operator was running the session in "auto".
-    seedSession("auto")
-    const mode = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        // Running in auto, then switch to plan (captures "auto" as the prior mode).
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-          Stream.tap((ev) =>
-            ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void
-          ),
-          Stream.runDrain
-        )
-        const session = yield* SessionStore.get(SESSION)
-        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
-      }).pipe(Effect.provide(base()))
-    )
-    expect(mode).toBe("auto")
-  })
-
-  it("uses the explicit auto override when approving from another execution mode", async () => {
-    seedSession("accept-edits")
-    const mode = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "accept-edits")
-        yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-          Stream.tap((ev) =>
-            ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id, "auto") : Effect.void
-          ),
-          Stream.runDrain
-        )
-        const session = yield* SessionStore.get(SESSION)
-        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
-      }).pipe(Effect.provide(base()))
-    )
-
-    expect(mode).toBe("auto")
-  })
-
-  it("keeps plan mode TRANSIENT — never persists 'plan' as the session mode", async () => {
-    // If "plan" were persisted, a restart (empty in-memory maps) would resurrect
-    // plan mode from session.mode with no priorModes captured, and approval would
-    // fall back to "accept-edits". Keeping session.mode at the real exec mode is
-    // what makes approval reliably restore it.
-    seedSession("auto")
-    const persisted = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner.setMode(SESSION, "plan")
-        const session = yield* SessionStore.get(SESSION)
-        return session.chats.find((chat) => chat.id === session.activeChatId)?.mode
-      }).pipe(Effect.provide(base()))
-    )
-    expect(persisted).toBe("auto") // NOT "plan"
-  })
-
-  it("re-drives execution for a stale plan (no live run): switches out of plan mode and runs", async () => {
-    seedSession("plan")
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        // Seed a transcript holding the (now orphaned) plan, as after a restart.
-        const plan = scriptedPlan(SESSION, 1)
-        const msg: Message = {
-          id: "a_seed",
-          role: "assistant",
-          parts: [{ _tag: "Plan", plan }],
-          streaming: false,
-          createdAt: "2026-07-13T00:00:00.000Z"
-        }
-        yield* TranscriptStore.append(SESSION, msg)
-        const events: Array<StreamEvent> = []
-        yield* runner.resumePlan(SESSION, plan.id).pipe(
-          Stream.tap((ev) =>
-            ev._tag === "GateRequested" ? runner.decideGate(SESSION, ev.gate.id, "allow") : Effect.void
-          ),
-          Stream.runForEach((ev) => Effect.sync(() => events.push(ev)))
-        )
-        const mode = (yield* SessionStore.get(SESSION)).mode
-        return { events, mode }
-      }).pipe(Effect.provide(base()))
-    )
-    // A fresh run streamed to completion — proving the session left plan mode (else
-    // the scripted adapter would re-enter the plan branch and park forever).
-    expect(result.events.some((e) => e._tag === "Started")).toBe(true)
-    expect(result.events.some((e) => e._tag === "Done")).toBe(true)
-    expect(result.mode).not.toBe("plan")
-  })
-
-  it("resumePlan streams nothing for an unknown plan id", async () => {
-    seedSession("plan")
-    const events = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        const out: Array<StreamEvent> = []
-        yield* runner.resumePlan(SESSION, "nope").pipe(Stream.runForEach((ev) => Effect.sync(() => out.push(ev))))
-        return out
-      }).pipe(Effect.provide(base()))
-    )
-    expect(events).toHaveLength(0)
-  })
-
-  it("resumePlan emits a terminal refusal when the reviewed revision is stale", async () => {
-    const events = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        const first = yield* PlanStore.promoteDocument(temp.root, {
-          sessionId: SESSION,
-          producingChatId: SESSION,
-          id: "stale-plan",
-          plan: mkPlan("PRD: Stale plan", "It works."),
-          author: "agent"
-        })
-        yield* PlanStore.updateDocument(temp.root, {
-          sessionId: SESSION,
-          producingChatId: SESSION,
-          planId: first.id,
-          baseRevision: first.revision,
-          plan: mkPlan("PRD: Stale plan", "The newer revision works."),
-          author: "user"
-        })
-        const out: Array<StreamEvent> = []
-        yield* runner
-          .resumePlan(SESSION, SESSION, first.id, first.revision)
-          .pipe(
-            Stream.runForEach((event) =>
-              Effect.sync(() => out.push(event))
-            )
-          )
-        return out
-      }).pipe(Effect.provide(base()))
-    )
-
-    expect(events).toStrictEqual([
-      {
-        _tag: "Failed",
-        message:
-          "Plan execution refused because canonical revision 2 replaced reviewed revision 1. Review the latest revision and approve again."
-      }
-    ])
-  })
-
-  it("does not churn a needs-verification revision on an unrelated turn", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const before = yield* PlanStore.promoteDocument(temp.root, {
-          sessionId: SESSION,
-          producingChatId: SESSION,
-          id: "waiting-plan",
-          plan: mkPlan("PRD: Waiting plan", "Evidence is required."),
-          status: "needs-verification",
-          author: "agent"
-        })
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner
-          .prompt(SESSION, SESSION, "Unrelated question")
-          .pipe(Stream.runDrain)
-        return { before, after: yield* PlanStore.readDocument(temp.root) }
-      }).pipe(Effect.provide(base()))
-    )
-
-    expect(result.after?.revision).toBe(result.before.revision)
-    expect(result.after?.status).toBe("needs-verification")
-  })
-
-  it("routes an open comment as a revision, then executes the revised plan", async () => {
-    const program = Effect.gen(function* () {
-      const runner = yield* AgentRunner
-      yield* runner.setMode(SESSION, "plan")
-      const seen: Array<string> = []
-      let proposedRaw: string | null = null
-      const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-        Stream.tap((ev) => {
-          if (
-            (ev._tag !== "PlanProposed" && ev._tag !== "PlanUpdated") ||
-            ev.plan.status !== "proposed" ||
-            (proposedRaw !== null && ev.plan.raw === proposedRaw) ||
-            seen.length >= 2
-          ) {
-            return Effect.void
-          }
-          const first = seen.length === 0
-          seen.push(ev.plan.id)
-          proposedRaw = ev.plan.raw
-          return first
-            ? runner
-                .commentPlanStep(SESSION, ev.plan.id, "s_04", "Add a single-flight guard.")
-                .pipe(Effect.zipRight(runner.revisePlan(SESSION, ev.plan.id)))
-            : runner.approvePlan(SESSION, ev.plan.id)
-        }),
-        Stream.runForEach((e) => Effect.sync(() => events.push(e)))
-      )
-      const transcript = yield* TranscriptStore.list(SESSION)
-      return { events, seen, transcript }
-    })
-    const { events, seen, transcript } = await Effect.runPromise(program.pipe(Effect.provide(base())))
-
-    // The revision keeps the canonical plan identity and updates its card.
-    expect(seen).toHaveLength(2)
-    expect(new Set(seen).size).toBe(1)
-    expect(ranTool(events, "plan-edit-1")).toBe(true)
-
-    const parts = planParts(transcript)
-    expect(parts).toHaveLength(1)
-    expect(parts[0]!.plan.status).toBe("approved")
-    expect(parts[0]!.plan.comments[0]?.routed).toBe(true)
-  })
-
-  it("stop rejects a pending plan (no dead buttons on reload)", async () => {
-    const program = Effect.gen(function* () {
-      const runner = yield* AgentRunner
-      yield* runner.setMode(SESSION, "plan")
-      const events: Array<StreamEvent> = []
-      yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-        Stream.tap((ev) => (ev._tag === "PlanProposed" ? runner.stop(SESSION) : Effect.void)),
-        Stream.runForEach((e) => Effect.sync(() => events.push(e)))
-      )
-      const transcript = yield* TranscriptStore.list(SESSION)
-      return { events, transcript }
-    })
-    const { events, transcript } = await Effect.runPromise(program.pipe(Effect.provide(base())))
-
-    expect(ranTool(events, "plan-edit-1")).toBe(false)
-    expect(planParts(transcript)[0]!.plan.status).toBe("rejected")
-  })
-
-  it("requires a fresh approval gate for a new plan after the previous plan is done", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "plan")
-        let completedPlanId = ""
-        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-          Stream.tap((event) => {
-            if (event._tag !== "PlanProposed") return Effect.void
-            completedPlanId = event.plan.id
-            return runner.approvePlan(SESSION, event.plan.id)
-          }),
-          Stream.runDrain
-        )
-        expect((yield* PlanStore.readDocument(temp.root))?.status).toBe("done")
-
-        yield* runner.setMode(SESSION, "plan")
-        let nextPlanId = ""
-        const nextEvents: Array<StreamEvent> = []
-        yield* runner.prompt(SESSION, SESSION, "[[plan]] implement a separate task").pipe(
-          Stream.tap((event) => {
-            if (event._tag !== "PlanProposed") return Effect.void
-            nextPlanId = event.plan.id
-            return runner.stop(SESSION)
-          }),
-          Stream.runForEach((event) => Effect.sync(() => nextEvents.push(event)))
-        )
-
-        return { completedPlanId, nextPlanId, nextEvents }
-      }).pipe(Effect.provide(base()))
-    )
-
-    expect(result.nextPlanId).not.toBe("")
-    expect(result.nextPlanId).not.toBe(result.completedPlanId)
-    expect(result.nextEvents.some((event) => event._tag === "PlanProposed")).toBe(true)
-    expect(ranTool(result.nextEvents, "plan-edit-1")).toBe(false)
   })
 })
 
@@ -1871,7 +974,6 @@ describe("AgentRunner model", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       modelReportingAdapter,
       ContextManager.Default,
       ConfigService.Default,
@@ -1886,591 +988,6 @@ describe("AgentRunner model", () => {
       }).pipe(Effect.provide(base))
     )
     expect(persistedModelId).toBe("anthropic/claude-test")
-  })
-})
-
-describe("AgentRunner plan library", () => {
-  const WT = "/tmp/jingler/worktrees/jingler/mysession"
-
-  /** Seed a session that owns a worktree (so the runner writes/points at plans). */
-  const seedSessionWithWorktree = (mode: PermissionMode) => {
-    const session: Session = {
-      id: SESSION,
-      repo: "acme/widget",
-      branch: "chore/mysession",
-      title: "My session",
-      status: "idle",
-      ...TEST_RUNTIME,
-      diff: { added: 0, removed: 0 },
-      prNumber: null,
-      costUsd: 0,
-      tokens: 0,
-      updatedAt: "2026-07-11T10:00:00.000Z",
-      worktreePath: WT,
-      chats: [
-        chatForSession("2026-07-11T10:00:00.000Z", { mode })
-      ],
-      activeChatId: SESSION,
-      mode
-    }
-    mkdirSync(temp.root, { recursive: true })
-    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
-  }
-
-  /** An adapter that records the prompt it was handed, then completes. */
-  const recordingAdapter = (out: {
-    prompt: string | null
-    specs?: Array<AgentTurnSpec>
-    reply?: string
-  }): Layer.Layer<AgentTurnDriver> =>
-    Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (_sessionId, spec, ctx) =>
-          Effect.gen(function* () {
-            out.prompt = spec.prompt
-            out.specs?.push(spec)
-            if (out.reply !== undefined) {
-              yield* ctx.emit({ _tag: "Assistant", text: out.reply })
-            }
-            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<AgentTurnDriverShape["run"]>,
-        stop: () => Effect.void
-      })
-    )
-
-  const baseWithAdapter = (adapter: Layer.Layer<AgentTurnDriver>) =>
-    Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      adapter,
-      ContextManager.Default,
-      temp.layer
-    )
-
-  it("keeps plan mode transient so approval restores the selected agent's execution policy", async () => {
-    seedSessionWithWorktree("plan")
-    const captured: { prompt: string | null; specs: Array<AgentTurnSpec> } = {
-      prompt: null,
-      specs: []
-    }
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner
-          .prompt(SESSION, SESSION, "Fix the bounded issue directly.")
-          .pipe(Stream.runDrain)
-        yield* PlanStore.promoteDocument(WT, {
-          sessionId: SESSION,
-          producingChatId: SESSION,
-          id: "approved-plan",
-          status: "executing",
-          author: "agent",
-          plan: EXISTING_DELEGATION
-        })
-        yield* runner
-          .prompt(SESSION, SESSION, "Integrate and report the result.")
-          .pipe(Stream.runDrain)
-      }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
-    )
-
-    expect(captured.specs).toHaveLength(2)
-    for (const spec of captured.specs) {
-      expect(spec.mode).toBe("plan")
-    }
-    expect(captured.specs[0]?.prompt).toContain("<managed-tools>")
-    expect(captured.specs[1]?.prompt).toContain("<session-context>")
-    expect(captured.specs[1]?.prompt).toMatch(/current-plan-[a-f0-9]{16}\.json/)
-  })
-
-  it("preserves the operator's execution mode for direct turns", async () => {
-    for (const mode of ["ask", "accept-edits", "auto"] as const) {
-      seedSessionWithWorktree(mode)
-      const captured: { prompt: string | null; specs: Array<AgentTurnSpec> } = {
-        prompt: null,
-        specs: []
-      }
-      await Effect.runPromise(
-        Effect.gen(function* () {
-          const runner = yield* AgentRunner
-          yield* runner.prompt(SESSION, SESSION, "Inspect and act within my configured permissions.").pipe(
-            Stream.runDrain
-          )
-        }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
-      )
-
-      expect(captured.specs).toHaveLength(1)
-      expect(captured.specs[0]?.mode).toBe(mode)
-    }
-  })
-
-  it("always attaches Jingler's managed tool contract to plan runs", async () => {
-    seedSessionWithWorktree("plan")
-    const captured: { prompt: string | null; specs: Array<AgentTurnSpec> } = {
-      prompt: null,
-      specs: []
-    }
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* (yield* AgentRunner)
-          .prompt(SESSION, SESSION, "Plan this work.")
-          .pipe(Stream.runDrain)
-      }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
-    )
-
-    expect(captured.specs).toHaveLength(1)
-    expect(captured.specs[0]?.mode).toBe("plan")
-    expect(captured.prompt).toContain("<managed-tools>")
-  })
-
-  it("executes and verifies bounded work directly without proposing a plan", async () => {
-    seedSessionWithWorktree("auto")
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        const events = yield* runner
-          .prompt(
-            SESSION,
-            SESSION,
-            "Add and verify the one bounded rate-limit change."
-          )
-          .pipe(Stream.runCollect)
-        return {
-          events,
-          document: yield* PlanStore.readDocument(WT)
-        }
-      }).pipe(
-        Effect.provide(baseWithAdapter(makeScriptedAgentTurnDriver(0)))
-      )
-    )
-
-    const emitted = Array.from(result.events)
-    expect(emitted.some((event) => event._tag === "PlanProposed")).toBe(false)
-    expect(emitted).toContainEqual(
-      expect.objectContaining({
-        _tag: "ToolStart",
-        name: "Edit",
-        target: "src/routes/billing.ts"
-      })
-    )
-    expect(emitted).toContainEqual(
-      expect.objectContaining({
-        _tag: "ToolEnd",
-        id: "bash-1",
-        status: "success",
-        meta: "1 passed"
-      })
-    )
-    expect(result.document).toBeNull()
-  })
-
-  it("leaves invalid amendments at the enhanced plan boundary", async () => {
-    seedSessionWithWorktree("auto")
-    // A re-emitted plan whose new stage declares no acceptance criterion — the
-    // compiler rejects it (`missing-acceptance`) rather than making it canonical.
-    const invalidAmendment = {
-      ...EXISTING_DELEGATION,
-      stages: [
-        ...EXISTING_DELEGATION.stages,
-        {
-          id: "02",
-          title: "Missing acceptance",
-          intent: "A stage with no verifiable outcome.",
-          approach: [],
-          files: [{ path: "src/new.ts", change: "A" as const }],
-          diagrams: [],
-          notes: [],
-          acceptance: [],
-          dependencies: []
-        }
-      ]
-    }
-    const captured = {
-      prompt: null,
-      reply: `I could not complete this amendment.\n\n\`\`\`json\n${JSON.stringify({ mode: "submit", plan: invalidAmendment })}\n\`\`\``
-    }
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* PlanStore.promoteDocument(WT, {
-          sessionId: SESSION,
-          producingChatId: SESSION,
-          id: "approved-plan",
-          status: "executing",
-          author: "agent",
-          plan: EXISTING_DELEGATION
-        })
-        const before = yield* PlanStore.readDocument(WT, SESSION, SESSION)
-        const runner = yield* AgentRunner
-        const events = yield* runner
-          .prompt(SESSION, SESSION, "Add the new delegated stage.")
-          .pipe(Stream.runCollect)
-        const messages = yield* TranscriptStore.list(SESSION)
-        const feedback = messages
-          .at(-1)
-          ?.parts.filter((part) => part._tag === "Text")
-          .map((part) => part.text)
-          .join("\n")
-        expect(feedback).toContain("I could not complete this amendment.")
-        expect(feedback).not.toContain("Jingler amendment outcome")
-        expect(Array.from(events)).toContainEqual({
-          _tag: "Assistant",
-          text: expect.stringContaining("I could not complete this amendment.")
-        })
-        expect((yield* PlanStore.readDocument(WT, SESSION, SESSION))?.revision).toBe(
-          before?.revision
-        )
-      }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
-    )
-  })
-
-  it("leaves the approved plan untouched when the reply carries no amendment block", async () => {
-    seedSessionWithWorktree("auto")
-    const captured = {
-      prompt: null,
-      reply: "Just some coordination prose — no plan JSON block here."
-    }
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* PlanStore.promoteDocument(WT, {
-          sessionId: SESSION,
-          producingChatId: SESSION,
-          id: "approved-plan",
-          status: "executing",
-          author: "agent",
-          plan: EXISTING_DELEGATION
-        })
-        const before = yield* PlanStore.readDocument(WT, SESSION, SESSION)
-        const runner = yield* AgentRunner
-        yield* runner
-          .prompt(SESSION, SESSION, "Coordinate, but do not amend.")
-          .pipe(Stream.runDrain)
-        const after = yield* PlanStore.readDocument(WT, SESSION, SESSION)
-
-        // No plan block → no amendment → the canonical plan is unchanged.
-        expect(after?.revision).toBe(before?.revision)
-        expect(after?.plan).toStrictEqual(before?.plan)
-      }).pipe(Effect.provide(baseWithAdapter(recordingAdapter(captured))))
-    )
-  })
-
-  it("writes a proposed plan into the session's plan library (~/jingler/.jingler/<worktree>/)", async () => {
-    seedSessionWithWorktree("plan")
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-    OpenConnectorService.Default,
-    BrowserControlMcpServiceTest,
-    InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      makeScriptedAgentTurnDriver(0),
-      ContextManager.Default,
-      ConfigService.Default,
-      temp.layer
-    )
-    const files = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, SESSION, "[[plan]] refactor auth").pipe(
-          Stream.tap((ev) =>
-            ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void
-          ),
-          Stream.runDrain
-        )
-        return yield* PlanStore.list(WT)
-      }).pipe(Effect.provide(base))
-    )
-    // One stable canonical file is namespaced by worktree under the plan library.
-    expect(files).toHaveLength(1)
-    const file = files[0]!
-    expect(readFileSync(file, "utf8")).toContain("Refactor auth flow")
-  })
-
-  it("canonicalizes a proposed plan before publishing PlanProposed", async () => {
-    seedSessionWithWorktree("plan")
-    const fallback = mkPlan(
-      "PRD: Refactor auth",
-      "Extract the token store, update callers, and run the auth tests."
-    )
-    const fallbackAdapter = Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (sessionId, _spec, ctx) =>
-          Effect.gen(function* () {
-            yield* ctx.emit({ _tag: "Started", sessionId })
-            yield* ctx.proposePlan(fallback)
-            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<AgentTurnDriverShape["run"]>,
-        stop: () => Effect.void
-      })
-    )
-    const base = baseWithAdapter(fallbackAdapter)
-    const proposed: Plan[] = []
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, SESSION, "Plan the auth refactor.").pipe(
-          Stream.tap((event) => {
-            if (event._tag !== "PlanProposed") return Effect.void
-            proposed.push(event.plan)
-            return runner.approvePlan(SESSION, event.plan.id)
-          }),
-          Stream.runDrain
-        )
-      }).pipe(Effect.provide(base))
-    )
-
-    const document = await Effect.runPromise(
-      PlanStore.readDocument(WT, SESSION, SESSION).pipe(
-        Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
-      )
-    )
-    expect(document).not.toBeNull()
-    expect(proposed).toHaveLength(1)
-    expect(proposed[0]).toMatchObject({ id: document?.id, structured: true })
-    expect(document?.plan.title).toBe("PRD: Refactor auth")
-    expect(JSON.stringify(document?.plan)).toContain("Extract the token store")
-  })
-
-  it("removes the streamed HTML protocol block after publishing the canonical plan", async () => {
-    seedSessionWithWorktree("plan")
-    const reply = [
-      "Planning complete.",
-      "",
-      "```json",
-      scriptedPlanEmission("streamed", 1),
-      "```"
-    ].join("\n")
-    const streamedPlan = scriptedPlanPrd("streamed", 1)
-    const streamedAdapter = Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (sessionId, _spec, ctx) =>
-          Effect.gen(function* () {
-            yield* ctx.emit({ _tag: "Started", sessionId })
-            yield* ctx.emit({ _tag: "Assistant", text: reply })
-            yield* ctx.proposePlan(
-              streamedPlan,
-              reply.slice(reply.indexOf("```json"))
-            )
-            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<AgentTurnDriverShape["run"]>,
-        stop: () => Effect.void
-      })
-    )
-    const base = baseWithAdapter(streamedAdapter)
-
-    const transcript = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, SESSION, "Plan the auth refactor.").pipe(
-          Stream.tap((event) =>
-            event._tag === "PlanProposed"
-              ? runner.approvePlan(SESSION, event.plan.id)
-              : Effect.void
-          ),
-          Stream.runDrain
-        )
-        return yield* TranscriptStore.list(SESSION)
-      }).pipe(Effect.provide(base))
-    )
-
-    const assistant = transcript.findLast((message) => message.role === "assistant")
-    const visibleText = assistant?.parts
-      .filter((part) => part._tag === "Text")
-      .map((part) => part.text)
-      .join("\n")
-    expect(visibleText).toBe("Planning complete.")
-    expect(assistant?.parts.some((part) => part._tag === "Plan")).toBe(true)
-  })
-
-  it("preserves visible HTML when the selected plan came from a separate payload", async () => {
-    seedSessionWithWorktree("plan")
-    const visibleExample = [
-      "Payload submitted separately; keep this documentation:",
-      "",
-      "```json",
-      scriptedPlanEmission("visible-example", 1).replace("Refactor auth flow", "Visible documentation"),
-      "```"
-    ].join("\n")
-    const payloadPlan = scriptedPlanPrd("payload", 1)
-    const payloadAdapter = Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (sessionId, _spec, ctx) =>
-          Effect.gen(function* () {
-            yield* ctx.emit({ _tag: "Started", sessionId })
-            yield* ctx.emit({ _tag: "Assistant", text: visibleExample })
-            yield* ctx.proposePlan(payloadPlan)
-            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<AgentTurnDriverShape["run"]>,
-        stop: () => Effect.void
-      })
-    )
-    const testLayer = baseWithAdapter(payloadAdapter)
-
-    const transcript = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "plan")
-        yield* runner.prompt(SESSION, SESSION, "Plan the auth refactor.").pipe(
-          Stream.tap((event) =>
-            event._tag === "PlanProposed"
-              ? runner.approvePlan(SESSION, event.plan.id)
-              : Effect.void
-          ),
-          Stream.runDrain
-        )
-        return yield* TranscriptStore.list(SESSION)
-      }).pipe(Effect.provide(testLayer))
-    )
-
-    const visibleText = transcript
-      .flatMap((message) => message.parts)
-      .filter((part) => part._tag === "Text")
-      .map((part) => part.text)
-      .join("\n")
-    expect(visibleText).toContain("Payload submitted separately")
-    expect(visibleText).toContain("Visible documentation")
-  })
-
-  it("prepends the saved-plan pointer (with the file path) to the next run", async () => {
-    seedSessionWithWorktree("auto")
-    const captured: { prompt: string | null } = { prompt: null }
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-    OpenConnectorService.Default,
-    BrowserControlMcpServiceTest,
-    InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      recordingAdapter(captured),
-      ContextManager.Default,
-      ConfigService.Default,
-      temp.layer
-    )
-    // A saved plan already exists for this worktree.
-    const planFile = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* PlanStore.promoteDocument(WT, {
-          sessionId: "s1",
-          producingChatId: "s1",
-          id: "s1-plan",
-          plan: scriptedPlanPrd("s1", 1),
-          author: "agent"
-        })
-        return yield* PlanStore.currentFileFor(WT, "s1", "s1")
-      }).pipe(
-        Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
-      )
-    )
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, SESSION, "please implement the plan").pipe(Stream.runDrain)
-      }).pipe(Effect.provide(base))
-    )
-    expect(captured.prompt).toContain("<session-context>")
-    expect(captured.prompt).toContain(planFile) // the absolute plan path is handed over
-    // Anchors the agent to its worktree so it doesn't chase the plan file's
-    // (out-of-tree) location and cd out of the project.
-    expect(captured.prompt).toContain(WT)
-    // The user's actual text is preserved at the end (the note is only a prefix).
-    expect(captured.prompt?.endsWith("please implement the plan")).toBe(true)
-  })
-
-  it("does NOT prepend a pointer when the worktree has no saved plan", async () => {
-    seedSessionWithWorktree("auto")
-    const captured: { prompt: string | null } = { prompt: null }
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-    OpenConnectorService.Default,
-    BrowserControlMcpServiceTest,
-    InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      recordingAdapter(captured),
-      ContextManager.Default,
-      ConfigService.Default,
-      temp.layer
-    )
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, SESSION, "just do X").pipe(Stream.runDrain)
-      }).pipe(Effect.provide(base))
-    )
-    // The standing "ask through your native channel" note prefixes every turn,
-    // so assert on the plan pointer's absence rather than the whole string.
-    expect(captured.prompt).toContain("just do X")
-    expect(captured.prompt).not.toContain("saved plan")
-    expect(captured.prompt?.endsWith("just do X")).toBe(true)
-  })
-
-  it("keeps a slash command first, so the harness still expands it", async () => {
-    seedSessionWithWorktree("auto")
-    const captured: { prompt: string | null } = { prompt: null }
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-    OpenConnectorService.Default,
-    BrowserControlMcpServiceTest,
-    InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      recordingAdapter(captured),
-      ContextManager.Default,
-      temp.layer
-    )
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* PlanStore.promoteDocument(WT, {
-          sessionId: "s1",
-          producingChatId: "s1",
-          id: "s1-plan",
-          plan: scriptedPlanPrd("s1", 1),
-          author: "agent"
-        })
-        return yield* PlanStore.currentFileFor(WT, "s1", "s1")
-      }).pipe(
-        Effect.provide(Layer.merge(PlanStore.Default, temp.layer))
-      )
-    )
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, SESSION, "/babysit-pr get it to main").pipe(Stream.runDrain)
-      }).pipe(Effect.provide(base))
-    )
-    // Prefixing the pointer demoted the command to prose, and the turn came back
-    // empty. The context now rides along AFTER it.
-    expect(captured.prompt?.startsWith("/babysit-pr get it to main")).toBe(true)
-    expect(captured.prompt).toContain("<session-context>")
   })
 })
 
@@ -2526,7 +1043,6 @@ describe("AgentRunner resume across restarts", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       resumeAdapter(captured, "sdk-123"),
       ContextManager.Default,
       ConfigService.Default,
@@ -2561,272 +1077,6 @@ describe("AgentRunner resume across restarts", () => {
       }).pipe(Effect.provide(base))
     )
     expect(captured.piSessionId).toBe("sdk-123")
-  })
-})
-
-describe("AgentRunner plan progress across turns", () => {
-  const WT_X = "/tmp/jingler/worktrees/jingler/crossturn"
-
-  const seedCrossTurnSession = () => {
-    const session: Session = {
-      id: SESSION,
-      repo: "acme/widget",
-      branch: "chore/crossturn",
-      title: "Cross-turn session",
-      status: "idle",
-      diff: { added: 0, removed: 0 },
-      prNumber: null,
-      costUsd: 0,
-      tokens: 0,
-      updatedAt: "2026-07-11T10:00:00.000Z",
-      worktreePath: WT_X,
-      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode: "auto" })],
-      activeChatId: SESSION,
-      mode: "auto"
-    }
-    mkdirSync(temp.root, { recursive: true })
-    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
-  }
-
-  /**
-   * Turn 1 proposes a plan and does NO work; turn 2 edits a file the plan
-   * declared. That's the shape of every real session — the plan is approved once
-   * and execution runs on across many later turns, each with its own assistant
-   * message. `edit` is the path the second turn writes.
-   */
-  const twoTurnAdapter = (edit: string, plan?: (p: PlanPrd) => PlanPrd): Layer.Layer<AgentTurnDriver> => {
-    let turn = 0
-    return Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (sessionId, _spec, ctx) =>
-          Effect.gen(function* () {
-            turn += 1
-            if (turn === 1) {
-              const base = scriptedPlanPrd(sessionId, 1)
-              yield* ctx.proposePlan(plan ? plan(base) : base)
-              yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-              return
-            }
-            yield* ctx.emit({ _tag: "ToolStart", id: "x1", name: "Write", target: edit })
-            yield* ctx.emit({
-              _tag: "ToolEnd",
-              id: "x1",
-              status: "success",
-              meta: null,
-              diff: { added: 40, removed: 0 },
-              preview: null
-            })
-            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<AgentTurnDriverShape["run"]>,
-        stop: () => Effect.void
-      })
-    )
-  }
-
-  /** Turn 1: propose + approve. Turn 2: the edit lands. Returns the plan after. */
-  const runTwoTurns = (edit: string, plan?: (p: PlanPrd) => PlanPrd) => {
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-    OpenConnectorService.Default,
-    BrowserControlMcpServiceTest,
-    InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      twoTurnAdapter(edit, plan),
-      ContextManager.Default,
-      ConfigService.Default,
-      temp.layer
-    )
-    return Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, SESSION, "plan the refactor").pipe(
-          Stream.tap((ev) =>
-            ev._tag === "PlanProposed" ? runner.approvePlan(SESSION, ev.plan.id) : Effect.void
-          ),
-          Stream.runDrain
-        )
-        // A FRESH assistant message: the plan part is now behind us.
-        yield* runner.prompt(SESSION, SESSION, "now implement it").pipe(Stream.runDrain)
-        return findApprovedPlan(yield* TranscriptStore.list(SESSION))
-      }).pipe(Effect.provide(base))
-    )
-  }
-
-  const stepStatus = (
-    located: { readonly plan: Plan } | null,
-    id: string
-  ): string | undefined => located?.plan.steps.find((s) => s.id === id)?.status
-
-  it("marks a step done when the edit lands on a LATER turn than the plan", async () => {
-    seedCrossTurnSession()
-    // s_02 declares src/auth/token-store.ts.
-    const located = await runTwoTurns(`${WT_X}/src/auth/token-store.ts`)
-    expect(stepStatus(located, "s_02")).toBe("done")
-  })
-
-  it("leaves the plan's other steps untouched", async () => {
-    seedCrossTurnSession()
-    const located = await runTwoTurns(`${WT_X}/src/auth/token-store.ts`)
-    expect(stepStatus(located, "s_01")).toBe("proposed")
-    expect(stepStatus(located, "s_05")).toBe("proposed")
-  })
-
-  /** Point step s_01 at a bare filename — the shape that breaks a naive suffix match. */
-  const bareFilenameStep = (p: PlanPrd): PlanPrd => ({
-    ...p,
-    stages: p.stages.map((s) =>
-      s.id === "s_01"
-        ? { ...s, files: [{ path: "session.ts", change: "M" as const, added: 1, removed: 0 }] }
-        : s
-    )
-  })
-
-  it("does not tick a step on a bare-filename suffix collision", async () => {
-    seedCrossTurnSession()
-    // s_01 declares "session.ts"; the edit hits an unrelated "refund-session.ts".
-    // An unanchored endsWith matches those two and ticks a step that had nothing
-    // to do with the edit — a boundary-anchored match must not.
-    const located = await runTwoTurns(`${WT_X}/src/billing/refund-session.ts`, bareFilenameStep)
-    expect(stepStatus(located, "s_01")).not.toBe("done")
-  })
-
-  it("still ticks a bare-filename step on a genuine path match", async () => {
-    seedCrossTurnSession()
-    // The boundary anchor must not overshoot: "session.ts" still matches a real
-    // /…/session.ts edit.
-    const located = await runTwoTurns(`${WT_X}/src/auth/session.ts`, bareFilenameStep)
-    expect(stepStatus(located, "s_01")).toBe("done")
-  })
-})
-
-describe("AgentRunner worker plan checkpoints", () => {
-  const WT_W = "/tmp/jingler/worktrees/jingler/workers"
-
-  const seedWorkerSession = () => {
-    const session: Session = {
-      id: SESSION,
-      repo: "acme/widget",
-      branch: "feat/workers",
-      title: "Worker delegation session",
-      status: "idle",
-      diff: { added: 0, removed: 0 },
-      prNumber: null,
-      costUsd: 0,
-      tokens: 0,
-      updatedAt: "2026-07-11T10:00:00.000Z",
-      worktreePath: WT_W,
-      chats: [chatForSession("2026-07-11T10:00:00.000Z", { mode: "auto" })],
-      activeChatId: SESSION,
-      mode: "auto"
-    }
-    mkdirSync(temp.root, { recursive: true })
-    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([session]))
-  }
-
-  /**
-   * Turn 1 proposes the plan; turn 2 delegates: a WORKER (agentId-tagged
-   * stream) emits the PLAN_TASK checkpoint, the main agent emits none. This is
-   * the delegation shape that used to freeze the plan panel — sub-agent events
-   * route to the renderer and returned before the marker parser ran, so a
-   * worker executing a stage for ten minutes never moved a task off "pending".
-   */
-  const delegatingAdapter = (): Layer.Layer<AgentTurnDriver> => {
-    let turn = 0
-    return Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (sessionId, _spec, ctx) =>
-          Effect.gen(function* () {
-            turn += 1
-            if (turn === 1) {
-              yield* ctx.proposePlan(scriptedPlanPrd(sessionId, 1))
-              yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-              return
-            }
-            yield* ctx.emit({
-              _tag: "SubagentStarted",
-              id: "task_worker_1",
-              name: "worker",
-              description: "Implement stage s_02",
-              parentId: null
-            })
-            // The marker arrives split across two deltas, as a live stream
-            // delivers it — the accumulator has to reassemble it. A stale
-            // fingerprint applies by id with a warning, exactly as main's does.
-            yield* ctx.emit({
-              _tag: "Assistant",
-              agentId: "task_worker_1",
-              text: "Working on the stage.\nPLAN_TASK stage=s_02 finger"
-            })
-            yield* ctx.emit({
-              _tag: "Assistant",
-              agentId: "task_worker_1",
-              text: "print=stale task=s_02.task.1 status=completed\n"
-            })
-            yield* ctx.emit({
-              _tag: "SubagentEnded",
-              id: "task_worker_1",
-              status: "done"
-            })
-            yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
-          }) as ReturnType<AgentTurnDriverShape["run"]>,
-        stop: () => Effect.void
-      })
-    )
-  }
-
-  it("applies a delegated worker's PLAN_TASK checkpoints to the live plan", async () => {
-    seedWorkerSession()
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      OpenConnectorService.Default,
-      BrowserControlMcpServiceTest,
-      InMemorySecretStoreLive,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      PlanStore.Default,
-      delegatingAdapter(),
-      ContextManager.Default,
-      temp.layer
-    )
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runner = yield* AgentRunner
-        yield* runner.setMode(SESSION, "auto")
-        yield* runner.prompt(SESSION, SESSION, "plan the work").pipe(
-          Stream.tap((event) =>
-            event._tag === "PlanProposed"
-              ? runner.approvePlan(SESSION, event.plan.id)
-              : Effect.void
-          ),
-          Stream.runDrain
-        )
-        yield* runner.prompt(SESSION, SESSION, "delegate stage two").pipe(Stream.runDrain)
-        return {
-          document: yield* PlanStore.readDocument(WT_W),
-          transcript: yield* TranscriptStore.list(SESSION)
-        }
-      }).pipe(Effect.provide(base))
-    )
-
-    const stage = result.document?.plan.stages.find((candidate) => candidate.id === "s_02")
-    expect(stage?.tasks?.find((task) => task.id === "s_02.task.1")?.status).toBe("completed")
-    // The worker's text still never lands on the persisted main turn.
-    const mainText = result.transcript
-      .flatMap((message) => message.parts)
-      .filter((part) => part._tag === "Text")
-      .map((part) => part.text)
-      .join("\n")
-    expect(mainText).not.toContain("PLAN_TASK")
-    expect(mainText).not.toContain("Working on the stage.")
   })
 })
 
@@ -2881,7 +1131,6 @@ describe("AgentRunner failures", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       unusedAdapter,
       temp.layer
     )
@@ -2949,7 +1198,6 @@ describe("AgentRunner failures", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       switchingAdapter,
       temp.layer
     )
@@ -3018,7 +1266,6 @@ describe("AgentRunner failures", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       failingAdapter,
       temp.layer
     )
@@ -3146,8 +1393,7 @@ describe("AgentRunner stop", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         ConfigService.Default,
         hangingAdapter(started, interrupted, opts.gate),
         temp.layer
@@ -3204,8 +1450,7 @@ describe("AgentRunner stop", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         hangingAdapter(started, interrupted),
         temp.layer
       )
@@ -3260,8 +1505,7 @@ describe("AgentRunner stop", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
         temp.layer
       )
@@ -3310,8 +1554,7 @@ describe("AgentRunner stop", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
         temp.layer
       )
@@ -3364,8 +1607,7 @@ describe("AgentRunner stop", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         settledThenLingeringAdapter(settled, interrupted),
         temp.layer
       )
@@ -3423,8 +1665,7 @@ describe("AgentRunner stop", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         makeScriptedAgentTurnDriver(0),
         temp.layer
       )
@@ -3502,8 +1743,7 @@ describe("AgentRunner stop", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         slowAdapter,
         temp.layer
       )
@@ -3572,8 +1812,7 @@ describe("AgentRunner first-event watchdog", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         muteAdapter,
         temp.layer
       )
@@ -3623,8 +1862,7 @@ describe("AgentRunner first-event watchdog", () => {
         SessionStore.Default,
         TranscriptStore.Default,
         BackgroundTaskStore.Default,
-        PlanStore.Default,
-        ContextManager.Default,
+          ContextManager.Default,
         chattyAdapter,
         temp.layer
       )
@@ -3673,7 +1911,6 @@ describe("AgentRunner live tool output", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       deltaAdapter,
       ContextManager.Default,
       ConfigService.Default,
@@ -3724,7 +1961,6 @@ describe("AgentRunner usage accrual", () => {
       SessionStore.Default,
       TranscriptStore.Default,
       BackgroundTaskStore.Default,
-      PlanStore.Default,
       makeScriptedAgentTurnDriver(0),
       temp.layer
     )

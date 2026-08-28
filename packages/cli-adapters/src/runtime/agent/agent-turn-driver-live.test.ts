@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from "vitest"
 import {
   type AgentContext,
   AgentTurnDriver,
-  PlanDecision,
   type AgentTurnSpec,
   type SteerTurn
 } from "../../agent-turn-driver.js"
@@ -48,8 +47,6 @@ const context = (): AgentContext => ({
   emit: vi.fn((_event: StreamEvent) => Effect.void),
   canUseTool: vi.fn(() => Effect.succeed("allow" as const)),
   askQuestion: vi.fn(() => Effect.succeed([])),
-  proposePlan: vi.fn(() => Effect.succeed(PlanDecision.Reject())),
-  saveDraftPlan: vi.fn(() => Effect.void),
   registerBackgroundStop: vi.fn(() => Effect.void),
   registerTurnSteer: vi.fn((_steer: SteerTurn | null) => Effect.void)
 })

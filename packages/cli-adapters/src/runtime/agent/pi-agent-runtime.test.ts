@@ -75,8 +75,6 @@ const context: AgentRuntimeContext = {
   ...inactiveRuntimeActivity,
   canUseTool: () => Effect.succeed("allow"),
   askQuestion: () => Effect.succeed([]),
-  saveDraftPlan: () => Effect.void,
-  proposePlan: () => Effect.succeed({ _tag: "Reject" })
 }
 
 /** A handle that settles each prompt immediately, retained while `fleet.childActive`. */

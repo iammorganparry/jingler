@@ -62,8 +62,6 @@ describe("pi tool bridge", () => {
       ...inactiveRuntimeActivity,
       canUseTool,
       askQuestion: () => Effect.succeed([]),
-      saveDraftPlan: () => Effect.void,
-      proposePlan: () => Effect.succeed({ _tag: "Reject" })
     }
     const [tool] = createPiTools(registry, spec, context)
 
@@ -93,8 +91,6 @@ describe("pi tool bridge", () => {
       ...inactiveRuntimeActivity,
       canUseTool,
       askQuestion: () => Effect.succeed([]),
-      saveDraftPlan: () => Effect.void,
-      proposePlan: () => Effect.succeed({ _tag: "Reject" })
     }, { allowTool: () => false })
 
     const result = await tool?.execute(
@@ -125,8 +121,6 @@ describe("pi tool bridge", () => {
       ...inactiveRuntimeActivity,
       canUseTool: () => Effect.succeed("allow"),
       askQuestion: () => Effect.succeed([]),
-      saveDraftPlan: () => Effect.void,
-      proposePlan: () => Effect.succeed({ _tag: "Reject" })
     })
 
     const result = await tool?.execute(
@@ -161,8 +155,6 @@ describe("pi tool bridge", () => {
       ...inactiveRuntimeActivity,
       canUseTool: () => Effect.succeed("allow"),
       askQuestion: () => Effect.succeed([]),
-      saveDraftPlan: () => Effect.void,
-      proposePlan: () => Effect.succeed({ _tag: "Reject" })
     }).find(({ name }) => name === "workspace_list_files")
 
     expect(tool?.parameters).toEqual({
@@ -183,8 +175,6 @@ describe("pi tool permission denial", () => {
       ...inactiveRuntimeActivity,
       canUseTool: () => Effect.succeed("deny"),
       askQuestion: () => Effect.succeed([]),
-      saveDraftPlan: () => Effect.void,
-      proposePlan: () => Effect.succeed({ _tag: "Reject" })
     }
     const [tool] = createPiTools(registry, spec, context)
 

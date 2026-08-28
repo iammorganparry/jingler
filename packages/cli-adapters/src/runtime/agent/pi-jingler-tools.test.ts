@@ -13,8 +13,6 @@ const runtimeContext = (overrides: Partial<AgentRuntimeContext> = {}): AgentRunt
   ...inactiveRuntimeActivity,
   canUseTool: () => Effect.succeed("allow"),
   askQuestion: () => Effect.succeed([]),
-  saveDraftPlan: () => Effect.void,
-  proposePlan: () => Effect.succeed({ _tag: "Reject" }),
   ...overrides
 })
 

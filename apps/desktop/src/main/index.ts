@@ -14,7 +14,6 @@ import { join, resolve } from "node:path"
 import {
   killAllChildren,
   killAllPtysSync,
-  PlanStore,
   PluginHost,
   SecretStore,
   SessionStore,
@@ -75,38 +74,6 @@ const enableCodexDiagnostics = (): void => {
   )
 }
 
-const recoverInterruptedPlans = (updatedBefore: string) => Effect.gen(function* () {
-  const sessions = yield* SessionStore.list()
-  yield* Effect.forEach(
-    sessions,
-    (session) =>
-      session.worktreePath
-        ? PlanStore.markInterrupted(
-            session.worktreePath,
-            session.id,
-            session.activeChatId,
-            updatedBefore
-          ).pipe(
-            Effect.asVoid,
-            Effect.catchAllCause((cause) =>
-              Effect.logError(
-                `Could not recover the interrupted plan for ${session.id}: ${String(cause)}`
-              )
-            )
-          )
-        : Effect.void,
-    { concurrency: "unbounded", discard: true }
-  )
-}).pipe(
-  Effect.catchAllCause((cause) =>
-    Effect.logError(`Could not enumerate interrupted plans: ${String(cause)}`)
-  )
-)
-
-// Only one instance may run: a second launch (e.g. the OS handing us a
-// `jingler://` deep link) must forward its argv into the primary instance
-// rather than spawn a rival window. If we didn't get the lock, we're that second
-// launch — quit immediately and let `second-instance` do the delivery.
 const gotPrimaryLock = app.requestSingleInstanceLock()
 if (!gotPrimaryLock) {
   app.quit()
@@ -465,7 +432,6 @@ if (!gotPrimaryLock) {
     // their exact canonical revisions in parallel, but never put filesystem
     // recovery on the window-creation path: a corrupt artifact or unavailable
     // volume must not launch Jingler with no window.
-    void runtime.runPromise(recoverInterruptedPlans(new Date().toISOString()))
     void runtime.runPromise(
       RuntimeRecoveryService.reconcile.pipe(
         Effect.catchAllCause((cause) =>

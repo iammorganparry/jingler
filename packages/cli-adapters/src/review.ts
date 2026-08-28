@@ -11,7 +11,7 @@ import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
 import type { FileSystem, Path } from "@effect/platform"
 import { Effect, Option, PubSub, RcMap, Ref, Schema, Stream } from "effect"
 import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
-import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
+import { AgentTurnDriver } from "./agent-turn-driver.js"
 import type { AppPaths } from "./app-paths.js"
 import { ReviewStore } from "./review-store.js"
 import { SessionStore } from "./sessions.js"
@@ -457,7 +457,6 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
             ),
           canUseTool: () => Effect.succeed("deny" as const),
           askQuestion: () => Effect.succeed([]),
-          proposePlan: () => Effect.succeed(PlanDecision.Reject()),
           // Deliberately dropped. The reviewer is a nested, read-only run against
           // the SAME session id, so registering its stop handle would overwrite
           // the real agent's — and the dock's Stop button would then be aiming at
