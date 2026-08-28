@@ -3,6 +3,7 @@
 import {
   type CSSProperties,
   Fragment,
+  memo,
   useEffect,
   useState,
 } from "react";
@@ -113,7 +114,7 @@ export function useAgentCodeTokens(
   return null;
 }
 
-export function AgentCodeLine({
+export const AgentCodeLine = memo(function AgentCodeLine({
   code,
   tokens,
   className,
@@ -138,7 +139,7 @@ export function AgentCodeLine({
         : code}
     </span>
   );
-}
+});
 
 export function AgentCode({
   code,

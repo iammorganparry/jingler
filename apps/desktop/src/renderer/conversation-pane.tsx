@@ -361,9 +361,11 @@ export function ConversationPane({
   // the worktree's tracked-file list, already fetched for the composer's `@`
   // menu — reusing it is what keeps the false-positive gate free.
   const knownFiles = useMemo(() => new Set(convo.files), [convo.files])
+  const onOpenFileRef = useRef(onOpenFile)
+  onOpenFileRef.current = onOpenFile
   const openAsset = useCallback(
-    (path: string) => onOpenFile?.(session.id, path),
-    [onOpenFile, session.id]
+    (path: string) => onOpenFileRef.current?.(session.id, path),
+    [session.id]
   )
 
   // A ratio, not a fixed plan width: the first split gives Plan Review two
