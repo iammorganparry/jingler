@@ -5,6 +5,30 @@ import { plannotatorProjectionToPlanDocument } from "@jingler/core"
 import { ConversationView } from "./conversation-view.js"
 
 describe("ConversationView Plannotator projection", () => {
+  it("does not render a transcript card for an empty projection", () => {
+    const document = plannotatorProjectionToPlanDocument(
+      {
+        phase: "idle",
+        planFilePath: null,
+        review: null,
+        checklist: []
+      },
+      "session-1",
+      "chat-1",
+      "2026-08-13T00:00:00.000Z"
+    )
+
+    render(
+      <ConversationView
+        messages={[]}
+        mode="auto"
+        planDocument={document}
+      />
+    )
+
+    expect(screen.queryByTestId("plannotator-transcript-card")).toBeNull()
+  })
+
   it("renders the native transcript card as a read-only checklist projection", () => {
     const document = plannotatorProjectionToPlanDocument(
       {

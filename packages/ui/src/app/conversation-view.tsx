@@ -307,6 +307,8 @@ export function ConversationView({
   const [following, setFollowing] = useState(true)
   const [queueExpanded, setQueueExpanded] = useState(false)
   const queueLimit = queueExpanded ? queued.length : QUEUE_PREVIEW
+  const showPlanTranscriptCard = planDocument !== null &&
+    (planDocument.plan.sections.length > 0 || planDocument.plan.stages.length > 0)
 
   // Shift+Tab cycles the HITL mode (works while typing in the composer). Plan
   // is part of the same Jingler-owned contract for every certified model.
@@ -550,7 +552,7 @@ export function ConversationView({
               )
             })}
           </div>
-          {planDocument ? (
+          {showPlanTranscriptCard ? (
             <div className="mx-auto w-full max-w-[760px] pb-6" data-testid="plannotator-transcript-card">
               <PlanApprovalCard
                 plan={planDocumentToPlan(planDocument)}
