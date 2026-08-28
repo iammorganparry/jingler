@@ -67,11 +67,10 @@ const document: PlanDocument = {
   updatedBy: "agent"
 }
 
-describe("PlanApprovalCard approval", () => {
-  it("offers review and approval actions", () => {
-    const approvals: Array<string | undefined> = []
+describe("PlanApprovalCard projection", () => {
+  it("offers read-only review navigation without approval controls", () => {
     const onOpenReview = vi.fn()
-    render(<PlanApprovalCard plan={plan} onApprove={(mode) => approvals.push(mode)} onOpenReview={onOpenReview} />)
+    render(<PlanApprovalCard plan={plan} onOpenReview={onOpenReview} />)
 
     expect(screen.getByTestId("plan-approval-card")).toBeTruthy()
     expect(screen.getByText("1").textContent).toBe(String(plan.steps.length))
@@ -79,9 +78,7 @@ describe("PlanApprovalCard approval", () => {
     fireEvent.click(screen.getByRole("button", { name: "View Plan" }))
     expect(onOpenReview).toHaveBeenCalledOnce()
 
-    fireEvent.click(screen.getByRole("button", { name: /^Approve$/ }))
-
-    expect(approvals).toStrictEqual([undefined])
+    expect(screen.queryByRole("button", { name: /^Approve$/ })).toBeNull()
   })
 
   it("renders canonical stages with their nested tasks when ids match", () => {
@@ -92,14 +89,5 @@ describe("PlanApprovalCard approval", () => {
     expect(screen.getByText("First stage task")).toBeTruthy()
     expect(screen.getByText("Second stage task")).toBeTruthy()
     expect(screen.queryByText("Implement it")).toBeNull()
-  })
-
-  it("disables inline approval until the canonical revision is available", () => {
-    render(<PlanApprovalCard plan={plan} />)
-
-    expect(screen.getByRole("button", { name: /^Approve$/ })).toHaveProperty(
-      "disabled",
-      true
-    )
   })
 })

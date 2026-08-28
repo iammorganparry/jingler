@@ -1184,6 +1184,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
+  /** Whether a persisted Plannotator review was interrupted by host restart. */
+  Rpc.make("Agent.plannotatorRecoveryNeeded", {
+    success: Schema.Boolean,
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
   /**
    * Kill ONE live sub-agent, leaving the turn (and its siblings) running.
    *

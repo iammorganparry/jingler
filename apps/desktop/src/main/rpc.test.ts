@@ -54,7 +54,6 @@ import {
   GitHubApiError,
   DetectedResourceCandidate,
   ProviderModelId,
-  planStageSemanticFingerprint,
 } from "@jingler/core";
 import {
   appPathsFor,

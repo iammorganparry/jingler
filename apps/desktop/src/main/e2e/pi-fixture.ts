@@ -643,16 +643,33 @@ const PLANNOTATOR_E2E_PLAN = [
 
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const lastMessage = context.messages.at(-1)
-  const submitted = context.messages.some(
+  const submitCount = context.messages.filter(
     (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL
-  )
-  if (submitted) {
+  ).length
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === SUBMIT_PLAN_TOOL) {
+    if (toolResultText(lastMessage).includes("YOUR PLAN WAS NOT APPROVED")) {
+      return callTool(
+        PLAN_WRITE_TOOL,
+        {
+          path: "PLAN.md",
+          content: PLANNOTATOR_E2E_PLAN.replace(
+            "Replace the auth flow",
+            "Revise the auth flow while keeping the existing token format"
+          )
+        },
+        "plannotator-rewrite"
+      )
+    }
     return fauxAssistantMessage(
       "Implemented and verified the approved plan. [DONE:1] [DONE:2]"
     )
   }
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === PLAN_WRITE_TOOL) {
-    return callTool(SUBMIT_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-submit")
+    return callTool(
+      SUBMIT_PLAN_TOOL,
+      { filePath: "PLAN.md" },
+      `plannotator-submit-${submitCount + 1}`
+    )
   }
   return callTool(
     PLAN_WRITE_TOOL,

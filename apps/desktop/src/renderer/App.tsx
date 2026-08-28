@@ -722,11 +722,6 @@ function AuthedApp({
       // snapshots rather than leaving meters reading against the old one.
       void qc.invalidateQueries({ queryKey: ["context"] });
     });
-  const savePlanTemplate = (template: { readonly source: string }) =>
-    rpc.configSetPlanTemplate(template).then((saved) => {
-      qc.setQueryData(["config"], saved);
-    });
-
   // Toggle a repo's starred state, persist the whole list, and update the cache.
   const toggleStar = (repoPath: string) => {
     const next = starredRepos.includes(repoPath)
@@ -1867,8 +1862,6 @@ function AuthedApp({
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
         contextSessions={contextSessions}
-        planTemplate={configQuery.data?.planTemplate ?? null}
-        onSavePlanTemplate={savePlanTemplate}
         unifiedMcp={unifiedMcp}
         connector={connector}
         environments={environmentController.environments}

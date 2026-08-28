@@ -146,7 +146,7 @@ export const Interactive: Story = { render: () => <Playground /> }
 export const Card: Story = {
   render: () => (
     <div className="w-[680px] bg-editor p-6">
-      <PlanCard plan={basePlan()} onApprove={() => {}} onOpenReview={() => {}} />
+      <PlanCard plan={basePlan()} onOpenReview={() => {}} />
     </div>
   )
 }
@@ -154,7 +154,7 @@ export const Card: Story = {
 export const CardRevising: Story = {
   render: () => (
     <div className="w-[680px] bg-editor p-6">
-      <PlanCard plan={basePlan({ status: "revising" })} onApprove={() => {}} onOpenReview={() => {}} />
+      <PlanCard plan={basePlan({ status: "revising" })} onOpenReview={() => {}} />
     </div>
   )
 }

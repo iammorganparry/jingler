@@ -251,7 +251,7 @@ test("the mode chip lives in the composer and Shift+Tab cycles all modes", async
 
   await window.keyboard.press("Shift+Tab")
   // Plan mode is reachable for every certified pi model and themes the composer purple.
-  await expect(window.getByRole("button", { name: "Enhanced Plan", exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Plan", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "plan")
 
   await window.keyboard.press("Shift+Tab")

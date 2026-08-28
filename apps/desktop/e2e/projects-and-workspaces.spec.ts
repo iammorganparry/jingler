@@ -215,7 +215,7 @@ test("migrates an existing repository and session into the project workspace hie
   expect(migrated.connectionId).toBe("jingler-e2e-connection")
 })
 
-test("adds a project creates a workspace selects capabilities and completes an enhanced plan", async ({
+test("adds a project creates a workspace selects capabilities and completes a Plannotator plan", async ({
   launchApp
 }) => {
   const launched = await launchApp({

@@ -5445,6 +5445,11 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const runner = yield* AgentRunner;
       return yield* runner.chatBusy(chatId);
     }),
+  "Agent.plannotatorRecoveryNeeded": ({ sessionId, chatId }) =>
+    Effect.gen(function* () {
+      const runner = yield* AgentRunner;
+      return yield* runner.plannotatorRecoveryNeeded(sessionId, chatId);
+    }),
   // Not `AgentRunner.stop` scoped smaller: that halts the whole turn. A
   // sub-agent is killed through the run's own per-task handle, which is what
   // `BackgroundTaskStore` holds.

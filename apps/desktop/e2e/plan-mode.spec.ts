@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+import type { ElectronApplication } from "@playwright/test"
 import { appShell, expect, type SeedSession, test } from "./fixtures.js"
 
 const PI_FIXTURE = {
@@ -36,6 +37,14 @@ const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession
   }],
   activeChatId: "s_plannotator_chat"
 }]
+
+const reviewScript = (app: ElectronApplication, expression: string) =>
+  app.evaluate(async ({ webContents }, source) => {
+    const page = webContents.getAllWebContents().find((contents) =>
+      contents.getURL().startsWith("http://localhost:")
+    )
+    return page?.executeJavaScript(source) ?? null
+  }, expression)
 
 test("Plannotator reviews inside the Plan tab and drives native progress", async ({
   launchApp
@@ -114,10 +123,129 @@ test("Plannotator reviews inside the Plan tab and drives native progress", async
 
   await launched.window.getByTestId("active-chat-tab").first().click()
   await expect(
-    launched.window.getByText("Implemented and verified the approved plan.")
+    launched.window.getByText("Implemented and verified the approved plan.").first()
   ).toBeVisible({ timeout: 30_000 })
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
   await expect.poll(async () =>
     (await reviewPages()).filter(({ url }) => url.startsWith("http://localhost:")).length,
   { timeout: 20_000 }).toBe(0)
+})
+
+test("Plannotator feedback revises the same plan before approval", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+
+  const composer = launched.window.getByPlaceholder(/Message .+…/)
+  await composer.click()
+  await launched.window.keyboard.press("Shift+Tab")
+  await launched.window.keyboard.press("Shift+Tab")
+  await composer.fill("[[plan]] replace auth")
+  await composer.press("Enter")
+  const planTab = launched.window.getByRole("button", { name: "Plan Review" }).first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+  await expect.poll(() => reviewScript(launched.app, "document.body?.innerText ?? ''"), {
+    timeout: 20_000
+  }).toContain("Continue")
+  await reviewScript(
+    launched.app,
+    `[...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Continue')?.click()`
+  )
+  await expect.poll(() => reviewScript(
+    launched.app,
+    `Boolean(document.querySelector('button[title="Add global comment"]'))`
+  )).toBe(true)
+  await reviewScript(launched.app, `document.querySelector('button[title="Add global comment"]')?.click()`)
+  await expect.poll(() => reviewScript(
+    launched.app,
+    `Boolean(document.querySelector('textarea[placeholder="Add a global comment..."]'))`
+  )).toBe(true)
+  await reviewScript(launched.app, `(() => {
+    const node = document.querySelector('textarea[placeholder="Add a global comment..."]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setter?.call(node, 'Keep the existing token format.');
+    node?.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  await expect.poll(() => reviewScript(
+    launched.app,
+    `[...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Add')?.disabled`
+  )).toBe(false)
+  await reviewScript(
+    launched.app,
+    `[...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Add')?.click()`
+  )
+  await expect.poll(() => reviewScript(
+    launched.app,
+    `document.querySelector('button[title="Send Feedback"]')?.disabled`
+  )).toBe(false)
+  await reviewScript(launched.app, `document.querySelector('button[title="Send Feedback"]')?.click()`)
+  await expect.poll(() => reviewScript(launched.app, "document.body?.innerText ?? ''"), {
+    timeout: 30_000
+  }).toContain("keeping the existing token format")
+
+  await reviewScript(launched.app, `(() => {
+    const button = [...document.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.includes('Approve')
+    );
+    button?.click();
+  })()`)
+  await launched.window.getByTestId("active-chat-tab").first().click()
+  await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
+    .toBeVisible({ timeout: 30_000 })
+  await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
+})
+
+test("a pending Plannotator review reopens after an Electron restart", async ({ launchApp }) => {
+  const first = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(first.window)).toBeVisible()
+
+  const composer = first.window.getByPlaceholder(/Message .+…/)
+  await composer.click()
+  await first.window.keyboard.press("Shift+Tab")
+  await first.window.keyboard.press("Shift+Tab")
+  await composer.fill("[[plan]] replace auth")
+  await composer.press("Enter")
+  await expect(first.window.getByRole("button", { name: "Plan Review" }).first())
+    .toBeVisible({ timeout: 20_000 })
+  await first.app.close()
+
+  const reopened = await launchApp({
+    configured: true,
+    withRepo: true,
+    home: first.home,
+    reposDir: first.reposDir,
+    userDataDir: first.userDataDir,
+    authServer: first.authServer,
+    githubServer: first.githubServer,
+    githubRelay: first.githubRelay
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  const planTab = reopened.window.getByRole("button", { name: "Plan Review" }).first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+  await expect.poll(() => reopened.app.evaluate(async ({ webContents }) => {
+    const page = webContents.getAllWebContents().find((contents) =>
+      contents.getURL().startsWith("http://localhost:")
+    )
+    return page?.executeJavaScript("document.body?.innerText ?? ''") ?? ""
+  }), { timeout: 30_000 }).toContain("Implement the auth change")
+  await reopened.window.getByTestId("active-chat-tab").first().click()
+  await expect(reopened.window.getByText("0/2")).toBeVisible({ timeout: 20_000 })
+  const transcriptCard = reopened.window.getByTestId("plannotator-transcript-card")
+  await expect(transcriptCard).toContainText("Implement the auth change")
+  await expect(transcriptCard).toContainText("Verify the auth change")
+  await expect(transcriptCard.getByRole("button", { name: /^Approve$/ })).toHaveCount(0)
+  const planDrawer = reopened.window.getByTestId("plan-task-list")
+  await expect(planDrawer).toContainText("Implement the auth change")
+  await expect(planDrawer).toContainText("Verify the auth change")
 })

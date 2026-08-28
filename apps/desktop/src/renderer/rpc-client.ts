@@ -62,7 +62,6 @@ import type {
   Project,
   ProjectDirectoryListing,
   PermissionMode,
-  PlanApprovalResult,
   PlanCommentMessageDeliveryState,
   PlanDocument,
   PlanPrd,
@@ -852,13 +851,6 @@ export const rpc = {
       chatId,
       ...(reasoning === undefined ? {} : { reasoning })
     })),
-  agentCommentPlanStep: async (..._args: ReadonlyArray<unknown>) => {},
-  agentRevisePlan: async (..._args: ReadonlyArray<unknown>) => {},
-  agentApprovePlan: async (..._args: ReadonlyArray<unknown>): Promise<PlanApprovalResult> => ({
-    status: "refused",
-    message: "Plannotator owns plan approval.",
-    latestRevision: 0
-  }),
   agentSetModel: (
     sessionId: string,
     chatId: string,
@@ -871,6 +863,8 @@ export const rpc = {
     run((c) => c.Agent.stop({ sessionId, chatId })),
   agentChatBusy: (sessionId: string, chatId: string): Promise<boolean> =>
     run((c) => c.Agent.chatBusy({ sessionId, chatId })),
+  agentPlannotatorRecoveryNeeded: (sessionId: string, chatId: string): Promise<boolean> =>
+    run((c) => c.Agent.plannotatorRecoveryNeeded({ sessionId, chatId })),
   agentStopSubagent: (
     sessionId: string,
     chatId: string,
@@ -1192,8 +1186,6 @@ export const rpc = {
       if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
-  agentResumePlan: (..._args: ReadonlyArray<unknown>): (() => void) => () => {},
-
   // ── Terminal ─────────────────────────────────────────────────────────────
   /** Spawn a PTY for a session (cwd defaults to its worktree) and return it. */
   terminalCreate: (

@@ -9,7 +9,7 @@
  * agent keeps working. Attaching to an existing actor also means switching back
  * shows its up-to-date state with no reload.
  */
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { useSelector } from "@xstate/react"
 import type {
   Attachment,
@@ -144,6 +144,24 @@ export function useConversation(
     (s) => s,
     (a, b) => a === b || (a.context === b.context && a.value === b.value)
   )
+  const recoveryChecked = useRef<string | null>(null)
+  useEffect(() => {
+    if (!state.context.loaded || !session.chats.find(({ id }) => id === chatId)?.piSessionId) return
+    const key = `${session.id}:${chatId}`
+    if (recoveryChecked.current === key) return
+    recoveryChecked.current = key
+    let cancelled = false
+    void rpc.agentPlannotatorRecoveryNeeded(session.id, chatId).then((needed) => {
+      if (cancelled || !needed) return
+      actor.send({ type: "SET_MODE", mode: "plan" })
+      actor.send({ type: "SEND", text: "/plannotator-resume-review" })
+    }).catch(() => {
+      if (!cancelled) recoveryChecked.current = null
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [actor, chatId, session.chats, session.id, state.context.loaded])
 
   // Command callbacks, memoised per actor: `actor.send` never changes for a
   // given actor, so none of these need a fresh identity per snapshot. Their

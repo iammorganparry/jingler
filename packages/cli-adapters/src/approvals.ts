@@ -86,7 +86,7 @@ export const verdict = (
 ): "allow" | "gate" => {
   if (mode === "auto") return "allow"
   // The memory server is bundled and scoped by Jingler itself. Asking the
-  // operator again during enhanced plan execution can strand the active agent
+  // operator again during plan execution can strand the active agent
   // workers, so every memory operation bypasses the generic harness gate.
   if (jinglerMode && isJinglerMemoryRequest(req)) return "allow"
   if (isAllowlisted(allow, req.command)) return "allow"

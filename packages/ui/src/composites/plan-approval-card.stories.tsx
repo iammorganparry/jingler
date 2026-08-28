@@ -81,11 +81,11 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const AwaitingApproval: Story = {
-  args: { plan: plan(), document: documentFor(plan()), onApprove: () => {}, onOpenReview: () => {} }
+  args: { plan: plan(), document: documentFor(plan()), onOpenReview: () => {} }
 }
 
 export const Revising: Story = {
-  args: { plan: plan("revising"), document: documentFor(plan("revising")), onApprove: () => {}, onOpenReview: () => {} }
+  args: { plan: plan("revising"), document: documentFor(plan("revising")), onOpenReview: () => {} }
 }
 
 export const Approved: Story = {

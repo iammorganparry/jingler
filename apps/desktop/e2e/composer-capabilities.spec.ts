@@ -55,7 +55,10 @@ test("offers only certified connection models, never harness choices", async ({ 
   await launched.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` }).click()
   const modelOption = launched.window.getByRole("option", { name: new RegExp(`^${MODEL_LABEL}`) })
   await expect(modelOption).toBeVisible()
-  await expect(modelOption).toContainText(`${MODEL_ID} · desktop`)
+  await expect(modelOption).toHaveAttribute(
+    "data-value",
+    `${CONNECTION_ID}:${encodeURIComponent(MODEL_ID)}`
+  )
   await expect(launched.window.getByText(/Claude Code|Codex CLI|OpenCode|Cursor Agent/i)).toHaveCount(0)
 })
 
@@ -72,7 +75,7 @@ test("offers the same Jingler permission modes for every certified model", async
   await expect(launched.window.getByRole("option", { name: /^Ask Before Actions\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Accept Edits\b/ })).toBeVisible()
   await expect(launched.window.getByRole("option", { name: /^Auto\b/ })).toBeVisible()
-  await expect(launched.window.getByRole("option", { name: /^Enhanced Plan\b/ })).toBeVisible()
+  await expect(launched.window.getByRole("option", { name: /^Plan\b/ })).toBeVisible()
 })
 
 test("derives reasoning choices from the certified model capability", async ({ launchApp }) => {
@@ -156,7 +159,7 @@ test("configures canonical model, mode, and reasoning before creating a session"
   await expect(
     launched.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` })
   ).toBeVisible()
-  await launched.window.getByRole("button", { name: "Accept Edits", exact: true }).click()
+  await launched.window.getByRole("button", { name: "Auto", exact: true }).click()
   await launched.window.getByRole("option", { name: /^Ask Before Actions\b/ }).click()
   await launched.window.getByRole("button", { name: "Thinking strength" }).click()
   await launched.window.getByRole("option", { name: "High", exact: true }).click()

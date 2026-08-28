@@ -49,6 +49,7 @@ import {
 import { buildGate, makeApprovals, verdict } from "./approvals.js"
 import { runLifetime } from "./run-lifetime.js"
 import { routePeerAgentMessage } from "./peer-agent-coordination.js"
+import { plannotatorReviewPending } from "./plannotator-recovery.js"
 import { questionNote } from "./question-prompt.js"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
@@ -598,7 +599,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // mode, for the same reason: no system-prompt hook is shared by every
           // harness, and this has to survive a mid-session harness switch.
           const ask = questionNote()
-          // How this harness submits an enhanced plan. Null for Claude — the adapter passes
+          // How this harness submits a plan. Null for Claude — the adapter passes
           // `planModeInstructions` as a real SDK option there, and saying it twice
           // would compete with the `ExitPlanMode` tool the harness is steered
           // toward. With Jingler tools disabled, the harness owns planning and
@@ -1597,6 +1598,20 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         return !(yield* Ref.get(running.settled))
       })
 
+    const plannotatorRecoveryNeeded = (
+      sessionId: string,
+      chatId: string
+    ) =>
+      Effect.gen(function* () {
+        const session = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+        const chat = session?.chats.find((candidate) => candidate.id === chatId)
+        if (!chat?.piSessionId) return false
+        const paths = yield* AppPaths
+        return yield* Effect.promise(() =>
+          plannotatorReviewPending(chat.piSessionId, paths.piSessionsDir)
+        )
+      })
+
     return {
       /**
        * Whether any session is mid-run. Read by the learning daemon so a
@@ -1606,24 +1621,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
        */
       anyRunning: anySessionRunActive,
       chatBusy,
+      plannotatorRecoveryNeeded,
       prompt,
       decideGate,
       answerQuestion,
       setMode,
       steer,
       stop,
-      commentPlanStep: (..._args: ReadonlyArray<unknown>) => Effect.void,
-      revisePlan: (..._args: ReadonlyArray<unknown>) => Effect.void,
-      approvePlan: (..._args: ReadonlyArray<unknown>) => Effect.succeed({
-        status: "refused" as const,
-        message: "Plannotator owns plan approval.",
-        latestRevision: 0
-      }),
-      resumePlan: (..._args: ReadonlyArray<unknown>) =>
-        Stream.fromIterable<StreamEvent>([{
-          _tag: "Failed",
-          message: "Plannotator owns plan execution."
-        }]),
       forgetChat
     } as const
   })

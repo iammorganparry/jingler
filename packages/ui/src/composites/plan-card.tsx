@@ -1,10 +1,9 @@
-import type { ExecutionMode, Plan, PlanDocument, PlanTaskStatus } from "@jingler/core"
+import type { Plan, PlanDocument, PlanTaskStatus } from "@jingler/core"
 import {
   CheckCircle2,
   Circle,
   CircleAlert,
   CircleDashed,
-  CornerDownLeft,
   Download,
   ListChecks,
   ListTodo,
@@ -87,23 +86,17 @@ function TaskStatusIcon({ status }: { status: PlanTaskStatus }) {
 export function PlanApprovalCard({
   plan,
   document,
-  onApprove,
-  onResume,
   onOpenReview,
   className
 }: {
   plan: Plan
   /** Canonical stage/task shape for the active plan; legacy transcript cards omit it. */
   document?: PlanDocument | null
-  onApprove?: (executionMode?: ExecutionMode) => void
-  /** Approve a STALE plan (its original run is gone) — re-drives execution. */
-  onResume?: () => void
-  /** Open the full Plan Review view (step drill-in, comments, revise). */
+  /** Open the full read-only native plan projection. */
   onOpenReview?: () => void
   className?: string
 }) {
   const [showAll, setShowAll] = useState(false)
-  const pending = plan.status === "proposed" || plan.status === "revising"
   const stale = plan.status === "stale"
   const stages = approvalStages(plan, document)
   const visibleStages = showAll ? stages : stages.slice(0, PREVIEW_STEPS)
@@ -201,13 +194,6 @@ export function PlanApprovalCard({
         {onOpenReview && (
           <Button variant="ghost" size="sm" onClick={onOpenReview}>View Plan</Button>
         )}
-        {pending && (
-          <Button size="sm" disabled={onApprove === undefined} onClick={() => onApprove?.()}>
-            Approve
-            <CornerDownLeft className="size-3" />
-          </Button>
-        )}
-        {stale && onResume && <Button size="sm" onClick={onResume}>Approve &amp; implement</Button>}
       </footer>
     </section>
   )

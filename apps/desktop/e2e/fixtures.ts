@@ -798,8 +798,13 @@ export const test = base.extend<{
           console.error("E2E_RENDERER_ERROR", error),
         );
         page.on("console", (message) => {
-          if (message.type() === "error")
-            console.error("E2E_RENDERER_CONSOLE", message.text());
+          if (message.type() !== "error") return;
+          const url = message.location().url;
+          // Plannotator uses 404 as "no saved draft" and closes its annotation SSE
+          // when a review decision tears down the loopback server. Chromium logs
+          // both expected lifecycle responses as resource errors.
+          if (url.endsWith("/api/draft") || url.includes("/api/external-annotations/stream")) return;
+          console.error("E2E_RENDERER_CONSOLE", message.text(), url);
         });
       });
       const window = await app.firstWindow();

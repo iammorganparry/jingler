@@ -1,5 +1,5 @@
 diff --git a/index.ts b/index.ts
-index 6b36649e7fb05cda18e5e59d3dca87e4603413df..204a9fd2f36e14594e219ba97dfe4252d2986d45 100644
+index 6b36649e7fb05cda18e5e59d3dca87e4603413df..3caf8048134adbd3ab4ba0bba3f449c942c479dd 100644
 --- a/index.ts
 +++ b/index.ts
 @@ -41,8 +41,10 @@ import {
@@ -14,7 +14,16 @@ index 6b36649e7fb05cda18e5e59d3dca87e4603413df..204a9fd2f36e14594e219ba97dfe4252
  	type PlannotatorPlanApprovedEvent,
  	registerPlannotatorEventListeners,
  } from "./plannotator-events.ts";
-@@ -298,7 +300,10 @@ export default function plannotator(pi: ExtensionAPI): void {
+@@ -139,6 +141,8 @@ type PersistedPlannotatorState = {
+ 	 * session that never entered plan mode still injects nothing (#1269).
+ 	 */
+ 	idleNoticePending?: boolean;
++	/** A submitted planning tool call was awaiting an interactive decision. */
++	reviewPending?: boolean;
+ };
+ 
+ /**
+@@ -298,7 +302,10 @@ export default function plannotator(pi: ExtensionAPI): void {
  	let phase: Phase = "idle";
  	void registerPlannotatorEventListeners(pi, {
  		handlePlanMode: async (mode, ctx) => {
@@ -26,7 +35,15 @@ index 6b36649e7fb05cda18e5e59d3dca87e4603413df..204a9fd2f36e14594e219ba97dfe4252
  			if (mode === "enter") {
  				if (phase === "idle") await enterPlanning(ctx);
  				return { phase };
-@@ -340,6 +345,18 @@ export default function plannotator(pi: ExtensionAPI): void {
+@@ -317,6 +324,7 @@ export default function plannotator(pi: ExtensionAPI): void {
+ 	let phaseAddedTools: string[] = [];
+ 	let plannotatorConfig = {};
+ 	let justApprovedPlan = false;
++	let reviewPending = false;
+ 	// One-shot latch per phase entry: the phase framing message is delivered on
+ 	// the first prompt of a phase and then lives in conversation history, so it
+ 	// must never be re-sent on later prompts of the same phase. Reset at every
+@@ -340,6 +348,18 @@ export default function plannotator(pi: ExtensionAPI): void {
  	let todoProvider: TodoProvider | undefined;
  	/** Latch: no provider found, or one sync failed. Cleared on return to idle. */
  	let todoProviderDisabled = false;
@@ -45,42 +62,329 @@ index 6b36649e7fb05cda18e5e59d3dca87e4603413df..204a9fd2f36e14594e219ba97dfe4252
  
  	pi.on("session_start", (_event, ctx) => {
  		sessionAlive = true;
-@@ -463,6 +480,7 @@ export default function plannotator(pi: ExtensionAPI): void {
+@@ -462,7 +482,9 @@ export default function plannotator(pi: ExtensionAPI): void {
+ 			phaseAddedTools,
  			framingDelivered,
  			idleNoticePending,
++			reviewPending,
  		});
 +		publishHostState();
  	}
  
  	async function applyModelRef(
-@@ -555,6 +573,7 @@ export default function plannotator(pi: ExtensionAPI): void {
+@@ -554,7 +576,9 @@ export default function plannotator(pi: ExtensionAPI): void {
+ 		// framing this entry will deliver; dropping it avoids a stale "plan
  		// mode is off" landing after plan mode came back on.
  		idleNoticePending = false;
++		reviewPending = false;
  		checklistItems = [];
 +		hostChecklist = [];
  		captureSavedState(ctx);
  		await applyPhaseConfig(ctx, { restoreSavedState: false });
  		persistState();
-@@ -1258,9 +1277,17 @@ export default function plannotator(pi: ExtensionAPI): void {
+@@ -580,6 +604,7 @@ export default function plannotator(pi: ExtensionAPI): void {
+ 		// one place the plan-mode-off notice may be armed (#1320). Fresh idle
+ 		// sessions never pass through returnToIdle and stay injection-free.
+ 		idleNoticePending = true;
++		reviewPending = false;
+ 		checklistItems = [];
+ 		lastSubmittedPath = null;
+ 		// Re-detect for the next plan: a provider that appeared (or a transient
+@@ -625,6 +650,131 @@ export default function plannotator(pi: ExtensionAPI): void {
+ 		ctx.ui.notify("Plannotator: approved plan handed off for external execution.");
+ 	}
+ 
++	async function reviewSubmittedPlan(
++		ctx: ExtensionContext,
++		inputPath: string,
++		planContent: string,
++		signal?: AbortSignal,
++	) {
++		reviewPending = true;
++		persistState();
++		let result: { approved: boolean; feedback?: string };
++		try {
++			const review = await startPlanReviewBrowserSession(ctx, planContent, signal);
++			activeReview = { reviewId: review.reviewId, url: review.url };
++			publishHostState();
++			try {
++				result = await review.waitForDecision();
++			} finally {
++				activeReview = null;
++				publishHostState();
++			}
++			reviewPending = false;
++			persistState();
++		} catch (err) {
++			reviewPending = false;
++			persistState();
++			// A stopped session is an outcome, not a startup failure: the review
++			// was closed (cancellation or port self-preemption) before a decision.
++			if (isBrowserSessionStoppedError(err)) {
++				ctx.ui.notify("Plan review session was closed before a decision.", "info");
++				return {
++					content: [
++						{
++							type: "text",
++							text: "The plan review browser session was closed before a decision was made. The plan was neither approved nor rejected; resubmit to reopen review.",
++						},
++					],
++					details: { approved: false },
++				};
++			}
++			const message = `Failed to start plan review UI: ${getStartupErrorMessage(err)}`;
++			ctx.ui.notify(message, "error");
++			return {
++				content: [{ type: "text", text: message }],
++				details: { approved: false },
++			};
++		}
++	
++		if (result.approved) {
++			if (resolveExecutionMode(plannotatorConfig) === "external") {
++				await handoffApprovedPlan(ctx, inputPath, planContent, result.feedback);
++				return {
++					content: [{ type: "text", text: "Plan approved and handed off for external execution." }],
++					details: {
++						approved: true,
++						handedOff: true,
++						...(result.feedback ? { feedback: result.feedback } : {}),
++					},
++					terminate: true,
++				};
++			}
++	
++			phase = "executing";
++			framingDelivered = false;
++			await applyPhaseConfig(ctx, { restoreSavedState: true });
++			pi.appendEntry("plannotator-execute", { lastSubmittedPath });
++			persistState();
++			justApprovedPlan = true;
++	
++			const doneMsg =
++				checklistItems.length > 0
++					? `After completing each step, include [DONE:n] in your response where n is the step number.`
++					: "";
++	
++			if (result.feedback) {
++				const { getPlanApprovedWithNotesPrompt } = await loadPlannotatorPrompts();
++				return {
++					content: [
++						{
++							type: "text",
++							text: getPlanApprovedWithNotesPrompt("pi", loadConfig(), {
++								planFilePath: inputPath,
++								doneMsg,
++								feedback: result.feedback,
++							}),
++						},
++					],
++					details: { approved: true, feedback: result.feedback },
++					terminate: true,
++				};
++			}
++	
++			const { getPlanApprovedPrompt } = await loadPlannotatorPrompts();
++			return {
++				content: [
++					{
++						type: "text",
++						text: getPlanApprovedPrompt("pi", loadConfig(), {
++							planFilePath: inputPath,
++							doneMsg,
++						}),
++					},
++				],
++				details: { approved: true },
++				terminate: true,
++			};
++		}
++	
++		// Denied
++		persistState();
++		const feedbackText = result.feedback || "Plan rejected. Please revise.";
++		const { buildPlanFileRule, getPlanDeniedPrompt, getPlanToolName } = await loadPlannotatorPrompts();
++		return {
++			content: [
++				{
++					type: "text",
++					text: getPlanDeniedPrompt("pi", loadConfig(), {
++						toolName: getPlanToolName("pi"),
++						planFileRule: buildPlanFileRule(getPlanToolName("pi"), inputPath),
++						feedback: feedbackText,
++					}),
++				},
++			],
++			details: { approved: false, feedback: feedbackText },
++		};
++	}
++
+ 	// ── Commands & Shortcuts ─────────────────────────────────────────────
+ 
+ 	pi.registerCommand("plannotator-plan-mode", {
+@@ -634,6 +784,35 @@ export default function plannotator(pi: ExtensionAPI): void {
+ 		},
+ 	});
+ 
++	pi.registerCommand("plannotator-resume-review", {
++		description: "Resume a plan review interrupted by host restart",
++		handler: async (_args, ctx) => {
++			if (phase !== "planning" || !reviewPending || !lastSubmittedPath) return;
++			const inputPath = lastSubmittedPath;
++			const fullPath = resolve(ctx.cwd, inputPath);
++			if (!existsSync(fullPath)) {
++				reviewPending = false;
++				lastSubmittedPath = null;
++				persistState();
++				ctx.ui.notify(`Cannot resume plan review: ${inputPath} no longer exists.`, "error");
++				return;
++			}
++			const planContent = readFileSync(fullPath, "utf-8");
++			if (!planContent.trim()) {
++				reviewPending = false;
++				persistState();
++				ctx.ui.notify(`Cannot resume plan review: ${inputPath} is empty.`, "error");
++				return;
++			}
++			checklistItems = parseChecklist(planContent);
++			const outcome = await reviewSubmittedPlan(ctx, inputPath, planContent);
++			if (outcome.details.approved || "feedback" in outcome.details) {
++				const text = outcome.content.map((part) => part.text).join("\n");
++				await pi.sendUserMessage(text);
++			}
++		},
++	});
++
+ 	pi.registerCommand("plannotator-review", {
+ 		description: "Open interactive code review for current changes or a PR URL; pass --git or --gitbutler to force that provider",
+ 		handler: async (args, ctx) => {
+@@ -1258,109 +1437,7 @@ export default function plannotator(pi: ExtensionAPI): void {
  				};
  			}
  
 -			let result: Awaited<ReturnType<typeof openPlanReviewBrowser>>;
-+			let result: { approved: boolean; feedback?: string };
- 			try {
+-			try {
 -				result = await openPlanReviewBrowser(ctx, planContent, signal);
-+				const review = await startPlanReviewBrowserSession(ctx, planContent, signal);
-+				activeReview = { reviewId: review.reviewId, url: review.url };
-+				publishHostState();
-+				try {
-+					result = await review.waitForDecision();
-+				} finally {
-+					activeReview = null;
-+					publishHostState();
-+				}
- 			} catch (err) {
- 				// A stopped session is an outcome, not a startup failure: the review
- 				// was closed (cancellation or port self-preemption) before a decision.
+-			} catch (err) {
+-				// A stopped session is an outcome, not a startup failure: the review
+-				// was closed (cancellation or port self-preemption) before a decision.
+-				if (isBrowserSessionStoppedError(err)) {
+-					ctx.ui.notify("Plan review session was closed before a decision.", "info");
+-					return {
+-						content: [
+-							{
+-								type: "text",
+-								text: "The plan review browser session was closed before a decision was made. The plan was neither approved nor rejected; resubmit to reopen review.",
+-							},
+-						],
+-						details: { approved: false },
+-					};
+-				}
+-				const message = `Failed to start plan review UI: ${getStartupErrorMessage(err)}`;
+-				ctx.ui.notify(message, "error");
+-				return {
+-					content: [{ type: "text", text: message }],
+-					details: { approved: false },
+-				};
+-			}
+-
+-			if (result.approved) {
+-				if (resolveExecutionMode(plannotatorConfig) === "external") {
+-					await handoffApprovedPlan(ctx, inputPath, planContent, result.feedback);
+-					return {
+-						content: [{ type: "text", text: "Plan approved and handed off for external execution." }],
+-						details: {
+-							approved: true,
+-							handedOff: true,
+-							...(result.feedback ? { feedback: result.feedback } : {}),
+-						},
+-						terminate: true,
+-					};
+-				}
+-
+-				phase = "executing";
+-				framingDelivered = false;
+-				await applyPhaseConfig(ctx, { restoreSavedState: true });
+-				pi.appendEntry("plannotator-execute", { lastSubmittedPath });
+-				persistState();
+-				justApprovedPlan = true;
+-
+-				const doneMsg =
+-					checklistItems.length > 0
+-						? `After completing each step, include [DONE:n] in your response where n is the step number.`
+-						: "";
+-
+-				if (result.feedback) {
+-					const { getPlanApprovedWithNotesPrompt } = await loadPlannotatorPrompts();
+-					return {
+-						content: [
+-							{
+-								type: "text",
+-								text: getPlanApprovedWithNotesPrompt("pi", loadConfig(), {
+-									planFilePath: inputPath,
+-									doneMsg,
+-									feedback: result.feedback,
+-								}),
+-							},
+-						],
+-						details: { approved: true, feedback: result.feedback },
+-						terminate: true,
+-					};
+-				}
+-
+-				const { getPlanApprovedPrompt } = await loadPlannotatorPrompts();
+-				return {
+-					content: [
+-						{
+-							type: "text",
+-							text: getPlanApprovedPrompt("pi", loadConfig(), {
+-								planFilePath: inputPath,
+-								doneMsg,
+-							}),
+-						},
+-					],
+-					details: { approved: true },
+-					terminate: true,
+-				};
+-			}
+-
+-			// Denied
+-			persistState();
+-			const feedbackText = result.feedback || "Plan rejected. Please revise.";
+-			const { buildPlanFileRule, getPlanDeniedPrompt, getPlanToolName } = await loadPlannotatorPrompts();
+-			return {
+-				content: [
+-					{
+-						type: "text",
+-						text: getPlanDeniedPrompt("pi", loadConfig(), {
+-							toolName: getPlanToolName("pi"),
+-							planFileRule: buildPlanFileRule(getPlanToolName("pi"), inputPath),
+-							feedback: feedbackText,
+-						}),
+-					},
+-				],
+-				details: { approved: false, feedback: feedbackText },
+-			};
++			return await reviewSubmittedPlan(ctx, inputPath, planContent, signal);
+ 		},
+ 	});
+ 
+@@ -1632,6 +1709,7 @@ Mark completed steps with [DONE:n] in your response.`
+ 			// the transition but not yet the delivery still owes it; a path
+ 			// that recorded the delivery must not repeat it.
+ 			idleNoticePending = stateEntry.data.idleNoticePending ?? false;
++			reviewPending = stateEntry.data.reviewPending ?? false;
+ 		} else {
+ 			// No plannotator activity on this path. Memory savedState and
+ 			// phaseAddedTools are kept so the idle branch below can hand back
+@@ -1642,6 +1720,7 @@ Mark completed steps with [DONE:n] in your response.`
+ 			// countermand is owed — and injecting one here would break the
+ 			// #1269 fresh-session inject-nothing promise.
+ 			idleNoticePending = false;
++			reviewPending = false;
+ 		}
+ 
+ 		if (phase === "planning" && !savedState) {
 diff --git a/plannotator-browser.ts b/plannotator-browser.ts
 index 42fb412e83aa8ba0685d0224204dd723e47db94d..74d6ffc2c9eca8e9c07b8653f1afbc0a3d6624ac 100644
 --- a/plannotator-browser.ts

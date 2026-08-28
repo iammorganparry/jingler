@@ -185,7 +185,7 @@ function LegacySelectMenu() {
         <Check size={13} className="text-blue" />
       </div>
       <div className="rounded-md px-2 py-2 text-[13px] text-text-body">Auto</div>
-      <div className="rounded-md px-2 py-2 text-[13px] text-text-body">Enhanced Plan</div>
+      <div className="rounded-md px-2 py-2 text-[13px] text-text-body">Plan</div>
     </div>
   )
 }

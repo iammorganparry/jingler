@@ -5,7 +5,6 @@ import type {
   GithubConfig,
   NotificationsConfig,
   OffloadComputeSettings,
-  PlanTemplateConfig,
   ContextConfig,
   ContextSnapshot,
   Environment,
@@ -53,7 +52,6 @@ import {
 } from "../components/dialog.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { GithubMark } from "../components/github-mark.js"
-import { PlanSettings } from "./plan-settings.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
 import {
   PluginsSettings,
@@ -189,9 +187,6 @@ export interface SettingsViewProps {
     onRename: (id: string, name: string) => void | Promise<void>
     onRevoke: (id: string) => void | Promise<void>
   }
-  /** Custom PRD structure injected into planning runs. */
-  planTemplate?: PlanTemplateConfig | null
-  onSavePlanTemplate?: (template: PlanTemplateConfig) => Promise<void> | void
   /** Unified MCP (OpenConnector) connection settings (from `useOpenConnector`). */
   unifiedMcp?: OpenConnectorSectionProps
   /**
@@ -261,8 +256,6 @@ export function SettingsView({
   themes,
   plugins,
   devices,
-  planTemplate,
-  onSavePlanTemplate,
   unifiedMcp,
   connector,
   context,
@@ -420,10 +413,17 @@ export function SettingsView({
         />
       ) : section === "plan" ? (
         <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
-          <PlanSettings
-            source={planTemplate?.source}
-            onSave={(source) => onSavePlanTemplate?.({ source })}
-          />
+          <div className="mx-auto w-full max-w-[760px] rounded-xl border border-line bg-panel p-5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-purple">
+              Plannotator
+            </p>
+            <h2 className="mt-1 text-[19px] font-semibold text-text-bright">Plan mode</h2>
+            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+              Plans are Markdown files reviewed and revised in Plannotator. Jingler&apos;s todo list,
+              Plan drawer, progress dock, composer summary, and transcript card are read-only views
+              of that plan.
+            </p>
+          </div>
         </div>
       ) : section === "agents" ? (
         agents ? <AgentsSettings {...agents} /> : <StubSection label="Agents & skills" />
