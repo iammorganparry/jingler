@@ -37,6 +37,13 @@ if (bootThemeCss) {
 
 installExplanationQueryBridge(queryClient)
 
+// Dev-only perf instrumentation (window.__jinglerPerf, read by the main
+// process perf monitor over CDP). The env guard makes electron-vite drop the
+// module — and its lazy react-scan dependency — from packaged bundles.
+if (import.meta.env.DEV) {
+  import("./perf-hook.js").catch(() => {})
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

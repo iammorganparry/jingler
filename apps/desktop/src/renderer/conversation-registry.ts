@@ -340,6 +340,14 @@ export const useChatActivities = (
  * been evicted — in which case this rebuilds it and the transcript re-loads from
  * disk, exactly as it does on a cold start.
  */
+/**
+ * Dev-only observability accessor for the perf monitor (perf-hook.ts). The
+ * registry map is module-private on purpose; this exposes only its SIZE — a
+ * count above MAX_LIVE_ACTORS + visible panes means eviction has stopped
+ * working, which historically was a multi-GB leak.
+ */
+export const __debugActorCount = (): number => registry.size
+
 export const getConversationActor = (
   session: Session,
   chatId: string = session.activeChatId

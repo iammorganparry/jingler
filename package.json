@@ -17,6 +17,7 @@
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint .",
     "lint:anti-slop": "NODE_OPTIONS=--experimental-strip-types oxlint",
+    "perf": "node scripts/perf/perf.mjs",
     "license:check": "node scripts/licenses/check-production-licenses.mjs",
     "artifacts:check": "node scripts/artifacts/check-packaged-artifacts.mjs",
     "clean": "turbo run clean && rimraf node_modules",

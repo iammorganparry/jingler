@@ -74,6 +74,30 @@ const enableCodexDiagnostics = (): void => {
   )
 }
 
+/**
+ * Dev-mode performance monitor (see perf-monitor.ts): passive memory/CPU
+ * sampling plus an agent-queryable loopback HTTP API for heap snapshots, CPU
+ * profiles, and leak checks. Same gate shape as `enableCodexDiagnostics`:
+ * never in packaged builds, off in headless e2e (unless a test forces it on
+ * with `JINGLER_PERF_MONITOR=1`), and explicitly disableable with
+ * `JINGLER_PERF_MONITOR=0`. Loaded via dynamic import so packaged builds
+ * never evaluate the module.
+ */
+const enablePerfMonitor = (webContentsId: number): void => {
+  if (
+    app.isPackaged ||
+    (process.env.JINGLER_E2E_HEADLESS === "1" && process.env.JINGLER_PERF_MONITOR !== "1") ||
+    process.env.JINGLER_PERF_MONITOR === "0"
+  ) {
+    return
+  }
+  import("./perf-monitor.js")
+    .then((monitor) => monitor.startPerfMonitor(webContentsId))
+    .catch((cause) => {
+      console.error("[perf-monitor] failed to start", cause)
+    })
+}
+
 const gotPrimaryLock = app.requestSingleInstanceLock()
 if (!gotPrimaryLock) {
   app.quit()
@@ -455,6 +479,7 @@ if (!gotPrimaryLock) {
 
     applyDevDockIcon()
     createWindow()
+    if (mainWindow !== null) enablePerfMonitor(mainWindow.webContents.id)
 
     // Self-update only makes sense in a packaged build (dev has no update feed).
     if (

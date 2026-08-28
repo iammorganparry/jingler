@@ -263,6 +263,18 @@ sidebar must reflect the same value, active turns cannot move, and sessions with
 work use an explicit continuation. See `docs/remote-environments.md` and the
 device relay/agent READMEs for operations and recovery.
 
+### Performance monitor (dev only)
+
+Un-packaged builds run a passive perf monitor in Electron main
+(`apps/desktop/src/main/perf-monitor.ts`): ~20s samples of process +
+renderer-CDP counters into `~/jingler/diagnostics/perf/history.jsonl`, plus a
+loopback HTTP API (discovery: `~/jingler/diagnostics/perf/endpoint.json`) for
+heap snapshots, CPU/allocation profiles, react-scan render tracking, and a
+three-snapshot memlab leak protocol. **Investigating a leak or perf problem?
+Use `pnpm perf` — see `skills/perf-monitor/SKILL.md`** for the workflow and
+the leak-signature verdicts. It never runs packaged; `JINGLER_PERF_MONITOR=0`
+disables it in dev, `=1` forces it on in headless e2e.
+
 ## Conventions & gotchas
 
 - **Every new user-facing feature ships an e2e test** — a Playwright `_electron`
