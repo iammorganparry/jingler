@@ -51,7 +51,8 @@
     "eval:pi:deterministic": "tsx evals/run-eval.ts deterministic",
     "eval:pi:live": "tsx evals/run-eval.ts live",
     "eval:pi:replay": "tsx evals/run-eval.ts replay",
-    "eval:pi:release-manifest": "tsx evals/certification/run-release-certifications.ts"
+    "eval:pi:release-manifest": "tsx evals/certification/run-release-certifications.ts",
+    "eval:plannotator": "vitest run evals/plannotator-*.test.ts"
   },
   "dependencies": {
     "@dietrichgebert/ponytail": "4.9.0",
