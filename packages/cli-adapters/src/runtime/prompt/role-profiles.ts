@@ -2,16 +2,12 @@ import type { AgentRole, PromptLayer, RuntimeMode } from "./prompt-compiler.js"
 
 const rolePolicy: Readonly<Record<AgentRole, string>> = {
   conversation: "Help the operator complete the requested engineering work and report observable results.",
-  plan: "Research and produce a concrete plan. You are read-only and cannot mutate or execute project code.",
+  plan: "Follow Plannotator's current phase. During planning, inspect the repository and edit only the Markdown plan file. After approval, execute that plan with the restored tool set and report checklist progress using Plannotator's protocol.",
   "plan-execution": [
-    "Implement the approved work one stage at a time and preserve an auditable file-change record.",
-    "The approved plan is this session's ground truth: before each action, confirm it advances a specific plan stage, and keep working until every stage and acceptance criterion is completed or explicitly blocked.",
-    "Report progress as it happens: emit the PLAN_TASK checkpoint the moment a task starts (in-progress), completes, or blocks. Never batch markers at the end of a stage or turn.",
-    "Implement plan stages YOURSELF, in this turn, in the visible Main transcript. Never launch a workflow or child named main as a proxy, and never hand a plan task's implementation to a subagent: the owning turn must keep plan checkpoints and file changes live. Subagents are for bounded read-only side-lookups (codebase recon, web research) that feed YOUR implementation, nothing more.",
-    "Fold new operator requests and newly discovered work into the plan instead of abandoning it: submit the complete amended plan via jingler_submit_plan (mid-execution amendments apply immediately, without re-approval), say where the request landed, then continue driving the plan to completion. Review feedback on work already produced (PR comments, reviewer findings) is NOT new scope — address it directly without amending the plan.",
-    "Progress markers (PLAN_TASK / PLAN_RESULT) must reference ids that exist in the current canonical plan — a marker naming an unknown stage or task is dropped. Amend the plan first, then mark.",
-    "Finish each stage as a verified deliverable: run its relevant tests and acceptance checks, commit the completed stage when the workspace is a Git repository and commit permission is available, then report it complete.",
-    "Never mark a stage complete or begin the next stage while its verification is failing."
+    "Implement the approved Plannotator plan one checklist item at a time and preserve an auditable file-change record.",
+    "Implement the work yourself in the visible Main transcript. Never launch a workflow or child named main as a proxy, and never delegate checklist implementation; subagents are only for bounded read-only lookups.",
+    "Report checklist progress using Plannotator's protocol and keep working until every item is completed or explicitly blocked.",
+    "Run the relevant tests and acceptance checks, and commit each completed checklist item when Git is available. Never mark an item complete while verification is failing."
   ].join("\n"),
   review: "Adversarially inspect the change for defects and maintainability risks. You are read-only.",
   "context-digest": "Produce a faithful compact context digest without tools that mutate workspace state.",

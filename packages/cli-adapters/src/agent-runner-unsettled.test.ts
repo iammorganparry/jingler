@@ -18,7 +18,6 @@ import { ContextManager } from "./context-manager.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
-import { PlanStore } from "./plan-store.js"
 import { withTempRoot } from "./test-support.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
 
@@ -127,7 +126,6 @@ const run = (adapter: Layer.Layer<AgentTurnDriver>) => {
     SessionStore.Default,
     TranscriptStore.Default,
     BackgroundTaskStore.Default,
-    PlanStore.Default,
     adapter,
     ContextManager.Default,
     temp.layer

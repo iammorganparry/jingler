@@ -62,7 +62,6 @@ import type {
   Project,
   ProjectDirectoryListing,
   PermissionMode,
-  PlanApprovalResult,
   PlanCommentMessageDeliveryState,
   PlanDocument,
   PlanPrd,
@@ -852,37 +851,6 @@ export const rpc = {
       chatId,
       ...(reasoning === undefined ? {} : { reasoning })
     })),
-  agentCommentPlanStep: (
-    sessionId: string,
-    planId: string,
-    stepId: string,
-    body: string,
-    anchor?: {
-      readonly quote: string
-      readonly prefix: string
-      readonly suffix: string
-    }
-  ): Promise<void> =>
-    run((c) =>
-      c.Agent.commentPlanStep({
-        sessionId,
-        planId,
-        stepId,
-        body,
-        ...(anchor ? { anchor } : {})
-      })
-    ),
-  agentRevisePlan: (sessionId: string, planId: string): Promise<void> =>
-    run((c) => c.Agent.revisePlan({ sessionId, planId })),
-  agentApprovePlan: (
-    sessionId: string,
-    planId: string,
-    executionMode?: ExecutionMode,
-    revision?: number
-  ): Promise<PlanApprovalResult> =>
-    run((c) =>
-      c.Agent.approvePlan({ sessionId, planId, executionMode, revision })
-    ),
   agentSetModel: (
     sessionId: string,
     chatId: string,
@@ -895,6 +863,8 @@ export const rpc = {
     run((c) => c.Agent.stop({ sessionId, chatId })),
   agentChatBusy: (sessionId: string, chatId: string): Promise<boolean> =>
     run((c) => c.Agent.chatBusy({ sessionId, chatId })),
+  agentPlannotatorRecoveryNeeded: (sessionId: string, chatId: string): Promise<boolean> =>
+    run((c) => c.Agent.plannotatorRecoveryNeeded({ sessionId, chatId })),
   agentStopSubagent: (
     sessionId: string,
     chatId: string,
@@ -1216,30 +1186,6 @@ export const rpc = {
       if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
-  agentResumePlan: (
-    sessionId: string,
-    chatId: string,
-    planId: string,
-    revision: number | undefined,
-    onEvent: (event: StreamEvent) => void
-  ): (() => void) => {
-    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
-    let cancelled = false
-    void clientPromise.then((client) => {
-      if (cancelled) return
-      fiber = coreRuntime.runFork(
-        drainRun(
-          client.Agent.resumePlan({ sessionId, chatId, planId, revision }),
-          onEvent
-        )
-      )
-    })
-    return () => {
-      cancelled = true
-      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
-    }
-  },
-
   // ── Terminal ─────────────────────────────────────────────────────────────
   /** Spawn a PTY for a session (cwd defaults to its worktree) and return it. */
   terminalCreate: (
@@ -1313,6 +1259,27 @@ export const rpc = {
     visible: boolean
   ): Promise<void> =>
     run((c) => c.BrowserPreview.setVisible({ sessionId, chatId, visible })),
+  plannotatorPreviewOpen: (
+    sessionId: string,
+    chatId: string,
+    url: string,
+    bounds: BrowserBounds
+  ): Promise<void> =>
+    run((c) => c.PlannotatorPreview.open({ sessionId, chatId, url, bounds })),
+  plannotatorPreviewSetBounds: (
+    sessionId: string,
+    chatId: string,
+    bounds: BrowserBounds
+  ): Promise<void> =>
+    run((c) => c.PlannotatorPreview.setBounds({ sessionId, chatId, bounds })),
+  plannotatorPreviewSetVisible: (
+    sessionId: string,
+    chatId: string,
+    visible: boolean
+  ): Promise<void> =>
+    run((c) => c.PlannotatorPreview.setVisible({ sessionId, chatId, visible })),
+  plannotatorPreviewClose: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.PlannotatorPreview.close({ sessionId, chatId })),
   // ── Auth ─────────────────────────────────────────────────────────────────
   /** The current authenticated session, or null when signed out. */
   authGetSession: (): Promise<AuthSession | null> =>
@@ -1358,86 +1325,16 @@ export const rpc = {
       if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
-  planCurrent: (sessionId: string, chatId: string): Promise<PlanDocument | null> =>
-    run((c) => c.Plan.current({ sessionId, chatId })),
-  planStartDraft: (sessionId: string, chatId: string): Promise<PlanDocument> =>
-    run((c) => c.Plan.startDraft({ sessionId, chatId })),
-  planDiscard: (sessionId: string, chatId: string): Promise<null> =>
-    run((c) => c.Plan.discard({ sessionId, chatId })),
-  planUpdateDocument: (input: {
-    sessionId: string
-    chatId: string
-    planId: string
-    baseRevision: number
-    plan: PlanPrd
-    author: "user" | "agent"
-  }): Promise<PlanDocument> => run((c) => c.Plan.updateDocument(input)),
-  planDispatchMessage: (input: {
-    sessionId: string
-    chatId: string
-    planId: string
-    baseRevision: number
-    annotationId: string
-    body: string
-    authorId: string
-    mentionedParticipantIds: ReadonlyArray<string>
-  }): Promise<{
-    readonly document: PlanDocument
-    readonly messageId: string
-    readonly deliveries: ReadonlyArray<PlanMentionDelivery>
-  }> => run((c) => c.Plan.dispatchMessage(input)),
-  planDispatchExistingMessage: (input: {
-    sessionId: string
-    chatId: string
-    planId: string
-    baseRevision: number
-    annotationId: string
-    messageId: string
-  }): Promise<{
-    readonly document: PlanDocument
-    readonly messageId: string
-    readonly deliveries: ReadonlyArray<PlanMentionDelivery>
-  }> => run((c) => c.Plan.dispatchExistingMessage(input)),
-  planUpdateMessageDelivery: (input: {
-    sessionId: string
-    chatId: string
-    planId: string
-    baseRevision: number
-    annotationId: string
-    messageId: string
-    deliveryState: PlanCommentMessageDeliveryState
-    author: "user" | "agent"
-  }): Promise<PlanDocument> => run((c) => c.Plan.updateMessageDelivery(input)),
-  planSetThreadResolved: (input: {
-    sessionId: string
-    chatId: string
-    planId: string
-    baseRevision: number
-    annotationId: string
-    resolved: boolean
-    author: "user" | "agent"
-  }): Promise<PlanDocument> => run((c) => c.Plan.setThreadResolved(input)),
-  planWatch: (
-    sessionId: string,
-    chatId: string,
-    onDocument: (document: PlanDocument | null) => void
-  ): (() => void) => {
-    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
-    let cancelled = false
-    void clientPromise.then((client) => {
-      if (cancelled) return
-      fiber = coreRuntime.runFork(
-        client.Plan.watch({ sessionId, chatId }).pipe(
-          Stream.runForEach((document) =>
-            Effect.sync(() => onDocument(document))
-          )
-        )
-      )
-    })
-    return () => {
-      cancelled = true
-      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
-    }
+  planCurrent: async (..._args: ReadonlyArray<unknown>): Promise<PlanDocument | null> => null,
+  planStartDraft: async (..._args: ReadonlyArray<unknown>): Promise<PlanDocument> => {
+    throw new Error("Plannotator owns plan drafts")
+  },
+  planDispatchMessage: async (..._args: ReadonlyArray<unknown>): Promise<never> => {
+    throw new Error("Plannotator owns plan feedback")
+  },
+  planWatch: (_sessionId: string, _chatId: string, onDocument: (document: PlanDocument | null) => void): (() => void) => {
+    onDocument(null)
+    return () => {}
   },
   reviewWatch: (
     sessionId: string,

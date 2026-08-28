@@ -41,7 +41,6 @@ describe("PromptCompiler", () => {
         { id: "jingler_list_resources", version: "2", description: "Search resources." },
         { id: "jingler_load_resource", version: "2", description: "Load one resource." },
         { id: "jingler_ask_question", version: "1", description: "Ask the operator." },
-        { id: "jingler_submit_plan", version: "1", description: "Submit a plan." },
         { id: "jingler_publish_explanation", version: "1", description: "Publish an explanation." },
         { id: "mcp__jingler-memory__memory_search", version: "1", description: "Search memory." }
       ],
@@ -51,7 +50,7 @@ describe("PromptCompiler", () => {
     expect(result.text).toContain("jingler_list_resources with a narrow query")
     expect(result.text).toContain("Jingler memory is private working context")
     expect(result.text).toContain("Use jingler_ask_question")
-    expect(result.text).toContain("Use jingler_submit_plan")
+    expect(result.text).not.toContain("jingler_submit_plan")
     expect(result.text).toContain("jingler_publish_explanation")
     expect(result.text).toContain("Treat /explain as an explicit hard trigger")
     expect(result.text).toContain("Keep short factual answers")
@@ -86,15 +85,15 @@ describe("PromptCompiler", () => {
     expect(result.text).toContain("two or more named children with distinct tasks")
   })
 
-  it("requires a plan-execution stage to be tested and committed before advancing", () => {
+  it("requires a Plannotator checklist item to be tested and committed before completion", () => {
     const result = new PromptCompiler().compile({
       layers: runtimeInvariantLayers("plan-execution", "accept-edits"),
       tools: [tool],
       tokenBudget: 2_000
     })
-    expect(result.text).toContain("run its relevant tests and acceptance checks")
-    expect(result.text).toContain("commit the completed stage")
-    expect(result.text).toContain("Never mark a stage complete")
+    expect(result.text).toContain("relevant tests and acceptance checks")
+    expect(result.text).toContain("commit each completed checklist item")
+    expect(result.text).toContain("Never mark an item complete")
   })
 
   it("makes plan execution the main agent's own work, never a delegated run", () => {
@@ -103,10 +102,10 @@ describe("PromptCompiler", () => {
       tools: [tool],
       tokenBudget: 2_000
     })
-    expect(result.text).toContain("Implement plan stages YOURSELF")
+    expect(result.text).toContain("Implement the work yourself")
     expect(result.text).toContain("in the visible Main transcript")
     expect(result.text).toContain("Never launch a workflow or child named main as a proxy")
-    expect(result.text).toContain("never hand a plan task's implementation to a subagent")
+    expect(result.text).toContain("never delegate checklist implementation")
     // The old policy actively encouraged delegating whole stages — pinned gone.
     expect(result.text).not.toContain("When you delegate a stage to a sub-agent")
   })

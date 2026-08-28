@@ -28,7 +28,6 @@ import type {
   SessionPrStatus,
   Project,
   ProjectDirectoryListing,
-  PlanTemplateConfig,
   Repo,
   PrSummary,
   Session,
@@ -235,8 +234,6 @@ export interface JinglerAppProps {
   providerConnections?: SettingsViewProps["providerConnections"]
   agents?: SettingsViewProps["agents"]
   runtimeInspector?: SettingsViewProps["runtimeInspector"]
-  planTemplate?: PlanTemplateConfig | null
-  onSavePlanTemplate?: (template: PlanTemplateConfig) => void
   /** Unified MCP (OpenConnector) connection settings (Settings → Connectors). */
   unifiedMcp?: OpenConnectorSectionProps
   /** MCP Connector Center data + actions (Settings → Connector Center). */
@@ -506,8 +503,6 @@ export function JinglerApp({
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
-  planTemplate,
-  onSavePlanTemplate,
   unifiedMcp,
   connector,
   renderPullRequest,
@@ -1343,8 +1338,6 @@ export function JinglerApp({
               providerConnections={providerConnections}
               agents={agents}
               runtimeInspector={runtimeInspector}
-              planTemplate={planTemplate}
-              onSavePlanTemplate={onSavePlanTemplate}
               unifiedMcp={unifiedMcp}
               connector={connector}
               githubConnection={githubConnection}

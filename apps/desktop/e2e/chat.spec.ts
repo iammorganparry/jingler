@@ -251,7 +251,7 @@ test("the mode chip lives in the composer and Shift+Tab cycles all modes", async
 
   await window.keyboard.press("Shift+Tab")
   // Plan mode is reachable for every certified pi model and themes the composer purple.
-  await expect(window.getByRole("button", { name: "Enhanced Plan", exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Plan", exact: true })).toBeVisible()
   await expect(surface).toHaveAttribute("data-mode", "plan")
 
   await window.keyboard.press("Shift+Tab")
@@ -739,36 +739,6 @@ test("an orphaned pending gate settles on load (its dead buttons disappear)", as
   await expect(window.getByText("waiting")).toHaveCount(0)
   await expect(window.getByRole("button", { name: /Allow once/ })).toHaveCount(0)
   await expect(window.getByRole("button", { name: "Deny" })).toHaveCount(0)
-})
-
-test("PLAN_TASK protocol renders as status chips without leaking markers or fingerprints", async ({
-  launchApp
-}) => {
-  const { window } = await launchApp({
-    configured: true,
-    withRepo: true,
-    sessions: seededSessions,
-    transcripts: {
-      s_seeded: [
-        {
-          id: "a_progress",
-          role: "assistant",
-          streaming: false,
-          createdAt: "2026-08-08T00:00:00.000Z",
-          parts: [{
-            _tag: "Text",
-            text: "PLAN_TASK stage=S1 fingerprint=secret-fingerprint task=S1-T3 status=completedPLAN_TASK stage=S1 fingerprint=secret-fingerprint task=S1-T4 status=in-progressMoving to the per-session tunnel."
-          }]
-        }
-      ]
-    }
-  })
-
-  await expect(appShell(window)).toBeVisible()
-  await expect(window.getByLabel("S1-T3: Completed")).toBeVisible()
-  await expect(window.getByLabel("S1-T4: In progress")).toBeVisible()
-  await expect(window.getByText("Moving to the per-session tunnel.")).toBeVisible()
-  await expect(window.getByText(/PLAN_TASK|secret-fingerprint/)).toHaveCount(0)
 })
 
 test("an archived session shows in the Archived group, read-only, and restores", async ({

@@ -1,16 +1,15 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
 import {
-  PlanPrd,
   type FileChangeSet,
   type Message,
   type PiRunSpec,
+  type PlannotatorProjection,
   type StreamEvent,
   type SubagentFleetControlOutcome,
   type SubagentFleetControlRequest,
   type SubagentFleetSnapshot
 } from "@jingler/core"
-import { Effect, Option, Queue, Schema, Stream } from "effect"
-import { createPlanToolDraftStream, type PlanToolDraftStream } from "../../plan-draft-stream.js"
+import { Effect, Queue, Stream } from "effect"
 import { mcpCapabilityFingerprint } from "../tools/mcp-tools.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
@@ -25,6 +24,10 @@ export interface PiSessionHandle {
   readonly parentPiSessionId: string
   readonly modelId: string
   readonly contextWindow: number | null
+  readonly plannotatorPhase?: () => "idle" | "planning" | "executing"
+  readonly subscribePlannotator?: (
+    listener: (state: PlannotatorProjection) => void
+  ) => () => void
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
   readonly subscribeFleet: (listener: (event: StreamEvent) => void) => () => void
   readonly controlSubagent: (
@@ -133,34 +136,6 @@ const reconcileWorkspace = (
     Effect.asVoid
   )
 
-const PLAN_TOOLS = new Set(["jingler_save_draft_plan", "jingler_submit_plan"])
-const PlanToolArguments = Schema.Struct({ plan: PlanPrd })
-const decodePlanToolArguments = Schema.decodeUnknownOption(PlanToolArguments)
-
-const projectPlanDraft = (
-  event: AgentSessionEvent,
-  draft: PlanToolDraftStream
-): StreamEvent | null => {
-  if (event.type === "message_start" && event.message.role === "assistant") {
-    return draft.clear()
-  }
-  if (event.type !== "message_update") return null
-  const update = event.assistantMessageEvent
-  if (update.type === "toolcall_delta") {
-    const block = update.partial.content[update.contentIndex]
-    return block?.type === "toolCall" && PLAN_TOOLS.has(block.name)
-      ? draft.append(update.delta)
-      : null
-  }
-  if (update.type !== "toolcall_end" || !PLAN_TOOLS.has(update.toolCall.name)) {
-    return null
-  }
-  return Option.match(decodePlanToolArguments(update.toolCall.arguments), {
-    onNone: () => draft.clear(),
-    onSome: ({ plan }) => draft.complete(plan)
-  })
-}
-
 const settleSession = (
   handle: PiSessionHandle,
   sink: EventSink
@@ -178,11 +153,14 @@ const settleSession = (
 
 const subscribeToSession = (
   handle: PiSessionHandle,
-  sink: EventSink,
-  planDraft: PlanToolDraftStream
+  sink: EventSink
 ): (() => void) => {
   const unsubscribeFleet = handle.subscribeFleet((event) => sink.emit(event))
+  const unsubscribePlannotator = handle.subscribePlannotator?.((state) =>
+    sink.emit({ _tag: "PlannotatorStateChanged", state })
+  ) ?? (() => {})
   const normalize = createPiEventNormalizer()
+  let previousPlanPhase = handle.plannotatorPhase?.() ?? "idle"
   let reflectionStarted = false
   let reflectionActive = false
   let reflectionTimeout: ReturnType<typeof setTimeout> | null = null
@@ -205,12 +183,17 @@ const subscribeToSession = (
       ) {
         sink.noteProviderRecovery()
       }
-      const draft = projectPlanDraft(event, planDraft)
-      if (draft) sink.emit(draft)
       const normalized = normalize(event, handle.contextWindow ?? undefined)
       if (normalized) sink.emit(normalized)
     }
     if (event.type !== "agent_settled") return
+
+    const planPhase = handle.plannotatorPhase?.() ?? "idle"
+    if (planPhase === "executing" && previousPlanPhase !== "executing") {
+      previousPlanPhase = planPhase
+      return
+    }
+    previousPlanPhase = planPhase
 
     if (!reflectionStarted) {
       const prompt = handle.memoryReflectionPrompt?.() ?? null
@@ -254,6 +237,7 @@ const subscribeToSession = (
   return () => {
     finishReflection()
     unsubscribeFleet()
+    unsubscribePlannotator()
     unsubscribeSession()
   }
 }
@@ -348,11 +332,8 @@ const rebindableContext = (
   registerBackgroundStop: (stop) => holder.current.registerBackgroundStop(stop),
   canUseTool: (request) => holder.current.canUseTool(request),
   askQuestion: (request) => holder.current.askQuestion(request),
-  saveDraftPlan: (plan) => holder.current.saveDraftPlan(plan),
   publishExplanation: (explanation) =>
     holder.current.publishExplanation?.(explanation) ?? Effect.void,
-  discardPlan: () => holder.current.discardPlan?.() ?? Effect.void,
-  proposePlan: (plan) => holder.current.proposePlan(plan)
 })
 
 class PiSessionRegistry {
@@ -556,13 +537,12 @@ const runSession = (
       const record = yield* sessions.acquire(spec, context)
       const handle = record.handle
       const sink = makeEventSink(queue, handle.observe)
-      const planDraft = createPlanToolDraftStream(() => `plan-draft:${spec.runId}`)
       sink.emit({
         _tag: "Started",
         sessionId: handle.id,
         model: handle.modelId
       })
-      const unsubscribe = subscribeToSession(handle, sink, planDraft)
+      const unsubscribe = subscribeToSession(handle, sink)
       startPrompt(handle, spec.prompt, sink)
       return Stream.fromQueue(queue).pipe(
         Stream.takeUntil((event) => event._tag === "Done" || event._tag === "Failed"),

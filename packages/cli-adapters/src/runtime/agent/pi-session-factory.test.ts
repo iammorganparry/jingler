@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process"
-import { mkdtemp, readdir, rm } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
   AgentSession,
   CreateAgentSessionOptions,
-  CreateAgentSessionResult
+  CreateAgentSessionResult,
+  EventBus
 } from "@earendil-works/pi-coding-agent"
 import {
   CURRENT_RUNTIME_CONTRACTS,
@@ -15,7 +16,7 @@ import {
   type PiRunSpec
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
@@ -25,7 +26,10 @@ import {
   makeSubagentCapabilityBroker,
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
-import { makePiSessionFactory } from "./pi-session-factory.js"
+import {
+  enterPlannotatorPlanMode,
+  makePiSessionFactory
+} from "./pi-session-factory.js"
 
 const roots: string[] = []
 const brokers: SubagentCapabilityBroker[] = []
@@ -36,6 +40,9 @@ const originalEnvironment = {
   JINGLER_SUBAGENT_CREDENTIAL_ROOT: process.env.JINGLER_SUBAGENT_CREDENTIAL_ROOT,
   JINGLER_SUBAGENT_NODE: process.env.JINGLER_SUBAGENT_NODE
 }
+beforeEach(() => {
+  for (const name of Object.keys(originalEnvironment)) delete process.env[name]
+})
 afterEach(async () => {
   for (const [name, value] of Object.entries(originalEnvironment)) {
     if (value === undefined) delete process.env[name]
@@ -100,6 +107,7 @@ const fakeSession = (): AgentSession =>
     sessionFile: "/tmp/pi-session.jsonl",
     sessionId: "pi-session",
     subscribe: vi.fn(() => vi.fn()),
+    bindExtensions: vi.fn(async () => undefined),
     prompt: vi.fn(async () => undefined),
     steer: vi.fn(async () => undefined),
     abort: vi.fn(async () => undefined),
@@ -108,6 +116,81 @@ const fakeSession = (): AgentSession =>
   }) as unknown as AgentSession
 
 describe("pi session creation", () => {
+  it("enters Plannotator plan mode through its documented event contract", async () => {
+    const events: EventBus = {
+      emit: (channel, data) => {
+        expect(channel).toBe("plannotator:request")
+        const request = data as {
+          readonly action: string
+          readonly payload: { readonly mode: string }
+          readonly respond: (response: unknown) => void
+        }
+        expect(request.action).toBe("plan-mode")
+        expect(request.payload.mode).toBe("enter")
+        request.respond({ status: "handled", result: { phase: "planning" } })
+      },
+      on: () => () => {}
+    }
+
+    await expect(enterPlannotatorPlanMode(events)).resolves.toEqual({
+      phase: "planning"
+    })
+  })
+
+  it("configures a Plan session for Plannotator planning and automatic execution", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-plannotator-session-"))
+    roots.push(root)
+    const agentDir = join(root, "agent")
+    const captured: CreateAgentSessionOptions[] = []
+    const projection = {
+      phase: "executing" as const,
+      planFilePath: "PLAN.md",
+      review: {
+        reviewId: "review-1",
+        url: "http://localhost:19432"
+      },
+      checklist: [{ step: 1, text: "Implement", completed: false }]
+    }
+    const enterPlanMode = vi.fn(async (events: EventBus) => {
+      events.emit("plannotator:host-state", projection)
+      return { phase: "executing" as const }
+    })
+    const factory = makePiSessionFactory({
+      agentDir,
+      sessionsDir: join(root, "sessions"),
+      credentials: new InMemoryProviderCredentialStore(),
+      resolveConnection: () => Effect.succeed(connection),
+      enterPlannotatorPlanMode: enterPlanMode,
+      createSession: async (options) => {
+        captured.push(options)
+        options.sessionManager?.appendCustomEntry("plannotator", {
+          phase: "executing"
+        })
+        return { session: fakeSession(), extensionsResult: {} as never }
+      }
+    })
+
+    const handle = await Effect.runPromise(factory.create({
+      ...makeSpec(root),
+      role: "plan",
+      mode: "plan"
+    }, {} as never))
+
+    expect(enterPlanMode).toHaveBeenCalledOnce()
+    expect(captured[0]?.tools).toEqual(
+      expect.arrayContaining(["write", "edit", "plannotator_submit_plan"])
+    )
+    expect(captured[0]?.customTools?.map(({ name }) => name)).not.toContain(
+      "jingler_submit_plan"
+    )
+    expect(handle.plannotatorPhase?.()).toBe("executing")
+    const projected = vi.fn()
+    handle.subscribePlannotator?.(projected)
+    expect(projected).toHaveBeenCalledWith(projection)
+    expect(JSON.parse(await readFile(join(agentDir, "plannotator.json"), "utf8")))
+      .toMatchObject({ executionMode: "automatic" })
+  })
+
   it("pins credentials, compiles a locked prompt, and seeds visible history once", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-pi-session-"))
     roots.push(root)
@@ -122,11 +205,12 @@ describe("pi session creation", () => {
       })
     )
     const captured: CreateAgentSessionOptions[] = []
+    const session = fakeSession()
     const createSession = async (
       options: CreateAgentSessionOptions
     ): Promise<CreateAgentSessionResult> => {
       captured.push(options)
-      return { session: fakeSession(), extensionsResult: {} as never }
+      return { session, extensionsResult: {} as never }
     }
     const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)
@@ -152,14 +236,16 @@ describe("pi session creation", () => {
     ]))
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([
       "jingler_ask_question",
-      "jingler_discard_plan",
-      "jingler_publish_explanation",
-      "jingler_submit_plan"
+      "jingler_publish_explanation"
     ])
     expect(received?.resourceLoader?.getExtensions().extensions).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: expect.stringContaining("pi-subagents") }),
-      expect.objectContaining({ path: expect.stringContaining("ponytail") })
+      expect.objectContaining({ path: expect.stringContaining("ponytail") }),
+      expect.objectContaining({ path: expect.stringContaining("plannotator") })
     ]))
+    expect(session.bindExtensions).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "rpc", uiContext: expect.any(Object) })
+    )
     expect(received?.resourceLoader?.getSkills().skills.map(({ name }) => name)).toContain("ponytail")
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
       "Jingler's embedded engineering agent"
@@ -208,7 +294,7 @@ describe("pi session creation", () => {
     await Effect.runPromise(factory.create({
       ...makeSpec(root),
       role: "plan",
-      mode: "plan"
+      mode: "read-only"
     }, {} as never))
 
     expect(captured[0]?.tools).toContain("code_intelligence")

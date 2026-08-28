@@ -3,7 +3,6 @@ import { Effect, Layer, Ref, Stream } from "effect"
 import {
   type AgentContext,
   AgentTurnDriver,
-  PlanDecision,
   type AgentTurnSpec
 } from "../../agent-turn-driver.js"
 import { AgentRuntime } from "./agent-runtime.js"
@@ -29,27 +28,10 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
       command: null
     }),
   askQuestion: context.askQuestion,
-  saveDraftPlan: (plan: Parameters<NonNullable<AgentContext["saveDraftPlan"]>>[0]) =>
-    context.saveDraftPlan?.(plan) ?? Effect.void,
   publishExplanation: (explanation: Parameters<NonNullable<AgentContext["publishExplanation"]>>[0]) =>
     context.publishExplanation?.(explanation) ?? Effect.void,
-  discardPlan: () => context.discardPlan?.() ?? Effect.void,
   listPeerAgents: context.listPeerAgents,
-  messagePeerAgent: context.messagePeerAgent,
-  proposePlan: (plan: Parameters<AgentContext["proposePlan"]>[0]) =>
-    context.proposePlan(plan).pipe(
-      Effect.map((decision) =>
-        PlanDecision.$is("Approve")(decision)
-          ? {
-              _tag: "Approve" as const,
-              mode: decision.mode,
-              plan: decision.plan
-            }
-          : PlanDecision.$is("Revise")(decision)
-            ? { _tag: "Revise" as const, feedback: decision.feedback }
-            : { _tag: "Reject" as const }
-      )
-    )
+  messagePeerAgent: context.messagePeerAgent
 })
 
 const piSpec = (runId: string, spec: AgentTurnSpec) => {

@@ -211,21 +211,6 @@ describe("ReviewService — never parks", () => {
     await expect(runReview(adapter)).resolves.toBeDefined()
   })
 
-  it("rejects a proposed plan immediately", async () => {
-    const adapter = stubAdapter((_id, _spec, ctx) =>
-      Effect.gen(function* () {
-        const decision = yield* ctx.proposePlan({
-          id: "p1",
-          summary: "A plan",
-          steps: [],
-          status: "proposed"
-        } as never)
-        expect(decision._tag).toBe("Reject")
-        yield* emitJson(ctx, '{"findings":[]}')
-      })
-    )
-    await expect(runReview(adapter)).resolves.toBeDefined()
-  })
 })
 
 describe("ReviewService — spec", () => {

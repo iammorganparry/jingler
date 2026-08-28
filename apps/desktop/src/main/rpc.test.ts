@@ -22,7 +22,6 @@ import {
   MemoryService,
   makeAgentResourceService,
   ExplanationStore,
-  PlanStore,
   PluginAuth,
   PluginHost,
   PluginRegistry,
@@ -55,7 +54,6 @@ import {
   GitHubApiError,
   DetectedResourceCandidate,
   ProviderModelId,
-  planStageSemanticFingerprint,
 } from "@jingler/core";
 import {
   appPathsFor,
@@ -94,12 +92,7 @@ import {
   githubSubmitReview,
   githubPr,
   mismatchedIssueProviderId,
-  planAppendMessage,
-  planDispatchExistingMessage,
-  planSetThreadResolved,
-  planUpdateMessageDelivery,
   reconcileRelaySessionRoutes,
-  planWatch,
   reviewGet,
   reviewMarkRouted,
   reviewReconcile,
@@ -725,207 +718,6 @@ describe("RPC handlers", () => {
       expect(exit._tag).toBe("Failure");
       expect(String(exit)).toContain("has not drifted");
     });
-  });
-
-  it("routes revision-guarded thread mutations through the session plan worktree", async () => {
-    const now = "2026-07-31T09:00:00.000Z";
-    const worktreePath = join(dir, "worktree");
-    mkdirSync(worktreePath, { recursive: true });
-    mkdirSync(root, { recursive: true });
-    writeFileSync(
-      join(root, "sessions.json"),
-      JSON.stringify([
-        {
-          id: "session-plan-thread",
-          repo: "widget",
-          branch: "chore/widget",
-          title: "Widget",
-          status: "idle",
-          diff: { added: 0, removed: 0 },
-          prNumber: null,
-          costUsd: 0,
-          tokens: 0,
-          updatedAt: now,
-          worktreePath,
-          chats: [
-            {
-              id: "chat-plan-thread",
-              title: null,
-              createdAt: now,
-              updatedAt: now,
-            },
-          ],
-          activeChatId: "chat-plan-thread",
-        },
-      ]),
-    );
-    const services = Layer.mergeAll(
-      SessionStore.Default,
-      PlanStore.Default,
-      ExplanationStore.Default,
-    ).pipe(Layer.provideMerge(base));
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const explanationFiber = yield* explanationWatch("session-plan-thread").pipe(
-          Stream.filter((document) => document !== null),
-          Stream.take(1),
-          Stream.runCollect,
-          Effect.fork,
-        );
-        yield* Effect.sleep("25 millis");
-        const explanation = yield* ExplanationStore.publish(
-          worktreePath,
-          "session-plan-thread",
-          "chat-plan-thread",
-          {
-            title: "Thread flow",
-            summary: "The explanation RPC watches the canonical artifact.",
-            sections: [],
-          },
-        );
-        const watchedExplanation = Chunk.toReadonlyArray(
-          yield* Fiber.join(explanationFiber),
-        )[0];
-        const plan = yield* PlanStore.promoteDocument(worktreePath, {
-          sessionId: "session-plan-thread",
-          producingChatId: "chat-plan-thread",
-          id: "plan-thread",
-          plan: {
-            title: "PRD: Thread RPC",
-            sections: [],
-            stages: [
-              {
-                id: "01",
-                title: "Persist",
-                intent: "Persist.",
-                approach: [],
-                files: [],
-                diagrams: [],
-                notes: [],
-                acceptance: [
-                  {
-                    id: "01.1",
-                    text: "It persists.",
-                    status: "pending",
-                    evidence: null,
-                  },
-                ],
-              },
-            ],
-            annotations: [],
-          },
-          author: "agent",
-        });
-        const withThread = yield* PlanStore.addAnnotation(worktreePath, {
-          sessionId: "session-plan-thread",
-          producingChatId: "chat-plan-thread",
-          planId: plan.id,
-          baseRevision: plan.revision,
-          stageId: "01",
-          body: "Can you verify this?",
-          author: "user",
-        });
-        const annotationId = withThread.plan.annotations[0]!.id;
-        const watchedFiber = yield* planWatch("session-plan-thread", "chat-plan-thread").pipe(
-          Stream.take(1),
-          Stream.runCollect,
-          Effect.fork,
-        );
-        yield* Effect.sleep("25 millis");
-        const appended = yield* planAppendMessage({
-          sessionId: "session-plan-thread",
-          chatId: "chat-plan-thread",
-          planId: plan.id,
-          baseRevision: withThread.revision,
-          annotationId,
-          body: "Verified.",
-          authorKind: "agent",
-          authorId: "worker-storage",
-          mentionedParticipantIds: ["operator"],
-          deliveryState: "pending",
-        });
-        const watched = Chunk.toReadonlyArray(
-          yield* Fiber.join(watchedFiber),
-        )[0];
-        const messageId = appended.plan.annotations[0]!.messages[1]!.id;
-        const delivered = yield* planUpdateMessageDelivery({
-          sessionId: "session-plan-thread",
-          chatId: "chat-plan-thread",
-          planId: plan.id,
-          baseRevision: appended.revision,
-          annotationId,
-          messageId,
-          deliveryState: "sent",
-          author: "agent",
-        });
-        const resolved = yield* planSetThreadResolved({
-          sessionId: "session-plan-thread",
-          chatId: "chat-plan-thread",
-          planId: plan.id,
-          baseRevision: delivered.revision,
-          annotationId,
-          resolved: true,
-          author: "user",
-        });
-        const stale = yield* Effect.either(
-          planSetThreadResolved({
-            sessionId: "session-plan-thread",
-            chatId: "chat-plan-thread",
-            planId: plan.id,
-            baseRevision: appended.revision,
-            annotationId,
-            resolved: false,
-            author: "user",
-          }),
-        );
-        const retrySent = yield* Effect.either(
-          planDispatchExistingMessage({
-            sessionId: "session-plan-thread",
-            chatId: "chat-plan-thread",
-            planId: plan.id,
-            baseRevision: resolved.revision,
-            annotationId,
-            messageId,
-          }),
-        );
-        return {
-          appended,
-          delivered,
-          resolved,
-          stale,
-          retrySent,
-          watched,
-          explanation,
-          watchedExplanation,
-        };
-      }).pipe(Effect.provide(services)),
-    );
-
-    expect(result.appended.plan.annotations[0]?.messages[1]).toMatchObject({
-      body: "Verified.",
-      authorKind: "agent",
-      authorId: "worker-storage",
-      mentionedParticipantIds: ["operator"],
-      deliveryState: "pending",
-    });
-    expect(
-      result.delivered.plan.annotations[0]?.messages[1]?.deliveryState,
-    ).toBe("sent");
-    expect(result.resolved.plan.annotations[0]?.status).toBe("resolved");
-    expect(result.explanation.revision).toBe(1);
-    expect(result.watchedExplanation).toEqual(result.explanation);
-    expect(result.watched?.revision).toBe(result.appended.revision);
-    expect(result.watched?.plan.annotations[0]?.messages[1]?.body).toBe(
-      "Verified.",
-    );
-    expect(Either.isLeft(result.stale)).toBe(true);
-    expect(Either.isLeft(result.retrySent)).toBe(true);
-    if (Either.isLeft(result.stale)) {
-      expect(result.stale.left).toMatchObject({
-        _tag: "PlanConflictError",
-        latestRevision: result.resolved.revision,
-      });
-    }
   });
 
   describe("Agent.setReasoning", () => {

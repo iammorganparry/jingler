@@ -19,7 +19,7 @@ import { Effect, Fiber, Ref } from "effect"
 import { AppPaths } from "./app-paths.js"
 import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
-import { AgentTurnDriver, PlanDecision } from "./agent-turn-driver.js"
+import { AgentTurnDriver } from "./agent-turn-driver.js"
 import { ConfigService } from "./config.js"
 import { digestPrompt, lastMessageId, parseDigest, renderTranscript } from "./context-digest.js"
 import { SessionStore } from "./sessions.js"
@@ -325,7 +325,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
                 : Effect.void,
             canUseTool: () => Effect.succeed("deny" as const),
             askQuestion: () => Effect.succeed([]),
-            proposePlan: () => Effect.succeed(PlanDecision.Reject()),
             // Deliberately dropped. This is a nested run against a session that
             // already has a real agent; registering a stop handle here would
             // overwrite that agent's, aiming the dock's Stop button at the wrong

@@ -6,7 +6,6 @@ import {
 import { Effect, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
-  PlanDecision,
   scriptedRun,
   type AgentContext,
   type AgentTurnSpec
@@ -44,7 +43,6 @@ const context: AgentContext = {
   emit: () => Effect.void,
   canUseTool: () => Effect.succeed("deny"),
   askQuestion: () => Effect.succeed([]),
-  proposePlan: () => Effect.succeed(PlanDecision.Reject()),
   registerBackgroundStop: () => Effect.void,
   registerTurnSteer: () => Effect.void
 }

@@ -59,8 +59,6 @@ export const runReadOnlyRoleText = (
         ...inactiveRuntimeActivity,
         canUseTool: () => Effect.succeed("deny"),
         askQuestion: () => Effect.succeed([]),
-        saveDraftPlan: () => Effect.void,
-        proposePlan: () => Effect.succeed({ _tag: "Reject" })
       }
     )
     .pipe(

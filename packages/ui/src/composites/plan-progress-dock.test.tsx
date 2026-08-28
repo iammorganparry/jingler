@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import type { PlanDocument, PlanPrdStage, PlanTaskStatus } from "@jingler/core"
+import {
+  plannotatorProjectionToPlanDocument,
+  type PlanDocument,
+  type PlanPrdStage,
+  type PlanTaskStatus
+} from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PlanTaskList, planProgressStatus } from "./plan-progress-dock.js"
@@ -68,6 +73,29 @@ describe("PlanTaskList task list", () => {
     expect(screen.getByTestId("plan-progress-stage-02").textContent).not.toContain("worker")
     fireEvent.click(screen.getByTestId("plan-progress-stage-02"))
     expect(onOpenStage).toHaveBeenCalledWith("02")
+  })
+
+  it("renders Plannotator checklist progress through the native task list", () => {
+    const projected = plannotatorProjectionToPlanDocument(
+      {
+        phase: "executing",
+        planFilePath: "PLAN.md",
+        review: null,
+        checklist: [
+          { step: 1, text: "Implement", completed: true },
+          { step: 2, text: "Verify", completed: false }
+        ]
+      },
+      "session-1",
+      "chat-1",
+      "2026-08-27T00:00:00.000Z"
+    )
+
+    render(<PlanTaskList document={projected} />)
+
+    expect(screen.getByRole("button", { name: "Plan tasks: 1 of 2 done" })).toBeTruthy()
+    expect(screen.getByText("Implement")).toBeTruthy()
+    expect(screen.getByText("Verify")).toBeTruthy()
   })
 
   it("reflects a Plan.watch revision without retaining local progress", () => {

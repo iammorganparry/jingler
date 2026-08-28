@@ -197,11 +197,11 @@ per-tool memory implementations. See `docs/shared-memory.md` for the complete
 runtime and operations contract.
 
 The composer supports Claude and Codex only. Its model, permission mode, and reasoning controls
-are derived from the selected harness capability catalogue. Enhanced Plan belongs to the selected
-agent: that same harness executes the approved plan, records progress, and submits complete
-revisions. There is no Jingler orchestrator or worker assignment layer. With **Use Jingler tools**
-enabled, Enhanced Plan replaces the provider-native plan surface; disabling it leaves native tools
-and native planning available to the provider.
+are derived from the selected harness capability catalogue. Plan mode belongs to the pinned
+Plannotator Pi extension: it owns the Markdown plan, review decision, automatic same-session
+execution, checklist persistence, and recovery. Jingler's todo list, plan drawer, progress dock,
+composer summary, and transcript card are disposable read-only projections of Plannotator state.
+Do not add a second plan lifecycle, approval path, checkpoint protocol, or persistence layer.
 
 Persistence schemas are migration boundaries. `WorkspaceConfig` additions stay
 optional and read-modify-write helpers must preserve every unrelated section.

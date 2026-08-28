@@ -11,7 +11,6 @@ import "./plugin-runtime.js"
 import { App } from "./App.js"
 import { queryClient } from "./query-client.js"
 import { installExplanationQueryBridge } from "./use-explanation-document.js"
-import { installPlanDocumentFlushHandler } from "./plan-document-registry.js"
 
 /**
  * Paint the operator's theme before React exists.
@@ -36,7 +35,6 @@ if (bootThemeCss) {
   document.head.appendChild(style)
 }
 
-installPlanDocumentFlushHandler()
 installExplanationQueryBridge(queryClient)
 
 createRoot(document.getElementById("root")!).render(

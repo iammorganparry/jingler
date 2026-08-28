@@ -1,11 +1,10 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { planDocumentToPlan } from "@jingler/core"
 import type {
   Attachment,
-  ExecutionMode,
   GateDecision,
   Message,
   PermissionMode,
-  Plan,
   PlanDocument,
   PlanStatus,
   ProviderCatalog,
@@ -30,6 +29,7 @@ import { ThinkingOrb } from "../components/loading.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import { MessageTurn, ToolStopContext } from "../composites/message-turn.js"
+import { PlanApprovalCard } from "../composites/plan-card.js"
 import { createMessageRailPreview, MessageScroller } from "../composites/beui/messages.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { ContextMeter } from "../composites/context-meter.js"
@@ -150,27 +150,14 @@ export interface ConversationViewProps {
   /** A pending AskUserQuestion — replaces the composer with the question card. */
   question?: QuestionRequest | null
   onAnswerQuestion?: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
-  /** Approve a proposed plan inline (from a transcript plan card). */
-  onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
-  /** Approve a stale plan inline (re-drives execution after a restart). */
-  onResumePlan?: (planId: string) => void
-  /**
-   * Open the full Plan Review view — bare from a transcript plan card, or with a
-   * stage id from the composer progress dock.
-   */
+  /** Open the full read-only native plan projection. */
   onOpenPlanReview?: (stepId?: string) => void
-  /** Discard the canonical plan (from a transcript submit-plan card). */
-  onDiscardPlan?: () => void
   /** Fork a drifted direct session's work onto a new worktree session (BranchDrift banner). */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session (BranchDrift banner). */
   onAdoptBranch?: () => void | Promise<void>
   /**
-   * Legacy transcript projection retained for inline plan-card compatibility.
-   */
-  plan?: Plan | null
-  /**
-   * Canonical live plan document with task and acceptance progress from Plan.watch.
+   * Read-only native projection of Plannotator checklist progress.
    */
   planDocument?: PlanDocument | null
   /**
@@ -265,13 +252,9 @@ export function ConversationView({
   onSetReasoning,
   question,
   onAnswerQuestion,
-  onApprovePlan,
-  onResumePlan,
   onOpenPlanReview,
-  onDiscardPlan,
   onForkOntoBranch,
   onAdoptBranch,
-  plan = null,
   planDocument = null,
   draft,
   onDraftChange,
@@ -493,11 +476,6 @@ export function ConversationView({
           >
             {virtualizer.getVirtualItems().map((item) => {
               const m = messages[item.index]!
-              const matchingPlanDocument = planDocument && m.parts.some(
-                (part) => part._tag === "Plan" && part.plan.id === planDocument.id
-              )
-                ? planDocument
-                : undefined
               return (
                 <div
                   key={item.key}
@@ -510,13 +488,8 @@ export function ConversationView({
                   <div className="mx-auto w-full max-w-[760px] pb-6">
                     <MessageTurn
                       message={m}
-                      planDocument={matchingPlanDocument}
                       providerId={m.providerId ?? providerId}
                       onDecideGate={onDecideGate}
-                      onApprovePlan={onApprovePlan}
-                      onResumePlan={onResumePlan}
-                      onOpenPlanReview={onOpenPlanReview}
-                      onDiscardPlan={onDiscardPlan}
                       onForkOntoBranch={onForkOntoBranch}
                       onAdoptBranch={onAdoptBranch}
                     />
@@ -525,6 +498,15 @@ export function ConversationView({
               )
             })}
           </div>
+          {planDocument ? (
+            <div className="mx-auto w-full max-w-[760px] pb-6" data-testid="plannotator-transcript-card">
+              <PlanApprovalCard
+                plan={planDocumentToPlan(planDocument)}
+                document={planDocument}
+                onOpenReview={onOpenPlanReview}
+              />
+            </div>
+          ) : null}
           </ToolStopContext.Provider>
           {busy ? (
             <div className="mx-auto mt-1 flex w-full max-w-[760px] justify-start" data-testid="chat-thinking-orb">

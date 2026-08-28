@@ -24,7 +24,6 @@ import {
   managedWebSearchServiceFromEnvironment,
   WebSearchService
 } from "@jingler/cli-adapters/web-search"
-import { PlanStore } from "@jingler/cli-adapters/plan-store"
 import { PluginHost } from "@jingler/cli-adapters/plugin-host"
 import { PluginRegistry } from "@jingler/cli-adapters/plugins"
 import { ProjectService } from "@jingler/cli-adapters/projects"
@@ -476,7 +475,6 @@ const deviceRuntime = (root: string, targetId: string) => {
     SessionStore.Default,
     TranscriptStore.Default,
     BackgroundTaskStore.Default,
-    PlanStore.Default,
     ProjectService.Default,
     ContextManager.Default,
     ConfigService.Default,

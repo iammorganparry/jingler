@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   CURRENT_RUNTIME_CONTRACTS,
   Environment,
-  ProviderCatalog,
-  planDocumentToPlan
+  ProviderCatalog
 } from "@jingler/core"
 import { Schema } from "effect"
 import {
@@ -13,37 +12,6 @@ import {
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
 import { providerRecoveryOf } from "./provider-recovery.js"
-import { matchesCanonicalPlan } from "./plan-document-machine.js"
-
-describe("plan approval revision", () => {
-  const document = {
-    id: "plan-1",
-    sessionId: "session-1",
-    producingChatId: "chat-1",
-    revision: 4,
-    status: "proposed" as const,
-    plan: {
-      title: "Ship the current revision",
-      sections: [],
-      stages: [],
-      annotations: []
-    },
-    updatedAt: "2026-08-13T00:00:00.000Z",
-    updatedBy: "agent" as const
-  }
-
-  it("keeps approval disabled until Plan.watch catches the visible revision", () => {
-    const visible = planDocumentToPlan(document)
-    const staleDocument = {
-      ...document,
-      revision: 3,
-      plan: { ...document.plan, title: "Ship the previous revision" }
-    }
-
-    expect(matchesCanonicalPlan(staleDocument, visible)).toBe(false)
-    expect(matchesCanonicalPlan(document, visible)).toBe(true)
-  })
-})
 
 describe("conversation/plan split ratio", () => {
   it("starts with two thirds for the plan and resizes continuously", () => {

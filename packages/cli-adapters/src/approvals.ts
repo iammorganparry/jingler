@@ -5,7 +5,7 @@ import type {
   PermissionMode,
   QuestionAnswer
 } from "@jingler/core"
-import type { PermissionRequest, PlanDecision } from "./agent-turn-driver.js"
+import type { PermissionRequest } from "./agent-turn-driver.js"
 import { PLAN_AUTO_RUN_DEFAULT } from "@jingler/core"
 
 /**
@@ -30,13 +30,6 @@ interface PendingGate {
   readonly deferred: Deferred.Deferred<PermissionDecision>
   /** Token added to the chat's allowlist on an "always" decision. */
   readonly allowLabel: string | null
-}
-
-/** A proposed plan awaiting the operator's decision; the `Deferred` resumes the agent. */
-interface PendingPlan {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly deferred: Deferred.Deferred<PlanDecision>
 }
 
 /** A question group awaiting the user's answers; the `Deferred` resumes the agent. */
@@ -93,7 +86,7 @@ export const verdict = (
 ): "allow" | "gate" => {
   if (mode === "auto") return "allow"
   // The memory server is bundled and scoped by Jingler itself. Asking the
-  // operator again during enhanced plan execution can strand the active agent
+  // operator again during plan execution can strand the active agent
   // workers, so every memory operation bypasses the generic harness gate.
   if (jinglerMode && isJinglerMemoryRequest(req)) return "allow"
   if (isAllowlisted(allow, req.command)) return "allow"
@@ -189,39 +182,6 @@ export interface Approvals {
    * Gates deny and questions answer empty — a stopped agent must not stay blocked.
    */
   readonly releaseChat: (sessionId: string, chatId: string) => Effect.Effect<void>
-  /**
-   * Park the agent on a proposed plan until the operator decides. Same ordering
-   * rule as `awaitGate` — `announce` also persists the plan to the library, which
-   * must not happen before the plan can be answered.
-   */
-  readonly awaitPlan: (
-    sessionId: string,
-    chatId: string,
-    planId: string,
-    announce: Effect.Effect<void>
-  ) => Effect.Effect<PlanDecision>
-  /**
-   * Who owns a pending plan, or null. The comment / revise / approve handlers all
-   * begin with this lookup.
-   */
-  readonly pendingPlan: (
-    planId: string
-  ) => Effect.Effect<{ readonly sessionId: string; readonly chatId: string } | null>
-  /**
-   * Settle a pending plan. Guarded on the SESSION only — unlike gates, a plan is
-   * addressed by an id unique across the session's chats, and the out-of-band plan
-   * RPCs do not carry one.
-   */
-  readonly settlePlan: (
-    sessionId: string,
-    planId: string,
-    decision: PlanDecision
-  ) => Effect.Effect<void>
-  /** Every plan a chat is parked on — the caller marks them rejected and settles them. */
-  readonly pendingPlanIds: (
-    sessionId: string,
-    chatId: string
-  ) => Effect.Effect<ReadonlyArray<string>>
   /** Drop a closed chat's allowlist so the map doesn't grow for the process's life. */
   readonly forgetChat: (chatId: string) => Effect.Effect<void>
 }
@@ -231,7 +191,6 @@ export const makeApprovals: Effect.Effect<Approvals> = Effect.gen(function* () {
   const gates = yield* Ref.make(new Map<string, PendingGate>())
   const questions = yield* Ref.make(new Map<string, PendingQuestion>())
   const allowlists = yield* Ref.make(new Map<string, Set<string>>())
-  const plans = yield* Ref.make(new Map<string, PendingPlan>())
 
   const forget = <V>(ref: Ref.Ref<Map<string, V>>, key: string) =>
     Ref.update(ref, (m) => {
@@ -316,36 +275,6 @@ export const makeApprovals: Effect.Effect<Approvals> = Effect.gen(function* () {
           { discard: true }
         )
       }),
-
-    awaitPlan: (sessionId, chatId, planId, announce) =>
-      Effect.gen(function* () {
-        const deferred = yield* Deferred.make<PlanDecision>()
-        yield* Ref.update(plans, (m) => new Map(m).set(planId, { sessionId, chatId, deferred }))
-        yield* announce
-        return yield* Deferred.await(deferred)
-      }).pipe(Effect.ensuring(forget(plans, planId))),
-
-    pendingPlan: (planId) =>
-      Effect.map(Ref.get(plans), (m) => {
-        const entry = m.get(planId)
-        return entry === undefined
-          ? null
-          : { sessionId: entry.sessionId, chatId: entry.chatId }
-      }),
-
-    settlePlan: (sessionId, planId, decision) =>
-      Effect.gen(function* () {
-        const entry = (yield* Ref.get(plans)).get(planId)
-        if (entry === undefined || entry.sessionId !== sessionId) return
-        yield* Deferred.succeed(entry.deferred, decision)
-      }),
-
-    pendingPlanIds: (sessionId, chatId) =>
-      Effect.map(Ref.get(plans), (m) =>
-        [...m.entries()]
-          .filter(([, p]) => p.sessionId === sessionId && p.chatId === chatId)
-          .map(([planId]) => planId)
-      ),
 
     forgetChat: (chatId) => forget(allowlists, chatId)
   }

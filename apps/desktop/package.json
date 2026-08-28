@@ -33,6 +33,7 @@
     "@effect/platform-node": "^0.107.0",
     "@effect/rpc": "^0.75.1",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+    "@plannotator/pi-extension": "0.27.8",
     "@tanstack/react-query": "^5.101.2",
     "@xstate/react": "^6.1.0",
     "@xterm/addon-fit": "^0.11.0",

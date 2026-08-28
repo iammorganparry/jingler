@@ -1,3 +1,6 @@
+import { mkdir, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
+import { createRequire } from "node:module"
 import {
   DefaultResourceLoader,
   SettingsManager,
@@ -12,9 +15,15 @@ import {
 } from "../resources/ponytail-resources.js"
 export { PONYTAIL_EXTENSION_PATH, PONYTAIL_SKILLS_PATH } from "../resources/ponytail-resources.js"
 
+const require = createRequire(import.meta.url)
+export const PLANNOTATOR_EXTENSION_PATH = dirname(
+  require.resolve("@plannotator/pi-extension/package.json")
+)
+
 const ALLOWED_EXTENSION_PATHS = new Set([
   PI_SUBAGENTS_EXTENSION_PATH,
-  PONYTAIL_EXTENSION_PATH
+  PONYTAIL_EXTENSION_PATH,
+  PLANNOTATOR_EXTENSION_PATH
 ])
 
 export class PiResourceError extends Data.TaggedError("PiResourceError")<{
@@ -27,6 +36,7 @@ export interface LockedPiResourceInput {
   readonly agentDir: string
   readonly systemPrompt: string
   readonly eventBus?: EventBus
+  readonly plannotatorExecutionTools?: ReadonlyArray<string>
 }
 
 /** Build a pi loader whose only prompt/resource input is supplied by Jingler. */
@@ -35,6 +45,19 @@ export const createLockedPiResources = (
 ): Effect.Effect<ResourceLoader, PiResourceError> =>
   Effect.tryPromise({
     try: async () => {
+      process.env.PLANNOTATOR_EMBEDDED = "1"
+      if (input.plannotatorExecutionTools !== undefined) {
+        await mkdir(input.agentDir, { recursive: true })
+        await writeFile(
+          join(input.agentDir, "plannotator.json"),
+          JSON.stringify({
+            executionMode: "automatic",
+            phases: {
+              executing: { activeTools: input.plannotatorExecutionTools }
+            }
+          })
+        )
+      }
       const loader = new DefaultResourceLoader({
         cwd: input.cwd,
         agentDir: input.agentDir,
@@ -51,7 +74,11 @@ export const createLockedPiResources = (
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        additionalExtensionPaths: [PI_SUBAGENTS_EXTENSION_PATH, PONYTAIL_EXTENSION_PATH],
+        additionalExtensionPaths: [
+          PI_SUBAGENTS_EXTENSION_PATH,
+          PONYTAIL_EXTENSION_PATH,
+          PLANNOTATOR_EXTENSION_PATH
+        ],
         additionalSkillPaths: [PONYTAIL_SKILLS_PATH],
         additionalPromptTemplatePaths: [],
         additionalThemePaths: [],

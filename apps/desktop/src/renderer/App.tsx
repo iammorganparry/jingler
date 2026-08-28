@@ -90,10 +90,6 @@ import {
   disposeConversationActor,
   getConversationActor,
 } from "./conversation-registry.js";
-import {
-  flushPlanDocument,
-  stopPlanDocument,
-} from "./plan-document-registry.js";
 import { addDraftCodeReference, clearDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
 import { clearViewedPaths } from "./viewed-store.js";
@@ -726,11 +722,6 @@ function AuthedApp({
       // snapshots rather than leaving meters reading against the old one.
       void qc.invalidateQueries({ queryKey: ["context"] });
     });
-  const savePlanTemplate = (template: { readonly source: string }) =>
-    rpc.configSetPlanTemplate(template).then((saved) => {
-      qc.setQueryData(["config"], saved);
-    });
-
   // Toggle a repo's starred state, persist the whole list, and update the cache.
   const toggleStar = (repoPath: string) => {
     const next = starredRepos.includes(repoPath)
@@ -878,7 +869,6 @@ function AuthedApp({
       sessions
         .find((session) => session.id === sessionId)
         ?.chats.map((chat) => chat.id) ?? [];
-    await flushPlanDocument(sessionId).catch(() => {});
     await rpc.sessionsDelete(sessionId);
     browserDock.removeSession(sessionId);
     // Stop the persistent conversation actor for a deleted session (it's kept
@@ -886,7 +876,6 @@ function AuthedApp({
     disposeConversationActor(sessionId);
     disposeFileBrowserActor(sessionId);
     for (const chatId of chatIds) clearPlanAutoPresentation(chatId);
-    stopPlanDocument(sessionId);
     // Same reasoning for the composer draft — it outlives the pane by design, so
     // nothing else would ever collect it (and it's persisted).
     for (const chatId of chatIds) clearDraft(chatId);
@@ -1873,8 +1862,6 @@ function AuthedApp({
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
         contextSessions={contextSessions}
-        planTemplate={configQuery.data?.planTemplate ?? null}
-        onSavePlanTemplate={savePlanTemplate}
         unifiedMcp={unifiedMcp}
         connector={connector}
         environments={environmentController.environments}

@@ -27,7 +27,6 @@ import {
   isSubagentEvent,
   scopeToAgent,
   latestPlan,
-  resumePlanPrompt,
   pendingPlan,
   pendingQuestion,
   setGateStatus,
@@ -36,7 +35,6 @@ import {
   setQuestionAnswers,
   settleLoaded,
   settleStreaming,
-  stripPlanResultProtocol,
   userMessage
 } from "./conversation.js"
 import type { Plan, PlanComment, QuestionRequest } from "./conversation.js"
@@ -104,27 +102,6 @@ describe("ContentPart", () => {
       tool: { id: "t", name: "Bash", target: null, status: "exploded", meta: null, diff: null, preview: null }
     })
     expect(Either.isLeft(result)).toBe(true)
-  })
-})
-
-describe("stripPlanResultProtocol", () => {
-  it("keeps readable prose and removes valid, malformed, and partial evidence records", () => {
-    expect(
-      stripPlanResultProtocol(
-        [
-          "Implementation complete.",
-          "PLAN_RESULT criterion=01.1 status=passed evidence=pnpm test passed",
-          "  PLAN_RESULT criterion=01.2 status=passed",
-          "PLAN_RES"
-        ].join("\n")
-      )
-    ).toBe("Implementation complete.")
-  })
-
-  it("does not strip ordinary plan prose", () => {
-    expect(stripPlanResultProtocol("Plan complete.\nThe results are in Plan Review.")).toBe(
-      "Plan complete.\nThe results are in Plan Review."
-    )
   })
 })
 
@@ -678,23 +655,6 @@ describe("Plan flow", () => {
   it("findApprovedPlan returns null when no plan is approved", () => {
     expect(findApprovedPlan([])).toBe(null)
     expect(findApprovedPlan([assistantMessage("a0", now)])).toBe(null)
-  })
-
-  it("resumePlanPrompt embeds the plan and instructs implementation (for a post-restart re-drive)", () => {
-    const p = plan()
-    const prompt = resumePlanPrompt(p)
-    expect(prompt).toContain(p.summary)
-    expect(prompt).toMatch(/implement it now/i)
-    expect(prompt.toLowerCase()).toContain("do not re-plan")
-    expect(prompt).toContain("Do not repeat tasks already marked completed")
-    expect(prompt).toContain("PLAN_TASK stage=<stage-id>")
-    // The amendment contract: new work goes through jingler_submit_plan FIRST,
-    // because a marker naming an id outside the canonical plan is dropped.
-    expect(prompt).toContain("jingler_submit_plan")
-    expect(prompt).toContain("dropped")
-    // Includes the step titles so the resumed (memory-less) harness has the plan.
-    expect(prompt).toContain(p.steps[0]!.title)
-    if (p.raw) expect(prompt).toContain(p.raw)
   })
 
   it("addPlanComment appends the comment and flags its step", () => {

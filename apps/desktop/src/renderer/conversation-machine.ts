@@ -20,6 +20,7 @@ import type {
   PlanApprovalResult,
   PlanComment,
   PlanDraft,
+  PlannotatorProjection,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -245,6 +246,8 @@ export interface ConversationContext {
   readonly sharedPlanChatId: string | null
   /** Canonical plan projected over every transcript page as it is loaded. */
   readonly sharedPlan: Plan | null
+  /** Disposable native projection of Plannotator's authoritative state. */
+  readonly plannotator?: PlannotatorProjection
   /** Volatile sanitized plan source for the current planning turn. */
   readonly planDraft: PlanDraft | null
   /** Prevents a reformat retry from reopening a split the operator closed. */
@@ -686,21 +689,13 @@ const agentStream = fromCallback<
   }
 >(({ sendBack, input }) => {
   const onEvent = (event: StreamEvent) => sendBack({ type: "STREAM_EVENT", event })
-  const cancel = input.resumePlanId
-    ? rpc.agentResumePlan(
-        input.sessionId,
-        input.resumeChatId,
-        input.resumePlanId,
-        input.resumePlanRevision ?? undefined,
-        onEvent
-      )
-    : rpc.agentRun(input.sessionId, input.chatId, input.text, onEvent, input.images, {
-        displayText: input.displayText,
-        reasoning: input.reasoning ?? null,
-        ...(input.externalInstruction === null
-          ? {}
-          : { externalInstruction: input.externalInstruction })
-      })
+  const cancel = rpc.agentRun(input.sessionId, input.chatId, input.text, onEvent, input.images, {
+    displayText: input.displayText,
+    reasoning: input.reasoning ?? null,
+    ...(input.externalInstruction === null
+      ? {}
+      : { externalInstruction: input.externalInstruction })
+  })
   return cancel
 })
 
@@ -1364,16 +1359,6 @@ export const conversationMachine = setup({
       const feedback = planFeedbackFor(context, event)
       if (feedback === null) return {}
 
-      void rpc
-        .agentCommentPlanStep(
-          context.session.id,
-          feedback.plan.id,
-          "",
-          feedback.text
-        )
-        .then(() => rpc.agentRevisePlan(context.session.id, feedback.plan.id))
-        .catch(() => {})
-
       const comment: PlanComment = {
         id: `pc_local_${stamp()}`,
         stepId: "",
@@ -1578,6 +1563,9 @@ export const conversationMachine = setup({
           tokens: 0,
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e))
         }
+      }
+      if (e._tag === "PlannotatorStateChanged") {
+        return { plannotator: e.state }
       }
       if (e._tag === "PlanDraft") {
         if (e.draft.phase === "cleared") return { planDraft: null }
@@ -1977,16 +1965,6 @@ export const conversationMachine = setup({
     // The runner echoes a `PlanUpdated` so the authoritative state reconciles.
     optimisticPlanComment: assign(({ context, event }) => {
       if (event.type !== "COMMENT_PLAN_STEP") return {}
-      void rpc
-        .agentCommentPlanStep(
-          context.session.id,
-          event.planId,
-          event.stepId,
-          event.body,
-          event.anchor
-        )
-        .then(() => rpc.agentRevisePlan(context.session.id, event.planId))
-        .catch(() => {})
       const comment: PlanComment = {
         id: `pc_local_${stamp()}`,
         stepId: event.stepId,
@@ -2007,41 +1985,11 @@ export const conversationMachine = setup({
     }),
     optimisticPlanRevise: assign(({ context, event }) => {
       if (event.type !== "REVISE_PLAN") return {}
-      void rpc.agentRevisePlan(context.session.id, event.planId)
       return { messages: context.messages.map((m) => setPlanStatus(m, event.planId, "revising")) }
     }),
-    optimisticPlanApprove: assign(({ context, event, self }) => {
+    optimisticPlanApprove: assign(({ context, event }) => {
       if (event.type !== "APPROVE_PLAN") return {}
       const executionMode = event.executionMode ?? context.executionMode
-      const latestRevision = event.revision ?? 0
-      void rpc
-        .agentApprovePlan(
-          context.session.id,
-          event.planId,
-          event.executionMode,
-          event.revision
-        )
-        .then((result) => {
-          self.send({
-            type: "PLAN_APPROVAL_RESULT",
-            planId: event.planId,
-            result
-          })
-        })
-        .catch((error: unknown) => {
-          self.send({
-            type: "PLAN_APPROVAL_RESULT",
-            planId: event.planId,
-            result: {
-              status: "refused",
-              message:
-                error instanceof Error
-                  ? error.message
-                  : `Plan approval failed: ${String(error)}`,
-              latestRevision
-            }
-          })
-        })
       return {
         mode: executionMode,
         executionMode,
@@ -2245,7 +2193,6 @@ export const conversationMachine = setup({
     // races nothing, since the harness answers it on the ordinary stream.
     STOP_SUBAGENT: { actions: "requestStopSubagent" },
     CLOSE_SUBAGENT: { actions: "closeSubagent" },
-    PLAN_APPROVAL_RESULT: { actions: "reconcilePlanApproval" },
     // Paging older history races nothing (it only prepends to `messages`), so it
     // lives at the root and works in every state — including `running`, where the
     // operator may scroll back while the agent works.
@@ -2359,7 +2306,6 @@ export const conversationMachine = setup({
         // moment the load settles, exactly as a send during a run is held.
         SEND: [
           { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
-          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
           { actions: "enqueue" }
         ],
         // Whatever is held here is ON SCREEN as a queued row (a hand-off lands one
@@ -2479,8 +2425,6 @@ export const conversationMachine = setup({
           },
           { actions: "settleLateSteer" }
         ],
-        APPROVE_PLAN: { target: "running", actions: "startResumePlan" },
-        RESUME_PLAN: { target: "running", actions: "startResumePlan" },
         SET_MODE: { actions: "persistMode" },
         // Re-read the worktree diff on demand (e.g. after a revert from the rail).
         REFRESH_DIFF: { target: "refreshingDiff" }
@@ -2537,7 +2481,6 @@ export const conversationMachine = setup({
         // boundary where the harness can take it (see `canAutoFlush`).
         SEND: [
           { guard: "canCoalesceExternalSend", actions: "coalesceExternalSend" },
-          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
           { actions: "enqueue" }
         ],
         UNQUEUE: { actions: "removeQueued" },
@@ -2547,7 +2490,6 @@ export const conversationMachine = setup({
         // through `stopping` so the halt has landed before the next turn starts;
         // refreshingDiff dequeues it (the rest of the queue follows).
         SEND_NOW: [
-          { guard: "canRoutePlanFeedback", actions: "routePlanFeedback" },
           { guard: "canSteerQueued", actions: "promoteAndSteer" },
           // Hidden reference context cannot steer (the steer RPC has no field
           // for it), so "now" is honoured the only other way there is: stop the
@@ -2583,9 +2525,6 @@ export const conversationMachine = setup({
         ],
         DECIDE_GATE: { actions: "optimisticGate" },
         ANSWER_QUESTION: { actions: "optimisticAnswer" },
-        COMMENT_PLAN_STEP: { actions: "optimisticPlanComment" },
-        REVISE_PLAN: { actions: "optimisticPlanRevise" },
-        APPROVE_PLAN: { actions: "optimisticPlanApprove" },
         SET_MODE: { actions: "persistMode" },
         // Stopping PARKS the queue rather than clearing it — the operator asked
         // the agent to halt, not to destroy what they typed. The rows stay on

@@ -146,7 +146,6 @@ describe("provider model behavior verification", () => {
         case "structured.question-plan":
           return [
             { kind: "event", tag: "QuestionRequested" },
-            { kind: "event", tag: "PlanProposed" },
             { kind: "event", tag: "Done" }
           ] as const
         case "quality.semantic-references":

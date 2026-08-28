@@ -8,6 +8,9 @@ patchedDependencies:
   '@pierre/diffs@1.3.0-beta.11':
     hash: 5d0da83f10c372826d076676ae0aa74bb85c68ef97323f793c3e2fb6e9e27845
     path: patches/@pierre__diffs@1.3.0-beta.11.patch
+  '@plannotator/pi-extension@0.27.8':
+    hash: e41064a1afa6d9a7225dcd4ff053b40f71109a02ba1ef556800476625be32b53
+    path: patches/@plannotator__pi-extension@0.27.8.patch
   pi-subagents@0.57.0:
     hash: 991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d
     path: patches/pi-subagents@0.57.0.patch
@@ -95,6 +98,9 @@ importers:
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
+      '@plannotator/pi-extension':
+        specifier: 0.27.8
+        version: 0.27.8(patch_hash=e41064a1afa6d9a7225dcd4ff053b40f71109a02ba1ef556800476625be32b53)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-query':
         specifier: ^5.101.2
         version: 5.101.2(react@19.2.7)
@@ -473,6 +479,9 @@ importers:
       '@octokit/webhooks':
         specifier: ^14.2.0
         version: 14.2.0
+      '@plannotator/pi-extension':
+        specifier: 0.27.8
+        version: 0.27.8(patch_hash=e41064a1afa6d9a7225dcd4ff053b40f71109a02ba1ef556800476625be32b53)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       effect:
         specifier: ^3.21.4
         version: 3.21.4
@@ -2566,6 +2575,9 @@ packages:
     resolution: {integrity: sha512-+Sg6GCR/wy1oSmQDFq4LQDAhm3ETKnorxN+y5nbLULOR3P0c14f2Wurzj3/xqPXtasLFfHd5iRFQ7AJt4KH2cw==}
     engines: {node: '>=8'}
 
+  '@joplin/turndown-plugin-gfm@1.0.67':
+    resolution: {integrity: sha512-FZfW5EZfidhzd1IaY1uxHnIZPTVOxAdleMZ4/1U6Nt5b7+Qj5JThDnaIomuJtetnUBzuRNbe9FWMuqD4B3dlWA==}
+
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0':
     resolution: {integrity: sha512-qvsTEwEFefhdirGOPnu9Wp6ChfIwy2dBCRuETU3uE+4cC+PFoxMSiiEhxk4lOluA34eARHA0OxqsEUYDqRMgeQ==}
     peerDependencies:
@@ -2687,6 +2699,9 @@ packages:
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
+
+  '@mixmark-io/domino@2.2.0':
+    resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
 
   '@modelcontextprotocol/sdk@1.29.0':
     resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
@@ -3340,8 +3355,18 @@ packages:
       react: ^18.3.1 || ^19.0.0
       react-dom: ^18.3.1 || ^19.0.0
 
+  '@pierre/diffs@1.3.2':
+    resolution: {integrity: sha512-+aSaxN/fGwmegUF/UVkXOOA8Run+sYOqhqTc1JvlieoYXsW/9KykOIR88FvgXjesI0MGZJLsX8dthn3+x2kymA==}
+    peerDependencies:
+      react: ^18.3.1 || ^19.0.0
+      react-dom: ^18.3.1 || ^19.0.0
+
   '@pierre/theme@1.1.0':
     resolution: {integrity: sha512-GC2OWTAfTIIWWYhPCygwG8t2EtePQkRfON4MI2rwIkJylmiyqIttJID2dCL8sUD8cNdEvYkEyfEHHKMeCiDLoQ==}
+    engines: {vscode: ^1.0.0}
+
+  '@pierre/theme@2.0.0':
+    resolution: {integrity: sha512-yNDd9GYLQl1mEUJR8AneJ5e4ohLIHQd/wZLWr4fagt78vS2RwwZNW530vVgHqXFAyFVcFlRmGUD5ramXH46OXw==}
     engines: {vscode: ^1.0.0}
 
   '@pierre/theming@0.0.2':
@@ -3393,6 +3418,18 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
+
+  '@plannotator/pi-extension@0.27.8':
+    resolution: {integrity: sha512-0ygrzaL+78hMq3iyC+3JSEGstSt1fWpVfo1hSWFWVWZ+xOHgR2L6z4Ve1aDZmIuMvR45y8LYhh1An7ftCkoeMA==}
+    peerDependencies:
+      '@earendil-works/pi-coding-agent': '>=0.79.1'
+
+  '@plannotator/webtui@0.1.0':
+    resolution: {integrity: sha512-pwJfFg5VXOwucs55K6mef5fgK5eC8mJrFYc8RJdvB/T00alwnzgDjT/BAsarPiMj4U3NjUZImzxnbypJsn/ESA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      react: ^18.3.0 || ^19.0.0
+      react-dom: ^18.3.0 || ^19.0.0
 
   '@playwright/test@1.61.1':
     resolution: {integrity: sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==}
@@ -5000,16 +5037,39 @@ packages:
   '@xterm/addon-fit@0.11.0':
     resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
 
+  '@xterm/addon-fit@0.12.0-beta.216':
+    resolution: {integrity: sha512-IgKE3ngNodSnmj1O+EEYpKQZkSbAUbghPlCWd8G32RL0piIMqb3FX3BuYLnWZeLNoD9iMtublLMG1T9XjGeVvA==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.216
+
+  '@xterm/addon-unicode11@0.10.0-beta.216':
+    resolution: {integrity: sha512-i7TrEHOTzUEOClH1+6IHoHy7bR/XHVRBjHc5e0u6A1HucFkAlCU+bqUY8EfwNOh1/iUjuB06EtNh6BM1o/ZAlA==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.216
+
   '@xterm/addon-web-links@0.11.0':
     resolution: {integrity: sha512-nIHQ38pQI+a5kXnRaTgwqSHnX7KE6+4SVoceompgHL26unAxdfP6IPqUTSYPQgSwM56hsElfoNrrW5V7BUED/Q==}
     peerDependencies:
       '@xterm/xterm': ^5.0.0
 
+  '@xterm/addon-web-links@0.13.0-beta.216':
+    resolution: {integrity: sha512-ZP3BDy1na/37TZHO8FB+XHJFoO8muyPoOzkaL2X28n5A9ZFQPbf834EMRsvDczKnfQvtZcve+ZCmMJj1ZHGjow==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.216
+
   '@xterm/addon-webgl@0.19.0':
     resolution: {integrity: sha512-b3fMOsyLVuCeNJWxolACEUED0vm7qC0cy4wRvf3oURSzDTYVQiGPhTnhWZwIHdvC48Y+oLhvYXnY4XDXPoJo6A==}
 
+  '@xterm/addon-webgl@0.20.0-beta.215':
+    resolution: {integrity: sha512-oCbH3YxiGOzRcKxwTfSRCA1TqpoT/AitO2X5MuqD14DVnb4Z3rTKQYfHBA7R6HA7U4K9OzmtIsi5+VyEIEaWsg==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.216
+
   '@xterm/xterm@6.0.0':
     resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
+
+  '@xterm/xterm@6.1.0-beta.216':
+    resolution: {integrity: sha512-87rfymzVje5eYUlGG94hz1WkOYvFRcFDGdiOAbg4d8xt8OGSGR2nMNU4I1n5MDE1RBPBqRd+WVJ5w7q3pwMoZA==}
 
   '@xyflow/react@12.11.2':
     resolution: {integrity: sha512-eLAlDWJfWnQEhJwGMjlWdAXO9eYllKpliUmPQlAmOLxz6mExXuzMVDUKLMquixgkrtmMFFtug3jGKmYYld12cA==}
@@ -5453,6 +5513,10 @@ packages:
   chokidar@4.0.3:
     resolution: {integrity: sha512-Qgzu8kfBvo+cA4962jnP1KkS6Dop5NS6g7R5LFYJr4b8Ub94PPQXUksCw9PvXoeXPRRddRNC5C1JQUR2SMGtnA==}
     engines: {node: '>= 14.16.0'}
+
+  chokidar@5.0.0:
+    resolution: {integrity: sha512-TQMmc3w+5AxjpL8iIiwebF73dRDF4fBIieAqGn9RGCWaEVwQ6Fb2cGe31Yns0RRIzii5goJ1Y7xbMwo1TxMplw==}
+    engines: {node: '>= 20.19.0'}
 
   chownr@1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
@@ -7182,6 +7246,11 @@ packages:
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
+  lucide-react@0.577.0:
+    resolution: {integrity: sha512-4LjoFv2eEPwYDPg/CUdBJQSDfPyzXCRrVW1X7jrx/trgxnxkHFjnVZINbzvzxjN70dxychOfg+FTYwBiS3pQ5A==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   lucide-react@1.24.0:
     resolution: {integrity: sha512-YT6mBD8lGKkg4nM39enlm94/sfJIiW0YKUT60fBy4YK8tai31ylg1VhGNWxkpSKHo9UagfnZqwIff3HTDQwXeA==}
     peerDependencies:
@@ -7646,6 +7715,9 @@ packages:
 
   node-html-parser@7.1.0:
     resolution: {integrity: sha512-iJo8b2uYGT40Y8BTyy5ufL6IVbN8rbm/1QK2xffXU/1a/v3AAa0d1YAoqBNYqaS4R/HajkWIpIfdE6KcyFh1AQ==}
+
+  node-pty@1.1.0:
+    resolution: {integrity: sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg==}
 
   node-releases@2.0.51:
     resolution: {integrity: sha512-wRNIrw4DmVLKQlbgOMdkMx27Wrpzes2hh5Jtbi2bjPd+4wJstWIqP5A+lscnqbm0xxmT5Bpg8Lec5ItEBwx6BQ==}
@@ -8170,6 +8242,10 @@ packages:
   readdirp@4.1.2:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
+
+  readdirp@5.1.1:
+    resolution: {integrity: sha512-Kko+Y5XQ6fM+Ce3dq3m9YGxnacYZYl9cA1wZjaF3Vbry2L3i1qVg8+CAgNPsXRArPMUMCaOR7oa9Nqntc43JKA==}
+    engines: {node: '>= 20.19.0'}
 
   recast@0.23.12:
     resolution: {integrity: sha512-dEWRjcINDu/F4l2dYx57ugBtD7HV9KXESyxhzw/MqWLeglJrsjJKqACPyUPg+6AF8mIgm+Zi0dZ3ACoIg+QtpA==}
@@ -8784,6 +8860,10 @@ packages:
   turbo@2.10.4:
     resolution: {integrity: sha512-GQpduILaKjoaGljw097ScsSyKTtZSY7cZ3bJktzfTkPMyCf3ShKLuXK2IaOEN2Plziml+ArR7WJ1m+V4VbnaKQ==}
     hasBin: true
+
+  turndown@7.2.4:
+    resolution: {integrity: sha512-I8yFsfRzmzK0WV1pNNOA4A7y4RDfFxPRxb3t+e3ui14qSGOxGtiSP6GjeX+Y6CHb7HYaFj7ECUD7VE5kQMZWGQ==}
+    engines: {node: '>=18', npm: '>=9'}
 
   tw-animate-css@1.4.0:
     resolution: {integrity: sha512-7bziOlRqH0hJx80h/3mbicLW7o8qLsH5+RaLR2t+OHM3D0JlWGODQKQ4cxbK7WlvmUxpcj6Kgu6EKqjrGFe3QQ==}
@@ -10828,6 +10908,8 @@ snapshots:
 
   '@istanbuljs/schema@0.1.6': {}
 
+  '@joplin/turndown-plugin-gfm@1.0.67': {}
+
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@7.0.2)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0))':
     dependencies:
       glob: 13.0.6
@@ -10954,6 +11036,8 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@mixmark-io/domino@2.2.0': {}
 
   '@modelcontextprotocol/sdk@1.29.0(zod@4.4.3)':
     dependencies:
@@ -11460,7 +11544,23 @@ snapshots:
     transitivePeerDependencies:
       - '@shikijs/themes'
 
+  '@pierre/diffs@1.3.2(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+    dependencies:
+      '@pierre/theme': 2.0.0
+      '@pierre/theming': 1.0.0(@pierre/theme@2.0.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)
+      '@shikijs/transformers': 4.4.2
+      diff: 9.0.0
+      hast-util-to-html: 9.0.5
+      lru_map: 0.4.1
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+      shiki: 4.4.2
+    transitivePeerDependencies:
+      - '@shikijs/themes'
+
   '@pierre/theme@1.1.0': {}
+
+  '@pierre/theme@2.0.0': {}
 
   '@pierre/theming@0.0.2(@pierre/theme@1.1.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)':
     optionalDependencies:
@@ -11473,6 +11573,14 @@ snapshots:
   '@pierre/theming@1.0.0(@pierre/theme@1.1.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)':
     optionalDependencies:
       '@pierre/theme': 1.1.0
+      '@shikijs/themes': 4.4.2
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+      shiki: 4.4.2
+
+  '@pierre/theming@1.0.0(@pierre/theme@2.0.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)':
+    optionalDependencies:
+      '@pierre/theme': 2.0.0
       '@shikijs/themes': 4.4.2
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
@@ -11492,6 +11600,39 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
+
+  '@plannotator/pi-extension@0.27.8(patch_hash=e41064a1afa6d9a7225dcd4ff053b40f71109a02ba1ef556800476625be32b53)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+    dependencies:
+      '@earendil-works/pi-coding-agent': 0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
+      '@joplin/turndown-plugin-gfm': 1.0.67
+      '@pierre/diffs': 1.3.2(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@plannotator/webtui': 0.1.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      chokidar: 5.0.0
+      diff: 8.0.4
+      parse5: 7.3.0
+      turndown: 7.2.4
+    transitivePeerDependencies:
+      - '@shikijs/themes'
+      - bufferutil
+      - react
+      - react-dom
+      - utf-8-validate
+
+  '@plannotator/webtui@0.1.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+    dependencies:
+      '@xterm/addon-fit': 0.12.0-beta.216(@xterm/xterm@6.1.0-beta.216)
+      '@xterm/addon-unicode11': 0.10.0-beta.216(@xterm/xterm@6.1.0-beta.216)
+      '@xterm/addon-web-links': 0.13.0-beta.216(@xterm/xterm@6.1.0-beta.216)
+      '@xterm/addon-webgl': 0.20.0-beta.215(@xterm/xterm@6.1.0-beta.216)
+      '@xterm/xterm': 6.1.0-beta.216
+      lucide-react: 0.577.0(react@19.2.7)
+      node-pty: 1.1.0
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   '@playwright/test@1.61.1':
     dependencies:
@@ -12987,13 +13128,31 @@ snapshots:
 
   '@xterm/addon-fit@0.11.0': {}
 
+  '@xterm/addon-fit@0.12.0-beta.216(@xterm/xterm@6.1.0-beta.216)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.216
+
+  '@xterm/addon-unicode11@0.10.0-beta.216(@xterm/xterm@6.1.0-beta.216)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.216
+
   '@xterm/addon-web-links@0.11.0(@xterm/xterm@6.0.0)':
     dependencies:
       '@xterm/xterm': 6.0.0
 
+  '@xterm/addon-web-links@0.13.0-beta.216(@xterm/xterm@6.1.0-beta.216)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.216
+
   '@xterm/addon-webgl@0.19.0': {}
 
+  '@xterm/addon-webgl@0.20.0-beta.215(@xterm/xterm@6.1.0-beta.216)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.216
+
   '@xterm/xterm@6.0.0': {}
+
+  '@xterm/xterm@6.1.0-beta.216': {}
 
   '@xyflow/react@12.11.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
@@ -13486,6 +13645,10 @@ snapshots:
   chokidar@4.0.3:
     dependencies:
       readdirp: 4.1.2
+
+  chokidar@5.0.0:
+    dependencies:
+      readdirp: 5.1.1
 
   chownr@1.1.4: {}
 
@@ -15334,6 +15497,10 @@ snapshots:
     dependencies:
       react: 19.2.7
 
+  lucide-react@0.577.0(react@19.2.7):
+    dependencies:
+      react: 19.2.7
+
   lucide-react@1.24.0(react@19.2.7):
     dependencies:
       react: 19.2.7
@@ -16044,6 +16211,10 @@ snapshots:
       css-select: 5.2.2
       he: 1.2.0
 
+  node-pty@1.1.0:
+    dependencies:
+      node-addon-api: 7.1.1
+
   node-releases@2.0.51: {}
 
   nopt@6.0.0:
@@ -16626,6 +16797,8 @@ snapshots:
       minimatch: 5.1.9
 
   readdirp@4.1.2: {}
+
+  readdirp@5.1.1: {}
 
   recast@0.23.12:
     dependencies:
@@ -17414,6 +17587,10 @@ snapshots:
       '@turbo/linux-arm64': 2.10.4
       '@turbo/windows-64': 2.10.4
       '@turbo/windows-arm64': 2.10.4
+
+  turndown@7.2.4:
+    dependencies:
+      '@mixmark-io/domino': 2.2.0
 
   tw-animate-css@1.4.0: {}
 

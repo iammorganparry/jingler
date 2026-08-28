@@ -1,6 +1,5 @@
 import { createContext, memo, type ReactNode, useContext, useState } from "react"
-import { planTaskProtocolTokens, stripPlanResultProtocol } from "@jingler/core"
-import type { ContentPart, ExecutionMode, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
+import type { ContentPart, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
@@ -13,15 +12,9 @@ import { providerColor, providerLabel, ProviderIcon } from "../components/provid
 import { ApprovalGate } from "./approval-gate.js"
 import { BranchDriftBanner } from "./branch-drift-banner.js"
 import { ContextDivider } from "./context-divider.js"
-import { PlanApprovalCard } from "./plan-card.js"
 import { QuestionSummary } from "./question-summary.js"
 import { ThoughtBlock } from "./thought-block.js"
 import { ToolCall } from "./tool-call.js"
-import {
-  SUBMIT_PLAN_TOOL,
-  SubmitPlanCard,
-  decodeSubmitPlanDecision
-} from "./submit-plan-card.js"
 import { StreamingText } from "./streaming-text.js"
 import { toolDisplayName } from "../lib/tool-names.js"
 
@@ -35,12 +28,10 @@ const COLLAPSE_MIN = 3
 type ToolPart = Extract<ContentPart, { _tag: "Tool" }>
 
 /**
- * Tool parts that may collapse into a "+ N more" run. The submit-plan control
- * tool renders as its own card (or not at all — see `SubmitPlanPart`), never
- * inside a collapsed tool run.
+ * Tool parts that may collapse into a "+ N more" run.
  */
 const isGroupableTool = (part: ContentPart): part is ToolPart =>
-  part._tag === "Tool" && part.tool.name !== SUBMIT_PLAN_TOOL
+  part._tag === "Tool"
 type ImagePart = Extract<ContentPart, { _tag: "Image" }>
 type ThinkingPart = Extract<ContentPart, { _tag: "Thinking" }>
 type PlanTaskProgressPart = Extract<ContentPart, { _tag: "PlanTaskProgress" }>
@@ -113,7 +104,7 @@ function PlanTaskProgressChip({ progress }: { progress: Omit<PlanTaskProgressPar
   )
 }
 
-function ProtocolText({
+function MessageText({
   text,
   markdown,
   streaming = false
@@ -122,41 +113,13 @@ function ProtocolText({
   markdown: boolean
   streaming?: boolean
 }) {
-  const tokens = planTaskProtocolTokens(markdown ? stripPlanResultProtocol(text) : text)
-  const hasProgress = tokens.some((token) => token.kind === "progress")
-  if (!hasProgress) {
-    const visible = tokens.map((token) => token.kind === "text" ? token.text : "").join("")
-    if (visible.length === 0) return null
-    return markdown ? (
-      <StreamingText text={visible} streaming={streaming} className={WIDTH} />
-    ) : (
-      <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
-        {visible}
-      </p>
-    )
-  }
-  const lastTextToken = tokens.findLastIndex((token) => token.kind === "text" && token.text.trim().length > 0)
-  return (
-    <div className={cn(WIDTH, "flex flex-col gap-2")}>
-      {tokens.map((token, index) =>
-        token.kind === "progress" ? (
-          <PlanTaskProgressChip key={`progress-${index}`} progress={token.progress} />
-        ) : token.text.trim().length > 0 ? (
-          markdown ? (
-            <StreamingText
-              key={`text-${index}`}
-              text={token.text}
-              streaming={streaming && index === lastTextToken}
-              className={WIDTH}
-            />
-          ) : (
-            <p key={`text-${index}`} className="m-0 whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body">
-              {token.text}
-            </p>
-          )
-        ) : null
-      )}
-    </div>
+  if (text.length === 0) return null
+  return markdown ? (
+    <StreamingText text={text} streaming={streaming} className={WIDTH} />
+  ) : (
+    <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
+      {text}
+    </p>
   )
 }
 
@@ -330,74 +293,24 @@ function MergedThoughts({ parts }: { parts: ReadonlyArray<ThinkingPart> }) {
   )
 }
 
-/**
- * The submit-plan control tool gets its own card — the generic one dumps the
- * decision's raw JSON. When this TURN also carries the plan itself (a gated
- * proposal: PlanProposed lands in the same message), the PlanApprovalCard is
- * the surface — approve lives there — and a second card for the same plan
- * would just be clutter, so this one disappears. What stays visible is the
- * turn with no plan card: above all an auto-applied mid-execution amendment.
- */
-function SubmitPlanPart({
-  tool,
-  inlinePlanIds,
-  onOpenPlanReview,
-  onDiscardPlan
-}: {
-  tool: ToolCallModel
-  inlinePlanIds?: ReadonlySet<string>
-  onOpenPlanReview?: () => void
-  onDiscardPlan?: () => void
-}) {
-  const decision = decodeSubmitPlanDecision(tool.output)
-  const shownDespitePlanCard =
-    decision?.kind === "approved" &&
-    decision.plan !== null &&
-    !inlinePlanIds?.has(decision.plan.id)
-  if ((inlinePlanIds?.size ?? 0) > 0 && !shownDespitePlanCard) return null
-  return (
-    <SubmitPlanCard
-      tool={tool}
-      decision={decision}
-      onOpenPlanReview={onOpenPlanReview}
-      onDiscardPlan={onDiscardPlan}
-      className={WIDTH}
-    />
-  )
-}
-
 function PartView({
   part,
   markdown,
-  planDocument,
-  inlinePlanIds,
   onDecideGate,
-  onApprovePlan,
-  onResumePlan,
-  onOpenPlanReview,
-  onDiscardPlan,
   onForkOntoBranch,
   onAdoptBranch,
   streamingText = false
 }: {
   part: ContentPart
   markdown: boolean
-  planDocument?: PlanDocument | null
-  /** Ids of every Plan part in this MESSAGE (not just the visible slice). */
-  inlinePlanIds?: ReadonlySet<string>
   streamingText?: boolean
   onDecideGate?: (gateId: string, decision: GateDecision) => void
-  onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
-  onResumePlan?: (planId: string) => void
-  onOpenPlanReview?: () => void
-  /** Discard the session's canonical plan (Plan Review's discard, inline). */
-  onDiscardPlan?: () => void
   onForkOntoBranch?: () => void | Promise<void>
   onAdoptBranch?: () => void | Promise<void>
 }) {
   switch (part._tag) {
     case "Text": {
-      return <ProtocolText text={part.text} markdown={markdown} streaming={streamingText} />
+      return <MessageText text={part.text} markdown={markdown} streaming={streamingText} />
     }
     case "PlanTaskProgress":
       return <PlanTaskProgressChip progress={part} />
@@ -409,16 +322,7 @@ function PartView({
       return <MergedThoughts parts={[part]} />
 
     case "Tool":
-      return part.tool.name === SUBMIT_PLAN_TOOL ? (
-        <SubmitPlanPart
-          tool={part.tool}
-          inlinePlanIds={inlinePlanIds}
-          onOpenPlanReview={onOpenPlanReview}
-          onDiscardPlan={onDiscardPlan}
-        />
-      ) : (
-        <ToolCardView tool={part.tool} />
-      )
+      return <ToolCardView tool={part.tool} />
     case "Gate":
       return (
         <ApprovalGate
@@ -439,23 +343,7 @@ function PartView({
         <QuestionSummary request={part.request} answers={part.answers} className={WIDTH} />
       )
     case "Plan":
-      return (
-        <PlanApprovalCard
-          plan={part.plan}
-          document={planDocument?.id === part.plan.id ? planDocument : undefined}
-          onApprove={
-            onApprovePlan === undefined
-              ? undefined
-              : (executionMode) => onApprovePlan(part.plan.id, executionMode)
-          }
-          onResume={
-            onResumePlan === undefined
-              ? undefined
-              : () => onResumePlan(part.plan.id)
-          }
-          onOpenReview={onOpenPlanReview}
-        />
-      )
+      return null
     case "Context":
       // Deliberately full-width and unindented: this marks a boundary in the
       // conversation rather than being something the agent said.
@@ -482,14 +370,8 @@ function renderParts(
   parts: ReadonlyArray<ContentPart>,
   markdown: boolean,
   handlers: {
-    planDocument?: PlanDocument | null
-    inlinePlanIds?: ReadonlySet<string>
-    onDecideGate?: (gateId: string, decision: GateDecision) => void
-    onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
-    onResumePlan?: (planId: string) => void
-    onOpenPlanReview?: () => void
-    onDiscardPlan?: () => void
-    onForkOntoBranch?: () => void | Promise<void>
+      onDecideGate?: (gateId: string, decision: GateDecision) => void
+      onForkOntoBranch?: () => void | Promise<void>
     onAdoptBranch?: () => void | Promise<void>
   },
   // When a mega-turn's prefix is collapsed, `parts` is a suffix of the real
@@ -610,29 +492,14 @@ const hiddenPrefixLength = (partCount: number): number =>
 function MessageTurnImpl({
   message,
   providerId,
-  planDocument,
   onDecideGate,
-  onApprovePlan,
-  onResumePlan,
-  onOpenPlanReview,
-  onDiscardPlan,
   onForkOntoBranch,
   onAdoptBranch
 }: {
   message: Message
-  /** Canonical live document used only when it matches an inline plan id. */
-  planDocument?: PlanDocument | null
   /** Canonical provider identity for the assistant eyebrow. */
   providerId?: ProviderId | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
-  /** Approve a proposed plan inline (from the transcript's plan card). */
-  onApprovePlan?: (planId: string, executionMode?: ExecutionMode) => void
-  /** Approve a stale plan inline (re-drives execution after a restart). */
-  onResumePlan?: (planId: string) => void
-  /** Open the full Plan Review view from the inline plan card. */
-  onOpenPlanReview?: () => void
-  /** Discard the canonical plan from the inline submit-plan card. */
-  onDiscardPlan?: () => void
   /** Fork a drifted direct session's work onto a new worktree session. */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session. */
@@ -641,9 +508,6 @@ function MessageTurnImpl({
   const isAssistant = message.role === "assistant"
   // From the FULL part list, not the visible slice: a mega-turn's collapsed
   // prefix can hold the Plan part whose presence suppresses the submit card.
-  const inlinePlanIds = new Set(
-    message.parts.flatMap((part) => (part._tag === "Plan" ? [part.plan.id] : []))
-  )
   const [showAllParts, setShowAllParts] = useState(false)
   const hiddenParts = showAllParts ? 0 : hiddenPrefixLength(message.parts.length)
   const visibleParts =
@@ -680,14 +544,8 @@ function MessageTurnImpl({
         visibleParts,
         isAssistant,
         {
-          planDocument,
-          inlinePlanIds,
-          onDecideGate,
-          onApprovePlan,
-          onResumePlan,
-          onOpenPlanReview,
-          onDiscardPlan,
-          onForkOntoBranch,
+                          onDecideGate,
+                                          onForkOntoBranch,
           onAdoptBranch
         },
         hiddenParts,
