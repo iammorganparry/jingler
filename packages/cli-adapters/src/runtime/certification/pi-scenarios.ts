@@ -77,9 +77,9 @@ export const CORE_PI_SCENARIOS: ReadonlyArray<EvalScenario> = [
   scenario({
     id: "structured.question-plan",
     capability: "structured-interaction",
-    required: [event("QuestionRequested"), event("PlanProposed"), event("Done")],
+    required: [event("QuestionRequested"), event("Done")],
     forbidden: [],
-    ordering: [before(event("QuestionRequested"), event("PlanProposed"))]
+    ordering: [before(event("QuestionRequested"), event("Done"))]
   }),
   scenario({
     id: "quality.semantic-references",

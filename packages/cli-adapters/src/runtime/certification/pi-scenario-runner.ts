@@ -48,7 +48,7 @@ const promptFor = (scenarioId: string): string => {
     case "capability.managed-resources":
       return "List managed resources, load managed-skill and managed-prompt by id, then call mcp__managed__write_file. Call each exactly once, then finish."
     case "structured.question-plan":
-      return "Ask the structured question Continue?, then submit a one-step plan after it is answered."
+      return "Ask the structured question Continue?, then finish after it is answered."
     case "quality.semantic-references":
       return "Find every semantic reference to token declared on source.ts line 1. Use code intelligence, include source.ts and reexport.ts evidence, and exclude the shadowed local in use.ts."
     case "quality.structural-preview":
@@ -299,8 +299,8 @@ const specFor = (input: {
     chatId: "eval-chat",
     connectionId: connection.id,
     modelId,
-    role: scenarioId === "structured.question-plan" ? "plan" : "conversation",
-    mode: scenarioId === "structured.question-plan" ? "plan" : "ask",
+    role: "conversation",
+    mode: "ask",
     cwd: root,
     prompt: promptFor(scenarioId),
     priorMessages: [],

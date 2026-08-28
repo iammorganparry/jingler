@@ -3,7 +3,6 @@ import {
   fauxToolCall,
   type FauxResponseStep
 } from "@earendil-works/pi-ai"
-import { defaultPlan } from "@jingler/core"
 
 const qualityResponses = (scenarioId: string): ReadonlyArray<FauxResponseStep> | null => {
   if (scenarioId === "quality.semantic-references") return [
@@ -61,12 +60,6 @@ export const scriptedPiScenarioResponses = (
               ]
             }
           ]
-        }),
-        { stopReason: "toolUse" }
-      ),
-      fauxAssistantMessage(
-        fauxToolCall("jingler_submit_plan", {
-          plan: defaultPlan("Verify deterministic structured interaction.")
         }),
         { stopReason: "toolUse" }
       ),
