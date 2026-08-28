@@ -86,9 +86,11 @@ finds an older version.
    validates the agent's metadata and creates a conventional `type/kebab-slug`
    branch itself.
 
-4. Describe the task in the composer. Enhanced Plan keeps one approval gate and is executed,
-   progressed, and amended by the selected agent. Turn off **Use Jingler tools** under connector
-   settings when you want the provider's native plan behaviour instead.
+4. Describe the task in the composer. In Plan mode, the pinned Plannotator extension owns the
+   Markdown plan, review decision, automatic same-session execution, checklist progress, and
+   recovery. Jingler embeds the loopback review in the Plan tab and mirrors its checklist into the
+   native plan drawer, progress dock, composer, todo list, and transcript without storing a second
+   plan state.
 
 5. If the Jingler GitHub App is connected, create or link a pull request from the PR view.
 

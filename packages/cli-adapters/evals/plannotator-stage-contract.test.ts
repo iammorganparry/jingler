@@ -18,6 +18,10 @@ describe("Plannotator migration stage contracts", () => {
       dependencies: Record<string, string>
     }
     expect(packageJson.dependencies["@plannotator/pi-extension"]).toBe("0.27.8")
+    const desktopPackage = JSON.parse(read("apps/desktop/package.json")) as {
+      dependencies: Record<string, string>
+    }
+    expect(desktopPackage.dependencies["@plannotator/pi-extension"]).toBe("0.27.8")
     expect(read("packages/cli-adapters/src/runtime/agent/locked-pi-resources.ts"))
       .toContain("PLANNOTATOR_EXTENSION_PATH")
     expect(read("packages/cli-adapters/src/runtime/agent/pi-session-factory.ts"))

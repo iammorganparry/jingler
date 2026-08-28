@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   assertLockedPiResources,
   createLockedPiResources
@@ -17,6 +17,9 @@ const originalEnvironment = {
   JINGLER_SUBAGENT_CREDENTIAL_ROOT: process.env.JINGLER_SUBAGENT_CREDENTIAL_ROOT,
   JINGLER_SUBAGENT_NODE: process.env.JINGLER_SUBAGENT_NODE
 }
+beforeEach(() => {
+  for (const name of Object.keys(originalEnvironment)) delete process.env[name]
+})
 afterEach(async () => {
   for (const [name, value] of Object.entries(originalEnvironment)) {
     if (value === undefined) delete process.env[name]
