@@ -15,8 +15,8 @@ does it do when there is no issue.
 | A tab that hides itself when irrelevant | `when: "hasIssue"` in `src/manifest.ts` |
 | A host half doing the network work | `src/main.ts` |
 | Consent-gated credentials | `getSession("github", ["issues:read", "repository:owner/name"])` in `src/main.ts` |
-| GitHub App REST access | Host-side `fetch` with a short-lived installation credential |
-| Legacy folder-only sessions | Host-side `git remote get-url origin` resolution; no GitHub CLI |
+| GitHub access | Authenticated `gh` CLI first; short-lived App credential fallback |
+| Legacy folder-only sessions | Host-side `git remote get-url origin` resolution |
 | UI → host over a command | `contributes.commands` + `host.invoke` |
 | Themed components, no hardcoded colour | `@jingler/plugin-sdk/ui` in `src/ui.tsx` |
 | Activating lazily | `activationEvents: ["onTab:github-issues.issue"]` |
@@ -44,10 +44,10 @@ installation. The UI receives only the normalized issue, never the credential,
 raw response, or authorization headers. This is not a style preference — the UI
 half physically cannot do the other job.
 
-The plugin does not execute GitHub CLI. The bundled integration therefore works
-on a machine with Git and no `gh` binary. A separately installed third-party
-plugin remains trusted Node code and can choose to launch subprocesses; that is
-outside this provider's supported path.
+The plugin prefers an authenticated GitHub CLI because it already carries the
+operator's repository permissions. When `gh` is missing or unauthenticated, it
+falls back to the GitHub App credential flow. App installation is therefore
+optional for reads; webhook-backed realtime still requires an installation.
 
 ## Building and running it
 

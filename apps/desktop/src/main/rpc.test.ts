@@ -404,6 +404,23 @@ describe("reconcileRelaySessionRoutes", () => {
     expect(result).toEqual([current]);
   });
 
+  it("archives a route after CLI linking clears its App identity", async () => {
+    const archive = vi.fn(async () => undefined);
+    await expect(
+      reconcileRelaySessionRoutes(
+        async () => [linkedSession({
+          prNumber: 43,
+          githubInstallationId: undefined,
+          githubRepositoryId: undefined,
+        })],
+        async () => [route()],
+        archive,
+        vi.fn(),
+      ),
+    ).resolves.toEqual([]);
+    expect(archive).toHaveBeenCalledWith(route());
+  });
+
   it("retains a matching route without mutation", async () => {
     const mutate = vi.fn();
     const current = route();
@@ -1236,6 +1253,45 @@ describe("RPC handlers", () => {
         githubDetectPr("nope").pipe(Effect.provide(github)),
       );
       expect(detected).toBeNull();
+    });
+
+    it("links a CLI-detected PR without enabling realtime when the App is not installed", async () => {
+      const now = "2026-08-11T06:00:00.000Z";
+      const worktreePath = join(dir, "cli-only-worktree");
+      mkdirSync(root, { recursive: true });
+      mkdirSync(worktreePath, { recursive: true });
+      writeFileSync(join(root, "sessions.json"), JSON.stringify([{
+        id: "cli-only", repo: "widget", branch: "fix/cli", baseBranch: "main",
+        title: "CLI PR", status: "idle", cli: "claude", diff: { added: 0, removed: 0 },
+        prNumber: 41, githubInstallationId: "old-installation", githubRepositoryId: "old-repository",
+        costUsd: 0, tokens: 0, updatedAt: now, worktreePath,
+        workspaceMode: "worktree", semanticBranchPending: false,
+        semanticBranchProposal: { type: "fix", slug: "cli" },
+        chats: [{ id: "cli-chat", title: null, createdAt: now, updatedAt: now }],
+        activeChatId: "cli-chat",
+      }]));
+      const upsertSessionRoute = vi.fn();
+      const github = Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        fakeGithubApi({
+          prForWorktree: () => Effect.succeed(44),
+          repository: () => Effect.fail(new GitHubApiError({
+            reason: "repository-access",
+            message: "App is not installed",
+          })),
+        }),
+        Layer.succeed(GitService, { branchAt: () => Effect.succeed("fix/cli") } as never),
+        Layer.succeed(GitHubAuth, { upsertSessionRoute } as never),
+      );
+
+      await expect(Effect.runPromise(githubDetectPr("cli-only").pipe(Effect.provide(github))))
+        .resolves.toBe(44);
+      const linked = await Effect.runPromise(SessionStore.get("cli-only").pipe(Effect.provide(github)));
+      expect(linked.prNumber).toBe(44);
+      expect(linked.githubInstallationId).toBeUndefined();
+      expect(linked.githubRepositoryId).toBeUndefined();
+      expect(upsertSessionRoute).not.toHaveBeenCalled();
     });
 
     it("synchronizes the live branch and replacement PR route before returning", async () => {

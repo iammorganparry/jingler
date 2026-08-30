@@ -1471,9 +1471,19 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
         })
 
-      /** Link (or clear) the session's pull-request number. */
+      /** Link a PR number without App routing; changing PRs clears stale realtime identity. */
       const setPrNumber = (id: string, prNumber: number | null) =>
-        update(id, (s) => ({ ...s, prNumber }))
+        update(id, (session) => {
+          if (session.prNumber === prNumber) return session
+          const {
+            githubInstallationId: _installationId,
+            githubRepositoryId: _repositoryId,
+            githubFeedbackDeliveryIds: _deliveryIds,
+            githubFeedbackSemanticKeys: _semanticKeys,
+            ...unlinked
+          } = session
+          return { ...unlinked, prNumber }
+        })
 
       /** Persist the live worktree/PR identity as one routing transition. */
       const setGitHubLink = (

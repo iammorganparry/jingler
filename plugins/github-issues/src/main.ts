@@ -1,7 +1,7 @@
 /**
- * The host half: fetching an issue through a short-lived GitHub App
- * installation credential. Network and credentials remain in the extension
- * host; the renderer receives only the normalized issue payload.
+ * The host half: fetching an issue through the authenticated GitHub CLI, with
+ * a short-lived GitHub App installation credential as fallback. Credentials
+ * remain in the extension host; the renderer receives only normalized data.
  */
 import type { Activate, AuthSession, ExecResult } from "@jingler/plugin-sdk/host"
 
@@ -88,6 +88,55 @@ const user = (value: unknown): GitHubUser | undefined => {
   const candidate = record(value)
   const login = string(candidate?.login)
   return login ? { login } : undefined
+}
+
+const normalizeIssue = async (
+  value: unknown,
+  loadComments?: () => Promise<ReadonlyArray<IssueComment>>
+): Promise<IssuePayload | null> => {
+  const issue = record(value)
+  const number = issue?.number
+  const title = string(issue?.title)
+  const state = string(issue?.state)
+  const url = string(issue?.url)
+  const createdAt = string(issue?.createdAt)
+  if (!issue || typeof number !== "number" || !title || !state || !url || !createdAt) return null
+
+  const author = user(issue.author)
+  return {
+    number,
+    title,
+    body: string(issue.body) ?? "",
+    state: state.toLowerCase(),
+    url,
+    labels: Array.isArray(issue.labels)
+      ? issue.labels.flatMap((value) => {
+          const label = record(value)
+          const name = string(label?.name)
+          if (!name) return []
+          const color = string(label?.color)
+          return [{ name, ...(color ? { color } : {}) }]
+        })
+      : [],
+    assignees: Array.isArray(issue.assignees)
+      ? issue.assignees.flatMap((value) => {
+          const assignee = user(value)
+          return assignee ? [assignee] : []
+        })
+      : [],
+    comments: loadComments ? await loadComments() : Array.isArray(issue.comments)
+      ? issue.comments.flatMap((value) => {
+          const comment = record(value)
+          const body = string(comment?.body)
+          const commentCreatedAt = string(comment?.createdAt)
+          if (body === null || !commentCreatedAt) return []
+          const commentAuthor = user(comment?.author)
+          return [{ body, createdAt: commentCreatedAt, ...(commentAuthor ? { author: commentAuthor } : {}) }]
+        })
+      : [],
+    createdAt,
+    ...(author ? { author } : {})
+  }
 }
 
 const nextPage = (response: Response): string | null => {
@@ -183,48 +232,57 @@ export const fetchIssue = async (
     session.accessToken
   )
   const issue = record(issueResult.value)
-  const number = issue?.number
-  const title = string(issue?.title)
-  const state = string(issue?.state)
-  const url = string(issue?.html_url)
-  const createdAt = string(issue?.created_at)
-  if (!issue || typeof number !== "number" || !title || !state || !url || !createdAt) {
-    throw new Error("GitHub returned an invalid issue.")
-  }
+  if (!issue) throw new Error("GitHub returned an invalid issue.")
+  const normalized = await normalizeIssue({
+    ...issue,
+    url: issue.html_url,
+    author: issue.user,
+    createdAt: issue.created_at
+  }, () => comments(
+    request,
+    `${base}/issues/${input.issueNumber}/comments?per_page=100`,
+    session.accessToken
+  ))
+  if (!normalized) throw new Error("GitHub returned an invalid issue.")
+  return normalized
+}
 
-  const labels = Array.isArray(issue.labels)
-    ? issue.labels.flatMap((value) => {
-        const label = record(value)
-        const labelName = string(label?.name)
-        if (!labelName) return []
-        const color = string(label?.color)
-        return [{ name: labelName, ...(color ? { color } : {}) }]
-      })
-    : []
-  const assignees = Array.isArray(issue.assignees)
-    ? issue.assignees.flatMap((value) => {
-        const assignee = user(value)
-        return assignee ? [assignee] : []
-      })
-    : []
-  const author = user(issue.user)
+const CLI_FIELDS = [
+  "number", "title", "body", "state", "url", "author", "labels", "assignees", "comments", "createdAt"
+].join(",")
 
-  return {
-    number,
-    title,
-    body: string(issue.body) ?? "",
-    state,
-    url,
-    labels,
-    assignees,
-    comments: await comments(
-      request,
-      `${base}/issues/${input.issueNumber}/comments?per_page=100`,
-      session.accessToken
-    ),
-    createdAt,
-    ...(author ? { author } : {})
+/** Prefer the operator's authenticated GitHub CLI without exposing its token. */
+export const fetchIssueWithCli = async (
+  input: FetchArgs,
+  exec: (
+    command: string,
+    args?: readonly string[],
+    options?: { readonly cwd?: string; readonly timeoutMs?: number }
+  ) => Promise<ExecResult>
+): Promise<IssuePayload | null> => {
+  repositoryParts(input.repo)
+  if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber <= 0) {
+    throw new Error("The linked GitHub issue number is invalid.")
   }
+  const options = { ...(input.worktreePath ? { cwd: input.worktreePath } : {}), timeoutMs: 10_000 }
+  let auth: ExecResult
+  try {
+    auth = await exec("gh", ["auth", "status", "--active", "--hostname", "github.com"], options)
+  } catch {
+    return null
+  }
+  if (auth.code !== 0) return null
+  const result = await exec("gh", [
+    "issue", "view", String(input.issueNumber), "--repo", input.repo, "--json", CLI_FIELDS
+  ], options).catch(() => null)
+  if (result?.code !== 0) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(result.stdout) as unknown
+  } catch {
+    return null
+  }
+  return normalizeIssue(raw)
 }
 
 export const activate: Activate = (ctx) => {
@@ -232,11 +290,14 @@ export const activate: Activate = (ctx) => {
     ctx.commands.register("github-issues.fetch", async (input) => {
       const args = input as FetchArgs
       const repo = await resolveRepository(args.repo, args.worktreePath, ctx.exec)
+      const resolved = { ...args, repo }
+      const cliIssue = await fetchIssueWithCli(resolved, ctx.exec)
+      if (cliIssue) return cliIssue
       const session = await ctx.authentication.getSession("github", [
         "issues:read",
         `repository:${repo}`
       ])
-      return fetchIssue({ ...args, repo }, session)
+      return fetchIssue(resolved, session)
     })
   )
 

@@ -19,6 +19,7 @@ import {
   RemoteBootstrapService,
   RemoteSessionService,
   GitHubApi,
+  GitHubCli,
   GitHubAuth,
   GitHubEventStore,
   GitService,
@@ -234,10 +235,9 @@ const AppServicesLayer = RpcServicesLayer.pipe(
     )
   ),
   Layer.provide(UsageService.Default),
-  // GitHub is deliberately an HTTP/App-authenticated service. There is no
-  // GitHub CLI layer in the runtime, so a machine's ambient PATH cannot become
-  // a hidden credential or transport fallback.
-  Layer.provide(GitHubApi.Default),
+  // Prefer the operator's authenticated GitHub CLI for local GitHub work. The
+  // App client remains the fallback and still exclusively owns realtime grants.
+  Layer.provide(GitHubApi.Default.pipe(Layer.provide(GitHubCli.Default))),
   Layer.provide(GitHubEventStore.Default),
   // Retained for the plugin-host provider as well as consumed by GitHubApi.
   // Supplying SecretStore here closes the layer locally; an outer provider

@@ -18,6 +18,7 @@ import { request as octokitRequest } from "@octokit/request"
 import { Effect, Runtime } from "effect"
 import { branchAt } from "./git.js"
 import { GitHubAuth, type GitHubInstallationCredential } from "./github-auth.js"
+import { GitHubCli } from "./github-cli.js"
 import { parseGitHubRemote } from "./github-remote.js"
 export { parseGitHubRemote } from "./github-remote.js"
 import {
@@ -1082,10 +1083,25 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
   return client
 }
 
+export const preferGitHubCli = async <A>(
+  available: () => Promise<boolean>,
+  cli: () => Promise<A>,
+  app: () => Promise<A>
+): Promise<A> => {
+  if (!(await available())) return app()
+  try {
+    return await cli()
+  } catch (error) {
+    if (error instanceof GitHubApiError && error.reason === "validation") throw error
+    return app()
+  }
+}
+
 export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi", {
   accessors: true,
   effect: Effect.gen(function* () {
     const auth = yield* GitHubAuth
+    const cli = yield* GitHubCli
     const runtime = yield* Effect.runtime<CommandExecutor.CommandExecutor>()
     const run = Runtime.runPromise(runtime)
     const client = makeGitHubApiClient({
@@ -1108,13 +1124,29 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         try: promise,
         catch: (error) => githubError(error)
       })
+    const preferCli = <A>(
+      cliEffect: Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor>,
+      app: () => Promise<A>
+    ): Effect.Effect<A, GitHubApiError> =>
+      wrap(() => preferGitHubCli(
+        () => run(cli.available()),
+        () => run(cliEffect),
+        app
+      ))
     return {
+      cliAvailable: () => wrap(() => run(cli.available())),
+      inbox: () => preferCli(cli.inbox(), async () => {
+        const repositories = await run(auth.repositories())
+        const groups = await Promise.all(repositories.map((repository) => client.listInboxPrsBySlug(repository.fullName)))
+        return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      }),
       repository: (cwd: string) => wrap(() => client.repository(cwd)),
       rateLimit: () => Effect.sync(client.rateLimit),
       prForBranch: (cwd: string, branch: string) => wrap(() => client.prForBranch(cwd, branch)),
       prForBranchBySlug: (slug: string, branch: string) =>
         wrap(() => client.prForBranchBySlug(slug, branch)),
-      prForWorktree: (cwd: string) => wrap(() => client.prForWorktree(cwd)),
+      prForWorktree: (cwd: string) =>
+        preferCli(cli.prForWorktree(cwd), () => client.prForWorktree(cwd)),
       listPrs: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
         wrap(() => client.listPrs(cwd, options)),
       listPrsBySlug: (slug: string, options: { readonly mine: boolean; readonly search: string }) =>
@@ -1127,8 +1159,10 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       issueView: (cwd: string, number: number) => wrap(() => client.issueView(cwd, number)),
       prState: (cwd: string, number: number) => wrap(() => client.prState(cwd, number)),
       prHeadSha: (cwd: string, number: number) => wrap(() => client.prHeadSha(cwd, number)),
-      prView: (cwd: string, number: number) => wrap(() => client.prView(cwd, number)),
-      prViewBySlug: (slug: string, number: number) => wrap(() => client.prViewBySlug(slug, number)),
+      prView: (cwd: string, number: number) =>
+        preferCli(cli.prView(cwd, number), () => client.prView(cwd, number)),
+      prViewBySlug: (slug: string, number: number) =>
+        preferCli(cli.prViewBySlug(slug, number), () => client.prViewBySlug(slug, number)),
       prFiles: (cwd: string, number: number) => wrap(() => client.prFiles(cwd, number)),
       prDiff: (cwd: string, number: number) => wrap(() => client.prDiff(cwd, number)),
       prCheckout: (cwd: string, number: number) => wrap(() => client.prCheckout(cwd, number)),

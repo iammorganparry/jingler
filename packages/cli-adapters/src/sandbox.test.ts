@@ -7,6 +7,7 @@ describe("unattendedSandbox", () => {
     const deny = unattendedSandbox("/home/x").filesystem.denyRead
     expect(deny).toContain("/home/x/.ssh")
     expect(deny).toContain("/home/x/.aws")
+    expect(deny).toContain("/home/x/.config/gh")
     // The harnesses Jingler itself drives: an agent that read these could keep
     // running as the operator long after the session ended.
     expect(deny).toContain("/home/x/.claude/.credentials.json")

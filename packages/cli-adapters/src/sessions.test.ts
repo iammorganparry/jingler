@@ -901,6 +901,37 @@ describe("SessionStore", () => {
     expect(cleared._tag === "Success" && cleared.value.prNumber).toBe(null)
   })
 
+  it("clears stale App routing identity when the PR number changes", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Replacement PR" }))
+        yield* SessionStore.setGitHubLink(created.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42
+        })
+        yield* SessionStore.claimGitHubFeedback(created.id, {
+          installationId: "installation-1",
+          repositoryId: "repository-1",
+          prNumber: 42,
+          deliveryId: "delivery-1",
+          semanticKey: "comment-1",
+          event: feedbackEvent()
+        })
+        yield* SessionStore.setPrNumber(created.id, 43)
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value).toMatchObject({ prNumber: 43 })
+    expect(exit.value.githubInstallationId).toBeUndefined()
+    expect(exit.value.githubRepositoryId).toBeUndefined()
+    expect(exit.value.githubFeedbackDeliveryIds).toBeUndefined()
+    expect(exit.value.githubFeedbackSemanticKeys).toBeUndefined()
+  })
+
   it("persists publish checkpoints for restart-safe recovery", async () => {
     const exit = await runExit(
       Effect.gen(function* () {

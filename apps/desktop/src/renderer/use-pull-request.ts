@@ -62,13 +62,13 @@ export function usePullRequest(
   opts: { connected: boolean; autoDetect: boolean; onPrLinked?: (sessionId: string, prNumber: number) => void }
 ): PullRequestState {
   const qc = useQueryClient()
-  const { connected, autoDetect, onPrLinked } = opts
+  const { autoDetect, onPrLinked } = opts
 
   const query = useQuery({
     queryKey: prKey(session.id, session.prNumber),
     queryFn: async () => {
       // Re-detect even when linked: a session can outlive one PR and open another.
-      if (connected && autoDetect) {
+      if (autoDetect) {
         const n = await rpc.githubDetectPr(session.id).catch(() => null)
         if (n != null && n !== session.prNumber) onPrLinked?.(session.id, n)
       }

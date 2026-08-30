@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { fetchIssue, resolveRepository } from "./main.js"
+import { fetchIssue, fetchIssueWithCli, resolveRepository } from "./main.js"
 
 const session = {
   accessToken: "ghs_installation_secret",
@@ -58,6 +58,54 @@ describe("fetchIssue responses", () => {
     }
   })
 
+})
+
+describe("fetchIssueWithCli", () => {
+  it("uses an authenticated gh CLI without requesting App credentials", async () => {
+    const exec = vi.fn()
+      .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout: JSON.stringify({
+          number: 42,
+          title: "CLI issue",
+          body: "body",
+          state: "OPEN",
+          url: "https://github.com/acme/widgets/issues/42",
+          author: { login: "octocat" },
+          labels: [],
+          assignees: [],
+          comments: [{ body: "hello", author: { login: "mona" }, createdAt: "2030-01-02T00:00:00Z" }],
+          createdAt: "2030-01-01T00:00:00Z"
+        }),
+        stderr: ""
+      })
+
+    await expect(fetchIssueWithCli({ repo: "acme/widgets", issueNumber: 42 }, exec))
+      .resolves.toMatchObject({ title: "CLI issue", state: "open", comments: [{ body: "hello" }] })
+    expect(exec.mock.calls[1]?.[1]).toContain("--repo")
+  })
+
+  it("returns null when gh is unavailable or unauthenticated", async () => {
+    const exec = vi.fn().mockResolvedValue({ code: 1, stdout: "", stderr: "not logged in" })
+    await expect(fetchIssueWithCli({ repo: "acme/widgets", issueNumber: 42 }, exec))
+      .resolves.toBeNull()
+    expect(exec).toHaveBeenCalledTimes(1)
+  })
+
+  it("falls back when the gh executable cannot be spawned", async () => {
+    const exec = vi.fn().mockRejectedValue(new Error("spawn gh ENOENT"))
+    await expect(fetchIssueWithCli({ repo: "acme/widgets", issueNumber: 42 }, exec))
+      .resolves.toBeNull()
+    expect(exec).toHaveBeenCalledTimes(1)
+  })
+
+  it("validates inputs before invoking gh", async () => {
+    const exec = vi.fn()
+    await expect(fetchIssueWithCli({ repo: "acme/widgets", issueNumber: 0 }, exec))
+      .rejects.toThrow("issue number is invalid")
+    expect(exec).not.toHaveBeenCalled()
+  })
 })
 
 describe("fetchIssue boundaries", () => {
