@@ -19,6 +19,7 @@ import { ContextManager } from "@jingler/cli-adapters/context-manager"
 import { GitService } from "@jingler/cli-adapters/git"
 import { GitHubApi, parseGitHubRemote } from "@jingler/cli-adapters/github-api"
 import { GitHubAuth } from "@jingler/cli-adapters/github-auth"
+import { GitHubCli } from "@jingler/cli-adapters/github-cli"
 import { OpenConnectorService } from "@jingler/cli-adapters/open-connector"
 import {
   managedWebSearchServiceFromEnvironment,
@@ -478,7 +479,10 @@ const deviceRuntime = (root: string, targetId: string) => {
     ProjectService.Default,
     ContextManager.Default,
     ConfigService.Default,
-    GitHubApi.Default.pipe(Layer.provideMerge(GitHubAuth.Default)),
+    GitHubApi.Default.pipe(
+      Layer.provide(GitHubCli.Default),
+      Layer.provideMerge(GitHubAuth.Default)
+    ),
     GitService.Default,
     WorkspaceService.Default,
     OpenConnectorService.Default
