@@ -14,17 +14,49 @@ const PR_FIELDS = [
   "mergeStateStatus", "mergedAt", "url"
 ].join(",")
 
-const INBOX_FIELDS = [
-  "assignees", "author", "commentsCount", "isDraft", "labels", "number", "repository",
-  "state", "title", "updatedAt", "url"
-].join(",")
-
-const REVIEW_THREADS_QUERY = `query($owner:String!,$repo:String!,$number:Int!){
-  repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{
-    id isResolved isOutdated path line startLine originalLine originalStartLine resolvedBy{login}
-    comments(first:50){nodes{id databaseId body createdAt diffHunk authorAssociation author{login avatarUrl __typename} pullRequestReview{id} reactionGroups{content reactors{totalCount}}}}
-  }}}}
+const INBOX_QUERY = `query($endCursor:String){
+  viewer{login}
+  search(query:"is:pr is:open involves:@me sort:updated-desc",type:ISSUE,first:100,after:$endCursor){
+    nodes{... on PullRequest{
+      assignees(first:100){nodes{login}} author{login avatarUrl} comments{totalCount} isDraft
+      labels(first:100){nodes{name color}} number repository{nameWithOwner}
+      reviewRequests(first:100){nodes{requestedReviewer{... on User{login}}}}
+      state title updatedAt url
+    }}
+    pageInfo{hasNextPage endCursor}
+  }
 }`
+
+const COMMENT_FIELDS = `
+  id databaseId body createdAt diffHunk authorAssociation
+  author{login avatarUrl __typename} pullRequestReview{id}
+  reactionGroups{content reactors{totalCount}}
+`
+
+const REVIEW_THREADS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){
+    nodes{
+      id isResolved isOutdated path line startLine originalLine originalStartLine resolvedBy{login}
+      comments(first:100){nodes{${COMMENT_FIELDS}} pageInfo{hasNextPage endCursor}}
+    }
+    pageInfo{hasNextPage endCursor}
+  }}}
+}`
+
+const REVIEW_THREAD_COMMENTS_QUERY = `query($id:ID!,$endCursor:String){
+  node(id:$id){... on PullRequestReviewThread{
+    comments(first:100,after:$endCursor){nodes{${COMMENT_FIELDS}} pageInfo{hasNextPage endCursor}}
+  }}
+}`
+
+const COMMITS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
+  repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(first:100,after:$endCursor){
+    nodes{commit{oid url signature{isValid}}}
+    pageInfo{hasNextPage endCursor}
+  }}}
+}`
+
+const NO_PULL_REQUEST = /no pull requests found|could not find(?: a)? pull request/i
 
 const decode = (stream: Stream.Stream<Uint8Array, PlatformError>) =>
   stream.pipe(Stream.decodeText(), Stream.runFold("", (output, chunk) => output + chunk))
@@ -82,6 +114,123 @@ const slugParts = (slug: string): readonly [string, string] => {
   return [owner, repo]
 }
 
+type Json = Record<string, unknown>
+
+const records = (value: unknown): ReadonlyArray<Json> =>
+  Array.isArray(value) ? value.map(jsonRecord) : []
+
+const connectionPage = (
+  value: unknown,
+  resource: string
+): { readonly nodes: ReadonlyArray<Json>; readonly next: string | null } => {
+  const connection = jsonRecord(value)
+  const pageInfo = jsonRecord(connection.pageInfo)
+  if (typeof pageInfo.hasNextPage !== "boolean") {
+    throw new GitHubApiError({
+      reason: "unavailable",
+      message: `GitHub CLI returned invalid ${resource} pagination.`
+    })
+  }
+  if (!pageInfo.hasNextPage) return { nodes: records(connection.nodes), next: null }
+  if (typeof pageInfo.endCursor !== "string" || pageInfo.endCursor.length === 0) {
+    throw new GitHubApiError({
+      reason: "unavailable",
+      message: `GitHub CLI returned invalid ${resource} pagination.`
+    })
+  }
+  return { nodes: records(connection.nodes), next: pageInfo.endCursor }
+}
+
+const reviewThreadsConnection = (raw: unknown): Json => {
+  const data = jsonRecord(jsonRecord(raw).data)
+  const repository = jsonRecord(data.repository)
+  const pullRequest = jsonRecord(repository.pullRequest)
+  return jsonRecord(pullRequest.reviewThreads)
+}
+
+const threadCommentsConnection = (raw: unknown): Json => {
+  const data = jsonRecord(jsonRecord(raw).data)
+  return jsonRecord(jsonRecord(data.node).comments)
+}
+
+const commitsConnection = (raw: unknown): Json => {
+  const data = jsonRecord(jsonRecord(raw).data)
+  const repository = jsonRecord(data.repository)
+  const pullRequest = jsonRecord(repository.pullRequest)
+  return jsonRecord(pullRequest.commits)
+}
+
+const paginatedGraphql = (
+  cwd: string | null,
+  fields: ReadonlyArray<string>,
+  query: string
+): Effect.Effect<ReadonlyArray<unknown>, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  json(cwd, [
+    "api", "graphql", "--paginate", "--slurp",
+    ...fields.flatMap((field) => ["-F", field]),
+    "-f", `query=${query}`
+  ]).pipe(
+    Effect.flatMap((raw) =>
+      Array.isArray(raw)
+        ? Effect.succeed(raw)
+        : Effect.fail(new GitHubApiError({
+            reason: "unavailable",
+            message: "GitHub CLI returned invalid paginated GraphQL data."
+          }))
+    )
+  )
+
+const reviewThreads = (
+  cwd: string | null,
+  owner: string,
+  repo: string,
+  number: number
+): Effect.Effect<ReturnType<typeof mapReviewThreads>, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  Effect.gen(function* () {
+    const pages = yield* paginatedGraphql(
+      cwd,
+      [`owner=${owner}`, `repo=${repo}`, `number=${number}`],
+      REVIEW_THREADS_QUERY
+    )
+    const threads = pages.flatMap((page) => connectionPage(
+      reviewThreadsConnection(page),
+      "review threads"
+    ).nodes)
+    const complete: Json[] = []
+    for (const thread of threads) {
+      const first = connectionPage(thread.comments, "review comments")
+      const comments = [...first.nodes]
+      if (first.next) {
+        const commentPages = yield* paginatedGraphql(
+          cwd,
+          [`id=${String(thread.id)}`, `endCursor=${first.next}`],
+          REVIEW_THREAD_COMMENTS_QUERY
+        )
+        for (const page of commentPages) {
+          comments.push(...connectionPage(threadCommentsConnection(page), "review comments").nodes)
+        }
+      }
+      complete.push({ ...thread, comments: { nodes: comments } })
+    }
+    return mapReviewThreads(complete)
+  })
+
+const commitEvidence = (
+  cwd: string | null,
+  owner: string,
+  repo: string,
+  number: number
+): Effect.Effect<ReadonlyArray<Json>, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  paginatedGraphql(
+    cwd,
+    [`owner=${owner}`, `repo=${repo}`, `number=${number}`],
+    COMMITS_QUERY
+  ).pipe(
+    Effect.map((pages) => pages.flatMap((page) =>
+      connectionPage(commitsConnection(page), "commits").nodes.map((node) => jsonRecord(node.commit))
+    ))
+  )
+
 const prView = (
   cwd: string | null,
   repository: string | null,
@@ -95,11 +244,17 @@ const prView = (
       : yield* execute(cwd, ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).pipe(
           Effect.map(slugParts)
         )
-    const threads = yield* json(cwd, [
-      "api", "graphql", "-F", `owner=${owner}`, "-F", `repo=${repo}`, "-F", `number=${number}`,
-      "-f", `query=${REVIEW_THREADS_QUERY}`
-    ]).pipe(Effect.map(mapReviewThreads), Effect.orElseSucceed(() => []))
-    return { ...mapPrView(raw), reviewThreads: threads }
+    const threads = yield* reviewThreads(cwd, owner, repo, number)
+    const evidence = yield* commitEvidence(cwd, owner, repo, number)
+    const evidenceByOid = new Map(evidence.flatMap((commit) =>
+      typeof commit.oid === "string" ? [[commit.oid, commit] as const] : []
+    ))
+    const pr = jsonRecord(raw)
+    const commits = records(pr.commits).map((commit) => ({
+      ...commit,
+      ...evidenceByOid.get(String(commit.oid))
+    }))
+    return { ...mapPrView({ ...pr, commits }), reviewThreads: threads }
   })
 
 export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli", {
@@ -124,22 +279,38 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
             ? pr.number
             : null
         }),
-        Effect.orElseSucceed(() => null)
+        Effect.catchTag("GitHubApiError", (error) =>
+          NO_PULL_REQUEST.test(error.message) ? Effect.succeed(null) : Effect.fail(error)
+        )
       ),
     prView: (cwd: string, number: number) => prView(cwd, null, number),
     prViewBySlug: (repository: string, number: number) => prView(null, repository, number),
     inbox: () =>
       Effect.gen(function* () {
         const raw = yield* json(null, [
-          "search", "prs", "--state", "open", "--involves", "@me", "--sort", "updated",
-          "--order", "desc", "--limit", "100", "--json", INBOX_FIELDS
+          "api", "graphql", "--paginate", "--slurp", "-f", `query=${INBOX_QUERY}`
         ])
         if (!Array.isArray(raw)) return []
-        return raw.flatMap((value): ReadonlyArray<PullRequestListItem> => {
-          const row = jsonRecord(value)
-          const repository = jsonRecord(row.repository).nameWithOwner
-          if (typeof repository !== "string") return []
-          return [mapPullRequestListItem({ ...row, comments: row.commentsCount }, repository, null)]
+        const pages = raw.map(jsonRecord)
+        const viewerLogin = jsonRecord(jsonRecord(pages[0]?.data).viewer).login
+        return pages.flatMap((page) => {
+          const nodes = jsonRecord(jsonRecord(page.data).search).nodes
+          if (!Array.isArray(nodes)) return []
+          return nodes.flatMap((value): ReadonlyArray<PullRequestListItem> => {
+            const row = jsonRecord(value)
+            const repository = jsonRecord(row.repository).nameWithOwner
+            if (typeof repository !== "string") return []
+            const reviewRequests = jsonRecord(row.reviewRequests).nodes
+            return [mapPullRequestListItem({
+              ...row,
+              assignees: jsonRecord(row.assignees).nodes,
+              comments: jsonRecord(row.comments).totalCount,
+              labels: jsonRecord(row.labels).nodes,
+              reviewRequests: Array.isArray(reviewRequests)
+                ? reviewRequests.map((request) => jsonRecord(jsonRecord(request).requestedReviewer))
+                : []
+            }, repository, typeof viewerLogin === "string" ? viewerLogin : null)]
+          })
         })
       })
   })

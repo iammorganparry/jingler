@@ -404,6 +404,23 @@ describe("reconcileRelaySessionRoutes", () => {
     expect(result).toEqual([current]);
   });
 
+  it("archives a route after CLI linking clears its App identity", async () => {
+    const archive = vi.fn(async () => undefined);
+    await expect(
+      reconcileRelaySessionRoutes(
+        async () => [linkedSession({
+          prNumber: 43,
+          githubInstallationId: undefined,
+          githubRepositoryId: undefined,
+        })],
+        async () => [route()],
+        archive,
+        vi.fn(),
+      ),
+    ).resolves.toEqual([]);
+    expect(archive).toHaveBeenCalledWith(route());
+  });
+
   it("retains a matching route without mutation", async () => {
     const mutate = vi.fn();
     const current = route();
@@ -1246,7 +1263,8 @@ describe("RPC handlers", () => {
       writeFileSync(join(root, "sessions.json"), JSON.stringify([{
         id: "cli-only", repo: "widget", branch: "fix/cli", baseBranch: "main",
         title: "CLI PR", status: "idle", cli: "claude", diff: { added: 0, removed: 0 },
-        prNumber: null, costUsd: 0, tokens: 0, updatedAt: now, worktreePath,
+        prNumber: 41, githubInstallationId: "old-installation", githubRepositoryId: "old-repository",
+        costUsd: 0, tokens: 0, updatedAt: now, worktreePath,
         workspaceMode: "worktree", semanticBranchPending: false,
         semanticBranchProposal: { type: "fix", slug: "cli" },
         chats: [{ id: "cli-chat", title: null, createdAt: now, updatedAt: now }],

@@ -139,7 +139,8 @@ export const mapPrCommit = (raw: unknown): PrCommit => {
     author: text(cliAuthor?.login) ?? text(cliAuthor?.name) ?? text(author.login) ?? text(commitAuthor.name) ?? "unknown",
     committedAt: text(row.committedDate) ?? text(commitAuthor.date) ?? "",
     url: text(field(row, "htmlUrl", "html_url")) ?? text(row.url) ?? "",
-    verified: jsonRecord(commit.verification).verified === true
+    verified:
+      jsonRecord(commit.verification).verified === true || jsonRecord(row.signature).isValid === true
   }
 }
 

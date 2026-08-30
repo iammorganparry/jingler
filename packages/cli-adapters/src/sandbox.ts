@@ -46,10 +46,10 @@ export const CREDENTIAL_DIRS: ReadonlyArray<string> = [
   ".docker",
   ".npmrc",
   ".netrc",
+  ".config/gh",
   ".config/gcloud",
-  // Plaintext git credentials remain blocked. GitHub CLI access is deliberate:
-  // agents use `gh` as the preferred GitHub client, while its token stays in the
-  // platform keychain on supported systems.
+  // Git credentials remain blocked even when the CLI stores its token in the
+  // platform keychain: `gh auth token` can still extract that bearer token.
   ".git-credentials",
   ".config/git/credentials",
   // Holds `oauthAccount` and MCP server definitions whose `env` blocks

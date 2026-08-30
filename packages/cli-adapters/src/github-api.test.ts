@@ -1,5 +1,6 @@
+import { GitHubApiError } from "@jingler/core"
 import { describe, expect, it, vi } from "vitest"
-import { makeGitHubApiClient, parseGitHubRemote } from "./github-api.js"
+import { makeGitHubApiClient, parseGitHubRemote, preferGitHubCli } from "./github-api.js"
 import type { GitHubApiClientOptions } from "./github-api.js"
 
 interface SeenRequest {
@@ -97,6 +98,26 @@ const makeClient = (
 
 const pathIs = (request: SeenRequest, pathname: string): boolean =>
   request.url.pathname === pathname
+
+describe("preferGitHubCli", () => {
+  it("falls back to the App when an authenticated CLI operation fails", async () => {
+    const app = vi.fn().mockResolvedValue("app")
+    await expect(preferGitHubCli(
+      async () => true,
+      async () => { throw new GitHubApiError({ reason: "unavailable", message: "network" }) },
+      app
+    )).resolves.toBe("app")
+    expect(app).toHaveBeenCalledOnce()
+  })
+
+  it("does not hide validation failures behind the App fallback", async () => {
+    const error = new GitHubApiError({ reason: "validation", message: "bad repository" })
+    const app = vi.fn().mockResolvedValue("app")
+    await expect(preferGitHubCli(async () => true, async () => { throw error }, app))
+      .rejects.toBe(error)
+    expect(app).not.toHaveBeenCalled()
+  })
+})
 
 describe("GitHubApi remote and repository identity", () => {
   it.each([

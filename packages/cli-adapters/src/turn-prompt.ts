@@ -68,7 +68,7 @@ const prefixOf = (notes: TurnNotes): string =>
 export const managedToolsNote = (): string =>
   [
     "<managed-tools>",
-    "For GitHub, use the authenticated `gh` CLI whenever it is available, including for reading, creating, updating, and reviewing pull requests. Fall back to Jingler's attached MCP/OpenConnector GitHub tools only when `gh` is unavailable or unauthenticated. For every other provider, Jingler's attached MCP servers are the authoritative tool set; use OpenConnector before any harness-native equivalent.",
+    "For GitHub, prefer Jingler's host-provided GitHub commands. Use the authenticated `gh` CLI only when the current environment explicitly permits it; never print, request, or expose its token. Fall back to Jingler's attached MCP/OpenConnector GitHub tools when host commands and `gh` are unavailable. For every other provider, Jingler's attached MCP servers are the authoritative tool set; use OpenConnector before any harness-native equivalent.",
     "For browser interaction use the attached jingler-browser tools, which control the in-app browser visible to the operator. Do not use browser-use, Playwright MCP, or a harness browser plugin. Running the repository's own Playwright test suite as a normal shell command is still allowed when the task requires it.",
     "</managed-tools>"
   ].join("\n")

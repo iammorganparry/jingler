@@ -1083,6 +1083,20 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
   return client
 }
 
+export const preferGitHubCli = async <A>(
+  available: () => Promise<boolean>,
+  cli: () => Promise<A>,
+  app: () => Promise<A>
+): Promise<A> => {
+  if (!(await available())) return app()
+  try {
+    return await cli()
+  } catch (error) {
+    if (error instanceof GitHubApiError && error.reason === "validation") throw error
+    return app()
+  }
+}
+
 export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi", {
   accessors: true,
   effect: Effect.gen(function* () {
@@ -1114,7 +1128,11 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       cliEffect: Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor>,
       app: () => Promise<A>
     ): Effect.Effect<A, GitHubApiError> =>
-      wrap(async () => (await run(cli.available())) ? run(cliEffect) : app())
+      wrap(() => preferGitHubCli(
+        () => run(cli.available()),
+        () => run(cliEffect),
+        app
+      ))
     return {
       cliAvailable: () => wrap(() => run(cli.available())),
       inbox: () => preferCli(cli.inbox(), async () => {

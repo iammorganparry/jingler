@@ -2586,6 +2586,8 @@ export const githubDetectPr = (sessionId: string) =>
         message: error.message,
       })),
     );
+    // Stop any old PR route before attempting to hydrate the new App identity.
+    yield* Effect.promise(refreshGitHubRelaySupervisors);
     // App identity is optional for CLI-linked PRs. Hydrate it only when this
     // repository is installed, which is what makes realtime routing available.
     yield* Effect.gen(function* () {
@@ -2663,6 +2665,11 @@ export const reconcileRelaySessionRoutes = async (
       .filter((route) => route.state === "active")
       .map((route) => [route.sessionId, route]),
   );
+  for (const [sessionId, route] of active) {
+    if (byId.has(sessionId)) continue;
+    await archive(route);
+    active.delete(sessionId);
+  }
   for (const session of sessions) {
     const route = active.get(session.id);
     if (

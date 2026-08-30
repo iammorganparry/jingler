@@ -93,6 +93,13 @@ describe("fetchIssueWithCli", () => {
     expect(exec).toHaveBeenCalledTimes(1)
   })
 
+  it("falls back when the gh executable cannot be spawned", async () => {
+    const exec = vi.fn().mockRejectedValue(new Error("spawn gh ENOENT"))
+    await expect(fetchIssueWithCli({ repo: "acme/widgets", issueNumber: 42 }, exec))
+      .resolves.toBeNull()
+    expect(exec).toHaveBeenCalledTimes(1)
+  })
+
   it("validates inputs before invoking gh", async () => {
     const exec = vi.fn()
     await expect(fetchIssueWithCli({ repo: "acme/widgets", issueNumber: 0 }, exec))
