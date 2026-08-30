@@ -10,5 +10,5 @@
     "jsx": "react-jsx",
     "types": ["node", "react", "react-dom"]
   },
-  "include": ["src", "electron.vite.config.ts"]
+  "include": ["src", "electron.vite.config.ts", "electron.vite.config.test.ts"]
 }

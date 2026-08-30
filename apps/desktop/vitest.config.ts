@@ -17,6 +17,7 @@ export default defineConfig({
     name: "desktop",
     environment: "node",
     include: [
+      "electron.vite.config.test.ts",
       "src/main/**/*.test.ts",
       "src/renderer/**/*.test.ts",
       "src/renderer/**/*.test.tsx"

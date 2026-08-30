@@ -95,6 +95,12 @@ importers:
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
+      '@pierre/diffs':
+        specifier: 1.3.6
+        version: 1.3.6(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@pierre/trees':
+        specifier: 1.0.0-beta.6
+        version: 1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)
       '@plannotator/pi-extension':
         specifier: 0.27.8
         version: 0.27.8(patch_hash=34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -212,7 +218,7 @@ importers:
         version: 19.2.7(react@19.2.7)
       react-scan:
         specifier: ^0.5.7
-        version: 0.5.7(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(esbuild@0.28.1)(eslint@10.9.1(jiti@2.7.0))(preact-render-to-string@6.6.5)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rollup@4.62.2)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.1)(yaml@2.9.0))
+        version: 0.5.7(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(esbuild@0.28.1)(eslint@10.9.1(jiti@2.7.0))(preact-render-to-string@6.6.5(preact@11.0.0-beta.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rollup@4.62.2)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.1)(yaml@2.9.0))
       tailwindcss:
         specifier: ^4.3.2
         version: 4.3.2
@@ -12848,10 +12854,10 @@ snapshots:
 
   '@preact/signals-core@1.14.4': {}
 
-  '@preact/signals@2.11.1(preact@10.29.8)':
+  '@preact/signals@2.11.1(preact@10.29.8(preact-render-to-string@6.6.5(preact@11.0.0-beta.0)))':
     dependencies:
       '@preact/signals-core': 1.14.4
-      preact: 10.29.8(preact-render-to-string@6.6.5)
+      preact: 10.29.8(preact-render-to-string@6.6.5(preact@11.0.0-beta.0))
 
   '@protobufjs/aspromise@1.1.2': {}
 
@@ -18149,11 +18155,6 @@ snapshots:
 
   postgres@3.4.9: {}
 
-  preact-render-to-string@6.6.5(preact@10.29.8):
-    dependencies:
-      preact: 10.29.8(preact-render-to-string@6.6.5)
-    optional: true
-
   preact-render-to-string@6.6.5(preact@11.0.0-beta.0):
     dependencies:
       preact: 11.0.0-beta.0
@@ -18161,10 +18162,6 @@ snapshots:
   preact@10.29.8(preact-render-to-string@6.6.5(preact@11.0.0-beta.0)):
     optionalDependencies:
       preact-render-to-string: 6.6.5(preact@11.0.0-beta.0)
-
-  preact@10.29.8(preact-render-to-string@6.6.5):
-    optionalDependencies:
-      preact-render-to-string: 6.6.5(preact@10.29.8)
 
   preact@11.0.0-beta.0: {}
 
@@ -18419,16 +18416,16 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.17
 
-  react-scan@0.5.7(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(esbuild@0.28.1)(eslint@10.9.1(jiti@2.7.0))(preact-render-to-string@6.6.5)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rollup@4.62.2)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.1)(yaml@2.9.0)):
+  react-scan@0.5.7(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(esbuild@0.28.1)(eslint@10.9.1(jiti@2.7.0))(preact-render-to-string@6.6.5(preact@11.0.0-beta.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rollup@4.62.2)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.1)(yaml@2.9.0)):
     dependencies:
       '@babel/core': 7.29.7
       '@babel/types': 7.29.7
-      '@preact/signals': 2.11.1(preact@10.29.8)
+      '@preact/signals': 2.11.1(preact@10.29.8(preact-render-to-string@6.6.5(preact@11.0.0-beta.0)))
       '@rollup/pluginutils': 5.4.0(rollup@4.62.2)
       bippy: 0.5.43(react@19.2.7)
       commander: 14.0.3
       picocolors: 1.1.1
-      preact: 10.29.8(preact-render-to-string@6.6.5)
+      preact: 10.29.8(preact-render-to-string@6.6.5(preact@11.0.0-beta.0))
       prompts: 2.4.2
       react: 19.2.7
       react-doctor: 0.9.12(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.0))(eslint@10.9.1(jiti@2.7.0))
