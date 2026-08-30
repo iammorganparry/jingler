@@ -1985,7 +1985,7 @@ function AuthedApp({
             <PullRequestPane
               session={session}
               connected={sessionConnected}
-              autoDetect={sessionConnected && autoDetect}
+              autoDetect={autoDetect}
               viewerLogin={github.connection.user?.login}
               connectionMessage={
                 github.connection.connected

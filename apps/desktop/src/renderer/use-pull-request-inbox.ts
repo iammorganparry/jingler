@@ -30,18 +30,17 @@ export function pullRequestSessionTarget(
   }
 }
 
-export function usePullRequestInbox(connected: boolean) {
+export function usePullRequestInbox(_connected: boolean) {
   const [selected, setSelected] = useState<PullRequestListItem | null>(null)
   const queryClient = useQueryClient()
   const list = useQuery({
     queryKey: ["github", "pr-inbox"],
-    queryFn: rpc.githubPrInbox,
-    enabled: connected
+    queryFn: rpc.githubPrInbox
   })
   const detail = useQuery({
     queryKey: ["github", "pr-inbox", selected?.repository, selected?.number],
     queryFn: () => selected ? rpc.githubPrBySlug(selected.repository, selected.number) : null,
-    enabled: connected && selected !== null
+    enabled: selected !== null
   })
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ["github", "pr-inbox"] })
@@ -74,7 +73,7 @@ export function usePullRequestInbox(connected: boolean) {
     selected,
     select: setSelected,
     detail: detail.data ?? null,
-    loading: connected && list.isPending,
+    loading: list.isPending,
     detailLoading: detail.isPending && selected !== null,
     detailError: (detail.error as { message?: string } | null)?.message ?? null,
     comment: (body: string) => {
@@ -93,8 +92,9 @@ export function usePullRequestInbox(connected: boolean) {
     closeError: (closeMutation.error as { message?: string } | null)?.message ?? null,
     merging: mergeMutation.isPending,
     mergeError: (mergeMutation.error as { message?: string } | null)?.message ?? null,
-    error: connected
-      ? (list.error as { message?: string } | null)?.message ?? null
-      : "Connect GitHub to load pull requests."
+    error: list.isError
+      ? (list.error as { message?: string }).message ??
+        "Authenticate GitHub CLI or connect the GitHub App to load pull requests."
+      : null
   }
 }

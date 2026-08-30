@@ -2153,16 +2153,7 @@ export const workspaceRevertLines = (input: {
  * `Github.pr` handler. Returns the linked PR via GitHub APIs or null when the
  * session has no worktree or no linked PR. Exported for tests.
  */
-export const githubPrInbox = () =>
-  Effect.gen(function* () {
-    const repositories = yield* GitHubAuth.repositories();
-    const groups = yield* Effect.forEach(
-      repositories,
-      (repository) => GitHubApi.listInboxPrsBySlug(repository.fullName),
-      { concurrency: 6 },
-    );
-    return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  });
+export const githubPrInbox = () => GitHubApi.inbox();
 
 export const githubPrBySlug = (repository: string, number: number) =>
   GitHubApi.prViewBySlug(repository, number);
@@ -2588,29 +2579,29 @@ export const githubDetectPr = (sessionId: string) =>
     // Resolve against the worktree's live branch — the stored `session.branch`
     // drifts once the agent checks out / creates a different branch there.
     const n = yield* GitHubApi.prForWorktree(session.worktreePath);
-    if (n !== null) {
+    if (n === null) return null;
+    yield* SessionStore.setPrNumber(session.id, n);
+    // App identity is optional for CLI-linked PRs. Hydrate it only when this
+    // repository is installed, which is what makes realtime routing available.
+    yield* Effect.gen(function* () {
       const [repository, liveBranch] = yield* Effect.all([
-        GitHubApi.repository(session.worktreePath),
-        GitService.branchAt(session.worktreePath),
+        GitHubApi.repository(session.worktreePath!),
+        GitService.branchAt(session.worktreePath!),
       ]);
-      const linked = yield* SessionStore.setGitHubLink(session.id, {
+      yield* SessionStore.setGitHubLink(session.id, {
         installationId: repository.installationId,
         repositoryId: repository.id,
         prNumber: n,
         ...(liveBranch === null ? {} : { branch: liveBranch }),
-      }).pipe(
-        Effect.as(true),
-        Effect.orElseSucceed(() => false),
-      );
-      if (!linked) return null;
+      });
       yield* GitHubAuth.upsertSessionRoute({
         sessionId: session.id,
         installationId: repository.installationId,
         repositoryId: repository.id,
         pullRequestNumber: n,
-      }).pipe(Effect.ignore);
+      });
       yield* Effect.promise(refreshGitHubRelaySupervisors);
-    }
+    }).pipe(Effect.ignore);
     return n;
   });
 

@@ -46,11 +46,10 @@ export const CREDENTIAL_DIRS: ReadonlyArray<string> = [
   ".docker",
   ".npmrc",
   ".netrc",
-  ".config/gh",
   ".config/gcloud",
-  // The OTHER place a GitHub token lives, in plaintext
-  // (`https://user:ghp_xxx@github.com`), on a machine that by definition uses
-  // git. Denying `.config/gh` without this covered one of the two.
+  // Plaintext git credentials remain blocked. GitHub CLI access is deliberate:
+  // agents use `gh` as the preferred GitHub client, while its token stays in the
+  // platform keychain on supported systems.
   ".git-credentials",
   ".config/git/credentials",
   // Holds `oauthAccount` and MCP server definitions whose `env` blocks

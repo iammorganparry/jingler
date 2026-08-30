@@ -132,11 +132,12 @@ export const mapPrCommit = (raw: unknown): PrCommit => {
   const commit = jsonRecord(row.commit)
   const author = jsonRecord(row.author)
   const commitAuthor = jsonRecord(commit.author)
+  const cliAuthor = rows(row.authors)[0]
   return {
-    sha: text(row.sha) ?? "",
-    message: (text(commit.message) ?? "").split("\n", 1)[0] ?? "",
-    author: text(author.login) ?? text(commitAuthor.name) ?? "unknown",
-    committedAt: text(commitAuthor.date) ?? "",
+    sha: text(row.sha) ?? text(row.oid) ?? "",
+    message: text(row.messageHeadline) ?? (text(commit.message) ?? "").split("\n", 1)[0] ?? "",
+    author: text(cliAuthor?.login) ?? text(cliAuthor?.name) ?? text(author.login) ?? text(commitAuthor.name) ?? "unknown",
+    committedAt: text(row.committedDate) ?? text(commitAuthor.date) ?? "",
     url: text(field(row, "htmlUrl", "html_url")) ?? text(row.url) ?? "",
     verified: jsonRecord(commit.verification).verified === true
   }
@@ -269,8 +270,8 @@ export const mapPrView = (raw: unknown): PullRequest => {
     isDraft,
     author: { login: text(author.login) ?? "unknown", avatarUrl: avatarOf(author) },
     createdAt: text(field(pr, "createdAt", "created_at")) ?? "",
-    commits: integer(pr.commits) ?? rows(pr.commit_items).length,
-    commitItems: rows(pr.commit_items).map(mapPrCommit),
+    commits: integer(pr.commits) ?? rows(pr.commit_items ?? pr.commits).length,
+    commitItems: rows(pr.commit_items ?? pr.commits).map(mapPrCommit),
     changedFiles: integer(field(pr, "changedFiles", "changed_files")) ?? files.length,
     additions: integer(pr.additions) ?? 0,
     deletions: integer(pr.deletions) ?? 0,
