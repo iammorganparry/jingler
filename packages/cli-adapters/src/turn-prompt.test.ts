@@ -96,6 +96,7 @@ describe("composeTurnPrompt", () => {
       composeTurnPrompt("browse", { tools: "TOOLS", ask: "ASK" }, { leadWithText: false })
     ).toBe("TOOLS\n\nASK\n\nbrowse")
     expect(managedToolsNote()).toContain("jingler-browser")
+    expect(managedToolsNote()).toContain("authenticated `gh` CLI")
     expect(managedToolsNote()).toContain("OpenConnector")
   })
 

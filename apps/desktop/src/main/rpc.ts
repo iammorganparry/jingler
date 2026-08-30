@@ -2580,7 +2580,12 @@ export const githubDetectPr = (sessionId: string) =>
     // drifts once the agent checks out / creates a different branch there.
     const n = yield* GitHubApi.prForWorktree(session.worktreePath);
     if (n === null) return null;
-    yield* SessionStore.setPrNumber(session.id, n);
+    yield* SessionStore.setPrNumber(session.id, n).pipe(
+      Effect.mapError((error) => new GitHubApiError({
+        reason: "unavailable",
+        message: error.message,
+      })),
+    );
     // App identity is optional for CLI-linked PRs. Hydrate it only when this
     // repository is installed, which is what makes realtime routing available.
     yield* Effect.gen(function* () {
