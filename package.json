@@ -49,8 +49,9 @@
       "@homebridge/node-pty-prebuilt-multiarch"
     ],
     "patchedDependencies": {
-      "pi-subagents@0.57.0": "patches/pi-subagents@0.57.0.patch",
-      "@plannotator/pi-extension@0.27.8": "patches/@plannotator__pi-extension@0.27.8.patch"
+      "pi-subagents@0.57.0": "/Users/morganparry/repos/jingler/patches/pi-subagents@0.57.0.patch",
+      "@plannotator/pi-extension@0.27.8": "/Users/morganparry/repos/jingler/patches/@plannotator__pi-extension@0.27.8.patch",
+      "@pierre/diffs@1.3.6": "patches/@pierre__diffs@1.3.6.patch"
     }
   }
 }

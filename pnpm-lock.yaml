@@ -5,6 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
+  '@pierre/diffs@1.3.6':
+    hash: e359e20dd06be19c9ae66eef227647587513cb1ae3b22777e3bcbb9be33826d1
+    path: patches/@pierre__diffs@1.3.6.patch
   '@plannotator/pi-extension@0.27.8':
     hash: 34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce
     path: patches/@plannotator__pi-extension@0.27.8.patch
@@ -97,7 +100,7 @@ importers:
         version: 0.13.1
       '@pierre/diffs':
         specifier: 1.3.6
-        version: 1.3.6(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 1.3.6(patch_hash=e359e20dd06be19c9ae66eef227647587513cb1ae3b22777e3bcbb9be33826d1)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@pierre/trees':
         specifier: 1.0.0-beta.6
         version: 1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)
@@ -650,7 +653,7 @@ importers:
         version: 0.0.78(@types/react@19.2.17)(react@19.2.7)
       '@pierre/diffs':
         specifier: 1.3.6
-        version: 1.3.6(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 1.3.6(patch_hash=e359e20dd06be19c9ae66eef227647587513cb1ae3b22777e3bcbb9be33826d1)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@pierre/trees':
         specifier: 1.0.0-beta.6
         version: 1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)
@@ -12756,7 +12759,7 @@ snapshots:
     transitivePeerDependencies:
       - '@shikijs/themes'
 
-  '@pierre/diffs@1.3.6(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@pierre/diffs@1.3.6(patch_hash=e359e20dd06be19c9ae66eef227647587513cb1ae3b22777e3bcbb9be33826d1)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@pierre/theme': 2.0.0
       '@pierre/theming': 1.0.1(@pierre/theme@2.0.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)
