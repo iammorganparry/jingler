@@ -58,17 +58,26 @@ describe("GitHubCli", () => {
       }) }
       if (args[0] === "repo") return { stdout: "acme/widget\n" }
       if (args.join(" ").includes("commits(first:100")) {
-        expect(args.join(" ")).toContain("commit{oid url signature{isValid}}")
-        return { stdout: JSON.stringify([{
-          data: { repository: { pullRequest: { commits: {
-            nodes: [{ commit: {
-              oid: "abc",
-              url: "https://github.com/acme/widget/commit/abc",
-              signature: { isValid: true }
-            } }],
+        expect(args.join(" ")).toContain("authors(first:1){nodes{name user{login}}}")
+        expect(args.join(" ")).toContain("signature{isValid}")
+        const commit = (oid: string) => ({ commit: {
+          oid,
+          messageHeadline: oid === "abc" ? "ship it" : "ship more",
+          committedDate: "2026-08-26T08:00:00Z",
+          url: `https://github.com/acme/widget/commit/${oid}`,
+          authors: { nodes: [{ name: "Octo Cat", user: { login: "octocat" } }] },
+          signature: { isValid: true }
+        } })
+        return { stdout: JSON.stringify([
+          { data: { repository: { pullRequest: { commits: {
+            nodes: [commit("abc")],
+            pageInfo: { hasNextPage: true, endCursor: "commits-2" }
+          } } } } },
+          { data: { repository: { pullRequest: { commits: {
+            nodes: [commit("def")],
             pageInfo: { hasNextPage: false, endCursor: null }
-          } } } }
-        }]) }
+          } } } } }
+        ]) }
       }
       if (args[0] === "api") return { stdout: JSON.stringify([{
         data: { repository: { pullRequest: { reviewThreads: {
@@ -79,13 +88,23 @@ describe("GitHubCli", () => {
       return
     })
 
-    expect(result).toMatchObject({ number: 42, title: "CLI first", commits: 1 })
-    expect(result.commitItems?.[0]).toMatchObject({
-      sha: "abc",
-      message: "ship it",
-      url: "https://github.com/acme/widget/commit/abc",
-      verified: true
-    })
+    expect(result).toMatchObject({ number: 42, title: "CLI first", commits: 2 })
+    expect(result.commitItems).toMatchObject([
+      {
+        sha: "abc",
+        message: "ship it",
+        author: "octocat",
+        url: "https://github.com/acme/widget/commit/abc",
+        verified: true
+      },
+      {
+        sha: "def",
+        message: "ship more",
+        author: "octocat",
+        url: "https://github.com/acme/widget/commit/def",
+        verified: true
+      }
+    ])
     expect(commands.map((args) => args[0])).toEqual(["pr", "repo", "api", "api"])
   })
 

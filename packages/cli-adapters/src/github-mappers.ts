@@ -132,11 +132,18 @@ export const mapPrCommit = (raw: unknown): PrCommit => {
   const commit = jsonRecord(row.commit)
   const author = jsonRecord(row.author)
   const commitAuthor = jsonRecord(commit.author)
-  const cliAuthor = rows(row.authors)[0]
+  const cliAuthors = jsonRecord(row.authors)
+  const cliAuthor = rows(cliAuthors.nodes ?? row.authors)[0]
   return {
     sha: text(row.sha) ?? text(row.oid) ?? "",
     message: text(row.messageHeadline) ?? (text(commit.message) ?? "").split("\n", 1)[0] ?? "",
-    author: text(cliAuthor?.login) ?? text(cliAuthor?.name) ?? text(author.login) ?? text(commitAuthor.name) ?? "unknown",
+    author:
+      text(cliAuthor?.login) ??
+      nestedLogin(cliAuthor?.user) ??
+      text(cliAuthor?.name) ??
+      text(author.login) ??
+      text(commitAuthor.name) ??
+      "unknown",
     committedAt: text(row.committedDate) ?? text(commitAuthor.date) ?? "",
     url: text(field(row, "htmlUrl", "html_url")) ?? text(row.url) ?? "",
     verified:

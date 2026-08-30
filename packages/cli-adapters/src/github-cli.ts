@@ -51,7 +51,11 @@ const REVIEW_THREAD_COMMENTS_QUERY = `query($id:ID!,$endCursor:String){
 
 const COMMITS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(first:100,after:$endCursor){
-    nodes{commit{oid url signature{isValid}}}
+    nodes{commit{
+      oid messageHeadline committedDate url
+      authors(first:1){nodes{name user{login}}}
+      signature{isValid}
+    }}
     pageInfo{hasNextPage endCursor}
   }}}
 }`
@@ -245,16 +249,8 @@ const prView = (
           Effect.map(slugParts)
         )
     const threads = yield* reviewThreads(cwd, owner, repo, number)
-    const evidence = yield* commitEvidence(cwd, owner, repo, number)
-    const evidenceByOid = new Map(evidence.flatMap((commit) =>
-      typeof commit.oid === "string" ? [[commit.oid, commit] as const] : []
-    ))
-    const pr = jsonRecord(raw)
-    const commits = records(pr.commits).map((commit) => ({
-      ...commit,
-      ...evidenceByOid.get(String(commit.oid))
-    }))
-    return { ...mapPrView({ ...pr, commits }), reviewThreads: threads }
+    const commits = yield* commitEvidence(cwd, owner, repo, number)
+    return { ...mapPrView({ ...jsonRecord(raw), commits }), reviewThreads: threads }
   })
 
 export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli", {
