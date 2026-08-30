@@ -282,50 +282,7 @@ export const fetchIssueWithCli = async (
   } catch {
     return null
   }
-  const issue = record(raw)
-  const number = issue?.number
-  const title = string(issue?.title)
-  const state = string(issue?.state)
-  const url = string(issue?.url)
-  const createdAt = string(issue?.createdAt)
-  if (!issue || typeof number !== "number" || !title || !state || !url || !createdAt) {
-    return null
-  }
-  const author = user(issue.author)
-  return {
-    number,
-    title,
-    body: string(issue.body) ?? "",
-    state: state.toLowerCase(),
-    url,
-    labels: Array.isArray(issue.labels)
-      ? issue.labels.flatMap((value) => {
-          const label = record(value)
-          const name = string(label?.name)
-          if (!name) return []
-          const color = string(label?.color)
-          return [{ name, ...(color ? { color } : {}) }]
-        })
-      : [],
-    assignees: Array.isArray(issue.assignees)
-      ? issue.assignees.flatMap((value) => {
-          const assignee = user(value)
-          return assignee ? [assignee] : []
-        })
-      : [],
-    comments: Array.isArray(issue.comments)
-      ? issue.comments.flatMap((value) => {
-          const comment = record(value)
-          const body = string(comment?.body)
-          const commentCreatedAt = string(comment?.createdAt)
-          if (body === null || !commentCreatedAt) return []
-          const commentAuthor = user(comment?.author)
-          return [{ body, createdAt: commentCreatedAt, ...(commentAuthor ? { author: commentAuthor } : {}) }]
-        })
-      : [],
-    createdAt,
-    ...(author ? { author } : {})
-  }
+  return normalizeIssue(raw)
 }
 
 export const activate: Activate = (ctx) => {
