@@ -8,9 +8,6 @@ patchedDependencies:
   '@pierre/diffs@1.3.6':
     hash: e359e20dd06be19c9ae66eef227647587513cb1ae3b22777e3bcbb9be33826d1
     path: patches/@pierre__diffs@1.3.6.patch
-  '@plannotator/pi-extension@0.27.8':
-    hash: 34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce
-    path: patches/@plannotator__pi-extension@0.27.8.patch
   pi-subagents@0.57.0:
     hash: 991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d
     path: patches/pi-subagents@0.57.0.patch
@@ -98,15 +95,15 @@ importers:
       '@homebridge/node-pty-prebuilt-multiarch':
         specifier: ^0.13.1
         version: 0.13.1
+      '@jingler/plannotator-ext':
+        specifier: workspace:*
+        version: link:../../packages/plannotator-ext
       '@pierre/diffs':
         specifier: 1.3.6
         version: 1.3.6(patch_hash=e359e20dd06be19c9ae66eef227647587513cb1ae3b22777e3bcbb9be33826d1)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@pierre/trees':
         specifier: 1.0.0-beta.6
         version: 1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.4.2)
-      '@plannotator/pi-extension':
-        specifier: 0.27.8
-        version: 0.27.8(patch_hash=34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-query':
         specifier: ^5.101.2
         version: 5.101.2(react@19.2.7)
@@ -473,6 +470,9 @@ importers:
       '@jingler/core':
         specifier: workspace:*
         version: link:../core
+      '@jingler/plannotator-ext':
+        specifier: workspace:*
+        version: link:../plannotator-ext
       '@jingler/themes':
         specifier: workspace:*
         version: link:../themes
@@ -488,9 +488,6 @@ importers:
       '@octokit/webhooks':
         specifier: ^14.2.0
         version: 14.2.0
-      '@plannotator/pi-extension':
-        specifier: 0.27.8
-        version: 0.27.8(patch_hash=34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       effect:
         specifier: ^3.21.4
         version: 3.21.4
@@ -585,6 +582,27 @@ importers:
       '@jingler/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+
+  packages/plannotator-ext:
+    dependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: '>=0.79.1'
+        version: 0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
+      '@joplin/turndown-plugin-gfm':
+        specifier: ^1.0.64
+        version: 1.0.67
+      '@pierre/diffs':
+        specifier: 1.3.2
+        version: 1.3.2(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      chokidar:
+        specifier: ^5.0.0
+        version: 5.0.0
+      parse5:
+        specifier: ^7.3.0
+        version: 7.3.0
+      turndown:
+        specifier: ^7.2.4
+        version: 7.2.4
 
   packages/plugin-sdk:
     devDependencies:
@@ -3861,18 +3879,6 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
-  '@plannotator/pi-extension@0.27.8':
-    resolution: {integrity: sha512-0ygrzaL+78hMq3iyC+3JSEGstSt1fWpVfo1hSWFWVWZ+xOHgR2L6z4Ve1aDZmIuMvR45y8LYhh1An7ftCkoeMA==}
-    peerDependencies:
-      '@earendil-works/pi-coding-agent': '>=0.79.1'
-
-  '@plannotator/webtui@0.1.0':
-    resolution: {integrity: sha512-pwJfFg5VXOwucs55K6mef5fgK5eC8mJrFYc8RJdvB/T00alwnzgDjT/BAsarPiMj4U3NjUZImzxnbypJsn/ESA==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      react: ^18.3.0 || ^19.0.0
-      react-dom: ^18.3.0 || ^19.0.0
-
   '@playwright/test@1.61.1':
     resolution: {integrity: sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==}
     engines: {node: '>=18'}
@@ -5550,39 +5556,16 @@ packages:
   '@xterm/addon-fit@0.11.0':
     resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
 
-  '@xterm/addon-fit@0.12.0-beta.216':
-    resolution: {integrity: sha512-IgKE3ngNodSnmj1O+EEYpKQZkSbAUbghPlCWd8G32RL0piIMqb3FX3BuYLnWZeLNoD9iMtublLMG1T9XjGeVvA==}
-    peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.216
-
-  '@xterm/addon-unicode11@0.10.0-beta.216':
-    resolution: {integrity: sha512-i7TrEHOTzUEOClH1+6IHoHy7bR/XHVRBjHc5e0u6A1HucFkAlCU+bqUY8EfwNOh1/iUjuB06EtNh6BM1o/ZAlA==}
-    peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.216
-
   '@xterm/addon-web-links@0.11.0':
     resolution: {integrity: sha512-nIHQ38pQI+a5kXnRaTgwqSHnX7KE6+4SVoceompgHL26unAxdfP6IPqUTSYPQgSwM56hsElfoNrrW5V7BUED/Q==}
     peerDependencies:
       '@xterm/xterm': ^5.0.0
 
-  '@xterm/addon-web-links@0.13.0-beta.216':
-    resolution: {integrity: sha512-ZP3BDy1na/37TZHO8FB+XHJFoO8muyPoOzkaL2X28n5A9ZFQPbf834EMRsvDczKnfQvtZcve+ZCmMJj1ZHGjow==}
-    peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.216
-
   '@xterm/addon-webgl@0.19.0':
     resolution: {integrity: sha512-b3fMOsyLVuCeNJWxolACEUED0vm7qC0cy4wRvf3oURSzDTYVQiGPhTnhWZwIHdvC48Y+oLhvYXnY4XDXPoJo6A==}
 
-  '@xterm/addon-webgl@0.20.0-beta.215':
-    resolution: {integrity: sha512-oCbH3YxiGOzRcKxwTfSRCA1TqpoT/AitO2X5MuqD14DVnb4Z3rTKQYfHBA7R6HA7U4K9OzmtIsi5+VyEIEaWsg==}
-    peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.216
-
   '@xterm/xterm@6.0.0':
     resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
-
-  '@xterm/xterm@6.1.0-beta.216':
-    resolution: {integrity: sha512-87rfymzVje5eYUlGG94hz1WkOYvFRcFDGdiOAbg4d8xt8OGSGR2nMNU4I1n5MDE1RBPBqRd+WVJ5w7q3pwMoZA==}
 
   '@xyflow/react@12.11.2':
     resolution: {integrity: sha512-eLAlDWJfWnQEhJwGMjlWdAXO9eYllKpliUmPQlAmOLxz6mExXuzMVDUKLMquixgkrtmMFFtug3jGKmYYld12cA==}
@@ -7975,11 +7958,6 @@ packages:
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  lucide-react@0.577.0:
-    resolution: {integrity: sha512-4LjoFv2eEPwYDPg/CUdBJQSDfPyzXCRrVW1X7jrx/trgxnxkHFjnVZINbzvzxjN70dxychOfg+FTYwBiS3pQ5A==}
-    peerDependencies:
-      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
   lucide-react@1.24.0:
     resolution: {integrity: sha512-YT6mBD8lGKkg4nM39enlm94/sfJIiW0YKUT60fBy4YK8tai31ylg1VhGNWxkpSKHo9UagfnZqwIff3HTDQwXeA==}
     peerDependencies:
@@ -8457,9 +8435,6 @@ packages:
 
   node-html-parser@7.1.0:
     resolution: {integrity: sha512-iJo8b2uYGT40Y8BTyy5ufL6IVbN8rbm/1QK2xffXU/1a/v3AAa0d1YAoqBNYqaS4R/HajkWIpIfdE6KcyFh1AQ==}
-
-  node-pty@1.1.0:
-    resolution: {integrity: sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg==}
 
   node-releases@2.0.51:
     resolution: {integrity: sha512-wRNIrw4DmVLKQlbgOMdkMx27Wrpzes2hh5Jtbi2bjPd+4wJstWIqP5A+lscnqbm0xxmT5Bpg8Lec5ItEBwx6BQ==}
@@ -12806,39 +12781,6 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
-  '@plannotator/pi-extension@0.27.8(patch_hash=34555c45c56c058d2ed276efc6f14e0d15173e0c2044a054311f2218bcdc81ce)(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
-    dependencies:
-      '@earendil-works/pi-coding-agent': 0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3)
-      '@joplin/turndown-plugin-gfm': 1.0.67
-      '@pierre/diffs': 1.3.2(@shikijs/themes@4.4.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@plannotator/webtui': 0.1.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      chokidar: 5.0.0
-      diff: 8.0.4
-      parse5: 7.3.0
-      turndown: 7.2.4
-    transitivePeerDependencies:
-      - '@shikijs/themes'
-      - bufferutil
-      - react
-      - react-dom
-      - utf-8-validate
-
-  '@plannotator/webtui@0.1.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
-    dependencies:
-      '@xterm/addon-fit': 0.12.0-beta.216(@xterm/xterm@6.1.0-beta.216)
-      '@xterm/addon-unicode11': 0.10.0-beta.216(@xterm/xterm@6.1.0-beta.216)
-      '@xterm/addon-web-links': 0.13.0-beta.216(@xterm/xterm@6.1.0-beta.216)
-      '@xterm/addon-webgl': 0.20.0-beta.215(@xterm/xterm@6.1.0-beta.216)
-      '@xterm/xterm': 6.1.0-beta.216
-      lucide-react: 0.577.0(react@19.2.7)
-      node-pty: 1.1.0
-      react: 19.2.7
-      react-dom: 19.2.7(react@19.2.7)
-      ws: 8.21.0
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   '@playwright/test@1.61.1':
     dependencies:
       playwright: 1.61.1
@@ -14411,31 +14353,13 @@ snapshots:
 
   '@xterm/addon-fit@0.11.0': {}
 
-  '@xterm/addon-fit@0.12.0-beta.216(@xterm/xterm@6.1.0-beta.216)':
-    dependencies:
-      '@xterm/xterm': 6.1.0-beta.216
-
-  '@xterm/addon-unicode11@0.10.0-beta.216(@xterm/xterm@6.1.0-beta.216)':
-    dependencies:
-      '@xterm/xterm': 6.1.0-beta.216
-
   '@xterm/addon-web-links@0.11.0(@xterm/xterm@6.0.0)':
     dependencies:
       '@xterm/xterm': 6.0.0
 
-  '@xterm/addon-web-links@0.13.0-beta.216(@xterm/xterm@6.1.0-beta.216)':
-    dependencies:
-      '@xterm/xterm': 6.1.0-beta.216
-
   '@xterm/addon-webgl@0.19.0': {}
 
-  '@xterm/addon-webgl@0.20.0-beta.215(@xterm/xterm@6.1.0-beta.216)':
-    dependencies:
-      '@xterm/xterm': 6.1.0-beta.216
-
   '@xterm/xterm@6.0.0': {}
-
-  '@xterm/xterm@6.1.0-beta.216': {}
 
   '@xyflow/react@12.11.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
@@ -17008,10 +16932,6 @@ snapshots:
     dependencies:
       react: 19.2.7
 
-  lucide-react@0.577.0(react@19.2.7):
-    dependencies:
-      react: 19.2.7
-
   lucide-react@1.24.0(react@19.2.7):
     dependencies:
       react: 19.2.7
@@ -17733,10 +17653,6 @@ snapshots:
     dependencies:
       css-select: 5.2.2
       he: 1.2.0
-
-  node-pty@1.1.0:
-    dependencies:
-      node-addon-api: 7.1.1
 
   node-releases@2.0.51: {}
 
