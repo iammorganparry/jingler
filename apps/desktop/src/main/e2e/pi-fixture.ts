@@ -678,6 +678,30 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
   )
 }
 
+const UPDATE_PLAN_TOOL = "plannotator_update_plan"
+
+// Exercises the always-available plan scratchpad OUTSIDE plan mode: the model
+// writes a plan file, adopts it silently with plannotator_update_plan, then
+// ticks the first step with a [DONE:1] marker — no review, no phase change.
+const planScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  const lastMessage = context.messages.at(-1)
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === UPDATE_PLAN_TOOL) {
+    return fauxAssistantMessage(
+      "Adopted the plan scratchpad and finished the first step. [DONE:1]"
+    )
+  }
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+    return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-update")
+  }
+  // Normal sessions carry Jingler's workspace tools, not pi's plan-mode
+  // write/edit pair — the scratchpad flow must work with the ordinary toolset.
+  return callTool(
+    WRITE_TOOL,
+    { path: "PLAN.md", content: PLANNOTATOR_E2E_PLAN },
+    "plannotator-scratchpad-write"
+  )
+}
+
 const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const prompt = latestOperatorText(context)
   if (prompt.includes("[[beui-production]]")) {
@@ -812,6 +836,8 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
   switch (fixture.scenarioId) {
     case "plan-mode":
       return Array.from({ length: 12 }, () => planModeResponse)
+    case "plan-scratchpad":
+      return Array.from({ length: 8 }, () => planScratchpadResponse)
     case "managed-resources":
       return [
         fauxAssistantMessage(fauxToolCall("jingler_load_resource", { id: "managed-skill" }), {

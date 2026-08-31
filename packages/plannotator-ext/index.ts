@@ -55,6 +55,7 @@ import {
 	applyPhaseTools,
 	isPlanWritePathAllowed,
 	PLAN_SUBMIT_TOOL,
+	PLAN_UPDATE_TOOL,
 	releasePhaseTools,
 	type Phase,
 	stripPlanningOnlyTools,
@@ -645,7 +646,10 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	async function resumePendingPlanReview(ctx: ExtensionContext): Promise<void> {
-		if (phase !== "planning" || !reviewPending || !lastSubmittedPath) return;
+		// Submissions are no longer planning-only, so a restart can interrupt a
+		// review begun from idle or executing too — resume by reviewPending
+		// alone rather than by phase.
+		if (!reviewPending || !lastSubmittedPath) return;
 		if (reviewStarting || activeReview !== null) {
 			publishHostState();
 			return;
@@ -710,11 +714,11 @@ export default function plannotator(pi: ExtensionAPI): void {
 		name: PLAN_SUBMIT_TOOL,
 		label: "Submit Plan",
 		description:
-			"Submit your Plannotator plan for user review. " +
-			"Call this only while Plannotator planning mode is active, after writing your plan as a markdown file anywhere inside the working directory. " +
+			"Submit your Plannotator plan for user review, from any mode: after writing (or revising) your plan as a markdown file inside the working directory, call this when a change is significant enough to need the operator's sign-off. " +
 			"Pass the path to the plan file (e.g. PLAN.md or plans/auth.md). " +
-			"The user will review the plan in a visual browser UI and can approve, deny with feedback, or annotate it. " +
-			"If denied, edit the same file in place, then call this again with the same path.",
+			"The user reviews the plan and can approve, deny with feedback, or annotate it; approval moves execution forward in this same session. " +
+			"If denied, edit the same file in place, then call this again with the same path. " +
+			"For small revisions that do not need sign-off, use plannotator_update_plan instead.",
 		parameters: Type.Object({
 			filePath: Type.String({
 				description:
@@ -723,19 +727,6 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}) as any,
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			// Guard: must be in planning phase
-			if (phase !== "planning") {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "Error: Not in plan mode. Use /plannotator-plan-mode to enter planning mode first.",
-						},
-					],
-					details: { approved: false },
-				};
-			}
-
 			const inputPath = (params as { filePath?: string })?.filePath?.trim();
 			if (!inputPath) {
 				return {
@@ -848,6 +839,98 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			return await reviewSubmittedPlan(ctx, inputPath, planContent, signal);
+		},
+	});
+
+	// The silent half of the agent-chooses revision gate: adopt or refresh the
+	// plan from disk with NO operator review. Significant changes go through
+	// plannotator_submit_plan; everything else lands here so the plan works as
+	// a live scratchpad in any phase (idle sessions included).
+	pi.registerTool({
+		name: PLAN_UPDATE_TOOL,
+		label: "Update Plan",
+		description:
+			"Adopt or refresh the Plannotator plan from a markdown file WITHOUT operator review. " +
+			"Use this to keep the plan current as you work — after creating a plan in a normal session, ticking checklist items, or making small revisions that do not need sign-off. " +
+			"Pass the path to the plan file (e.g. PLAN.md or plans/auth.md); its checklist becomes the live progress list shown to the operator. " +
+			"Significant changes to an approved plan should go through " + PLAN_SUBMIT_TOOL + " for review instead.",
+		parameters: Type.Object({
+			filePath: Type.String({
+				description:
+					"Path to the markdown plan file, relative to the working directory. Must end in .md or .mdx and resolve inside cwd.",
+			}),
+		}) as any,
+
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const inputPath = (params as { filePath?: string })?.filePath?.trim();
+			if (!inputPath) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: ${PLAN_UPDATE_TOOL} requires a filePath argument pointing to your markdown plan file (e.g. "PLAN.md" or "plans/auth.md").`,
+						},
+					],
+					details: { updated: false },
+				};
+			}
+			if (!isPlanWritePathAllowed(inputPath, ctx.cwd)) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: plan file must be a markdown file (.md or .mdx) inside the working directory. Rejected: ${inputPath}`,
+						},
+					],
+					details: { updated: false },
+				};
+			}
+			let planContent: string;
+			try {
+				planContent = readFileSync(resolve(ctx.cwd, inputPath), "utf-8");
+			} catch (err) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: failed to read ${inputPath}: ${err instanceof Error ? err.message : String(err)}. Write the plan file first, then call ${PLAN_UPDATE_TOOL} again.`,
+						},
+					],
+					details: { updated: false },
+				};
+			}
+			if (planContent.trim().length === 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Error: ${inputPath} is empty. Write your plan first, then call ${PLAN_UPDATE_TOOL} again.`,
+						},
+					],
+					details: { updated: false },
+				};
+			}
+
+			lastSubmittedPath = inputPath;
+			checklistItems = parseChecklist(planContent);
+			updateStatus(ctx);
+			updateWidget(ctx);
+			await syncTodoProvider(ctx);
+			persistState();
+
+			const completed = checklistItems.filter((item) => item.completed).length;
+			const summary = checklistItems.length > 0
+				? `Plan updated from ${inputPath}: ${completed}/${checklistItems.length} checklist steps complete.`
+				: `Plan updated from ${inputPath} (no checklist steps found — use "- [ ]" checkboxes to track progress).`;
+			return {
+				content: [
+					{
+						type: "text",
+						text: `${summary} The operator sees this plan live; call ${PLAN_SUBMIT_TOOL} when a change needs their review.`,
+					},
+				],
+				details: { updated: true, steps: checklistItems.length, completed },
+			};
 		},
 	});
 
@@ -1018,6 +1101,25 @@ Mark completed steps with [DONE:n] in your response.`
 
 	// Track execution progress
 	pi.on("turn_end", async (event, ctx) => {
+		if (phase === "idle" && lastSubmittedPath) {
+			// Idle tracking: a plan adopted via plannotator_update_plan (or an
+			// earlier run) may have been edited this turn with write/edit —
+			// re-read so checkbox flips reflow the live checklist without any
+			// phase machinery. Idle still injects nothing into prompts (#1269);
+			// this only refreshes the host-state projection and status line.
+			try {
+				checklistItems = parseChecklist(
+					readFileSync(resolve(ctx.cwd, lastSubmittedPath), "utf-8"),
+				);
+			} catch {
+				return;
+			}
+			const idleText = getAssistantMessageText(event.message);
+			if (idleText) markCompletedSteps(idleText, checklistItems);
+			updateStatus(ctx);
+			persistState();
+			return;
+		}
 		if (phase !== "executing" || checklistItems.length === 0) return;
 
 		const text = getAssistantMessageText(event.message);

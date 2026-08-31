@@ -316,12 +316,19 @@ const createResources = (
     ...(registry?.capabilitiesFor(spec.role, spec.mode) ?? []),
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
   ]
+  // Written for every mode: plan runs swap to the plan-execution toolset on
+  // approval, while a plan approved from a normal session re-applies the
+  // session's own toolset — a no-op swap, but one the executing phase needs
+  // defined now that plans can be submitted from any mode.
   const executionTools = spec.mode === "plan"
     ? [
         ...(registry?.capabilitiesFor("plan-execution", "auto").map(({ id }) => id) ?? []),
         ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
       ]
-    : undefined
+    : [
+        ...(registry?.capabilitiesFor(spec.role, spec.mode).map(({ id }) => id) ?? []),
+        ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
+      ]
   const eventBus = createEventBus()
   const compiled = (options.promptCompiler ?? new PromptCompiler()).compile({
     layers: runtimeInvariantLayers(spec.role, spec.mode),
@@ -415,18 +422,25 @@ const createEmbeddedSession = (
         : []
       const thinkingLevel = thinkingLevelFor(spec.reasoning)
       const sessionManager = sessionManagerFor(spec, options.sessionsDir)
+      // The plan scratchpad tools ride in EVERY mode: submit opens operator
+      // review (the agent chooses when a change warrants it), update refreshes
+      // the live plan silently. Plan mode additionally narrows the rest of the
+      // toolset to read-only capabilities.
       const initialToolNames = spec.mode === "plan"
         ? [
             ...(registry?.capabilitiesFor("plan", "plan").map(({ id }) => id) ?? []),
             "write",
             "edit",
             "plannotator_submit_plan",
+            "plannotator_update_plan",
             ...(nativeSubagentsEnabled
               ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
               : [])
           ]
         : [
             ...customTools.map((tool) => tool.name),
+            "plannotator_submit_plan",
+            "plannotator_update_plan",
             ...(nativeSubagentsEnabled
               ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
               : [])

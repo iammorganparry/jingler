@@ -848,14 +848,25 @@ export function ConversationPane({
   // while this pane is unmounted for a background session. Nothing to do here.
 
   const plannotatorDocument = useMemo(
-    () => convo.plannotator
-      ? plannotatorProjectionToPlanDocument(
-          convo.plannotator,
-          session.id,
-          activeChat.id,
-          new Date().toISOString()
-        )
-      : null,
+    () => {
+      const projection = convo.plannotator
+      if (!projection) return null
+      // Plannotator publishes host-state in every phase now (idle tracking),
+      // so an empty idle projection is a real payload — but nothing to show.
+      // Without this guard every session grows a hollow "Plan 0/0" drawer.
+      const hasPlan =
+        projection.review !== null ||
+        projection.planFilePath !== null ||
+        projection.checklist.length > 0
+      return hasPlan
+        ? plannotatorProjectionToPlanDocument(
+            projection,
+            session.id,
+            activeChat.id,
+            new Date().toISOString()
+          )
+        : null
+    },
     [activeChat.id, convo.plannotator, session.id]
   )
   const nativePlanDocument = plannotatorDocument

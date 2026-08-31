@@ -1893,6 +1893,32 @@ describe("conversationMachine — Plannotator projection", () => {
     expect(actor.getSnapshot().context.executionMode).toBe("auto")
     actor.stop()
   })
+
+  it("keeps the operator's mode when a plan starts executing outside plan mode", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    actor.send({ type: "SET_MODE", mode: "ask" })
+    expect(actor.getSnapshot().context.mode).toBe("ask")
+    actor.send({ type: "SEND", text: "work with a plan scratchpad" })
+    await waitFor(actor, (snapshot) => snapshot.matches("running"))
+
+    emit({
+      _tag: "PlannotatorStateChanged",
+      state: {
+        phase: "executing",
+        planFilePath: "PLAN.md",
+        review: null,
+        checklist: [{ step: 1, text: "Implement", completed: false }]
+      }
+    })
+
+    expect(actor.getSnapshot().context.plannotator?.phase).toBe("executing")
+    // The auto-switch is a plan-mode affordance only: a plan approved from a
+    // normal ask/accept-edits/auto session must not loosen the operator's
+    // permission mode.
+    expect(actor.getSnapshot().context.mode).toBe("ask")
+    actor.stop()
+  })
 })
 
 describe("conversationMachine — persisted session reconciliation", () => {

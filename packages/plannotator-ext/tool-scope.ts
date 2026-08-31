@@ -3,6 +3,7 @@ import { extname, isAbsolute, relative, resolve } from "node:path";
 export type Phase = "idle" | "planning" | "executing";
 
 export const PLAN_SUBMIT_TOOL = "plannotator_submit_plan";
+export const PLAN_UPDATE_TOOL = "plannotator_update_plan";
 
 const ALLOWED_PLAN_EXTENSIONS = new Set<string>([".md", ".mdx"]);
 
