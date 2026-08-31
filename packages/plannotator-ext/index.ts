@@ -33,9 +33,6 @@ import { loadConfig, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
 import {
-	hasPlanBrowserHtml,
-	getStartupErrorMessage,
-	startPlanReviewBrowserSession,
 	PLANNOTATOR_HOST_NOTICE_CHANNEL,
 	PLANNOTATOR_HOST_STATE_CHANNEL,
 	PLANNOTATOR_PLAN_APPROVED_CHANNEL,
@@ -44,6 +41,10 @@ import {
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.ts";
 import { resolveTodoProvider, type TodoProvider } from "./todo-providers/index.ts";
+import {
+	getStartupErrorMessage,
+	startNativePlanReviewSession,
+} from "./native-review.ts";
 import {
 	getAssistantMessageText,
 } from "./assistant-message.ts";
@@ -115,16 +116,9 @@ type PersistedPlannotatorState = {
 const PLAN_MODE_OFF_NOTICE = `[PLANNOTATOR - PLAN MODE OFF]
 Plannotator plan mode has ended. Disregard all earlier Plannotator planning or execution instructions from this session: the planning restrictions (markdown-only writes, plan submission for review) and the execution checklist protocol ([DONE:n] markers) no longer apply, and the plan-submission tool is no longer available. Full tool access is restored — respond and use tools normally. If the user wants planning again, they will re-enable plan mode.`;
 
-function getPlanReviewAvailabilityWarning(options: { hasUI: boolean; hasPlanHtml: boolean }): string | null {
-	const { hasUI, hasPlanHtml } = options;
-	if (hasUI && hasPlanHtml) return null;
-	if (!hasUI && !hasPlanHtml) {
-		return "Plannotator: interactive plan review is unavailable in this session (no UI support and missing built assets). Plans will auto-approve on exit_plan_mode.";
-	}
-	if (!hasUI) {
-		return "Plannotator: interactive plan review is unavailable in this session (no UI support). Plans will auto-approve on exit_plan_mode.";
-	}
-	return "Plannotator: interactive plan review assets are missing. Rebuild the extension to restore the browser UI. Plans will auto-approve on exit_plan_mode.";
+function getPlanReviewAvailabilityWarning(options: { hasUI: boolean }): string | null {
+	if (options.hasUI) return null;
+	return "Plannotator: interactive plan review is unavailable in this session (no UI support). Plans will auto-approve on exit_plan_mode.";
 }
 
 /**
@@ -433,7 +427,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		ctx.ui.notify(
 			"Plannotator: planning mode enabled.",
 		);
-		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
+		const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI });
 		if (warning) {
 			ctx.ui.notify(warning, "warning");
 		}
@@ -515,9 +509,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 		persistState();
 		let result: { approved: boolean; feedback?: string };
 		try {
-			const review = await startPlanReviewBrowserSession(ctx, planContent, signal);
+			const review = startNativePlanReviewSession(pi, signal);
 			reviewStarting = false;
-			activeReview = { reviewId: review.reviewId, url: review.url };
+			activeReview = { reviewId: review.reviewId };
 			publishHostState();
 			try {
 				result = await review.waitForDecision();
@@ -809,7 +803,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			checklistItems = parseChecklist(planContent);
 
 			// Non-interactive or no HTML: auto-approve
-			if (!ctx.hasUI || !hasPlanBrowserHtml()) {
+			if (!ctx.hasUI) {
 				if (resolveExecutionMode(plannotatorConfig) === "external") {
 					await handoffApprovedPlan(ctx, inputPath, planContent);
 					return {
@@ -1285,7 +1279,7 @@ Mark completed steps with [DONE:n] in your response.`
 		if (phase === "planning") {
 			checklistItems = [];
 			if (options.warnOnPlanning) {
-				const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI, hasPlanHtml: hasPlanBrowserHtml() });
+				const warning = getPlanReviewAvailabilityWarning({ hasUI: ctx.hasUI });
 				if (warning) {
 					ctx.ui.notify(warning, "warning");
 				}

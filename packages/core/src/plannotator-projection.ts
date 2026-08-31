@@ -12,9 +12,24 @@ export type PlannotatorChecklistItem = Schema.Schema.Type<
 
 export const PlannotatorReview = Schema.Struct({
   reviewId: Schema.String,
-  url: Schema.String
+  /** Legacy browser-review URL; the native review surface has none. */
+  url: Schema.optional(Schema.String)
 })
 export type PlannotatorReview = Schema.Schema.Type<typeof PlannotatorReview>
+
+/**
+ * Operator verdict on a pending Plannotator review, emitted by the host onto
+ * the session's event bus. Matched to the review by id: stale or duplicate
+ * decisions are ignored by the extension.
+ */
+export const PlannotatorReviewDecision = Schema.Struct({
+  reviewId: Schema.String,
+  approved: Schema.Boolean,
+  feedback: Schema.optional(Schema.String)
+})
+export type PlannotatorReviewDecision = Schema.Schema.Type<
+  typeof PlannotatorReviewDecision
+>
 
 export const PlannotatorProjection = Schema.Struct({
   phase: Schema.Literal("idle", "planning", "executing"),

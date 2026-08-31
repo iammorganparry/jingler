@@ -78,6 +78,7 @@ describe("retitleSession", () => {
       steer: () => Effect.void,
       interrupt: () => Effect.void,
       controlSubagent: () => Effect.die("unused"),
+      decidePlanReview: () => Effect.die("unused"),
       subagentFleetSnapshot: () => Effect.die("unused"),
       subagentTranscript: () => Effect.die("unused")
     })

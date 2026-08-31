@@ -2273,27 +2273,20 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String, visible: Schema.Boolean }
   }),
 
-  Rpc.make("PlannotatorPreview.open", {
-    error: BrowserPreviewError,
+  /**
+   * Deliver the operator's verdict on a pending Plannotator review to the
+   * live session. The forked extension resolves its awaited review when the
+   * reviewId matches; stale or duplicate decisions are ignored there.
+   */
+  Rpc.make("Plan.decide", {
+    error: GitError,
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
-      url: Schema.String,
-      bounds: BrowserBounds,
-      themeCss: Schema.String
+      reviewId: Schema.String,
+      approved: Schema.Boolean,
+      feedback: Schema.optional(Schema.String)
     }
-  }),
-  Rpc.make("PlannotatorPreview.setTheme", {
-    payload: { sessionId: Schema.String, chatId: Schema.String, themeCss: Schema.String }
-  }),
-  Rpc.make("PlannotatorPreview.setBounds", {
-    payload: { sessionId: Schema.String, chatId: Schema.String, bounds: BrowserBounds }
-  }),
-  Rpc.make("PlannotatorPreview.setVisible", {
-    payload: { sessionId: Schema.String, chatId: Schema.String, visible: Schema.Boolean }
-  }),
-  Rpc.make("PlannotatorPreview.close", {
-    payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
   // ── Browser control (agent QA) ───────────────────────────────────────────────

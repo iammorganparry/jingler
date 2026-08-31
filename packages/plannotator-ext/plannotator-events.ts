@@ -1,39 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getLastAssistantMessageText } from "./assistant-message.ts";
-import {
-	getStartupErrorMessage,
-	hasPlanBrowserHtml,
-	loadPlannotatorBrowser,
-} from "./plannotator-browser-runtime.ts";
-
-type PlannotatorBrowserModule = typeof import("./plannotator-browser.ts");
-
-/** Start a plan-review browser session after loading the browser/server graph on demand. */
-export function startPlanReviewBrowserSession(
-	...args: Parameters<PlannotatorBrowserModule["startPlanReviewBrowserSession"]>
-): ReturnType<PlannotatorBrowserModule["startPlanReviewBrowserSession"]> {
-	return loadPlannotatorBrowser().then((browser) => browser.startPlanReviewBrowserSession(...args));
-}
-
-/** Open a plan review after loading the browser/server graph on demand. */
-export function openPlanReviewBrowser(
-	...args: Parameters<PlannotatorBrowserModule["openPlanReviewBrowser"]>
-): ReturnType<PlannotatorBrowserModule["openPlanReviewBrowser"]> {
-	return loadPlannotatorBrowser().then((browser) => browser.openPlanReviewBrowser(...args));
-}
-
-/** Open the plan archive after loading the browser/server graph on demand. */
-export function openArchiveBrowserAction(
-	...args: Parameters<PlannotatorBrowserModule["openArchiveBrowserAction"]>
-): ReturnType<PlannotatorBrowserModule["openArchiveBrowserAction"]> {
-	return loadPlannotatorBrowser().then((browser) => browser.openArchiveBrowserAction(...args));
-}
+import { getStartupErrorMessage } from "./native-review.ts";
 
 export const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request" as const;
-export const PLANNOTATOR_REVIEW_RESULT_CHANNEL = "plannotator:review-result" as const;
 export const PLANNOTATOR_PLAN_APPROVED_CHANNEL = "plannotator:plan-approved" as const;
 export const PLANNOTATOR_HOST_STATE_CHANNEL = "plannotator:host-state" as const;
 export const PLANNOTATOR_HOST_NOTICE_CHANNEL = "plannotator:host-notice" as const;
@@ -42,15 +11,11 @@ export const PLANNOTATOR_TIMEOUT_MS = 5_000;
 export interface PlannotatorHostStateEvent {
 	phase: "idle" | "planning" | "executing";
 	planFilePath: string | null;
-	review: { reviewId: string; url: string } | null;
+	review: { reviewId: string; url?: string } | null;
 	checklist: Array<{ step: number; text: string; completed: boolean }>;
 }
 
-export type PlannotatorAction =
-	| "plan-mode"
-	| "plan-review"
-	| "review-status"
-	| "archive";
+export type PlannotatorAction = "plan-mode";
 
 export interface PlannotatorHandledResponse<T> {
 	status: "handled";
@@ -87,26 +52,6 @@ export interface PlannotatorPlanModeResult {
 	phase: "idle" | "planning" | "executing";
 }
 
-export interface PlannotatorPlanReviewPayload {
-	planFilePath?: string;
-	planContent: string;
-	origin?: string;
-}
-
-export interface PlannotatorPlanReviewStartResult {
-	status: "pending";
-	reviewId: string;
-}
-
-export interface PlannotatorReviewResultEvent {
-	reviewId: string;
-	approved: boolean;
-	feedback?: string;
-	savedPath?: string;
-	agentSwitch?: string;
-	permissionMode?: string;
-}
-
 export interface PlannotatorPlanApprovedEvent {
 	cwd: string;
 	planFilePath: string;
@@ -114,73 +59,15 @@ export interface PlannotatorPlanApprovedEvent {
 	feedback?: string;
 }
 
-export interface PlannotatorReviewStatusPayload {
-	reviewId: string;
-}
-
-export type PlannotatorReviewStatusResult =
-	| { status: "pending" }
-	| ({ status: "completed" } & PlannotatorReviewResultEvent)
-	| { status: "missing" };
-
-export interface PlannotatorArchivePayload {
-	customPlanPath?: string;
-}
-
-export interface PlannotatorArchiveResult {
-	opened: boolean;
-}
-
 export type PlannotatorRequestMap = {
 	"plan-mode": PlannotatorRequestBase<"plan-mode", PlannotatorPlanModePayload, PlannotatorPlanModeResult>;
-	"plan-review": PlannotatorRequestBase<"plan-review", PlannotatorPlanReviewPayload, PlannotatorPlanReviewStartResult>;
-	"review-status": PlannotatorRequestBase<"review-status", PlannotatorReviewStatusPayload, PlannotatorReviewStatusResult>;
-	archive: PlannotatorRequestBase<"archive", PlannotatorArchivePayload, PlannotatorArchiveResult>;
 };
 export type PlannotatorRequest = PlannotatorRequestMap[PlannotatorAction];
 export type PlannotatorResponseMap = {
 	"plan-mode": PlannotatorResponse<PlannotatorPlanModeResult>;
-	"plan-review": PlannotatorResponse<PlannotatorPlanReviewStartResult>;
-	"review-status": PlannotatorResponse<PlannotatorReviewStatusResult>;
-	archive: PlannotatorResponse<PlannotatorArchiveResult>;
 };
 function isPlannotatorAction(value: unknown): value is PlannotatorAction {
-	return (
-		value === "plan-mode" ||
-		value === "plan-review" ||
-		value === "review-status" ||
-		value === "archive"
-	);
-}
-
-const REVIEW_STATUS_PATH = join(homedir(), ".pi", "plannotator-review-status.json");
-
-type StoredReviewStatus = Record<string, PlannotatorReviewStatusResult>;
-
-function readStoredReviewStatuses(): StoredReviewStatus {
-	try {
-		if (!existsSync(REVIEW_STATUS_PATH)) return {};
-		const raw = readFileSync(REVIEW_STATUS_PATH, "utf-8");
-		const parsed = JSON.parse(raw) as StoredReviewStatus;
-		return parsed && typeof parsed === "object" ? parsed : {};
-	} catch {
-		return {};
-	}
-}
-
-function writeStoredReviewStatuses(statuses: StoredReviewStatus): void {
-	mkdirSync(dirname(REVIEW_STATUS_PATH), { recursive: true });
-	writeFileSync(REVIEW_STATUS_PATH, JSON.stringify(statuses, null, 2));
-}
-
-function setStoredReviewStatus(reviewId: string, status: PlannotatorReviewStatusResult): void {
-	const statuses = readStoredReviewStatuses();
-	statuses[reviewId] = status;
-	writeStoredReviewStatuses(statuses);
-}
-
-function getStoredReviewStatus(reviewId: string): PlannotatorReviewStatusResult {
-	return readStoredReviewStatuses()[reviewId] ?? { status: "missing" };
+	return value === "plan-mode";
 }
 
 function createActiveSessionContext() {
@@ -226,16 +113,6 @@ export function registerPlannotatorEventListeners(
 		}
 
 		try {
-			if (request.action === "review-status") {
-				const reviewId = request.payload?.reviewId;
-				if (typeof reviewId !== "string" || !reviewId.trim()) {
-					request.respond({ status: "error", error: "Missing reviewId for review-status request." });
-					return;
-				}
-				request.respond({ status: "handled", result: getStoredReviewStatus(reviewId) });
-				return;
-			}
-
 			if (!ctx) {
 				request.respond({ status: "unavailable", error: "Plannotator context is not ready yet." });
 				return;
@@ -256,40 +133,6 @@ export function registerPlannotatorEventListeners(
 					request.respond({ status: "handled", result });
 					return;
 				}
-				case "plan-review": {
-					const planContent = request.payload?.planContent;
-					if (typeof planContent !== "string" || !planContent.trim()) {
-						request.respond({ status: "error", error: "Missing planContent for plan-review request." });
-						return;
-					}
-					const session = await startPlanReviewBrowserSession(ctx, planContent);
-					setStoredReviewStatus(session.reviewId, { status: "pending" });
-					session.onDecision((result) => {
-						const reviewResult = {
-							reviewId: session.reviewId,
-							approved: result.approved,
-							feedback: result.feedback,
-							savedPath: result.savedPath,
-							agentSwitch: result.agentSwitch,
-							permissionMode: result.permissionMode,
-						} satisfies PlannotatorReviewResultEvent;
-						setStoredReviewStatus(session.reviewId, { status: "completed", ...reviewResult });
-						pi.events.emit(PLANNOTATOR_REVIEW_RESULT_CHANNEL, reviewResult);
-					});
-					request.respond({
-						status: "handled",
-						result: {
-							status: "pending",
-							reviewId: session.reviewId,
-						},
-					});
-					return;
-				}
-				case "archive": {
-					const result = await openArchiveBrowserAction(ctx, request.payload?.customPlanPath);
-					request.respond({ status: "handled", result });
-					return;
-				}
 			}
 		} catch (err) {
 			const message = getStartupErrorMessage(err);
@@ -304,6 +147,5 @@ export function registerPlannotatorEventListeners(
 
 export {
 	getLastAssistantMessageText,
-	hasPlanBrowserHtml,
 	getStartupErrorMessage,
 };

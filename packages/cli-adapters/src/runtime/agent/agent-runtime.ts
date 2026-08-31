@@ -3,6 +3,7 @@ import type {
   AgentRosterEntry,
   PeerAgentMessageResult,
   PiRunSpec,
+  PlannotatorReviewDecision,
   ExplanationPayload,
   QuestionAnswer,
   QuestionRequest,
@@ -75,6 +76,12 @@ export interface AgentRuntimeShape {
     chatId: string,
     request: SubagentFleetControlRequest
   ) => Effect.Effect<SubagentFleetControlOutcome, AgentRuntimeError>
+  /** Deliver the operator's verdict on the chat's pending native plan review. */
+  readonly decidePlanReview: (
+    sessionId: string,
+    chatId: string,
+    decision: PlannotatorReviewDecision
+  ) => Effect.Effect<void, AgentRuntimeError>
   readonly subagentFleetSnapshot: (
     sessionId: string,
     chatId: string,

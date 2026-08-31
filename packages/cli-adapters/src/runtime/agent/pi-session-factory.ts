@@ -16,7 +16,7 @@ import type {
   RegisterSubagentCapabilityCeilingOptions,
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
-import { PlannotatorProjection } from "@jingler/core"
+import { PlannotatorProjection, type PlannotatorReviewDecision } from "@jingler/core"
 import type {
   Message,
   PiRunSpec,
@@ -116,6 +116,7 @@ const makeExtensionUIContext = (): ExtensionUIContext => ({
 const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request"
 const PLANNOTATOR_HOST_STATE_CHANNEL = "plannotator:host-state"
 const PLANNOTATOR_HOST_NOTICE_CHANNEL = "plannotator:host-notice"
+const PLANNOTATOR_REVIEW_DECISION_CHANNEL = "plannotator:review-decision"
 const PLANNOTATOR_TIMEOUT_MS = 5_000
 const decodePlannotatorProjection = Schema.decodeUnknownOption(PlannotatorProjection)
 interface PlannotatorPlanModeResult {
@@ -380,6 +381,7 @@ interface EmbeddedSession {
     listener: (state: PlannotatorProjection) => void
   ) => () => void
   readonly subscribePlannotatorNotice: (listener: (message: string) => void) => () => void
+  readonly decidePlanReview: (decision: PlannotatorReviewDecision) => void
   readonly stopPlannotatorProjection: () => void
   readonly setMemoryReflectionActive: (active: boolean) => void
 }
@@ -520,6 +522,9 @@ const createEmbeddedSession = (
           for (const message of pendingPlannotatorNotices.splice(0)) listener(message)
           return () => plannotatorNoticeListeners.delete(listener)
         },
+        decidePlanReview: (decision) => {
+          events.emit(PLANNOTATOR_REVIEW_DECISION_CHANNEL, decision)
+        },
         stopPlannotatorProjection: () => {
           stopPlannotatorState()
           stopPlannotatorNotice()
@@ -578,6 +583,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     plannotatorPhase: embedded.plannotatorPhase,
     subscribePlannotator: embedded.subscribePlannotator,
     subscribePlannotatorNotice: embedded.subscribePlannotatorNotice,
+    decidePlanReview: embedded.decidePlanReview,
     subscribe: (listener) => {
       const unsubscribeSession = session.subscribe((event) => {
         if (
