@@ -34,7 +34,8 @@ const prepareRepository = (repoPath: string): ReadonlyArray<SeedSession> => {
       test: "printf 'owned device test clean\\n'"
     }
   }))
-  execFileSync("git", ["add", "package.json"], { cwd: repoPath })
+  writeFileSync(join(repoPath, "fresh.txt"), "before edit\n")
+  execFileSync("git", ["add", "package.json", "fresh.txt"], { cwd: repoPath })
   execFileSync("git", ["commit", "-qm", "add typecheck fixture"], { cwd: repoPath })
   execFileSync(
     "git",
@@ -55,7 +56,6 @@ test("enables, primes, automatically routes, and restores Offload Compute status
 }) => {
   const app = await launchApp({
     configured: true,
-    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
     withRepo: true,
     config: {
       offloadCompute: { enabled: false, explicitCommands: [] }
@@ -97,7 +97,6 @@ test("enables, primes, automatically routes, and restores Offload Compute status
     reposDir: app.reposDir,
     userDataDir: app.userDataDir,
     configured: true,
-    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
     authServer: app.authServer
   })
   await expect(appShell(reopened.window)).toBeVisible()
@@ -118,12 +117,13 @@ test("enables, primes, automatically routes, and restores Offload Compute status
     .toBeGreaterThan(primesBeforeRestore)
 })
 
-test("selects, persists, and executes on a specific fail-closed owned device", async ({
+test("selects, persists, and executes fresh edits on a specific fail-closed owned device", async ({
   launchApp
 }) => {
+  let ownedWorkspace = ""
   const app = await launchApp({
     configured: true,
-    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
+    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "0" },
     withRepo: true,
     remoteEnvironment: true,
     config: {
@@ -135,7 +135,7 @@ test("selects, persists, and executes on a specific fail-closed owned device", a
             repositorySlug: "jingler/example",
             command: {
               executable: "node",
-              args: ["-e", "process.stdout.write('owned device test clean\\n')"],
+              args: ["-e", "process.stdout.write(require('node:fs').readFileSync('fresh.txt', 'utf8'))"],
               cwd: "."
             }
           },
@@ -151,7 +151,10 @@ test("selects, persists, and executes on a specific fail-closed owned device", a
         ]
       }
     },
-    sessions: ({ repoPath }) => prepareRepository(repoPath)
+    sessions: ({ repoPath }) => {
+      ownedWorkspace = repoPath
+      return prepareRepository(repoPath)
+    }
   })
   await expect(appShell(app.window)).toBeVisible()
   await app.window.getByRole("button", { name: "Account menu" }).click()
@@ -192,13 +195,14 @@ test("selects, persists, and executes on a specific fail-closed owned device", a
   }).toMatchObject({ enabled: true, target: { kind: "owned-device", deviceId } })
 
   await app.window.getByRole("button", { name: "Close settings" }).click()
+  writeFileSync(join(ownedWorkspace, "fresh.txt"), "edited immediately before offload\n")
   const composer = app.window.getByRole("textbox", { name: /Message/ })
   await composer.fill("[[offload-owned-device]] Run the tests.")
   await composer.press("Enter")
   const remoteTool = app.window.getByRole("button", { name: /Bash (?:Running|Completed|Failed)/ })
   await expect(remoteTool).toBeVisible()
   await openToolResult(remoteTool)
-  await expect(app.window.getByText("owned device test clean", { exact: true }))
+  await expect(app.window.getByText("edited immediately before offload", { exact: true }))
     .toBeVisible({ timeout: 30_000 })
   await expect(app.window.getByText("Tests completed on the selected owned device."))
     .toBeVisible()
@@ -221,7 +225,6 @@ test("keeps eligible commands local while Offload Compute is disabled", async ({
 }) => {
   const app = await launchApp({
     configured: true,
-    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
     withRepo: true,
     config: {
       offloadCompute: { enabled: false, explicitCommands: [] }
@@ -238,29 +241,6 @@ test("keeps eligible commands local while Offload Compute is disabled", async ({
   expect(app.authServer.offloadRequests).toHaveLength(0)
 })
 
-test("keeps eligible commands local while an enabled host has resource headroom", async ({
-  launchApp
-}) => {
-  const app = await launchApp({
-    configured: true,
-    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "0" },
-    withRepo: true,
-    config: {
-      offloadCompute: { enabled: true, explicitCommands: [] }
-    },
-    sessions: ({ repoPath }) => prepareRepository(repoPath)
-  })
-  await expect(appShell(app.window)).toBeVisible()
-  await sendOffloadPrompt(app.window)
-  const localTool = app.window.getByRole("button", { name: /Bash (?:Running|Completed|Failed)/ })
-  await expect(localTool).toBeVisible()
-  await openToolResult(localTool)
-  await expect(app.window.getByText("pnpm: command not found", { exact: false }))
-    .toBeVisible()
-  await expect.poll(() => app.authServer.offloadRequests.map(({ kind }) => kind))
-    .toEqual(["prime"])
-})
-
 test("cancels the active remote command through the existing Stop control", async ({
   launchApp
 }) => {
@@ -269,7 +249,6 @@ test("cancels the active remote command through the existing Stop control", asyn
     const app = await launchApp({
       authServer,
       configured: true,
-    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
       withRepo: true,
       config: {
         offloadCompute: { enabled: true, explicitCommands: [] }
@@ -298,7 +277,6 @@ test("reports remote failure and requires an explicit local retry", async ({
     const app = await launchApp({
       authServer,
       configured: true,
-    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
       withRepo: true,
       config: {
         offloadCompute: { enabled: true, explicitCommands: [] }

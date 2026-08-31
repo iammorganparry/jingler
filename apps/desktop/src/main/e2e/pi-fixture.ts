@@ -752,7 +752,7 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
     return recentToolResultCount(context, COMMAND_TOOL) === 0
       ? callTool(
           COMMAND_TOOL,
-          { command: "node -e \"process.stdout.write('owned device test clean\\\\n')\"" },
+          { command: "node -e \"process.stdout.write(require('node:fs').readFileSync('fresh.txt', 'utf8'))\"" },
           "offload-owned-device-1"
         )
       : fauxAssistantMessage("Tests completed on the selected owned device.")

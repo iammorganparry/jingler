@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { gunzipSync } from "node:zlib"
 import { NodeContext } from "@effect/platform-node"
 import {
   DEFAULT_OFFLOAD_COMPUTE_SETTINGS,
@@ -55,15 +56,11 @@ const paths = (): AppPathsShape => ({
 })
 
 const router = async (
-  squeezed = true,
   ownedDevice?: OwnedDeviceOffloadPort
 ): Promise<OffloadCommandRouterPort> => {
   const secrets = await Effect.runPromise(makeInMemorySecretStore("desktop-token"))
   return Effect.runPromise(
-    makeOffloadCommandRouterWithOwnedDevice(ownedDevice, {
-      start: () => undefined,
-      isSqueezed: () => squeezed
-    }).pipe(
+    makeOffloadCommandRouterWithOwnedDevice(ownedDevice).pipe(
       Effect.provide(ConfigService.Default),
       Effect.provide(GitService.Default),
       Effect.provide(Layer.succeed(SecretStore, secrets)),
@@ -145,24 +142,6 @@ describe("automatic Offload Compute routing", () => {
     }))
     const result = await Effect.runPromise(
       (await router()).executeIfEligible(
-        workspace,
-        "session-one",
-        "pnpm typecheck",
-        context()
-      )
-    )
-    expect(result).toBeNull()
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it("keeps eligible work local while the host has CPU and memory headroom", async () => {
-    await writeFile(paths().configFile, JSON.stringify({
-      reposDir: null,
-      createdAt: new Date().toISOString(),
-      offloadCompute: { enabled: true, explicitCommands: [] }
-    }))
-    const result = await Effect.runPromise(
-      (await router(false)).executeIfEligible(
         workspace,
         "session-one",
         "pnpm typecheck",
@@ -261,7 +240,7 @@ describe("automatic Offload Compute routing", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("routes a pressured eligible command only to the selected owned device", async () => {
+  it("routes every eligible command with fresh tracked edits to the selected owned device", async () => {
     await writeFile(paths().configFile, JSON.stringify({
       reposDir: null,
       createdAt: new Date().toISOString(),
@@ -271,6 +250,7 @@ describe("automatic Offload Compute routing", () => {
         explicitCommands: []
       }
     }))
+    await writeFile(join(workspace, "package.json"), "{\"fresh\":true}\n")
     const execute = vi.fn<OwnedDeviceOffloadPort["execute"]>(() => Effect.succeed({
       command: "pnpm typecheck",
       exitCode: 0,
@@ -281,7 +261,7 @@ describe("automatic Offload Compute routing", () => {
     }))
 
     const result = await Effect.runPromise(
-      (await router(true, { execute })).executeIfEligible(
+      (await router({ execute })).executeIfEligible(
         workspace,
         "session-one",
         "pnpm typecheck",
@@ -293,6 +273,9 @@ describe("automatic Offload Compute routing", () => {
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
       deviceId: "device_selected"
     }))
+    const snapshot = execute.mock.calls[0]?.[0].snapshot
+    expect(snapshot).toBeDefined()
+    expect(gunzipSync(snapshot!.compressedBytes).toString("utf8")).toContain("fresh")
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

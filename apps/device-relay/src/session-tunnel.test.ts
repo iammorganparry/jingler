@@ -15,11 +15,14 @@ const initialization = (sessionId: string) => ({
 
 const clientInstanceId = "client_abcdefghijklmnop"
 
-const admission = (input: ReturnType<typeof initialization>) => ({
+const admission = (
+  input: ReturnType<typeof initialization>,
+  admittedClientInstanceId = clientInstanceId
+) => ({
   subject: input.subject,
   deviceId: input.deviceId,
   sessionId: input.sessionId,
-  clientInstanceId,
+  clientInstanceId: admittedClientInstanceId,
   attachmentGeneration: 1,
   controllerLeaseGeneration: 1,
   expiresAt: input.expiresAt
@@ -64,11 +67,13 @@ const connect = async (
   tunnel: DurableObjectStub<SessionTunnelObject>,
   input: ReturnType<typeof initialization>,
   endpoint: TunnelEndpoint,
-  acknowledgedSequence = 0
+  acknowledgedSequence = 0,
+  connectedClientInstanceId = clientInstanceId,
+  acquireController = endpoint === "desktop"
 ): Promise<WebSocket> => {
-  const clientAdmission = admission(input)
+  const clientAdmission = admission(input, connectedClientInstanceId)
   await tunnel.attachClient(clientAdmission, nowSeconds)
-  if (endpoint === "desktop") {
+  if (acquireController) {
     await tunnel.acquireController(
       { ...clientAdmission, expectedGeneration: 1, takeover: false },
       nowSeconds
@@ -83,7 +88,7 @@ const connect = async (
         "x-jingler-subject": input.subject,
         "x-jingler-device-id": input.deviceId,
         "x-jingler-device-generation": String(input.deviceGeneration),
-        "x-jingler-client-instance-id": clientInstanceId,
+        "x-jingler-client-instance-id": connectedClientInstanceId,
         "x-jingler-attachment-generation": "1",
         "x-jingler-controller-lease-generation": "1",
         "x-jingler-expires-at": String(input.expiresAt),
@@ -252,6 +257,88 @@ describe("encrypted session tunnel", () => {
     ])
     desktop.close(1000, "done")
     reconnected.close(1000, "done")
+  })
+
+  it("broadcasts device events to the controller and passive desktop observers", async () => {
+    const input = initialization("session_desktop_subscribers_abcd")
+    const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
+    await tunnel.initialize(input, nowSeconds)
+    const controller = await connect(tunnel, input, "desktop")
+    const observer = await connect(
+      tunnel,
+      input,
+      "desktop",
+      0,
+      "client_observer_abcdefgh",
+      false
+    )
+    const device = await connect(tunnel, input, "device")
+    controller.accept()
+    observer.accept()
+    device.accept()
+    await nextMessage(controller)
+    await nextMessage(observer)
+    await nextMessage(device)
+
+    const controllerDelivery = nextMessage(controller)
+    const observerDelivery = nextMessage(observer)
+    const accepted = nextMessage(device)
+    device.send(JSON.stringify({
+      type: "envelope",
+      envelope: envelope(input.sessionId, "device", 1)
+    }))
+    await expect(controllerDelivery).resolves.toMatchObject({
+      type: "envelope",
+      envelope: { sequence: 1 }
+    })
+    await expect(observerDelivery).resolves.toMatchObject({
+      type: "envelope",
+      envelope: { sequence: 1 }
+    })
+    await expect(accepted).resolves.toMatchObject({ type: "envelope-result", status: "inserted" })
+
+    const acknowledged = nextMessage(observer)
+    const peerAcknowledged = nextMessage(device)
+    observer.send(JSON.stringify({
+      type: "ack",
+      acknowledgement: {
+        version: 1,
+        sessionId: input.sessionId,
+        sender: "desktop",
+        acknowledgedSequence: 1
+      }
+    }))
+    await expect(acknowledged).resolves.toMatchObject({ type: "acknowledged", sequence: 1 })
+    await expect(peerAcknowledged).resolves.toMatchObject({ type: "peer-acknowledged", sequence: 1 })
+    await expect(tunnel.storedSequences("device")).resolves.toEqual([])
+
+    const rejected = nextMessage(observer)
+    observer.send(JSON.stringify({
+      type: "envelope",
+      envelope: envelope(input.sessionId, "desktop", 1)
+    }))
+    await expect(rejected).resolves.toMatchObject({
+      type: "envelope-result",
+      status: "stale-controller"
+    })
+
+    observer.close(1000, "done")
+    const remainingDelivery = nextMessage(controller)
+    const secondAccepted = nextMessage(device)
+    device.send(JSON.stringify({
+      type: "envelope",
+      envelope: envelope(input.sessionId, "device", 2)
+    }))
+    await expect(remainingDelivery).resolves.toMatchObject({
+      type: "envelope",
+      envelope: { sequence: 2 }
+    })
+    await expect(secondAccepted).resolves.toMatchObject({
+      type: "envelope-result",
+      status: "inserted"
+    })
+    controller.close(1000, "done")
+    device.close(1000, "done")
   })
 
   it("does not replay acknowledged commands", async () => {
