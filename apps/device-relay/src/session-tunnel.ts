@@ -700,8 +700,10 @@ export class SessionTunnelObject extends DurableObject<Env> {
       )
     }
 
-    for (const socket of this.ctx.getWebSockets(`endpoint:${endpoint}`)) {
-      safeClose(socket, 4002, "Connection replaced")
+    if (endpoint === "device") {
+      for (const socket of this.ctx.getWebSockets("endpoint:device")) {
+        safeClose(socket, 4002, "Connection replaced")
+      }
     }
     const pair = new WebSocketPair()
     const client = pair[0]

@@ -25,10 +25,6 @@ import {
 } from "./offload-snapshot.js"
 import { SecretStore } from "./secret-store.js"
 import {
-  makeResourcePressureMonitor,
-  type ResourcePressurePort
-} from "./resource-pressure.js"
-import {
   ToolError,
   type ToolExecutionContext
 } from "./runtime/tools/tool-registry.js"
@@ -255,8 +251,7 @@ export const pollResult = async (input: PollInput): Promise<OffloadedCommandResu
 
 /** Capture desktop services once; each command remains an Effect-owned workflow. */
 export const makeOffloadCommandRouterWithOwnedDevice = (
-  ownedDevice?: OwnedDeviceOffloadPort,
-  resourcePressure: ResourcePressurePort = makeResourcePressureMonitor()
+  ownedDevice?: OwnedDeviceOffloadPort
 ) => Effect.gen(function* () {
   const config = yield* ConfigService
   const secrets = yield* SecretStore
@@ -278,7 +273,6 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
         Effect.mapError(() => failure("Could not read Offload Compute settings"))
       ))?.offloadCompute ?? DEFAULT_OFFLOAD_COMPUTE_SETTINGS
       if (!settings.enabled) return "disabled" as const
-      resourcePressure.start()
       if (settings.target.kind === "owned-device") return "accepted" as const
       const token = yield* secrets.get
       if (token === null) return yield* Effect.fail(failure("Sign in before using Offload Compute"))
@@ -356,8 +350,6 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
       : `${repository.owner}/${repository.repo}`
     const routing = classifyOffloadCommand(settings, observed.command, repositorySlug)
     if (routing.target === "local") return null
-    resourcePressure.start()
-    if (!resourcePressure.isSqueezed()) return null
     const invocationKey = context.idempotencyKey
     if (!invocationKey) {
       return yield* Effect.fail(failure(
