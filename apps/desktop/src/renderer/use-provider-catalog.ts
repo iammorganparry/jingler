@@ -16,7 +16,14 @@ const messageOf = (error: unknown): string =>
 /** Canonical provider catalog mutations; every success refreshes the one shared query. */
 export function useProviderCatalog() {
   const queryClient = useQueryClient()
-  const catalog = useQuery({ queryKey: CATALOG_KEY, queryFn: rpc.providerList })
+  // Reconnects can finish while the window is unfocused (browser OAuth, a CLI
+  // login): unlike the client-wide default, re-check on focus so provider
+  // recovery banners clear without a manual refresh.
+  const catalog = useQuery({
+    queryKey: CATALOG_KEY,
+    queryFn: rpc.providerList,
+    refetchOnWindowFocus: true
+  })
   const refreshCatalog = () => queryClient.invalidateQueries({ queryKey: CATALOG_KEY })
 
   const refresh = useMutation({

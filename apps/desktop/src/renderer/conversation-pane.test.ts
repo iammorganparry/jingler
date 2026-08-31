@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest"
 import {
   CURRENT_RUNTIME_CONTRACTS,
   Environment,
-  ProviderCatalog
+  ProviderCatalog,
+  type Session
 } from "@jingler/core"
 import { Schema } from "effect"
 import {
@@ -11,7 +12,7 @@ import {
   DEFAULT_PLAN_SPLIT_RATIO,
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
-import { providerRecoveryOf } from "./provider-recovery.js"
+import { providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
 
 describe("conversation/plan split ratio", () => {
   it("starts with two thirds for the plan and resizes continuously", () => {
@@ -97,5 +98,82 @@ describe("provider recovery", () => {
       targetId: cloud.id,
       target: cloud
     })).toBeUndefined()
+  })
+})
+
+const rebindModelId = "openai-codex/gpt-5.6-sol"
+const entry = (id: string, overrides?: {
+  status?: string
+  selectable?: boolean
+  providerId?: string
+}) => ({
+  connection: {
+    id,
+    providerId: overrides?.providerId ?? "openai-codex",
+    authKind: "openai-codex-oauth",
+    account: null,
+    targetId: "desktop",
+    status: overrides?.status ?? "authenticated",
+    subscription: {
+      entitlement: "active",
+      planLabel: null,
+      expiresAt: null,
+      quotaLabel: null,
+      rateLimitLabel: null,
+      confirmedBillingRoute: "subscription"
+    },
+    createdAt: "2026-08-13T00:00:00.000Z",
+    updatedAt: "2026-08-13T00:00:00.000Z"
+  },
+  models: [{
+    providerId: overrides?.providerId ?? "openai-codex",
+    id: rebindModelId,
+    label: "GPT-5.6 Sol",
+    capabilities: { contextWindow: null, reasoning: [], vision: false },
+    verification: "certified",
+    selectable: overrides?.selectable ?? true,
+    certificationKey: "current"
+  }]
+})
+const catalogOf = (...connections: ReadonlyArray<ReturnType<typeof entry>>) =>
+  Schema.decodeUnknownSync(ProviderCatalog)({
+    refreshedAt: "2026-08-13T00:00:00.000Z",
+    stale: false,
+    connections
+  })
+const selection = (connectionId: string) => ({
+  connectionId: connectionId as Session["connectionId"],
+  providerId: "openai-codex" as Session["providerId"],
+  modelId: rebindModelId as Session["modelId"],
+  targetId: "desktop"
+})
+
+describe("provider rebind", () => {
+  it("rebinds to the single reconnected account when the pinned connection is gone", () => {
+    const catalog = catalogOf(entry("connection_new"))
+    expect(providerRebindOf(catalog, selection("connection_gone"))).toBe("connection_new")
+  })
+
+  it("never rebinds while the pinned connection still exists, even unauthenticated", () => {
+    const catalog = catalogOf(
+      entry("connection_pinned", { status: "expired" }),
+      entry("connection_new")
+    )
+    expect(providerRebindOf(catalog, selection("connection_pinned"))).toBeUndefined()
+  })
+
+  it("refuses an ambiguous rebind when several connections would qualify", () => {
+    const catalog = catalogOf(entry("connection_a"), entry("connection_b"))
+    expect(providerRebindOf(catalog, selection("connection_gone"))).toBeUndefined()
+  })
+
+  it("refuses a rebind when the replacement cannot run the pinned model", () => {
+    const catalog = catalogOf(entry("connection_new", { selectable: false }))
+    expect(providerRebindOf(catalog, selection("connection_gone"))).toBeUndefined()
+  })
+
+  it("refuses a rebind onto a different provider's connection", () => {
+    const catalog = catalogOf(entry("connection_claude", { providerId: "claude" }))
+    expect(providerRebindOf(catalog, selection("connection_gone"))).toBeUndefined()
   })
 })

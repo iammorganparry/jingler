@@ -71,7 +71,7 @@ import {
   rpcFailureReason,
   rpcFailureTag
 } from "./rpc-failure.js"
-import { providerRecoveryOf } from "./provider-recovery.js"
+import { providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
@@ -421,15 +421,29 @@ export function ConversationPane({
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
+  const providerSelection = {
+    ...convo,
+    connectionSelectionRequired: session.connectionSelectionRequired,
+    modelSelectionRequired: session.modelSelectionRequired,
+    targetId: session.environmentId ?? "desktop",
+    target: environments.find((environment) => environment.id === session.environmentId)
+  }
   const providerRecovery = providerCatalog
-    ? providerRecoveryOf(providerCatalog, {
-        ...convo,
-        connectionSelectionRequired: session.connectionSelectionRequired,
-        modelSelectionRequired: session.modelSelectionRequired,
-        targetId: session.environmentId ?? "desktop",
-        target: environments.find((environment) => environment.id === session.environmentId)
-      })
+    ? providerRecoveryOf(providerCatalog, providerSelection)
     : undefined
+  // Reconnecting a removed account mints a new connection id, so the pinned one
+  // never reappears and the recovery card would stay up after the operator has
+  // already fixed the problem. When the refreshed catalog has an unambiguous
+  // replacement, rebind through the same SET_MODEL path the picker uses.
+  const rebindConnectionId = providerCatalog
+    ? providerRebindOf(providerCatalog, providerSelection)
+    : undefined
+  const { providerId: convoProviderId, modelId: convoModelId, setModel } = convo
+  useEffect(() => {
+    if (rebindConnectionId === undefined) return
+    if (convoProviderId == null || convoModelId == null) return
+    setModel(rebindConnectionId, convoProviderId, convoModelId)
+  }, [rebindConnectionId, convoProviderId, convoModelId, setModel])
   const composerDisabledReason = typeof providerRecovery === "string"
     ? providerRecovery
     : providerRecovery?.message
