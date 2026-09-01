@@ -139,7 +139,7 @@ test("Plannotator reviews in a bundled Plan-tab view and drives progress", async
 
   await approveReview(launched.app)
 
-  await launched.window.getByTestId("active-chat-tab").first().click()
+  // Approval returns to the responsive conversation/plan split without hiding the plan.
   const transcriptCard = launched.window.getByTestId("plannotator-transcript-card")
   await expect(transcriptCard).toBeVisible()
   await expect(launched.window.getByRole("tab", { name: "Plan 1/2" })).toBeVisible({

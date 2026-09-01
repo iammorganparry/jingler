@@ -84,6 +84,8 @@ export interface ConversationPaneCtx {
    * progress dock deep-links; the inline plan card calls it bare).
    */
   onOpenPlanReview: (stepId?: string) => void
+  /** Leave full-page Plan Review after acceptance; wide panes retain the split. */
+  onPlanReviewAccepted: () => void
   /** Open a repository path in this session's Files tab. */
   onOpenFile: (path: string) => void
   /** Present the Files workspace without requiring a path to be selected. */
@@ -386,6 +388,11 @@ function SessionPaneBody(props: SessionPaneProps) {
     },
     [props.session.id, supportsAuxiliarySplit, hasPlan]
   )
+  const acceptPlanReview = useCallback(() => {
+    setTarget(null)
+    setTab(BUILTIN_TAB.conversation)
+    setSplit(supportsAuxiliarySplit)
+  }, [supportsAuxiliarySplit])
   const presentPlanDraft = useCallback(() => {
     setTarget(null)
     setDraftPlanSessionId(props.session.id)
@@ -512,6 +519,7 @@ function SessionPaneBody(props: SessionPaneProps) {
               openPlanReview(stepId)
             }
           },
+          onPlanReviewAccepted: acceptPlanReview,
           onOpenFile: (path) => {
             props.onOpenFile?.(session.id, path)
             ctx.onSelectTab(BUILTIN_TAB.files)
