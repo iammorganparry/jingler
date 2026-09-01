@@ -87,10 +87,11 @@ finds an older version.
    branch itself.
 
 4. Describe the task in the composer. In Plan mode, the pinned Plannotator extension owns the
-   Markdown plan, review decision, automatic same-session execution, checklist progress, and
-   recovery. Jingler embeds the loopback review in the Plan tab and mirrors its checklist into the
-   native plan drawer, progress dock, composer, todo list, and transcript without storing a second
-   plan state.
+   structured Markdown plan, review decision, automatic same-session execution, checklist
+   progress, and recovery. Jingler packages Plannotator's review surface in the Plan tab without a
+   localhost server and mirrors its checklist into the native plan drawer, progress dock, composer,
+   todo list, and transcript without storing a second plan state. Each `##` plan stage is sized as a
+   logical commit boundary; its Markdown checkbox markers are the durable step statuses.
 
 5. If the Jingler GitHub App is connected, create or link a pull request from the PR view.
 

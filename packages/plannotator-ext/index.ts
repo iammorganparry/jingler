@@ -26,9 +26,11 @@ import { Key } from "@earendil-works/pi-tui";
 import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
 import {
 	type ChecklistItem,
-	markCompletedSteps,
+	extractDoneSteps,
 	parseChecklist,
 } from "./generated/checklist.ts";
+import { persistPlanStatuses } from "./plan-status.ts";
+
 import { loadConfig, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
@@ -198,6 +200,45 @@ export default function plannotator(pi: ExtensionAPI): void {
 		return parseChecklist(content);
 	}
 
+	async function persistDoneMarkers(text: string, ctx: ExtensionContext): Promise<number> {
+		if (!lastSubmittedPath) return 0;
+		const validSteps = new Set(checklistItems.map(({ step }) => step));
+		const completedSteps = extractDoneSteps(text).filter((step) => validSteps.has(step));
+		if (completedSteps.length === 0) return 0;
+		const fullPath = resolve(ctx.cwd, lastSubmittedPath);
+		try {
+			const content = await persistPlanStatuses(
+				fullPath,
+				new Map(completedSteps.map((step) => [step, "completed" as const])),
+			);
+			checklistItems = adoptPlanContent(content);
+			return completedSteps.length;
+		} catch (error) {
+			try {
+				checklistItems = adoptPlanContent(readFileSync(fullPath, "utf8"));
+			} catch {
+				phase = "idle";
+				lastSubmittedPath = null;
+				activeReview = null;
+				reviewPending = false;
+				justApprovedPlan = false;
+				checklistItems = [];
+				hostChecklist = [];
+				lastPlanContent = null;
+				hostStructure = null;
+				idleNoticePending = true;
+				publishHostState();
+				updateStatus(ctx);
+				persistState();
+			}
+			ctx.ui.notify(
+				`Plannotator could not persist checklist progress: ${error instanceof Error ? error.message : String(error)}`,
+				"error",
+			);
+			return 0;
+		}
+	}
+
 	function publishHostState(): void {
 		if (checklistItems.length > 0) hostChecklist = checklistItems.map((item) => ({ ...item }));
 		if (hostStructure === null && lastPlanContent !== null) {
@@ -241,6 +282,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			planFilePath: lastSubmittedPath,
 			review: activeReview,
 			checklist: hostChecklist.map((item) => ({ ...item })),
+			...(lastPlanContent === null ? {} : { planContent: lastPlanContent }),
 			...structured,
 		} satisfies PlannotatorHostStateEvent);
 	}
@@ -1156,7 +1198,7 @@ Mark completed steps with [DONE:n] in your response.`
 	// rewrites history, and it invalidates the provider cache by itself.
 
 	// Track execution progress
-	pi.on("turn_end", async (event, ctx) => {
+	pi.on("message_end", async (event, ctx) => {
 		if (phase === "idle" && lastSubmittedPath) {
 			// Idle tracking: a plan adopted via plannotator_update_plan (or an
 			// earlier run) may have been edited this turn with write/edit —
@@ -1171,7 +1213,7 @@ Mark completed steps with [DONE:n] in your response.`
 				return;
 			}
 			const idleText = getAssistantMessageText(event.message);
-			if (idleText) markCompletedSteps(idleText, checklistItems);
+			if (idleText) await persistDoneMarkers(idleText, ctx);
 			updateStatus(ctx);
 			persistState();
 			return;
@@ -1180,7 +1222,7 @@ Mark completed steps with [DONE:n] in your response.`
 
 		const text = getAssistantMessageText(event.message);
 		if (!text) return;
-		if (markCompletedSteps(text, checklistItems) > 0) {
+		if (await persistDoneMarkers(text, ctx) > 0) {
 			updateStatus(ctx);
 			updateWidget(ctx);
 			await syncTodoProvider(ctx);
@@ -1313,12 +1355,16 @@ Mark completed steps with [DONE:n] in your response.`
 						}
 					}
 
+					const recoveredMarkers: string[] = [];
 					for (let i = executeIndex + 1; i < entries.length; i++) {
 						const entry = entries[i];
 						if (entry.type === "message" && "message" in entry) {
 							const text = getAssistantMessageText(entry.message);
-							if (text) markCompletedSteps(text, checklistItems);
+							if (text) recoveredMarkers.push(text);
 						}
+					}
+					if (recoveredMarkers.length > 0) {
+						await persistDoneMarkers(recoveredMarkers.join("\n"), ctx);
 					}
 				} else {
 					// Plan file gone — fall back to idle. This demotes a RECORDED

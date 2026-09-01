@@ -1,0 +1,11 @@
+--- packages/ui/hooks/useUpdateCheck.ts.upstream	2026-09-01 11:36:36
++++ packages/ui/hooks/useUpdateCheck.ts	2026-09-01 11:36:37
+@@ -72,6 +72,8 @@
+   }, [checkResult?.latestVersion]);
+ 
+   useEffect(() => {
++    // Jingler embeds a pinned build and owns app updates; never call GitHub here.
++    return undefined;
+     const checkForUpdates = async () => {
+       try {
+         const currentVersion = typeof __APP_VERSION__ !== 'undefined'

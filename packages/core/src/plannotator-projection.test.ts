@@ -78,6 +78,7 @@ describe("Plannotator native projection", () => {
       "2026-08-27T00:00:00.000Z"
     )
     expect(document.status).toBe("proposed")
+    expect(document.reviewId).toBe("r1")
     expect(document.plan.stages).toHaveLength(1)
   })
 
@@ -91,6 +92,7 @@ describe("Plannotator native projection", () => {
         { step: 2, text: "Wire the route", completed: false },
         { step: 3, text: "Service tests green", completed: false }
       ],
+      planContent: "# Auth replacement\n\n- [x] Add the service\n",
       title: "Auth replacement",
       revision: 3,
       sections: [{
@@ -133,6 +135,7 @@ describe("Plannotator native projection", () => {
       "2026-08-27T00:00:00.000Z"
     )
     expect(document.plan.title).toBe("Auth replacement")
+    expect(document.sourceMarkdown).toContain("- [x] Add the service")
     expect(document.revision).toBe(3)
     expect(document.plan.sections).toHaveLength(1)
     expect(document.plan.sections[0]!.blocks.map((block) => block.kind)).toEqual([

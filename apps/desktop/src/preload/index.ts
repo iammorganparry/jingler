@@ -16,6 +16,12 @@ const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 const PLAN_FLUSH_REQUEST_CHANNEL = "jingler/plan-flush-request"
 const PLAN_FLUSH_COMPLETE_CHANNEL = "jingler/plan-flush-complete"
+const PLANNOTATOR_OPEN_CHANNEL = "jingler/plannotator/open"
+const PLANNOTATOR_HIDE_CHANNEL = "jingler/plannotator/hide"
+const PLANNOTATOR_CLOSE_CHANNEL = "jingler/plannotator/close"
+const PLANNOTATOR_CLOSE_SESSION_CHANNEL = "jingler/plannotator/close-session"
+const PLANNOTATOR_DECISION_CHANNEL = "jingler/plannotator/decision"
+const PLANNOTATOR_DECISION_ACK_CHANNEL = "jingler/plannotator/decision-ack"
 
 /**
  * The active theme's `:root` block, fetched SYNCHRONOUSLY at preload time.
@@ -119,5 +125,30 @@ contextBridge.exposeInMainWorld("jingler", {
     ipcRenderer.on(PLAN_FLUSH_REQUEST_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PLAN_FLUSH_REQUEST_CHANNEL, listener)
   },
-  planFlushComplete: () => ipcRenderer.send(PLAN_FLUSH_COMPLETE_CHANNEL)
+  planFlushComplete: () => ipcRenderer.send(PLAN_FLUSH_COMPLETE_CHANNEL),
+  openPlannotator: (payload: unknown) => ipcRenderer.invoke(PLANNOTATOR_OPEN_CHANNEL, payload),
+  hidePlannotator: (owner: unknown) => ipcRenderer.send(PLANNOTATOR_HIDE_CHANNEL, owner),
+  closePlannotator: (owner: unknown) => ipcRenderer.send(PLANNOTATOR_CLOSE_CHANNEL, owner),
+  closePlannotatorSession: (sessionId: string) =>
+    ipcRenderer.send(PLANNOTATOR_CLOSE_SESSION_CHANNEL, sessionId),
+  onPlannotatorDecision: (
+    cb: (payload: unknown) => boolean | undefined | Promise<boolean | undefined>
+  ) => {
+    const listener = async (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      if (
+        typeof payload !== "object" ||
+        payload === null ||
+        !("deliveryId" in payload) ||
+        typeof payload.deliveryId !== "string"
+      ) return
+      const delivered = await Promise.resolve(cb(payload)).catch(() => false)
+      if (delivered === undefined) return
+      ipcRenderer.send(PLANNOTATOR_DECISION_ACK_CHANNEL, {
+        deliveryId: payload.deliveryId,
+        delivered
+      })
+    }
+    ipcRenderer.on(PLANNOTATOR_DECISION_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(PLANNOTATOR_DECISION_CHANNEL, listener)
+  }
 })

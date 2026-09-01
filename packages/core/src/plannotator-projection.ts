@@ -117,6 +117,8 @@ export const PlannotatorProjection = Schema.Struct({
   planFilePath: Schema.NullOr(Schema.String),
   review: Schema.NullOr(PlannotatorReview),
   checklist: Schema.Array(PlannotatorChecklistItem),
+  /** Current Markdown scratchpad; absent from legacy publishers. */
+  planContent: Schema.optional(Schema.String),
   /** Structured plan payload — absent from flat/legacy publishers. */
   title: Schema.optional(Schema.NullOr(Schema.String)),
   revision: Schema.optional(Schema.Number),
@@ -154,6 +156,8 @@ export const plannotatorProjectionToPlanDocument = (
   sessionId,
   producingChatId,
   revision: projection.revision ?? 1,
+  reviewId: projection.review?.reviewId,
+  sourceMarkdown: projection.planContent,
   status: projectionStatus(projection),
   plan: {
     title: projection.title ?? projection.planFilePath ?? "Plan",
@@ -188,7 +192,7 @@ const sectionBlockToPlanBlock = (
       return {
         kind: "code",
         id,
-        ...(block.language === undefined ? {} : { language: block.language }),
+        language: block.language,
         code: block.code
       }
     case "diagram":
@@ -230,17 +234,13 @@ const structuredStageToPlanStage = (
     text: criterion.text,
     status: criterion.status,
     evidence: null,
-    ...(criterion.testReferences === undefined
-      ? {}
-      : {
-          testReferences: criterion.testReferences.map((reference) => ({
-            path: reference.path,
-            cases: reference.cases
-          }))
-        })
+    testReferences: criterion.testReferences?.map((reference) => ({
+      path: reference.path,
+      cases: reference.cases
+    }))
   })),
-  ...(stage.complexity === undefined ? {} : { complexity: stage.complexity }),
-  ...(stage.dependencies === undefined ? {} : { dependencies: stage.dependencies })
+  complexity: stage.complexity,
+  dependencies: stage.dependencies
 })
 
 const flatStageOf = (

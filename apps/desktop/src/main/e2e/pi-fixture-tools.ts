@@ -10,6 +10,7 @@ export const E2E_BACKGROUND_TOOL = "jingler_e2e_background"
 export const E2E_HELD_SUBAGENTS_TOOL = "jingler_e2e_held_subagents"
 export const E2E_HOLD_TOOL = "jingler_e2e_hold"
 export const E2E_REVIEW_PAUSE_TOOL = "jingler_e2e_review_pause"
+export const E2E_PLAN_PROGRESS_TOOL = "jingler_e2e_plan_progress"
 
 export const E2eBackgroundKind = Schema.Literal(
   "watch",
@@ -316,6 +317,23 @@ const registerHeldSubagentsTool = (
   })
 }
 
+const registerPlanProgressTool = (registry: ToolRegistry): void => {
+  registry.register({
+    id: E2E_PLAN_PROGRESS_TOOL,
+    version: "1",
+    description: "Pause between deterministic plan progress markers.",
+    input: Schema.Struct({}),
+    risk: "read",
+    roles: ["conversation", "plan", "plan-execution"],
+    modes: ["auto", "plan"],
+    timeoutMs: 8_000,
+    outputBudget: 1_000,
+    cancellable: false,
+    idempotency: "safe",
+    execute: () => Effect.runPromise(Effect.sleep("5 seconds").pipe(Effect.as({ advanced: true })))
+  })
+}
+
 const registerHoldTool = (registry: ToolRegistry): void => {
   registry.register({
     id: E2E_HOLD_TOOL,
@@ -343,6 +361,7 @@ export const configureE2ePiTools: NonNullable<
   Effect.sync(() => {
     registerBackgroundFixtureTool(registry, spec, context)
     registerHeldSubagentsTool(registry, spec, context)
+    registerPlanProgressTool(registry)
     registerHoldTool(registry)
     registerReviewPauseTool(registry)
   })

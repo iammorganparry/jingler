@@ -81,13 +81,31 @@ describe("PlanApprovalCard projection", () => {
     expect(screen.queryByRole("button", { name: /^Approve$/ })).toBeNull()
   })
 
-  it("renders canonical stages with their nested tasks when ids match", () => {
-    render(<PlanApprovalCard plan={plan} document={document} />)
+  it("renders canonical stages and tracks their live task status", () => {
+    const view = render(<PlanApprovalCard plan={plan} document={document} />)
 
     expect(screen.getByText("Canonical plan summary.")).toBeTruthy()
     expect(screen.getByText("Canonical stage")).toBeTruthy()
     expect(screen.getByText("First stage task")).toBeTruthy()
     expect(screen.getByText("Second stage task")).toBeTruthy()
     expect(screen.queryByText("Implement it")).toBeNull()
+    expect(screen.getByTestId("plan-approval-stage-canonical-stage").dataset.status)
+      .toBe("running")
+
+    view.rerender(<PlanApprovalCard plan={plan} document={{
+      ...document,
+      plan: {
+        ...document.plan,
+        stages: [{
+          ...document.plan.stages[0]!,
+          tasks: (document.plan.stages[0]!.tasks ?? []).map((task) => ({
+            ...task,
+            status: "completed" as const
+          }))
+        }]
+      }
+    }} />)
+    expect(screen.getByTestId("plan-approval-stage-canonical-stage").dataset.status)
+      .toBe("completed")
   })
 })

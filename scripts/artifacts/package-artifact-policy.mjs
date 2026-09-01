@@ -5,6 +5,7 @@ const PI_PACKAGES = [
 const PONYTAIL_PACKAGE = "@dietrichgebert/ponytail"
 const SUBAGENT_PACKAGE = "pi-subagents"
 const SUBAGENT_RUNTIME_LOADER = "jiti"
+const PLANNOTATOR_PACKAGE = "@jingler/plannotator-ext"
 
 const LEGACY_HARNESS_PACKAGES = [
   "@anthropic-ai/claude-agent-sdk",
@@ -36,7 +37,13 @@ export const auditDeviceBundle = (source) => [
 export const auditDesktopArchive = (entries) => {
   const normalized = entries.map((entry) => entry.replace(LEADING_SLASH, ""))
   return [
-    ...[PONYTAIL_PACKAGE, ...PI_PACKAGES, SUBAGENT_PACKAGE, SUBAGENT_RUNTIME_LOADER].flatMap((name) =>
+    ...[
+      PONYTAIL_PACKAGE,
+      ...PI_PACKAGES,
+      SUBAGENT_PACKAGE,
+      SUBAGENT_RUNTIME_LOADER,
+      PLANNOTATOR_PACKAGE
+    ].flatMap((name) =>
       normalized.includes(`${packageMarker(name)}package.json`)
         ? []
         : [`desktop archive is missing ${name}`]
@@ -57,7 +64,13 @@ export const auditDesktopArchive = (entries) => {
 export const auditRuntimeDependencies = (manifest, label) => {
   const dependencies = manifest.dependencies ?? {}
   const required = label === "desktop"
-    ? [PONYTAIL_PACKAGE, ...PI_PACKAGES, SUBAGENT_PACKAGE, SUBAGENT_RUNTIME_LOADER]
+    ? [
+        PONYTAIL_PACKAGE,
+        ...PI_PACKAGES,
+        SUBAGENT_PACKAGE,
+        SUBAGENT_RUNTIME_LOADER,
+        PLANNOTATOR_PACKAGE
+      ]
     : [PONYTAIL_PACKAGE, ...PI_PACKAGES, SUBAGENT_PACKAGE]
   return [
     ...required.flatMap((name) =>

@@ -1,238 +1,98 @@
-import {
-  type ExecutionMode,
-  type PlanAnnotationAnchor,
-  type PlanCommentMessage,
-  type Plan,
-  type PlanDocument,
-  type PlanDraft
-} from "@jingler/core"
-import { ClipboardList } from "lucide-react"
-import { type ReactNode, useState } from "react"
-import { Button } from "../components/button.js"
-import { Markdown } from "../components/markdown.js"
-import { PlanCommentLayer } from "../composites/plan-doc/plan-comment-layer.js"
-import {
-  atLeast,
-  useWidthTier,
-  WidthTierProvider
-} from "../hooks/width-tier.js"
-import { cn } from "../lib/cn.js"
-import {
-  PlanEditor,
-  type PlanEditorSyncState
-} from "../composites/plan-editor.js"
+import type { PlanDocument } from "@jingler/core"
+import { useEffect, useRef } from "react"
 
-/**
- * The Plan Review tab is the canonical Notion-style document editor.
- *
- * Canonical documents use the Notion-style editor. Threads created before
- * canonical plan documents existed keep their original Markdown in `plan.raw`;
- * those render as a simple read-only document rather than resurrecting the
- * legacy multi-pane review workspace.
- */
+export interface PlannotatorOpenPayload {
+  readonly sessionId: string
+  readonly chatId: string
+  readonly document: PlanDocument
+  readonly canDecide: boolean
+  readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+}
+
+export interface PlannotatorPlanHost {
+  readonly openPlannotator: (payload: PlannotatorOpenPayload) => Promise<void>
+  readonly hidePlannotator: (owner: { readonly sessionId: string; readonly chatId: string }) => void
+  readonly onPlannotatorDecision: (
+    callback: (decision: PlannotatorDecision) => boolean | undefined | Promise<boolean | undefined>
+  ) => () => void
+}
+
 export interface PlanReviewProps {
-  /** Legacy transcript projection; never rendered as a review workspace. */
-  plan: Plan | null
-  document?: PlanDocument | null
-  /** Live-only sanitized source; never an editable or approvable revision. */
-  streamingDraft?: PlanDraft | null
-  draft?: string
-  syncState?: PlanEditorSyncState
-  syncError?: string | null
-  canApprove?: boolean
-  /** Live worktree patch used for compact per-file evidence in the plan. */
-  patch?: string
-  knownFiles?: ReadonlySet<string>
-  onOpenFile?: (path: string) => void
-  /** One-shot stable stage id requested by the composer progress dock. */
-  selectedStepId?: string | null
-  revisionTarget?: { readonly stageId: string | null } | null
-  /** @deprecated Split panes render the same responsive document editor. */
-  compact?: boolean
-  /** Called after the requested stage has been scrolled into view. */
-  onSelectStep?: (stepId: string) => void
-  onApprove?: (executionMode?: ExecutionMode) => void
-  onResume?: () => void
-  onRevise?: () => void
-  /** @deprecated Comments are anchored directly inside the document editor. */
-  onComment?: (stepId: string, body: string) => void
-  onStartDraft?: () => void
-  onSendToAgent?: () => void
-  /** Discard the canonical plan; shown for settled statuses with a confirm step. */
-  onDiscard?: () => void
-  onRetryDocument?: () => void
-  /**
-   * Comment-layer seams (a later stage owns rendering). The plan document is
-   * read-only now; these are carried through so the comment layer can consume
-   * them without re-plumbing the pane, but nothing here dispatches them yet.
-   */
-  onReplyThread?: (
-    annotationId: string,
-    body: string,
-    mentionedParticipantIds: ReadonlyArray<string>
-  ) => Promise<void> | void
-  onRetryThread?: (
-    annotationId: string,
-    message: PlanCommentMessage
-  ) => Promise<void> | void
-  onSetThreadResolved?: (
-    annotationId: string,
-    resolved: boolean
-  ) => Promise<void> | void
-  /** Create a new comment on a step (stageId) or a highlighted span (anchor). */
-  onAddComment?: (
-    target: { stageId?: string; anchor?: PlanAnnotationAnchor },
-    body: string,
-    mentionedParticipantIds: ReadonlyArray<string>
-  ) => Promise<void> | void
-  /** Seam for the page-navigation shell rendered around the document body. */
-  pageNav?: ReactNode
+  readonly document: PlanDocument
+  readonly canApprove?: boolean
+  readonly host: PlannotatorPlanHost
+  readonly onApprove?: () => void | Promise<void>
+  readonly onRevise?: (feedback?: string) => void | Promise<void>
 }
 
-export function PlanReview(props: PlanReviewProps) {
-  return (
-    <WidthTierProvider className="flex-col">
-      <PlanReviewBody {...props} />
-    </WidthTierProvider>
-  )
+export type PlannotatorDecision = {
+  readonly sessionId: string
+  readonly chatId: string
+  readonly reviewId: string
+  readonly approved: boolean
+  readonly feedback?: string
+  readonly deliveryId: string
 }
 
-function PlanReviewBody(props: PlanReviewProps) {
-  // Match the conversation transcript/composer column exactly. The plan used to
-  // span the whole pane, which made prose line lengths jump when switching tabs
-  // and made the same document feel unrelated to the chat that produced it.
-  const gutter = atLeast(useWidthTier(), "mid") ? "px-[30px]" : "px-3"
-  const {
-    plan,
-    document,
-    streamingDraft,
-    draft,
-    syncState = "clean",
-    syncError,
-    canApprove = true,
-    onApprove,
-    onResume,
-    onRevise,
-    onStartDraft,
-    onSendToAgent,
-    onDiscard,
-    onRetryDocument,
-    selectedStepId,
-    revisionTarget,
-    onSelectStep,
-    patch,
-    knownFiles,
-    onOpenFile,
-    onReplyThread,
-    onRetryThread,
-    onSetThreadResolved,
-    onAddComment,
-    pageNav
-  } = props
+export function PlanReview({
+  document,
+  canApprove = true,
+  host,
+  onApprove,
+  onRevise
+}: PlanReviewProps) {
+  const placeholder = useRef<HTMLDivElement | null>(null)
+  const sessionId = document.sessionId
+  const chatId = document.producingChatId
+  const canDecide =
+    canApprove &&
+    document.reviewId !== undefined &&
+    (document.status === "proposed" || document.status === "revising")
 
-  const [container, setContainer] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    const element = placeholder.current
+    if (!element) return
 
-  const promotingSource = null
-  const transientSource = streamingDraft?.source ?? promotingSource
-  // A "complete" draft never outranks a document already parked on the
-  // operator's decision. The submit tool holds the turn open on that approval,
-  // so leaving "Validating plan" up (it replaces the Approve button in
-  // `plan-floating-actions`) deadlocks the pair: the backend waits on a click
-  // the UI refuses to offer. This is the rendered backstop for the stale-draft
-  // race the conversation machine also guards against — a draft event draining
-  // from the pi queue AFTER the directly-emitted proposal already cleared it.
-  const draftSuperseded =
-    streamingDraft?.phase === "complete" &&
-    (document?.status === "proposed" || document?.status === "revising")
-  const transientState =
-    streamingDraft !== null && streamingDraft !== undefined && !draftSuperseded
-      ? streamingDraft.phase === "complete"
-        ? "validating"
-        : "composing"
-      : undefined
+    const publish = () => {
+      const bounds = element.getBoundingClientRect()
+      host.openPlannotator({
+        sessionId,
+        chatId,
+        document,
+        canDecide,
+        bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+      }).catch(() => {
+        // Closing a chat can destroy the native view while a resize update is in flight.
+      })
+    }
+    const observer = new ResizeObserver(publish)
+    observer.observe(element)
+    publish()
+    return () => {
+      observer.disconnect()
+      host.hidePlannotator({ sessionId, chatId })
+    }
+  }, [document, canDecide, sessionId, chatId, host])
 
-  if (!document && plan && promotingSource === null && transientSource === null) {
-    return (
-      <div className={cn("min-h-0 min-w-0 flex-1 overflow-auto bg-editor", gutter)}>
-        <article
-          aria-label="Legacy plan markdown"
-          className="mx-auto w-full max-w-[760px] py-10"
-        >
-          <Markdown>{plan.raw}</Markdown>
-        </article>
-      </div>
-    )
-  }
-
-  if (!document && transientSource === null) {
-    return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-editor text-center">
-        <ClipboardList className="size-8 text-line-strong" />
-        <div className="max-w-xs text-[13px] leading-[1.5] text-muted-foreground">
-          No plan yet. In <span className="font-semibold text-text">Plan</span> mode, ask the agent
-          for a change and it will map out an approach here — or start one yourself and hand it to
-          the agent.
-        </div>
-        {onStartDraft && (
-          <Button size="sm" onClick={onStartDraft}>
-            <ClipboardList className="size-3.5" />
-            Start a plan
-          </Button>
-        )}
-      </div>
-    )
-  }
-
-  const commentLayer =
-    document != null ? (
-      <PlanCommentLayer
-        annotations={document.plan.annotations}
-        containerRef={container}
-        onAddComment={onAddComment ?? (() => {})}
-        onReply={onReplyThread ?? (() => {})}
-        onSetResolved={onSetThreadResolved ?? (() => {})}
-        onRetry={onRetryThread}
-        // The read-only document machine only ever reports loading | clean |
-        // error, so comments are disabled whenever it isn't cleanly loaded.
-        disabled={syncState !== "clean"}
-      />
-    ) : null
+  useEffect(() => host.onPlannotatorDecision(async (decision) => {
+    if (
+      decision.sessionId !== sessionId ||
+      decision.chatId !== chatId ||
+      decision.reviewId !== document.reviewId
+    ) return undefined
+    const decide = decision.approved ? onApprove : onRevise
+    if (!decide) return false
+    if (decision.approved) await onApprove?.()
+    else await onRevise?.(decision.feedback)
+    return true
+  }), [document.reviewId, host, onApprove, onRevise, sessionId, chatId])
 
   return (
-    // Pane-width like the conversation view's agent bar: the editor (and its tab
-    // bar) span the full pane, and each page centres its own content — so the tab
-    // bar is NOT indented by a gutter/max-width wrapper.
-    <div className="flex min-h-0 min-w-0 flex-1 bg-editor">
-      <div
-        data-testid="plan-review-container"
-        className="flex min-h-0 w-full flex-1"
-      >
-        <PlanEditor
-          document={document ?? null}
-          source={transientSource ?? draft ?? (document ? JSON.stringify(document.plan) : "")}
-          transientState={transientState}
-          state={syncState}
-          error={syncError}
-          canApprove={canApprove}
-          onApprove={onApprove}
-          onResume={onResume}
-          onRevise={onRevise}
-          onSendToAgent={onSendToAgent}
-          onDiscard={onDiscard}
-          onRetry={onRetryDocument}
-          targetStageId={selectedStepId}
-          revisionTarget={revisionTarget}
-          onTargetStageConsumed={
-            selectedStepId ? () => onSelectStep?.(selectedStepId) : undefined
-          }
-          patch={patch}
-          knownFiles={knownFiles}
-          onOpenFile={onOpenFile}
-          commentLayer={commentLayer}
-          onContainerRef={setContainer}
-          pageNav={pageNav}
-        />
-      </div>
-    </div>
+    <section
+      ref={placeholder}
+      data-testid="plannotator-embedded-view"
+      aria-label="Plannotator plan review"
+      className="min-h-0 min-w-0 flex-1 bg-editor"
+    />
   )
 }

@@ -35,7 +35,7 @@ afterEach(cleanup)
 describe("Composer plan task list", () => {
   it("embeds canonical plan tasks in the composer and routes stage selection", () => {
     const onOpenPlanStage = vi.fn()
-    render(<Composer planDocument={document} onOpenPlanStage={onOpenPlanStage} />)
+    const view = render(<Composer planDocument={document} onOpenPlanStage={onOpenPlanStage} />)
 
     const composer = screen.getByTestId("composer")
     const taskList = screen.getByTestId("plan-task-list")
@@ -48,6 +48,19 @@ describe("Composer plan task list", () => {
     expect(planTab.textContent).toContain("0/1")
     fireEvent.click(screen.getByTestId("plan-progress-stage-stage-1"))
     expect(onOpenPlanStage).toHaveBeenCalledWith("stage-1")
+
+    view.rerender(<Composer planDocument={{
+      ...document,
+      plan: {
+        ...document.plan,
+        stages: [{
+          ...document.plan.stages[0]!,
+          tasks: [{ id: "task-1", text: "Embed the task list", status: "completed" }]
+        }]
+      }
+    }} />)
+    expect(screen.getByRole("tab", { name: /Plan/ }).textContent).toContain("1/1")
+    expect(screen.getByTestId("plan-progress-stage-stage-1").textContent).toContain("Done")
   })
 
   it("extends the Plan tab to the overview, revealing nested subtasks", () => {

@@ -27,6 +27,23 @@ describe("MessageTurn streaming text", () => {
     expect(view.container.textContent).toContain("Earlier settled paragraph")
   })
 
+  it("inserts transcript-owned content after its exact part", () => {
+    const view = render(<MessageTurn
+      message={assistant({
+        streaming: false,
+        parts: [
+          { _tag: "Text", text: "Before tool." },
+          { _tag: "Text", text: "Plan tool." },
+          { _tag: "Text", text: "After tool." }
+        ]
+      })}
+      afterPart={{ index: 1, content: <div>Plan widget.</div> }}
+    />)
+    const text = view.container.textContent ?? ""
+    expect(text.indexOf("Plan tool.")).toBeLessThan(text.indexOf("Plan widget."))
+    expect(text.indexOf("Plan widget.")).toBeLessThan(text.indexOf("After tool."))
+  })
+
   it("does not mark completed messages or a text part followed by another part", () => {
     const completed = render(<MessageTurn message={assistant({ streaming: false })} />)
     expect(completed.container.querySelector(".jingler-streaming-text")).toBeNull()

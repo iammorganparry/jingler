@@ -1,4 +1,10 @@
-import type { Plan, PlanDocument, PlanTaskStatus } from "@jingler/core"
+import {
+  planStageExecutionStatus,
+  type Plan,
+  type PlanDocument,
+  type PlanStageExecutionStatus,
+  type PlanTaskStatus
+} from "@jingler/core"
 import {
   CheckCircle2,
   Circle,
@@ -52,6 +58,7 @@ const downloadPlan = (plan: Plan) => {
 type ApprovalStage = {
   id: string
   title: string
+  status: PlanStageExecutionStatus
   tasks: ReadonlyArray<{ id: string; text: string; status: PlanTaskStatus }>
 }
 
@@ -60,11 +67,27 @@ const approvalStages = (plan: Plan, document?: PlanDocument | null): ReadonlyArr
     ? document.plan.stages.map((stage) => ({
         id: stage.id,
         title: stage.title,
+        status: planStageExecutionStatus(stage),
         tasks: stage.tasks ?? []
       }))
     : plan.steps
         .filter((step) => step.kind !== "branch-arm")
-        .map((step) => ({ id: step.id, title: step.title, tasks: [] }))
+        .map((step) => ({ id: step.id, title: step.title, status: "queued", tasks: [] }))
+
+function StageStatusIcon({ status }: { status: PlanStageExecutionStatus }) {
+  switch (status) {
+    case "completed":
+      return <CheckCircle2 className="size-3.5 shrink-0 text-green" />
+    case "running":
+      return <Loader2 className="size-3.5 shrink-0 animate-spin text-blue" />
+    case "blocked":
+    case "failed":
+      return <CircleAlert className="size-3.5 shrink-0 text-yellow" />
+    case "queued":
+    case "interrupted":
+      return <CircleDashed className="size-3.5 shrink-0 text-dim" />
+  }
+}
 
 function TaskStatusIcon({ status }: { status: PlanTaskStatus }) {
   switch (status) {
@@ -154,9 +177,14 @@ export function PlanApprovalCard({
           </div>
           <ol className="m-0 flex list-none flex-col gap-1 px-2 py-1.5">
             {visibleStages.map((stage) => (
-              <li key={stage.id} className="rounded-md px-1.5 py-1">
+              <li
+                key={stage.id}
+                data-testid={`plan-approval-stage-${stage.id}`}
+                data-status={stage.status}
+                className="rounded-md px-1.5 py-1"
+              >
                 <div className="flex min-h-6 min-w-0 items-center gap-2 text-[11.5px] text-text-body">
-                  <CircleDashed className="size-3.5 shrink-0 text-dim" />
+                  <StageStatusIcon status={stage.status} />
                   <span className="min-w-0 flex-1 truncate font-medium">{stage.title}</span>
                 </div>
                 {stage.tasks.length > 0 && (

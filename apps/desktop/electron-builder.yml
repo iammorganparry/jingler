@@ -53,6 +53,8 @@ extraResources:
     to: icon.png
   - from: ../../THIRD-PARTY-LICENSES
     to: THIRD-PARTY-LICENSES
+  - from: ../../packages/plannotator-ext/assets
+    to: plannotator
   # Executed by Jingler's packaged Electron binary in Node mode, so detached
   # pi-subagents children use the exact Pi runtime packaged with Jingler instead
   # of an ambient Node or `pi` from PATH.

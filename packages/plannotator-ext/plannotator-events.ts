@@ -13,6 +13,8 @@ export interface PlannotatorHostStateEvent {
 	planFilePath: string | null;
 	review: { reviewId: string; url?: string } | null;
 	checklist: Array<{ step: number; text: string; completed: boolean }>;
+	/** Current Markdown scratchpad; the embedded review app renders this directly. */
+	planContent?: string;
 	/** Structured scratchpad payload (plan-parse.ts); absent for flat plans. */
 	title?: string | null;
 	revision?: number;

@@ -24,7 +24,7 @@
  * Plain flat checklists parse exactly as before: one stage-less checklist,
  * no sections, and the host falls back to its flat projection.
  */
-import { CHECKLIST_PATTERN, type ChecklistItem } from "./generated/checklist.ts";
+import { scanChecklist, type ChecklistItem } from "./generated/checklist.ts";
 
 export type PlanTaskStatus = "pending" | "in-progress" | "completed" | "blocked";
 
@@ -85,7 +85,6 @@ export interface ParsedPlanMarkdown {
 	checklist: ChecklistItem[];
 }
 
-const CHECKBOX_LINE = new RegExp(`^(\\s*)${CHECKLIST_PATTERN.source}$`);
 const STAGE_HEADING = /^##\s+(.+?)\s*$/;
 const SUB_HEADING = /^###\s+(.+?)\s*$/;
 const STAGE_ID_COMMENT = /\s*<!--\s*id:\s*([\w-]+)\s*-->\s*$/;
@@ -356,6 +355,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	const allLines = content.split("\n");
 	const frontmatter = parseFrontmatter(allLines);
 	const lines = allLines.slice(frontmatter.bodyStart);
+	const checkboxByLine = new Map(scanChecklist(lines.join("\n")).map((item) => [item.line, item]));
 
 	let title = frontmatter.title;
 	const checklist: ChecklistItem[] = [];
@@ -364,7 +364,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	let stage: StageBuilder | null = null;
 	let fence: { language: string; lines: string[] } | null = null;
 
-	for (const raw of lines) {
+	for (const [line, raw] of lines.entries()) {
 		const fenceMatch = FENCE_LINE.exec(raw.trim());
 		if (fence !== null) {
 			if (fenceMatch !== null) {
@@ -394,16 +394,19 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 			continue;
 		}
 
-		const checkbox = CHECKBOX_LINE.exec(raw);
-		if (checkbox !== null) {
-			const [, indent, mark, text] = checkbox;
-			const trimmedText = text.trim();
-			if (trimmedText.length === 0) continue;
-			const step = checklist.length + 1;
-			checklist.push({ step, text: trimmedText, completed: /[xX]/.test(mark) });
+		const checkbox = checkboxByLine.get(line);
+		if (checkbox !== undefined) {
+			checklist.push({
+				step: checkbox.step,
+				text: checkbox.text,
+				completed: checkbox.completed,
+			});
 			if (stage !== null) {
-				if (indent.length > 0) stage.nestedCheckbox(step, mark, trimmedText);
-				else stage.checkbox(step, mark, trimmedText);
+				if (checkbox.indent.length > 0) {
+					stage.nestedCheckbox(checkbox.step, checkbox.mark, checkbox.text);
+				} else {
+					stage.checkbox(checkbox.step, checkbox.mark, checkbox.text);
+				}
 			}
 			continue;
 		}
