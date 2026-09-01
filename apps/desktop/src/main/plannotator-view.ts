@@ -28,6 +28,16 @@ export const PLANNOTATOR_DECISION_CHANNEL = "jingler/plannotator/decision"
 export const PLANNOTATOR_DECISION_ACK_CHANNEL = "jingler/plannotator/decision-ack"
 const PARTITION = "jingler-plannotator"
 const DECISION_ACK_TIMEOUT_MS = 5_000
+const REVIEW_ONBOARDING_PREDICATE =
+  'function P0n(){return Lt.getItem(Vot)==="true"?!1:Lt.getItem(R0n)!=="2"}'
+const REVIEW_ONBOARDING_DISABLED = "function P0n(){return!1}"
+
+export const embeddedReviewHtmlOf = (html: string): string => {
+  if (!html.includes(REVIEW_ONBOARDING_PREDICATE)) {
+    throw new Error("Pinned Plannotator onboarding marker is missing")
+  }
+  return html.replace(REVIEW_ONBOARDING_PREDICATE, REVIEW_ONBOARDING_DISABLED)
+}
 
 const Owner = Schema.Struct({ sessionId: Schema.String, chatId: Schema.String })
 type Owner = Schema.Schema.Type<typeof Owner>
@@ -193,7 +203,7 @@ const sendDecision = async (
 
 const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Response> => {
   if (path === "/") {
-    host.reviewHtml ??= readFile(reviewAssetPath(), "utf8")
+    host.reviewHtml ??= readFile(reviewAssetPath(), "utf8").then(embeddedReviewHtmlOf)
     return new Response(await host.reviewHtml, {
       headers: { "content-type": "text/html; charset=utf-8" }
     })

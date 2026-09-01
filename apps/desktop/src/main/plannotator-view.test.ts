@@ -1,6 +1,6 @@
 import type { PlanDocument } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { reviewMarkdownOf } from "./plannotator-view.js"
+import { embeddedReviewHtmlOf, reviewMarkdownOf } from "./plannotator-view.js"
 
 const legacyDocument: PlanDocument = {
   id: "legacy-plan",
@@ -50,6 +50,16 @@ const legacyDocument: PlanDocument = {
   updatedAt: "2026-09-01T00:00:00.000Z",
   updatedBy: "agent"
 }
+
+describe("embeddedReviewHtmlOf", () => {
+  it("disables the pinned first-run dialog and rejects an unknown bundle", () => {
+    const marker = 'function P0n(){return Lt.getItem(Vot)==="true"?!1:Lt.getItem(R0n)!=="2"}'
+    expect(embeddedReviewHtmlOf(`<html>${marker}</html>`))
+      .toBe("<html>function P0n(){return!1}</html>")
+    expect(() => embeddedReviewHtmlOf("<html></html>"))
+      .toThrow("Pinned Plannotator onboarding marker is missing")
+  })
+})
 
 describe("reviewMarkdownOf", () => {
   it("preserves source markdown when available", () => {

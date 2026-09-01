@@ -28,42 +28,37 @@ beforeEach(() => {
 })
 
 describe("plan auto-presentation", () => {
-  it("allows only the first plan-producing turn to auto-open per session", async () => {
+  it("opens each review once", async () => {
     const { claimPlanAutoPresentation } = await import("./plan-presence.js")
-    const sessionId = "session-first-plan"
 
-    expect(claimPlanAutoPresentation(sessionId)).toBe(true)
-    expect(claimPlanAutoPresentation(sessionId)).toBe(false)
+    expect(claimPlanAutoPresentation("chat-1", "review-1")).toBe(true)
+    expect(claimPlanAutoPresentation("chat-1", "review-1")).toBe(false)
+    expect(claimPlanAutoPresentation("chat-1", "review-2")).toBe(true)
   })
 
-  it("survives a renderer restart", async () => {
+  it("remembers the current review across a renderer restart", async () => {
     const firstModule = await import("./plan-presence.js")
-    const sessionId = "session-restarted-plan"
-
-    expect(firstModule.claimPlanAutoPresentation(sessionId)).toBe(true)
+    expect(firstModule.claimPlanAutoPresentation("chat-1", "review-1")).toBe(true)
     vi.resetModules()
     const restartedModule = await import("./plan-presence.js")
 
-    expect(restartedModule.claimPlanAutoPresentation(sessionId)).toBe(false)
+    expect(restartedModule.claimPlanAutoPresentation("chat-1", "review-1")).toBe(false)
+    expect(restartedModule.claimPlanAutoPresentation("chat-1", "review-2")).toBe(true)
   })
 
-  it("tracks sessions independently and resets only when a session is deleted", async () => {
+  it("clears only the deleted chat", async () => {
     const {
       claimPlanAutoPresentation,
       clearPlanAutoPresentation,
       planAutoPresentationStorageKey
     } = await import("./plan-presence.js")
-    const first = "session-reset-first-plan"
-    const second = "session-independent-plan"
 
-    expect(claimPlanAutoPresentation(first)).toBe(true)
-    expect(claimPlanAutoPresentation(second)).toBe(true)
-    expect(claimPlanAutoPresentation(first)).toBe(false)
+    expect(claimPlanAutoPresentation("chat-1", "review-1")).toBe(true)
+    expect(claimPlanAutoPresentation("chat-2", "review-1")).toBe(true)
+    clearPlanAutoPresentation("chat-1")
 
-    clearPlanAutoPresentation(first)
-
-    expect(storage.getItem(planAutoPresentationStorageKey(first))).toBeNull()
-    expect(claimPlanAutoPresentation(first)).toBe(true)
-    expect(claimPlanAutoPresentation(second)).toBe(false)
+    expect(storage.getItem(planAutoPresentationStorageKey("chat-1"))).toBeNull()
+    expect(claimPlanAutoPresentation("chat-1", "review-1")).toBe(true)
+    expect(claimPlanAutoPresentation("chat-2", "review-1")).toBe(false)
   })
 })

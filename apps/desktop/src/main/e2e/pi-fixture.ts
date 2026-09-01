@@ -644,9 +644,12 @@ const PLANNOTATOR_E2E_PLAN = [
 
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const lastMessage = context.messages.at(-1)
+  const planMessages = operatorText(context)
+  const planStart = planMessages.findLastIndex((text) => text.includes("[[plan]]"))
+  const currentPlanMessages = planStart < 0 ? planMessages : planMessages.slice(planStart)
   // Post-approval, Plannotator nudges the SAME session to continue (and its
-  // executing-phase framing lands AFTER that nudge, so scan every operator
-  // message like the [[plan]] trigger does). A real agent implements the
+  // executing-phase framing lands AFTER that nudge, so scan operator messages
+  // belonging to the current [[plan]] trigger). A real agent implements the
   // approved plan here; re-submitting would open a second review — the submit
   // tool stays active in every phase now, so the script must not lean on it
   // being missing.
@@ -654,7 +657,7 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
   // the approved plan", while a review resumed after a restart sends the
   // approved prompt ("Plan approved. You now have full tool access…") as a
   // follow-up message instead.
-  if (operatorText(context).some((text) =>
+  if (currentPlanMessages.some((text) =>
     text.includes("Continue with the approved plan") ||
     text.includes("Plan approved. You now have full tool access")
   )) {

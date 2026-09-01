@@ -195,7 +195,10 @@ export function ConversationPane({
     const reviewId = convo.plannotator?.review?.reviewId ?? null
     if (reviewId === null || reviewId === presentedPlannotatorReview.current) return
     presentedPlannotatorReview.current = reviewId
-    if (onPlanDraftAvailable !== undefined && claimPlanAutoPresentation(activeChat.id)) {
+    if (
+      onPlanDraftAvailable !== undefined &&
+      claimPlanAutoPresentation(activeChat.id, reviewId)
+    ) {
       onPlanDraftAvailable()
     }
   }, [activeChat.id, convo.plannotator?.review?.reviewId, onPlanDraftAvailable])
