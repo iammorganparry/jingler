@@ -88,6 +88,7 @@ export function ConversationPane({
   session,
   view = "conversation",
   onOpenPlanReview,
+  onPlanReviewAccepted,
   onPlanDraftAvailable,
   onRestore,
   onDelete,
@@ -114,6 +115,8 @@ export function ConversationPane({
   view?: "conversation" | "plan" | "split"
   /** Switch the pane to the active embedded Plannotator review. */
   onOpenPlanReview?: (stepId?: string) => void
+  /** Leave the blocking review after approval without removing the plan. */
+  onPlanReviewAccepted?: () => void
   /** Auto-present a newly active Plannotator review at the host's responsive width. */
   onPlanDraftAvailable?: () => void
   /** Restore this session from archived (the banner + locked composer). */
@@ -734,8 +737,9 @@ export function ConversationPane({
     async (approved: boolean, feedback?: string) => {
       if (pendingReviewId === null) return
       await rpc.planDecide(session.id, activeChat.id, pendingReviewId, approved, feedback)
+      if (approved) onPlanReviewAccepted?.()
     },
-    [activeChat.id, pendingReviewId, session.id]
+    [activeChat.id, onPlanReviewAccepted, pendingReviewId, session.id]
   )
   // The plan surface persists for as long as a plan exists. Plannotator owns
   // review actions while pending, then stays read-only as the checklist advances.

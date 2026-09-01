@@ -541,6 +541,51 @@ describe("mount groups", () => {
     rect.mockRestore()
   })
 
+  it("returns an accepted full-width review to Conversation without removing Plan", async () => {
+    const rect = mockPaneWidth(600)
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set(["c_a_1"])}
+        renderConversation={(_session, view, ctx) => (
+          <div>
+            <button onClick={ctx.onPlanDraftAvailable}>stream draft</button>
+            <button onClick={ctx.onPlanReviewAccepted}>accept plan</button>
+            <span data-testid="plan-presentation">{view}</span>
+          </div>
+        )}
+      />
+    )
+
+    await screen.findByRole("button", { name: "stream draft" })
+    fireEvent.click(screen.getByRole("button", { name: "stream draft" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    fireEvent.click(screen.getByRole("button", { name: "accept plan" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("conversation")
+    expect(screen.getByRole("button", { name: "Plan" })).toBeTruthy()
+    rect.mockRestore()
+  })
+
+  it("keeps an accepted review split beside a roomy conversation", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set(["c_a_1"])}
+        renderConversation={(_session, view, ctx) => (
+          <div>
+            <button onClick={ctx.onPlanDraftAvailable}>stream draft</button>
+            <button onClick={ctx.onPlanReviewAccepted}>accept plan</button>
+            <span data-testid="plan-presentation">{view}</span>
+          </div>
+        )}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "stream draft" }))
+    fireEvent.click(screen.getByRole("button", { name: "accept plan" }))
+    expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
+  })
+
   it("opens a manually selected Plan Review full-width when the pane is too narrow", async () => {
     const rect = mockPaneWidth(600)
     render(
