@@ -31,7 +31,7 @@ import {
 } from "./generated/checklist.ts";
 import { persistPlanStatuses } from "./plan-status.ts";
 
-import { loadConfig, resolveUseJina } from "./generated/config.ts";
+import { loadConfig, resolveTodoProviderEnabled, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
 import {
@@ -42,7 +42,7 @@ import {
 	type PlannotatorPlanApprovedEvent,
 	registerPlannotatorEventListeners,
 } from "./plannotator-events.ts";
-import { resolveTodoProvider, type TodoProvider } from "./todo-providers/index.ts";
+import { createPiTodosProvider, detectPiTodos } from "./todo-providers/pi-todos.ts";
 import {
 	getStartupErrorMessage,
 	startNativePlanReviewSession,
@@ -184,7 +184,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	 */
 	let sessionAlive = true;
 	/** Resolved once per execution phase; undefined means widget-only. */
-	let todoProvider: TodoProvider | undefined;
+	let todoProvider: ReturnType<typeof createPiTodosProvider> | undefined;
 	/** Latch: no provider found, or one sync failed. Cleared on return to idle. */
 	let todoProviderDisabled = false;
 	let activeReview: PlannotatorHostStateEvent["review"] = null;
@@ -372,14 +372,14 @@ export default function plannotator(pi: ExtensionAPI): void {
 		if (todoProviderDisabled) return;
 		if (phase !== "executing" || !lastSubmittedPath) return;
 		if (!todoProvider) {
-			todoProvider = resolveTodoProvider(loadConfig(), {
-				cwd: ctx.cwd,
-				sessionId: ctx.sessionManager.getSessionId(),
-			});
-			if (!todoProvider) {
+			if (!resolveTodoProviderEnabled(loadConfig()) || !detectPiTodos(ctx.cwd)) {
 				todoProviderDisabled = true;
 				return;
 			}
+			todoProvider = createPiTodosProvider({
+				cwd: ctx.cwd,
+				sessionId: ctx.sessionManager.getSessionId(),
+			});
 		}
 		// Tag on the cwd-relative path: it is stable across machines and reads
 		// cleanly in the /todos detail view, which renders raw tags.
