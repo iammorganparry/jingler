@@ -13,11 +13,9 @@
   },
   "dependencies": {
     "effect": "^3.21.4",
-    "node-html-parser": "^7.0.1",
     "xstate": "^5.32.4"
   },
   "devDependencies": {
-    "@jingler/tsconfig": "workspace:*",
-    "fast-check": "^4.9.0"
+    "@jingler/tsconfig": "workspace:*"
   }
 }

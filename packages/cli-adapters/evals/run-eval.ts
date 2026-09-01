@@ -6,14 +6,14 @@ import {
   type EvalResult
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
-import { EvalTrace } from "./behavior-contract.js"
+import { EvalTrace } from "../src/runtime/certification/behavior-contract.js"
 import {
   LiveEvalMatrix,
   requireReleaseCandidateMatrix,
   runLiveMatrix
 } from "./live/live-matrix.js"
-import { redactErrorMessage, redactReport, scoreScenario } from "./pi-eval.js"
-import { CORE_PI_SCENARIOS, scenarioById } from "./pi-scenarios.js"
+import { redactErrorMessage, redactReport, scoreScenario } from "../src/runtime/certification/pi-eval.js"
+import { CORE_PI_SCENARIOS, scenarioById } from "../src/runtime/certification/pi-scenarios.js"
 import { runDeterministicScenario } from "./deterministic-runtime.js"
 import { AtomicJsonFile } from "../src/runtime/persistence/atomic-json-file.js"
 

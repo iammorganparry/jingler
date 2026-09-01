@@ -16,9 +16,6 @@
  *     closed, anything else is open. New todos default to "open".
  *   - a closed todo drops its `assigned_to_session`, which also keeps it from
  *     sorting above open work in the `/todos` list.
- *
- * `pi-todos.test.ts` re-derives that reader independently and round-trips our
- * output through it, so a drift in either direction fails loudly.
  */
 import crypto from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
@@ -30,7 +27,6 @@ import type { ChecklistItem } from "../generated/checklist.ts";
 // (see its docstring: duplicating it is how #927/#929 escaped one runtime).
 // It is already vendored into generated/, so reusing it adds no new vendoring.
 import { isWithinDirectory } from "../generated/html-assets-node.ts";
-import type { TodoProvider, TodoProviderEnv } from "./types.ts";
 
 const TODO_DIR_NAME = path.join(".pi", "todos");
 const TODO_PATH_ENV = "PI_TODO_PATH";
@@ -283,7 +279,7 @@ async function readOwnedTodos(todosDir: string, planId: string): Promise<Map<num
 	return owned;
 }
 
-export function createPiTodosProvider(env: TodoProviderEnv): TodoProvider {
+export function createPiTodosProvider(env: { cwd: string; sessionId?: string }) {
 	// Serializes overlapping sync() calls on this instance. pi-todos has no
 	// atomic upsert: two syncs racing between readOwnedTodos and its writes
 	// would both see the same step as "missing" and each create a todo for
@@ -297,9 +293,8 @@ export function createPiTodosProvider(env: TodoProviderEnv): TodoProvider {
 		// of openat2/O_NOFOLLOW would be — but it shrinks the window from a whole
 		// session to microseconds.
 		const todosDir = resolveContainedTodoDir(env.cwd);
-		// Fail closed. `resolveTodoProvider` already gates on `detectPiTodos`,
-		// which applies the same containment check; re-deriving it here keeps a
-		// provider constructed directly (tests, a future caller) safe too.
+		// Fail closed. Detection applies the same containment check; re-deriving
+		// it here keeps direct callers safe too.
 		if (todosDir === null) return;
 		await fs.mkdir(todosDir, { recursive: true });
 		const owned = await readOwnedTodos(todosDir, planId);

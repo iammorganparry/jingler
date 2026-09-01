@@ -11,7 +11,7 @@ import {
   runLiveTarget,
   type LiveEvalTarget
 } from "./live-matrix.js"
-import { CORE_PI_SCENARIOS } from "../pi-scenarios.js"
+import { CORE_PI_SCENARIOS } from "../../src/runtime/certification/pi-scenarios.js"
 
 const MATRIX_MISMATCH = /missing release candidates.*unexpected live targets/u
 

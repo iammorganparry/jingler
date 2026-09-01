@@ -4,12 +4,9 @@ import { join } from "node:path"
 /**
  * Keeping an unattended agent away from the operator's credentials.
  *
- * The file-tool check in `confinement.ts` cannot see a shell: `Bash` takes a
- * command string, not a path, and a plan step legitimately needs Bash to build
- * and test. So `cat ~/.ssh/id_rsa` walked straight through it.
- *
- * The Claude SDK's sandbox does see it. Verified on macOS against the real
- * harness: without a sandbox the read succeeds, with one it fails with
+ * Path-based file-tool checks cannot see a shell: `Bash` takes a command string,
+ * not a path, and a plan step legitimately needs Bash to build and test. An OS
+ * sandbox does see it: without one the read succeeds, with one it fails with
  * "Operation not permitted" at the OS level rather than by the model's good
  * manners.
  *
@@ -72,10 +69,8 @@ export const credentialDenyList = (home: string): ReadonlyArray<string> =>
  * `failIfUnavailable: false` is deliberate and is the main caveat: the sandbox
  * needs platform support (bubblewrap on Linux), and defaulting to `true` would
  * turn a missing dependency into "your approved plan refuses to run". Degrading
- * is the right call for a defence-in-depth measure — but it does mean that on an
- * unsupported host this protection is silently absent, which is why the
- * file-tool check in `confinement.ts` is kept as well rather than replaced. That
- * one is pure and works everywhere.
+ * is the right call for a defence-in-depth measure, but on an unsupported host
+ * this protection is absent.
  *
  * `autoAllowBashIfSandboxed` is what makes this usable: a sandboxed command is
  * already constrained by the OS, so gating each one on a human who is not there

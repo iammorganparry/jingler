@@ -11,7 +11,7 @@ import {
   evaluateProviderModelBehavior,
   type VerifyProviderModelBehaviorInput
 } from "../../src/runtime/certification/model-verifier.js"
-import type { EvalTrace } from "../behavior-contract.js"
+import type { EvalTrace } from "../../src/runtime/certification/behavior-contract.js"
 
 export const LiveEvalTarget = Schema.Struct({
   connection: ProviderConnection,
