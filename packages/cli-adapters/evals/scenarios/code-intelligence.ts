@@ -1,5 +1,5 @@
 import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
-import { event, toolCall, toolOutputContains, type EvalScenario } from "../behavior-contract.js"
+import { event, toolCall, toolOutputContains, type EvalScenario } from "../../src/runtime/certification/behavior-contract.js"
 
 /**
  * Baseline failure: text search cannot distinguish the exported token from a

@@ -6,7 +6,7 @@ import {
 } from "@jingler/core"
 import { Cause, Data, Effect, Schema } from "effect"
 import { AtomicJsonFile } from "../../src/runtime/persistence/atomic-json-file.js"
-import { CORE_CAPABILITY_PROFILE } from "../pi-scenarios.js"
+import { CORE_CAPABILITY_PROFILE } from "../../src/runtime/certification/pi-scenarios.js"
 import { buildReleaseCertificationManifest } from "./release-certifications.js"
 
 class ReleaseManifestCommandError extends Data.TaggedError(

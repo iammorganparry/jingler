@@ -360,7 +360,7 @@ export const scriptedRun =
       /**
        * A turn HELD OPEN by sub-agents that are still working.
        *
-       * The shape the real Claude adapter now has (see `turn-continuation.ts`): the
+       * The shape the live agent runtime has: the
        * main agent stops talking, but its `Done` is WITHHELD because the sub-agents
        * it delegated to are still running inside the same query. The regression this
        * drives is the one the operator reported — talking to the main agent killed

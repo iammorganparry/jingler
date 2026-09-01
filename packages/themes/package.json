@@ -12,8 +12,7 @@
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@jingler/core": "workspace:*",
-    "effect": "^3.21.4"
+    "@jingler/core": "workspace:*"
   },
   "devDependencies": {
     "@shikijs/themes": "^4.3.1",

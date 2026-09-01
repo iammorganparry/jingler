@@ -8,7 +8,7 @@ import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all"
 import { Effect, Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import configuredCandidates from "../../../../config/pi-release-candidates.json" with { type: "json" }
-import { CORE_CAPABILITY_PROFILE } from "../pi-scenarios.js"
+import { CORE_CAPABILITY_PROFILE } from "../../src/runtime/certification/pi-scenarios.js"
 import { buildReleaseCertificationManifest } from "./release-certifications.js"
 
 const coreProfile = CORE_CAPABILITY_PROFILE

@@ -75,7 +75,7 @@ describe("runLifetime", () => {
  * read as `work-finished` here, and `Fiber.interrupt` aborted the one SDK query all
  * five were running inside.
  *
- * The fix is upstream, in `turn-continuation.ts`: a turn with live sub-agents does
+ * The fix is upstream in the agent runtime: a turn with live sub-agents does
  * not emit its terminal event, so `turnSettled` stays FALSE and rule 1/2 keeps the
  * run alive without this policy knowing sub-agents exist. These cases pin the two
  * rows that fix depends on, so a later edit here cannot quietly reopen the bug.

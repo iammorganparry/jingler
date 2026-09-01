@@ -623,7 +623,7 @@ describe("AgentRunner sub-agents", () => {
 
   /**
    * An adapter that models a HELD-OPEN turn: the main agent finishes talking, its
-   * `Done` is withheld while the sub-agent works on (see `turn-continuation.ts`),
+   * `Done` is withheld while the sub-agent works on,
    * and only the sub-agent's bookend releases it.
    *
    * The gap is where the bug used to live. With the `Done` emitted early the

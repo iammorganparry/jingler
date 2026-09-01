@@ -1266,8 +1266,8 @@ describe("conversationMachine — queue while busy", () => {
 /**
  * What the renderer must do while sub-agents are still working.
  *
- * The adapter now withholds a turn's `Done` until its last sub-agent bookends
- * (`turn-continuation.ts`), because every sub-agent runs inside the ONE SDK query
+ * The agent runtime withholds a turn's `Done` until its last sub-agent bookends,
+ * because every sub-agent runs inside the ONE SDK query
  * that `Done` used to close — so settling early aborted all of them. That changes
  * which events the machine sees while `running`, and these cases pin the three
  * consequences rather than leaving them to be discovered by a user.

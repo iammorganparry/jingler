@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
-import type { EvalObservation, EvalTrace } from "./behavior-contract.js"
+import type { EvalObservation, EvalTrace } from "../src/runtime/certification/behavior-contract.js"
 import {
   scoreScenario,
   assertReportRedacted,
   redactErrorMessage,
   redactReport
-} from "./pi-eval.js"
-import { scenarioById } from "./pi-scenarios.js"
+} from "../src/runtime/certification/pi-eval.js"
+import { scenarioById } from "../src/runtime/certification/pi-scenarios.js"
 
 const scenario = (id: string) => {
   const value = scenarioById(id)
