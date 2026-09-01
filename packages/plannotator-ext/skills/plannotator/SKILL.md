@@ -49,7 +49,7 @@ Checkbox markers are durable execution state:
 | `[-]` | blocked |
 | `[x]` | completed or acceptance passed |
 
-Update the same plan file in place as work advances. Do not create a second status file or reorder existing checkboxes during execution: document-order numbering is how legacy `[DONE:n]` progress markers find their step.
+Use `[~]` and `[-]` only for implementation steps. Acceptance criteria are binary checks and use `[ ]` or `[x]` only. Update the same plan file in place as work advances. Do not create a second status file or reorder existing checkboxes during execution: document-order numbering is how legacy `[DONE:n]` progress markers find their step.
 
 ## Review loop
 

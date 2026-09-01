@@ -24,4 +24,18 @@ describe("persistPlanStatuses", () => {
     expect(result).toBe("- [x] First\n- [~] Second\n")
     expect(await readFile(path, "utf8")).toBe(result)
   })
+
+  it("serializes concurrent marker updates without losing either one", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "plannotator-status-"))
+    directories.push(directory)
+    const path = join(directory, "PLAN.md")
+    await writeFile(path, "- [ ] First\n- [ ] Second\n", "utf8")
+
+    await Promise.all([
+      persistPlanStatuses(path, new Map([[1, "completed"]])),
+      persistPlanStatuses(path, new Map([[2, "in-progress"]]))
+    ])
+
+    expect(await readFile(path, "utf8")).toBe("- [x] First\n- [~] Second\n")
+  })
 })

@@ -368,6 +368,8 @@ export const PlanDocument = Schema.Struct({
   revision: Schema.Number,
   /** Pending Plannotator review identity; absent for other plan producers. */
   reviewId: Schema.optional(Schema.String),
+  /** Read-only Plannotator source; absent for other plan producers. */
+  sourceMarkdown: Schema.optional(Schema.String),
   status: PlanDocumentStatus,
   plan: PlanPrd,
   updatedAt: Schema.String,

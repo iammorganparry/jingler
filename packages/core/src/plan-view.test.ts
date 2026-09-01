@@ -1,252 +1,46 @@
+import type { PlanPrdStage, PlanTaskStatus } from "./plan-document.js"
+import { planStageExecutionStatus } from "./plan-view.js"
 import { describe, expect, it } from "vitest"
-import type { PlanPrd, PlanPrdSection, PlanPrdStage } from "./plan-document.js"
-import {
-  planStageExecutionStatus,
-  stagesToGraph,
-  toPlanArchitectureView,
-  toPlanStepViews,
-  toPlanView
-} from "./plan-view.js"
 
 const stage = (
-  id: string,
-  dependencies: ReadonlyArray<string>,
-  overrides: Partial<PlanPrdStage> = {}
+  taskStatuses: ReadonlyArray<PlanTaskStatus>,
+  acceptance: PlanPrdStage["acceptance"] = []
 ): PlanPrdStage => ({
-  id,
-  title: `Stage ${id}`,
-  intent: `Intent ${id}`,
+  id: "stage",
+  title: "Stage",
+  intent: "Test stage status",
   approach: [],
+  tasks: taskStatuses.map((status, index) => ({ id: `task-${index}`, text: status, status })),
   files: [],
   diagrams: [],
   notes: [],
-  acceptance: [],
-  dependencies: [...dependencies],
-  ...overrides
+  acceptance
 })
 
-const prd = (
-  stages: ReadonlyArray<PlanPrdStage>,
-  sections: ReadonlyArray<PlanPrdSection> = []
-): PlanPrd => ({
-  title: "PRD: Test",
-  sections: [...sections],
-  stages: [...stages],
-  annotations: []
-})
-
-const ids = (values: ReadonlyArray<{ readonly id: string }>): Array<string> =>
-  values.map((value) => value.id)
-
-const edgeKeys = (
-  edges: ReadonlyArray<{ readonly from: string; readonly to: string }>
-): Array<string> => edges.map((edge) => `${edge.from}->${edge.to}`).sort()
-
-describe("toPlanStepViews", () => {
-  it("returns no steps for an empty plan", () => {
-    expect(toPlanStepViews(prd([]))).toEqual([])
+describe("planStageExecutionStatus", () => {
+  it("uses blocked and failed as the highest-priority states", () => {
+    expect(planStageExecutionStatus(stage(["in-progress", "blocked"]))).toBe("blocked")
+    expect(planStageExecutionStatus(stage(["in-progress"], [{
+      id: "acceptance",
+      text: "Fails",
+      status: "failed",
+      evidence: null
+    }]))).toBe("failed")
   })
 
-  it("orders a linear dependency chain topologically", () => {
-    // Deliberately out of order in source to prove ordering is by dependency.
-    const steps = toPlanStepViews(
-      prd([stage("c", ["b"]), stage("a", []), stage("b", ["a"])])
-    )
-    expect(ids(steps)).toEqual(["a", "b", "c"])
-  })
+  it("derives running, completed, and queued from every stage marker", () => {
+    const acceptance = (status: "pending" | "passed") => [{
+      id: "acceptance",
+      text: "Verify it",
+      status,
+      evidence: null
+    }] as const
 
-  it("derives progress from task state and passes complexity through", () => {
-    const [queued, running] = toPlanStepViews(
-      prd([
-        stage("a", []),
-        stage("b", ["a"], {
-          complexity: "high",
-          tasks: [{ id: "b.1", text: "Implement", status: "in-progress" }]
-        })
-      ])
-    )
-    expect(queued?.executionStatus).toBe("queued")
-    expect(queued?.complexity).toBeUndefined()
-    expect(running?.executionStatus).toBe("running")
-    expect(running?.complexity).toBe("high")
-  })
-
-  it("treats verified taskless stages consistently as completed", () => {
-    const verified = stage("verified", [], {
-      tasks: [],
-      acceptance: [{
-        id: "verified.1",
-        text: "Verified",
-        testReferences: [],
-        status: "passed",
-        evidence: "Checked."
-      }]
-    })
-
-    expect(planStageExecutionStatus(verified)).toBe("completed")
-    expect(toPlanStepViews(prd([verified]))[0]?.executionStatus).toBe("completed")
-    expect(stagesToGraph(prd([verified])).nodes[0]?.executionStatus).toBe("completed")
-  })
-
-  it("passes a stage's structured file list through", () => {
-    const [step] = toPlanStepViews(
-      prd([
-        stage("a", [], {
-          files: [
-            { path: "src/foo.ts", change: "A", added: 10, removed: 2 },
-            { path: "src/bar.ts", change: "D", added: 0, removed: 5 }
-          ]
-        })
-      ])
-    )
-    expect(step?.files).toEqual([
-      { path: "src/foo.ts", change: "A", added: 10, removed: 2 },
-      { path: "src/bar.ts", change: "D", added: 0, removed: 5 }
-    ])
-  })
-
-  it("yields an empty file list when a stage declares none", () => {
-    const [step] = toPlanStepViews(prd([stage("a", [])]))
-    expect(step?.files).toEqual([])
-  })
-
-  it("projects the canonical walkthrough blocks for implementation guidance", () => {
-    const [step] = toPlanStepViews(prd([stage("a", [], {
-      walkthrough: [
-        { kind: "prose", id: "why", text: "Preserve the boundary." },
-        { kind: "code", id: "how", language: "ts", code: "runBoundary()" }
-      ]
-    })]))
-    expect(step?.walkthrough).toEqual([
-      { kind: "prose", id: "why", text: "Preserve the boundary." },
-      { kind: "code", id: "how", language: "ts", code: "runBoundary()" }
-    ])
-  })
-})
-
-describe("stagesToGraph", () => {
-  it("returns empty nodes and edges for an empty plan", () => {
-    expect(stagesToGraph(prd([]))).toEqual({ nodes: [], edges: [] })
-  })
-
-  it("builds nodes and edges for a linear chain", () => {
-    const graph = stagesToGraph(prd([stage("a", []), stage("b", ["a"]), stage("c", ["b"])]))
-    expect(ids(graph.nodes)).toEqual(["a", "b", "c"])
-    expect(graph.nodes[0]).toMatchObject({ id: "a", stageId: "a", title: "Stage a" })
-    expect(edgeKeys(graph.edges)).toEqual(["a->b", "b->c"])
-  })
-
-  it("builds the correct edges and topological node order for a diamond graph", () => {
-    // a -> b, a -> c, b -> d, c -> d
-    const graph = stagesToGraph(
-      prd([stage("a", []), stage("b", ["a"]), stage("c", ["a"]), stage("d", ["b", "c"])])
-    )
-    expect(ids(graph.nodes)).toEqual(["a", "b", "c", "d"])
-    expect(edgeKeys(graph.edges)).toEqual(["a->b", "a->c", "b->d", "c->d"])
-  })
-
-  it("drops edges to a dangling dependency id without throwing", () => {
-    const graph = stagesToGraph(
-      prd([stage("a", []), stage("b", ["a", "does-not-exist"])])
-    )
-    expect(ids(graph.nodes)).toEqual(["a", "b"])
-    expect(edgeKeys(graph.edges)).toEqual(["a->b"])
-  })
-
-  it("ignores a self-referential dependency", () => {
-    const graph = stagesToGraph(prd([stage("a", ["a"])]))
-    expect(graph.edges).toEqual([])
-  })
-
-})
-
-describe("toPlanArchitectureView", () => {
-  it("returns empty sections and stages for an empty plan", () => {
-    expect(toPlanArchitectureView(prd([]))).toEqual({ sections: [], stages: [] })
-  })
-
-  it("keeps section diagrams in their section and stage diagrams in their stage", () => {
-    const sections: Array<PlanPrdSection> = [
-      {
-        id: "context",
-        title: "Context",
-        blocks: [
-          { kind: "prose", id: "p1", text: "One document is authoritative." },
-          { kind: "diagram", id: "d1", source: "graph TD; A-->B" }
-        ]
-      }
-    ]
-    const stages = [
-      stage("a", [], {
-        diagrams: [{ id: "sd1", source: "flowchart LR; X-->Y" }]
-      })
-    ]
-    const view = toPlanArchitectureView(prd(stages, sections))
-    expect(view.sections.map((section) => section.title)).toEqual(["Context"])
-    expect(view.sections[0]?.blocks[1]).toEqual({
-      kind: "diagram",
-      id: "d1",
-      source: "graph TD; A-->B"
-    })
-    expect(view.stages).toEqual([
-      {
-        id: "a",
-        title: "Stage a",
-        diagrams: [{ id: "sd1", source: "flowchart LR; X-->Y" }]
-      }
-    ])
-  })
-
-  it("keeps every architecture diagram associated with its owning stage", () => {
-    const view = toPlanArchitectureView(
-      prd([
-        stage("a", [], {
-          diagrams: [
-            { id: "a-flow", source: "flowchart LR; Input-->Core" },
-            { id: "a-state", source: "stateDiagram-v2; [*]-->Ready" }
-          ]
-        }),
-        stage("b", ["a"], {
-          diagrams: [{ id: "b-flow", source: "flowchart LR; Core-->UI" }]
-        })
-      ])
-    )
-
-    expect(view.stages).toEqual([
-      {
-        id: "a",
-        title: "Stage a",
-        diagrams: [
-          { id: "a-flow", source: "flowchart LR; Input-->Core" },
-          { id: "a-state", source: "stateDiagram-v2; [*]-->Ready" }
-        ]
-      },
-      {
-        id: "b",
-        title: "Stage b",
-        diagrams: [{ id: "b-flow", source: "flowchart LR; Core-->UI" }]
-      }
-    ])
-  })
-})
-
-describe("toPlanView", () => {
-  it("bundles steps, architecture, and workflow projections", () => {
-    const view = toPlanView(
-      prd(
-        [stage("a", []), stage("b", ["a"])],
-        [
-          {
-            id: "context",
-            title: "Context",
-            blocks: [{ kind: "prose", id: "p1", text: "Prose." }]
-          }
-        ]
-      )
-    )
-    expect(ids(view.steps)).toEqual(["a", "b"])
-    expect(view.architecture.sections.map((section) => section.title)).toEqual(["Context"])
-    expect(ids(view.workflow.nodes)).toEqual(["a", "b"])
-    expect(edgeKeys(view.workflow.edges)).toEqual(["a->b"])
+    expect(planStageExecutionStatus(stage(["in-progress"]))).toBe("running")
+    expect(planStageExecutionStatus(stage(["completed", "pending"]))).toBe("running")
+    expect(planStageExecutionStatus(stage(["completed"], acceptance("pending")))).toBe("running")
+    expect(planStageExecutionStatus(stage(["completed"], acceptance("passed")))).toBe("completed")
+    expect(planStageExecutionStatus(stage([], acceptance("passed")))).toBe("completed")
+    expect(planStageExecutionStatus(stage(["pending"]))).toBe("queued")
   })
 })

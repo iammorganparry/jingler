@@ -95,10 +95,7 @@ export default defineConfig(({ command }) => {
     plugins: [externalizeDepsPlugin({ exclude: workspacePackages })],
     build: {
       rollupOptions: {
-        input: {
-          index: resolve(import.meta.dirname, "src/preload/index.ts"),
-          plannotator: resolve(import.meta.dirname, "src/preload/plannotator.ts")
-        }
+        input: { index: resolve(import.meta.dirname, "src/preload/index.ts") }
       }
     }
   },

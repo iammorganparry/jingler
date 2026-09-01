@@ -27,6 +27,7 @@ import {
   E2E_BACKGROUND_TOOL,
   E2E_HELD_SUBAGENTS_TOOL,
   E2E_HOLD_TOOL,
+  E2E_PLAN_PROGRESS_TOOL,
   E2E_REVIEW_PAUSE_TOOL,
   type E2eBackgroundKind
 } from "./pi-fixture-tools.js"
@@ -657,9 +658,13 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
     text.includes("Continue with the approved plan") ||
     text.includes("Plan approved. You now have full tool access")
   )) {
-    return fauxAssistantMessage(
-      "Implemented and verified the approved plan. [DONE:1] [DONE:2]"
-    )
+    if (recentToolResultCount(context, E2E_PLAN_PROGRESS_TOOL) === 0) {
+      return fauxAssistantMessage([
+        fauxText("Implemented the first plan step. [DONE:1]"),
+        fauxToolCall(E2E_PLAN_PROGRESS_TOOL, {}, { id: "plannotator-progress" })
+      ], { stopReason: "toolUse" })
+    }
+    return fauxAssistantMessage("Implemented and verified the approved plan. [DONE:2]")
   }
   const submitCount = context.messages.filter(
     (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL

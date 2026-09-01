@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { plannotatorProjectionToPlanDocument } from "@jingler/core"
-import { ConversationView } from "./conversation-view.js"
+import { plannotatorProjectionToPlanDocument, type Message } from "@jingler/core"
+import { ConversationView, planTranscriptAnchorIndex } from "./conversation-view.js"
 
 describe("ConversationView Plannotator projection", () => {
   it("does not render a transcript card for an empty projection", () => {
@@ -29,33 +29,48 @@ describe("ConversationView Plannotator projection", () => {
     expect(screen.queryByTestId("plannotator-transcript-card")).toBeNull()
   })
 
-  it("renders the native transcript card as a read-only checklist projection", () => {
+  it("does not append an active plan when its plan-tool turn is not loaded", () => {
     const document = plannotatorProjectionToPlanDocument(
       {
         phase: "executing",
         planFilePath: "/tmp/plan.md",
         review: null,
-        checklist: [
-          { step: 1, text: "Inspect the runtime", completed: true },
-          { step: 2, text: "Verify recovery", completed: false }
-        ]
+        checklist: [{ step: 1, text: "Inspect the runtime", completed: true }]
       },
       "session-1",
       "chat-1",
       "2026-08-13T00:00:00.000Z"
     )
 
-    render(
-      <ConversationView
-        messages={[]}
-        mode="plan"
-        planDocument={document}
-      />
-    )
+    render(<ConversationView messages={[]} mode="plan" planDocument={document} />)
 
-    expect(screen.getByTestId("plannotator-transcript-card")).toBeTruthy()
-    expect(screen.getAllByText("Inspect the runtime").length).toBeGreaterThan(0)
-    expect(screen.getAllByText("Verify recovery").length).toBeGreaterThan(0)
-    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull()
+    expect(screen.queryByTestId("plannotator-transcript-card")).toBeNull()
+  })
+
+  it("anchors to the latest plan creation or revision tool turn", () => {
+    const message = (id: string, toolName?: string): Message => ({
+      id,
+      role: "assistant",
+      streaming: false,
+      createdAt: `2026-08-13T00:00:0${id}.000Z`,
+      parts: toolName === undefined ? [] : [{
+        _tag: "Tool",
+        tool: {
+          id: `tool-${id}`,
+          name: toolName,
+          target: "PLAN.md",
+          status: "success",
+          meta: null,
+          diff: null,
+          preview: null
+        }
+      }]
+    })
+
+    expect(planTranscriptAnchorIndex([
+      message("1", "plannotator_submit_plan"),
+      message("2", "workspace_read_file"),
+      message("3", "plannotator_update_plan")
+    ])).toBe(2)
   })
 })

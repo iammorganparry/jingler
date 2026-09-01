@@ -14,7 +14,7 @@ export const Variants: Story = {
   render: () => (
     <div className="flex max-w-[520px] flex-wrap items-start gap-2 bg-panel p-4">
       <FileChip path="packages/core/src/plan-view.ts" added={206} removed={0} />
-      <FileChip path="packages/ui/src/composites/plan-editor.tsx" added={41} removed={18} />
+      <FileChip path="packages/ui/src/screens/plan-review.tsx" added={41} removed={18} />
       <FileChip path="apps/desktop/src/renderer/conversation-pane.tsx" added={3} removed={0} />
       <FileChip path="README.md" />
       <FileChip
@@ -45,7 +45,7 @@ export const InProse: Story = {
     <p className="max-w-[560px] bg-panel p-4 text-[12.5px] leading-[2] text-text-body">
       The rework touched{" "}
       <FileChip path="packages/core/src/plan-view.ts" added={206} removed={0} /> and{" "}
-      <FileChip path="packages/ui/src/composites/plan-editor.tsx" added={41} removed={18} />, so the
+      <FileChip path="packages/ui/src/screens/plan-review.tsx" added={41} removed={18} />, so the
       chips flow inline with the sentence.
     </p>
   )

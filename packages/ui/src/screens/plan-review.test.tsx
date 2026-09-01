@@ -1,322 +1,101 @@
-// @vitest-environment jsdom
-import "@testing-library/jest-dom/vitest"
-import type { Plan, PlanDocument } from "@jingler/core"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { PlanReview } from "./plan-review.js"
-
-const source = JSON.stringify({
-  mode: "draft",
-  plan: {
-    title: "PRD: Editor-only plan",
-    sections: [],
-    stages: [
-      {
-        id: "01",
-        title: "Build",
-        intent: "Use one document editor.",
-        approach: [],
-        files: [],
-        diagrams: [],
-        notes: [],
-        walkthrough: [
-          { kind: "prose", id: "01-why", text: "Keep the document boundary explicit." },
-          { kind: "code", id: "01-code", language: "tsx", code: "<PlanReview document={plan} />" }
-        ],
-        acceptance: [
-          { id: "01.1", text: "Legacy rails are absent.", status: "pending", evidence: null }
-        ],
-        dependencies: []
-      }
-    ],
-    annotations: []
-  }
-})
+import type { PlanDocument } from "@jingler/core"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { PlanReview, type PlannotatorPlanHost } from "./plan-review.js"
 
 const document: PlanDocument = {
-  id: "plan-1",
-  sessionId: "s1",
-  producingChatId: "c1",
-  revision: 2,
+  id: "plannotator:PLAN.md",
+  sessionId: "session-1",
+  producingChatId: "chat-1",
+  revision: 1,
+  reviewId: "review-1",
+  sourceMarkdown: "# Auth plan\n\n- [ ] Implement auth\n",
   status: "proposed",
   plan: {
-    title: "PRD: Editor-only plan",
+    title: "Auth plan",
     sections: [],
-    stages: [
-      {
-        id: "01",
-        title: "Build",
-        intent: "Use one document editor.",
-        approach: [],
-        files: [],
-        diagrams: [],
-        notes: [],
-        walkthrough: [
-          { kind: "prose", id: "01-why", text: "Keep the document boundary explicit." },
-          { kind: "code", id: "01-code", language: "tsx", code: "<PlanReview document={plan} />" }
-        ],
-        acceptance: [
-          {
-            id: "01.1",
-            text: "Legacy rails are absent.",
-            status: "pending",
-            evidence: null
-          }
-        ]
-      }
-    ],
+    stages: [],
     annotations: []
   },
-  updatedAt: "2026-07-29T00:00:00.000Z",
+  updatedAt: "2026-08-27T00:00:00.000Z",
   updatedBy: "agent"
 }
 
-const legacyPlan: Plan = {
-  id: "legacy-plan",
-  summary: "Legacy projection",
-  status: "proposed",
-  structured: true,
-  raw: "# Stored legacy plan\n\nThis is the original **Markdown output**.",
-  graph: null,
-  comments: [],
-  steps: [
-    {
-      id: "s1",
-      number: "01",
-      title: "Legacy step",
-      intent: "This must not render.",
-      approach: [],
-      kind: "step",
-      condition: null,
-      parentId: null,
-      dependsOn: [],
-      blocks: [],
-      files: [],
-      guards: [],
-      code: null,
-      graph: null,
-      diff: null,
-      status: "proposed",
-      flagged: false,
-      changed: false
-    }
-  ]
+const openPlannotator = vi.fn(async () => {})
+const hidePlannotator = vi.fn()
+let decisionListener: Parameters<PlannotatorPlanHost["onPlannotatorDecision"]>[0] | undefined
+const host: PlannotatorPlanHost = {
+  openPlannotator,
+  hidePlannotator,
+  onPlannotatorDecision: (listener) => {
+    decisionListener = listener
+    return () => { decisionListener = undefined }
+  }
 }
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", class {
+    observe() {}
+    disconnect() {}
+  })
+})
+
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+  decisionListener = undefined
+  vi.unstubAllGlobals()
+})
 
 describe("PlanReview", () => {
-  it("keeps a streamed plan read-only, then shows the step outline once canonical", async () => {
-    const canonicalPlan: Plan = {
-      ...legacyPlan,
-      id: "plan-stream",
-      raw: source,
-      summary: "Editor-only plan"
-    }
-    const view = render(
-      <PlanReview
-        plan={null}
-        streamingDraft={{
-          id: "plan-stream",
-          source,
-          phase: "composing"
-        }}
-      />
-    )
+  it("opens the embedded Plannotator view with the canonical projection", async () => {
+    render(<PlanReview document={document} host={host} />)
 
-    // While composing, the partial DTO renders read-only as the step outline and
-    // the single loader is the disabled "Composing plan" button — no Approve.
-    expect(await screen.findByText("Build")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Composing plan" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull()
-
-    // Once canonical, the Steps page presents the digestible step outline and an
-    // Approve action — with no sync/revision indicator (the plan is read-only).
-    view.rerender(
-      <PlanReview plan={canonicalPlan} document={{ ...document, id: "plan-stream" }} />
-    )
-    expect(screen.queryByLabelText("Plan document")).toBeNull()
-    expect(screen.getByText("Build")).toBeTruthy()
-    expect(screen.queryByText("revision 2")).toBeNull()
-    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
+    expect(screen.getByTestId("plannotator-embedded-view")).toBeTruthy()
+    await waitFor(() => expect(openPlannotator).toHaveBeenCalled())
+    expect(openPlannotator).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      document,
+      canDecide: true
+    }))
   })
 
-  it("offers Approve when a stale complete draft outlives the proposed document", async () => {
-    // The stale-draft race: the submit tool's directly-emitted proposal beats
-    // the draft's queued "complete" snapshot, so the machine can be left
-    // holding both a proposed document AND a complete draft. The draft must
-    // not win — "Validating plan" replaces the Approve button, and the
-    // backend is parked on that very approval.
+  it("routes only the current review decision", async () => {
+    const onApprove = vi.fn()
+    const onRevise = vi.fn()
     render(
       <PlanReview
-        plan={null}
         document={document}
-        streamingDraft={{ id: "plan-stream", source, phase: "complete" }}
+        host={host}
+        onApprove={onApprove}
+        onRevise={onRevise}
       />
     )
+    await waitFor(() => expect(decisionListener).toBeDefined())
 
-    expect(await screen.findByText("Build")).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Validating plan" })).toBeNull()
-    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy()
-  })
-
-  it("still shows the validating loader while no document awaits a decision", async () => {
-    render(
-      <PlanReview
-        plan={null}
-        streamingDraft={{ id: "plan-stream", source, phase: "complete" }}
-      />
-    )
-
-    expect(await screen.findByText("Build")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Validating plan" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull()
-  })
-
-  it("degrades gracefully on a malformed streamed plan instead of crashing", async () => {
-    // A complete-but-malformed agent emission: the stage omits every required
-    // array (files/notes/acceptance/…). The outline/architecture views .map over
-    // those, so without normalization this would throw during render.
-    const malformed = JSON.stringify({
-      mode: "draft",
-      plan: {
-        title: "PRD: Malformed",
-        stages: [
-          {
-            id: "01",
-            title: "Broken stage",
-            tasks: [null, { id: "task", text: "Still readable", status: "unknown" }],
-            diagrams: [null, { id: "diagram", source: 42 }],
-            acceptance: [
-              {
-                id: "criterion",
-                text: "Malformed references do not crash.",
-                status: "unknown",
-                evidence: {},
-                testReferences: [null, { path: 42, cases: null }]
-              }
-            ]
-          }
-        ]
-      }
+    decisionListener?.({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      reviewId: "stale",
+      approved: true
     })
-    expect(() =>
-      render(
-        <PlanReview
-          plan={null}
-          streamingDraft={{ id: "plan-malformed", source: malformed, phase: "composing" }}
-        />
-      )
-    ).not.toThrow()
-    expect(await screen.findByText("Broken stage")).toBeTruthy()
-    expect(screen.getByText("Still readable")).toBeTruthy()
-  })
-
-  it("lands a progress-dock deep link on its step in the Steps outline", async () => {
-    const scrollIntoView = vi.fn()
-    Element.prototype.scrollIntoView = scrollIntoView
-    const onSelectStep = vi.fn()
-    render(
-      <PlanReview
-        plan={null}
-        document={document}
-        selectedStepId="01"
-        onSelectStep={onSelectStep}
-      />
-    )
-
-    expect(await screen.findByText("Build")).toBeTruthy()
-    expect(onSelectStep).toHaveBeenCalledWith("01")
-    expect(scrollIntoView).toHaveBeenCalled()
-  })
-
-  it("renders the step outline when a canonical document exists", () => {
-    render(<PlanReview plan={legacyPlan} document={document} />)
-
-    expect(screen.getByText("Build")).toBeTruthy()
-    expect(screen.getByText("Legacy rails are absent.")).toBeTruthy()
-    expect(screen.queryByLabelText("Resize step list")).toBeNull()
-    expect(screen.queryByLabelText("Resize changes")).toBeNull()
-  })
-
-  it("links compact Steps to the cohesive Guide", async () => {
-    render(<PlanReview plan={null} document={document} />)
-
-    // Steps page: the step outline.
-    expect(screen.getByText("Build")).toBeTruthy()
-
-    fireEvent.click(screen.getByRole("button", { name: "Open guide for Build" }))
-    expect(screen.getByRole("tab", { name: "Guide" })).toHaveAttribute("aria-selected", "true")
-    expect(screen.getByText("Keep the document boundary explicit.")).toBeTruthy()
-    expect(screen.getByText("<PlanReview document={plan} />")).toBeTruthy()
-
-    fireEvent.click(screen.getByRole("button", { name: "Open step Build" }))
-    expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true")
-
-    expect(screen.queryByRole("tab", { name: "Architecture" })).toBeNull()
-    expect(screen.queryByRole("tab", { name: "Walkthrough" })).toBeNull()
-
-    // Back to Steps.
-    fireEvent.click(screen.getByRole("tab", { name: "Steps" }))
-    expect(screen.getByText("Build")).toBeTruthy()
-  })
-
-  it("shows TLDR first and jumps from a Guide stage to its Steps card", async () => {
-    const scrollIntoView = vi.fn()
-    Element.prototype.scrollIntoView = scrollIntoView
-    const architectureDocument: PlanDocument = {
-      ...document,
-      plan: {
-        ...document.plan,
-        sections: [
-          {
-            id: "context",
-            title: "Context",
-            blocks: [{ kind: "prose", id: "context-copy", text: "Background detail." }]
-          },
-          {
-            id: "tldr",
-            title: "TL;DR",
-            blocks: [{ kind: "prose", id: "tldr-copy", text: "Outcome first." }]
-          }
-        ],
-        stages: document.plan.stages.map((stage) => ({
-          ...stage,
-          diagrams: [{ id: "build-flow", source: "flowchart LR; Plan-->Build" }]
-        }))
-      }
-    }
-
-    render(<PlanReview plan={null} document={architectureDocument} />)
-    fireEvent.click(screen.getByRole("tab", { name: "Guide" }))
-
-    const headings = screen.getAllByRole("heading", { level: 2 })
-    expect(headings[0]).toHaveTextContent("TL;DR")
-    expect(screen.getByText("Outcome first.")).toBeVisible()
-    expect(screen.getByRole("region", { name: "Guide for Build" })).toBeVisible()
-
-    fireEvent.click(screen.getByRole("button", { name: "Open step Build" }))
-    await waitFor(() => {
-      expect(screen.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true")
-      expect(globalThis.document.querySelector('[data-step-id="01"]')).toHaveAttribute("aria-pressed", "true")
+    decisionListener?.({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      reviewId: "review-1",
+      approved: false,
+      feedback: "Keep token compatibility"
     })
-    expect(scrollIntoView).toHaveBeenCalled()
+
+    expect(onApprove).not.toHaveBeenCalled()
+    expect(onRevise).toHaveBeenCalledWith("Keep token compatibility")
   })
 
-  it("renders an older plan as its original Markdown without the legacy workspace", () => {
-    render(<PlanReview plan={legacyPlan} />)
-
-    expect(
-      screen.getByRole("article", { name: "Legacy plan markdown" })
-    ).toBeTruthy()
-    expect(
-      screen.getByRole("heading", { name: "Stored legacy plan" })
-    ).toBeTruthy()
-    expect(screen.getByText("Markdown output")).toBeTruthy()
-    expect(screen.queryByText("Legacy step")).toBeNull()
-    expect(screen.queryByText("This must not render.")).toBeNull()
-    expect(screen.queryByText(/No plan yet/)).toBeNull()
-    expect(screen.queryByLabelText("Resize step list")).toBeNull()
-    expect(screen.queryByLabelText("Resize changes")).toBeNull()
+  it("hides the native view when the placeholder unmounts", async () => {
+    const view = render(<PlanReview document={document} host={host} />)
+    await waitFor(() => expect(openPlannotator).toHaveBeenCalled())
+    view.unmount()
+    expect(hidePlannotator).toHaveBeenCalledWith({ sessionId: "session-1", chatId: "chat-1" })
   })
 })

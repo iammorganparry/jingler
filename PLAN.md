@@ -24,7 +24,7 @@ Keep the existing constrained Markdown format and formalize it in the Plannotato
 - stage checkboxes are ordered implementation steps, with one nested subtask level;
 - `### Acceptance` checkboxes close the stage;
 - `> depends: stage-id` expresses ordering;
-- checkbox markers are the status store: `[ ]` pending, `[~]` in progress, `[-]` blocked, `[x]` completed.
+- task checkbox markers are the status store: `[ ]` pending, `[~]` in progress, `[-]` blocked, `[x]` completed; acceptance checks stay binary (`[ ]` / `[x]`).
 
 Stages guide commit sizing only. This change will not create commits or pause execution at stage boundaries.
 
@@ -34,11 +34,7 @@ Update progress by surgically changing the matching checkbox marker in `PLAN.md`
 
 Restore only the upstream plan-review frontend from the fork's pinned **Plannotator 0.27.8** baseline and adapt its transport; do not restore code-review, annotation, or localhost-server features removed in `packages/plannotator-ext/NOTICE.md`.
 
-Package the static frontend with the desktop app and load it in a dedicated Electron `WebContentsView` through a privileged custom app protocol, not `file://` or HTTP. Give that trusted view a dedicated sandboxed preload exposing only:
-
-- current plan Markdown/projection and review identity;
-- save/status-update requests that write `PLAN.md` through the existing extension/session path;
-- approve/revise decisions correlated by `reviewId`.
+Package the static frontend with the desktop app and load it in a dedicated Electron `WebContentsView` through a privileged custom app protocol, not `file://` or HTTP. Implement the pinned app's narrow `/api/plan`, approve, deny, feedback, and disabled-capability requests directly in that protocol. The view gets no preload, Node access, localhost server, or network access; review decisions remain correlated by `reviewId`.
 
 Reuse the bounds, visibility, navigation-denial, and teardown behavior from `apps/desktop/src/main/preview-view.ts`, but keep Plannotator views separate from generic browser sessions and BrowserControl. The renderer owns only a placeholder and reports its rectangle; the main process owns the native view.
 
@@ -62,7 +58,7 @@ Preserve:
 | Plan format and durable progress | `packages/plannotator-ext/plan-parse.ts`, `packages/plannotator-ext/generated/checklist.ts`, `packages/plannotator-ext/index.ts`, `packages/plannotator-ext/skills/plannotator/SKILL.md` |
 | Review transport/assets | `packages/plannotator-ext/native-review.ts`, restored pinned plan-review frontend assets under `packages/plannotator-ext/`, `packages/plannotator-ext/NOTICE.md` |
 | Read-only projection | `packages/core/src/plannotator-projection.ts`, `packages/core/src/plannotator-projection.test.ts`, CLI-adapter projection tests |
-| Desktop native view | new focused `apps/desktop/src/main/plannotator-view.ts`, dedicated preload entry, `apps/desktop/src/main/index.ts`, `apps/desktop/electron.vite.config.ts`, `apps/desktop/electron-builder.yml` |
+| Desktop native view | `apps/desktop/src/main/plannotator-view.ts`, `apps/desktop/src/main/index.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/electron-builder.yml` |
 | Plan-tab placeholder | `packages/ui/src/screens/plan-review.tsx`, renderer composition/hooks that currently pass `PlanEditor` props |
 | Retired enhanced UI | `packages/ui/src/composites/plan-editor.tsx` and now-unreferenced `plan-*` children/exports; related native-only tests |
 | End-to-end behavior | `apps/desktop/e2e/plan-mode.spec.ts`, `README.md` |
@@ -80,11 +76,11 @@ Exact RPC/store files between `pi-session-factory` and the renderer should be ch
 
 ## Steps
 
-- [ ] **Stage 1 — Make `PLAN.md` the complete durable state.** Document the existing stage convention and logical commit-boundary rule; add a minimal checkbox-marker updater so pending/in-progress/blocked/completed changes are written atomically to the Markdown scratchpad, reparsed, and republished without changing step numbering.
-- [ ] **Stage 2 — Restore and adapt the pinned plan-review frontend.** Bring back only the 0.27.8 plan-review assets with provenance, remove HTTP assumptions, and connect its load/save/status/review actions to a narrow host bridge keyed by plan path and `reviewId`.
-- [ ] **Stage 3 — Embed the bundled UI.** Register the custom protocol, package the assets, add a dedicated sandboxed `WebContentsView` plus preload, and implement open/bounds/visibility/session-switch/reload/teardown behavior for Plan-tab placeholders.
-- [ ] **Stage 4 — Retire the enhanced native Plan tab.** Replace `PlanEditor` with the embedded placeholder; remove native Steps/Guide/Workflow/comments/diff/floating-action code and redundant writable-plan plumbing only after references are gone, while retaining the read-only projection used outside the tab.
-- [ ] **Stage 5 — Lock recovery and progress behavior.** Update focused unit and Electron tests, product docs, and third-party notices; prove review, revision, execution progress, restart recovery, and packaged-asset loading without localhost web contents.
+- [x] **Stage 1 — Make `PLAN.md` the complete durable state.** Document the existing stage convention and logical commit-boundary rule; add a minimal checkbox-marker updater so pending/in-progress/blocked/completed changes are written atomically to the Markdown scratchpad, reparsed, and republished without changing step numbering.
+- [x] **Stage 2 — Restore and adapt the pinned plan-review frontend.** Bring back only the 0.27.8 plan-review assets with provenance, remove HTTP assumptions, and connect its load/save/status/review actions to a narrow host bridge keyed by plan path and `reviewId`.
+- [x] **Stage 3 — Embed the bundled UI.** Register the custom protocol, package the assets, add a dedicated sandboxed `WebContentsView` with no preload, and implement open/bounds/visibility/session-switch/reload/teardown behavior for Plan-tab placeholders.
+- [x] **Stage 4 — Retire the enhanced native Plan tab.** Replace `PlanEditor` with the embedded placeholder; remove native Steps/Guide/Workflow/comments/diff/floating-action code and redundant writable-plan plumbing only after references are gone, while retaining the read-only projection used outside the tab.
+- [x] **Stage 5 — Lock recovery and progress behavior.** Update focused unit and Electron tests, product docs, and third-party notices; prove review, revision, execution progress, restart recovery, and packaged-asset loading without localhost web contents.
 
 ## Verification
 

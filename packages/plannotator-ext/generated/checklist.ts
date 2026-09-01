@@ -20,6 +20,7 @@ export interface ScannedChecklistItem extends ChecklistItem {
   mark: string;
   prefix: string;
   suffix: string;
+  acceptance: boolean;
 }
 
 /**
@@ -40,12 +41,16 @@ export function scanChecklist(content: string): ScannedChecklistItem[] {
   const items: ScannedChecklistItem[] = [];
   const lines = content.split("\n");
   let fenced = false;
+  let acceptance = false;
   for (const [line, raw] of lines.entries()) {
     if (/^```[\w-]*\s*$/.test(raw.trim())) {
       fenced = !fenced;
       continue;
     }
     if (fenced) continue;
+    if (/^##\s+/.test(raw)) acceptance = false;
+    const subsection = /^###\s+(.+?)\s*$/.exec(raw)
+    if (subsection) acceptance = subsection[1].toLowerCase().startsWith("acceptance")
     const match = /^(\s*)([-*]\s*\[)([ xX~-])(\]\s+)(.*)$/.exec(raw);
     if (!match) continue;
     const text = match[5].trim();
@@ -59,6 +64,7 @@ export function scanChecklist(content: string): ScannedChecklistItem[] {
       mark: match[3],
       prefix: `${match[1]}${match[2]}`,
       suffix: `${match[4]}${match[5]}`,
+      acceptance,
     });
   }
   return items;
@@ -102,6 +108,7 @@ export function updateChecklistStatuses(
   const lines = content.split("\n");
   for (const item of scanChecklist(content)) {
     const status = updates.get(item.step);
+    if (item.acceptance && status !== "pending" && status !== "completed") continue;
     if (status !== undefined) {
       lines[item.line] = `${item.prefix}${markerForStatus[status]}${item.suffix}`;
     }

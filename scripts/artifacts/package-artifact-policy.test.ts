@@ -21,7 +21,8 @@ describe("package artifact policy", () => {
       "/node_modules/@earendil-works/pi-ai/package.json",
       "/node_modules/@earendil-works/pi-coding-agent/package.json",
       "/node_modules/pi-subagents/package.json",
-      "/node_modules/jiti/package.json"
+      "/node_modules/jiti/package.json",
+      "/node_modules/@jingler/plannotator-ext/package.json"
     ])).toEqual([])
   })
 
@@ -46,7 +47,8 @@ describe("package artifact policy", () => {
       "@earendil-works/pi-ai": "0.84.1",
       "@earendil-works/pi-coding-agent": "0.84.1",
       "pi-subagents": "0.57.0",
-      "jiti": "^2.7.0"
+      "jiti": "^2.7.0",
+      "@jingler/plannotator-ext": "workspace:*"
     } }, "desktop")).toEqual([])
     expect(auditRuntimeDependencies({ dependencies: {
       "@anthropic-ai/claude-agent-sdk": "1.0.0"

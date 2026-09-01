@@ -111,6 +111,7 @@ export function SessionChatTabs({
   const closeChat = (chatId: string) => {
     void rpc.sessionsCloseChat(session.id, chatId).then((updated) => {
       clearDraft(chatId)
+      window.jingler.closePlannotator({ sessionId: session.id, chatId })
       disposeChatActor(session.id, chatId)
       publishSessionUpdate(updated)
     }).catch(() => {})
@@ -127,6 +128,7 @@ export function SessionChatTabs({
       for (const chat of session.chats) {
         await rpc.sessionsCloseChat(session.id, chat.id).then((updated) => {
           clearDraft(chat.id)
+          window.jingler.closePlannotator({ sessionId: session.id, chatId: chat.id })
           disposeChatActor(session.id, chat.id)
           publishSessionUpdate(updated)
         }).catch(() => {})

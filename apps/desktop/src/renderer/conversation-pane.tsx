@@ -516,6 +516,7 @@ export function ConversationPane({
   const closeChat = (chatId: string) => {
     void rpc.sessionsCloseChat(session.id, chatId).then((updated) => {
       clearDraft(chatId)
+      window.jingler.closePlannotator({ sessionId: session.id, chatId })
       disposeChatActor(session.id, chatId)
       publishSessionUpdate(updated)
     }).catch(() => {})
@@ -728,7 +729,6 @@ export function ConversationPane({
     },
     [activeChat.id, convo.plannotator, session.id]
   )
-  const nativePlanDocument = plannotatorDocument
   const pendingReviewId = convo.plannotator?.review?.reviewId ?? null
   const decideReview = useCallback(
     (approved: boolean, feedback?: string) => {
@@ -737,21 +737,16 @@ export function ConversationPane({
     },
     [activeChat.id, pendingReviewId, session.id]
   )
-  // The plan surface persists for as long as a plan exists. While a review is
-  // pending the floating actions carry approve/revise; afterwards the same
-  // document stays up read-only, ticking live as the checklist progresses.
-  const planSurface = nativePlanDocument !== null
+  // The plan surface persists for as long as a plan exists. Plannotator owns
+  // review actions while pending, then stays read-only as the checklist advances.
+  const planSurface = plannotatorDocument !== null
     ? (
         <PlanReview
           key={pendingReviewId ?? "plan"}
-          plan={null}
-          document={nativePlanDocument}
+          document={plannotatorDocument}
           canApprove={pendingReviewId !== null}
-          knownFiles={knownFiles}
-          onApprove={(executionMode) => {
-            decideReview(true)
-            if (executionMode !== undefined) convo.setMode(executionMode)
-          }}
+          host={window.jingler}
+          onApprove={() => decideReview(true)}
           onRevise={() => decideReview(false)}
         />
       )
@@ -1078,7 +1073,7 @@ export function ConversationPane({
           onOpenPlanReview={onOpenPlanReview}
           onForkOntoBranch={onForkOntoBranchStable}
           onAdoptBranch={onAdoptBranchStable}
-          planDocument={nativePlanDocument}
+          planDocument={plannotatorDocument}
           draft={draft.text}
           // Merge against the LIVE draft, never the render-time `draft` closure:
           // on send the composer fires onSend → setValue("") → setAttachments([])

@@ -388,15 +388,22 @@ const PartView = memo(function PartView({
 function renderParts(
   parts: ReadonlyArray<ContentPart>,
   markdown: boolean,
-  handlers: {
-      onDecideGate?: (gateId: string, decision: GateDecision) => void
-      onForkOntoBranch?: () => void | Promise<void>
+  {
+    onDecideGate,
+    onForkOntoBranch,
+    onAdoptBranch,
+    afterPart,
+    keyOffset = 0,
+    streamingTextIndex = -1
+  }: {
+    onDecideGate?: (gateId: string, decision: GateDecision) => void
+    onForkOntoBranch?: () => void | Promise<void>
     onAdoptBranch?: () => void | Promise<void>
-  },
-  // When a mega-turn's prefix is collapsed, `parts` is a suffix of the real
-  // array — keys must stay ABSOLUTE so expanding doesn't remount the tail.
-  keyOffset = 0,
-  streamingTextIndex = -1
+    afterPart?: { readonly index: number; readonly content: ReactNode }
+    /** Absolute offset when a mega-turn's prefix is collapsed. */
+    keyOffset?: number
+    streamingTextIndex?: number
+  }
 ): ReactNode[] {
   const out: ReactNode[] = []
   let run: ToolPart[] = []
@@ -434,6 +441,13 @@ function renderParts(
     out.push(<MergedThoughts key={`t${thoughtStart}`} parts={thoughts} />)
     thoughts = []
   }
+  const insertAfter = (index: number) => {
+    if (afterPart?.index !== index) return
+    flush()
+    flushImgs()
+    flushThoughts()
+    out.push(<div key={`after-${index}`}>{afterPart.content}</div>)
+  }
   parts.forEach((part, localIndex) => {
     const i = localIndex + keyOffset
     if (isGroupableTool(part)) {
@@ -441,6 +455,7 @@ function renderParts(
       flushThoughts()
       if (run.length === 0) runStart = i
       run.push(part)
+      insertAfter(i)
       return
     }
     if (part._tag === "Image") {
@@ -448,6 +463,7 @@ function renderParts(
       flushThoughts()
       if (imgs.length === 0) imgStart = i
       imgs.push(part)
+      insertAfter(i)
       return
     }
     if (part._tag === "Thinking") {
@@ -455,6 +471,7 @@ function renderParts(
       flushImgs()
       if (thoughts.length === 0) thoughtStart = i
       thoughts.push(part)
+      insertAfter(i)
       return
     }
     flush()
@@ -466,9 +483,12 @@ function renderParts(
         part={part}
         markdown={markdown}
         streamingText={i === streamingTextIndex}
-        {...handlers}
+        onDecideGate={onDecideGate}
+        onForkOntoBranch={onForkOntoBranch}
+        onAdoptBranch={onAdoptBranch}
       />
     )
+    insertAfter(i)
   })
   flush()
   flushImgs()
@@ -513,7 +533,8 @@ function MessageTurnImpl({
   providerId,
   onDecideGate,
   onForkOntoBranch,
-  onAdoptBranch
+  onAdoptBranch,
+  afterPart
 }: {
   message: Message
   /** Canonical provider identity for the assistant eyebrow. */
@@ -523,6 +544,8 @@ function MessageTurnImpl({
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session. */
   onAdoptBranch?: () => void | Promise<void>
+  /** Insert transcript-owned UI immediately after one absolute part index. */
+  afterPart?: { readonly index: number; readonly content: ReactNode }
 }) {
   const isAssistant = message.role === "assistant"
   // From the FULL part list, not the visible slice: a mega-turn's collapsed
@@ -559,17 +582,14 @@ function MessageTurnImpl({
           Show {hiddenParts} earlier steps
         </button>
       )}
-      {renderParts(
-        visibleParts,
-        isAssistant,
-        {
-                          onDecideGate,
-                                          onForkOntoBranch,
-          onAdoptBranch
-        },
-        hiddenParts,
+      {renderParts(visibleParts, isAssistant, {
+        onDecideGate,
+        onForkOntoBranch,
+        onAdoptBranch,
+        afterPart,
+        keyOffset: hiddenParts,
         streamingTextIndex
-      )}
+      })}
     </div>
   )
 }
