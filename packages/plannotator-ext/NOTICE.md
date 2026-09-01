@@ -17,8 +17,10 @@ authors.
 - The code-review and markdown-annotation features were removed (Jingler never
   used them): the `plannotator-review`, `plannotator-annotate` and
   `plannotator-last` commands, `server/serverReview.ts`, `server/serverAnnotate.ts`,
-  the `review-editor.html` bundle, and the `generated/` PR-review / call-flow /
-  guide modules they pulled in. Only the plan-review slice remains.
+  the upstream `review-editor.html` bundle, and the `generated/` PR-review /
+  call-flow / guide modules they pulled in. Only the plan-review slice remains.
+  `review-plan.html` is Jingler's focused embedded host for that slice; it is not
+  the removed upstream code-review bundle and starts no HTTP server.
 - `generated/` files keep their upstream "@generated — DO NOT EDIT" headers for
   provenance; in this fork they are ordinary forked source and may be edited.
 

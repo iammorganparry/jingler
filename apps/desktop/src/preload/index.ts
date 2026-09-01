@@ -16,6 +16,9 @@ const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 const PLAN_FLUSH_REQUEST_CHANNEL = "jingler/plan-flush-request"
 const PLAN_FLUSH_COMPLETE_CHANNEL = "jingler/plan-flush-complete"
+const PLANNOTATOR_OPEN_CHANNEL = "jingler/plannotator/open"
+const PLANNOTATOR_HIDE_CHANNEL = "jingler/plannotator/hide"
+const PLANNOTATOR_DECISION_CHANNEL = "jingler/plannotator/decision"
 
 /**
  * The active theme's `:root` block, fetched SYNCHRONOUSLY at preload time.
@@ -119,5 +122,12 @@ contextBridge.exposeInMainWorld("jingler", {
     ipcRenderer.on(PLAN_FLUSH_REQUEST_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PLAN_FLUSH_REQUEST_CHANNEL, listener)
   },
-  planFlushComplete: () => ipcRenderer.send(PLAN_FLUSH_COMPLETE_CHANNEL)
+  planFlushComplete: () => ipcRenderer.send(PLAN_FLUSH_COMPLETE_CHANNEL),
+  openPlannotator: (payload: unknown) => ipcRenderer.invoke(PLANNOTATOR_OPEN_CHANNEL, payload),
+  hidePlannotator: (owner: unknown) => ipcRenderer.send(PLANNOTATOR_HIDE_CHANNEL, owner),
+  onPlannotatorDecision: (cb: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => cb(payload)
+    ipcRenderer.on(PLANNOTATOR_DECISION_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(PLANNOTATOR_DECISION_CHANNEL, listener)
+  }
 })

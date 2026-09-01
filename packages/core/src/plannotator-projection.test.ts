@@ -78,6 +78,7 @@ describe("Plannotator native projection", () => {
       "2026-08-27T00:00:00.000Z"
     )
     expect(document.status).toBe("proposed")
+    expect(document.reviewId).toBe("r1")
     expect(document.plan.stages).toHaveLength(1)
   })
 

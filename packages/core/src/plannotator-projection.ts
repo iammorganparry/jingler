@@ -154,6 +154,7 @@ export const plannotatorProjectionToPlanDocument = (
   sessionId,
   producingChatId,
   revision: projection.revision ?? 1,
+  ...(projection.review === null ? {} : { reviewId: projection.review.reviewId }),
   status: projectionStatus(projection),
   plan: {
     title: projection.title ?? projection.planFilePath ?? "Plan",

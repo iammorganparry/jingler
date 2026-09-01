@@ -366,6 +366,8 @@ export const PlanDocument = Schema.Struct({
   sessionId: Schema.String,
   producingChatId: Schema.String,
   revision: Schema.Number,
+  /** Pending Plannotator review identity; absent for other plan producers. */
+  reviewId: Schema.optional(Schema.String),
   status: PlanDocumentStatus,
   plan: PlanPrd,
   updatedAt: Schema.String,

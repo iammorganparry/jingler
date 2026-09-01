@@ -56,6 +56,20 @@ interface JinglerBridge {
   readonly onPlanFlushRequested: (cb: () => void) => () => void
   /** Complete the close handshake after every live plan actor settles. */
   readonly planFlushComplete: () => void
+  /** Show or update the bundled Plannotator view over its renderer placeholder. */
+  readonly openPlannotator: (payload: unknown) => Promise<void>
+  /** Hide the named Plannotator view without destroying its review state. */
+  readonly hidePlannotator: (owner: { readonly sessionId: string; readonly chatId: string }) => void
+  /** Receive approve/revise actions from the isolated Plannotator view. */
+  readonly onPlannotatorDecision: (
+    cb: (payload: {
+      readonly sessionId: string
+      readonly chatId: string
+      readonly reviewId: string
+      readonly approved: boolean
+      readonly feedback?: string
+    }) => void
+  ) => () => void
 }
 
 interface Window {

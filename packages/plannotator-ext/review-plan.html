@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+  <title>Plannotator plan review</title>
+  <style>
+    :root { color-scheme: dark; font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; background:#141414; color:#ddd }
+    * { box-sizing:border-box } body { margin:0; min-height:100vh; background:#141414 }
+    main { width:min(780px, 100%); margin:auto; padding:34px 24px 92px }
+    h1 { font-size:24px; margin:0 0 22px; color:#f3f3f3 } h2 { font-size:16px; margin:30px 0 8px; color:#eee }
+    h3 { font-size:12px; margin:18px 0 7px; text-transform:uppercase; letter-spacing:.08em; color:#999 }
+    p { color:#bbb } .stage { border:1px solid #333; border-radius:10px; padding:18px; margin:14px 0; background:#191919 }
+    ul { list-style:none; padding:0; margin:8px 0 } li { display:flex; gap:9px; padding:5px 0 } .mark { width:18px; color:#888; flex:none }
+    .completed { color:#777; text-decoration:line-through } .blocked { color:#e36d75 } .running { color:#d7ba7d }
+    .meta { color:#888; font-size:11px } .actions { position:fixed; inset:auto 0 0; display:flex; justify-content:center; gap:8px; padding:12px; border-top:1px solid #333; background:#181818ee; backdrop-filter:blur(8px) }
+    button { border:1px solid #3a3a3a; border-radius:7px; padding:7px 13px; background:#242424; color:#ddd; cursor:pointer }
+    button.primary { background:#2563eb; border-color:#2563eb; color:white } textarea { width:min(620px, calc(100vw - 32px)); height:72px; resize:vertical; border:1px solid #3a3a3a; border-radius:7px; padding:8px; background:#101010; color:#ddd }
+    dialog { border:1px solid #3a3a3a; border-radius:10px; background:#1b1b1b; color:#ddd; padding:16px } dialog::backdrop { background:#0008 }
+    .empty { padding:80px 20px; text-align:center; color:#888 }
+  </style>
+</head>
+<body>
+  <main id="app"><div class="empty">Loading plan…</div></main>
+  <dialog id="revise"><form method="dialog"><h2>Revise with agent</h2><textarea id="feedback" aria-label="Revision feedback" placeholder="What should change?"></textarea><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button value="cancel">Cancel</button><button id="send" value="send" class="primary">Send feedback</button></div></form></dialog>
+  <script>
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const marker = status => status === 'completed' || status === 'passed' ? '✓' : status === 'in-progress' ? '◐' : status === 'blocked' || status === 'failed' ? '!' : '○';
+    const row = item => `<li class="${item.status === 'completed' || item.status === 'passed' ? 'completed' : item.status === 'blocked' || item.status === 'failed' ? 'blocked' : item.status === 'in-progress' ? 'running' : ''}"><span class="mark">${marker(item.status)}</span><span>${esc(item.text)}</span></li>`;
+    const render = state => {
+      const plan = state?.document?.plan;
+      if (!plan) { document.querySelector('#app').innerHTML = '<div class="empty">No plan yet.</div>'; return; }
+      const stages = (plan.stages ?? []).map(stage => `<section class="stage"><h2>${esc(stage.title)}</h2><p>${esc(stage.intent)}</p>${stage.tasks?.length ? `<h3>Steps</h3><ul>${stage.tasks.map(row).join('')}</ul>` : ''}${stage.acceptance?.length ? `<h3>Acceptance</h3><ul>${stage.acceptance.map(row).join('')}</ul>` : ''}${stage.dependencies?.length ? `<div class="meta">Depends on: ${stage.dependencies.map(esc).join(', ')}</div>` : ''}</section>`).join('');
+      document.querySelector('#app').innerHTML = `<div class="meta">${esc(state.document.status)}</div><h1>${esc(plan.title)}</h1>${stages || '<div class="empty">No stages yet.</div>'}${state.canDecide ? '<div class="actions"><button id="revise-button">Revise</button><button id="approve" class="primary">Approve</button></div>' : ''}`;
+      document.querySelector('#approve')?.addEventListener('click', () => window.plannotator.decide(true));
+      document.querySelector('#revise-button')?.addEventListener('click', () => document.querySelector('#revise').showModal());
+    };
+    document.querySelector('#send').addEventListener('click', event => { const feedback = document.querySelector('#feedback').value.trim(); if (!feedback) { event.preventDefault(); return; } window.plannotator.decide(false, feedback); });
+    window.plannotator.onState(render);
+  </script>
+</body>
+</html>

@@ -40,17 +40,34 @@ const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession
   activeChatId: "s_plannotator_chat"
 }]
 
-/**
- * The plan review is fully native now — no Plannotator webview, no loopback
- * review server. Any localhost webContents during a plan review would mean the
- * deleted browser surface came back.
- */
+/** The plan review is a bundled custom-scheme view, never a localhost server. */
 const reviewUrls = (app: ElectronApplication) =>
   app.evaluate(async ({ webContents }) =>
     webContents.getAllWebContents()
       .map((contents) => contents.getURL())
-      .filter((url) => url.startsWith("http://localhost:"))
+      .filter((url) => url.startsWith("jingler-plan:"))
   )
+
+const reviewText = (app: ElectronApplication) =>
+  app.evaluate(async ({ webContents }) => {
+    const review = webContents.getAllWebContents()
+      .find((contents) => contents.getURL() === "jingler-plan://review/")
+    return review?.executeJavaScript("document.body.innerText") ?? ""
+  })
+
+const approveReview = (app: ElectronApplication) =>
+  app.evaluate(async ({ webContents }) => {
+    const review = webContents.getAllWebContents()
+      .find((contents) => contents.getURL() === "jingler-plan://review/")
+    await review?.executeJavaScript("document.querySelector('#approve')?.click()")
+  })
+
+const reviseReview = (app: ElectronApplication) =>
+  app.evaluate(async ({ webContents }) => {
+    const review = webContents.getAllWebContents()
+      .find((contents) => contents.getURL() === "jingler-plan://review/")
+    await review?.executeJavaScript("document.querySelector('#revise-button')?.click(); document.querySelector('#feedback').value = 'Keep the token format'; document.querySelector('#send')?.click()")
+  })
 
 const startPlanReview = async (launched: LaunchedApp) => {
   const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
@@ -62,7 +79,7 @@ const startPlanReview = async (launched: LaunchedApp) => {
   await composer.press("Enter")
 }
 
-test("Plannotator reviews natively inside the Plan tab and drives progress", async ({
+test("Plannotator reviews in a bundled Plan-tab view and drives progress", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -81,14 +98,11 @@ test("Plannotator reviews natively inside the Plan tab and drives progress", asy
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
 
-  // The native document editor renders the projected checklist as stages, and
-  // the floating actions carry the approval — nothing is a webview.
-  const actions = launched.window.getByTestId("plan-floating-actions")
-  await expect(actions).toBeVisible({ timeout: 20_000 })
-  await expect(actions).toContainText("proposed")
-  expect(await reviewUrls(launched.app)).toEqual([])
+  await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible()
+  await expect.poll(() => reviewUrls(launched.app)).toEqual(["jingler-plan://review/"])
+  await expect.poll(() => reviewText(launched.app)).toContain("proposed")
 
-  await actions.getByRole("button", { name: "Approve" }).click()
+  await approveReview(launched.app)
 
   await launched.window.getByTestId("active-chat-tab").first().click()
   await expect(
@@ -100,7 +114,7 @@ test("Plannotator reviews natively inside the Plan tab and drives progress", asy
   const persistentTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(persistentTab).toBeVisible()
   await persistentTab.click()
-  await expect(launched.window.getByTestId("plan-floating-actions")).toContainText(/executing|done/)
+  await expect.poll(() => reviewText(launched.app)).toMatch(/executing|done/)
 })
 
 test("Revise with agent denies the review and the same plan file is revised", async ({
@@ -118,20 +132,17 @@ test("Revise with agent denies the review and the same plan file is revised", as
   const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  const actions = launched.window.getByTestId("plan-floating-actions")
-  await expect(actions).toBeVisible({ timeout: 20_000 })
-
-  await actions.getByRole("button", { name: "More plan actions" }).click()
-  await launched.window.getByRole("menuitem", { name: "Revise with agent" }).click()
+  await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible()
+  await reviseReview(launched.app)
 
   // The denial goes back through the submit tool; the scripted agent rewrites
   // the SAME plan file in place and resubmits it for a second review.
   await expect.poll(() =>
     readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"), { timeout: 30_000 }
   ).toContain("keeping the existing token format")
-  const revisedActions = launched.window.getByTestId("plan-floating-actions")
-  await expect(revisedActions).toBeVisible({ timeout: 30_000 })
-  await revisedActions.getByRole("button", { name: "Approve" }).click()
+  await expect.poll(() => reviewText(launched.app), { timeout: 30_000 })
+    .toContain("proposed")
+  await approveReview(launched.app)
 
   await launched.window.getByTestId("active-chat-tab").first().click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
@@ -139,7 +150,7 @@ test("Revise with agent denies the review and the same plan file is revised", as
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
 })
 
-test("a pending Plannotator review reopens natively after an Electron restart", async ({
+test("a pending Plannotator review reopens in the bundled view after an Electron restart", async ({
   launchApp
 }) => {
   const first = await launchApp({
@@ -168,9 +179,8 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   const planTab = reopened.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  const actions = reopened.window.getByTestId("plan-floating-actions")
-  await expect(actions).toBeVisible({ timeout: 30_000 })
-  expect(await reviewUrls(reopened.app)).toEqual([])
+  await expect(reopened.window.getByTestId("plannotator-embedded-view")).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => reviewUrls(reopened.app)).toEqual(["jingler-plan://review/"])
 
   await reopened.window.getByTestId("active-chat-tab").first().click()
   await expect(reopened.window.getByText("0/2")).toBeVisible({ timeout: 20_000 })
@@ -183,7 +193,7 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
 
   // The resumed review must still be decidable over the native channel.
   await planTab.click()
-  await actions.getByRole("button", { name: "Approve" }).click()
+  await approveReview(reopened.app)
   await reopened.window.getByTestId("active-chat-tab").first().click()
   await expect(reopened.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
