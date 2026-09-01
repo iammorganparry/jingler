@@ -507,7 +507,9 @@ export function Composer({
   // split only the pane the operator is looking at takes it.
   useEffect(() => {
     if (!autoFocus) return;
-    const id = requestAnimationFrame(() => ref.current?.focus());
+    const id = requestAnimationFrame(() => {
+      if (document.hasFocus()) ref.current?.focus();
+    });
     return () => cancelAnimationFrame(id);
   }, [autoFocus, focusKey]);
 

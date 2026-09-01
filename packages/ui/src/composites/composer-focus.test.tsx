@@ -1,5 +1,5 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Composer } from "./composer.js"
 
 /**
@@ -9,7 +9,14 @@ import { Composer } from "./composer.js"
  * than assert synchronously.
  */
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true)
+})
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 describe("Composer autofocus", () => {
   it("takes the caret when it is the pane on screen", async () => {
@@ -24,6 +31,33 @@ describe("Composer autofocus", () => {
     // Give the deferred focus a chance to happen, then assert it did not.
     await new Promise((resolve) => requestAnimationFrame(resolve))
     expect(document.activeElement).not.toBe(textarea)
+  })
+
+  it("does not steal focus when agent activity remounts it behind another app", async () => {
+    vi.mocked(document.hasFocus).mockReturnValue(false)
+    const outside = document.body.appendChild(document.createElement("input"))
+    outside.focus()
+
+    const { rerender } = render(<Composer key="before-stream" autoFocus focusKey="s1" />)
+    rerender(<Composer key="stream-update" autoFocus focusKey="s1" busy />)
+
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    expect(document.activeElement).toBe(outside)
+    outside.remove()
+  })
+
+  it("does not steal focus if the window goes inactive before deferred focus runs", async () => {
+    const hasFocus = vi.mocked(document.hasFocus)
+    hasFocus.mockReturnValue(true)
+    const outside = document.body.appendChild(document.createElement("input"))
+    outside.focus()
+
+    render(<Composer autoFocus focusKey="s1" />)
+    hasFocus.mockReturnValue(false)
+
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    expect(document.activeElement).toBe(outside)
+    outside.remove()
   })
 
   it("refocuses when the pane swaps to a different session", async () => {
