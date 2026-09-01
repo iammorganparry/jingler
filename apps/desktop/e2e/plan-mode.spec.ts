@@ -171,6 +171,46 @@ test("Plannotator reviews in a bundled Plan-tab view and drives progress", async
   await expect.poll(() => reviewText(launched.app)).toContain("Verify the auth change")
 })
 
+test("a new review in the same chat is presented and can be approved", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await startPlanReview(launched)
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+  await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
+  await expect.poll(() => reviewText(launched.app)).not.toContain("Choose how plans look")
+  await approveReview(launched.app)
+  await launched.window.getByTestId("active-chat-tab").first().click()
+  await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
+    .toBeVisible({ timeout: 30_000 })
+
+  const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
+  await composer.click()
+  await launched.window.keyboard.press("Shift+Tab")
+  await expect(launched.window.locator("[data-mode='plan']")).toContainText("Plan")
+  await composer.fill("[[plan]] revise auth again")
+  await composer.press("Enter")
+
+  await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible({
+    timeout: 20_000
+  })
+  await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
+  await planTab.click()
+  await approveReview(launched.app)
+  await launched.window.getByTestId("active-chat-tab").first().click()
+  await expect.poll(() =>
+    launched.window.getByText("Implemented and verified the approved plan.").count(),
+  { timeout: 30_000 }).toBeGreaterThan(1)
+})
+
 test("a hidden renderer cannot settle a review without acknowledging delivery", async ({
   launchApp
 }) => {
