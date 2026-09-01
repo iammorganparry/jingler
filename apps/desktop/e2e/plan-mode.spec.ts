@@ -77,7 +77,7 @@ test("Plannotator reviews natively inside the Plan tab and drives progress", asy
   await expect.poll(() => existsSync(join(launched.repoPath, "PLAN.md")), {
     timeout: 20_000
   }).toBe(true)
-  const planTab = launched.window.getByRole("button", { name: "Plan Review" }).first()
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
 
@@ -95,8 +95,12 @@ test("Plannotator reviews natively inside the Plan tab and drives progress", asy
     launched.window.getByText("Implemented and verified the approved plan.").first()
   ).toBeVisible({ timeout: 30_000 })
   await expect(launched.window.locator("[data-mode='auto']")).toContainText("Auto")
-  await expect(launched.window.getByRole("button", { name: "Plan Review" })).toHaveCount(0)
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
+  // The plan outlives its approval: the tab persists as a live progress surface.
+  const persistentTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(persistentTab).toBeVisible()
+  await persistentTab.click()
+  await expect(launched.window.getByTestId("plan-floating-actions")).toContainText(/executing|done/)
 })
 
 test("Revise with agent denies the review and the same plan file is revised", async ({
@@ -111,7 +115,7 @@ test("Revise with agent denies the review and the same plan file is revised", as
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
 
-  const planTab = launched.window.getByRole("button", { name: "Plan Review" }).first()
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
   const actions = launched.window.getByTestId("plan-floating-actions")
@@ -146,7 +150,7 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   })
   await expect(appShell(first.window)).toBeVisible()
   await startPlanReview(first)
-  await expect(first.window.getByRole("button", { name: "Plan Review" }).first())
+  await expect(first.window.getByTestId("view-tab-plan").first())
     .toBeVisible({ timeout: 20_000 })
   await first.app.close()
 
@@ -161,7 +165,7 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
     githubRelay: first.githubRelay
   })
   await expect(appShell(reopened.window)).toBeVisible()
-  const planTab = reopened.window.getByRole("button", { name: "Plan Review" }).first()
+  const planTab = reopened.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
   const actions = reopened.window.getByTestId("plan-floating-actions")
@@ -206,7 +210,7 @@ for (const recoveryCase of [
     })
     await expect(appShell(first.window)).toBeVisible()
     await startPlanReview(first)
-    await expect(first.window.getByRole("button", { name: "Plan Review" }).first())
+    await expect(first.window.getByTestId("view-tab-plan").first())
       .toBeVisible({ timeout: 20_000 })
     await first.app.close()
 
@@ -225,7 +229,7 @@ for (const recoveryCase of [
     await expect(reopened.window.getByText(recoveryCase.message)).toBeVisible({ timeout: 20_000 })
     await expect(reopened.window.getByText("Implemented and verified the approved plan."))
       .toHaveCount(0)
-    await expect(reopened.window.getByRole("button", { name: "Plan Review" })).toHaveCount(0)
+    await expect(reopened.window.getByTestId("view-tab-plan")).toHaveCount(0)
     await expect(reopened.window.getByTestId("plan-task-list")).toHaveCount(0)
     expect(await reviewUrls(reopened.app)).toEqual([])
   })

@@ -6,7 +6,6 @@ import type { Page } from "@playwright/test"
 import {
   appShell,
   expect,
-  planDirectory, planFile,
   sessionRow,
   type SeedSession,
   test
@@ -239,15 +238,17 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   }).toBe("jingler-e2e/eval-model")
 
   await expect(launched.window.getByRole("button", { name: /^Model:/ })).toBeVisible()
-  await launched.window.getByPlaceholder(/Message .+…/).press("Enter")
   const sessions = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))
   const worktreePath = sessions[0].worktreePath as string
-  const savedPlanFile = planFile(launched.home, worktreePath, sessions[0].id, sessions[0].chats[0].id)
-  await expect.poll(() => existsSync(savedPlanFile), { timeout: 20_000 }).toBe(true)
-  await launched.window.getByRole("button", { name: "Plan Review" }).first().click()
+  // Plannotator owns the plan as a markdown file in the worktree; the native
+  // Plan tab reviews and approves it — there is no separate plan store.
+  await expect.poll(() => existsSync(join(worktreePath, "PLAN.md")), { timeout: 20_000 }).toBe(true)
+  await launched.window.getByTestId("view-tab-plan").first().click()
   await launched.window.getByRole("button", { name: "More plan actions" }).click()
   await launched.window.getByRole("menuitem", { name: "Approve and auto", exact: true }).click()
-  await expect.poll(() => JSON.parse(readFileSync(savedPlanFile, "utf8")).status, {
-    timeout: 30_000
-  }).toBe("done")
+  await launched.window.getByTestId("active-chat-tab").first().click()
+  await expect(
+    launched.window.getByText("Implemented and verified the approved plan.").first()
+  ).toBeVisible({ timeout: 30_000 })
+  await expect(launched.window.locator("[data-mode='auto']")).toContainText("Auto")
 })

@@ -79,9 +79,11 @@ test("plan scratchpad tracks progress in a normal session without plan mode", as
     launched.window.getByRole("tab", { name: PLAN_DRAWER_TAB }).first()
   ).toContainText("1/2", { timeout: 20_000 })
 
-  // The session never left accept-edits: no plan mode, no review surface.
+  // The session never left accept-edits, and no review ever opened — but the
+  // Plan tab appears anyway: a created plan is viewable the moment it exists.
   await expect(launched.window.locator("[data-mode='accept-edits']")).toBeVisible()
-  await expect(
-    launched.window.getByRole("button", { name: "Plan Review" })
-  ).toHaveCount(0)
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(planTab).toBeVisible()
+  await planTab.click()
+  await expect(launched.window.getByTestId("plan-task-list").first()).toBeVisible()
 })

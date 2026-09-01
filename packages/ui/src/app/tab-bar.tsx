@@ -428,6 +428,7 @@ export function TabBar({
               <button
                 key={key}
                 type="button"
+                data-testid={`view-tab-${key}`}
                 onClick={() => onChange(key)}
                 aria-current={isActive ? "page" : undefined}
                 aria-label={tab.label}

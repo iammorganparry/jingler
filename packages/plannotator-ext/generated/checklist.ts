@@ -20,12 +20,18 @@ export interface ChecklistItem {
  *   - [x] Completed step
  *   * [ ] Alternative bullet
  */
+// Jingler fork: the shared checkbox grammar, reused by the structured plan
+// parser (plan-parse.ts) so flat [DONE:n] numbering and the rich stage/task
+// model can never disagree. Extends upstream with `~` (in-progress) and `-`
+// (blocked) marks and with indented (nested) checkboxes.
+export const CHECKLIST_PATTERN = /[-*]\s*\[([ xX~-])\]\s+(.+)/;
+
 export function parseChecklist(content: string): ChecklistItem[] {
   const items: ChecklistItem[] = [];
-  const pattern = /^[-*]\s*\[([ xX])\]\s+(.+)$/gm;
+  const pattern = new RegExp(`^\\s*${CHECKLIST_PATTERN.source}$`, "gm");
 
   for (const match of content.matchAll(pattern)) {
-    const completed = match[1] !== " ";
+    const completed = /[xX]/.test(match[1]);
     const text = match[2].trim();
     if (text.length > 0) {
       items.push({ step: items.length + 1, text, completed });

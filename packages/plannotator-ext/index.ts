@@ -45,6 +45,7 @@ import {
 	getStartupErrorMessage,
 	startNativePlanReviewSession,
 } from "./native-review.ts";
+import { parsePlanMarkdown, type ParsedPlanMarkdown } from "./plan-parse.ts";
 import {
 	getAssistantMessageText,
 } from "./assistant-message.ts";
@@ -59,7 +60,6 @@ import {
 	PLAN_UPDATE_TOOL,
 	releasePhaseTools,
 	type Phase,
-	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
 import { isBrowserSessionStoppedError } from "./browser-session-error.ts";
 
@@ -188,14 +188,60 @@ export default function plannotator(pi: ExtensionAPI): void {
 	let activeReview: PlannotatorHostStateEvent["review"] = null;
 	let reviewStarting = false;
 	let hostChecklist: ChecklistItem[] = [];
+	let lastPlanContent: string | null = null;
+	let hostStructure: ParsedPlanMarkdown | null = null;
+
+	/** Remember the plan text every reader saw, so the publisher can re-derive structure. */
+	function adoptPlanContent(content: string): ChecklistItem[] {
+		lastPlanContent = content;
+		hostStructure = null;
+		return parseChecklist(content);
+	}
 
 	function publishHostState(): void {
 		if (checklistItems.length > 0) hostChecklist = checklistItems.map((item) => ({ ...item }));
+		if (hostStructure === null && lastPlanContent !== null) {
+			try {
+				hostStructure = parsePlanMarkdown(lastPlanContent);
+			} catch {
+				hostStructure = null;
+			}
+		}
+		// The flat checklist is the live progress record ([DONE:n] ticks mutate
+		// it); overlay its completion back onto the parsed structure by step so
+		// both views can never disagree.
+		const completedSteps = new Set(
+			hostChecklist.filter((item) => item.completed).map((item) => item.step),
+		);
+		const overlayTask = <T extends { step: number; status: string }>(task: T): T =>
+			completedSteps.has(task.step) && task.status !== "completed"
+				? { ...task, status: "completed" }
+				: task;
+		const structured = hostStructure === null || hostStructure.stages.length === 0
+			? {}
+			: {
+					title: hostStructure.title,
+					revision: hostStructure.revision,
+					sections: hostStructure.sections,
+					stages: hostStructure.stages.map((stage) => ({
+						...stage,
+						tasks: stage.tasks.map((task) => ({
+							...overlayTask(task),
+							subtasks: task.subtasks.map((subtask) => overlayTask(subtask)),
+						})),
+						acceptance: stage.acceptance.map((criterion) =>
+							completedSteps.has(criterion.step) && criterion.status !== "passed"
+								? { ...criterion, status: "passed" as const }
+								: criterion,
+						),
+					})),
+				};
 		pi.events.emit(PLANNOTATOR_HOST_STATE_CHANNEL, {
 			phase,
 			planFilePath: lastSubmittedPath,
 			review: activeReview,
 			checklist: hostChecklist.map((item) => ({ ...item })),
+			...structured,
 		} satisfies PlannotatorHostStateEvent);
 	}
 
@@ -677,7 +723,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			publishHostNotice(message);
 			return;
 		}
-		checklistItems = parseChecklist(planContent);
+		checklistItems = adoptPlanContent(planContent);
 		const outcome = await reviewSubmittedPlan(ctx, inputPath, planContent);
 		const text = outcome.content.map((part) => part.text).join("\n");
 		if (text && (outcome.details.approved || "feedback" in outcome.details)) {
@@ -800,7 +846,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			lastSubmittedPath = inputPath;
-			checklistItems = parseChecklist(planContent);
+			checklistItems = adoptPlanContent(planContent);
 
 			// Non-interactive or no HTML: auto-approve
 			if (!ctx.hasUI) {
@@ -906,7 +952,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			}
 
 			lastSubmittedPath = inputPath;
-			checklistItems = parseChecklist(planContent);
+			checklistItems = adoptPlanContent(planContent);
 			updateStatus(ctx);
 			updateWidget(ctx);
 			await syncTodoProvider(ctx);
@@ -982,7 +1028,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			const fullPath = resolve(ctx.cwd, lastSubmittedPath);
 			try {
 				const planContent = readFileSync(fullPath, "utf-8");
-				checklistItems = parseChecklist(planContent);
+				checklistItems = adoptPlanContent(planContent);
 			} catch {
 				// File deleted during execution — degrade gracefully
 			}
@@ -1102,7 +1148,7 @@ Mark completed steps with [DONE:n] in your response.`
 			// phase machinery. Idle still injects nothing into prompts (#1269);
 			// this only refreshes the host-state projection and status line.
 			try {
-				checklistItems = parseChecklist(
+				checklistItems = adoptPlanContent(
 					readFileSync(resolve(ctx.cwd, lastSubmittedPath), "utf-8"),
 				);
 			} catch {
@@ -1239,7 +1285,7 @@ Mark completed steps with [DONE:n] in your response.`
 				const fullPath = resolve(ctx.cwd, lastSubmittedPath);
 				if (existsSync(fullPath)) {
 					const content = readFileSync(fullPath, "utf-8");
-					checklistItems = parseChecklist(content);
+					checklistItems = adoptPlanContent(content);
 
 					// Find last execution marker and scan messages after it for [DONE:n]
 					let executeIndex = -1;
@@ -1292,9 +1338,10 @@ Mark completed steps with [DONE:n] in your response.`
 				await restoreSavedState(ctx);
 				savedState = null;
 			}
-			const activeTools = pi.getActiveTools();
-			const idleTools = stripPlanningOnlyTools(activeTools);
-			if (idleTools.length !== activeTools.length) pi.setActiveTools(idleTools);
+			// Jingler fork: the submit/update tools are deliberately NOT stripped
+			// here — the plan scratchpad rides in every mode, and idle sessions
+			// may submit a plan for review whenever the agent judges it needs
+			// operator sign-off.
 		} else if (phase === "planning" || phase === "executing") {
 			await applyPhaseConfig(ctx, { restoreSavedState: true });
 		}

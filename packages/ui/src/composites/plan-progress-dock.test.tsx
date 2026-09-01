@@ -84,7 +84,11 @@ describe("PlanTaskList task list", () => {
         checklist: [
           { step: 1, text: "Implement", completed: true },
           { step: 2, text: "Verify", completed: false }
-        ]
+        ],
+        title: null,
+        revision: 1,
+        stages: [],
+        sections: []
       },
       "session-1",
       "chat-1",

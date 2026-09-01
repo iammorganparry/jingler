@@ -13,6 +13,11 @@ export interface PlannotatorHostStateEvent {
 	planFilePath: string | null;
 	review: { reviewId: string; url?: string } | null;
 	checklist: Array<{ step: number; text: string; completed: boolean }>;
+	/** Structured scratchpad payload (plan-parse.ts); absent for flat plans. */
+	title?: string | null;
+	revision?: number;
+	sections?: import("./plan-parse.ts").PlanSection[];
+	stages?: import("./plan-parse.ts").ParsedPlanStage[];
 }
 
 export type PlannotatorAction = "plan-mode";

@@ -1878,7 +1878,11 @@ describe("conversationMachine — Plannotator projection", () => {
         phase: "executing",
         planFilePath: "PLAN.md",
         review: null,
-        checklist: [{ step: 1, text: "Implement", completed: false }]
+        checklist: [{ step: 1, text: "Implement", completed: false }],
+        title: null,
+        revision: 1,
+        stages: [],
+        sections: []
       }
     })
 
@@ -1886,7 +1890,11 @@ describe("conversationMachine — Plannotator projection", () => {
       phase: "executing",
       planFilePath: "PLAN.md",
       review: null,
-      checklist: [{ step: 1, text: "Implement", completed: false }]
+      checklist: [{ step: 1, text: "Implement", completed: false }],
+      title: null,
+      revision: 1,
+      stages: [],
+      sections: []
     })
     expect(actor.getSnapshot().context.messages).toHaveLength(messageCount)
     await waitFor(actor, (snapshot) => snapshot.context.mode === "auto")
@@ -1908,7 +1916,11 @@ describe("conversationMachine — Plannotator projection", () => {
         phase: "executing",
         planFilePath: "PLAN.md",
         review: null,
-        checklist: [{ step: 1, text: "Implement", completed: false }]
+        checklist: [{ step: 1, text: "Implement", completed: false }],
+        title: null,
+        revision: 1,
+        stages: [],
+        sections: []
       }
     })
 

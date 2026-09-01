@@ -737,13 +737,16 @@ export function ConversationPane({
     },
     [activeChat.id, pendingReviewId, session.id]
   )
-  const planSurface = pendingReviewId !== null
+  // The plan surface persists for as long as a plan exists. While a review is
+  // pending the floating actions carry approve/revise; afterwards the same
+  // document stays up read-only, ticking live as the checklist progresses.
+  const planSurface = nativePlanDocument !== null
     ? (
         <PlanReview
-          key={pendingReviewId}
+          key={pendingReviewId ?? "plan"}
           plan={null}
           document={nativePlanDocument}
-          canApprove
+          canApprove={pendingReviewId !== null}
           knownFiles={knownFiles}
           onApprove={(executionMode) => {
             decideReview(true)

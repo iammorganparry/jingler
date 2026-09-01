@@ -135,6 +135,7 @@ export function ViewRail({
             <Tooltip key={tab.id} label={tooltip} side="left">
               <button
                 type="button"
+                data-testid={`view-tab-${tab.id}`}
                 onClick={() => onChange(tab.id)}
                 aria-current={isActive ? "page" : undefined}
                 aria-label={tab.label}

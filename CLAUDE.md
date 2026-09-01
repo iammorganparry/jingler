@@ -197,10 +197,19 @@ per-tool memory implementations. See `docs/shared-memory.md` for the complete
 runtime and operations contract.
 
 The composer supports Claude and Codex only. Its model, permission mode, and reasoning controls
-are derived from the selected harness capability catalogue. Plan mode belongs to the pinned
-Plannotator Pi extension: it owns the Markdown plan, review decision, automatic same-session
-execution, checklist persistence, and recovery. Jingler's todo list, plan drawer, progress dock,
-composer summary, and transcript card are disposable read-only projections of Plannotator state.
+are derived from the selected harness capability catalogue. The plan lifecycle belongs to
+Jingler's **forked** Plannotator Pi extension (`packages/plannotator-ext`, see its NOTICE.md for
+provenance): it owns the Markdown plan file, the review decision, automatic same-session
+execution, checklist persistence, and recovery. The plan tools ride in EVERY permission mode —
+`plannotator_update_plan` refreshes the plan silently (a live scratchpad), and
+`plannotator_submit_plan` opens operator review when the agent judges a change needs sign-off.
+The plan file is structured Markdown parsed by the fork (`plan-parse.ts`: `##` stages, checkbox
+tasks with `[~]`/`[-]` marks, `### Acceptance`/`### Files`, `> complexity`/`> depends`, mermaid
+fences); reviews are decided NATIVELY — the renderer's `PlanReview` surface sends
+`Plan.decide` → the session's `plannotator:review-decision` event channel; there is no review
+webview or HTTP review server. The Plan tab persists for as long as a plan exists. Jingler's
+todo list, plan drawer, progress dock, composer summary, transcript card, and the Plan tab's
+document are disposable read-only projections of Plannotator host-state.
 Do not add a second plan lifecycle, approval path, checkpoint protocol, or persistence layer.
 
 Persistence schemas are migration boundaries. `WorkspaceConfig` additions stay
