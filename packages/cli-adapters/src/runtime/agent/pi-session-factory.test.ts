@@ -2,11 +2,12 @@ import { execFileSync } from "node:child_process"
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type {
-  AgentSession,
-  CreateAgentSessionOptions,
-  CreateAgentSessionResult,
-  EventBus
+import {
+  createEventBus,
+  type AgentSession,
+  type CreateAgentSessionOptions,
+  type CreateAgentSessionResult,
+  type EventBus
 } from "@earendil-works/pi-coding-agent"
 import {
   CURRENT_RUNTIME_CONTRACTS,
@@ -27,6 +28,7 @@ import {
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
 import {
+  deliverPlanReviewDecision,
   enterPlannotatorPlanMode,
   makePiSessionFactory
 } from "./pi-session-factory.js"
@@ -52,6 +54,26 @@ afterEach(async () => {
     ...brokers.splice(0).map((broker) => Effect.runPromise(broker.close)),
     ...roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   ])
+})
+
+describe("deliverPlanReviewDecision", () => {
+  it("requires the waiting extension to acknowledge the review id", () => {
+    const events = createEventBus()
+    events.on("plannotator:review-decision", (payload) => {
+      events.emit("plannotator:review-decision-ack", {
+        reviewId: (payload as { reviewId: string }).reviewId
+      })
+    })
+
+    expect(() => deliverPlanReviewDecision(events, {
+      reviewId: "review-1",
+      approved: true
+    })).not.toThrow()
+    expect(() => deliverPlanReviewDecision(createEventBus(), {
+      reviewId: "review-1",
+      approved: true
+    })).toThrow("The plan review is no longer pending")
+  })
 })
 
 const connection = Schema.decodeUnknownSync(ProviderConnection)({
