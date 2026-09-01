@@ -72,7 +72,8 @@ interface JinglerBridge {
       readonly reviewId: string
       readonly approved: boolean
       readonly feedback?: string
-    }) => void
+      readonly deliveryId: string
+    }) => boolean | undefined | Promise<boolean | undefined>
   ) => () => void
 }
 

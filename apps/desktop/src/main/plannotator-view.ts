@@ -2,7 +2,8 @@ import {
   BrowserBounds,
   type BrowserBounds as BrowserBoundsData,
   PlanDocument,
-  type PlanDocument as PlanDocumentData
+  type PlanDocument as PlanDocumentData,
+  type PlanTaskStatus
 } from "@jingler/core"
 import { randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
@@ -24,7 +25,9 @@ export const PLANNOTATOR_HIDE_CHANNEL = "jingler/plannotator/hide"
 export const PLANNOTATOR_CLOSE_CHANNEL = "jingler/plannotator/close"
 export const PLANNOTATOR_CLOSE_SESSION_CHANNEL = "jingler/plannotator/close-session"
 export const PLANNOTATOR_DECISION_CHANNEL = "jingler/plannotator/decision"
+export const PLANNOTATOR_DECISION_ACK_CHANNEL = "jingler/plannotator/decision-ack"
 const PARTITION = "jingler-plannotator"
+const DECISION_ACK_TIMEOUT_MS = 5_000
 
 const Owner = Schema.Struct({ sessionId: Schema.String, chatId: Schema.String })
 type Owner = Schema.Schema.Type<typeof Owner>
@@ -34,6 +37,7 @@ const OpenPayload = Schema.Struct({
   document: PlanDocument,
   canDecide: Schema.Boolean
 })
+const DecisionAck = Schema.Struct({ deliveryId: Schema.String, delivered: Schema.Boolean })
 type OpenPayload = Schema.Schema.Type<typeof OpenPayload>
 type ViewEntry = {
   readonly owner: Owner
@@ -43,6 +47,8 @@ type ViewEntry = {
   document: PlanDocumentData
   canDecide: boolean
   signature: string
+  settledReviewId?: string
+  inFlightReviewId?: string
   loading?: Promise<void>
 }
 type Host = {
@@ -50,7 +56,7 @@ type Host = {
   readonly partition: Session
   readonly views: Map<string, ViewEntry>
   readonly viewsByToken: Map<string, ViewEntry>
-  readonly settledReviewIds: Set<string>
+  readonly acknowledgements: Map<string, (delivered: boolean) => void>
   reviewHtml?: Promise<string>
 }
 
@@ -64,6 +70,33 @@ const rectOf = ({ x, y, width, height }: BrowserBoundsData) => ({
 const stateSignature = ({ document, canDecide }: Pick<OpenPayload, "document" | "canDecide">) =>
   `${document.reviewId ?? ""}\0${document.status}\0${document.sourceMarkdown ?? ""}\0${canDecide}`
 
+const taskMarker = (status: PlanTaskStatus) => {
+  if (status === "completed") return "x"
+  if (status === "in-progress") return "~"
+  if (status === "blocked") return "-"
+  return " "
+}
+
+export const reviewMarkdownOf = (document: PlanDocumentData): string =>
+  document.sourceMarkdown ?? [
+    `# ${document.plan.title}`,
+    ...document.plan.stages.flatMap((stage) => [
+      "",
+      `## ${stage.title}`,
+      ...(stage.tasks ?? []).map((task) => `- [${taskMarker(task.status)}] ${task.text}`),
+      ...(stage.acceptance.length === 0
+        ? []
+        : [
+            "",
+            "### Acceptance",
+            ...stage.acceptance.map((criterion) =>
+              `- [${criterion.status === "passed" || criterion.status === "waived" ? "x" : " "}] ${criterion.text}`
+            )
+          ])
+    ]),
+    ""
+  ].join("\n")
+
 const decodeOwner = Schema.decodeUnknownOption(Owner)
 const decodeOpenPayload = Schema.decodeUnknownOption(OpenPayload)
 const json = <A>(body: A, status = 200): Response =>
@@ -75,6 +108,30 @@ const feedbackOf = async (request: Request): Promise<string | undefined> => {
   }))(await request.json().catch(() => null))
   return Option.isSome(body) ? body.value.feedback?.trim() || undefined : undefined
 }
+
+const deliverDecision = (
+  host: Host,
+  window: BrowserWindow,
+  payload: Owner & {
+    readonly reviewId: string
+    readonly approved: boolean
+    readonly feedback?: string
+  }
+): Promise<boolean> => new Promise((resolveDelivery) => {
+  const deliveryId = randomUUID()
+  const finish = (delivered: boolean) => {
+    clearTimeout(timeout)
+    host.acknowledgements.delete(deliveryId)
+    resolveDelivery(delivered)
+  }
+  const timeout = setTimeout(() => finish(false), DECISION_ACK_TIMEOUT_MS)
+  host.acknowledgements.set(deliveryId, finish)
+  try {
+    window.webContents.send(PLANNOTATOR_DECISION_CHANNEL, { ...payload, deliveryId })
+  } catch {
+    finish(false)
+  }
+})
 
 export const registerPlannotatorScheme = (): void => {
   protocol.registerSchemesAsPrivileged([{
@@ -113,26 +170,25 @@ const sendDecision = async (
     !entry.canDecide ||
     entry.document.reviewId !== reviewId ||
     reviewId === undefined ||
-    host.settledReviewIds.has(reviewId) ||
+    entry.settledReviewId === reviewId ||
+    entry.inFlightReviewId === reviewId ||
     window === null ||
     window.webContents.isDestroyed()
   ) return json({ error: "Review is no longer pending." }, 409)
 
-  host.settledReviewIds.add(reviewId)
+  entry.inFlightReviewId = reviewId
+  const delivered = await deliverDecision(host, window, {
+    ...entry.owner,
+    reviewId,
+    approved,
+    feedback
+  })
+  if (entry.inFlightReviewId === reviewId) entry.inFlightReviewId = undefined
+  if (!delivered) return json({ error: "Could not deliver the review decision." }, 503)
+
+  entry.settledReviewId = reviewId
   entry.canDecide = false
-  try {
-    window.webContents.send(PLANNOTATOR_DECISION_CHANNEL, {
-      ...entry.owner,
-      reviewId,
-      approved,
-      feedback
-    })
-    return json({ ok: true })
-  } catch {
-    host.settledReviewIds.delete(reviewId)
-    entry.canDecide = true
-    return json({ error: "Could not deliver the review decision." }, 503)
-  }
+  return json({ ok: true })
 }
 
 const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Response> => {
@@ -145,7 +201,7 @@ const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Re
   if (path === "/api/plan") {
     const readOnly = !entry.canDecide || entry.document.reviewId === undefined
     return json({
-      plan: entry.document.sourceMarkdown ?? entry.document.plan.title,
+      plan: reviewMarkdownOf(entry.document),
       origin: "pi",
       mode: readOnly ? "archive" : undefined,
       archivePlans: readOnly ? [] : undefined,
@@ -245,10 +301,14 @@ const openEntry = async (host: Host, payload: OpenPayload): Promise<void> => {
   entry.view.setBounds(rectOf(payload.bounds))
   const signature = stateSignature(payload)
   const changed = signature !== entry.signature
+  if (entry.document.reviewId !== payload.document.reviewId) {
+    entry.settledReviewId = undefined
+    entry.inFlightReviewId = undefined
+  }
   entry.document = payload.document
   entry.canDecide = payload.canDecide &&
     payload.document.reviewId !== undefined &&
-    !host.settledReviewIds.has(payload.document.reviewId)
+    entry.settledReviewId !== payload.document.reviewId
   entry.signature = signature
 
   if (entry.view.webContents.getURL() === "") {
@@ -270,7 +330,7 @@ export const installPlannotatorView = (
     partition: session.fromPartition(PARTITION),
     views: new Map(),
     viewsByToken: new Map(),
-    settledReviewIds: new Set()
+    acknowledgements: new Map()
   }
   host.partition.protocol.handle(PLANNOTATOR_SCHEME, (request) => handleProtocol(host, request))
   host.partition.webRequest.onBeforeRequest((details, callback) => {
@@ -280,6 +340,14 @@ export const installPlannotatorView = (
     })
   })
 
+  const acknowledge = (event: Electron.IpcMainEvent, value: unknown) => {
+    if (event.sender !== host.windowOf()?.webContents) return
+    const acknowledgement = Schema.decodeUnknownOption(DecisionAck)(value)
+    if (Option.isNone(acknowledgement)) return
+    host.acknowledgements.get(acknowledgement.value.deliveryId)?.(
+      acknowledgement.value.delivered
+    )
+  }
   const hide = (_event: Electron.IpcMainEvent, value: Owner) => {
     const owner = decodeOwner(value)
     if (Option.isSome(owner)) host.views.get(ownerKey(owner.value))?.view.setVisible(false)
@@ -299,15 +367,18 @@ export const installPlannotatorView = (
     const payload = decodeOpenPayload(value)
     return Option.isSome(payload) ? openEntry(host, payload.value) : undefined
   })
+  ipcMain.on(PLANNOTATOR_DECISION_ACK_CHANNEL, acknowledge)
   ipcMain.on(PLANNOTATOR_HIDE_CHANNEL, hide)
   ipcMain.on(PLANNOTATOR_CLOSE_CHANNEL, close)
   ipcMain.on(PLANNOTATOR_CLOSE_SESSION_CHANNEL, closeSession)
 
   return () => {
     ipcMain.removeHandler(PLANNOTATOR_OPEN_CHANNEL)
+    ipcMain.removeListener(PLANNOTATOR_DECISION_ACK_CHANNEL, acknowledge)
     ipcMain.removeListener(PLANNOTATOR_HIDE_CHANNEL, hide)
     ipcMain.removeListener(PLANNOTATOR_CLOSE_CHANNEL, close)
     ipcMain.removeListener(PLANNOTATOR_CLOSE_SESSION_CHANNEL, closeSession)
+    for (const resolveDelivery of host.acknowledgements.values()) resolveDelivery(false)
     for (const entry of [...host.views.values()]) destroyEntry(host, entry)
     host.partition.protocol.unhandle(PLANNOTATOR_SCHEME)
   }

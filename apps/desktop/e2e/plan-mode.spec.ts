@@ -73,6 +73,14 @@ const clickReviewButton = async (app: ElectronApplication, label: string) => {
 }
 
 const approveReview = (app: ElectronApplication) => clickReviewButton(app, "Approve")
+const approveReviewStatus = (app: ElectronApplication) =>
+  app.evaluate(async ({ webContents }) => {
+    const review = webContents.getAllWebContents()
+      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
+    return review?.executeJavaScript(
+      "fetch('/api/approve', { method: 'POST' }).then((response) => response.status)"
+    )
+  })
 const reviewSecurity = (app: ElectronApplication) =>
   app.evaluate(async ({ webContents }) => {
     const review = webContents.getAllWebContents()
@@ -169,6 +177,64 @@ test("Plannotator reviews in a bundled Plan-tab view and drives progress", async
   await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"))
     .toContain("- [x] Verify the auth change")
   await expect.poll(() => reviewText(launched.app)).toContain("Verify the auth change")
+})
+
+test("a hidden renderer cannot settle a review without acknowledging delivery", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await startPlanReview(launched)
+
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+  await expect.poll(() => reviewUrls(launched.app)).toHaveLength(1)
+  await launched.window.getByRole("button", { name: "Split plan beside conversation" }).click()
+  await expect(launched.window.getByTestId("plannotator-embedded-view")).toHaveCount(0)
+
+  await expect(approveReviewStatus(launched.app)).resolves.toBe(503)
+
+  await planTab.click()
+  await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible()
+  await approveReview(launched.app)
+  await launched.window.getByTestId("active-chat-tab").first().click()
+  await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
+    .toBeVisible({ timeout: 30_000 })
+})
+
+test("missing PLAN.md during execution fails closed without rejecting progress", async ({
+  launchApp
+}) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await startPlanReview(launched)
+
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+  await expect.poll(() => reviewUrls(launched.app)).toHaveLength(1)
+  await approveReview(launched.app)
+
+  await launched.window.getByTestId("active-chat-tab").first().click()
+  await expect(launched.window.getByRole("tab", { name: "Plan 1/2" })).toBeVisible({
+    timeout: 20_000
+  })
+  rmSync(join(launched.repoPath, "PLAN.md"))
+
+  await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
+    .toBeVisible({ timeout: 30_000 })
+  expect(existsSync(join(launched.repoPath, "PLAN.md"))).toBe(false)
 })
 
 test("Revise with agent denies the review and the same plan file is revised", async ({

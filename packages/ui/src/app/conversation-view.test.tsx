@@ -47,8 +47,12 @@ describe("ConversationView Plannotator projection", () => {
     expect(screen.queryByTestId("plannotator-transcript-card")).toBeNull()
   })
 
-  it("anchors to the latest plan creation or revision tool turn", () => {
-    const message = (id: string, toolName?: string): Message => ({
+  it("anchors to the latest non-failed plan creation or revision tool turn", () => {
+    const message = (
+      id: string,
+      toolName?: string,
+      status: "running" | "success" | "error" = "success"
+    ): Message => ({
       id,
       role: "assistant",
       streaming: false,
@@ -59,7 +63,7 @@ describe("ConversationView Plannotator projection", () => {
           id: `tool-${id}`,
           name: toolName,
           target: "PLAN.md",
-          status: "success",
+          status,
           meta: null,
           diff: null,
           preview: null
@@ -69,8 +73,8 @@ describe("ConversationView Plannotator projection", () => {
 
     expect(planTranscriptAnchorIndex([
       message("1", "plannotator_submit_plan"),
-      message("2", "workspace_read_file"),
-      message("3", "plannotator_update_plan")
+      message("2", "plannotator_update_plan", "error"),
+      message("3", "plannotator_update_plan", "running")
     ])).toBe(2)
   })
 })

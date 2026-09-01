@@ -12,15 +12,17 @@ export interface PlannotatorOpenPayload {
 export interface PlannotatorPlanHost {
   readonly openPlannotator: (payload: PlannotatorOpenPayload) => Promise<void>
   readonly hidePlannotator: (owner: { readonly sessionId: string; readonly chatId: string }) => void
-  readonly onPlannotatorDecision: (callback: (decision: PlannotatorDecision) => void) => () => void
+  readonly onPlannotatorDecision: (
+    callback: (decision: PlannotatorDecision) => boolean | undefined | Promise<boolean | undefined>
+  ) => () => void
 }
 
 export interface PlanReviewProps {
   readonly document: PlanDocument
   readonly canApprove?: boolean
   readonly host: PlannotatorPlanHost
-  readonly onApprove?: () => void
-  readonly onRevise?: (feedback?: string) => void
+  readonly onApprove?: () => void | Promise<void>
+  readonly onRevise?: (feedback?: string) => void | Promise<void>
 }
 
 export type PlannotatorDecision = {
@@ -29,6 +31,7 @@ export type PlannotatorDecision = {
   readonly reviewId: string
   readonly approved: boolean
   readonly feedback?: string
+  readonly deliveryId: string
 }
 
 export function PlanReview({
@@ -71,14 +74,17 @@ export function PlanReview({
     }
   }, [document, canDecide, sessionId, chatId, host])
 
-  useEffect(() => host.onPlannotatorDecision((decision) => {
+  useEffect(() => host.onPlannotatorDecision(async (decision) => {
     if (
       decision.sessionId !== sessionId ||
       decision.chatId !== chatId ||
       decision.reviewId !== document.reviewId
-    ) return
-    if (decision.approved) onApprove?.()
-    else onRevise?.(decision.feedback)
+    ) return undefined
+    const decide = decision.approved ? onApprove : onRevise
+    if (!decide) return false
+    if (decision.approved) await onApprove?.()
+    else await onRevise?.(decision.feedback)
+    return true
   }), [document.reviewId, host, onApprove, onRevise, sessionId, chatId])
 
   return (

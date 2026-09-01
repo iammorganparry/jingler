@@ -92,3 +92,11 @@ Exact RPC/store files between `pi-session-factory` and the renderer should be ch
 
 > [!NOTE]
 > This intentionally does not port the enhanced tab's Guide, Workflow graph, inline comments, or live diff evidence into Plannotator. The requested carry-over is structured committable stages plus durable step status. Add other views only when there is a concrete Plannotator-side requirement.
+
+## Adversarial review follow-up
+
+- [x] Confirm decision delivery before settling reviews.
+- [x] Preserve legacy checklist content in the embedded review.
+- [x] Harden fenced-code scanning and missing-plan recovery.
+- [x] Reassess filesystem race guarantees and document the enforceable contract.
+- [x] Run focused and Electron regression tests, then update PR #260.

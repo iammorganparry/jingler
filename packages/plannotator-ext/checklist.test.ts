@@ -51,6 +51,24 @@ describe("updateChecklistStatuses", () => {
     ].join("\n"))
   })
 
+  it("ignores CommonMark fences with info strings, tildes, and longer markers", () => {
+    const plan = [
+      "````md title=\"example\"",
+      "- [ ] Backtick example",
+      "```",
+      "````",
+      "~~~ markdown example",
+      "- [ ] Tilde example",
+      "~~~~",
+      "- [ ] Real step",
+      ""
+    ].join("\n")
+
+    expect(updateChecklistStatuses(plan, new Map([[1, "completed"]]))).toBe(
+      plan.replace("- [ ] Real step", "- [x] Real step")
+    )
+  })
+
   it("keeps acceptance criteria binary", () => {
     const plan = [
       "## Stage",

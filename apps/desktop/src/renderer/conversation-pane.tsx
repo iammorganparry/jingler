@@ -731,9 +731,9 @@ export function ConversationPane({
   )
   const pendingReviewId = convo.plannotator?.review?.reviewId ?? null
   const decideReview = useCallback(
-    (approved: boolean, feedback?: string) => {
+    async (approved: boolean, feedback?: string) => {
       if (pendingReviewId === null) return
-      void rpc.planDecide(session.id, activeChat.id, pendingReviewId, approved, feedback)
+      await rpc.planDecide(session.id, activeChat.id, pendingReviewId, approved, feedback)
     },
     [activeChat.id, pendingReviewId, session.id]
   )
@@ -747,7 +747,7 @@ export function ConversationPane({
           canApprove={pendingReviewId !== null}
           host={window.jingler}
           onApprove={() => decideReview(true)}
-          onRevise={() => decideReview(false)}
+          onRevise={(feedback) => decideReview(false, feedback)}
         />
       )
     : null

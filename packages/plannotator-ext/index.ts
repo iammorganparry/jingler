@@ -214,7 +214,23 @@ export default function plannotator(pi: ExtensionAPI): void {
 			checklistItems = adoptPlanContent(content);
 			return completedSteps.length;
 		} catch (error) {
-			checklistItems = adoptPlanContent(readFileSync(fullPath, "utf8"));
+			try {
+				checklistItems = adoptPlanContent(readFileSync(fullPath, "utf8"));
+			} catch {
+				phase = "idle";
+				lastSubmittedPath = null;
+				activeReview = null;
+				reviewPending = false;
+				justApprovedPlan = false;
+				checklistItems = [];
+				hostChecklist = [];
+				lastPlanContent = null;
+				hostStructure = null;
+				idleNoticePending = true;
+				publishHostState();
+				updateStatus(ctx);
+				persistState();
+			}
 			ctx.ui.notify(
 				`Plannotator could not persist checklist progress: ${error instanceof Error ? error.message : String(error)}`,
 				"error",

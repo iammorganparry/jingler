@@ -30,7 +30,7 @@ const persistOnce = async (
   return next
 }
 
-/** Serialize atomic marker updates and refuse to replace a concurrently edited plan. */
+/** Serialize marker updates and abort when an external edit is observed before replacement. */
 export async function persistPlanStatuses(
   planFilePath: string,
   updates: ReadonlyMap<number, ChecklistStatus>

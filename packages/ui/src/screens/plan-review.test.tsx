@@ -74,19 +74,21 @@ describe("PlanReview", () => {
     )
     await waitFor(() => expect(decisionListener).toBeDefined())
 
-    decisionListener?.({
+    expect(await decisionListener?.({
       sessionId: "session-1",
       chatId: "chat-1",
       reviewId: "stale",
-      approved: true
-    })
-    decisionListener?.({
+      approved: true,
+      deliveryId: "delivery-stale"
+    })).toBeUndefined()
+    expect(await decisionListener?.({
       sessionId: "session-1",
       chatId: "chat-1",
       reviewId: "review-1",
       approved: false,
-      feedback: "Keep token compatibility"
-    })
+      feedback: "Keep token compatibility",
+      deliveryId: "delivery-current"
+    })).toBe(true)
 
     expect(onApprove).not.toHaveBeenCalled()
     expect(onRevise).toHaveBeenCalledWith("Keep token compatibility")

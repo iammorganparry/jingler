@@ -37,17 +37,31 @@ export interface ScannedChecklistItem extends ChecklistItem {
 // (blocked) marks and with indented (nested) checkboxes.
 export const CHECKLIST_PATTERN = /[-*]\s*\[([ xX~-])\]\s+(.+)/;
 
+type Fence = { marker: "`" | "~"; length: number };
+
+const openingFence = (line: string): Fence | null => {
+  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match || (match[1][0] === "`" && match[2].includes("`"))) return null;
+  return { marker: match[1].startsWith("`") ? "`" : "~", length: match[1].length };
+};
+
+const closesFence = (line: string, fence: Fence): boolean => {
+  const match = /^ {0,3}(`{3,}|~{3,})[\t ]*$/.exec(line);
+  return match !== null && match[1][0] === fence.marker && match[1].length >= fence.length;
+};
+
 export function scanChecklist(content: string): ScannedChecklistItem[] {
   const items: ScannedChecklistItem[] = [];
   const lines = content.split("\n");
-  let fenced = false;
+  let fence: Fence | null = null;
   let acceptance = false;
   for (const [line, raw] of lines.entries()) {
-    if (/^```[\w-]*\s*$/.test(raw.trim())) {
-      fenced = !fenced;
+    if (fence !== null) {
+      if (closesFence(raw, fence)) fence = null;
       continue;
     }
-    if (fenced) continue;
+    fence = openingFence(raw);
+    if (fence !== null) continue;
     if (/^##\s+/.test(raw)) acceptance = false;
     const subsection = /^###\s+(.+?)\s*$/.exec(raw)
     if (subsection) acceptance = subsection[1].toLowerCase().startsWith("acceptance")
