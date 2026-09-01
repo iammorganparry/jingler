@@ -1925,7 +1925,6 @@ function AuthedApp({
             providerCatalog={providerCatalog.catalog}
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
-            onPlanReviewAccepted={ctx.onPlanReviewAccepted}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}
             onRestore={restoreSession}
             onDelete={deleteSession}

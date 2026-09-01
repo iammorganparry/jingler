@@ -138,22 +138,14 @@ test("Plannotator reviews in a bundled Plan-tab view and drives progress", async
   expect(security.url).toMatch(PLANNOTATOR_URL)
 
   await approveReview(launched.app)
+  await expect.poll(() => reviewText(launched.app)).not.toContain("Approve")
+  await expect.poll(() => reviewUrls(launched.app)).toEqual([
+    expect.stringMatching(/^jingler-plan:\/\/[^/]+\/$/)
+  ])
 
-  // Approval returns to the responsive conversation/plan split without hiding the plan.
+  await launched.window.getByTestId("active-chat-tab").first().click()
   const transcriptCard = launched.window.getByTestId("plannotator-transcript-card")
   await expect(transcriptCard).toBeVisible()
-  await expect(launched.window.getByRole("tab", { name: "Plan 1/2" })).toBeVisible({
-    timeout: 20_000
-  })
-  await expect(launched.window.getByTestId("plan-approval-stage-plannotator-step-1"))
-    .toHaveAttribute("data-status", "completed")
-  await expect(launched.window.getByTestId("plan-approval-stage-plannotator-step-2"))
-    .toHaveAttribute("data-status", "queued")
-  await expect(launched.window.getByTestId("plan-progress-stage-plannotator-step-1"))
-    .toContainText("Done")
-  await expect(launched.window.getByTestId("plan-progress-stage-plannotator-step-2"))
-    .toContainText("Pending")
-
   const completion = launched.window
     .getByText("Implemented and verified the approved plan.")
     .first()

@@ -117,7 +117,27 @@ const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request"
 const PLANNOTATOR_HOST_STATE_CHANNEL = "plannotator:host-state"
 const PLANNOTATOR_HOST_NOTICE_CHANNEL = "plannotator:host-notice"
 const PLANNOTATOR_REVIEW_DECISION_CHANNEL = "plannotator:review-decision"
+const PLANNOTATOR_REVIEW_DECISION_ACK_CHANNEL = "plannotator:review-decision-ack"
 const PLANNOTATOR_TIMEOUT_MS = 5_000
+
+export const deliverPlanReviewDecision = (
+  events: EventBus,
+  decision: PlannotatorReviewDecision
+): void => {
+  let acknowledged = false
+  const unsubscribe = events.on(PLANNOTATOR_REVIEW_DECISION_ACK_CHANNEL, (payload) => {
+    if ((payload as { reviewId?: unknown } | undefined)?.reviewId === decision.reviewId) {
+      acknowledged = true
+    }
+  })
+  try {
+    events.emit(PLANNOTATOR_REVIEW_DECISION_CHANNEL, decision)
+  } finally {
+    unsubscribe()
+  }
+  if (!acknowledged) throw new Error("The plan review is no longer pending")
+}
+
 /**
  * Pi's native mutation tools, granted to plan mode ONLY as the markdown plan
  * scratchpad (the fork gates them to .md/.mdx during planning). They bypass
@@ -536,9 +556,7 @@ const createEmbeddedSession = (
           for (const message of pendingPlannotatorNotices.splice(0)) listener(message)
           return () => plannotatorNoticeListeners.delete(listener)
         },
-        decidePlanReview: (decision) => {
-          events.emit(PLANNOTATOR_REVIEW_DECISION_CHANNEL, decision)
-        },
+        decidePlanReview: (decision) => deliverPlanReviewDecision(events, decision),
         stopPlannotatorProjection: () => {
           stopPlannotatorState()
           stopPlannotatorNotice()

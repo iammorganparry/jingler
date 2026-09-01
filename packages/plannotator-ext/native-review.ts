@@ -14,6 +14,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
 
 export const PLANNOTATOR_REVIEW_DECISION_CHANNEL = "plannotator:review-decision" as const;
+export const PLANNOTATOR_REVIEW_DECISION_ACK_CHANNEL = "plannotator:review-decision-ack" as const;
 
 /** Convert a startup failure into the stable user-facing message used by Pi commands and events. */
 export function getStartupErrorMessage(error: unknown): string {
@@ -85,6 +86,7 @@ export function startNativePlanReviewSession(
 	const onBusDecision = (payload: unknown) => {
 		const event = payload as Partial<PlannotatorReviewDecisionEvent> | undefined;
 		if (!event || event.reviewId !== reviewId || typeof event.approved !== "boolean") return;
+		pi.events.emit(PLANNOTATOR_REVIEW_DECISION_ACK_CHANNEL, { reviewId });
 		settle({
 			approved: event.approved,
 			...(typeof event.feedback === "string" && event.feedback.length > 0

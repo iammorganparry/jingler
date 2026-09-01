@@ -301,7 +301,8 @@ const openEntry = async (host: Host, payload: OpenPayload): Promise<void> => {
   entry.view.setBounds(rectOf(payload.bounds))
   const signature = stateSignature(payload)
   const changed = signature !== entry.signature
-  if (entry.document.reviewId !== payload.document.reviewId) {
+  const reviewChanged = entry.document.reviewId !== payload.document.reviewId
+  if (reviewChanged) {
     entry.settledReviewId = undefined
     entry.inFlightReviewId = undefined
   }
@@ -317,7 +318,14 @@ const openEntry = async (host: Host, payload: OpenPayload): Promise<void> => {
     })
     await entry.loading
   } else if (changed && entry.loading === undefined) {
-    entry.view.webContents.reload()
+    if (reviewChanged) {
+      entry.loading = entry.view.webContents.loadURL(entry.url).finally(() => {
+        entry.loading = undefined
+      })
+      await entry.loading
+    } else {
+      entry.view.webContents.reload()
+    }
   }
   entry.view.setVisible(true)
 }
