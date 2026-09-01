@@ -453,7 +453,7 @@ describe("mount groups", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }))
     expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
   })
 
@@ -476,7 +476,7 @@ describe("mount groups", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }))
     expect(screen.getByTestId("plan-presentation").textContent).toBe("split")
 
     rendered.rerender(<SessionPane
@@ -497,7 +497,7 @@ describe("mount groups", () => {
       />
     )
 
-    expect(screen.queryByRole("button", { name: "Plan Review" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Plan" })).toBeNull()
   })
 
   it("opens the first streamed draft beside a roomy conversation", () => {
@@ -553,8 +553,8 @@ describe("mount groups", () => {
       />
     )
 
-    await screen.findByRole("button", { name: "Plan Review" })
-    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    await screen.findByRole("button", { name: "Plan" })
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }))
     expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
     rect.mockRestore()
   })
@@ -580,7 +580,7 @@ describe("mount groups", () => {
     )
     expect(onMount).toHaveBeenCalledTimes(1)
 
-    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }))
     expect(onMount).toHaveBeenCalledTimes(1)
   })
 

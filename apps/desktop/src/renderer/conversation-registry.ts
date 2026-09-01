@@ -146,10 +146,16 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
   setSessionActivity(sessionId, activities[0] ?? null)
   for (const [key, snapshot] of snapshots) {
     if (!key.startsWith(`${sessionId}:`)) continue
+    // The Plan tab persists for as long as a plan EXISTS — a pending review,
+    // a tracked plan file, or a live checklist — not just while a review is
+    // open. Approval no longer makes the tab (and the plan) vanish.
+    const plannotator = snapshot.context.plannotator
     setPlanPresent(
       key.slice(sessionId.length + 1),
-      snapshot.context.plannotator?.review !== null &&
-        snapshot.context.plannotator?.review !== undefined
+      plannotator !== undefined && plannotator !== null &&
+        (plannotator.review !== null ||
+          plannotator.planFilePath !== null ||
+          plannotator.checklist.length > 0)
     )
   }
   // The diff describes the WORKTREE, which every chat in the session shares —

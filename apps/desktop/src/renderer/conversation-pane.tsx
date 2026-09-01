@@ -13,7 +13,6 @@ import type {
   ProviderCatalog,
   Session,
   SubagentFleetControlAction,
-  ThemeTokens,
   SubagentFleetControlOutcome,
   SubagentFleetNode
 } from "@jingler/core"
@@ -32,9 +31,8 @@ import {
   FleetAgentView,
   ResizeHandle,
   RuntimeRecoveryCard,
-  useContainerWidth,
-  useHasNativeEclipsingOverlay,
-  useThemeTokens
+  PlanReview,
+  useContainerWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
 import { publishFleetAgentFileActivity } from "./agent-file-activity.js"
@@ -72,7 +70,6 @@ import {
   rpcFailureTag
 } from "./rpc-failure.js"
 import { providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
-import { useNativeViewBounds } from "./use-native-view-bounds.js"
 
 const PLAN_SPLIT_RATIO_KEY = "sb.split.plan.ratio"
 
@@ -85,129 +82,6 @@ const initialPlanSplitRatio = (): number => {
   } catch {
     return DEFAULT_PLAN_SPLIT_RATIO
   }
-}
-
-const PLANNOTATOR_CSS_VARIABLE = /(--[\w-]+:\s*[^;]+);/g
-
-const plannotatorThemeCss = (tokens: ThemeTokens): string => {
-  const scheme = tokens.kind === "light" ? "light" : "dark"
-  return `
-:root, .dark, [data-theme="light"] {
-  color-scheme: ${scheme};
-  --background: ${tokens.canvas};
-  --foreground: ${tokens.textBody};
-  --card: ${tokens.panel};
-  --card-foreground: ${tokens.textBright};
-  --popover: ${tokens.panel};
-  --popover-foreground: ${tokens.textBright};
-  --primary: ${tokens.brand};
-  --primary-foreground: ${tokens.canvas};
-  --secondary: ${tokens.surface};
-  --secondary-foreground: ${tokens.textBody};
-  --muted: ${tokens.surface};
-  --muted-foreground: ${tokens.muted};
-  --accent: ${tokens.brand};
-  --accent-foreground: ${tokens.canvas};
-  --destructive: ${tokens.red};
-  --success: ${tokens.green};
-  --warning: ${tokens.yellow};
-  --border: ${tokens.line};
-  --input: ${tokens.line};
-  --ring: ${tokens.brand};
-  --code-bg: ${tokens.editor};
-  --focus-highlight: ${tokens.selection};
-  --surface-0: ${tokens.canvas};
-  --surface-1: ${tokens.panel};
-  --surface-2: ${tokens.surface};
-  --atomic-editor-bg: ${tokens.editor};
-  --atomic-editor-bg-panel: ${tokens.panel};
-  --atomic-editor-bg-surface: ${tokens.surface};
-  --atomic-editor-border: ${tokens.line};
-  --atomic-editor-accent: ${tokens.brand};
-  --atomic-editor-fg: ${tokens.textBody};
-  --atomic-editor-fg-muted: ${tokens.muted};
-  --atomic-editor-fg-faint: ${tokens.dim};
-}
-body { background: ${tokens.canvas}; color: ${tokens.textBody}; }
-`.replace(PLANNOTATOR_CSS_VARIABLE, "$1 !important;")
-}
-
-function PlannotatorPlanView({
-  sessionId,
-  chatId,
-  url
-}: {
-  readonly sessionId: string
-  readonly chatId: string
-  readonly url: string
-}) {
-  const overlayOpen = useHasNativeEclipsingOverlay()
-  const themeTokens = useThemeTokens()
-  const themeCss = useMemo(() => plannotatorThemeCss(themeTokens), [themeTokens])
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [loaded, setLoaded] = useState(false)
-  const loadId = useRef(0)
-  const appliedThemeCss = useRef(themeCss)
-  const boundsRef = useNativeViewBounds({
-    active: true,
-    onFirstPaintableRect: (rect) => {
-      const id = ++loadId.current
-      setLoadError(null)
-      setLoaded(false)
-      appliedThemeCss.current = themeCss
-      void rpc.plannotatorPreviewOpen(sessionId, chatId, url, rect, themeCss).then(() => {
-        if (loadId.current === id) setLoaded(true)
-      }).catch((error: unknown) => {
-        if (loadId.current !== id) return
-        setLoadError(error instanceof Error ? error.message : "Plannotator failed to load")
-        void rpc.plannotatorPreviewClose(sessionId, chatId)
-      })
-    },
-    onBoundsChanged: (rect) => {
-      void rpc.plannotatorPreviewSetBounds(sessionId, chatId, rect)
-    }
-  })
-
-  useEffect(() => {
-    loadId.current += 1
-    setLoadError(null)
-    setLoaded(false)
-  }, [url])
-
-  useEffect(() => {
-    if (!loaded || appliedThemeCss.current === themeCss) return
-    appliedThemeCss.current = themeCss
-    void rpc.plannotatorPreviewSetTheme(sessionId, chatId, themeCss)
-  }, [chatId, loaded, sessionId, themeCss])
-
-  useEffect(() => {
-    void rpc.plannotatorPreviewSetVisible(
-      sessionId,
-      chatId,
-      !overlayOpen && loaded && loadError === null
-    )
-  }, [chatId, loadError, loaded, overlayOpen, sessionId])
-
-  useEffect(
-    () => () => {
-      loadId.current += 1
-      void rpc.plannotatorPreviewSetVisible(sessionId, chatId, false)
-    },
-    [chatId, sessionId]
-  )
-
-  return (
-    <div className="relative min-h-0 flex-1 bg-editor">
-      <div ref={boundsRef} className="absolute inset-0" />
-      {!loaded && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8 text-center text-[12px] text-dim">
-          {loadError === null
-            ? "Loading Plannotator…"
-            : `Could not open Plannotator. ${loadError}`}
-        </div>
-      )}
-    </div>
-  )
 }
 
 export function ConversationPane({
@@ -270,21 +144,6 @@ export function ConversationPane({
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
   const convo = useConversation(session, activeChat.id)
-  const plannotatorReviewId = convo.plannotator?.review?.reviewId ?? null
-  const priorPlannotatorReview = useRef<string | null>(null)
-  useEffect(() => {
-    const prior = priorPlannotatorReview.current
-    if (prior !== null && prior !== plannotatorReviewId) {
-      void rpc.plannotatorPreviewClose(session.id, activeChat.id)
-    }
-    priorPlannotatorReview.current = plannotatorReviewId
-  }, [activeChat.id, plannotatorReviewId, session.id])
-  useEffect(
-    () => () => {
-      void rpc.plannotatorPreviewClose(session.id, activeChat.id)
-    },
-    [activeChat.id, session.id]
-  )
   const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
     string | undefined | null
   >(null)
@@ -848,24 +707,52 @@ export function ConversationPane({
   // while this pane is unmounted for a background session. Nothing to do here.
 
   const plannotatorDocument = useMemo(
-    () => convo.plannotator
-      ? plannotatorProjectionToPlanDocument(
-          convo.plannotator,
-          session.id,
-          activeChat.id,
-          new Date().toISOString()
-        )
-      : null,
+    () => {
+      const projection = convo.plannotator
+      if (!projection) return null
+      // Plannotator publishes host-state in every phase now (idle tracking),
+      // so an empty idle projection is a real payload — but nothing to show.
+      // Without this guard every session grows a hollow "Plan 0/0" drawer.
+      const hasPlan =
+        projection.review !== null ||
+        projection.planFilePath !== null ||
+        projection.checklist.length > 0
+      return hasPlan
+        ? plannotatorProjectionToPlanDocument(
+            projection,
+            session.id,
+            activeChat.id,
+            new Date().toISOString()
+          )
+        : null
+    },
     [activeChat.id, convo.plannotator, session.id]
   )
   const nativePlanDocument = plannotatorDocument
-  const planSurface = convo.plannotator?.review
+  const pendingReviewId = convo.plannotator?.review?.reviewId ?? null
+  const decideReview = useCallback(
+    (approved: boolean, feedback?: string) => {
+      if (pendingReviewId === null) return
+      void rpc.planDecide(session.id, activeChat.id, pendingReviewId, approved, feedback)
+    },
+    [activeChat.id, pendingReviewId, session.id]
+  )
+  // The plan surface persists for as long as a plan exists. While a review is
+  // pending the floating actions carry approve/revise; afterwards the same
+  // document stays up read-only, ticking live as the checklist progresses.
+  const planSurface = nativePlanDocument !== null
     ? (
-        <PlannotatorPlanView
-          key={convo.plannotator.review.reviewId}
-          sessionId={session.id}
-          chatId={activeChat.id}
-          url={convo.plannotator.review.url}
+        <PlanReview
+          key={pendingReviewId ?? "plan"}
+          plan={null}
+          document={nativePlanDocument}
+          canApprove={pendingReviewId !== null}
+          knownFiles={knownFiles}
+          onApprove={(executionMode) => {
+            decideReview(true)
+            if (executionMode !== undefined) convo.setMode(executionMode)
+          }}
+          onRevise={() => decideReview(false)}
         />
       )
     : null

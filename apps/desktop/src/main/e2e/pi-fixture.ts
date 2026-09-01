@@ -643,6 +643,24 @@ const PLANNOTATOR_E2E_PLAN = [
 
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const lastMessage = context.messages.at(-1)
+  // Post-approval, Plannotator nudges the SAME session to continue (and its
+  // executing-phase framing lands AFTER that nudge, so scan every operator
+  // message like the [[plan]] trigger does). A real agent implements the
+  // approved plan here; re-submitting would open a second review — the submit
+  // tool stays active in every phase now, so the script must not lean on it
+  // being missing.
+  // Two approval deliveries exist: the live tool result nudges "Continue with
+  // the approved plan", while a review resumed after a restart sends the
+  // approved prompt ("Plan approved. You now have full tool access…") as a
+  // follow-up message instead.
+  if (operatorText(context).some((text) =>
+    text.includes("Continue with the approved plan") ||
+    text.includes("Plan approved. You now have full tool access")
+  )) {
+    return fauxAssistantMessage(
+      "Implemented and verified the approved plan. [DONE:1] [DONE:2]"
+    )
+  }
   const submitCount = context.messages.filter(
     (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL
   ).length
@@ -664,7 +682,19 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
       "Implemented and verified the approved plan. [DONE:1] [DONE:2]"
     )
   }
-  if (lastMessage?.role === "toolResult" && lastMessage.toolName === PLAN_WRITE_TOOL) {
+  if (
+    lastMessage?.role === "toolResult" &&
+    (lastMessage.toolName === PLAN_WRITE_TOOL || lastMessage.toolName === WRITE_TOOL)
+  ) {
+    // Outside plan mode pi's markdown-only `write` tool is absent — retry the
+    // plan write with the ordinary workspace tool, as a real agent would.
+    if (toolResultText(lastMessage).includes("not found")) {
+      return callTool(
+        WRITE_TOOL,
+        { path: "PLAN.md", content: PLANNOTATOR_E2E_PLAN },
+        "plannotator-write-fallback"
+      )
+    }
     return callTool(
       SUBMIT_PLAN_TOOL,
       { filePath: "PLAN.md" },
@@ -675,6 +705,80 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
     PLAN_WRITE_TOOL,
     { path: "PLAN.md", content: PLANNOTATOR_E2E_PLAN },
     "plannotator-write"
+  )
+}
+
+const UPDATE_PLAN_TOOL = "plannotator_update_plan"
+
+// Exercises the always-available plan scratchpad OUTSIDE plan mode: the model
+// writes a plan file, adopts it silently with plannotator_update_plan, then
+// ticks the first step with a [DONE:1] marker — no review, no phase change.
+const planScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  const lastMessage = context.messages.at(-1)
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === UPDATE_PLAN_TOOL) {
+    return fauxAssistantMessage(
+      "Adopted the plan scratchpad and finished the first step. [DONE:1]"
+    )
+  }
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+    return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-update")
+  }
+  // Normal sessions carry Jingler's workspace tools, not pi's plan-mode
+  // write/edit pair — the scratchpad flow must work with the ordinary toolset.
+  return callTool(
+    WRITE_TOOL,
+    { path: "PLAN.md", content: PLANNOTATOR_E2E_PLAN },
+    "plannotator-scratchpad-write"
+  )
+}
+
+const RICH_SCRATCHPAD_PLAN = [
+  "---",
+  "title: Token store rollout",
+  "revision: 1",
+  "---",
+  "Replace scattered auth reads with one TokenStore.",
+  "",
+  "## Token store <!-- id: stage-store -->",
+  "Build the store behind the existing interface.",
+  "",
+  "### Approach",
+  "- Add the module",
+  "- Keep the old reads until rollout",
+  "",
+  "- [ ] Implement TokenStore",
+  "- [ ] Wire the callers",
+  "",
+  "### Acceptance",
+  "- [ ] Store tests green (test: src/store.test.ts::caches tokens)",
+  "",
+  "### Files",
+  "- `src/store.ts` — A",
+  "",
+  "> complexity: medium",
+  "",
+  "## Rollout",
+  "Switch callers over once the store holds.",
+  "",
+  "- [ ] Flip the flag"
+].join("\n")
+
+// The rich scratchpad convention outside plan mode: a structured multi-stage
+// plan adopted silently, then progress ticked with [DONE:1].
+const richScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  const lastMessage = context.messages.at(-1)
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === UPDATE_PLAN_TOOL) {
+    return fauxAssistantMessage(
+      "Adopted the structured plan. TokenStore implemented. [DONE:1]"
+    )
+  }
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+    return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "plannotator-rich-update")
+  }
+  return callTool(
+    WRITE_TOOL,
+    { path: "PLAN.md", content: RICH_SCRATCHPAD_PLAN },
+    "plannotator-rich-write"
   )
 }
 
@@ -812,6 +916,10 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
   switch (fixture.scenarioId) {
     case "plan-mode":
       return Array.from({ length: 12 }, () => planModeResponse)
+    case "plan-scratchpad":
+      return Array.from({ length: 8 }, () => planScratchpadResponse)
+    case "rich-plan-scratchpad":
+      return Array.from({ length: 8 }, () => richScratchpadResponse)
     case "managed-resources":
       return [
         fauxAssistantMessage(fauxToolCall("jingler_load_resource", { id: "managed-skill" }), {

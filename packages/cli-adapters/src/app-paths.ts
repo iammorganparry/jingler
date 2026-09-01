@@ -27,8 +27,10 @@ export interface AppPathsShape {
    */
   readonly reviewsDir: string
   /**
-   * `~/jingler/.jingler` — the canonical plan workspace. Each worktree has one
-   * authoritative `current-plan.mdx`, which can be resumed after a restart.
+   * `~/jingler/.jingler` — derivative plan/explanation documents. The live
+   * plan itself is a Markdown file in the worktree owned by the forked
+   * Plannotator extension; its durable phase/review state rides the pi-session
+   * journal, not this directory.
    */
   readonly plansDir: string
   /**

@@ -44,7 +44,8 @@
       "!**/dist/**",
       "!**/.turbo/**",
       "!**/storybook-static/**",
-      "!tools/oxlint/anti-slop"
+      "!tools/oxlint/anti-slop",
+      "!packages/plannotator-ext/**"
     ]
   }
 }

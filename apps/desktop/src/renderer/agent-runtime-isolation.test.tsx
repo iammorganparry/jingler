@@ -56,7 +56,7 @@ describe("agent runtime ownership matrix", () => {
       />
     )
     const view = render(pane(baseSession))
-    fireEvent.click(screen.getByRole("button", { name: "Plan Review" }))
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }))
     expect(screen.getByTestId("view").textContent).toBe("split")
 
     view.rerender(pane({ ...baseSession, activeChatId: "b" }))

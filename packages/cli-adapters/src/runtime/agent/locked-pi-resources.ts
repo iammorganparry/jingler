@@ -17,7 +17,7 @@ export { PONYTAIL_EXTENSION_PATH, PONYTAIL_SKILLS_PATH } from "../resources/pony
 
 const require = createRequire(import.meta.url)
 export const PLANNOTATOR_EXTENSION_PATH = dirname(
-  require.resolve("@plannotator/pi-extension/package.json")
+  require.resolve("@jingler/plannotator-ext/package.json")
 )
 
 const ALLOWED_EXTENSION_PATHS = new Set([

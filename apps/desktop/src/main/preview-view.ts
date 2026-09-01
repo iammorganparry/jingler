@@ -48,7 +48,7 @@ import { BrowserWindow, session as electronSession, WebContentsView } from "elec
 import { Context, Duration, Effect, Layer } from "effect"
 
 /** Which tab a native view belongs to. */
-export type PreviewOwner = "browser" | "asset" | "plan"
+export type PreviewOwner = "browser" | "asset"
 
 /**
  * The browser view's own persistent session, isolated from the app's default
@@ -64,8 +64,6 @@ export const browserOwnerKey = (sessionId: string, chatId: string): string =>
 export const browserPartitionForAgent = (sessionId: string, chatId: string): string =>
   `persist:jingler-browser-preview:${encodeURIComponent(sessionId)}:${encodeURIComponent(chatId)}`
 
-export const plannotatorPartition = (sessionId: string, chatId: string): string =>
-  `jingler-plannotator:${encodeURIComponent(sessionId)}:${encodeURIComponent(chatId)}`
 
 /** Hard ceiling on `controlWaitForSelector`, so a bad caller can't pin the RPC. */
 const MAX_WAIT_MS = 30_000
@@ -95,11 +93,6 @@ export interface PreviewViewServiceShape {
   /** Show the browser view and load `url` at `bounds`. Rejects non-http(s) URLs. */
   readonly openBrowser: (sessionId: string, chatId: string, url: string, bounds: BrowserBounds) => Effect.Effect<void, BrowserPreviewError>
   /** Show Plannotator's loopback-only review app in the Plan tab. */
-  readonly openPlan: (sessionId: string, chatId: string, url: string, bounds: BrowserBounds, themeCss: string) => Effect.Effect<void, BrowserPreviewError>
-  readonly setPlanTheme: (sessionId: string, chatId: string, themeCss: string) => Effect.Effect<void>
-  readonly setPlanBounds: (sessionId: string, chatId: string, bounds: BrowserBounds) => Effect.Effect<void>
-  readonly setPlanVisible: (sessionId: string, chatId: string, visible: boolean) => Effect.Effect<void>
-  readonly closePlan: (sessionId: string, chatId: string) => Effect.Effect<void>
   /**
    * Show the asset view over `bounds` with `absolutePath` loaded in Chromium's
    * own viewer. The caller MUST have validated containment first.
@@ -168,29 +161,6 @@ export const isHttpUrl = (url: string): boolean => {
   }
 }
 
-export const isLoopbackHttpUrl = (url: string): boolean => {
-  try {
-    const parsed = new URL(url)
-    return (
-      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-      (parsed.hostname === "localhost" ||
-        parsed.hostname === "127.0.0.1" ||
-        parsed.hostname === "[::1]")
-    )
-  } catch {
-    return false
-  }
-}
-
-export const isSameOriginHttpUrl = (url: string, origin: string | undefined): boolean => {
-  if (origin === undefined || !isHttpUrl(url)) return false
-  try {
-    return new URL(url).origin === origin
-  } catch {
-    return false
-  }
-}
-
 /**
  * An absolute path as a `file:` URL.
  *
@@ -213,12 +183,9 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   // Browser WebContents are session resources: each retains its own history,
   // scroll position and persistent storage partition while only one may paint.
   const browserViews = new Map<string, WebContentsView>()
-  const planViews = new Map<string, WebContentsView>()
   const assetViews = new Map<string, WebContentsView>()
   const visibleBrowserSessions = new Set<string>()
-  const visiblePlanSessions = new Set<string>()
   const visibleAssetSessions = new Set<string>()
-  const planOrigins = new Map<string, string>()
   // Session deletion is terminal. A late BrowserControl RPC from an agent being
   // torn down must not recreate the deleted session's native overlay.
   const deletedSessionIds = new Set<string>()
@@ -250,9 +217,6 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   const createView = (owner: PreviewOwner, sessionId: string | null, chatId: string | null = null): WebContentsView | null => {
     const win = mainWindow()
     if (!win) return null
-    const ownerKey = sessionId !== null && chatId !== null
-      ? browserOwnerKey(sessionId, chatId)
-      : null
     const view = new WebContentsView({
       webPreferences: {
         sandbox: true,
@@ -262,9 +226,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
         // in Chromium's viewer with no login state to leak.
         ...(owner === "browser" && sessionId !== null
           ? { partition: browserPartitionForAgent(sessionId, chatId ?? "") }
-          : owner === "plan" && sessionId !== null
-            ? { partition: plannotatorPartition(sessionId, chatId ?? "") }
-            : {})
+          : {})
       }
     })
     // WebContentsView starts visible. A BrowserControl operation may create and
@@ -280,11 +242,6 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
         event.preventDefault()
         return
       }
-      if (
-        owner === "plan" &&
-        ownerKey !== null &&
-        !isSameOriginHttpUrl(url, planOrigins.get(ownerKey))
-      ) event.preventDefault()
     })
     if (owner === "browser" && sessionId !== null && chatId !== null) {
       const key = browserOwnerKey(sessionId, chatId)
@@ -325,16 +282,6 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
     return view
   }
 
-  const ensurePlan = (sessionId: string, chatId: string): WebContentsView | null => {
-    if (deletedSessionIds.has(sessionId)) return null
-    const key = browserOwnerKey(sessionId, chatId)
-    const existing = planViews.get(key)
-    if (existing !== undefined) return existing
-    const view = createView("plan", sessionId, chatId)
-    if (view !== null) planViews.set(key, view)
-    return view
-  }
-
   const ensureAsset = (sessionId: string): WebContentsView | null => {
     if (deletedSessionIds.has(sessionId)) return null
     const existing = assetViews.get(sessionId)
@@ -357,8 +304,6 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
 
   const rejectBadUrl = (url: string) =>
     Effect.fail(new BrowserPreviewError({ message: `Only http(s) URLs can be previewed: ${url}` }))
-  const rejectBadPlanUrl = (url: string) =>
-    Effect.fail(new BrowserPreviewError({ message: `Only loopback Plannotator URLs can be embedded: ${url}` }))
 
   const controlFail = (op: string) => (cause: unknown) =>
     new BrowserControlError({
@@ -404,13 +349,9 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   const closeAllNow = (): void => {
     for (const view of browserViews.values()) destroy(view)
     browserViews.clear()
-    for (const view of planViews.values()) destroy(view)
-    planViews.clear()
-    planOrigins.clear()
     for (const view of assetViews.values()) destroy(view)
     assetViews.clear()
     visibleBrowserSessions.clear()
-    visiblePlanSessions.clear()
     visibleAssetSessions.clear()
     pendingNavigations.clear()
   }
@@ -422,13 +363,6 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
       browserViews.delete(key)
       visibleBrowserSessions.delete(key)
       pendingNavigations.delete(key)
-    }
-    for (const [key, view] of planViews) {
-      if (!key.startsWith(`${sessionId}\0`)) continue
-      destroy(view)
-      planViews.delete(key)
-      planOrigins.delete(key)
-      visiblePlanSessions.delete(key)
     }
     destroy(assetViews.get(sessionId) ?? null)
     assetViews.delete(sessionId)
@@ -460,72 +394,6 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
             setOwnerVisible(browserViews, visibleBrowserSessions, key, true)
           })
         : rejectBadUrl(url),
-
-    openPlan: (sessionId, chatId, url, bounds, themeCss) =>
-      isLoopbackHttpUrl(url)
-        ? Effect.gen(function* () {
-            const key = browserOwnerKey(sessionId, chatId)
-            const view = ensurePlan(sessionId, chatId)
-            if (!view) {
-              return yield* Effect.fail(
-                new BrowserPreviewError({ message: "No application window to attach Plannotator" })
-              )
-            }
-            const origin = new URL(url).origin
-            planOrigins.set(key, origin)
-            view.setBounds(toRect(bounds))
-            if (view.webContents.getURL() !== url) {
-              yield* Effect.tryPromise({
-                try: async () => {
-                  try {
-                    await view.webContents.loadURL(url)
-                  } catch {
-                    await new Promise((resolve) => setTimeout(resolve, 100))
-                    await view.webContents.loadURL(url)
-                  }
-                },
-                catch: (cause) => {
-                  destroy(view)
-                  planViews.delete(key)
-                  planOrigins.delete(key)
-                  visiblePlanSessions.delete(key)
-                  return new BrowserPreviewError({
-                    message: cause instanceof Error
-                      ? `Plannotator failed to load: ${cause.message}`
-                      : "Plannotator failed to load"
-                  })
-                }
-              })
-            }
-            yield* Effect.promise(() =>
-              view.webContents.insertCSS(themeCss, { cssOrigin: "user" }).then(() => undefined).catch(() => undefined)
-            )
-            setOwnerVisible(planViews, visiblePlanSessions, key, true)
-          })
-        : rejectBadPlanUrl(url),
-
-    setPlanTheme: (sessionId, chatId, themeCss) => Effect.promise(() => {
-      const view = planViews.get(browserOwnerKey(sessionId, chatId))
-      return view?.webContents.insertCSS(themeCss, { cssOrigin: "user" }).then(() => undefined).catch(() => undefined) ??
-        Promise.resolve()
-    }),
-
-    setPlanBounds: (sessionId, chatId, bounds) => Effect.sync(() => {
-      const key = browserOwnerKey(sessionId, chatId)
-      if (visiblePlanSessions.has(key)) planViews.get(key)?.setBounds(toRect(bounds))
-    }),
-
-    setPlanVisible: (sessionId, chatId, visible) => Effect.sync(() => {
-      setOwnerVisible(planViews, visiblePlanSessions, browserOwnerKey(sessionId, chatId), visible)
-    }),
-
-    closePlan: (sessionId, chatId) => Effect.sync(() => {
-      const key = browserOwnerKey(sessionId, chatId)
-      destroy(planViews.get(key) ?? null)
-      planViews.delete(key)
-      planOrigins.delete(key)
-      visiblePlanSessions.delete(key)
-    }),
 
     openFile: (sessionId, absolutePath, bounds) =>
       Effect.sync(() => {

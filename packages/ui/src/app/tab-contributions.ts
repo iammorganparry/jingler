@@ -251,11 +251,11 @@ export const BUILTIN_TAB_META: Record<
     blurb: "A focused visual explanation of the current technical topic."
   },
   plan: {
-    label: "Plan Review",
+    label: "Plan",
     icon: Waypoints,
     order: 20,
     blurb:
-      "Visualise the plan, step through flow control, annotate and gate steps."
+      "The live plan: review and approve proposals, then watch stages, tasks and acceptance progress as the agent works."
   },
   pr: {
     label: "Pull Request",

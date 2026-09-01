@@ -85,6 +85,7 @@ describe("AgentRuntimeAdapter", () => {
           steer: () => Effect.void,
           interrupt: () => Effect.void,
           controlSubagent: () => Effect.die("unused"),
+      decidePlanReview: () => Effect.die("unused"),
           subagentFleetSnapshot: () => Effect.die("unused"),
           subagentTranscript: () => Effect.die("unused")
         },
@@ -131,6 +132,7 @@ describe("AgentRuntimeAdapter", () => {
           steer,
           interrupt: () => Effect.void,
           controlSubagent: () => Effect.die("unused"),
+      decidePlanReview: () => Effect.die("unused"),
           subagentFleetSnapshot: () => Effect.die("unused"),
           subagentTranscript: () => Effect.die("unused")
         },
@@ -176,6 +178,7 @@ describe("AgentRuntimeAdapter", () => {
       steer: () => Effect.void,
       interrupt,
       controlSubagent: () => Effect.die("unused"),
+      decidePlanReview: () => Effect.die("unused"),
       subagentFleetSnapshot: () => Effect.die("unused"),
       subagentTranscript: () => Effect.die("unused")
     }

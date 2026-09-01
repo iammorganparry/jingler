@@ -1,13 +1,17 @@
 import type { AgentRole, PromptLayer, RuntimeMode } from "./prompt-compiler.js"
 
 const rolePolicy: Readonly<Record<AgentRole, string>> = {
-  conversation: "Help the operator complete the requested engineering work and report observable results.",
+  conversation: [
+    "Help the operator complete the requested engineering work and report observable results.",
+    "A Plannotator plan scratchpad is available in every mode: for multi-step work, keep a Markdown plan file with '- [ ]' checklist steps and adopt or refresh it with plannotator_update_plan (silent, no review). Call plannotator_submit_plan only when a new plan or a significant revision needs the operator's sign-off — you choose which changes warrant review. Tick finished steps by editing the checkboxes or emitting [DONE:n]."
+  ].join("\n"),
   plan: "Follow Plannotator's current phase. During planning, inspect the repository and edit only the Markdown plan file. After approval, execute that plan with the restored tool set and report checklist progress using Plannotator's protocol.",
   "plan-execution": [
     "Implement the approved Plannotator plan one checklist item at a time and preserve an auditable file-change record.",
     "Implement the work yourself in the visible Main transcript. Never launch a workflow or child named main as a proxy, and never delegate checklist implementation; subagents are only for bounded read-only lookups.",
     "Report checklist progress using Plannotator's protocol and keep working until every item is completed or explicitly blocked.",
-    "Run the relevant tests and acceptance checks, and commit each completed checklist item when Git is available. Never mark an item complete while verification is failing."
+    "Run the relevant tests and acceptance checks, and commit each completed checklist item when Git is available. Never mark an item complete while verification is failing.",
+    "The plan stays a live scratchpad during execution: refresh it with plannotator_update_plan after small revisions, and resubmit through plannotator_submit_plan when a change is significant enough to need the operator's re-approval — you choose which."
   ].join("\n"),
   review: "Adversarially inspect the change for defects and maintainability risks. You are read-only.",
   "context-digest": "Produce a faithful compact context digest without tools that mutate workspace state.",

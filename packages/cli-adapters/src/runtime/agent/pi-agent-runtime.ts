@@ -4,6 +4,7 @@ import {
   type Message,
   type PiRunSpec,
   type PlannotatorProjection,
+  type PlannotatorReviewDecision,
   type StreamEvent,
   type SubagentFleetControlOutcome,
   type SubagentFleetControlRequest,
@@ -29,6 +30,8 @@ export interface PiSessionHandle {
     listener: (state: PlannotatorProjection) => void
   ) => () => void
   readonly subscribePlannotatorNotice?: (listener: (message: string) => void) => () => void
+  /** Deliver the operator's verdict on a pending native plan review. */
+  readonly decidePlanReview?: (decision: PlannotatorReviewDecision) => void
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
   readonly subscribeFleet: (listener: (event: StreamEvent) => void) => () => void
   readonly controlSubagent: (
@@ -459,6 +462,16 @@ class PiSessionRegistry {
       : undefined
   }
 
+  /** The chat's live session, for out-of-band operations that carry no pi id. */
+  lookupByChat(sessionId: string, chatId: string): PiSessionHandle | undefined {
+    for (const record of this.#aliases.values()) {
+      if (record.sessionId === sessionId && record.chatId === chatId && !record.disposing) {
+        return record.handle
+      }
+    }
+    return undefined
+  }
+
   lookupTranscriptOwned(
     sessionId: string,
     chatId: string,
@@ -626,6 +639,19 @@ export const makePiAgentRuntime = (
         sessions.lookupOwned(sessionId, chatId, request.parentPiSessionId),
         request.parentPiSessionId,
         (session) => session.controlSubagent(request)
+      ),
+      decidePlanReview: (sessionId, chatId, decision) => sessionOperation(
+        sessions.lookupByChat(sessionId, chatId),
+        `${sessionId}/${chatId}`,
+        (session) => {
+          if (session.decidePlanReview === undefined) {
+            return Promise.reject(
+              new Error("This session's runtime does not support native plan review decisions")
+            )
+          }
+          session.decidePlanReview(decision)
+          return Promise.resolve()
+        }
       ),
       subagentFleetSnapshot: (sessionId, chatId, parentPiSessionId) =>
         sessionOperation(

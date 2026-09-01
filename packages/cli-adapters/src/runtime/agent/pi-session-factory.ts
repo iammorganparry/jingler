@@ -16,7 +16,7 @@ import type {
   RegisterSubagentCapabilityCeilingOptions,
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
-import { PlannotatorProjection } from "@jingler/core"
+import { PlannotatorProjection, type PlannotatorReviewDecision } from "@jingler/core"
 import type {
   Message,
   PiRunSpec,
@@ -116,6 +116,7 @@ const makeExtensionUIContext = (): ExtensionUIContext => ({
 const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request"
 const PLANNOTATOR_HOST_STATE_CHANNEL = "plannotator:host-state"
 const PLANNOTATOR_HOST_NOTICE_CHANNEL = "plannotator:host-notice"
+const PLANNOTATOR_REVIEW_DECISION_CHANNEL = "plannotator:review-decision"
 const PLANNOTATOR_TIMEOUT_MS = 5_000
 const decodePlannotatorProjection = Schema.decodeUnknownOption(PlannotatorProjection)
 interface PlannotatorPlanModeResult {
@@ -316,12 +317,19 @@ const createResources = (
     ...(registry?.capabilitiesFor(spec.role, spec.mode) ?? []),
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
   ]
+  // Written for every mode: plan runs swap to the plan-execution toolset on
+  // approval, while a plan approved from a normal session re-applies the
+  // session's own toolset — a no-op swap, but one the executing phase needs
+  // defined now that plans can be submitted from any mode.
   const executionTools = spec.mode === "plan"
     ? [
         ...(registry?.capabilitiesFor("plan-execution", "auto").map(({ id }) => id) ?? []),
         ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
       ]
-    : undefined
+    : [
+        ...(registry?.capabilitiesFor(spec.role, spec.mode).map(({ id }) => id) ?? []),
+        ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
+      ]
   const eventBus = createEventBus()
   const compiled = (options.promptCompiler ?? new PromptCompiler()).compile({
     layers: runtimeInvariantLayers(spec.role, spec.mode),
@@ -373,6 +381,7 @@ interface EmbeddedSession {
     listener: (state: PlannotatorProjection) => void
   ) => () => void
   readonly subscribePlannotatorNotice: (listener: (message: string) => void) => () => void
+  readonly decidePlanReview: (decision: PlannotatorReviewDecision) => void
   readonly stopPlannotatorProjection: () => void
   readonly setMemoryReflectionActive: (active: boolean) => void
 }
@@ -415,18 +424,25 @@ const createEmbeddedSession = (
         : []
       const thinkingLevel = thinkingLevelFor(spec.reasoning)
       const sessionManager = sessionManagerFor(spec, options.sessionsDir)
+      // The plan scratchpad tools ride in EVERY mode: submit opens operator
+      // review (the agent chooses when a change warrants it), update refreshes
+      // the live plan silently. Plan mode additionally narrows the rest of the
+      // toolset to read-only capabilities.
       const initialToolNames = spec.mode === "plan"
         ? [
             ...(registry?.capabilitiesFor("plan", "plan").map(({ id }) => id) ?? []),
             "write",
             "edit",
             "plannotator_submit_plan",
+            "plannotator_update_plan",
             ...(nativeSubagentsEnabled
               ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
               : [])
           ]
         : [
             ...customTools.map((tool) => tool.name),
+            "plannotator_submit_plan",
+            "plannotator_update_plan",
             ...(nativeSubagentsEnabled
               ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
               : [])
@@ -506,6 +522,9 @@ const createEmbeddedSession = (
           for (const message of pendingPlannotatorNotices.splice(0)) listener(message)
           return () => plannotatorNoticeListeners.delete(listener)
         },
+        decidePlanReview: (decision) => {
+          events.emit(PLANNOTATOR_REVIEW_DECISION_CHANNEL, decision)
+        },
         stopPlannotatorProjection: () => {
           stopPlannotatorState()
           stopPlannotatorNotice()
@@ -564,6 +583,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     plannotatorPhase: embedded.plannotatorPhase,
     subscribePlannotator: embedded.subscribePlannotator,
     subscribePlannotatorNotice: embedded.subscribePlannotatorNotice,
+    decidePlanReview: embedded.decidePlanReview,
     subscribe: (listener) => {
       const unsubscribeSession = session.subscribe((event) => {
         if (

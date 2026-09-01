@@ -46,33 +46,6 @@ import {
 } from "../src/main/e2e/fixture-identity.js";
 
 /** Match PlanStore's collision-proof directory for one physical checkout. */
-export const planDirectory = (home: string, worktreePath: string): string => {
-  let canonical: string;
-  try {
-    canonical = realpathSync(worktreePath);
-  } catch {
-    canonical = resolve(worktreePath);
-  }
-  const suffix = createHash("sha256")
-    .update(canonical)
-    .digest("hex")
-    .slice(0, 12);
-  return join(home, "jingler", ".jingler", `${basename(canonical)}-${suffix}`);
-};
-
-export const planFile = (
-  home: string,
-  worktreePath: string,
-  sessionId: string,
-  chatId: string,
-): string => {
-  const owner = createHash("sha256")
-    .update(`${sessionId}\0${chatId}`)
-    .digest("hex")
-    .slice(0, 16);
-  return join(planDirectory(home, worktreePath), `current-plan-${owner}.json`);
-};
-
 /**
  * Put the sidebar's Status filter on `archived` (or `all`) so archived sessions
  * are listed at all.

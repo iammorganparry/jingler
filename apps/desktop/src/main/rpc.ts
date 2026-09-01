@@ -5102,10 +5102,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       yield* BackgroundTaskStore.clearChat(sessionId, chatId);
       yield* runner.forgetChat(chatId);
       yield* Effect.flatMap(PreviewViewService, (preview) =>
-        Effect.all([
-          preview.closeBrowser(sessionId, chatId),
-          preview.closePlan(sessionId, chatId)
-        ]),
+        preview.closeBrowser(sessionId, chatId),
       );
       const updated = yield* SessionStore.closeChat(sessionId, chatId);
       yield* ContextManager.forget(chatId);
@@ -5907,25 +5904,20 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     Effect.flatMap(PreviewViewService, (b) => b.reload(sessionId, chatId)),
   "BrowserPreview.setVisible": ({ sessionId, chatId, visible }) =>
     Effect.flatMap(PreviewViewService, (b) => b.setVisible(sessionId, chatId, visible)),
-  "PlannotatorPreview.open": ({ sessionId, chatId, url, bounds, themeCss }) =>
-    Effect.flatMap(PreviewViewService, (preview) =>
-      preview.openPlan(sessionId, chatId, url, bounds, themeCss)
-    ),
-  "PlannotatorPreview.setTheme": ({ sessionId, chatId, themeCss }) =>
-    Effect.flatMap(PreviewViewService, (preview) =>
-      preview.setPlanTheme(sessionId, chatId, themeCss)
-    ),
-  "PlannotatorPreview.setBounds": ({ sessionId, chatId, bounds }) =>
-    Effect.flatMap(PreviewViewService, (preview) =>
-      preview.setPlanBounds(sessionId, chatId, bounds)
-    ),
-  "PlannotatorPreview.setVisible": ({ sessionId, chatId, visible }) =>
-    Effect.flatMap(PreviewViewService, (preview) =>
-      preview.setPlanVisible(sessionId, chatId, visible)
-    ),
-  "PlannotatorPreview.close": ({ sessionId, chatId }) =>
-    Effect.flatMap(PreviewViewService, (preview) =>
-      preview.closePlan(sessionId, chatId)
+  // Native plan review: the renderer's PlanReview surface delivers the
+  // operator's verdict straight onto the live session's event bus, where the
+  // forked Plannotator extension resolves its awaited review by reviewId.
+  "Plan.decide": ({ sessionId, chatId, reviewId, approved, feedback }) =>
+    Effect.flatMap(AgentRuntime, (runtime) =>
+      runtime.decidePlanReview(sessionId, chatId, {
+        reviewId,
+        approved,
+        ...(feedback === undefined ? {} : { feedback })
+      })
+    ).pipe(
+      Effect.mapError(
+        (cause) => new GitError({ message: "Could not deliver the plan review decision", cause })
+      )
     ),
   // Browser control — the SAME native view, driven by an agent (via the
   // browser-control MCP) so it can QA a preview URL where the operator watches.

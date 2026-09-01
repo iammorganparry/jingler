@@ -56,7 +56,7 @@ describe("locked pi resources", () => {
       ])
     )
     const plannotator = loader.getExtensions().extensions.find(({ path }) =>
-      path.includes("@plannotator/pi-extension")
+      path.includes("plannotator-ext")
     )
     expect([...plannotator!.tools.keys()]).toContain("plannotator_submit_plan")
     expect([...plannotator!.commands.keys()]).toContain("plannotator-plan-mode")

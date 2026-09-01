@@ -1,0 +1,23 @@
+{
+  "name": "@jingler/plannotator-ext",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Jingler's fork of the Plannotator Pi extension (plan slice): file-based plan mode with visual review, host-state projection, and embedded-host integration.",
+  "license": "MIT OR Apache-2.0",
+  "//origin": "Forked from @plannotator/pi-extension@0.27.8 (github.com/backnotprop/plannotator, apps/pi-extension) with Jingler's host-state patch folded in. See NOTICE.",
+  "pi": {
+    "extensions": [
+      "./"
+    ],
+    "skills": [
+      "skills/plannotator/SKILL.md"
+    ]
+  },
+  "dependencies": {
+    "parse5": "^7.3.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.79.1"
+  }
+}
