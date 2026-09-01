@@ -3,7 +3,7 @@
   "version": "0.2.1",
   "private": true,
   "type": "module",
-  "description": "Jingler — an agent-session manager for coding CLIs.",
+  "description": "Jingler \u2014 an agent-session manager for coding CLIs.",
   "main": "./out/main/index.js",
   "author": {
     "name": "Morgan Parry",
@@ -20,9 +20,9 @@
     "e2e:report": "playwright show-report",
     "build:bundled-plugins": "node ./scripts/build-bundled-plugins.mjs",
     "build:device-agent": "pnpm --filter @jingler/device-agent build",
-    "dist": "pnpm run build:bundled-plugins && pnpm run build:device-agent && electron-vite build && electron-builder --dir",
-    "electron:pack": "pnpm run build:bundled-plugins && pnpm run build:device-agent && electron-vite build && electron-builder",
-    "electron:publish": "pnpm run build:bundled-plugins && pnpm run build:device-agent && electron-vite build && electron-builder --publish always",
+    "dist": "pnpm run build:bundled-plugins && pnpm run build:device-agent && node ./scripts/materialize-plannotator-ext.mjs && electron-vite build && electron-builder --dir",
+    "electron:pack": "pnpm run build:bundled-plugins && pnpm run build:device-agent && node ./scripts/materialize-plannotator-ext.mjs && electron-vite build && electron-builder",
+    "electron:publish": "pnpm run build:bundled-plugins && pnpm run build:device-agent && node ./scripts/materialize-plannotator-ext.mjs && electron-vite build && electron-builder --publish always",
     "clean": "rimraf out dist release .turbo *.tsbuildinfo"
   },
   "dependencies": {
