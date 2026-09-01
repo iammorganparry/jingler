@@ -118,6 +118,14 @@ const PLANNOTATOR_HOST_STATE_CHANNEL = "plannotator:host-state"
 const PLANNOTATOR_HOST_NOTICE_CHANNEL = "plannotator:host-notice"
 const PLANNOTATOR_REVIEW_DECISION_CHANNEL = "plannotator:review-decision"
 const PLANNOTATOR_TIMEOUT_MS = 5_000
+/**
+ * Pi's native mutation tools, granted to plan mode ONLY as the markdown plan
+ * scratchpad (the fork gates them to .md/.mdx during planning). They bypass
+ * the registry's mutation observer, so approval strips them again via the
+ * executing phase's removeTools — real edits must go through workspace_edit /
+ * workspace_write to produce tracked file changes.
+ */
+const PLAN_SCRATCHPAD_TOOLS = ["write", "edit"] as const
 const decodePlannotatorProjection = Schema.decodeUnknownOption(PlannotatorProjection)
 interface PlannotatorPlanModeResult {
   readonly phase: "idle" | "planning" | "executing"
@@ -343,7 +351,14 @@ const createResources = (
     eventBus,
     ...(executionTools === undefined
       ? {}
-      : { plannotatorExecutionTools: executionTools })
+      : { plannotatorExecutionTools: executionTools }),
+    // Plan mode grants pi's native write/edit for the markdown plan
+    // scratchpad. Execution must shed them: they bypass the registry's
+    // mutation observer, so an edit made through them produces no file-change
+    // set — no diff in the transcript, nothing in the review panel.
+    ...(spec.mode === "plan"
+      ? { plannotatorExecutionRemoveTools: PLAN_SCRATCHPAD_TOOLS }
+      : {})
   }).pipe(
     Effect.flatMap((resources) =>
       assertLockedPiResources(resources, compiled.text).pipe(
@@ -431,8 +446,7 @@ const createEmbeddedSession = (
       const initialToolNames = spec.mode === "plan"
         ? [
             ...(registry?.capabilitiesFor("plan", "plan").map(({ id }) => id) ?? []),
-            "write",
-            "edit",
+            ...PLAN_SCRATCHPAD_TOOLS,
             "plannotator_submit_plan",
             "plannotator_update_plan",
             ...(nativeSubagentsEnabled

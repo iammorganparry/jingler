@@ -11,12 +11,16 @@ export function applyPhaseTools(
 	activeTools: readonly string[],
 	previouslyAddedTools: readonly string[],
 	configuredTools: readonly string[],
+	removeTools: readonly string[] = [],
 ): { activeTools: string[]; addedTools: string[] } {
 	const previousAdditions = new Set(previouslyAddedTools);
-	const baseTools = activeTools.filter((tool) => !previousAdditions.has(tool));
+	const removed = new Set(removeTools);
+	const baseTools = activeTools.filter(
+		(tool) => !previousAdditions.has(tool) && !removed.has(tool),
+	);
 	const baseToolSet = new Set(baseTools);
 	const addedTools = [...new Set(configuredTools)].filter(
-		(tool) => !baseToolSet.has(tool),
+		(tool) => !baseToolSet.has(tool) && !removed.has(tool),
 	);
 
 	return {

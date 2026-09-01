@@ -37,6 +37,35 @@ export interface LockedPiResourceInput {
   readonly systemPrompt: string
   readonly eventBus?: EventBus
   readonly plannotatorExecutionTools?: ReadonlyArray<string>
+  /**
+   * Tools stripped when a plan is approved and execution begins. Plan mode
+   * hands the agent pi's native `write`/`edit` for the markdown plan
+   * scratchpad only; letting them survive into execution would route real
+   * workspace edits around the registry's mutation tracking — no diff peek,
+   * no file-change set, no review evidence.
+   */
+  readonly plannotatorExecutionRemoveTools?: ReadonlyArray<string>
+}
+
+const writePlannotatorPhaseConfig = async (
+  input: LockedPiResourceInput
+): Promise<void> => {
+  if (input.plannotatorExecutionTools === undefined) return
+  await mkdir(input.agentDir, { recursive: true })
+  await writeFile(
+    join(input.agentDir, "plannotator.json"),
+    JSON.stringify({
+      executionMode: "automatic",
+      phases: {
+        executing: {
+          activeTools: input.plannotatorExecutionTools,
+          ...(input.plannotatorExecutionRemoveTools === undefined
+            ? {}
+            : { removeTools: input.plannotatorExecutionRemoveTools })
+        }
+      }
+    })
+  )
 }
 
 /** Build a pi loader whose only prompt/resource input is supplied by Jingler. */
@@ -46,18 +75,7 @@ export const createLockedPiResources = (
   Effect.tryPromise({
     try: async () => {
       process.env.PLANNOTATOR_EMBEDDED = "1"
-      if (input.plannotatorExecutionTools !== undefined) {
-        await mkdir(input.agentDir, { recursive: true })
-        await writeFile(
-          join(input.agentDir, "plannotator.json"),
-          JSON.stringify({
-            executionMode: "automatic",
-            phases: {
-              executing: { activeTools: input.plannotatorExecutionTools }
-            }
-          })
-        )
-      }
+      await writePlannotatorPhaseConfig(input)
       const loader = new DefaultResourceLoader({
         cwd: input.cwd,
         agentDir: input.agentDir,

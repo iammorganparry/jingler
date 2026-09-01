@@ -430,6 +430,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				activeTools,
 				phaseAddedTools,
 				phaseTools,
+				profile?.removeTools ?? [],
 			);
 			phaseAddedTools = selection.addedTools;
 			if (
@@ -975,6 +976,21 @@ export default function plannotator(pi: ExtensionAPI): void {
 	});
 
 	// ── Event Handlers ───────────────────────────────────────────────────
+
+	// Refuse tools the current phase's removeTools stripped. setActiveTools
+	// narrowing alone is not durable: Pi re-activates every allow-listed tool
+	// whenever its tool registry refreshes (extension tool registration,
+	// reload), so a removed tool can silently come back mid-phase. Blocking
+	// the call keeps the phase contract even then.
+	pi.on("tool_call", async (event) => {
+		if (phase !== "planning" && phase !== "executing") return;
+		const removed = getPhaseProfile()?.removeTools;
+		if (!removed?.includes(event.toolName)) return;
+		return {
+			block: true,
+			reason: `Plannotator: the ${event.toolName} tool is unavailable during the ${phase} phase. Use the workspace tools instead.`,
+		};
+	});
 
 	// Gate writes during planning — only markdown files inside cwd.
 	pi.on("tool_call", async (event, ctx) => {

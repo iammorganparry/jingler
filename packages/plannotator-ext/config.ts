@@ -24,6 +24,12 @@ export interface PhaseProfile {
   model?: PhaseModelRef | null;
   thinking?: ConfiguredThinkingLevel | null;
   activeTools?: string[] | null;
+  /**
+   * Tools this phase must not have active, stripped from the inherited
+   * toolset when the phase is entered (and refused if called anyway). Lets a
+   * host hand planning a scratchpad tool without it leaking into execution.
+   */
+  removeTools?: string[] | null;
   statusLabel?: string | null;
   /**
    * Phase framing template, delivered ONCE as a conversation message when the
@@ -53,6 +59,7 @@ export interface ResolvedPhaseProfile {
   model?: PhaseModelRef;
   thinking?: ConfiguredThinkingLevel;
   activeTools?: string[];
+  removeTools?: string[];
   statusLabel?: string;
   instructions?: string;
 }
@@ -186,6 +193,7 @@ function normalizeProfile(raw: unknown, ctx: ProfileContext): PhaseProfile | nul
     profile.thinking = normalizeThinking(raw.thinkingLevel, "thinkingLevel", ctx);
   }
   if ("activeTools" in raw) profile.activeTools = normalizeTools(raw.activeTools);
+  if ("removeTools" in raw) profile.removeTools = normalizeTools(raw.removeTools);
   if ("statusLabel" in raw) profile.statusLabel = normalizeLabel(raw.statusLabel);
   if ("instructions" in raw) profile.instructions = normalizePrompt(raw.instructions);
 
@@ -194,7 +202,11 @@ function normalizeProfile(raw: unknown, ctx: ProfileContext): PhaseProfile | nul
 
 function cloneProfile(profile: PhaseProfile | null | undefined): PhaseProfile | null | undefined {
   if (profile === null || profile === undefined) return profile;
-  return { ...profile, activeTools: profile.activeTools ? [...profile.activeTools] : profile.activeTools };
+  return {
+    ...profile,
+    activeTools: profile.activeTools ? [...profile.activeTools] : profile.activeTools,
+    removeTools: profile.removeTools ? [...profile.removeTools] : profile.removeTools,
+  };
 }
 
 function mergeProfile(base: PhaseProfile | null | undefined, override: PhaseProfile | null | undefined): PhaseProfile | null | undefined {
@@ -206,6 +218,7 @@ function mergeProfile(base: PhaseProfile | null | undefined, override: PhaseProf
     model: override.model !== undefined ? override.model : base.model,
     thinking: override.thinking !== undefined ? override.thinking : base.thinking,
     activeTools: override.activeTools !== undefined ? override.activeTools : base.activeTools,
+    removeTools: override.removeTools !== undefined ? override.removeTools : base.removeTools,
     statusLabel: override.statusLabel !== undefined ? override.statusLabel : base.statusLabel,
     instructions: override.instructions !== undefined ? override.instructions : base.instructions,
   };
@@ -322,6 +335,7 @@ export function resolvePhaseProfile(config: PlannotatorConfig, phase: PhaseName)
     model: resolveModel(defaults.model, phaseConfig.model),
     thinking: resolveThinking(defaults.thinking, phaseConfig.thinking),
     activeTools: resolveTools(defaults.activeTools, phaseConfig.activeTools),
+    removeTools: resolveTools(defaults.removeTools, phaseConfig.removeTools),
     statusLabel: resolveString(defaults.statusLabel, phaseConfig.statusLabel),
     instructions: resolveString(defaults.instructions, phaseConfig.instructions),
   };

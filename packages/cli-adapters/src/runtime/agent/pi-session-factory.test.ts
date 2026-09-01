@@ -115,6 +115,9 @@ const fakeSession = (): AgentSession =>
     getSessionStats: () => ({ cost: 0, tokens: { total: 0 } })
   }) as unknown as AgentSession
 
+const readPlannotatorConfig = async (agentDir: string): Promise<unknown> =>
+  JSON.parse(await readFile(join(agentDir, "plannotator.json"), "utf8"))
+
 describe("pi session creation", () => {
   it("enters Plannotator plan mode through its documented event contract", async () => {
     const events: EventBus = {
@@ -191,8 +194,10 @@ describe("pi session creation", () => {
     const notified = vi.fn()
     handle.subscribePlannotatorNotice?.(notified)
     expect(notified).toHaveBeenCalledWith("Plan review failed closed.")
-    expect(JSON.parse(await readFile(join(agentDir, "plannotator.json"), "utf8")))
-      .toMatchObject({ executionMode: "automatic" })
+    // Approval must strip the untracked plan-scratchpad write/edit tools.
+    expect(await readPlannotatorConfig(agentDir)).toMatchObject(
+      { executionMode: "automatic", phases: { executing: { removeTools: ["write", "edit"] } } }
+    )
   })
 
   it("pins credentials, compiles a locked prompt, and seeds visible history once", async () => {
