@@ -75,6 +75,10 @@ describe("ConversationView Plannotator projection", () => {
       message("1", "plannotator_submit_plan"),
       message("2", "plannotator_update_plan", "error"),
       message("3", "plannotator_update_plan", "running")
-    ])).toBe(2)
+    ])).toBe(0)
+    expect(planTranscriptAnchorIndex([
+      message("1", "plannotator_submit_plan"),
+      message("2", "plannotator_submit_plan", "running")
+    ])).toBe(1)
   })
 })

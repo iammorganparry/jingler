@@ -73,7 +73,10 @@ const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"
 const MODE_CYCLE_WITH_PLAN: ReadonlyArray<PermissionMode> = [...MODE_CYCLE, "plan"]
 const PLANNOTATOR_PLAN_TOOLS = new Set(["plannotator_submit_plan", "plannotator_update_plan"])
 const isPlannotatorPlanTool = (part: Message["parts"][number]): boolean =>
-  part._tag === "Tool" && part.tool.status !== "error" && PLANNOTATOR_PLAN_TOOLS.has(part.tool.name)
+  part._tag === "Tool" &&
+  PLANNOTATOR_PLAN_TOOLS.has(part.tool.name) &&
+  (part.tool.status === "success" ||
+    (part.tool.name === "plannotator_submit_plan" && part.tool.status === "running"))
 
 export const planTranscriptAnchorIndex = (messages: ReadonlyArray<Message>): number =>
   messages.findLastIndex((message) => message.parts.some(isPlannotatorPlanTool))
