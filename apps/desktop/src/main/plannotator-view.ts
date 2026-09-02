@@ -26,18 +26,11 @@ export const PLANNOTATOR_CLOSE_CHANNEL = "jingler/plannotator/close"
 export const PLANNOTATOR_CLOSE_SESSION_CHANNEL = "jingler/plannotator/close-session"
 export const PLANNOTATOR_DECISION_CHANNEL = "jingler/plannotator/decision"
 export const PLANNOTATOR_DECISION_ACK_CHANNEL = "jingler/plannotator/decision-ack"
-const PARTITION = "jingler-plannotator"
+export const PLANNOTATOR_PARTITION = "persist:jingler-plannotator"
 const DECISION_ACK_TIMEOUT_MS = 5_000
-const REVIEW_ONBOARDING_PREDICATE =
-  'function P0n(){return Lt.getItem(Vot)==="true"?!1:Lt.getItem(R0n)!=="2"}'
-const REVIEW_ONBOARDING_DISABLED = "function P0n(){return!1}"
 
-export const embeddedReviewHtmlOf = (html: string): string => {
-  if (!html.includes(REVIEW_ONBOARDING_PREDICATE)) {
-    throw new Error("Pinned Plannotator onboarding marker is missing")
-  }
-  return html.replace(REVIEW_ONBOARDING_PREDICATE, REVIEW_ONBOARDING_DISABLED)
-}
+/** Keep the pinned asset byte-for-byte intact so its persisted layout preference works normally. */
+export const embeddedReviewHtmlOf = (html: string): string => html
 
 const Owner = Schema.Struct({ sessionId: Schema.String, chatId: Schema.String })
 type Owner = Schema.Schema.Type<typeof Owner>
@@ -45,7 +38,8 @@ const OpenPayload = Schema.Struct({
   ...Owner.fields,
   bounds: BrowserBounds,
   document: PlanDocument,
-  canDecide: Schema.Boolean
+  canDecide: Schema.Boolean,
+  themeCss: Schema.String
 })
 const DecisionAck = Schema.Struct({ deliveryId: Schema.String, delivered: Schema.Boolean })
 type OpenPayload = Schema.Schema.Type<typeof OpenPayload>
@@ -56,6 +50,8 @@ type ViewEntry = {
   readonly view: WebContentsView
   document: PlanDocumentData
   canDecide: boolean
+  themeCss: string
+  themeCssKey?: string
   signature: string
   settledReviewId?: string
   inFlightReviewId?: string
@@ -279,7 +275,7 @@ const createEntry = (host: Host, payload: OpenPayload): ViewEntry | null => {
   const token = randomUUID()
   const url = `${PLANNOTATOR_SCHEME}://${token}/`
   const view = new WebContentsView({
-    webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false }
+    webPreferences: { partition: PLANNOTATOR_PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false }
   })
   const entry: ViewEntry = {
     owner: { sessionId: payload.sessionId, chatId: payload.chatId },
@@ -288,6 +284,7 @@ const createEntry = (host: Host, payload: OpenPayload): ViewEntry | null => {
     view,
     document: payload.document,
     canDecide: payload.canDecide,
+    themeCss: payload.themeCss,
     signature: stateSignature(payload)
   }
   view.setVisible(false)
@@ -305,6 +302,11 @@ const createEntry = (host: Host, payload: OpenPayload): ViewEntry | null => {
   return entry
 }
 
+const applyTheme = async (entry: ViewEntry): Promise<void> => {
+  if (entry.themeCssKey) await entry.view.webContents.removeInsertedCSS(entry.themeCssKey)
+  entry.themeCssKey = await entry.view.webContents.insertCSS(entry.themeCss)
+}
+
 const openEntry = async (host: Host, payload: OpenPayload): Promise<void> => {
   const entry = host.views.get(ownerKey(payload)) ?? createEntry(host, payload)
   if (!entry) return
@@ -312,11 +314,13 @@ const openEntry = async (host: Host, payload: OpenPayload): Promise<void> => {
   const signature = stateSignature(payload)
   const changed = signature !== entry.signature
   const reviewChanged = entry.document.reviewId !== payload.document.reviewId
+  const themeChanged = entry.themeCss !== payload.themeCss
   if (reviewChanged) {
     entry.settledReviewId = undefined
     entry.inFlightReviewId = undefined
   }
   entry.document = payload.document
+  entry.themeCss = payload.themeCss
   entry.canDecide = payload.canDecide &&
     payload.document.reviewId !== undefined &&
     entry.settledReviewId !== payload.document.reviewId
@@ -337,6 +341,7 @@ const openEntry = async (host: Host, payload: OpenPayload): Promise<void> => {
       entry.view.webContents.reload()
     }
   }
+  if (themeChanged || entry.themeCssKey === undefined) await applyTheme(entry)
   entry.view.setVisible(true)
 }
 
@@ -345,7 +350,7 @@ export const installPlannotatorView = (
 ): (() => void) => {
   const host: Host = {
     windowOf,
-    partition: session.fromPartition(PARTITION),
+    partition: session.fromPartition(PLANNOTATOR_PARTITION),
     views: new Map(),
     viewsByToken: new Map(),
     acknowledgements: new Map()

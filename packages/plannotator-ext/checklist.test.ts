@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest"
-import { updateChecklistStatuses } from "./generated/checklist.ts"
+import { extractProgressMarkers, updateChecklistStatuses } from "./generated/checklist.ts"
+
+describe("progress markers", () => {
+  it("parses every supported status in program order", () => {
+    expect(extractProgressMarkers(
+      "[ACTIVE:1] [DONE:2] [BLOCKED:3] [SKIPPED:4] [FAILED:5] [INTERRUPTED:6]"
+    )).toEqual([
+      { step: 1, status: "in-progress" },
+      { step: 2, status: "completed" },
+      { step: 3, status: "blocked" },
+      { step: 4, status: "skipped" },
+      { step: 5, status: "failed" },
+      { step: 6, status: "interrupted" }
+    ])
+  })
+})
 
 describe("updateChecklistStatuses", () => {
   it("updates markers by document order without changing task text or nesting", () => {

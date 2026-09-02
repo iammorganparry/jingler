@@ -26,7 +26,7 @@ import { Key } from "@earendil-works/pi-tui";
 import { buildPromptVariables, formatTodoList, loadPlannotatorConfig, renderTemplate, resolveExecutionMode, resolvePhaseProfile } from "./config.ts";
 import {
 	type ChecklistItem,
-	extractDoneSteps,
+	extractProgressMarkers,
 	parseChecklist,
 } from "./generated/checklist.ts";
 import { persistPlanStatuses } from "./plan-status.ts";
@@ -203,16 +203,24 @@ export default function plannotator(pi: ExtensionAPI): void {
 	async function persistDoneMarkers(text: string, ctx: ExtensionContext): Promise<number> {
 		if (!lastSubmittedPath) return 0;
 		const validSteps = new Set(checklistItems.map(({ step }) => step));
-		const completedSteps = extractDoneSteps(text).filter((step) => validSteps.has(step));
-		if (completedSteps.length === 0) return 0;
+		const updates = new Map<number, "in-progress" | "completed" | "blocked">();
+		for (const marker of extractProgressMarkers(text)) {
+			if (!validSteps.has(marker.step)) continue;
+			updates.set(
+				marker.step,
+				marker.status === "completed" || marker.status === "skipped"
+					? "completed"
+					: marker.status === "in-progress"
+						? "in-progress"
+						: "blocked",
+			);
+		}
+		if (updates.size === 0) return 0;
 		const fullPath = resolve(ctx.cwd, lastSubmittedPath);
 		try {
-			const content = await persistPlanStatuses(
-				fullPath,
-				new Map(completedSteps.map((step) => [step, "completed" as const])),
-			);
+			const content = await persistPlanStatuses(fullPath, updates);
 			checklistItems = adoptPlanContent(content);
-			return completedSteps.length;
+			return updates.size;
 		} catch (error) {
 			try {
 				checklistItems = adoptPlanContent(readFileSync(fullPath, "utf8"));
@@ -1104,7 +1112,7 @@ Todo status for ${planRef}: ${todoStats.completedCount}/${todoStats.totalCount} 
 Remaining steps:
 ${todoStats.todoList}
 
-Mark completed steps with [DONE:n] in your response.`
+Emit [ACTIVE:n] when work starts, then [DONE:n], [BLOCKED:n], [SKIPPED:n], [FAILED:n], or [INTERRUPTED:n] when it settles.`
 				: null;
 
 		if (framingDelivered) {

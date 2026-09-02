@@ -90,7 +90,24 @@ test("a structured plan renders stages natively and ticks live progress", async 
   await expect(
     launched.window.getByRole("tab", { name: /Plan/ }).first()
   ).toContainText("0/2", { timeout: 20_000 })
+  await expect(launched.window.getByLabel("Step 1: Completed")).toBeVisible()
+  await expect(launched.window.getByText("[DONE:1]", { exact: false })).toHaveCount(0)
 
   // Session state never changed: accept-edits, no review pending.
   await expect(launched.window.locator("[data-mode='accept-edits']")).toBeVisible()
+
+  await launched.app.close()
+  const reopened = await launchApp({
+    configured: true,
+    withRepo: true,
+    home: launched.home,
+    reposDir: launched.reposDir,
+    userDataDir: launched.userDataDir,
+    authServer: launched.authServer,
+    githubServer: launched.githubServer,
+    githubRelay: launched.githubRelay
+  })
+  await expect(appShell(reopened.window)).toBeVisible()
+  await expect(reopened.window.getByLabel("Step 1: Completed")).toBeVisible({ timeout: 20_000 })
+  await expect(reopened.window.getByText("[DONE:1]", { exact: false })).toHaveCount(0)
 })

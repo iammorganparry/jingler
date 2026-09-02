@@ -147,6 +147,9 @@ describe("pi tool bridge", () => {
     const registry = new ToolRegistry()
     registerWorkspaceInspectionTools(registry, "/workspace", {
       listFiles: () => Effect.succeed([]),
+      executeReadOnly: (_cwd, program, args) => Effect.succeed({
+        command: [program, ...args].join(" "), exitCode: 0, stdout: "", stderr: ""
+      }),
       readTextFile: (_cwd, path) =>
         Effect.succeed({ path, text: "", language: null, revision: "rev-1" })
     })
