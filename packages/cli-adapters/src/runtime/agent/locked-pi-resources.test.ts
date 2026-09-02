@@ -33,7 +33,15 @@ describe("locked pi resources", () => {
   it("ships the enhanced Markdown plan shape in the active phase prompt", async () => {
     const config = JSON.parse(
       await readFile(join(PLANNOTATOR_EXTENSION_PATH, "plannotator.json"), "utf8")
-    ) as { phases: { planning: { instructions: string } } }
+    ) as { phases: { planning: { activeTools: string[]; instructions: string } } }
+    expect(config.phases.planning.activeTools).toEqual(expect.arrayContaining([
+      "workspace_list_files",
+      "workspace_read_file",
+      "command_inspect",
+      "code_intelligence",
+      "structural_search",
+      "plannotator_submit_plan"
+    ]))
     const prompt = config.phases.planning.instructions
     expect(prompt).toContain("stable-stage-id")
     expect(prompt).toContain("### Acceptance")
