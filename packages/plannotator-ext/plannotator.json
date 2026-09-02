@@ -3,9 +3,11 @@
   "phases": {
     "planning": {
       "activeTools": [
-        "grep",
-        "find",
-        "ls",
+        "workspace_list_files",
+        "workspace_read_file",
+        "command_inspect",
+        "code_intelligence",
+        "structural_search",
         "plannotator_submit_plan"
       ],
       "statusLabel": "⏸ plan",
