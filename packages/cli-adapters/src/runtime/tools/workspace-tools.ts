@@ -67,8 +67,7 @@ const MUTATING_BRANCH_ARGUMENTS = new Set([
   "--copy", "--create-reflog", "--delete", "--edit-description", "--force", "--move",
   "--set-upstream-to", "--unset-upstream", "-C", "-D", "-M", "-c", "-d", "-f", "-m"
 ])
-const RG_FLAGS = new Set(["-i", "-l", "-n", "--hidden", "--json", "--no-ignore"])
-const RG_VALUE_FLAGS = new Set(["-g", "--glob", "-t", "--type"])
+const RG_FLAGS = new Set(["-i", "-l", "-n"])
 
 const invalidInspectionArgument = (argument: string): boolean =>
   argument.includes("\0") ||
@@ -104,11 +103,6 @@ export const validateInspectionCommand = (
     for (let index = 0; index < args.length; index += 1) {
       const argument = args[index]!
       if (RG_FLAGS.has(argument)) continue
-      if (RG_VALUE_FLAGS.has(argument)) {
-        index += 1
-        if (index >= args.length) throw new ToolError("invalid-input", `${argument} needs a value`)
-        continue
-      }
       if (argument.startsWith("-")) {
         throw new ToolError("forbidden", `rg flag is unavailable: ${argument}`)
       }
@@ -141,11 +135,14 @@ export const makeWorkspaceInspectionPort = Effect.gen(function* () {
       return Effect.fail(cause instanceof ToolError ? cause : new ToolError("forbidden", "Inspection command rejected"))
     }
     return Effect.scoped(Effect.gen(function* () {
-      const commandArgs = program === "rg" ? [...args, "."] : args
-      const baseCommand = Command.make(program, ...commandArgs).pipe(Command.workingDirectory(cwd))
-      const command = program === "git"
-        ? baseCommand.pipe(Command.env({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat" }))
-        : baseCommand
+      const commandProgram = "git"
+      const commandArgs = program === "rg"
+        ? ["grep", "--untracked", "--exclude-standard", ...args, "--", "."]
+        : args
+      const command = Command.make(commandProgram, ...commandArgs).pipe(
+        Command.workingDirectory(cwd),
+        Command.env({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat" })
+      )
       const child = yield* Command.start(command)
       const [stdout, stderr, exitCode] = yield* Effect.all(
         [collect(child.stdout, context), collect(child.stderr, context), child.exitCode],
