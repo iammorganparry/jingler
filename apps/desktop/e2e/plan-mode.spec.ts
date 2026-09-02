@@ -56,6 +56,23 @@ const reviewText = (app: ElectronApplication) =>
     return review?.executeJavaScript("document.body.innerText") ?? ""
   })
 
+const reviewTheme = (app: ElectronApplication) =>
+  app.evaluate(async ({ webContents }) => {
+    const review = webContents.getAllWebContents()
+      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
+    return review?.executeJavaScript(`(() => {
+      const style = getComputedStyle(document.documentElement);
+      return {
+        editor: style.getPropertyValue('--sb-editor').trim(),
+        background: style.getPropertyValue('--background').trim(),
+        foreground: style.getPropertyValue('--foreground').trim(),
+        border: style.getPropertyValue('--border').trim(),
+        primary: style.getPropertyValue('--primary').trim(),
+        colorScheme: style.colorScheme
+      };
+    })()`)
+  })
+
 const clickReviewButton = async (app: ElectronApplication, label: string) => {
   await expect.poll(() =>
     app.evaluate(async ({ webContents }, wanted) => {
@@ -72,7 +89,24 @@ const clickReviewButton = async (app: ElectronApplication, label: string) => {
   { timeout: 20_000 }).toBe(true)
 }
 
-const approveReview = (app: ElectronApplication) => clickReviewButton(app, "Approve")
+const choosePlanLayout = (app: ElectronApplication) =>
+  app.evaluate(async ({ webContents }) => {
+    const review = webContents.getAllWebContents()
+      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
+    return review?.executeJavaScript(`(() => {
+      const buttons = [...document.querySelectorAll('button')];
+      const continueButton = buttons.find((button) => button.textContent?.includes('Continue'));
+      if (!continueButton) return false;
+      buttons.find((button) => button.textContent?.includes('Grid'))?.click();
+      continueButton.click();
+      return true;
+    })()`) ?? false
+  })
+
+const approveReview = async (app: ElectronApplication) => {
+  await choosePlanLayout(app)
+  await clickReviewButton(app, "Approve")
+}
 const approveReviewStatus = (app: ElectronApplication) =>
   app.evaluate(async ({ webContents }) => {
     const review = webContents.getAllWebContents()
@@ -133,6 +167,23 @@ test("Plannotator reviews in a bundled Plan-tab view and drives progress", async
   await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible()
   await expect.poll(() => reviewUrls(launched.app)).toHaveLength(1)
   await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
+  await expect.poll(() => reviewText(launched.app)).toContain("Choose how plans look")
+  const hostTheme = await launched.window.evaluate(() => {
+    const style = getComputedStyle(document.documentElement)
+    return {
+      editor: style.getPropertyValue("--sb-editor").trim(),
+      foreground: style.getPropertyValue("--sb-text").trim(),
+      border: style.getPropertyValue("--sb-line").trim(),
+      primary: style.getPropertyValue("--sb-brand").trim()
+    }
+  })
+  await expect.poll(() => reviewTheme(launched.app)).toMatchObject({
+    ...hostTheme,
+    background: hostTheme.editor,
+    colorScheme: "dark"
+  })
+  await choosePlanLayout(launched.app)
+  await expect.poll(() => reviewText(launched.app)).not.toContain("Choose how plans look")
   const security = await reviewSecurity(launched.app)
   expect(security.popupDenied).toBe(true)
   expect(security.url).toMatch(PLANNOTATOR_URL)
@@ -186,7 +237,7 @@ test("a new review in the same chat is presented and can be approved", async ({
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
   await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
-  await expect.poll(() => reviewText(launched.app)).not.toContain("Choose how plans look")
+  await expect.poll(() => reviewText(launched.app)).toContain("Choose how plans look")
   await approveReview(launched.app)
   await launched.window.getByTestId("active-chat-tab").first().click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
@@ -313,8 +364,12 @@ test("a pending Plannotator review reopens in the bundled view after an Electron
   })
   await expect(appShell(first.window)).toBeVisible()
   await startPlanReview(first)
-  await expect(first.window.getByTestId("view-tab-plan").first())
-    .toBeVisible({ timeout: 20_000 })
+  const firstPlanTab = first.window.getByTestId("view-tab-plan").first()
+  await expect(firstPlanTab).toBeVisible({ timeout: 20_000 })
+  await firstPlanTab.click()
+  await expect.poll(() => reviewText(first.app)).toContain("Choose how plans look")
+  await choosePlanLayout(first.app)
+  await expect.poll(() => reviewText(first.app)).not.toContain("Choose how plans look")
   await first.app.close()
 
   const reopened = await launchApp({
@@ -333,6 +388,7 @@ test("a pending Plannotator review reopens in the bundled view after an Electron
   await planTab.click()
   await expect(reopened.window.getByTestId("plannotator-embedded-view")).toBeVisible({ timeout: 30_000 })
   await expect.poll(() => reviewUrls(reopened.app)).toHaveLength(1)
+  await expect.poll(() => reviewText(reopened.app)).not.toContain("Choose how plans look")
 
   await reopened.window.getByTestId("active-chat-tab").first().click()
   await expect(reopened.window.getByText("0/2")).toBeVisible({ timeout: 20_000 })

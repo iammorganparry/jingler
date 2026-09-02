@@ -23,6 +23,7 @@ import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 import { registerCodeIntelligenceTools } from "../tools/code-intelligence-tools.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
+import { registerWorkspaceInspectionTools } from "../tools/workspace-tools.js"
 import {
   makeSubagentCapabilityBroker,
   type SubagentCapabilityBroker
@@ -310,6 +311,15 @@ describe("pi session creation", () => {
     const captured: CreateAgentSessionOptions[] = []
     const registry = new ToolRegistry()
     registerCodeIntelligenceTools(registry, root)
+    registerWorkspaceInspectionTools(registry, root, {
+      listFiles: () => Effect.succeed([]),
+      readTextFile: (_cwd, path) => Effect.succeed({
+        path, text: "", language: null, revision: "sha256:test"
+      }),
+      executeReadOnly: (_cwd, program, args) => Effect.succeed({
+        command: [program, ...args].join(" "), exitCode: 0, stdout: "", stderr: ""
+      })
+    })
     const factory = makePiSessionFactory({
       agentDir: join(root, "agent"),
       sessionsDir: join(root, "sessions"),
@@ -329,7 +339,10 @@ describe("pi session creation", () => {
     }, {} as never))
 
     expect(captured[0]?.tools).toContain("code_intelligence")
+    expect(captured[0]?.tools).toContain("command_inspect")
     expect(captured[0]?.customTools?.map(({ name }) => name)).toContain("code_intelligence")
+    expect(captured[0]?.customTools?.map(({ name }) => name)).toContain("command_inspect")
+    expect(captured[0]?.tools).not.toContain("command_execute")
     expect(captured[0]?.tools).not.toContain("bash")
     expect(captured[0]?.tools).not.toContain("lsp")
   })

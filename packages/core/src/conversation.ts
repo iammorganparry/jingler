@@ -322,7 +322,7 @@ export type TextPart = Schema.Schema.Type<typeof TextPart>
 export const PlanTaskProgressPart = Schema.TaggedStruct("PlanTaskProgress", {
   stageId: Schema.String,
   taskId: Schema.String,
-  status: Schema.Literal("in-progress", "completed", "blocked")
+  status: Schema.Literal("in-progress", "completed", "blocked", "skipped", "failed", "interrupted")
 })
 export type PlanTaskProgressPart = Schema.Schema.Type<typeof PlanTaskProgressPart>
 

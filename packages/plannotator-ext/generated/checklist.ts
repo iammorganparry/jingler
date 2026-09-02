@@ -13,6 +13,12 @@ export interface ChecklistItem {
 }
 
 export type ChecklistStatus = "pending" | "in-progress" | "blocked" | "completed";
+export type ProgressMarkerStatus = "in-progress" | "completed" | "blocked" | "skipped" | "failed" | "interrupted";
+
+export interface ProgressMarker {
+  step: number;
+  status: ProgressMarkerStatus;
+}
 
 export interface ScannedChecklistItem extends ChecklistItem {
   line: number;
@@ -88,13 +94,33 @@ export function parseChecklist(content: string): ChecklistItem[] {
   return scanChecklist(content).map(({ step, text, completed }) => ({ step, text, completed }));
 }
 
-export function extractDoneSteps(message: string): number[] {
-  const steps: number[] = [];
-  for (const match of message.matchAll(/\[DONE:(\d+)\]/gi)) {
-    const step = Number(match[1]);
-    if (Number.isFinite(step)) steps.push(step);
+const STATUS_BY_MARKER = {
+  ACTIVE: "in-progress",
+  DONE: "completed",
+  BLOCKED: "blocked",
+  SKIPPED: "skipped",
+  FAILED: "failed",
+  INTERRUPTED: "interrupted",
+} as const;
+
+export function extractProgressMarkers(message: string): ProgressMarker[] {
+  const markers: ProgressMarker[] = [];
+  for (const match of message.matchAll(/\[(ACTIVE|DONE|BLOCKED|SKIPPED|FAILED|INTERRUPTED):(\d+)\]/gi)) {
+    const step = Number(match[2]);
+    if (Number.isFinite(step)) {
+      markers.push({
+        step,
+        status: STATUS_BY_MARKER[match[1].toUpperCase() as keyof typeof STATUS_BY_MARKER],
+      });
+    }
   }
-  return steps;
+  return markers;
+}
+
+export function extractDoneSteps(message: string): number[] {
+  return extractProgressMarkers(message)
+    .filter(({ status }) => status === "completed")
+    .map(({ step }) => step);
 }
 
 export function markCompletedSteps(text: string, items: ChecklistItem[]): number {
