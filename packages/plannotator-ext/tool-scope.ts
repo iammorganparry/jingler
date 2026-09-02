@@ -1,4 +1,5 @@
-import { extname, isAbsolute, relative, resolve } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 
 export type Phase = "idle" | "planning" | "executing";
 
@@ -43,8 +44,26 @@ export function releasePhaseTools(
 export function isPlanWritePathAllowed(inputPath: string, cwd: string): boolean {
 	if (!inputPath) return false;
 	const targetAbs = resolve(cwd, inputPath);
-	const rel = relative(resolve(cwd), targetAbs);
-	if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
 	const ext = extname(targetAbs).toLowerCase();
-	return ALLOWED_PLAN_EXTENSIONS.has(ext);
+	if (!ALLOWED_PLAN_EXTENSIONS.has(ext)) return false;
+
+	try {
+		const root = realpathSync(cwd);
+		let existing = targetAbs;
+		while (true) {
+			try {
+				lstatSync(existing);
+				break;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+				const parent = dirname(existing);
+				if (parent === existing) return false;
+				existing = parent;
+			}
+		}
+		const rel = relative(root, realpathSync(existing));
+		return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+	} catch {
+		return false;
+	}
 }

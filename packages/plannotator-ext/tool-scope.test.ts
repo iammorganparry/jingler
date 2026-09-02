@@ -1,6 +1,9 @@
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolvePhaseProfile, type PlannotatorConfig } from "./config.js";
-import { applyPhaseTools, releasePhaseTools } from "./tool-scope.js";
+import { applyPhaseTools, isPlanWritePathAllowed, releasePhaseTools } from "./tool-scope.js";
 
 describe("applyPhaseTools", () => {
 	it("adds configured tools not already active and records them as additions", () => {
@@ -50,6 +53,28 @@ describe("applyPhaseTools", () => {
 		);
 		const idle = releasePhaseTools(executing.activeTools, executing.addedTools);
 		expect(idle).toEqual(["read"]);
+	});
+});
+
+describe("planning writes", () => {
+	it("allows plan markdown but not source files, traversal, or symlink escapes", async () => {
+		const root = await mkdtemp(join(tmpdir(), "plannotator-plan-root-"));
+		const outside = await mkdtemp(join(tmpdir(), "plannotator-plan-outside-"));
+		try {
+			await symlink(outside, join(root, "escape"));
+			await symlink(join(outside, "new.md"), join(root, "DANGLING.md"));
+			expect(isPlanWritePathAllowed("PLAN.md", root)).toBe(true);
+			expect(isPlanWritePathAllowed("plans/auth.mdx", root)).toBe(true);
+			expect(isPlanWritePathAllowed("src/auth.ts", root)).toBe(false);
+			expect(isPlanWritePathAllowed("../PLAN.md", root)).toBe(false);
+			expect(isPlanWritePathAllowed("escape/PLAN.md", root)).toBe(false);
+			expect(isPlanWritePathAllowed("DANGLING.md", root)).toBe(false);
+		} finally {
+			await Promise.all([
+				rm(root, { recursive: true, force: true }),
+				rm(outside, { recursive: true, force: true }),
+			]);
+		}
 	});
 });
 
