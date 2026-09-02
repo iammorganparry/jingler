@@ -40,6 +40,8 @@ describe("locked pi resources", () => {
       "command_inspect",
       "code_intelligence",
       "structural_search",
+      "write",
+      "edit",
       "plannotator_submit_plan"
     ]))
     const prompt = config.phases.planning.instructions

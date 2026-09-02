@@ -56,10 +56,28 @@ const legacyDocument: PlanDocument = {
 }
 
 describe("embeddedReviewHtmlOf", () => {
-  it("keeps Plannotator's layout chooser and uses persistent app-wide storage", () => {
-    const html = "<html>Choose how plans look</html>"
-    expect(embeddedReviewHtmlOf(html)).toBe(html)
+  it("keeps the chooser and seeds an app-wide saved layout before the bundle", () => {
+    // biome-ignore lint/security/noSecrets: Static HTML fixture contains no credentials.
+    const html = [
+      "<html><head></head><body><script>",
+      "let Wbe=TTt;",
+      "</script>Choose how plans look</body></html>"
+    ].join("")
+    const embedded = embeddedReviewHtmlOf(html, {
+      resolved: "true",
+      gridEnabled: "false"
+    })
+    expect(embedded).toContain("Choose how plans look")
+    expect(embedded).toContain("let Wbe=localStorage;")
+    expect(embedded).toContain('"resolved":"true"')
+    expect(embedded).toContain('"gridEnabled":"false"')
+    expect(embedded.indexOf("<script>")).toBeLessThan(embedded.indexOf("</head>"))
     expect(PLANNOTATOR_PARTITION).toBe("persist:jingler-plannotator")
+  })
+
+  it("fails visibly when the pinned storage hook changes", () => {
+    expect(() => embeddedReviewHtmlOf("<html><head></head></html>"))
+      .toThrow("storage adapter marker is missing")
   })
 })
 

@@ -10,6 +10,7 @@ const PI_FIXTURE = {
 
 const COMPOSER_PLACEHOLDER = /Message .+…/
 const PLANNOTATOR_URL = /^jingler-plan:/
+const PLANNOTATOR_ENTRY_URL = /^jingler-plan:\/\/[^/]+\/$/
 
 const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
   id: "s_plannotator",
@@ -55,6 +56,26 @@ const reviewText = (app: ElectronApplication) =>
       .find((contents) => contents.getURL().startsWith("jingler-plan:"))
     return review?.executeJavaScript("document.body.innerText") ?? ""
   })
+
+const reviewStorage = (app: ElectronApplication) =>
+  app.evaluate(async ({ webContents }) => {
+    const review = webContents.getAllWebContents()
+      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
+    return review?.executeJavaScript(`({
+      "plannotator-plan-look-choice-resolved": localStorage.getItem("plannotator-plan-look-choice-resolved"),
+      "plannotator-grid-enabled": localStorage.getItem("plannotator-grid-enabled")
+    })`) ?? {}
+  })
+
+const hostTheme = (launched: LaunchedApp) => launched.window.evaluate(() => {
+  const style = getComputedStyle(document.documentElement)
+  return {
+    editor: style.getPropertyValue("--sb-editor").trim(),
+    foreground: style.getPropertyValue("--sb-text").trim(),
+    border: style.getPropertyValue("--sb-line").trim(),
+    primary: style.getPropertyValue("--sb-brand").trim()
+  }
+})
 
 const reviewTheme = (app: ElectronApplication) =>
   app.evaluate(async ({ webContents }) => {
@@ -168,18 +189,10 @@ test("Plannotator reviews in a bundled Plan-tab view and drives progress", async
   await expect.poll(() => reviewUrls(launched.app)).toHaveLength(1)
   await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
   await expect.poll(() => reviewText(launched.app)).toContain("Choose how plans look")
-  const hostTheme = await launched.window.evaluate(() => {
-    const style = getComputedStyle(document.documentElement)
-    return {
-      editor: style.getPropertyValue("--sb-editor").trim(),
-      foreground: style.getPropertyValue("--sb-text").trim(),
-      border: style.getPropertyValue("--sb-line").trim(),
-      primary: style.getPropertyValue("--sb-brand").trim()
-    }
-  })
+  const expectedTheme = await hostTheme(launched)
   await expect.poll(() => reviewTheme(launched.app)).toMatchObject({
-    ...hostTheme,
-    background: hostTheme.editor,
+    ...expectedTheme,
+    background: expectedTheme.editor,
     colorScheme: "dark"
   })
   await choosePlanLayout(launched.app)
@@ -191,7 +204,7 @@ test("Plannotator reviews in a bundled Plan-tab view and drives progress", async
   await approveReview(launched.app)
   await expect.poll(() => reviewText(launched.app)).not.toContain("Approve")
   await expect.poll(() => reviewUrls(launched.app)).toEqual([
-    expect.stringMatching(/^jingler-plan:\/\/[^/]+\/$/)
+    expect.stringMatching(PLANNOTATOR_ENTRY_URL)
   ])
 
   await launched.window.getByTestId("active-chat-tab").first().click()
@@ -220,6 +233,11 @@ test("Plannotator reviews in a bundled Plan-tab view and drives progress", async
   await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"))
     .toContain("- [x] Verify the auth change")
   await expect.poll(() => reviewText(launched.app)).toContain("Verify the auth change")
+  await expect.poll(() => reviewTheme(launched.app)).toMatchObject({
+    ...expectedTheme,
+    background: expectedTheme.editor,
+    colorScheme: "dark"
+  })
 })
 
 test("a new review in the same chat is presented and can be approved", async ({
@@ -255,6 +273,16 @@ test("a new review in the same chat is presented and can be approved", async ({
   })
   await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
   await planTab.click()
+  await expect.poll(() => reviewText(launched.app)).not.toContain("Choose how plans look")
+  await expect.poll(() => reviewStorage(launched.app)).toMatchObject({
+    "plannotator-plan-look-choice-resolved": "true"
+  })
+  const expectedTheme = await hostTheme(launched)
+  await expect.poll(() => reviewTheme(launched.app)).toMatchObject({
+    ...expectedTheme,
+    background: expectedTheme.editor,
+    colorScheme: "dark"
+  })
   await approveReview(launched.app)
   await launched.window.getByTestId("active-chat-tab").first().click()
   await expect.poll(() =>

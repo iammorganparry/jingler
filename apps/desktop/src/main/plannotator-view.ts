@@ -27,10 +27,42 @@ export const PLANNOTATOR_CLOSE_SESSION_CHANNEL = "jingler/plannotator/close-sess
 export const PLANNOTATOR_DECISION_CHANNEL = "jingler/plannotator/decision"
 export const PLANNOTATOR_DECISION_ACK_CHANNEL = "jingler/plannotator/decision-ack"
 export const PLANNOTATOR_PARTITION = "persist:jingler-plannotator"
+const LAYOUT_COOKIE_URL = "https://plannotator.jingler.invalid"
+const LAYOUT_COOKIE_NAME = "layout"
 const DECISION_ACK_TIMEOUT_MS = 5_000
 
-/** Keep the pinned asset byte-for-byte intact so its persisted layout preference works normally. */
-export const embeddedReviewHtmlOf = (html: string): string => html
+type LayoutPreferences = {
+  readonly resolved?: "true"
+  readonly gridEnabled?: "true" | "false"
+}
+
+const PLANNOTATOR_STORAGE_ADAPTER = "let Wbe=TTt;"
+
+export const embeddedReviewHtmlOf = (
+  html: string,
+  preferences: LayoutPreferences = {}
+): string => {
+  if (!html.includes(PLANNOTATOR_STORAGE_ADAPTER)) {
+    throw new Error("Pinned Plannotator storage adapter marker is missing")
+  }
+  return html
+    .replace(PLANNOTATOR_STORAGE_ADAPTER, "let Wbe=localStorage;")
+    .replace("<head>", `<head><script>(()=>{
+  const values=${JSON.stringify(preferences).replaceAll("<", "\\u003c")};
+  const keys={resolved:"plannotator-plan-look-choice-resolved",gridEnabled:"plannotator-grid-enabled"};
+  const original=Storage.prototype.setItem;
+  for(const [name,value] of Object.entries(values))if(value)original.call(localStorage,keys[name],value);
+  Storage.prototype.setItem=function(key,value){
+    original.call(this,key,value);
+    if(Object.values(keys).includes(key))queueMicrotask(()=>fetch("/api/layout-preferences",{
+      method:"POST",headers:{"content-type":"application/json"},keepalive:true,
+      body:JSON.stringify(Object.fromEntries(Object.entries({
+        resolved:localStorage.getItem(keys.resolved),gridEnabled:localStorage.getItem(keys.gridEnabled)
+      }).filter(([,value])=>value!==null)))
+    }).catch(()=>{}));
+  };
+})();</script>`)
+}
 
 const Owner = Schema.Struct({ sessionId: Schema.String, chatId: Schema.String })
 type Owner = Schema.Schema.Type<typeof Owner>
@@ -42,6 +74,10 @@ const OpenPayload = Schema.Struct({
   themeCss: Schema.String
 })
 const DecisionAck = Schema.Struct({ deliveryId: Schema.String, delivered: Schema.Boolean })
+const LayoutPreferencesPayload = Schema.Struct({
+  resolved: Schema.optional(Schema.Literal("true")),
+  gridEnabled: Schema.optional(Schema.Literal("true", "false"))
+})
 type OpenPayload = Schema.Schema.Type<typeof OpenPayload>
 type ViewEntry = {
   readonly owner: Owner
@@ -64,6 +100,7 @@ type Host = {
   readonly viewsByToken: Map<string, ViewEntry>
   readonly acknowledgements: Map<string, (delivered: boolean) => void>
   reviewHtml?: Promise<string>
+  layoutPreferences?: Promise<LayoutPreferences>
 }
 
 const ownerKey = ({ sessionId, chatId }: Owner): string => `${sessionId}\0${chatId}`
@@ -107,6 +144,51 @@ const decodeOwner = Schema.decodeUnknownOption(Owner)
 const decodeOpenPayload = Schema.decodeUnknownOption(OpenPayload)
 const json = <A>(body: A, status = 200): Response =>
   Response.json(body, { status, headers: { "cache-control": "no-store" } })
+
+const layoutPreferencesOf = (host: Host): Promise<LayoutPreferences> => {
+  host.layoutPreferences ??= host.partition.cookies.get({
+    url: LAYOUT_COOKIE_URL,
+    name: LAYOUT_COOKIE_NAME
+  }).then(([saved]) => {
+    if (!saved) return {}
+    try {
+      const parsed = JSON.parse(Buffer.from(saved.value, "base64url").toString("utf8"))
+      const decoded = Schema.decodeUnknownOption(LayoutPreferencesPayload)(parsed)
+      return Option.isSome(decoded) ? decoded.value : {}
+    } catch {
+      return {}
+    }
+  })
+  return host.layoutPreferences
+}
+
+const saveLayoutPreferences = async (
+  host: Host,
+  preferences: LayoutPreferences
+): Promise<void> => {
+  host.layoutPreferences = Promise.resolve(preferences)
+  await host.partition.cookies.set({
+    url: LAYOUT_COOKIE_URL,
+    name: LAYOUT_COOKIE_NAME,
+    value: Buffer.from(JSON.stringify(preferences)).toString("base64url"),
+    expirationDate: Math.floor(Date.now() / 1_000) + 10 * 365 * 24 * 60 * 60,
+    sameSite: "strict",
+    secure: true
+  })
+}
+
+const persistEntryLayout = async (host: Host, entry: ViewEntry): Promise<void> => {
+  try {
+    const candidate = await entry.view.webContents.executeJavaScript(`({
+      resolved: localStorage.getItem("plannotator-plan-look-choice-resolved") ?? undefined,
+      gridEnabled: localStorage.getItem("plannotator-grid-enabled") ?? undefined
+    })`)
+    const decoded = Schema.decodeUnknownOption(LayoutPreferencesPayload)(candidate)
+    if (Option.isSome(decoded)) await saveLayoutPreferences(host, decoded.value)
+  } catch {
+    // A closing view must not turn a delivered approval into a failure.
+  }
+}
 
 const feedbackOf = async (request: Request): Promise<string | undefined> => {
   const body = Schema.decodeUnknownOption(Schema.Struct({
@@ -192,6 +274,7 @@ const sendDecision = async (
   if (entry.inFlightReviewId === reviewId) entry.inFlightReviewId = undefined
   if (!delivered) return json({ error: "Could not deliver the review decision." }, 503)
 
+  await persistEntryLayout(host, entry)
   entry.settledReviewId = reviewId
   entry.canDecide = false
   return json({ ok: true })
@@ -199,8 +282,11 @@ const sendDecision = async (
 
 const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Response> => {
   if (path === "/") {
-    host.reviewHtml ??= readFile(reviewAssetPath(), "utf8").then(embeddedReviewHtmlOf)
-    return new Response(await host.reviewHtml, {
+    host.reviewHtml ??= readFile(reviewAssetPath(), "utf8")
+    return new Response(embeddedReviewHtmlOf(
+      await host.reviewHtml,
+      await layoutPreferencesOf(host)
+    ), {
       headers: { "content-type": "text/html; charset=utf-8" }
     })
   }
@@ -238,13 +324,21 @@ const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Re
   return json({ error: "Not found" }, 404)
 }
 
-const handlePost = (
+const handlePost = async (
   host: Host,
   entry: ViewEntry,
   path: string,
   request: Request
-): Promise<Response> | Response => {
+): Promise<Response> => {
   if (path === "/api/approve") return sendDecision(host, entry, true, request)
+  if (path === "/api/layout-preferences") {
+    const decoded = Schema.decodeUnknownOption(LayoutPreferencesPayload)(
+      await request.json().catch(() => null)
+    )
+    if (Option.isNone(decoded)) return json({ error: "Invalid preferences" }, 400)
+    await saveLayoutPreferences(host, decoded.value)
+    return json({ ok: true })
+  }
   if (path === "/api/deny" || path === "/api/feedback") {
     return sendDecision(host, entry, false, request)
   }
@@ -332,16 +426,13 @@ const openEntry = async (host: Host, payload: OpenPayload): Promise<void> => {
     })
     await entry.loading
   } else if (changed && entry.loading === undefined) {
-    if (reviewChanged) {
-      entry.loading = entry.view.webContents.loadURL(entry.url).finally(() => {
-        entry.loading = undefined
-      })
-      await entry.loading
-    } else {
-      entry.view.webContents.reload()
-    }
+    entry.loading = entry.view.webContents.loadURL(entry.url).finally(() => {
+      entry.loading = undefined
+    })
+    await entry.loading
+    entry.themeCssKey = undefined
   }
-  if (themeChanged || entry.themeCssKey === undefined) await applyTheme(entry)
+  if (themeChanged || changed || entry.themeCssKey === undefined) await applyTheme(entry)
   entry.view.setVisible(true)
 }
 
