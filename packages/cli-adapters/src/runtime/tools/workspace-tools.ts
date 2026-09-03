@@ -1,7 +1,8 @@
+import { Command, CommandExecutor } from "@effect/platform"
 import type { AssetFileEntry } from "@jingler/core"
-import { Data, Effect, Schema } from "effect"
+import { Data, Effect, Schema, Stream } from "effect"
 import { AssetService } from "../../asset.js"
-import type { ToolDefinition, ToolRegistry } from "./tool-registry.js"
+import { ToolError, type ToolDefinition, type ToolExecutionContext, type ToolRegistry } from "./tool-registry.js"
 
 const roles = [
   "conversation",
@@ -39,14 +40,129 @@ export interface WorkspaceInspectionPort {
     cwd: string,
     path: string
   ) => Effect.Effect<WorkspaceTextFile, WorkspaceInspectionError>
+  readonly executeReadOnly: (
+    cwd: string,
+    program: "git" | "rg",
+    args: ReadonlyArray<string>,
+    context: ToolExecutionContext
+  ) => Effect.Effect<{
+    readonly command: string
+    readonly exitCode: number
+    readonly stdout: string
+    readonly stderr: string
+  }, ToolError>
 }
 
 const inspectFailure = (message: string, cause?: unknown): WorkspaceInspectionError =>
   new WorkspaceInspectionError({ message, cause })
 
+const READ_ONLY_GIT_COMMANDS = new Set([
+  "branch", "diff", "grep", "log", "ls-tree", "rev-parse", "show", "status"
+])
+const FORBIDDEN_GIT_ARGUMENTS = new Set([
+  "--exec-path", "--ext-diff", "--git-dir", "--no-index", "--open-files-in-pager",
+  "--output", "--paginate", "--textconv", "--work-tree", "-C", "-c"
+])
+const MUTATING_BRANCH_ARGUMENTS = new Set([
+  "--copy", "--create-reflog", "--delete", "--edit-description", "--force", "--move",
+  "--set-upstream-to", "--unset-upstream", "-C", "-D", "-M", "-c", "-d", "-f", "-m"
+])
+const RG_FLAGS = new Set(["-i", "-l", "-n"])
+
+const invalidInspectionArgument = (argument: string): boolean =>
+  argument.includes("\0") ||
+  argument.startsWith("/") ||
+  argument.split(/[\\/]/).includes("..")
+
+export const validateInspectionCommand = (
+  program: "git" | "rg",
+  args: ReadonlyArray<string>
+): void => {
+  if (args.length === 0) throw new ToolError("invalid-input", "Inspection command needs arguments")
+  if (args.some(invalidInspectionArgument)) {
+    throw new ToolError("forbidden", "Inspection command cannot access paths outside the workspace")
+  }
+  if (program === "git") {
+    const [subcommand, ...rest] = args
+    if (!subcommand || !READ_ONLY_GIT_COMMANDS.has(subcommand)) {
+      throw new ToolError("forbidden", "Git subcommand is not read-only")
+    }
+    if (rest.some((argument) => FORBIDDEN_GIT_ARGUMENTS.has(argument) ||
+      [...FORBIDDEN_GIT_ARGUMENTS].some((flag) => argument.startsWith(`${flag}=`)))) {
+      throw new ToolError("forbidden", "Git argument can execute code or escape the workspace")
+    }
+    if (subcommand === "branch" && (
+      rest.some((argument) => MUTATING_BRANCH_ARGUMENTS.has(argument) ||
+        [...MUTATING_BRANCH_ARGUMENTS].some((flag) => argument.startsWith(`${flag}=`))) ||
+      rest.some((argument) => !argument.startsWith("-") && !rest.includes("--list"))
+    )) {
+      throw new ToolError("forbidden", "git branch is limited to listing branches")
+    }
+  } else {
+    let queryCount = 0
+    for (let index = 0; index < args.length; index += 1) {
+      const argument = args[index]!
+      if (RG_FLAGS.has(argument)) continue
+      if (argument.startsWith("-")) {
+        throw new ToolError("forbidden", `rg flag is unavailable: ${argument}`)
+      }
+      queryCount += 1
+    }
+    if (queryCount !== 1) {
+      throw new ToolError("forbidden", "rg accepts one pattern and searches only the workspace")
+    }
+  }
+}
+
 /** Reuse AssetService's existing containment and size boundary for agent reads. */
 export const makeWorkspaceInspectionPort = Effect.gen(function* () {
   const assets = yield* AssetService
+  const executor = yield* CommandExecutor.CommandExecutor
+
+  const collect = (
+    stream: Stream.Stream<Uint8Array, unknown>,
+    context: ToolExecutionContext
+  ): Effect.Effect<string, unknown> => stream.pipe(
+    Stream.decodeText(),
+    Stream.tap((chunk) => Effect.sync(() => context.progress({ message: chunk, completed: null, total: null }))),
+    Stream.runFold("", (output, chunk) => output + chunk)
+  )
+
+  const executeReadOnly: WorkspaceInspectionPort["executeReadOnly"] = (cwd, program, args, context) => {
+    try {
+      validateInspectionCommand(program, args)
+    } catch (cause) {
+      return Effect.fail(cause instanceof ToolError ? cause : new ToolError("forbidden", "Inspection command rejected"))
+    }
+    return Effect.scoped(Effect.gen(function* () {
+      const commandProgram = "git"
+      const commandArgs = program === "rg"
+        ? ["grep", "--untracked", "--exclude-standard", ...args, "--", "."]
+        : args
+      const command = Command.make(commandProgram, ...commandArgs).pipe(
+        Command.workingDirectory(cwd),
+        Command.env({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat" })
+      )
+      const child = yield* Command.start(command)
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [collect(child.stdout, context), collect(child.stderr, context), child.exitCode],
+        { concurrency: 3 }
+      )
+      if (exitCode !== 0 && !(program === "rg" && exitCode === 1)) {
+        return yield* Effect.fail(new ToolError(
+          "execution-failed",
+          stderr.trim() || stdout.trim() || `Inspection command exited ${exitCode}`
+        ))
+      }
+      return { command: [program, ...args].join(" "), exitCode: Number(exitCode), stdout, stderr }
+    })).pipe(
+      Effect.provideService(CommandExecutor.CommandExecutor, executor),
+      Effect.mapError((cause) => cause instanceof ToolError
+        ? cause
+        : new ToolError("execution-failed", "Inspection command failed"))
+    )
+  }
+
   return {
     listFiles: (cwd: string) =>
       assets.list(cwd).pipe(
@@ -73,7 +189,8 @@ export const makeWorkspaceInspectionPort = Effect.gen(function* () {
             ? cause
             : inspectFailure(`Could not read workspace file: ${path}`, cause)
         )
-      )
+      ),
+    executeReadOnly
   } satisfies WorkspaceInspectionPort
 })
 
@@ -117,6 +234,21 @@ export const registerWorkspaceInspectionTools = (
       input: Schema.Struct({ path: Schema.String.pipe(Schema.minLength(1)) }),
       execute: ({ path }) =>
         Effect.runPromise(workspace.readTextFile(cwd, path))
+    })
+  )
+  registry.register(
+    inspectionTool({
+      id: "command_inspect",
+      description:
+        "Run one bounded read-only Git or ripgrep command in the workspace using structured arguments. Shell syntax, write-capable Git operations, preprocessors, and paths outside the workspace are rejected.",
+      input: Schema.Struct({
+        program: Schema.Literal("git", "rg"),
+        args: Schema.Array(Schema.String).pipe(Schema.minItems(1))
+      }),
+      execute: ({ program, args }, context) =>
+        Effect.runPromise(workspace.executeReadOnly(cwd, program, args, context), {
+          signal: context.signal
+        })
     })
   )
 }

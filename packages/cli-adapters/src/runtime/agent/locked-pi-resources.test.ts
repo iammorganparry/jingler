@@ -1,11 +1,12 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   assertLockedPiResources,
-  createLockedPiResources
+  createLockedPiResources,
+  PLANNOTATOR_EXTENSION_PATH
 } from "./locked-pi-resources.js"
 import { preparePiSubagentsRuntime } from "../subagents/pi-subagents-bootstrap.js"
 
@@ -29,6 +30,29 @@ afterEach(async () => {
 })
 
 describe("locked pi resources", () => {
+  it("ships the enhanced Markdown plan shape in the active phase prompt", async () => {
+    const config = JSON.parse(
+      await readFile(join(PLANNOTATOR_EXTENSION_PATH, "plannotator.json"), "utf8")
+    ) as { phases: { planning: { activeTools: string[]; instructions: string } } }
+    expect(config.phases.planning.activeTools).toEqual(expect.arrayContaining([
+      "workspace_list_files",
+      "workspace_read_file",
+      "command_inspect",
+      "code_intelligence",
+      "structural_search",
+      "write",
+      "edit",
+      "plannotator_submit_plan"
+    ]))
+    const prompt = config.phases.planning.instructions
+    expect(prompt).toContain("stable-stage-id")
+    expect(prompt).toContain("### Acceptance")
+    expect(prompt).toContain("### Files")
+    expect(prompt).toContain("complexity:")
+    expect(prompt).toContain("depends:")
+    expect(prompt).toContain("Optional substep")
+  })
+
   it("ignores ambient prompts skills extensions themes and context files", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-pi-resources-"))
     roots.push(root)

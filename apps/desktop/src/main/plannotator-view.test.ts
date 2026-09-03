@@ -1,6 +1,10 @@
 import type { PlanDocument } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { embeddedReviewHtmlOf, reviewMarkdownOf } from "./plannotator-view.js"
+import {
+  embeddedReviewHtmlOf,
+  PLANNOTATOR_PARTITION,
+  reviewMarkdownOf
+} from "./plannotator-view.js"
 
 const legacyDocument: PlanDocument = {
   id: "legacy-plan",
@@ -52,12 +56,28 @@ const legacyDocument: PlanDocument = {
 }
 
 describe("embeddedReviewHtmlOf", () => {
-  it("disables the pinned first-run dialog and rejects an unknown bundle", () => {
-    const marker = 'function P0n(){return Lt.getItem(Vot)==="true"?!1:Lt.getItem(R0n)!=="2"}'
-    expect(embeddedReviewHtmlOf(`<html>${marker}</html>`))
-      .toBe("<html>function P0n(){return!1}</html>")
-    expect(() => embeddedReviewHtmlOf("<html></html>"))
-      .toThrow("Pinned Plannotator onboarding marker is missing")
+  it("keeps the chooser and seeds an app-wide saved layout before the bundle", () => {
+    // biome-ignore lint/security/noSecrets: Static HTML fixture contains no credentials.
+    const html = [
+      "<html><head></head><body><script>",
+      "let Wbe=TTt;",
+      "</script>Choose how plans look</body></html>"
+    ].join("")
+    const embedded = embeddedReviewHtmlOf(html, {
+      resolved: "true",
+      gridEnabled: "false"
+    })
+    expect(embedded).toContain("Choose how plans look")
+    expect(embedded).toContain("let Wbe=localStorage;")
+    expect(embedded).toContain('"resolved":"true"')
+    expect(embedded).toContain('"gridEnabled":"false"')
+    expect(embedded.indexOf("<script>")).toBeLessThan(embedded.indexOf("</head>"))
+    expect(PLANNOTATOR_PARTITION).toBe("persist:jingler-plannotator")
+  })
+
+  it("fails visibly when the pinned storage hook changes", () => {
+    expect(() => embeddedReviewHtmlOf("<html><head></head></html>"))
+      .toThrow("storage adapter marker is missing")
   })
 })
 

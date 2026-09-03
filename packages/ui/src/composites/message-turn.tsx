@@ -1,6 +1,15 @@
 import { createContext, memo, type ReactNode, useContext, useState } from "react"
-import type { ContentPart, GateDecision, Message, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle } from "lucide-react"
+import type { ContentPart, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  LoaderCircle,
+  PauseCircle,
+  XCircle
+} from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { AttachmentThumb } from "../components/attachment-thumb.js"
 import { Eyebrow } from "../components/eyebrow.js"
@@ -82,26 +91,60 @@ const HUNK_PREVIEW_LINES = 12
 const TASK_PROGRESS_META = {
   "in-progress": { label: "In progress", Icon: LoaderCircle, tone: "text-blue border-blue/30 bg-blue/10" },
   completed: { label: "Completed", Icon: CheckCircle2, tone: "text-green border-green/30 bg-green/10" },
-  blocked: { label: "Blocked", Icon: AlertCircle, tone: "text-yellow border-yellow/30 bg-yellow/10" }
+  blocked: { label: "Blocked", Icon: AlertCircle, tone: "text-yellow border-yellow/30 bg-yellow/10" },
+  skipped: { label: "Skipped", Icon: Circle, tone: "text-dim border-line bg-sunken" },
+  failed: { label: "Failed", Icon: XCircle, tone: "text-red border-red/30 bg-red/10" },
+  interrupted: { label: "Interrupted", Icon: PauseCircle, tone: "text-orange border-orange/30 bg-orange/10" }
 } as const
 
 function PlanTaskProgressChip({ progress }: { progress: Omit<PlanTaskProgressPart, "_tag"> }) {
   const meta = TASK_PROGRESS_META[progress.status]
   const { Icon } = meta
+  const step = /(?:task|step)-(\d+)(?:-done)?$/.exec(progress.taskId)?.[1]
+  const label = step ? `Step ${step}` : progress.taskId
   return (
     <span
       data-plan-task-progress={progress.taskId}
-      aria-label={`${progress.taskId}: ${meta.label}`}
+      aria-label={`${label}: ${meta.label}`}
       className={cn(
         "inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[10.5px]",
         meta.tone
       )}
     >
       <Icon className={cn("size-3", progress.status === "in-progress" && "animate-spin")} />
-      <span>{progress.taskId}</span>
+      <span>{label}</span>
       <span className="font-sans font-medium">{meta.label}</span>
     </span>
   )
+}
+
+export const PlanProgressContext = createContext<PlanDocument | null>(null)
+
+const MARKER_STATUS = {
+  ACTIVE: "in-progress",
+  DONE: "completed",
+  BLOCKED: "blocked",
+  SKIPPED: "skipped",
+  FAILED: "failed",
+  INTERRUPTED: "interrupted"
+} as const
+
+const progressTarget = (
+  document: PlanDocument,
+  step: number
+): { readonly stageId: string; readonly taskId: string } | null => {
+  for (const stage of document.plan.stages) {
+    const taskId = `plannotator-task-${step}`
+    if (stage.tasks?.some((task) => task.id === taskId)) return { stageId: stage.id, taskId }
+    const acceptanceId = `plannotator-acceptance-${step}`
+    if (stage.acceptance.some((criterion) => criterion.id === acceptanceId)) {
+      return { stageId: stage.id, taskId: acceptanceId }
+    }
+    if (stage.id === `plannotator-step-${step}`) {
+      return { stageId: stage.id, taskId: `${stage.id}-done` }
+    }
+  }
+  return null
 }
 
 function MessageText({
@@ -113,7 +156,42 @@ function MessageText({
   markdown: boolean
   streaming?: boolean
 }) {
+  const planDocument = useContext(PlanProgressContext)
   if (text.length === 0) return null
+  if (markdown && !streaming) {
+    const rendered: ReactNode[] = []
+    const seen = new Set<string>()
+    let cursor = 0
+    for (const match of text.matchAll(/\[(ACTIVE|DONE|BLOCKED|SKIPPED|FAILED|INTERRUPTED):(\d+)\]/g)) {
+      const index = match.index ?? 0
+      const step = Number(match[2])
+      const target = planDocument
+        ? progressTarget(planDocument, step)
+        : { stageId: `plannotator-step-${step}`, taskId: `plannotator-task-${step}` }
+      if (!target) continue
+      const prose = text.slice(cursor, index).replace(/[ \t]+$/, "")
+      if (prose.length > 0) {
+        rendered.push(<StreamingText key={`text-${index}`} text={prose} className={WIDTH} />)
+      }
+      const status = MARKER_STATUS[match[1] as keyof typeof MARKER_STATUS]
+      const key = `${target.taskId}:${status}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        rendered.push(
+          <PlanTaskProgressChip
+            key={`progress-${key}`}
+            progress={{ ...target, status }}
+          />
+        )
+      }
+      cursor = index + match[0].length
+    }
+    if (cursor > 0) {
+      const prose = text.slice(cursor).replace(/^[ \t]+/, "")
+      if (prose.length > 0) rendered.push(<StreamingText key="text-tail" text={prose} className={WIDTH} />)
+      return <div className={cn("flex flex-col items-start gap-2", WIDTH)}>{rendered}</div>
+    }
+  }
   return markdown ? (
     <StreamingText text={text} streaming={streaming} className={WIDTH} />
   ) : (
