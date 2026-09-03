@@ -661,7 +661,9 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     },
     subagentFleetSnapshot: () => lifecycle.refresh(),
     subagentTranscript: (runId) => lifecycle.transcript(runId),
-    prompt: (text) => session.prompt(text),
+    prompt: (text, images) => session.prompt(text, {
+      images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType }))
+    }),
     steer: (text) => session.steer(text),
     interrupt: () => session.abort(),
     dispose: async () => {

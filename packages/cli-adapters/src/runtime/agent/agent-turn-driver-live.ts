@@ -36,7 +36,6 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
 
 const piSpec = (runId: string, spec: AgentTurnSpec) => {
   const {
-    images: _images,
     mcp: _mcp,
     memoryAttachmentStatus: _memoryAttachmentStatus,
     ...runtime

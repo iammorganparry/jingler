@@ -106,6 +106,24 @@ const settlingHandle = (fleet: { childActive: boolean }): PiSessionHandle => ({
 })
 
 describe("PiAgentRuntime", () => {
+  it("passes current-turn images to the Pi session prompt", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const handle = { ...settlingHandle({ childActive: false }), prompt }
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
+    )
+    const image = {
+      id: "image-1",
+      name: "form.png",
+      mediaType: "image/png",
+      data: "aGVsbG8="
+    }
+
+    await Effect.runPromise(Stream.runCollect(runtime.run({ ...spec, images: [image] }, context)))
+
+    expect(prompt).toHaveBeenCalledWith("hello", [image])
+  })
+
   it("normalizes session construction failure as one terminal event", async () => {
     const runtime = await Effect.runPromise(
       makePiAgentRuntime({

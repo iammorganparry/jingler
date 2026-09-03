@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { Message } from "../conversation.js"
+import { Attachment, Message } from "../conversation.js"
 import { ReasoningSetting } from "../domain.js"
 import {
   ProviderConnectionId,
@@ -58,6 +58,7 @@ export const PiRunSpec = Schema.Struct({
   reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
   cwd: Schema.String,
   prompt: Schema.String,
+  images: Schema.optional(Schema.Array(Attachment)),
   priorMessages: Schema.Array(Message),
   piSessionId: Schema.NullOr(Schema.String),
   seed: Schema.NullOr(TranscriptSeed),

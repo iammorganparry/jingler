@@ -39,7 +39,7 @@ export interface PiSessionHandle {
   ) => Promise<SubagentFleetControlOutcome>
   readonly subagentFleetSnapshot: () => Promise<SubagentFleetSnapshot>
   readonly subagentTranscript: (runId: string) => Promise<ReadonlyArray<Message>>
-  readonly prompt: (text: string) => Promise<void>
+  readonly prompt: (text: string, images?: PiRunSpec["images"]) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>
   readonly dispose: () => void | Promise<void>
@@ -250,10 +250,15 @@ const subscribeToSession = (
   }
 }
 
-const startPrompt = (handle: PiSessionHandle, prompt: string, sink: EventSink): void => {
+const startPrompt = (
+  handle: PiSessionHandle,
+  prompt: string,
+  images: PiRunSpec["images"],
+  sink: EventSink
+): void => {
   Effect.runFork(
     Effect.tryPromise({
-      try: () => handle.prompt(prompt),
+      try: () => handle.prompt(prompt, images),
       catch: (cause) =>
         new AgentRuntimeError({
           reason: "provider",
@@ -561,7 +566,7 @@ const runSession = (
         model: handle.modelId
       })
       const unsubscribe = subscribeToSession(handle, sink)
-      startPrompt(handle, spec.prompt, sink)
+      startPrompt(handle, spec.prompt, spec.images, sink)
       return Stream.fromQueue(queue).pipe(
         Stream.takeUntil((event) => event._tag === "Done" || event._tag === "Failed"),
         Stream.ensuring(

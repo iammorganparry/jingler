@@ -381,6 +381,29 @@ test("Revise with agent denies the review and the same plan file is revised", as
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
 })
 
+test("main-chat feedback revises a pending Plannotator review", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await startPlanReview(launched)
+
+  await expect(launched.window.getByTestId("view-tab-plan").first()).toBeVisible({
+    timeout: 20_000
+  })
+  await launched.window.getByTestId("active-chat-tab").first().click()
+  const composer = launched.window.getByPlaceholder("Queue a message while the agent works…")
+  await composer.fill("Keep the existing token format")
+  await composer.press("Enter")
+
+  await expect.poll(() =>
+    readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"), { timeout: 30_000 }
+  ).toContain("keeping the existing token format")
+})
+
 test("a pending Plannotator review reopens in the bundled view after an Electron restart", async ({
   launchApp
 }) => {

@@ -302,6 +302,15 @@ describe("pi session creation", () => {
         customType: "jingler.normalized-transcript-seed"
       })
     ])
+    await handle.prompt("Read this form", [{
+      id: "image-1",
+      name: "form.png",
+      mediaType: "image/png",
+      data: "aGVsbG8="
+    }])
+    expect(session.prompt).toHaveBeenCalledWith("Read this form", {
+      images: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }]
+    })
     await handle.dispose()
   })
 
