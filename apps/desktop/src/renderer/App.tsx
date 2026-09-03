@@ -112,6 +112,7 @@ import {
 import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
 import { useMcpSettings } from "./use-mcp-settings.js";
+import { McpImportPrompt } from "./mcp-import-prompt.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useAgentsSettings } from "./use-agents-settings.js";
 import { useRuntimeInspector } from "./use-runtime-inspector.js";
@@ -2088,6 +2089,12 @@ function AuthedApp({
           </button>
         </div>
       )}
+      <McpImportPrompt
+        ready={!mcp.loading && mcp.parseError === null}
+        servers={mcp.servers}
+        load={mcp.importCandidates}
+        apply={mcp.applyImport}
+      />
       <ConfirmDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
