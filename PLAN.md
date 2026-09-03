@@ -1,169 +1,208 @@
 ---
-title: Make Plannotator feel native in Jingler
-revision: 1
+title: Reclaim dependency storage from coding sessions
+revision: 3
 ---
 
 ## Context
+Jingler creates concurrent local coding sessions as Git linked worktrees under `~/jingler/worktrees`. A session can then acquire its own `node_modules`, so persistent sessions grow disk usage quickly.
 
-The `feat/outfitter-app` transcript shows why this matters: long implementation turns currently end with raw protocol such as `[DONE:n]`, while Plan mode could not inspect Git history when the repository readers failed. The current embedded Plannotator also uses an in-memory Electron partition, suppresses its layout picker instead of remembering a choice, and renders with its bundled theme rather than Jingler’s active theme.
+The agreed requirements are:
 
-Commit `bd65fa13` replaced the old structured-plan system. Its prior model supported rich sections, typed blocks, stage intent/approach/tasks/files/diagrams/walkthroughs, dependencies, complexity, and explicit acceptance evidence. The current Plannotator parser and `PlanDocument` projection already retain most of that data; the main regression is that `packages/plannotator-ext/plannotator.json` tells agents to generate a generic six-section checklist instead of the richer stage shape already documented in the bundled skill.
+- Sessions for one repository remain fully concurrent, including commands and uncommitted changes.
+- Existing worktree sessions stay untouched and resumable until explicitly cleaned or deleted.
+- The first release provides storage inventory plus manual cleanup. It does not auto-delete on a budget.
+
+### Research result
+
+A single ordinary checkout cannot meet full concurrency. One Git working tree has one `HEAD`, one index, and one set of tracked files; switching branches replaces that state. Linked worktrees are Git's supported mechanism for exposing several branches concurrently. Coding agents also require normal mutable filesystems and arbitrary shell access, so index-only branch editing isn't a viable replacement.
+
+Worktrees already share Git object storage. The expensive parts are their checked-out files, dependency projections, build output, and caches. pnpm normally shares immutable package contents through its content-addressable store, but each project still has its own `node_modules` projection. This repository also uses `node-linker=hoisted` in `.npmrc` for Electron/native-module compatibility, making that projection larger.
+
+> [!WARNING]
+> Sharing one mutable `node_modules` symlink between branches is unsafe. Branches can have different lockfiles and manifests; workspace links can point into the wrong checkout; concurrent installs race on bins and metadata; native addons and lifecycle output can depend on cwd, Node/Electron ABI, OS, architecture, and branch source.
+
+pnpm's Global Virtual Store is safer because pnpm keys shared projections by dependency graph, but it was introduced experimentally in pnpm 10.12.1. Jingler pins pnpm 10.7.0, the hoisted Electron/native setup needs compatibility testing, and the feature wouldn't solve npm, Yarn, Bun, or non-Node projects. It is not part of this change.
+
+| Option | Concurrent | Branch-correct dependency state | Result |
+| --- | ---: | ---: | --- |
+| One checkout with branch switching | No | Only when serialized and clean | Rejected: conflicts with concurrency |
+| One shared `node_modules` symlink | Superficially | No | Rejected: corruption/staleness risk |
+| Copy-on-write container/FUSE overlays | Yes | Potentially | Rejected: platform and mount complexity |
+| Worktrees + package-manager store | Yes | Yes | Keep as the safe baseline |
+| Worktrees + manual cold dependency cleanup | Yes | Yes; reinstall needed after cleanup | **Selected** |
+
+### Official references
+
+- [Git worktree](https://git-scm.com/docs/git-worktree) — concurrent branches use multiple working trees.
+- [Git repository layout](https://git-scm.com/docs/gitrepository-layout) — linked worktrees share repository data while retaining per-worktree state.
+- [pnpm motivation](https://pnpm.io/10.x/motivation) — content-addressable package storage.
+- [pnpm 10.x `node_modules` structure](https://pnpm.io/10.x/symlinked-node-modules-structure) — per-project dependency projections and shared package contents.
+- [pnpm Global Virtual Store](https://pnpm.io/global-virtual-store) and [pnpm v10.12.1](https://github.com/pnpm/pnpm/releases/tag/v10.12.1) — graph-level sharing and its introduction version.
+- [pnpm install](https://pnpm.io/10.x/cli/install) — workspace and lockfile consistency requirements.
 
 ## Approach
+Keep the current worktree model. Add a narrow, explicit action that measures and removes only real `node_modules` directories from an inactive isolated session. Preserve the worktree, branch, transcript, source changes, and every other ignored path. Do not guess a package manager or automatically reinstall dependencies.
 
-Fix the four problems at their existing shared entry points:
+Inventory is advisory. Cleanup rechecks activity and takes a per-session operation guard also consulted by local agent launch/resume and terminal creation, so no process can start in the workspace while dependency directories are being removed.
 
-1. Add a narrowly validated, read-only command tool for Plan and Review roles instead of weakening `command_execute` or exposing unrestricted Bash.
-2. Make Plannotator’s phase prompt require the existing rich Markdown stage format.
-3. Let Plannotator persist one app-wide layout choice and feed the embedded view Jingler’s live theme CSS.
-4. Fold every supported legacy status marker into canonical progress parts before rendering the transcript, so protocol text becomes native UI.
-
-> [!IMPORTANT]
-> The read-only command runner will execute an allowlist with `execFile`-style argument arrays. It will not invoke a shell, accept redirection/pipelines, or reclassify the existing `command_execute` tool as safe.
+```mermaid
+flowchart LR
+  R[Registered repo + package-manager store]
+  R --> W1[Session worktree A]
+  R --> W2[Session worktree B]
+  W1 --> N1[node_modules A]
+  W2 --> N2[node_modules B]
+  U[Explicit reclaim action] --> G{Session idle + guarded?}
+  G -->|yes| N1
+  G -->|no| X[Refuse with reason]
+  N1 --> D[Remove node_modules only]
+```
 
 ## Files to modify
 
-| Area | Critical files |
+| Path | Change |
 | --- | --- |
-| Read-only shell inspection | `packages/cli-adapters/src/runtime/tools/workspace-mutation-tools.ts`, `packages/cli-adapters/src/runtime/tools/tool-registry.ts`, `packages/cli-adapters/src/runtime/agent/pi-session-factory.ts`, focused tool/factory tests |
-| Generated plan structure | `packages/plannotator-ext/plannotator.json`, `packages/plannotator-ext/skills/plannotator/SKILL.md`, `packages/cli-adapters/src/runtime/agent/locked-pi-resources.test.ts` |
-| Layout persistence and theme | `apps/desktop/src/main/plannotator-view.ts`, `packages/ui/src/screens/plan-review.tsx`, their unit tests, `apps/desktop/e2e/plan-mode.spec.ts` |
-| Status components | `packages/core/src/conversation.ts`, `packages/core/src/plannotator-projection.ts`, `packages/plannotator-ext/generated/checklist.ts`, `packages/ui/src/composites/message-turn.tsx`, focused core/extension/UI tests |
+| `packages/contracts/src/index.ts` | Add typed session dependency-inventory and reclaim RPCs/results. |
+| `packages/cli-adapters/src/sessions.ts` | Add contained `node_modules` discovery, size measurement, and removal under the existing serialized session lifecycle. |
+| `apps/desktop/src/main/rpc.ts` | Coordinate inventory/reclaim with session chats, `AgentRunner`, `TerminalService`, and launch guards. |
+| `apps/desktop/src/renderer/rpc-client.ts` | Add thin wrappers for the new RPCs. |
+| `apps/desktop/src/renderer/App.tsx` | Load/refresh inventory, own confirmation/result state, and invoke reclaim. |
+| `packages/ui/src/app/jingler-app.tsx` | Thread dependency-storage data/actions to the session screen. |
+| `packages/ui/src/screens/session-conversation.tsx` | Pass storage props into the sidebar. |
+| `packages/ui/src/app/session-sidebar.tsx` | Map per-session inventory to each row. |
+| `packages/ui/src/composites/session-row.tsx` | Add the session menu/hover action and its disabled reason. |
+| `README.md` | Document why worktrees remain and how dependency reclaim affects resume. |
+| Test files listed per stage | Extend existing suites. |
 
 ## Reuse
 
-- Keep `ToolRegistry.validateExecution` in `packages/cli-adapters/src/runtime/tools/tool-registry.ts` as the final role/mode guard.
-- Reuse workspace containment and bounded output behavior from `packages/cli-adapters/src/runtime/tools/workspace-tools.ts`; do not add a command library.
-- Keep the structured Markdown contract in `packages/plannotator-ext/skills/plannotator/SKILL.md` and the single projection in `packages/core/src/plannotator-projection.ts`.
-- Generate embedded theme CSS with `themeCssText`/`useThemeTokens` from `packages/ui/src/theme-provider.tsx`; do not create parallel theme state.
-- Extend the existing `PlanTaskProgressPart` and `PlanTaskProgressChip` rather than adding a second transcript status component.
+- `SessionStore` lifecycle serialization in `packages/cli-adapters/src/sessions.ts` for record-safe operations.
+- `workspaceModeOf` from `packages/core/src/domain.ts` to keep legacy sessions safe and reject direct-checkout cleanup.
+- `AgentRunner.chatBusy` in `packages/cli-adapters/src/agent-runner.ts` as the authoritative active-agent check.
+- `TerminalService.list` in `packages/cli-adapters/src/terminal.ts`; only `status: "running"` blocks cleanup because exited PTYs are already released.
+- `Sessions.delete` coordination in `apps/desktop/src/main/rpc.ts` as the model for resolving all chats and resource owners.
+- Lexical plus `realpath` containment from `apps/desktop/src/main/plugin-protocol.ts` and `lstat` symlink rejection from `packages/cli-adapters/src/offload-snapshot.ts`.
+- Existing `SessionRow` context-menu and hover-action pattern in `packages/ui/src/composites/session-row.tsx`.
+- Node stdlib `readdir`, `lstat`/`stat`, `realpath`, and `rm`; no dependency is needed.
 
-## Read-only repository inspection <!-- id: read-only-inspection -->
-Give planning and review turns enough shell-like access to inspect history without allowing workspace mutation.
+## Safe dependency inventory <!-- id: dependency-inventory -->
+Report reclaimable dependency storage without following symlinks or treating arbitrary ignored files as disposable.
 
 ### Approach
+1. Add a compact result per session: logical bytes, allocated bytes when available, dependency-directory count, eligibility, and refusal reason.
+2. For `workspaceMode: "worktree"`, recursively discover directories named exactly `node_modules`; never descend into `.git`, an already-found `node_modules`, or any symlink.
+3. Resolve the worktree and each candidate through lexical and real-path containment checks. A symlinked `node_modules`, missing path, unreadable path, or path outside the worktree is skipped and reported, never followed.
+4. Compute logical bytes from file sizes. On platforms exposing `stat.blocks`, compute allocated bytes as blocks × 512; otherwise return logical bytes as the documented fallback.
+5. Resolve all session chats through `AgentRunner.chatBusy` and terminals through `TerminalService.list` to report current cleanup eligibility.
 
-- Register a separate read-risk inspection command tool for `plan` and `review` roles.
-- Accept a command plus arguments as structured input and allow only repository/read programs needed for investigation: Git read operations (`status`, `diff`, `log`, `show`, `branch --list`, `grep`, `ls-tree`, `rev-parse`) and bounded text/search operations already needed when semantic tools fail.
-- Reject shell metacharacters, write-capable Git subcommands/flags, paths outside the workspace, interactive commands, and unbounded output before process launch.
-- Keep `command_execute`, ambient `bash`, mutation tools, installs, commits, and pushes unavailable in Plan mode.
-
-- [x] Add the validated read-only command definition and process runner.
-- [x] Expose it in Plan/Review capability assembly without changing execution-role policy.
-- [x] Cover allowed Git archaeology and denied redirection, mutation, traversal, and bypass cases.
+- [ ] Add inventory schemas and `Sessions.storageInventory` RPC.
+- [ ] Implement contained `node_modules` discovery and size accounting.
+- [ ] Return explicit eligibility/refusal data for direct sessions, active agents, and running terminals.
+- [ ] Add fixtures for nested dependencies, hard links, symlinks, missing paths, and direct sessions.
 
 ### Acceptance
-
-- [x] A Plan session can run the equivalent of `git log`, `git show`, `git diff`, and bounded repository search. (test: `packages/cli-adapters/src/runtime/tools/workspace-tools.test.ts`)
-- [x] The same session cannot write a file, invoke an interpreter, install dependencies, commit, or push. (test: `packages/cli-adapters/src/runtime/tools/tool-registry.test.ts`)
-- [x] Plan session creation advertises the inspection tool but not `command_execute`, `bash`, or mutation tools. (test: `packages/cli-adapters/src/runtime/agent/pi-session-factory.test.ts`)
+- [ ] Inventory finds root and nested workspace `node_modules` without double-counting nested package contents.
+- [ ] It never follows a symlink or reads outside `session.worktreePath`.
+- [ ] It distinguishes logical from allocated size where supported and documents the fallback.
+- [ ] Dirty tracked files, untracked source, and all non-`node_modules` ignored files are excluded.
+- [ ] Active-agent and running-terminal refusal reasons are accurate; exited terminals don't block cleanup.
 
 ### Files
-
-- `packages/cli-adapters/src/runtime/tools/workspace-mutation-tools.ts` — M
-- `packages/cli-adapters/src/runtime/tools/workspace-mutation-tools.test.ts` — M
-- `packages/cli-adapters/src/runtime/tools/tool-registry.test.ts` — M
-- `packages/cli-adapters/src/runtime/agent/pi-session-factory.test.ts` — M
+- `packages/contracts/src/index.ts` — M
+- `packages/cli-adapters/src/sessions.ts` — M
+- `packages/cli-adapters/src/sessions.test.ts` — M
+- `apps/desktop/src/main/rpc.ts` — M
+- `apps/desktop/src/main/rpc.test.ts` — M
 
 > complexity: high
 
-## Rich generated plan shape <!-- id: rich-plan-shape -->
-Restore the useful structure of enhanced plans without reviving the deleted JSON plan engine or duplicate editable state.
+## Guarded manual reclaim <!-- id: guarded-reclaim -->
+Remove only dependency directories from an inactive isolated session while keeping the session resumable.
 
 ### Approach
+1. Add `Sessions.reclaimDependencies({ sessionId })`, returning reclaimed logical/allocated bytes, removed count, and skipped paths/reasons.
+2. Add the smallest per-session in-memory operation guard in the main process. Reclaim acquires it; local agent send/resume and `Terminal.create` reject while it is held. Concurrent reclaim requests for the same session collapse to one clear busy result.
+3. After acquiring the guard, re-resolve the session and recheck every chat plus terminal. Refuse direct sessions, active agents, and running terminals.
+4. Re-run discovery and containment inside `SessionStore`'s serialized operation immediately before calling `rm(candidate, { recursive: true, force: true })`.
+5. Keep the session record, worktree registration, branch, transcript, source tree, and unknown ignored files unchanged. Do not run an install; the next agent/terminal command sees an ordinary dependency-missing checkout.
+6. Leave existing full-session deletion ordering unchanged (`AgentRunner.stop` → preview cleanup → `SessionStore.remove`/`removeWorktreeAt`).
 
-- Replace the generic “Context / Approach / Files / Reuse / Steps / Verification” requirement in `plannotator.json` with the bundled rich Markdown contract: frontmatter, stable `##` stage IDs, intent, ordered approach, nested tasks, acceptance with test references, files/change kinds, diagrams/notes when useful, complexity, and dependencies.
-- Keep every `##` stage sized as a reviewable commit boundary and preserve document-order checkbox numbering.
-- Add prompt-contract tests that compile a Plan session and assert the rich shape reaches the model; do not rely on the skill merely existing in the catalog.
-
-- [x] Make the phase prompt and skill agree on one rich Markdown schema.
-- [x] Pin the generated prompt contract with focused runtime tests.
-- [x] Verify the current parser/projector retains every documented field and add only missing parser coverage.
+- [ ] Add reclaim contract, client wrapper, and main handler.
+- [ ] Add the per-session reclaim guard to cleanup and process-launch entry points.
+- [ ] Implement idempotent contained deletion and structured results.
+- [ ] Cover activity races, duplicate reclaim, partial filesystem failure, and unchanged session persistence.
 
 ### Acceptance
-
-- [x] A fresh Plan-mode prompt explicitly requires stage IDs, tasks, acceptance checks, files, complexity, and dependencies. (test: `packages/cli-adapters/src/runtime/agent/locked-pi-resources.test.ts`)
-- [x] A representative rich plan round-trips through Plannotator into `PlanDocument` without flattening. (test: `packages/core/src/plannotator-projection.test.ts`)
+- [ ] Reclaim removes only validated real directories named `node_modules` inside an isolated worktree.
+- [ ] A process cannot launch in that session between the final activity check and cleanup completion.
+- [ ] Direct sessions are always refused, protecting the registered checkout.
+- [ ] A second reclaim is a safe no-op; partial failures report exact skipped paths and never remove source.
+- [ ] Existing sessions remain resumable and no record migration occurs.
+- [ ] Full session deletion behavior and worktree unregistering remain unchanged.
 
 ### Files
+- `packages/contracts/src/index.ts` — M
+- `packages/cli-adapters/src/sessions.ts` — M
+- `packages/cli-adapters/src/sessions.test.ts` — M
+- `apps/desktop/src/main/rpc.ts` — M
+- `apps/desktop/src/main/rpc.test.ts` — M
+- `apps/desktop/src/renderer/rpc-client.ts` — M
 
-- `packages/plannotator-ext/plannotator.json` — M
-- `packages/plannotator-ext/skills/plannotator/SKILL.md` — M
-- `packages/cli-adapters/src/runtime/agent/locked-pi-resources.test.ts` — M
-- `packages/core/src/plannotator-projection.test.ts` — M
+> complexity: high
+> depends: dependency-inventory
 
-> complexity: medium
-> depends: read-only-inspection
-
-## Native preferences and theme <!-- id: native-plannotator -->
-Make the embedded review behave like a Jingler view rather than a separate temporary app.
+## Session-row action and documentation <!-- id: reclaim-ui -->
+Expose current reclaimable size and one explicit cleanup action where sessions are already managed.
 
 ### Approach
+1. Fetch inventory in `App.tsx` and pass immutable per-session results through `JinglerApp` → `SessionConversation` → `SessionSidebar` → `SessionRow`.
+2. Add “Reclaim dependencies · 420 MB” immediately before Delete in the existing context menu and hover actions. Disable it with the server-provided reason for direct/active sessions or zero bytes.
+3. Use the existing confirmation-dialog pattern. State exactly that dependencies will be removed, source and session history stay, and the project may need its normal install command on resume.
+4. Refresh inventory after reclaim and show reclaimed bytes plus skipped failures. Do not add a new storage dashboard or settings screen in this release.
+5. Clarify New Session copy: Worktree supports concurrent isolated work; Local uses the registered checkout and is not concurrent isolation.
+6. Update README storage/troubleshooting text and cite the official Git/pnpm behavior above.
 
-- Change the isolated partition to `persist:jingler-plannotator`, remove the minified onboarding suppression patch, and let Plannotator’s existing local-storage layout preference survive restarts app-wide.
-- Pass `themeCssText(useThemeTokens())` on the existing `openPlannotator` payload.
-- Insert and replace that CSS in the existing `WebContentsView`, including theme changes while a plan stays open; remove the prior inserted stylesheet key to avoid accumulation.
-- Map Jingler tokens onto any Plannotator-owned CSS variables/selectors that its pinned bundle actually uses, while keeping sandboxing and navigation restrictions unchanged.
-
-- [x] Persist one app-wide layout choice and show the chooser only before the first choice.
-- [x] Apply the current Jingler theme on first paint and live theme changes.
-- [x] Preserve isolated protocol, sandbox, decision acknowledgement, and view lifecycle behavior.
-
-### Acceptance
-
-- [x] Selecting a layout, restarting Jingler, and opening another plan keeps that layout without asking again. (test: `apps/desktop/e2e/plan-mode.spec.ts`)
-- [x] The embedded plan’s computed canvas, text, border, accent, fonts, and color scheme match the active Jingler theme before and after a live theme switch. (test: `apps/desktop/e2e/plan-mode.spec.ts`)
-- [x] Unknown bundle changes fail visibly only for required integration hooks, not the removed onboarding string patch. (test: `apps/desktop/src/main/plannotator-view.test.ts`)
-
-### Files
-
-- `apps/desktop/src/main/plannotator-view.ts` — M
-- `apps/desktop/src/main/plannotator-view.test.ts` — M
-- `packages/ui/src/screens/plan-review.tsx` — M
-- `packages/ui/src/screens/plan-review.test.tsx` — M
-- `apps/desktop/e2e/plan-mode.spec.ts` — M
-
-> complexity: medium
-> depends: rich-plan-shape
-
-## Native execution status in chat <!-- id: native-status-chat -->
-Replace raw legacy markers with canonical transcript components while preserving plan-file progress.
-
-### Approach
-
-- Support `ACTIVE`, `DONE`, `BLOCKED`, `SKIPPED`, `FAILED`, and `INTERRUPTED` with one case-sensitive, one-based marker fold.
-- Map markers to the addressed checklist item before transcript persistence, update the plan state once, remove only recognized markers from visible prose, and emit an adjacent `PlanTaskProgressPart` in program order.
-- Extend the status union and existing chip metadata/icons for skipped, failed, and interrupted states; unknown/out-of-range markers remain ordinary text and do not alter the plan.
-- Deduplicate repeated markers so replay/recovery is idempotent.
-
-- [x] Extend the marker parser and canonical status model for all selected statuses.
-- [x] Fold valid markers into plan progress plus native transcript parts.
-- [x] Render each status through the existing accessible progress chip.
+- [ ] Thread inventory/action props to `SessionRow` and add the menu/hover action.
+- [ ] Add confirmation, progress, success, and failure states in `App.tsx`.
+- [ ] Update checkout-mode copy and README.
+- [ ] Extend focused row, machine, renderer, and E2E coverage.
 
 ### Acceptance
-
-- [x] `Workspace links restored. [DONE:8]` displays readable prose plus a native “step 8 completed” component, never the raw marker. (test: `packages/ui/src/composites/message-turn.test.tsx`)
-- [x] Every supported marker maps to the correct plan and chip state; duplicate/replayed markers do not apply twice. (test: `packages/plannotator-ext/checklist.test.ts`)
-- [x] Unknown statuses and out-of-range indices remain visible and leave plan state unchanged. (test: `packages/plannotator-ext/checklist.test.ts`)
-- [x] Recovery from persisted transcripts preserves status components and checklist state. (test: `apps/desktop/e2e/rich-plan-scratchpad.spec.ts`)
+- [ ] The action shows the measured reclaimable size and cannot run for an ineligible session.
+- [ ] Confirmation accurately states what is and isn't removed.
+- [ ] Success refreshes the size to zero and reports reclaimed bytes; partial failure remains actionable.
+- [ ] New-session copy no longer implies that Local mode can host concurrent isolated branches.
+- [ ] No automatic cleanup, disk budget, package-manager upgrade, or automatic reinstall is introduced.
 
 ### Files
-
-- `packages/plannotator-ext/generated/checklist.ts` — M
-- `packages/plannotator-ext/checklist.test.ts` — M
-- `packages/core/src/conversation.ts` — M
-- `packages/core/src/plannotator-projection.ts` — M
-- `packages/ui/src/composites/message-turn.tsx` — M
-- `packages/ui/src/composites/message-turn.test.tsx` — M
-- `apps/desktop/e2e/rich-plan-scratchpad.spec.ts` — M
+- `apps/desktop/src/renderer/App.tsx` — M
+- `packages/ui/src/app/jingler-app.tsx` — M
+- `packages/ui/src/screens/session-conversation.tsx` — M
+- `packages/ui/src/app/session-sidebar.tsx` — M
+- `packages/ui/src/composites/session-row.tsx` — M
+- `packages/ui/src/composites/session-row.test.tsx` — M
+- `packages/ui/src/composites/new-workspace-view.tsx` — M
+- `packages/ui/src/composites/new-workspace-machine.test.ts` — M if behavior assertions cover the changed copy/mode
+- `apps/desktop/e2e/projects-and-workspaces.spec.ts` — M
+- `README.md` — M
 
 > complexity: medium
-> depends: native-plannotator
+> depends: guarded-reclaim
 
 ## Verification
 
-- [x] Run focused Vitest suites for tool policy, prompt compilation, Plannotator parsing/status, projection, embedded view, and transcript rendering.
-- [x] Run `pnpm --filter @jingler/cli-adapters typecheck`, `pnpm --filter @jingler/ui typecheck`, and `pnpm --filter @jingler/desktop typecheck`.
-- [x] Run the focused Electron plan-mode and rich-plan-scratchpad specs.
-- [x] Manually verify first-choice layout persistence, live theme switching, rich plan review, and all six status chips in the packaged embedded view.
-- [x] Run repository lint and record any unrelated pre-existing failures separately.
+1. Focused logic and RPC tests:
+   - `pnpm vitest run packages/cli-adapters/src/sessions.test.ts apps/desktop/src/main/rpc.test.ts packages/ui/src/composites/session-row.test.tsx packages/ui/src/composites/new-workspace-machine.test.ts`
+2. Repository checks:
+   - `pnpm lint`
+   - `pnpm typecheck`
+   - `pnpm test`
+3. Desktop flow:
+   - `pnpm --filter @jingler/desktop e2e`
+4. Manual safety check:
+   - Create two worktree sessions for one repo and install dependencies in both.
+   - Leave dirty tracked and untracked source in one session.
+   - Confirm reclaim is refused while an agent or terminal runs.
+   - Reclaim after they stop; verify only real contained `node_modules` directories disappear.
+   - Resume both sessions and verify branches, source changes, transcripts, worktree registration, and the other session remain unchanged.
+   - Add an escaping `node_modules` symlink and verify it is skipped without touching its target.
