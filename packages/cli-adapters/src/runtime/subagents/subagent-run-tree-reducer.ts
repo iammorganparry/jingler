@@ -53,18 +53,21 @@ const createsCycle = (
   return false
 }
 
+export const isSubagentFleetNodeNewer = (
+  candidate: SubagentFleetNode,
+  current: SubagentFleetNode
+): boolean => candidate.registryRevision > current.registryRevision ||
+  (candidate.registryRevision === current.registryRevision &&
+    (candidate.childSequence > current.childSequence ||
+      (candidate.childSequence === current.childSequence && candidate.updatedAt > current.updatedAt)))
+
 const upsert = (
   nodes: ReadonlyArray<SubagentFleetNode>,
   candidate: SubagentFleetNode
 ): ReadonlyArray<SubagentFleetNode> => {
   if (createsCycle(nodes, candidate)) return nodes
   const existing = nodes.find((node) => node.id === candidate.id)
-  if (existing && (
-    existing.registryRevision > candidate.registryRevision ||
-    (existing.registryRevision === candidate.registryRevision &&
-      (existing.childSequence > candidate.childSequence ||
-        (existing.childSequence === candidate.childSequence && existing.updatedAt > candidate.updatedAt)))
-  )) return nodes
+  if (existing && isSubagentFleetNodeNewer(existing, candidate)) return nodes
   return [
     ...nodes.filter((node) => node.id !== candidate.id),
     candidate

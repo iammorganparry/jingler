@@ -32,7 +32,8 @@ import type {
   StreamEvent,
   Subagent,
   SubagentFleetControlOutcome,
-  SubagentFleetEvent
+  SubagentFleetEvent,
+  SubagentFleetNode
 } from "@jingler/core"
 import {
   activityOf,
@@ -63,6 +64,7 @@ import {
   stopChild
 } from "xstate"
 import { rpc } from "./rpc-client.js"
+import { completedSubagentNodes } from "./subagent-tab-store.js"
 import { compactMessageParts, compactMessages } from "./transcript-compaction.js"
 
 /**
@@ -72,8 +74,135 @@ import { compactMessageParts, compactMessages } from "./transcript-compaction.js
  * bounds how many deltas can accumulate unexamined.
  */
 const COMPACT_EVERY_N_FOLDS = 300
+const MAX_FLEET_EVENTS = 512
+const ACTIVE_FLEET_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set([
+  "queued",
+  "running",
+  "paused",
+  "needs-attention"
+])
+const COMPLETED_FLEET_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set([
+  "completed",
+  "failed",
+  "stopped",
+  "unknown"
+])
+
+export const boundedFleetEvents = (
+  events: ReadonlyArray<SubagentFleetEvent>
+): ReadonlyArray<SubagentFleetEvent> => {
+  if (events.length <= MAX_FLEET_EVENTS) return events
+  const parentPiSessionId = parentPiSessionIdFromFleetEvents(events, "")
+  const tombstones = new Map<string, Extract<SubagentFleetEvent, { _tag: "Remove" }>>()
+  let latestSnapshot: Extract<SubagentFleetEvent, { _tag: "Snapshot" }> | null = null
+  const terminalIds = new Set<string>()
+  for (const event of events) {
+    if (event._tag === "Remove") {
+      if (parentPiSessionId !== "" && !event.id.startsWith(`${parentPiSessionId}/`)) continue
+      const current = tombstones.get(event.id)
+      if (event.registryRevision >= (current?.registryRevision ?? -1)) {
+        tombstones.delete(event.id)
+        tombstones.set(event.id, event)
+      }
+      continue
+    }
+    if (event._tag === "Snapshot" && event.snapshot.parentPiSessionId === parentPiSessionId) {
+      if (
+        latestSnapshot === null ||
+        event.snapshot.registryRevision > latestSnapshot.snapshot.registryRevision ||
+        (event.snapshot.registryRevision === latestSnapshot.snapshot.registryRevision &&
+          event.snapshot.generatedAt > latestSnapshot.snapshot.generatedAt)
+      ) latestSnapshot = event
+    }
+    const nodes = event._tag === "Upsert"
+      ? event.node.parentPiSessionId === parentPiSessionId ? [event.node] : []
+      : event.snapshot.parentPiSessionId === parentPiSessionId ? event.snapshot.nodes : []
+    for (const node of nodes) {
+      if (node.nodeKind === "agent" && COMPLETED_FLEET_STATUSES.has(node.status)) {
+        terminalIds.add(node.id)
+      }
+    }
+  }
+
+  const activeNodes = parentPiSessionId === ""
+    ? []
+    : projectSubagentFleetEvents(parentPiSessionId, events).nodes.filter((node) =>
+        ACTIVE_FLEET_STATUSES.has(node.status)
+      )
+  const activeIds = new Set(activeNodes.map((node) => node.id))
+  const activeEvents = activeNodes.map((node): SubagentFleetEvent => ({
+    _tag: "Upsert",
+    version: 2,
+    eventId: `compact:${node.registryRevision}:${node.childSequence}:${node.id}`,
+    occurredAt: node.updatedAt,
+    node
+  }))
+  const parentEvents = events.filter((event) =>
+    event._tag === "Upsert"
+      ? event.node.parentPiSessionId === parentPiSessionId
+      : event._tag === "Snapshot"
+        ? event.snapshot.parentPiSessionId === parentPiSessionId
+        : event.id.startsWith(`${parentPiSessionId}/`)
+  )
+  const terminalEvents = completedSubagentNodes(parentEvents)
+    .map((node): SubagentFleetEvent => ({
+      _tag: "Upsert",
+      version: 2,
+      eventId: `compact:terminal:${node.registryRevision}:${node.childSequence}:${node.id}`,
+      occurredAt: node.completedAt ?? node.updatedAt,
+      node
+    }))
+  const metadataSnapshot: ReadonlyArray<SubagentFleetEvent> = latestSnapshot === null
+    ? []
+    : [{
+        ...latestSnapshot,
+        eventId: `compact:snapshot:${latestSnapshot.snapshot.registryRevision}`,
+        snapshot: {
+          ...latestSnapshot.snapshot,
+          omitted: Math.max(1, latestSnapshot.snapshot.omitted),
+          nodes: []
+        }
+      }]
+  // ponytail: 64 records covers the 8 live nodes plus the Previous chats window.
+  const historySlots = Math.max(
+    0,
+    64 - metadataSnapshot.length - activeEvents.length - terminalEvents.length
+  )
+  const history = historySlots === 0
+    ? []
+    : events
+        .filter((event) =>
+          event._tag === "Upsert" &&
+          event.node.parentPiSessionId === parentPiSessionId &&
+          !activeIds.has(event.node.id) &&
+          !terminalIds.has(event.node.id)
+        )
+        .slice(-historySlots)
+  const retained = [...metadataSnapshot, ...history, ...terminalEvents, ...activeEvents]
+  const protectedIds = new Set(retained.flatMap((event) =>
+    event._tag === "Upsert" ? [event.node.id] : []
+  ))
+  const removeSlots = MAX_FLEET_EVENTS - retained.length
+  const required = [...protectedIds]
+    .map((id) => tombstones.get(id))
+    .filter((event) => event !== undefined)
+    .slice(-removeSlots)
+  const requiredIds = new Set(required.map((event) => event.id))
+  const optionalSlots = removeSlots - required.length
+  const optional = optionalSlots <= 0
+    ? []
+    : [...tombstones.values()]
+        .filter((event) => !requiredIds.has(event.id))
+        .slice(-optionalSlots)
+  return [...retained, ...optional, ...required]
+}
+
 import { publishSessionUpdate } from "./session-updates.js"
-import { settleStoppedFleet } from "./subagent-fleet-machine.js"
+import {
+  parentPiSessionIdFromFleetEvents,
+  projectSubagentFleetEvents,
+  settleStoppedFleet
+} from "./subagent-fleet-machine.js"
 
 const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
   mode !== "plan"
@@ -340,6 +469,7 @@ type ConversationEvent =
    */
   | { type: "STEER_RESULT"; queued: QueuedMessage; result: SteerResult; auto?: boolean }
   | { type: "STREAM_EVENT"; event: StreamEvent }
+  | { type: "RECOVER_SUBAGENT_FLEET"; events: ReadonlyArray<SubagentFleetEvent> }
   | { type: "SESSION_EVENT_ENVELOPE"; envelope: SessionEventEnvelope }
   | { type: "PATCH_UPDATED"; patch: string }
   | { type: "FILES_UPDATED"; files: ReadonlyArray<string> }
@@ -1320,6 +1450,14 @@ export const conversationMachine = setup({
         ]
       }
     }),
+    recoverSubagentFleet: assign(({ context, event }) =>
+      event.type === "RECOVER_SUBAGENT_FLEET"
+        ? { subagentFleetEvents: boundedFleetEvents([
+            ...context.subagentFleetEvents,
+            ...event.events
+          ]) }
+        : {}
+    ),
     foldEvent: assign(({ context, event, self }) => {
       if (event.type !== "STREAM_EVENT") return {}
       const e = event.event
@@ -1333,7 +1471,7 @@ export const conversationMachine = setup({
       }
       if (e._tag === "SubagentFleetChanged") {
         return {
-          subagentFleetEvents: [...context.subagentFleetEvents, e.event].slice(-512)
+          subagentFleetEvents: boundedFleetEvents([...context.subagentFleetEvents, e.event])
         }
       }
       if (e._tag === "SubagentFleetControlAcknowledged") {
@@ -1470,7 +1608,9 @@ export const conversationMachine = setup({
     }),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
     settleStoppedFleet: assign(({ context }) => ({
-      subagentFleetEvents: settleStoppedFleet(context.subagentFleetEvents, Date.now())
+      subagentFleetEvents: boundedFleetEvents(
+        settleStoppedFleet(context.subagentFleetEvents, Date.now())
+      )
     })),
     markHistoryLoading: assign(() => ({ loadingHistory: true })),
     /**
@@ -1911,6 +2051,7 @@ export const conversationMachine = setup({
     // `loadWorkspaceMeta`).
     WORKSPACE_META_LOADED: { actions: "applyWorkspaceMeta" },
     REVIEW_EVENT: { actions: "applyReview" },
+    RECOVER_SUBAGENT_FLEET: { actions: "recoverSubagentFleet" },
     SET_REASONING: { actions: "persistReasoning" },
     SET_MODEL: { actions: "persistProviderModel" },
     SESSION_UPDATED: { guard: "sessionChanged", actions: "reconcileSession" },

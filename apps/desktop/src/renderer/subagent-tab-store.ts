@@ -4,6 +4,7 @@ import type {
   SubagentFleetEvent,
   SubagentFleetNode
 } from "@jingler/core"
+import { isSubagentFleetNodeNewer } from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-reducer"
 import {
   MAIN_FLEET_AGENT,
   parentPiSessionIdFromFleetEvents,
@@ -59,33 +60,58 @@ const setSnapshot = (
   refreshSession(sessionId)
 }
 
+export const recentSubagentNodes = (
+  nodes: ReadonlyArray<SubagentFleetNode>
+): ReadonlyArray<SubagentFleetNode> => [...nodes]
+  .sort((left, right) =>
+    (right.completedAt ?? right.updatedAt) - (left.completedAt ?? left.updatedAt)
+  )
+  .slice(0, 8)
+
 export const completedSubagentNodes = (
   events: ReadonlyArray<SubagentFleetEvent>
 ): ReadonlyArray<SubagentFleetNode> => {
-  const completed = new Map<string, SubagentFleetNode>()
+  const latest = new Map<string, SubagentFleetNode>()
+  const terminal = new Map<string, SubagentFleetNode>()
+  const removedAt = new Map<string, number>()
   for (const event of events) {
-    if (event._tag !== "Upsert") continue
-    const node = event.node
-    if (node.nodeKind === "agent" && COMPLETED.has(node.status)) {
-      completed.delete(node.id)
-      completed.set(node.id, node)
-    } else {
-      completed.delete(node.id)
+    if (event._tag === "Remove") {
+      removedAt.set(event.id, Math.max(removedAt.get(event.id) ?? 0, event.registryRevision))
+      continue
+    }
+    const nodes = event._tag === "Upsert"
+      ? [event.node]
+      : event._tag === "Snapshot"
+        ? event.snapshot.nodes
+        : []
+    for (const node of nodes) {
+      const current = latest.get(node.id)
+      if (current === undefined || !isSubagentFleetNodeNewer(current, node)) {
+        latest.set(node.id, node)
+      }
+      if (node.nodeKind === "agent" && COMPLETED.has(node.status)) {
+        const completed = terminal.get(node.id)
+        if (completed === undefined || !isSubagentFleetNodeNewer(completed, node)) {
+          terminal.set(node.id, node)
+        }
+      }
     }
   }
-  const values = [...completed.values()]
+  const values = [...terminal.values()].filter((node) => {
+    const current = latest.get(node.id)
+    return current === undefined ||
+      (removedAt.get(node.id) ?? -1) >= current.registryRevision ||
+      COMPLETED.has(current.status)
+  })
   const childOrchestrations = new Set(
     values
       .filter((node) => node.runId !== node.orchestrationRunId)
       .map((node) => node.orchestrationRunId)
   )
-  return values
-    .filter((node) =>
-      node.runId !== node.orchestrationRunId ||
-      !childOrchestrations.has(node.orchestrationRunId)
-    )
-    .slice(-8)
-    .reverse()
+  return recentSubagentNodes(values.filter((node) =>
+    node.runId !== node.orchestrationRunId ||
+    !childOrchestrations.has(node.orchestrationRunId)
+  ))
 }
 
 export const projectSubagentTabs = (input: {
@@ -94,16 +120,20 @@ export const projectSubagentTabs = (input: {
   readonly piSessionId: string | null
   readonly events: ReadonlyArray<SubagentFleetEvent>
   readonly legacyAgents: ReadonlyArray<Subagent>
+  readonly canonicalNodes?: ReadonlyArray<SubagentFleetNode>
 }): SubagentTabSnapshot => {
   const parentPiSessionId = parentPiSessionIdFromFleetEvents(
     input.events,
     input.piSessionId ?? `${input.sessionId}:${input.chatId}`
   )
-  const events = [
-    ...input.events,
-    ...projectLegacySubagents(parentPiSessionId, input.legacyAgents)
-  ]
-  const nodes = projectSubagentFleetEvents(parentPiSessionId, events).nodes
+  const legacyEvents = projectLegacySubagents(parentPiSessionId, input.legacyAgents)
+  const events = [...input.events, ...legacyEvents]
+  const nodes = input.canonicalNodes === undefined
+    ? projectSubagentFleetEvents(parentPiSessionId, events).nodes
+    : [
+        ...input.canonicalNodes,
+        ...projectSubagentFleetEvents(parentPiSessionId, legacyEvents).nodes
+      ]
   return {
     chatId: input.chatId,
     active: nodes.filter((node) =>
