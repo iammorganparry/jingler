@@ -140,14 +140,6 @@ export const deliverPlanReviewDecision = (
   if (!acknowledged) throw new Error("The plan review is no longer pending")
 }
 
-/**
- * Pi's native mutation tools, granted to plan mode ONLY as the markdown plan
- * scratchpad (the fork gates them to .md/.mdx during planning). They bypass
- * the registry's mutation observer, so approval strips them again via the
- * executing phase's removeTools — real edits must go through workspace_edit /
- * workspace_write to produce tracked file changes.
- */
-const PLAN_SCRATCHPAD_TOOLS = ["write", "edit"] as const
 const decodePlannotatorProjection = Schema.decodeUnknownOption(PlannotatorProjection)
 interface PlannotatorPlanModeResult {
   readonly phase: "idle" | "planning" | "executing"
@@ -309,9 +301,9 @@ const validateConnection = (
         })
       )
 
-const plannotatorExecutionSpec = (spec: PiRunSpec): PiRunSpec =>
+const effectiveRuntimeSpec = (spec: PiRunSpec): PiRunSpec =>
   spec.mode === "plan"
-    ? { ...spec, role: "plan-execution", mode: "auto" }
+    ? { ...spec, role: "conversation", mode: "auto" }
     : spec
 
 const createResources = (
@@ -320,36 +312,17 @@ const createResources = (
   registry: ToolRegistry | undefined,
   nativeSubagentsEnabled: boolean
 ) => {
+  const runtimeSpec = effectiveRuntimeSpec(spec)
   const tools = [
-    ...(registry?.capabilitiesFor(spec.role, spec.mode) ?? []),
-    {
-      id: "plannotator_submit_plan",
-      version: "1",
-      description: "Submit a Markdown plan for operator review."
-    },
-    {
-      id: "plannotator_update_plan",
-      version: "1",
-      description: "Refresh the active Markdown plan without requesting review."
-    },
+    ...(registry?.capabilitiesFor(runtimeSpec.role, runtimeSpec.mode) ?? []),
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
   ]
-  // Written for every mode: plan runs swap to the plan-execution toolset on
-  // approval, while a plan approved from a normal session re-applies the
-  // session's own toolset — a no-op swap, but one the executing phase needs
-  // defined now that plans can be submitted from any mode.
-  const executionTools = spec.mode === "plan"
-    ? [
-        ...(registry?.capabilitiesFor("plan-execution", "auto").map(({ id }) => id) ?? []),
-        ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
-      ]
-    : [
-        ...(registry?.capabilitiesFor(spec.role, spec.mode).map(({ id }) => id) ?? []),
-        ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
-      ]
+  // Plannotator reapplies this list on approval. Plan mode already has the
+  // Auto tool set, so the phase change must not narrow or replace it.
+  const executionTools = tools.map(({ id }) => id)
   const eventBus = createEventBus()
   const compiled = (options.promptCompiler ?? new PromptCompiler()).compile({
-    layers: runtimeInvariantLayers(spec.role, spec.mode),
+    layers: runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
     tools,
     tokenBudget: options.promptTokenBudget ?? 4_000
   })
@@ -358,16 +331,7 @@ const createResources = (
     agentDir: options.agentDir,
     systemPrompt: compiled.text,
     eventBus,
-    ...(executionTools === undefined
-      ? {}
-      : { plannotatorExecutionTools: executionTools }),
-    // Plan mode grants pi's native write/edit for the markdown plan
-    // scratchpad. Execution must shed them: they bypass the registry's
-    // mutation observer, so an edit made through them produces no file-change
-    // set — no diff in the transcript, nothing in the review panel.
-    ...(spec.mode === "plan"
-      ? { plannotatorExecutionRemoveTools: PLAN_SCRATCHPAD_TOOLS }
-      : {})
+    plannotatorExecutionTools: executionTools
   }).pipe(
     Effect.flatMap((resources) =>
       assertLockedPiResources(resources, compiled.text).pipe(
@@ -442,13 +406,11 @@ const createEmbeddedSession = (
       const customTools = registry ? [...createPiTools(registry, toolSpec, context)] : []
       const thinkingLevel = thinkingLevelFor(spec.reasoning)
       const sessionManager = sessionManagerFor(spec, options.sessionsDir)
-      // The plan scratchpad tools ride in EVERY mode: submit opens operator
-      // review (the agent chooses when a change warrants it), update refreshes
-      // the live plan silently. Plan mode additionally narrows the rest of the
-      // toolset to read-only capabilities.
+      // The plan scratchpad tools ride in every mode: submit opens operator
+      // review and update refreshes the live plan silently. Plan mode keeps that
+      // workflow while using the same tracked tools as an Auto conversation.
       const configured = await createConfiguredPiSession(
         spec,
-        registry,
         nativeSubagentsEnabled,
         customTools,
         options,
@@ -603,7 +565,7 @@ const createSessionHandle = (
     const connection = yield* options.resolveConnection(spec)
     yield* validateConnection(spec, connection)
     const registry = yield* resolveSessionToolRegistry(options, spec, context, tracker)
-    const toolSpec = plannotatorExecutionSpec(spec)
+    const toolSpec = effectiveRuntimeSpec(spec)
     if (registry.hasMutatingTools(toolSpec.role, toolSpec.mode) && !tracker) {
       return yield* Effect.fail(
         new AgentRuntimeError({
@@ -866,7 +828,6 @@ function publishSubagentProgress(
 
 async function createConfiguredPiSession(
   spec: PiRunSpec,
-  registry: ToolRegistry | undefined,
   nativeSubagentsEnabled: boolean,
   customTools: NonNullable<CreateAgentSessionOptions["customTools"]>,
   options: PiSessionFactoryOptions,
@@ -877,21 +838,12 @@ async function createConfiguredPiSession(
   sessionManager: SessionManager,
   events: EventBus
 ) {
-  const initialToolNames =
-    spec.mode === "plan"
-      ? [
-          ...(registry?.capabilitiesFor("plan", "plan").map(({ id }) => id) ?? []),
-          ...PLAN_SCRATCHPAD_TOOLS,
-          "plannotator_submit_plan",
-          "plannotator_update_plan",
-          ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id): [])
-        ]
-      : [
-          ...customTools.map((tool) => tool.name),
-          "plannotator_submit_plan",
-          "plannotator_update_plan",
-          ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
-        ]
+  const initialToolNames = [
+    ...customTools.map((tool) => tool.name),
+    "plannotator_submit_plan",
+    "plannotator_update_plan",
+    ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
+  ]
   const result = await (options.createSession ?? createAgentSession)({
     cwd: spec.cwd,
     agentDir: options.agentDir,

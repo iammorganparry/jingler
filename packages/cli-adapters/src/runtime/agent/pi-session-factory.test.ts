@@ -183,11 +183,27 @@ describe("pi session creation", () => {
       events.emit("plannotator:host-notice", { message: "Plan review failed closed." })
       return { phase: "executing" as const }
     })
+    const registry = new ToolRegistry()
+    registry.register({
+      id: "auto_only",
+      version: "1",
+      description: "Available to Auto conversations.",
+      input: Schema.Struct({}),
+      risk: "read",
+      roles: ["conversation"],
+      modes: ["auto"],
+      timeoutMs: 1_000,
+      outputBudget: 1_000,
+      cancellable: true,
+      idempotency: "safe",
+      execute: async () => null
+    })
     const factory = makePiSessionFactory({
       agentDir,
       sessionsDir: join(root, "sessions"),
       credentials: new InMemoryProviderCredentialStore(),
       resolveConnection: () => Effect.succeed(connection),
+      toolRegistry: registry,
       enterPlannotatorPlanMode: enterPlanMode,
       createSession: async (options) => {
         captured.push(options)
@@ -205,8 +221,15 @@ describe("pi session creation", () => {
     }, {} as never))
 
     expect(enterPlanMode).toHaveBeenCalledOnce()
-    expect(captured[0]?.tools).toEqual(
-      expect.arrayContaining(["write", "edit", "plannotator_submit_plan"])
+    expect(captured[0]?.tools).toEqual(expect.arrayContaining([
+      "auto_only",
+      "plannotator_submit_plan"
+    ]))
+    expect(captured[0]?.tools).not.toEqual(expect.arrayContaining(["write", "edit"]))
+    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain("Role: plan.")
+    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain("Execution mode: auto.")
+    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain(
+      "same execution freedom as Auto mode"
     )
     expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain(
       "- plannotator_submit_plan: Submit a Markdown plan for operator review."
@@ -231,10 +254,7 @@ describe("pi session creation", () => {
     const notified = vi.fn()
     handle.subscribePlannotatorNotice?.(notified)
     expect(notified).toHaveBeenCalledWith("Plan review failed closed.")
-    // Approval must strip the untracked plan-scratchpad write/edit tools.
-    expect(await readPlannotatorConfig(agentDir)).toMatchObject(
-      { executionMode: "automatic", phases: { executing: { removeTools: ["write", "edit"] } } }
-    )
+    expect(await readPlannotatorConfig(agentDir)).toMatchObject({ executionMode: "automatic" })
   })
 
   it("pins credentials, compiles a locked prompt, and seeds visible history once", async () => {

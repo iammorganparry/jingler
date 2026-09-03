@@ -931,16 +931,7 @@ export const WorkspaceConfig = Schema.Struct({
   providerSetupCompleted: Schema.optional(Schema.Boolean),
   /** Custom PRD/MDX structure injected into every native planning turn. */
   planTemplate: Schema.optional(PlanTemplateConfig),
-  /**
-   * Whether a session in PLAN mode may run commands without stopping for
-   * approval. Absent means ON (see `PLAN_AUTO_RUN_DEFAULT`).
-   *
-   * On by default because plan mode cannot write: the runtime omits edit tools, so
-   * the commands a planning turn wants are reads — `git log`, `rg`, and file inspection.
-   * Gating those turned every plan into a queue of approval prompts for actions
-   * that cannot change anything, which is how operators learn to click "allow"
-   * without reading. Edits still gate exactly as before, in every mode.
-   */
+  /** @deprecated Retained only so older config files continue to decode. Plan mode now runs like Auto. */
   planAutoRun: Schema.optional(Schema.Boolean),
   /**
    * Whether a finished task's final summary is shaped for an ADHD reader —
@@ -997,6 +988,7 @@ export const WorkspaceConfig = Schema.Struct({
 export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>;
 
 /** Plan mode runs its (read-only) commands unattended unless told otherwise. */
+/** @deprecated Plan mode now always uses Auto permissions. */
 export const PLAN_AUTO_RUN_DEFAULT = true;
 
 /** ADHD response shaping is opt-in — it rewrites the voice of every session. */

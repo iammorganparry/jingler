@@ -481,9 +481,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             ...(chat.allowlist ?? [])
           ])
           const workspaceConfig = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null))
-          // Read once per turn: plan mode's commands run unattended unless the
-          // operator switched that off in Settings.
-          const planAutoRun = workspaceConfig?.planAutoRun ?? PLAN_AUTO_RUN_DEFAULT
           // Read per turn, not per session: flipping ADHD mode in Settings takes
           // effect on the very next message of an already-running session.
           const adhdMode = workspaceConfig?.adhdMode ?? ADHD_MODE_DEFAULT

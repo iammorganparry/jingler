@@ -6,7 +6,6 @@ import type {
   QuestionAnswer
 } from "@jingler/core"
 import type { PermissionRequest } from "./agent-turn-driver.js"
-import { PLAN_AUTO_RUN_DEFAULT } from "@jingler/core"
 
 /**
  * Human-in-the-loop: what the agent must ask before doing, and what happens while
@@ -65,7 +64,7 @@ const basename = (target: string | null): string => target?.split("/").pop() ?? 
 /**
  * Decide whether a requested action runs (`"allow"`) or must pause for the
  * operator (`"gate"`), from the chat's HITL mode + allowlist:
- * - `auto` — everything runs,
+ * - `auto` and `plan` — everything runs,
  * - `accept-edits` — edits run, commands gate (unless allowlisted),
  * - `ask` — edits and commands both gate (unless a command is allowlisted).
  */
@@ -77,12 +76,6 @@ export const verdict = (
 ): "allow" | "gate" => {
   if (mode === "auto") return "allow"
   if (isAllowlisted(allow, req.command)) return "allow"
-  // Planning is a read-only phase: the harness refuses edits outright, so the
-  // only thing left to approve is a command that cannot change the tree. Running
-  // those unattended is the default; the operator can restore the prompts from
-  // Settings. Edits are NOT covered — they fall through to the rule below and
-  // gate exactly as they always did.
-  if (mode === "plan" && planAutoRun && req.kind === "command") return "allow"
   if (req.kind === "edit") return mode === "accept-edits" ? "allow" : "gate"
   return "gate"
 }

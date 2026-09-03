@@ -49,13 +49,9 @@ describe("verdict", () => {
     expect(verdict("accept-edits", allow, cmd("npm test -- --watch"))).toBe("allow")
   })
 
-  it("runs read-only commands in plan mode, but still gates edits", () => {
-    // Planning cannot change the tree — the harness refuses edits outright — so the
-    // only thing left to approve is a command that cannot do harm.
-    expect(verdict("plan", none, cmd("ls"), true)).toBe("allow")
-    expect(verdict("plan", none, edit, true)).toBe("gate")
-    // …unless the operator turned auto-run off.
-    expect(verdict("plan", none, cmd("ls"), false)).toBe("gate")
+  it("runs everything in plan mode", () => {
+    expect(verdict("plan", none, cmd("git commit -am done"))).toBe("allow")
+    expect(verdict("plan", none, edit)).toBe("allow")
   })
 })
 

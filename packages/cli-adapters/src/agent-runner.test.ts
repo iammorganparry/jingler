@@ -386,10 +386,8 @@ describe("AgentRunner HITL gating", () => {
     ).then(() => out)
   }
 
-  it("plan: a command runs unattended (planning cannot write), an edit still gates", async () => {
-    // Planning reads — `git log`, `rg`, `gh pr view`. Gating those trained the
-    // operator to click "allow" on actions that cannot change anything.
-    expect(await probe("plan")).toStrictEqual({ command: "allow", edit: "deny" })
+  it("plan: commands and edits run unattended like auto", async () => {
+    expect(await probe("plan")).toStrictEqual({ command: "allow", edit: "allow" })
   })
 
   it("ask: the same command still gates", async () => {

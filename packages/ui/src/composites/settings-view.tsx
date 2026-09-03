@@ -278,8 +278,6 @@ export function SettingsView({
   offloadStatus,
   defaultMode,
   onSaveDefaultMode,
-  planAutoRun,
-  onSavePlanAutoRun,
   adhdMode,
   onSaveAdhdMode,
   fontScale,
@@ -305,8 +303,6 @@ return (<GeneralSection
           onRefreshOffloadEnvironments={devices?.onRefresh}
           defaultMode={defaultMode}
           onSaveDefaultMode={onSaveDefaultMode}
-          planAutoRun={planAutoRun}
-          onSavePlanAutoRun={onSavePlanAutoRun}
           adhdMode={adhdMode}
           onSaveAdhdMode={onSaveAdhdMode}
           fontScale={fontScale}
@@ -935,8 +931,6 @@ function GeneralSection({
   onRefreshOffloadEnvironments,
   defaultMode,
   onSaveDefaultMode,
-  planAutoRun,
-  onSavePlanAutoRun,
   adhdMode,
   onSaveAdhdMode,
   fontScale,
@@ -952,8 +946,6 @@ function GeneralSection({
   onRefreshOffloadEnvironments?: () => void | Promise<void>
   defaultMode?: ExecutionMode | null
   onSaveDefaultMode?: (defaultMode: ExecutionMode) => void | Promise<void>
-  planAutoRun?: boolean | null
-  onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
   fontScale?: number | null
@@ -1006,9 +998,6 @@ return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
     () => setDefaultModeDraft(defaultMode ?? "auto"),
     [defaultMode]
   )
-  // Absent means ON, matching `PLAN_AUTO_RUN_DEFAULT` in the domain.
-  const [planDraft, setPlanDraft] = React.useState<boolean>(planAutoRun ?? true)
-  React.useEffect(() => setPlanDraft(planAutoRun ?? true), [planAutoRun])
   // Absent means OFF, matching `ADHD_MODE_DEFAULT` in the domain.
   const [adhdDraft, setAdhdDraft] = React.useState<boolean>(adhdMode ?? false)
   React.useEffect(() => setAdhdDraft(adhdMode ?? false), [adhdMode])
@@ -1139,23 +1128,6 @@ return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
               const mode = next as ExecutionMode
               setDefaultModeDraft(mode)
               void onSaveDefaultMode?.(mode)
-            }}
-          />
-        </div>
-
-        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Planning
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
-            label="Run read-only commands in Plannotator Plan mode"
-            description="This controls approval for exploration commands such as git history, search, and file inspection. Plannotator still owns plan review and approval."
-            checked={planDraft}
-            onChange={(next) => {
-              setPlanDraft(next)
-              void onSavePlanAutoRun?.(next)
             }}
           />
         </div>
