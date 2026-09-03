@@ -83,20 +83,18 @@ const fakeFactory = (
   }
 
 describe("MCP source policy", () => {
-  it("pins browser, memory, connector, and imported source risks", () => {
+  it("pins browser, memory, and configured source risks", () => {
     const named = (name: string): RuntimeMcpServer => ({ ...server, name })
     expect(
       jinglerMcpSources({
         browser: named("browser"),
         memory: named("memory"),
-        openConnector: named("open-connector"),
-        imported: [named("imported")]
+        configured: [named("configured")]
       }).map(({ server: source, risk }) => [source.name, risk])
     ).toEqual([
       ["browser", "execute"],
       ["memory", "network"],
-      ["open-connector", "execute"],
-      ["imported", "execute"]
+      ["configured", "execute"]
     ])
   })
 })

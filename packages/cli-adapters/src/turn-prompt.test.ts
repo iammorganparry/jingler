@@ -98,7 +98,7 @@ describe("composeTurnPrompt", () => {
     expect(managedToolsNote()).toContain("jingler-browser")
     expect(managedToolsNote()).toContain("authenticated `gh` CLI")
     expect(managedToolsNote()).toContain("never print, request, or expose its token")
-    expect(managedToolsNote()).toContain("OpenConnector")
+    expect(managedToolsNote()).toContain("attached MCP servers")
   })
 
   it("places research-first between tools and the ask protocol", () => {

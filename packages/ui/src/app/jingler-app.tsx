@@ -47,8 +47,7 @@ import {
   SettingsView,
   type SettingsViewProps
 } from "../composites/settings-view.js"
-import type { ConnectorCenterProps } from "../composites/connector-center.js"
-import type { OpenConnectorSectionProps } from "../composites/open-connector-section.js"
+import type { McpSettingsProps } from "../composites/mcp-settings.js"
 import type { ThemesSettingsProps } from "../composites/themes-settings.js"
 import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
 import type { PaneContribution } from "./pane-contributions.js"
@@ -234,10 +233,8 @@ export interface JinglerAppProps {
   providerConnections?: SettingsViewProps["providerConnections"]
   agents?: SettingsViewProps["agents"]
   runtimeInspector?: SettingsViewProps["runtimeInspector"]
-  /** Unified MCP (OpenConnector) connection settings (Settings → Connectors). */
-  unifiedMcp?: OpenConnectorSectionProps
-  /** MCP Connector Center data + actions (Settings → Connector Center). */
-  connector?: ConnectorCenterProps
+  /** MCP servers from ~/jingler/mcp.json (Settings › MCP servers). */
+  mcp?: McpSettingsProps
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (
     session: Session,
@@ -503,8 +500,7 @@ export function JinglerApp({
   onSaveAdhdMode,
   fontScale,
   onSaveFontScale,
-  unifiedMcp,
-  connector,
+  mcp,
   renderPullRequest,
   tabContributions,
   onSelectIssue,
@@ -1338,8 +1334,7 @@ export function JinglerApp({
               providerConnections={providerConnections}
               agents={agents}
               runtimeInspector={runtimeInspector}
-              unifiedMcp={unifiedMcp}
-              connector={connector}
+              mcp={mcp}
               githubConnection={githubConnection}
               githubBusy={githubBusy}
               onGithubConnect={onGithubConnect}

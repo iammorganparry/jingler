@@ -9,6 +9,7 @@ describe("makeAppPaths", () => {
     expect(makeAppPaths(root)).toEqual({
       root,
       configFile: join(root, "config.json"),
+      mcpConfigFile: join(root, "mcp.json"),
       sessionsFile: join(root, "sessions.json"),
       projectsFile: join(root, "projects.json"),
       worktreesDir: join(root, "worktrees"),

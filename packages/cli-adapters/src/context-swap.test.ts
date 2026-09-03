@@ -10,7 +10,6 @@ import { AgentRunner } from "./agent-runner.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { ConfigService } from "./config.js"
 import { InMemorySecretStoreLive } from "./secret-store.js"
-import { OpenConnectorService } from "./open-connector.js"
 import { ContextManager } from "./context-manager.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -87,7 +86,6 @@ const adapter: Layer.Layer<AgentTurnDriver> = Layer.succeed(
 const layers = () =>
   Layer.mergeAll(
     AgentRunner.Default,
-    OpenConnectorService.Default,
     BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
     ContextManager.Default,

@@ -35,8 +35,7 @@ import {
   ReviewService,
   ReviewStore,
   SessionStore,
-  OpenConnectorService,
-  OpenConnectorApi,
+  McpConfigService,
   TerminalService,
   ThemeService,
   TranscriptStore,
@@ -208,12 +207,7 @@ const RpcServicesLayer = RpcServerLive.pipe(
 const AppServicesLayer = RpcServicesLayer.pipe(
   // Merged into one stage purely to stay inside `pipe`'s 20-argument limit;
   // neither depends on the other, so the composition is unchanged.
-  Layer.provide(
-    Layer.mergeAll(
-      OpenConnectorService.Default,
-      OpenConnectorApi.Default
-    )
-  ),
+  Layer.provide(McpConfigService.Default),
   // PluginHost needs provideMerge because main
   // installs the Electron-backed process factory into it at startup, so the RPC
   // handlers must later reach the SAME instance rather than a second one with

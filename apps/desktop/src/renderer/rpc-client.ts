@@ -49,14 +49,7 @@ import type {
   IssueProviderDescriptor,
   IssueSummary,
   McpServerStatus,
-  OpenConnectorConfig,
-  OpenConnectorDefaults,
   OffloadComputeSettings,
-  ConnectorProvider,
-  ConnectorProviderDetail,
-  ConnectorConnection,
-  OAuthClientInfo,
-  ConnectorActionResult,
   Message,
   MemoryConfig,
   Project,
@@ -106,8 +99,10 @@ import type {
   ProviderModelId,
   CodexLoginMethod,
   DetectedResourceCandidate,
-  ManagedMcpImportInput,
-  ManagedMcpServer,
+  McpConfigEntry,
+  McpImportCandidateView,
+  McpImportSourceId,
+  McpServer,
   ManagedResource,
   ManagedResourceSelector,
   ManagedResourceScope,
@@ -377,9 +372,28 @@ export const rpc = {
       sourcePaths: candidates.map((candidate) => candidate.provenance.sourcePath),
       scope
     })),
-  agentResourcesImportMcp: (
-    input: ManagedMcpImportInput
-  ): Promise<ManagedMcpServer> => run((c) => c.AgentResources.importMcp(input)),
+  mcpList: (): Promise<{
+    readonly servers: ReadonlyArray<McpServer>
+    readonly error: string | null
+  }> => run((c) => c.Mcp.list()),
+  mcpStatus: (): Promise<ReadonlyArray<McpServerStatus>> =>
+    run((c) => c.Mcp.status()),
+  mcpWrite: (name: string, entry: McpConfigEntry): Promise<void> =>
+    run((c) => c.Mcp.write({ name, entry })),
+  mcpRemove: (name: string): Promise<void> =>
+    run((c) => c.Mcp.remove({ name })),
+  mcpSetEnabled: (name: string, enabled: boolean): Promise<void> =>
+    run((c) => c.Mcp.setEnabled({ name, enabled })),
+  mcpImportCandidates: (
+    source: McpImportSourceId
+  ): Promise<ReadonlyArray<McpImportCandidateView>> =>
+    run((c) => c.Mcp.importCandidates({ source })),
+  mcpApplyImport: (
+    source: McpImportSourceId,
+    names: ReadonlyArray<string>
+  ): Promise<ReadonlyArray<string>> =>
+    run((c) => c.Mcp.applyImport({ source, names })),
+  mcpReveal: (): Promise<void> => run((c) => c.Mcp.reveal()),
   agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>
     run((c) => c.AgentResources.remove(selector)),
   agentResourcesSetEnabled: (
@@ -741,67 +755,6 @@ export const rpc = {
     ),
   skillsList: (sessionId: string): Promise<ReadonlyArray<Skill>> =>
     run((c) => c.Skills.list({ sessionId })),
-  /** The unified OpenConnector settings + hasToken + env-aware onboarding defaults. */
-  openConnectorGet: (): Promise<{
-    config: OpenConnectorConfig
-    hasToken: boolean
-    defaults: OpenConnectorDefaults
-  }> => run((c) => c.OpenConnector.get()),
-  /** Save settings, and optionally the token (omit to keep, null/"" to clear). */
-  openConnectorSet: (
-    config: OpenConnectorConfig,
-    token?: string | null
-  ): Promise<void> => run((c) => c.OpenConnector.set({ config, token })),
-  /** Live probe of the configured endpoint (for the panel's Test button). */
-  openConnectorTest: (): Promise<McpServerStatus> =>
-    run((c) => c.OpenConnector.test()),
-  /** One-click onboarding: apply the environment default (dev = local, prod = hosted). */
-  openConnectorAutoSetup: (): Promise<void> =>
-    run((c) => c.OpenConnector.autoSetup()),
-  /** The OpenConnector provider catalog (Connector Center). */
-  connectorProviders: (): Promise<ReadonlyArray<ConnectorProvider>> =>
-    run((c) => c.Connector.providers()),
-  /** ONE provider's connect-form shape — fields, OAuth scopes, action count. */
-  connectorProvider: (service: string): Promise<ConnectorProviderDetail> =>
-    run((c) => c.Connector.provider({ service })),
-  /** The operator's established connections (no secrets). */
-  connectorConnections: (): Promise<ReadonlyArray<ConnectorConnection>> =>
-    run((c) => c.Connector.connections()),
-  /** OAuth-client metadata per provider (whether client creds are stored + redirect URI). */
-  connectorOauthConfigs: (): Promise<ReadonlyArray<OAuthClientInfo>> =>
-    run((c) => c.Connector.oauthConfigs()),
-  /** Create/replace an api-key or custom-credential connection. Secret goes IN only. */
-  connectorConnect: (
-    service: string,
-    authType: "api_key" | "custom_credential",
-    values: Record<string, string>,
-    connectionName?: string
-  ): Promise<ConnectorActionResult> =>
-    run((c) =>
-      c.Connector.connect({ service, authType, values, connectionName })
-    ),
-  /** Remove a connection. */
-  connectorDisconnect: (
-    service: string,
-    connectionName?: string
-  ): Promise<ConnectorActionResult> =>
-    run((c) => c.Connector.disconnect({ service, connectionName })),
-  /** Store OAuth client id/secret for a provider. Secret goes IN only. */
-  connectorSetOauthConfig: (
-    provider: string,
-    clientId: string,
-    clientSecret: string,
-    extra?: Record<string, string>
-  ): Promise<ConnectorActionResult> =>
-    run((c) =>
-      c.Connector.setOauthConfig({ provider, clientId, clientSecret, extra })
-    ),
-  /** Begin OAuth — the main process opens the consent URL in the system browser. */
-  connectorStartOauth: (
-    service: string,
-    connectionName?: string
-  ): Promise<ConnectorActionResult> =>
-    run((c) => c.Connector.startOauth({ service, connectionName })),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),
   /** A session's context accounting — drives the meter and the Settings list. */
   contextState: (sessionId: string, chatId: string): Promise<ContextSnapshot> =>

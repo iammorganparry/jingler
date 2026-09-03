@@ -12,7 +12,6 @@ import { AgentTurnDriver } from "./agent-turn-driver.js"
 import type { AgentTurnDriverShape } from "./agent-turn-driver.js"
 import { ConfigService } from "./config.js"
 import { InMemorySecretStoreLive } from "./secret-store.js"
-import { OpenConnectorService } from "./open-connector.js"
 import { AgentRunner } from "./agent-runner.js"
 import { ContextManager } from "./context-manager.js"
 import { SessionStore } from "./sessions.js"
@@ -119,7 +118,6 @@ const settlingAdapter: Layer.Layer<AgentTurnDriver> = Layer.succeed(
 const run = (adapter: Layer.Layer<AgentTurnDriver>) => {
   const base = Layer.mergeAll(
     AgentRunner.Default,
-    OpenConnectorService.Default,
     BrowserControlMcpServiceTest,
     InMemorySecretStoreLive,
     ConfigService.Default,

@@ -5,7 +5,6 @@ import type {
   GithubConfig,
   MemoryConfig,
   NotificationsConfig,
-  OpenConnectorConfig,
   OffloadComputeSettings,
   PlanTemplateConfig,
   ProviderConnectionId,
@@ -155,7 +154,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
             ...(existing?.fontScale !== undefined ? { fontScale: existing.fontScale } : {}),
             ...(existing?.theme ? { theme: existing.theme } : {}),
-            ...(existing?.openConnector ? { openConnector: existing.openConnector } : {}),
             ...(existing?.webSearch ? { webSearch: existing.webSearch } : {}),
             ...(existing?.memory ? { memory: existing.memory } : {}),
             ...(existing?.offloadCompute ? { offloadCompute: existing.offloadCompute } : {}),
@@ -252,9 +250,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
           })
         })
 
-      /** Persist the unified OpenConnector settings (endpoint, toggles). Token is NOT here. */
-      const setOpenConnector = (openConnector: OpenConnectorConfig) => patch({ openConnector })
-
       /** Persist only the secret-free WebSearch provider/setup choice. */
       const setWebSearch = (webSearch: WebSearchConfig) => patch({ webSearch })
 
@@ -317,7 +312,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setPlanTemplate,
         setActiveTheme,
         setThemeCustomizations,
-        setOpenConnector,
         setWebSearch,
         setMemory,
         setOffloadCompute,

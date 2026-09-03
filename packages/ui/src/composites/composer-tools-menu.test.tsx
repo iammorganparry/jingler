@@ -24,7 +24,7 @@ describe("Composer tools menu", () => {
     openMenu()
     expect(screen.getByRole("button", { name: ADD_IMAGE_ITEM })).toBeTruthy()
     expect(screen.getByRole("button", { name: SKILLS_ITEM })).toBeTruthy()
-    // MCP now lives ONLY in Settings › Connectors (OpenConnector), never the composer.
+    // MCP now lives ONLY in Settings › MCP servers, never the composer.
     expect(screen.queryByRole("button", { name: MCP_ITEM })).toBeNull()
   })
 

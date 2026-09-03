@@ -4,20 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
-      The Connector Center derives provider logos from a favicon service:
-      OpenConnector's catalog returns `iconUrl: null` for all ~1,100 providers but
-      a `homepageUrl` for each, so the logo is `s2/favicons?domain=<host>`.
-
-      BOTH origins are required. `www.google.com/s2/favicons` answers 301 and
-      redirects to `t{0..3}.gstatic.com/faviconV2?…`, and CSP is enforced against
-      the REDIRECT TARGET — allowing only google.com blocks every logo, which the
-      component then reports as a load error and silently falls back to an
-      initial-letter tile. Storybook has no CSP, so this failure is invisible
-      there and only appears in the packaged renderer.
-
-      Images only — no script, style or connect origin is widened.
-    -->
-    <!--
       `script-src` allows exactly one source beyond 'self': the
       `jingler-plugin:` scheme, which the main process registers and serves
       ONLY out of `~/jingler/plugins` (see main/plugin-protocol.ts). That is
@@ -38,7 +24,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-lrDvDoT6FYa2mhYaXuzEP4sY9g0/IWo3npmzl1XD4TI=' 'wasm-unsafe-eval' jingler-plugin:; font-src 'self' data:; img-src 'self' data: blob: jingler-plugin: https://github.com https://*.githubusercontent.com https://linear.app https://*.linear.app https://www.google.com https://*.gstatic.com"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-lrDvDoT6FYa2mhYaXuzEP4sY9g0/IWo3npmzl1XD4TI=' 'wasm-unsafe-eval' jingler-plugin:; font-src 'self' data:; img-src 'self' data: blob: jingler-plugin: https://github.com https://*.githubusercontent.com https://linear.app https://*.linear.app"
     />
     <title>Jingler</title>
     <!--

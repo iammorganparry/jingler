@@ -65,9 +65,7 @@ import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { healedWorktreePath } from "./runtime/persistence/worktree-path.js"
 import { branchAt, ensureWorktreeLinked } from "./git.js"
-import { OpenConnectorService } from "./open-connector.js"
 import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
-import { remoteMcpServer } from "./runtime/mcp/attachment.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
 import {
   memoryRecallQuery,
@@ -194,7 +192,6 @@ type PromptEnv =
   | TranscriptStore
   | BackgroundTaskStore
   | ContextManager
-  | OpenConnectorService
   | BrowserControlMcpService
   | SecretStore
   | CommandExecutor.CommandExecutor
@@ -611,18 +608,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const planProtocol = null
           const operatorText = displayText ?? text
           const promptText = text
-          // Resolve every remote MCP source once, here, where the full service
-          // context is available — adapters run in `R = never` async code and
-          // cannot reach services. Best-effort: a configured connector read
-          // failure yields null rather than failing the whole turn.
-          // Accessor (not a captured instance) so this stays in the METHOD's
-          // requirement channel (`PromptEnv`) rather than becoming a build-time
-          // dependency of `AgentRunner.Default` — the latter is a singleton whose
-          // construction must stay `R = never` for the layer graph and tests.
-          const openConnectorServer = yield* OpenConnectorService.injection().pipe(
-            Effect.orElseSucceed(() => null)
-          )
-
           // Browser control is exclusive within one repository session but
           // independent sessions receive isolated native views and may QA in
           // parallel. The scoped lease revokes its bearer when the run ends.
@@ -652,9 +637,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             chatId,
             memoryAttachment?.instructions ?? null
           )
+          // Operator-configured mcp.json servers are resolved inside the pi
+          // runtime per run (`pi-runtime-live`), not here.
           const mcp = {
             memory: null,
-            openConnector: remoteMcpServer(openConnectorServer),
             browser: browserAttachment
           }
 

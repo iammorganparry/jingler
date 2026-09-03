@@ -449,7 +449,7 @@ export const FLOW_RUNTIME_DIAGNOSTIC = decode(RuntimeDiagnosticSnapshot, {
   fileChangeStatuses: ["A", "M", "D", "R"],
   mcpHealth: [
     { name: "team-memory", status: "healthy" },
-    { name: "open-connector", status: "healthy" }
+    { name: "context7", status: "healthy" }
   ],
   terminalCause: "completed",
   updatedAt: "2026-08-13T14:04:00.000Z"
