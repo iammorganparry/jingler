@@ -1,6 +1,6 @@
-import type { McpConfigEntry } from "@jingler/core"
-import { McpConfigFile, mcpNameError } from "@jingler/core"
-import { Schema } from "effect"
+import type { McpConfigEntry, McpImportSourceId } from "@jingler/core"
+import { McpConfigEntry as McpConfigEntrySchema, mcpNameError } from "@jingler/core"
+import { Either, Schema } from "effect"
 import { parse as parseToml } from "smol-toml"
 
 /**
@@ -13,11 +13,9 @@ import { parse as parseToml } from "smol-toml"
  * problem instead of an entry, so the UI can show why it can't be imported.
  */
 
-export type McpImportSource = "claude" | "codex" | "opencode"
-
 export interface McpImportCandidate {
   readonly name: string
-  readonly source: McpImportSource
+  readonly source: McpImportSourceId
   readonly entry: McpConfigEntry | null
   /** Why this candidate cannot be imported; null when `entry` is usable. */
   readonly problem: string | null
@@ -39,15 +37,20 @@ const stringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
 
 const candidate = (
-  source: McpImportSource,
+  source: McpImportSourceId,
   name: string,
-  entry: McpConfigEntry | null,
+  entry: unknown,
   problem: string | null = null
 ): McpImportCandidate => {
   const nameProblem = mcpNameError(name)
-  return nameProblem !== null
-    ? { name, source, entry: null, problem: nameProblem }
-    : { name, source, entry, problem }
+  if (nameProblem !== null) return { name, source, entry: null, problem: nameProblem }
+  if (entry === null) {
+    return { name, source, entry, problem: problem ?? "Invalid server configuration" }
+  }
+  const decoded = Schema.decodeUnknownEither(McpConfigEntrySchema)(entry)
+  return Either.isRight(decoded)
+    ? { name, source, entry: decoded.right, problem }
+    : { name, source, entry: null, problem: "Invalid server configuration" }
 }
 
 /** One Claude-shaped `mcpServers` value → our entry. */
@@ -148,10 +151,13 @@ export const parseCodexMcp = (raw: string): ReadonlyArray<McpImportCandidate> =>
   return out
 }
 
-const decodeOpencode = Schema.decodeUnknownSync(Schema.parseJson(McpConfigFile))
-
-/** Parse `opencode.json` — the format matches ours, so entries copy verbatim. */
+/** Parse `opencode.json`; unsupported OAuth entries stay visible but cannot import. */
 export const parseOpencodeMcp = (raw: string): ReadonlyArray<McpImportCandidate> => {
-  const file = decodeOpencode(raw)
-  return Object.entries(file.mcp).map(([name, entry]) => candidate("opencode", name, entry))
+  const file: unknown = JSON.parse(raw)
+  if (!isRecord(file) || !isRecord(file.mcp)) return []
+  return Object.entries(file.mcp).map(([name, entry]) =>
+    isRecord(entry) && "oauth" in entry
+      ? candidate("opencode", name, null, "OAuth servers are not supported")
+      : candidate("opencode", name, entry)
+  )
 }

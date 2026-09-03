@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { join } from "node:path"
+import { isAbsolute, join, resolve } from "node:path"
 import type { ManagedResource, PiRunSpec } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
@@ -286,9 +286,9 @@ export const makePiAgentRuntimeLive = (
             id: resource.id,
             kind: resource.kind,
             name: resource.name,
-            description: resource.kind === "mcp" ? "" : resource.description,
-            managedPath: resource.kind === "mcp" ? "" : resource.managedPath,
-            byteLength: resource.kind === "mcp" ? 0 : resource.byteLength
+            description: resource.description,
+            managedPath: resource.managedPath,
+            byteLength: resource.byteLength
           })).sort((left, right) => String(left.id).localeCompare(String(right.id))),
           plugins: plugins?.prepared.toolsets.flatMap(({ source, descriptors }) =>
             descriptors.map((descriptor) => ({
@@ -418,7 +418,12 @@ export const makePiAgentRuntimeLive = (
                 server.transport === "stdio"
                   // An explicit cwd in mcp.json wins; otherwise servers run
                   // from the session's worktree.
-                  ? { ...server, cwd: server.cwd ?? spec.cwd }
+                  ? {
+                      ...server,
+                      cwd: server.cwd === undefined || server.cwd === ""
+                        ? spec.cwd
+                        : isAbsolute(server.cwd) ? server.cwd : resolve(spec.cwd, server.cwd)
+                    }
                   : server
               )
             },

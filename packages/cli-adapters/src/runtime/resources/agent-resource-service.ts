@@ -125,9 +125,6 @@ export const makeAgentResourceService = (
       candidate: DetectedResourceCandidate,
       scope: ManagedResourceScope
     ): Effect.Effect<ManagedResourceId, ResourceImportDiagnostic> => {
-      if (candidate.kind === "mcp") {
-        return Effect.fail(diagnostic(candidate, "unsupported", "MCP configuration requires explicit server review"))
-      }
       const kind = candidate.kind
 
       return Effect.tryPromise({
@@ -233,9 +230,6 @@ export const makeAgentResourceService = (
     const reveal = (id: ManagedResourceId) =>
       resourceById(id, "reveal").pipe(
         Effect.flatMap((resource) => {
-          if (resource.kind === "mcp") {
-            return Effect.fail(serviceError("reveal", "MCP resources do not expose a source file"))
-          }
           const expected = targetFor(root, resource.kind, resource.id)
           return resource.managedPath === expected && inside(root, expected)
             ? Effect.succeed(expected)
@@ -251,7 +245,7 @@ export const makeAgentResourceService = (
             try {
               await catalog.update(async (current) => {
                 const resource = current.find((item) => item.id === id)
-                if (resource === undefined || resource.kind === "mcp") throw new Error("Managed resource does not exist")
+                if (resource === undefined) throw new Error("Managed resource does not exist")
                 const removal = resource.kind === "skill" ? dirname(target) : target
                 if (!inside(root, removal)) throw new Error("Managed resource removal escapes its root")
                 const trash = join(root, ".trash", `${id}.${randomUUID()}`)
@@ -300,8 +294,7 @@ export const makeAgentResourceService = (
       setEnabled,
       enabledForTarget: (targetId) => list.pipe(
         Effect.map((resources) => resources.filter((resource) =>
-          resource.enabled && supportsTarget(resource.scope, targetId) &&
-          (resource.kind !== "mcp" || resource.availability.state === "available")
+          resource.enabled && supportsTarget(resource.scope, targetId)
         ))
       ),
       watch: () => Stream.concat(Stream.fromEffect(list.pipe(Effect.orElseSucceed(() => []))), Stream.fromPubSub(changes))

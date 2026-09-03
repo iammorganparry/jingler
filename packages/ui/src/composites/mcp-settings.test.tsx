@@ -41,6 +41,12 @@ describe("McpSettings", () => {
     expect(remove).toHaveBeenCalledWith("context7")
   })
 
+  it("surfaces failed actions", async () => {
+    render(<McpSettings {...props({ remove: async () => { throw new Error("disk is read-only") } })} />)
+    fireEvent.click(screen.getByText("Remove"))
+    expect(await screen.findByText("disk is read-only")).toBeTruthy()
+  })
+
   it("surfaces a parse error instead of silently showing an empty list", () => {
     render(<McpSettings {...props({ servers: [], parseError: "mcp.json is not valid JSON" })} />)
     expect(screen.getByText(/mcp\.json could not be read/)).toBeTruthy()
@@ -62,6 +68,24 @@ describe("McpSettings", () => {
       type: "remote",
       url: "https://mcp.sentry.dev/mcp",
       headers: { Authorization: "Bearer {env:SENTRY_TOKEN}" },
+      enabled: true
+    }))
+  })
+
+  it("keeps local command arguments exact", async () => {
+    const add = vi.fn(async () => {})
+    render(<McpSettings {...props({ add })} />)
+    fireEvent.click(screen.getByText("Add server"))
+    fireEvent.change(screen.getByLabelText("Server name"), { target: { value: "local" } })
+    fireEvent.change(screen.getByLabelText("Server type"), { target: { value: "local" } })
+    fireEvent.change(screen.getByLabelText("Server command"), {
+      target: { value: '["/Applications/My Server/bin/mcp", "--label", "two words"]' }
+    })
+    fireEvent.click(screen.getByText("Save server"))
+    await waitFor(() => expect(add).toHaveBeenCalledWith("local", {
+      type: "local",
+      command: ["/Applications/My Server/bin/mcp", "--label", "two words"],
+      environment: {},
       enabled: true
     }))
   })

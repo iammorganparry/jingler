@@ -120,14 +120,15 @@ describe("parseCodexMcp", () => {
 })
 
 describe("parseOpencodeMcp", () => {
-  it("copies entries verbatim", () => {
+  it("copies supported entry fields", () => {
     const candidates = parseOpencodeMcp(JSON.stringify({
       $schema: "https://opencode.ai/config.json",
       mcp: {
         context7: {
           type: "remote",
           url: "https://mcp.context7.com/mcp",
-          headers: { CONTEXT7_API_KEY: "{env:CONTEXT7_API_KEY}" }
+          headers: { CONTEXT7_API_KEY: "{env:CONTEXT7_API_KEY}" },
+          timeout: 10_000
         }
       }
     }))
@@ -140,9 +141,23 @@ describe("parseOpencodeMcp", () => {
           type: "remote",
           url: "https://mcp.context7.com/mcp",
           headers: { CONTEXT7_API_KEY: "{env:CONTEXT7_API_KEY}" },
+          timeout: 10_000,
           enabled: true
         }
       }
+    ])
+  })
+
+  it("rejects unsupported OAuth and invalid URLs per entry", () => {
+    const candidates = parseOpencodeMcp(JSON.stringify({ mcp: {
+      oauth: { type: "remote", url: "https://example.com", oauth: {} },
+      invalid: { type: "remote", url: "file:///tmp/mcp" },
+      empty: null
+    } }))
+    expect(candidates.map(({ name, entry, problem }) => ({ name, entry, problem }))).toEqual([
+      { name: "oauth", entry: null, problem: "OAuth servers are not supported" },
+      { name: "invalid", entry: null, problem: "Invalid server configuration" },
+      { name: "empty", entry: null, problem: "Invalid server configuration" }
     ])
   })
 })

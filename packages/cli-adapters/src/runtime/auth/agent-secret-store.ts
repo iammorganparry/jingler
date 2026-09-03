@@ -9,7 +9,6 @@ import type {
 } from "./credential-store.js"
 import {
   AuthKind,
-  ManagedSecretValues,
   type WebSearchProvider
 } from "@jingler/core"
 import { Effect, Either, Schema } from "effect"
@@ -22,11 +21,14 @@ const StoredCredentialPayload = Schema.Struct({
   expiresAt: Schema.NullOr(Schema.Number)
 })
 
+const ManagedSecretValues = Schema.Record({
+  key: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  value: Schema.String.pipe(Schema.maxLength(65_536))
+})
 const ManagedMcpSecretPayload = Schema.Struct({
   headers: ManagedSecretValues,
   env: ManagedSecretValues
 })
-export type ManagedMcpSecretPayload = Schema.Schema.Type<typeof ManagedMcpSecretPayload>
 
 const WebSearchCredentialPayload = Schema.Struct({
   apiKey: Schema.String.pipe(Schema.minLength(8), Schema.maxLength(16_384)),
@@ -127,21 +129,6 @@ export class AgentSecretStore implements ProviderCredentialStore {
         return Either.isLeft(decoded) ? null : decoded.right
       },
       catch: (cause) => new CredentialStoreError({ message: "Failed to read MCP secrets", cause })
-    })
-
-  writeMcp = (resourceId: string, targetId: string, value: ManagedMcpSecretPayload) =>
-    Effect.tryPromise({
-      try: async () => {
-        const payload = Schema.decodeUnknownSync(ManagedMcpSecretPayload)(value)
-        await updateDeviceSecretDocument(this.#store, (document) => ({
-          ...document,
-          managedMcpSecrets: {
-            ...document.managedMcpSecrets,
-            [mcpSecretKey(resourceId, targetId)]: payload
-          }
-        }))
-      },
-      catch: (cause) => new CredentialStoreError({ message: "Failed to persist MCP secrets", cause })
     })
 
   readWebSearch = (provider: WebSearchProvider) =>

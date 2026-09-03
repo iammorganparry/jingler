@@ -4,7 +4,7 @@ import { Schema } from "effect"
  * The operator-editable MCP config, `~/jingler/mcp.json`.
  *
  * The format is deliberately opencode-compatible (https://opencode.ai/docs/mcp-servers/)
- * so entries copy across between the two files verbatim.
+ * so supported entries copy across without reshaping.
  *
  * SECURITY: this file may hold literal secrets (headers, env values) — the same
  * stance as opencode's config and `~/.claude.json`. It is read only in the main
@@ -13,17 +13,30 @@ import { Schema } from "effect"
  * operators can keep the file itself secret-free.
  */
 
+const RemoteMcpUrl = Schema.String.pipe(
+  Schema.filter((value) => {
+    try {
+      const url = new URL(value)
+      return (url.protocol === "http:" || url.protocol === "https:") &&
+        url.username === "" && url.password === ""
+    } catch {
+      return false
+    }
+  }, { message: () => "MCP URL must be HTTP(S) without embedded credentials" })
+)
+
 /** A remote MCP server reached over streamable HTTP (default) or SSE. */
 export const McpConfigRemote = Schema.Struct({
   type: Schema.Literal("remote"),
-  url: Schema.String,
+  url: RemoteMcpUrl,
   /** Only needed for legacy SSE servers; absent means streamable HTTP. */
   transport: Schema.optional(Schema.Literal("http", "sse")),
   headers: Schema.optionalWith(
     Schema.Record({ key: Schema.String, value: Schema.String }),
     { default: () => ({}) }
   ),
-  enabled: Schema.optionalWith(Schema.Boolean, { default: () => true })
+  enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  timeout: Schema.optional(Schema.Number.pipe(Schema.positive()))
 })
 export type McpConfigRemote = Schema.Schema.Type<typeof McpConfigRemote>
 
@@ -31,13 +44,14 @@ export type McpConfigRemote = Schema.Schema.Type<typeof McpConfigRemote>
 export const McpConfigLocal = Schema.Struct({
   type: Schema.Literal("local"),
   /** argv: `["npx", "-y", "some-mcp"]`. Never shell-interpreted. */
-  command: Schema.Array(Schema.String).pipe(Schema.minItems(1)),
+  command: Schema.Array(Schema.String.pipe(Schema.minLength(1))).pipe(Schema.minItems(1)),
   environment: Schema.optionalWith(
     Schema.Record({ key: Schema.String, value: Schema.String }),
     { default: () => ({}) }
   ),
   cwd: Schema.optional(Schema.String),
-  enabled: Schema.optionalWith(Schema.Boolean, { default: () => true })
+  enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  timeout: Schema.optional(Schema.Number.pipe(Schema.positive()))
 })
 export type McpConfigLocal = Schema.Schema.Type<typeof McpConfigLocal>
 
@@ -104,38 +118,17 @@ export type McpImportCandidateView = Schema.Schema.Type<typeof McpImportCandidat
 
 const PLACEHOLDER = /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g
 
-/**
- * Replace every `{env:VAR}` placeholder from `env`. A missing variable
- * substitutes the empty string and is reported in `missing` so the UI can
- * warn instead of silently sending a mangled header.
- */
+/** Replace every `{env:VAR}` placeholder; missing variables become empty strings. */
 export const interpolateEnv = (
   value: string,
   env: Readonly<Record<string, string | undefined>>
-): { readonly value: string; readonly missing: ReadonlyArray<string> } => {
-  const missing: string[] = []
-  const resolved = value.replace(PLACEHOLDER, (_, name: string) => {
-    const found = env[name]
-    if (found === undefined) {
-      missing.push(name)
-      return ""
-    }
-    return found
-  })
-  return { value: resolved, missing }
-}
+): string => value.replace(PLACEHOLDER, (_, name: string) => env[name] ?? "")
 
 /** Interpolate every value of a headers/environment record. */
 export const interpolateEnvRecord = (
   record: Readonly<Record<string, string>>,
   env: Readonly<Record<string, string | undefined>>
-): { readonly values: Readonly<Record<string, string>>; readonly missing: ReadonlyArray<string> } => {
-  const values: Record<string, string> = {}
-  const missing: string[] = []
-  for (const [key, raw] of Object.entries(record)) {
-    const result = interpolateEnv(raw, env)
-    values[key] = result.value
-    missing.push(...result.missing)
-  }
-  return { values, missing: [...new Set(missing)] }
-}
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [key, interpolateEnv(value, env)])
+  )

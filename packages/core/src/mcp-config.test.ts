@@ -33,8 +33,15 @@ describe("McpConfigFile", () => {
     expect(Either.isRight(result) && Object.keys(result.right.mcp).length).toBe(0)
   })
 
-  it("rejects a local entry with an empty command", () => {
+  it("rejects invalid connection targets", () => {
+    for (const url of ["", "not a URL", "file:///tmp/mcp", "https://user:secret@example.com/mcp"]) {
+      expect(Either.isLeft(decode(McpConfigEntry, { type: "remote", url }))).toBe(true)
+    }
     expect(Either.isLeft(decode(McpConfigEntry, { type: "local", command: [] }))).toBe(true)
+    expect(Either.isLeft(decode(McpConfigEntry, { type: "local", command: [""] }))).toBe(true)
+    expect(Either.isLeft(decode(McpConfigEntry, {
+      type: "remote", url: "https://example.com", timeout: 0
+    }))).toBe(true)
   })
 
   it("rejects an unknown type", () => {
@@ -63,24 +70,19 @@ describe("mcpNameError", () => {
 })
 
 describe("interpolateEnv", () => {
-  it("substitutes placeholders and reports missing variables", () => {
-    const hit = interpolateEnv("Bearer {env:TOKEN}", { TOKEN: "abc" })
-    expect(hit).toEqual({ value: "Bearer abc", missing: [] })
-    const miss = interpolateEnv("{env:GONE}/{env:TOKEN}", { TOKEN: "abc" })
-    expect(miss.value).toBe("/abc")
-    expect(miss.missing).toEqual(["GONE"])
+  it("substitutes placeholders and empties missing variables", () => {
+    expect(interpolateEnv("Bearer {env:TOKEN}", { TOKEN: "abc" })).toBe("Bearer abc")
+    expect(interpolateEnv("{env:GONE}/{env:TOKEN}", { TOKEN: "abc" })).toBe("/abc")
   })
 
   it("leaves literal values untouched", () => {
-    expect(interpolateEnv("plain-secret", {})).toEqual({ value: "plain-secret", missing: [] })
+    expect(interpolateEnv("plain-secret", {})).toBe("plain-secret")
   })
 
-  it("interpolates a record and dedupes missing names", () => {
-    const result = interpolateEnvRecord(
+  it("interpolates a record", () => {
+    expect(interpolateEnvRecord(
       { a: "{env:X}", b: "{env:X}{env:Y}" },
       { Y: "y" }
-    )
-    expect(result.values).toEqual({ a: "", b: "y" })
-    expect(result.missing).toEqual(["X"])
+    )).toEqual({ a: "", b: "y" })
   })
 })

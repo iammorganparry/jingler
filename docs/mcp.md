@@ -6,7 +6,7 @@ servers** — both write the same file, so they can never diverge. Every enabled
 entry is attached to every session on the next turn; no restart needed.
 
 The format is deliberately [opencode](https://opencode.ai/docs/mcp-servers/)-
-compatible, so entries copy verbatim between the two configs.
+compatible, so supported entries copy between the two configs without reshaping.
 
 ## Format
 
@@ -35,7 +35,8 @@ compatible, so entries copy verbatim between the two configs.
   `environment` and `cwd`. Without `cwd`, the server runs from the session's
   worktree.
 - **`enabled: false`** disables an entry without deleting it. Removal is
-  deleting the key.
+  deleting the key. A positive `timeout` is preserved for opencode compatibility.
+- OpenCode's remote `oauth` setting is not supported yet; use explicit headers.
 - **`{env:VAR}`** placeholders in header/environment values resolve from the
   main process environment at launch, so the file itself can stay secret-free.
   Literal values also work — it is the operator's own file, same stance as
@@ -95,4 +96,4 @@ without an `mcp.json`, Jingler migrates automatically
 - previously imported managed MCP servers become plain entries, their
   encrypted values decrypted into the file, and the old catalog is deleted.
 
-The migration runs at most once and never touches an existing `mcp.json`.
+The migration never touches an existing `mcp.json`; with nothing to migrate it leaves no file behind.

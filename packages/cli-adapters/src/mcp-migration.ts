@@ -1,6 +1,6 @@
 import { FileSystem } from "@effect/platform"
 import type { McpConfigEntry } from "@jingler/core"
-import { ManagedMcpServer, mcpNameError } from "@jingler/core"
+import { ManagedResourceId, mcpNameError } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { McpConfigService } from "./mcp-config-service.js"
@@ -16,15 +16,39 @@ import { SecretStore } from "./secret-store.js"
  *    values) become plain entries, secrets decrypted into the file — mcp.json
  *    is the single catalog and is main-process-only.
  *
- * Guarded on `mcp.json` not existing yet, so it runs at most once and never
- * touches a file the operator already owns. Best-effort: any failure logs and
+ * Guarded on `mcp.json` not existing, so it never touches a file the operator
+ * already owns. With nothing to migrate it is a cheap no-op on later starts.
+ * Best-effort: any failure logs and
  * leaves the app fully usable.
  */
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-const decodeCatalog = Schema.decodeUnknownEither(Schema.parseJson(Schema.Array(ManagedMcpServer)))
+const LegacyManagedMcpServer = Schema.Union(
+  Schema.Struct({
+    id: ManagedResourceId,
+    name: Schema.String,
+    enabled: Schema.Boolean,
+    availability: Schema.Struct({ targetId: Schema.String }),
+    transport: Schema.Literal("http", "sse"),
+    url: Schema.String,
+    headerKeys: Schema.Array(Schema.String)
+  }),
+  Schema.Struct({
+    id: ManagedResourceId,
+    name: Schema.String,
+    enabled: Schema.Boolean,
+    availability: Schema.Struct({ targetId: Schema.String }),
+    transport: Schema.Literal("stdio"),
+    command: Schema.String,
+    args: Schema.Array(Schema.String),
+    envKeys: Schema.Array(Schema.String)
+  })
+)
+const decodeCatalog = Schema.decodeUnknownEither(
+  Schema.parseJson(Schema.Array(LegacyManagedMcpServer))
+)
 
 /**
  * Read `openConnector` from the RAW config.json — the key may already be gone
@@ -34,11 +58,9 @@ const openConnectorEntry = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const paths = yield* AppPaths
   const secrets = yield* SecretStore
-  const raw = yield* fs.readFileString(paths.configFile).pipe(Effect.orElseSucceed(() => null))
-  if (raw === null) return null
-  const parsed = yield* Effect.try(() => JSON.parse(raw) as unknown).pipe(
-    Effect.orElseSucceed(() => null)
-  )
+  if (!(yield* fs.exists(paths.configFile))) return null
+  const raw = yield* fs.readFileString(paths.configFile)
+  const parsed = yield* Effect.try(() => JSON.parse(raw) as unknown)
   if (!isRecord(parsed) || !isRecord(parsed.openConnector)) return null
   const { endpoint, enabled, serverName } = parsed.openConnector
   if (enabled !== true || typeof endpoint !== "string" || endpoint.length === 0) return null
@@ -61,36 +83,49 @@ const importedEntries = Effect.gen(function* () {
   const paths = yield* AppPaths
   const secretStore = yield* SecretStore
   const secrets = new AgentSecretStore(secretStore)
-  const raw = yield* fs.readFileString(paths.importedMcpFile).pipe(Effect.orElseSucceed(() => null))
-  if (raw === null) return []
+  if (!(yield* fs.exists(paths.importedMcpFile))) return []
+  const raw = yield* fs.readFileString(paths.importedMcpFile)
   const catalog = decodeCatalog(raw)
-  if (catalog._tag === "Left") return []
+  if (catalog._tag === "Left") {
+    return yield* Effect.fail(new Error("Legacy MCP catalog is malformed"))
+  }
   const entries: Array<{
     readonly name: string
+    readonly resourceId: string
     readonly entry: McpConfigEntry
     readonly targetId: string
   }> = []
   for (const server of catalog.right) {
-    const secret = yield* secrets
-      .readMcp(server.id, server.availability.targetId)
-      .pipe(Effect.orElseSucceed(() => null))
+    const secret = yield* secrets.readMcp(server.id, server.availability.targetId)
+    const secretKeys = server.transport === "stdio" ? server.envKeys : server.headerKeys
+    const secretValues = (server.transport === "stdio" ? secret?.env : secret?.headers) ?? {}
+    if (secretKeys.some((key) => !Object.hasOwn(secretValues, key))) {
+      return yield* Effect.fail(new Error(`Could not decrypt MCP secrets for "${server.id}"`))
+    }
     const entry: McpConfigEntry = server.transport === "stdio"
       ? {
           type: "local",
           command: [server.command, ...server.args],
-          environment: secret?.env ?? {},
+          environment: secretValues,
           enabled: server.enabled
         }
       : {
           type: "remote",
           url: server.url,
           ...(server.transport === "sse" ? { transport: "sse" as const } : {}),
-          headers: secret?.headers ?? {},
+          headers: secretValues,
           enabled: server.enabled
         }
-    if (mcpNameError(server.id) === null) {
-      entries.push({ name: server.id, entry, targetId: server.availability.targetId })
+    const name = mcpNameError(server.name) === null ? server.name : server.id
+    if (mcpNameError(name) !== null) {
+      return yield* Effect.fail(new Error(`Legacy MCP server "${server.id}" has no usable name`))
     }
+    entries.push({
+      name,
+      resourceId: server.id,
+      entry,
+      targetId: server.availability.targetId
+    })
   }
   return entries
 })
@@ -98,15 +133,19 @@ const importedEntries = Effect.gen(function* () {
 export const migrateMcpConfig = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const paths = yield* AppPaths
-  const exists = yield* fs.exists(paths.mcpConfigFile).pipe(Effect.orElseSucceed(() => false))
+  const exists = yield* fs.exists(paths.mcpConfigFile)
   if (exists) return
   const connector = yield* openConnectorEntry
   const imported = yield* importedEntries
   const entries = [...(connector === null ? [] : [connector]), ...imported]
   if (entries.length === 0) return
-  for (const { name, entry } of entries) {
-    yield* McpConfigService.write(name, entry)
+  const names = entries.map(({ name }) => name)
+  if (new Set(names).size !== names.length) {
+    return yield* Effect.fail(new Error("Legacy MCP sources contain duplicate server names"))
   }
+  yield* McpConfigService.writeAll(
+    Object.fromEntries(entries.map(({ name, entry }) => [name, entry]))
+  )
   // The old stores are now duplicates of mcp.json; leaving them would re-run
   // this migration's sources against an operator-edited file forever.
   yield* fs.remove(paths.importedMcpFile).pipe(Effect.ignore)
@@ -114,10 +153,12 @@ export const migrateMcpConfig = Effect.gen(function* () {
   const agentSecrets = new AgentSecretStore(secretStore)
   yield* Effect.forEach(
     imported,
-    ({ name, targetId }) => agentSecrets.deleteMcp(name, targetId).pipe(Effect.ignore),
+    ({ resourceId, targetId }) => agentSecrets.deleteMcp(resourceId, targetId).pipe(Effect.ignore),
     { discard: true }
   )
-  yield* secretStore.clearOpenConnectorToken.pipe(Effect.ignore)
+  if (connector !== null) {
+    yield* secretStore.clearOpenConnectorToken.pipe(Effect.ignore)
+  }
 }).pipe(
   Effect.provide(McpConfigService.Default),
   Effect.catchAll((cause) =>

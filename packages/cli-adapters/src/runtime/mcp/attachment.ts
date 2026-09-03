@@ -27,6 +27,7 @@ export interface McpLaunch {
   readonly command?: string
   readonly args: ReadonlyArray<string>
   readonly env: Readonly<Record<string, string>>
+  readonly cwd?: string
   readonly url?: string
   readonly headers: Readonly<Record<string, string>>
   readonly headerEnvironment?: Readonly<Record<string, string>>

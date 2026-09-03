@@ -55,16 +55,22 @@ const statusFor = (
 
 /** Parse "KEY=value" lines into a record; used for headers and environment. */
 const parsePairs = (raw: string): Record<string, string> =>
-  Object.fromEntries(
-    raw
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && line.includes("="))
-      .map((line) => {
-        const at = line.indexOf("=")
-        return [line.slice(0, at).trim(), line.slice(at + 1).trim()] as const
-      })
-  )
+  Object.fromEntries(raw.split("\n").flatMap((line) => {
+    const trimmed = line.trim()
+    if (trimmed === "") return []
+    const at = trimmed.indexOf("=")
+    if (at < 1) throw new Error(`Invalid KEY=value line: ${trimmed}`)
+    return [[trimmed.slice(0, at).trim(), trimmed.slice(at + 1).trim()]]
+  }))
+
+const parseCommand = (raw: string): string[] => {
+  const command: unknown = JSON.parse(raw)
+  if (!Array.isArray(command) || command.length === 0 ||
+      !command.every((part) => typeof part === "string" && part.length > 0)) {
+    throw new Error("Local command must be a non-empty JSON string array")
+  }
+  return command
+}
 
 function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
   const [open, setOpen] = React.useState(false)
@@ -88,15 +94,15 @@ function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
 
   const submit = async () => {
     setError(null)
-    const entry: McpConfigEntry = kind === "remote"
-      ? { type: "remote", url: target.trim(), headers: parsePairs(pairs), enabled: true }
-      : {
-          type: "local",
-          command: target.trim().split(/\s+/u),
-          environment: parsePairs(pairs),
-          enabled: true
-        }
     try {
+      const entry: McpConfigEntry = kind === "remote"
+        ? { type: "remote", url: target.trim(), headers: parsePairs(pairs), enabled: true }
+        : {
+            type: "local",
+            command: parseCommand(target.trim()),
+            environment: parsePairs(pairs),
+            enabled: true
+          }
       await add(name.trim(), entry)
       setOpen(false)
       setName("")
@@ -129,7 +135,7 @@ function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
       <Input
         value={target}
         onChange={(e) => setTarget(e.target.value)}
-        placeholder={kind === "remote" ? "https://mcp.example.com/mcp" : "npx -y some-mcp"}
+        placeholder={kind === "remote" ? "https://mcp.example.com/mcp" : '["npx", "-y", "some-mcp"]'}
         aria-label={kind === "remote" ? "Server URL" : "Server command"}
       />
       <label className="flex flex-col gap-1">
@@ -279,6 +285,14 @@ export function McpSettings({
   importCandidates,
   applyImport
 }: McpSettingsProps) {
+  const [actionError, setActionError] = React.useState<string | null>(null)
+  const run = (action: () => Promise<unknown>) => {
+    setActionError(null)
+    void action().catch((cause) =>
+      setActionError(cause instanceof Error ? cause.message : "MCP action failed")
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -295,6 +309,7 @@ export function McpSettings({
           it parses again.
         </Callout>
       ) : null}
+      {actionError ? <Callout tone="red">{actionError}</Callout> : null}
 
       <div className="flex flex-col gap-1">
         {servers.length === 0 && !loading && parseError === null ? (
@@ -333,12 +348,12 @@ export function McpSettings({
               </div>
               <Toggle
                 checked={server.enabled}
-                onCheckedChange={(checked) => void setEnabled(server.name, checked)}
+                onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
                 aria-label={`Enable ${server.name}`}
               />
               <button
                 type="button"
-                onClick={() => void remove(server.name)}
+                onClick={() => run(() => remove(server.name))}
                 className="text-[11px] text-red hover:underline"
               >
                 Remove
@@ -360,7 +375,7 @@ export function McpSettings({
         </button>
         <button
           type="button"
-          onClick={() => void reveal()}
+          onClick={() => run(reveal)}
           className="text-[11px] text-blue hover:underline"
         >
           Reveal mcp.json

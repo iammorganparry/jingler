@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { FileSystem } from "@effect/platform"
 import { Effect } from "effect"
@@ -101,6 +101,27 @@ describe("McpConfigService", () => {
     ])
   })
 
+  it("keeps a local cwd in runtime and probe launch details", async () => {
+    seed(JSON.stringify({
+      mcp: { local: { type: "local", command: ["node", "server.js"], cwd: "/tmp/mcp" } }
+    }))
+    const runtime = await provided(McpConfigService.resolve({}))
+    const parsed = await provided(McpConfigService.parsed({}))
+    expect(runtime._tag === "Success" && runtime.value[0]).toMatchObject({ cwd: "/tmp/mcp" })
+    expect(parsed._tag === "Success" && parsed.value[0]?.launch).toMatchObject({ cwd: "/tmp/mcp" })
+  })
+
+  it("resolve skips reserved names without dropping valid entries", async () => {
+    seed(JSON.stringify({ mcp: {
+      browser: { type: "remote", url: "https://reserved.example.com" },
+      valid: { type: "remote", url: "https://valid.example.com" }
+    } }))
+    const resolved = await provided(McpConfigService.resolve({}))
+    expect(resolved._tag === "Success" && resolved.value).toEqual([
+      expect.objectContaining({ name: "valid" })
+    ])
+  })
+
   it("resolve never fails on a malformed file, list reports the problem", async () => {
     seed("{ not json")
     const resolved = await provided(McpConfigService.resolve({}))
@@ -157,6 +178,15 @@ describe("McpConfigService", () => {
     )
     expect(ok._tag).toBe("Success")
     expect(onDisk().$schema).toBe("https://example.com/schema.json")
+  })
+
+  it("preserves unknown entry fields when toggling", async () => {
+    seed(JSON.stringify({
+      mcp: { context7: { type: "remote", url: "https://example.com", timeout: 30 } }
+    }))
+    await provided(McpConfigService.setEnabled("context7", false))
+    expect(onDisk().mcp.context7).toMatchObject({ timeout: 30, enabled: false })
+    expect(statSync(join(temp.root, "mcp.json")).mode & 0o777).toBe(0o600)
   })
 
   it("refuses to mutate a malformed file rather than clobbering it", async () => {

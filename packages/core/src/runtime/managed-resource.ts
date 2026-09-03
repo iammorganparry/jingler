@@ -8,14 +8,10 @@ export const ManagedResourceId = Schema.String.pipe(
 )
 export type ManagedResourceId = Schema.Schema.Type<typeof ManagedResourceId>
 
-export const ManagedResourceKind = Schema.Literal("skill", "prompt", "mcp")
+export const ManagedResourceKind = Schema.Literal("skill", "prompt")
 export type ManagedResourceKind = Schema.Schema.Type<typeof ManagedResourceKind>
 
-/** Stable identity across the file-resource and MCP catalogs. */
-export const ManagedResourceSelector = Schema.Struct({
-  kind: ManagedResourceKind,
-  id: ManagedResourceId
-})
+export const ManagedResourceSelector = Schema.Struct({ id: ManagedResourceId })
 export type ManagedResourceSelector = Schema.Schema.Type<typeof ManagedResourceSelector>
 
 export const ManagedResourceTrust = Schema.Literal("untrusted", "operator-approved")
@@ -32,14 +28,6 @@ export const ManagedResourceOrigin = Schema.Literal(
 export type ManagedResourceOrigin = Schema.Schema.Type<typeof ManagedResourceOrigin>
 
 const ManagedPath = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192))
-const ManagedSecretKey = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))
-
-export const ManagedSecretValues = Schema.Record({
-  key: ManagedSecretKey,
-  value: Schema.String.pipe(Schema.maxLength(65_536))
-})
-export type ManagedSecretValues = Schema.Schema.Type<typeof ManagedSecretValues>
-
 export const ManagedResourceProvenance = Schema.Struct({
   origin: ManagedResourceOrigin,
   sourceRoot: ManagedPath,
@@ -62,15 +50,6 @@ export const ManagedResourceScope = Schema.Union(
 )
 export type ManagedResourceScope = Schema.Schema.Type<typeof ManagedResourceScope>
 
-export const ManagedResourceAvailability = Schema.Struct({
-  state: Schema.Literal("available", "unavailable", "disabled"),
-  targetId: Schema.String,
-  reason: Schema.NullOr(Schema.String)
-})
-export type ManagedResourceAvailability = Schema.Schema.Type<
-  typeof ManagedResourceAvailability
->
-
 const ManagedResourceBase = {
   id: ManagedResourceId,
   name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160)),
@@ -89,56 +68,7 @@ export const ManagedFileResource = Schema.Struct({
 })
 export type ManagedFileResource = Schema.Schema.Type<typeof ManagedFileResource>
 
-const ManagedMcpBase = {
-  ...ManagedResourceBase,
-  kind: Schema.Literal("mcp"),
-  availability: ManagedResourceAvailability
-}
-
-export const ManagedMcpServer = Schema.Union(
-  Schema.Struct({
-    ...ManagedMcpBase,
-    transport: Schema.Literal("http", "sse"),
-    url: ManagedPath,
-    headerKeys: Schema.Array(ManagedSecretKey).pipe(Schema.maxItems(64))
-  }),
-  Schema.Struct({
-    ...ManagedMcpBase,
-    transport: Schema.Literal("stdio"),
-    command: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
-    args: Schema.Array(Schema.String.pipe(Schema.maxLength(8_192))).pipe(Schema.maxItems(256)),
-    envKeys: Schema.Array(ManagedSecretKey).pipe(Schema.maxItems(128))
-  })
-)
-export type ManagedMcpServer = Schema.Schema.Type<typeof ManagedMcpServer>
-
-const ManagedMcpImportBase = {
-  id: ManagedResourceId,
-  name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(160)),
-  scope: ManagedResourceScope,
-  targetId: Schema.String.pipe(Schema.minLength(1)),
-  provenance: ManagedResourceProvenance
-}
-
-/** Explicit, short-lived input. Secret values are removed before metadata persistence. */
-export const ManagedMcpImportInput = Schema.Union(
-  Schema.Struct({
-    ...ManagedMcpImportBase,
-    transport: Schema.Literal("http", "sse"),
-    url: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192)),
-    headers: ManagedSecretValues
-  }),
-  Schema.Struct({
-    ...ManagedMcpImportBase,
-    transport: Schema.Literal("stdio"),
-    command: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
-    args: Schema.Array(Schema.String.pipe(Schema.maxLength(8_192))).pipe(Schema.maxItems(256)),
-    env: ManagedSecretValues
-  })
-)
-export type ManagedMcpImportInput = Schema.Schema.Type<typeof ManagedMcpImportInput>
-
-export const ManagedResource = Schema.Union(ManagedFileResource, ManagedMcpServer)
+export const ManagedResource = ManagedFileResource
 export type ManagedResource = Schema.Schema.Type<typeof ManagedResource>
 
 export const ResourceImportDiagnostic = Schema.Struct({

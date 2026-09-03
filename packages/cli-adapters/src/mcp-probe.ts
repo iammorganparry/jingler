@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import { isAbsolute, resolve } from "node:path"
 import { Duration, Effect } from "effect"
 import type { McpLaunch, ParsedMcpServer } from "./runtime/mcp/attachment.js"
 import { neutralCwd } from "./cwd.js"
@@ -58,7 +59,9 @@ const makeTransport = (launch: McpLaunch, cwd: string | null) => {
        * inside an unrelated repo's checkout — which is exactly how a wowlogs-mcp
        * SQLite database ended up as an untracked file in the jingler repo.
        */
-      cwd: cwd ?? neutralCwd(),
+      cwd: launch.cwd === undefined
+        ? cwd ?? neutralCwd()
+        : isAbsolute(launch.cwd) ? launch.cwd : resolve(cwd ?? neutralCwd(), launch.cwd),
       // The server's stderr is noise here; we report the handshake result, not its logs.
       stderr: "ignore"
     })

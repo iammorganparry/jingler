@@ -1,9 +1,5 @@
 import { readFile } from "node:fs/promises"
-import {
-  ManagedResourceId,
-  type ManagedFileResource,
-  type ManagedResource
-} from "@jingler/core"
+import { ManagedResourceId, type ManagedResource } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import type { AgentResourceServiceShape } from "./agent-resource-service.js"
 import { ToolError, type ToolRegistry } from "../tools/tool-registry.js"
@@ -37,18 +33,13 @@ const boundedInstructions = (content: string) => {
       }
 }
 
-const fileResources = (
-  resources: ReadonlyArray<ManagedResource>
-): ReadonlyArray<ManagedFileResource> =>
-  resources.filter((resource): resource is ManagedFileResource => resource.kind !== "mcp")
-
-const matches = (resource: ManagedFileResource, query: string): boolean => {
+const matches = (resource: ManagedResource, query: string): boolean => {
   const haystack = `${resource.id}\n${resource.name}\n${resource.description}`.toLowerCase()
   return haystack.includes(query.toLowerCase())
 }
 
 const listResources = (
-  resources: ReadonlyArray<ManagedFileResource>,
+  resources: ReadonlyArray<ManagedResource>,
   query: string | undefined,
   limit: number | undefined
 ) => {
@@ -100,7 +91,7 @@ export const registerManagedFileTools = (
   service: AgentResourceServiceShape,
   resources: ReadonlyArray<ManagedResource>
 ): void => {
-  const available = [...fileResources(resources)].sort((left, right) =>
+  const available = [...resources].sort((left, right) =>
     left.id.localeCompare(right.id)
   )
   const availableIds = new Set(available.map(({ id }) => id))

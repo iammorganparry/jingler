@@ -89,7 +89,7 @@ import {
   branchAt,
 } from "@jingler/cli-adapters";
 import { appendFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -127,6 +127,7 @@ import {
   AgentResourceRpcError,
   WEB_SEARCH_CONFIG_DEFAULT,
   type WebSearchConfig,
+  type McpConfigEntry,
   WebSearchError,
 } from "@jingler/core";
 import type {
@@ -731,7 +732,7 @@ export const skillsList = (sessionId: string) =>
       .enabledForTarget(session?.environmentId ?? "desktop")
       .pipe(Effect.orElseSucceed(() => []));
     const managed = resources.flatMap((resource) =>
-      resource.kind === "mcp" || BUILTIN_SKILLS.some(({ name }) => name === `/${resource.id}`)
+      BUILTIN_SKILLS.some(({ name }) => name === `/${resource.id}`)
         ? []
         : [
             {
@@ -813,21 +814,14 @@ const mcpApplyImport = (
     const existing = new Set(
       (yield* mcpList()).servers.map((server) => server.name),
     );
-    const imported: string[] = [];
-    for (const candidate of candidates) {
-      if (
-        !requested.has(candidate.name) ||
-        candidate.entry === null ||
-        existing.has(candidate.name)
-      ) {
-        continue;
-      }
-      yield* McpConfigService.write(candidate.name, candidate.entry).pipe(
-        Effect.mapError((cause) => mcpError(cause.message, cause)),
-      );
-      imported.push(candidate.name);
-    }
-    return imported;
+    const selected = candidates.filter(
+      (candidate): candidate is McpImportCandidate & { entry: McpConfigEntry } =>
+        requested.has(candidate.name) && candidate.entry !== null && !existing.has(candidate.name),
+    );
+    yield* McpConfigService.writeAll(
+      Object.fromEntries(selected.map((candidate) => [candidate.name, candidate.entry])),
+    ).pipe(Effect.mapError((cause) => mcpError(cause.message, cause)));
+    return selected.map((candidate) => candidate.name);
   });
 
 const mcpReveal = () =>
@@ -836,10 +830,15 @@ const mcpReveal = () =>
     // Reveal needs a file to point at; seed the template on first use.
     yield* Effect.tryPromise({
       try: async () => {
+        await mkdir(dirname(paths.mcpConfigFile), { recursive: true });
         try {
-          await readFile(paths.mcpConfigFile, "utf8");
-        } catch {
-          await writeFile(paths.mcpConfigFile, `${JSON.stringify({ mcp: {} }, null, 2)}\n`);
+          await writeFile(
+            paths.mcpConfigFile,
+            `${JSON.stringify({ mcp: {} }, null, 2)}\n`,
+            { flag: "wx", mode: 0o600 },
+          );
+        } catch (cause) {
+          if (!(cause instanceof Error) || !("code" in cause) || cause.code !== "EEXIST") throw cause;
         }
       },
       catch: (cause) => mcpError("Could not create mcp.json", cause),
@@ -4573,10 +4572,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const service = yield* AgentResourceService;
       const detected = yield* resourceDetection(sessionId);
       const requested = new Set(sourcePaths);
-      const candidates = detected.candidates.filter(
-        (candidate) =>
-          candidate.kind !== "mcp" &&
-          requested.has(candidate.provenance.sourcePath),
+      const candidates = detected.candidates.filter((candidate) =>
+        requested.has(candidate.provenance.sourcePath),
       );
       const imported = yield* service.importResources(candidates, scope);
       const found = new Set(
@@ -4597,31 +4594,19 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         ],
       };
     }).pipe(Effect.mapError((cause) => agentResourceError("import", cause))),
-  "AgentResources.remove": ({ kind, id }) =>
-    kind === "mcp"
-      ? Effect.fail(
-        agentResourceError("remove", new Error("MCP servers are managed in Settings › MCP servers")),
-      )
-      : Effect.flatMap(AgentResourceService, (files) => files.remove(id)).pipe(
-        Effect.mapError((cause) => agentResourceError("remove", cause)),
-      ),
-  "AgentResources.setEnabled": ({ kind, id, enabled }) =>
-    kind === "mcp"
-      ? Effect.fail(
-        agentResourceError("enable", new Error("MCP servers are managed in Settings › MCP servers")),
-      )
-      : Effect.flatMap(AgentResourceService, (files) => files.setEnabled(id, enabled)).pipe(
-        Effect.mapError((cause) => agentResourceError("enable", cause)),
-      ),
-  "AgentResources.reveal": ({ kind, id }) =>
-    kind === "mcp"
-      ? Effect.fail(
-        agentResourceError("reveal", new Error("MCP resources do not have a local file")),
-      )
-      : Effect.flatMap(AgentResourceService, (service) => service.reveal(id)).pipe(
-        Effect.tap((path) => Effect.sync(() => shell.showItemInFolder(path))),
-        Effect.asVoid,
-        Effect.mapError((cause) => agentResourceError("reveal", cause)),
+  "AgentResources.remove": ({ id }) =>
+    Effect.flatMap(AgentResourceService, (files) => files.remove(id)).pipe(
+      Effect.mapError((cause) => agentResourceError("remove", cause)),
+    ),
+  "AgentResources.setEnabled": ({ id, enabled }) =>
+    Effect.flatMap(AgentResourceService, (files) => files.setEnabled(id, enabled)).pipe(
+      Effect.mapError((cause) => agentResourceError("enable", cause)),
+    ),
+  "AgentResources.reveal": ({ id }) =>
+    Effect.flatMap(AgentResourceService, (service) => service.reveal(id)).pipe(
+      Effect.tap((path) => Effect.sync(() => shell.showItemInFolder(path))),
+      Effect.asVoid,
+      Effect.mapError((cause) => agentResourceError("reveal", cause)),
       ),
   "AgentResources.enabledForTarget": ({ targetId }) =>
     resourceEnabledForTarget(targetId),
