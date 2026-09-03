@@ -108,10 +108,6 @@ function getAgentConfigDir(): string {
   return join(process.env.HOME || process.env.USERPROFILE || homedir(), ".pi", "agent");
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function readJsonFile(path: string): { data?: unknown; error?: string } {
   if (!existsSync(path)) return {};
 
@@ -124,10 +120,11 @@ function readJsonFile(path: string): { data?: unknown; error?: string } {
 
 function normalizeModel(value: unknown): PhaseModelRef | null | undefined {
   if (value === null) return null;
-  if (!isRecord(value)) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) return undefined;
+  const model = Object.fromEntries(Object.entries(value));
 
-  const provider = typeof value.provider === "string" ? value.provider.trim() : "";
-  const id = typeof value.id === "string" ? value.id.trim() : "";
+  const provider = typeof model.provider === "string" ? model.provider.trim() : "";
+  const id = typeof model.id === "string" ? model.id.trim() : "";
   if (!provider || !id) return undefined;
   return { provider, id };
 }
@@ -183,19 +180,20 @@ function normalizePrompt(value: unknown): string | null | undefined {
 
 function normalizeProfile(raw: unknown, ctx: ProfileContext): PhaseProfile | null | undefined {
   if (raw === null) return null;
-  if (!isRecord(raw)) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const fields = Object.fromEntries(Object.entries(raw));
 
   const profile: PhaseProfile = {};
 
-  if ("model" in raw) profile.model = normalizeModel(raw.model);
-  if ("thinking" in raw) profile.thinking = normalizeThinking(raw.thinking, "thinking", ctx);
-  if ("thinkingLevel" in raw && profile.thinking === undefined) {
-    profile.thinking = normalizeThinking(raw.thinkingLevel, "thinkingLevel", ctx);
+  if ("model" in fields) profile.model = normalizeModel(fields.model);
+  if ("thinking" in fields) profile.thinking = normalizeThinking(fields.thinking, "thinking", ctx);
+  if ("thinkingLevel" in fields && profile.thinking === undefined) {
+    profile.thinking = normalizeThinking(fields.thinkingLevel, "thinkingLevel", ctx);
   }
-  if ("activeTools" in raw) profile.activeTools = normalizeTools(raw.activeTools);
-  if ("removeTools" in raw) profile.removeTools = normalizeTools(raw.removeTools);
-  if ("statusLabel" in raw) profile.statusLabel = normalizeLabel(raw.statusLabel);
-  if ("instructions" in raw) profile.instructions = normalizePrompt(raw.instructions);
+  if ("activeTools" in fields) profile.activeTools = normalizeTools(fields.activeTools);
+  if ("removeTools" in fields) profile.removeTools = normalizeTools(fields.removeTools);
+  if ("statusLabel" in fields) profile.statusLabel = normalizeLabel(fields.statusLabel);
+  if ("instructions" in fields) profile.instructions = normalizePrompt(fields.instructions);
 
   return profile;
 }
@@ -247,25 +245,31 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: 
   }
 
   const raw = parsed.data;
-  if (!isRecord(raw)) return { config: {}, warnings: [] };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { config: {}, warnings: [] };
+  }
+  const fields = Object.fromEntries(Object.entries(raw));
 
   const warnings: string[] = [];
   const config: PlannotatorConfig = {};
-  if (raw.executionMode === null || raw.executionMode === "automatic" || raw.executionMode === "external") {
-    config.executionMode = raw.executionMode;
-  } else if (raw.executionMode !== undefined) {
+  if (fields.executionMode === null || fields.executionMode === "automatic" || fields.executionMode === "external") {
+    config.executionMode = fields.executionMode;
+  } else if (fields.executionMode !== undefined) {
     // Unrecognized values fall through to the inherited value (ultimately
     // "automatic"), so say so instead of silently ignoring the key.
     warnings.push(
-      `Ignoring unknown executionMode ${JSON.stringify(raw.executionMode)} in ${path}: expected "automatic" or "external". Falling back to automatic.`,
+      `Ignoring unknown executionMode ${JSON.stringify(fields.executionMode)} in ${path}: expected "automatic" or "external". Falling back to automatic.`,
     );
   }
-  if ("defaults" in raw) config.defaults = normalizeProfile(raw.defaults, { path, scope: "defaults", warnings });
+  if ("defaults" in fields) config.defaults = normalizeProfile(fields.defaults, { path, scope: "defaults", warnings });
 
-  if ("phases" in raw && isRecord(raw.phases)) {
+  const phaseFields = fields.phases !== null && typeof fields.phases === "object" && !Array.isArray(fields.phases)
+    ? Object.fromEntries(Object.entries(fields.phases))
+    : null;
+  if (phaseFields !== null) {
     const phases: Partial<Record<PhaseName, PhaseProfile | null>> = {};
     for (const phase of PHASES) {
-      const normalized = normalizeProfile(raw.phases[phase], { path, scope: `phases.${phase}`, warnings });
+      const normalized = normalizeProfile(phaseFields[phase], { path, scope: `phases.${phase}`, warnings });
       if (normalized !== undefined) phases[phase] = normalized;
     }
     if (Object.keys(phases).length > 0) config.phases = phases;
@@ -274,11 +278,15 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: 
   // Plannotator no longer modifies Pi's system prompt (#922). The old
   // systemPrompt key is ignored; say so once instead of silently dropping it.
   const obsoleteScopes: string[] = [];
-  if (isRecord(raw.defaults) && "systemPrompt" in raw.defaults) obsoleteScopes.push("defaults");
-  if (isRecord(raw.phases)) {
+  if (fields.defaults !== null && typeof fields.defaults === "object" && !Array.isArray(fields.defaults) && "systemPrompt" in fields.defaults) {
+    obsoleteScopes.push("defaults");
+  }
+  if (phaseFields !== null) {
     for (const phase of PHASES) {
-      const phaseRaw = raw.phases[phase];
-      if (isRecord(phaseRaw) && "systemPrompt" in phaseRaw) obsoleteScopes.push(`phases.${phase}`);
+      const phaseRaw = phaseFields[phase];
+      if (phaseRaw !== null && typeof phaseRaw === "object" && !Array.isArray(phaseRaw) && "systemPrompt" in phaseRaw) {
+        obsoleteScopes.push(`phases.${phase}`);
+      }
     }
   }
   if (obsoleteScopes.length > 0) {

@@ -16,6 +16,7 @@ import {
   clampFontScale,
   DEFAULT_THEME_ID,
   WEB_SEARCH_CONFIG_DEFAULT,
+  WebSearchConfig as WebSearchConfigSchema,
   WorkspaceConfig
 } from "@jingler/core"
 import { ConfigError } from "@jingler/core"
@@ -29,11 +30,16 @@ const decodePlanTemplate = Schema.decodeUnknownEither(Schema.parseJson(PlanPrd))
 
 type ConfigEnv = FileSystem.FileSystem | AppPaths
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const LegacyReasoningSettings = Schema.Struct({
+  reasoningEffort: Schema.optional(Schema.Unknown)
+})
+const LegacyWebSearchConfig = Schema.Struct({ webSearch: Schema.Unknown })
+const LegacyProviderConfig = Schema.Struct({
+  providers: Schema.Record({ key: Schema.String, value: Schema.Unknown })
+})
 
 const migrateProviderReasoning = (value: unknown): unknown => {
-  if (!isRecord(value)) return value
+  if (!Schema.is(LegacyReasoningSettings)(value)) return value
   switch (value.reasoningEffort) {
     case "off":
       return { ...value, thinkingEnabled: false, reasoningEffort: undefined }
@@ -49,22 +55,14 @@ const migrateProviderReasoning = (value: unknown): unknown => {
 }
 
 export const migrateConfigWebSearch = (value: unknown): unknown => {
-  if (!isRecord(value) || !("webSearch" in value)) return value
-  const webSearch = value.webSearch
-  if (!isRecord(webSearch)) {
-    return { ...value, webSearch: WEB_SEARCH_CONFIG_DEFAULT }
-  }
-  const provider = webSearch.provider
-  const validProvider = provider === "exa" || provider === "firecrawl"
-  const valid =
-    (webSearch.setup === "pending" && (provider === null || validProvider)) ||
-    (webSearch.setup === "skipped" && provider === null) ||
-    (webSearch.setup === "configured" && validProvider)
-  return valid ? value : { ...value, webSearch: WEB_SEARCH_CONFIG_DEFAULT }
+  if (!Schema.is(LegacyWebSearchConfig)(value)) return value
+  return Schema.is(WebSearchConfigSchema)(value.webSearch)
+    ? value
+    : { ...value, webSearch: WEB_SEARCH_CONFIG_DEFAULT }
 }
 
 export const migrateConfigReasoning = (value: unknown): unknown => {
-  if (!(isRecord(value) && isRecord(value.providers))) return value
+  if (!Schema.is(LegacyProviderConfig)(value)) return value
   return {
     ...value,
     providers: Object.fromEntries(

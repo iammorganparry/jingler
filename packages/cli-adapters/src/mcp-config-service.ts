@@ -6,7 +6,7 @@ import {
   McpConfigFile,
   mcpNameError
 } from "@jingler/core"
-import { Data, Effect, Schema } from "effect"
+import { Data, Effect, Option, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
 import type { ParsedMcpServer, RuntimeMcpServer } from "./runtime/mcp/attachment.js"
 
@@ -29,8 +29,12 @@ type Env = FileSystem.FileSystem | AppPaths
 
 const decodeFile = Schema.decodeUnknown(Schema.parseJson(McpConfigFile))
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const RawMcpDocument = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const RawMcpEntries = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const RawMcpEntry = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const decodeRawDocument = Schema.decodeUnknown(Schema.parseJson(RawMcpDocument))
+const decodeRawEntries = Schema.decodeUnknownOption(RawMcpEntries)
+const decodeRawEntry = Schema.decodeUnknownOption(RawMcpEntry)
 
 /** Redact one entry into the renderer-safe shape. */
 const redact = (name: string, entry: McpConfigEntry): McpServer =>
@@ -131,14 +135,11 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
                 new McpConfigError({ message: "Failed to read mcp.json", cause })
               )
             )
-          const parsed = yield* Effect.try({
-            try: () => JSON.parse(raw) as unknown,
-            catch: (cause) => new McpConfigError({ message: "mcp.json is not valid JSON", cause })
-          })
-          if (!isRecord(parsed)) {
-            return yield* Effect.fail(new McpConfigError({ message: "mcp.json must be a JSON object" }))
-          }
-          return parsed
+          return yield* decodeRawDocument(raw).pipe(
+            Effect.mapError((cause) =>
+              new McpConfigError({ message: "mcp.json must be a valid JSON object", cause })
+            )
+          )
         })
 
       const decodeEntries = (
@@ -199,7 +200,7 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           Effect.gen(function* () {
             const raw = yield* readRaw()
             const current = yield* decodeEntries(raw)
-            const rawMcp = isRecord(raw.mcp) ? raw.mcp : {}
+            const rawMcp = Option.getOrElse(decodeRawEntries(raw.mcp), () => ({}))
             const next = yield* mutation(current, rawMcp)
             yield* persist(raw, next)
           })
@@ -291,7 +292,10 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           const rawEntry = rawMcp[name]
           return Effect.succeed({
             ...rawMcp,
-            [name]: { ...(isRecord(rawEntry) ? rawEntry : entry), enabled }
+            [name]: {
+              ...Option.getOrElse(decodeRawEntry(rawEntry), () => entry),
+              enabled
+            }
           })
         })
 

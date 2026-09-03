@@ -60,6 +60,12 @@ describe("parseClaudeMcp", () => {
     ])
   })
 
+  it("treats non-string Claude transport values as absent", () => {
+    expect(parseClaudeMcp(JSON.stringify({
+      mcpServers: { docs: { type: null, url: "https://example.com/mcp" } }
+    }))[0]?.entry).toMatchObject({ type: "remote", url: "https://example.com/mcp" })
+  })
+
   it("flags reserved names and unrecognised shapes instead of dropping them", () => {
     const candidates = parseClaudeMcp(JSON.stringify({
       mcpServers: {

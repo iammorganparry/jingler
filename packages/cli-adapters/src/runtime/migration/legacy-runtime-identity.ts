@@ -3,11 +3,38 @@ import type {
   ProviderId,
   ProviderModelId
 } from "@jingler/core"
+import { Schema } from "effect"
 
-type JsonRecord = Record<string, unknown>
-
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const LegacyChatObject = Schema.Struct({
+  id: Schema.optional(Schema.Unknown),
+  model: Schema.optional(Schema.Unknown),
+  resumeId: Schema.optional(Schema.Unknown),
+  connectionId: Schema.optional(Schema.Unknown),
+  providerId: Schema.optional(Schema.Unknown),
+  modelId: Schema.optional(Schema.Unknown),
+  piSessionId: Schema.optional(Schema.Unknown),
+  legacyModel: Schema.optional(Schema.Unknown),
+  legacyResumeId: Schema.optional(Schema.Unknown)
+})
+const LegacyChatWithId = Schema.Struct({ id: Schema.Unknown })
+const LegacySessionObject = Schema.Struct({
+  chats: Schema.optional(Schema.Unknown),
+  activeChatId: Schema.optional(Schema.Unknown),
+  model: Schema.optional(Schema.Unknown),
+  resumeId: Schema.optional(Schema.Unknown),
+  cli: Schema.optional(Schema.Unknown),
+  connectionId: Schema.optional(Schema.Unknown),
+  providerId: Schema.optional(Schema.Unknown),
+  modelId: Schema.optional(Schema.Unknown),
+  piSessionId: Schema.optional(Schema.Unknown)
+})
+const LegacyConfigObject = Schema.Struct({
+  defaultConnectionId: Schema.optional(Schema.Unknown),
+  defaultCli: Schema.optional(Schema.Unknown),
+  providers: Schema.optional(Schema.Unknown)
+})
+const LegacyProviderMap = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const LegacyProviderSettings = Schema.Struct({ defaultModel: Schema.optional(Schema.Unknown) })
 
 export interface LegacyRuntimeCandidate {
   readonly providerId: string | null
@@ -46,7 +73,7 @@ const migrateChat = (
   legacyCli: unknown,
   resolve?: LegacyRuntimeResolver
 ): unknown => {
-  if (!isRecord(chat)) return chat
+  if (!Schema.is(LegacyChatObject)(chat)) return chat
   const legacyModel = typeof chat.model === "string" ? chat.model : null
   const legacyResumeId =
     typeof chat.resumeId === "string" ? chat.resumeId : null
@@ -96,16 +123,16 @@ export const migrateLegacyRuntimeIdentity = (
   value: unknown,
   resolve?: LegacyRuntimeResolver
 ): unknown => {
-  if (!isRecord(value)) return value
+  if (!Schema.is(LegacySessionObject)(value)) return value
   const chats = Array.isArray(value.chats)
     ? value.chats.map((chat) => migrateChat(chat, value.cli, resolve))
     : value.chats
   const active = Array.isArray(chats)
     ? chats.find(
-        (chat) => isRecord(chat) && chat.id === value.activeChatId
+        (chat) => Schema.is(LegacyChatWithId)(chat) && chat.id === value.activeChatId
       )
     : null
-  const activeRecord = isRecord(active) ? active : null
+  const activeRecord = Schema.is(LegacyChatObject)(active) ? active : null
   const legacyModel =
     typeof activeRecord?.legacyModel === "string"
       ? activeRecord.legacyModel
@@ -156,14 +183,14 @@ export const migrateLegacyRuntimeIdentity = (
 }
 
 export const migrateLegacyConfigIdentity = (value: unknown): unknown => {
-  if (!isRecord(value) || value.defaultConnectionId !== undefined) return value
+  if (!Schema.is(LegacyConfigObject)(value) || value.defaultConnectionId !== undefined) return value
   const cli = value.defaultCli
   const providerSettings =
-    isRecord(value.providers) && typeof cli === "string"
+    Schema.is(LegacyProviderMap)(value.providers) && typeof cli === "string"
       ? value.providers[cli]
       : null
   const model =
-    isRecord(providerSettings) && typeof providerSettings.defaultModel === "string"
+    Schema.is(LegacyProviderSettings)(providerSettings) && typeof providerSettings.defaultModel === "string"
       ? providerSettings.defaultModel
       : null
   const providerId = providerFromLegacy(cli, model)
