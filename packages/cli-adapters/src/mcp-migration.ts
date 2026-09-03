@@ -22,8 +22,14 @@ import { SecretStore } from "./secret-store.js"
  * leaves the app fully usable.
  */
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const LegacyOpenConnectorConfig = Schema.Struct({
+  openConnector: Schema.optional(Schema.Struct({
+    endpoint: Schema.String.pipe(Schema.minLength(1)),
+    enabled: Schema.Boolean,
+    serverName: Schema.optional(Schema.String)
+  }))
+})
+const decodeLegacyConfig = Schema.decodeUnknown(Schema.parseJson(LegacyOpenConnectorConfig))
 
 const LegacyManagedMcpServer = Schema.Union(
   Schema.Struct({
@@ -60,18 +66,16 @@ const openConnectorEntry = Effect.gen(function* () {
   const secrets = yield* SecretStore
   if (!(yield* fs.exists(paths.configFile))) return null
   const raw = yield* fs.readFileString(paths.configFile)
-  const parsed = yield* Effect.try(() => JSON.parse(raw) as unknown)
-  if (!isRecord(parsed) || !isRecord(parsed.openConnector)) return null
-  const { endpoint, enabled, serverName } = parsed.openConnector
-  if (enabled !== true || typeof endpoint !== "string" || endpoint.length === 0) return null
+  const { openConnector } = yield* decodeLegacyConfig(raw)
+  if (openConnector === undefined || !openConnector.enabled) return null
   const token = yield* secrets.getOpenConnectorToken
   if (token === null || token.length === 0) return null
-  const name = typeof serverName === "string" && mcpNameError(serverName) === null
-    ? serverName
+  const name = openConnector.serverName !== undefined && mcpNameError(openConnector.serverName) === null
+    ? openConnector.serverName
     : "open-connector"
   const entry: McpConfigEntry = {
     type: "remote",
-    url: `${endpoint.replace(/\/+$/, "")}/mcp`,
+    url: `${openConnector.endpoint.replace(/\/+$/, "")}/mcp`,
     headers: { Authorization: `Bearer ${token}` },
     enabled: true
   }
@@ -112,7 +116,7 @@ const importedEntries = Effect.gen(function* () {
       : {
           type: "remote",
           url: server.url,
-          ...(server.transport === "sse" ? { transport: "sse" as const } : {}),
+          transport: server.transport,
           headers: secretValues,
           enabled: server.enabled
         }
