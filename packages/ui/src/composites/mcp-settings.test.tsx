@@ -72,6 +72,16 @@ describe("McpSettings", () => {
     }))
   })
 
+  it("announces save failures without showing success", async () => {
+    render(<McpSettings {...props({ add: async () => { throw new Error("cannot write config") } })} />)
+    fireEvent.click(screen.getByText("Add server"))
+    fireEvent.change(screen.getByLabelText("Server name"), { target: { value: "broken" } })
+    fireEvent.change(screen.getByLabelText("Server URL"), { target: { value: "https://example.com" } })
+    fireEvent.click(screen.getByText("Save server"))
+    expect((await screen.findByRole("alert")).textContent).toContain("cannot write config")
+    expect(screen.getByText("Failed — retry")).toBeTruthy()
+  })
+
   it("keeps local command arguments exact", async () => {
     const add = vi.fn(async () => {})
     render(<McpSettings {...props({ add })} />)

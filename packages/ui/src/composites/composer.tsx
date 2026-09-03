@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   Attachment,
   Environment,
+  McpConfigEntry,
   PermissionMode,
   PlanDocument,
   ProviderCatalog,
@@ -42,6 +43,7 @@ import { Pill } from "../components/pill.js";
 import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
+import { McpServerDialog } from "./mcp-settings.js";
 import { planTaskCounts, PlanTaskList } from "./plan-progress-dock.js";
 import { PromptInputSurface } from "./beui/work.js";
 import {
@@ -228,6 +230,7 @@ function ComposerSelect<T extends string>({
 export function Composer({
   skills = [],
   files = [],
+  onAddMcp,
   onSend,
   onStop,
   branch,
@@ -271,6 +274,7 @@ export function Composer({
 }: {
   skills?: ReadonlyArray<Skill>;
   files?: ReadonlyArray<string>;
+  onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>;
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void;
   /** Halt the running agent. Given one, the button becomes Stop while `busy`. */
   onStop?: () => void;
@@ -433,6 +437,7 @@ export function Composer({
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Shims, so every call site below reads/writes exactly as it did when this was
@@ -869,6 +874,12 @@ export function Composer({
                   <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Skills</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Insert a harness command</span></span>
                   {skills.length > 0 && <span className="font-mono text-[10.5px] text-dim">{skills.length}</span>}
                 </button>
+                {onAddMcp !== undefined && (
+                  <button type="button" onClick={() => { setActionsOpen(false); setMcpDialogOpen(true); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface">
+                    <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><Server size={15} /></span>
+                    <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Connect MCP server</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Add tools for local sessions</span></span>
+                  </button>
+                )}
               </div>
             </MorphPopoverContent>
           </MorphPopover>
@@ -1020,6 +1031,9 @@ export function Composer({
           </div>
         )}
       </PromptInputSurface>
+      {onAddMcp !== undefined && (
+        <McpServerDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} add={onAddMcp} />
+      )}
     </div>
   );
 }

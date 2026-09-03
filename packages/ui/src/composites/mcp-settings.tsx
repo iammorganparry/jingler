@@ -5,9 +5,18 @@ import type {
   McpServer,
   McpServerStatus
 } from "@jingler/core"
+import { Schema } from "effect"
 import * as React from "react"
 import { AsyncButton } from "../components/async-button.js"
 import { Callout } from "../components/callout.js"
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "../components/dialog.js"
 import { Input } from "../components/input.js"
 import { Toggle } from "../components/toggle.js"
 
@@ -63,34 +72,26 @@ const parsePairs = (raw: string): Record<string, string> =>
     return [[trimmed.slice(0, at).trim(), trimmed.slice(at + 1).trim()]]
   }))
 
-const parseCommand = (raw: string): string[] => {
-  const command: unknown = JSON.parse(raw)
-  if (!Array.isArray(command) || command.length === 0 ||
-      !command.every((part) => typeof part === "string" && part.length > 0)) {
-    throw new Error("Local command must be a non-empty JSON string array")
-  }
-  return command
-}
+const decodeCommand = Schema.decodeUnknownSync(
+  Schema.Array(Schema.String.pipe(Schema.minLength(1))).pipe(Schema.minItems(1))
+)
 
-function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
-  const [open, setOpen] = React.useState(false)
+const parseCommand = (raw: string): ReadonlyArray<string> => decodeCommand(JSON.parse(raw))
+
+export function McpServerForm({
+  add,
+  onDone,
+  onCancel
+}: {
+  readonly add: McpSettingsProps["add"]
+  readonly onDone: () => void
+  readonly onCancel: () => void
+}) {
   const [name, setName] = React.useState("")
   const [kind, setKind] = React.useState<"remote" | "local">("remote")
   const [target, setTarget] = React.useState("")
   const [pairs, setPairs] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="self-start rounded-md border border-line bg-panel px-3 py-1.5 text-[12px] text-text hover:bg-surface"
-      >
-        Add server
-      </button>
-    )
-  }
 
   const submit = async () => {
     setError(null)
@@ -104,12 +105,14 @@ function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
             enabled: true
           }
       await add(name.trim(), entry)
-      setOpen(false)
+      onDone()
       setName("")
       setTarget("")
       setPairs("")
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the server")
+      const message = cause instanceof Error ? cause.message : "Could not save the server"
+      setError(message)
+      throw new Error(message)
     }
   }
 
@@ -151,20 +154,65 @@ function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
           aria-label={kind === "remote" ? "Headers" : "Environment variables"}
         />
       </label>
-      {error ? <Callout tone="red">{error}</Callout> : null}
+      {error ? <div role="alert"><Callout tone="red">{error}</Callout></div> : null}
       <div className="flex items-center gap-2">
         <AsyncButton pendingLabel="Saving…" onClick={submit}>
           Save server
         </AsyncButton>
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={onCancel}
           className="text-[11px] text-dim hover:underline"
         >
           Cancel
         </button>
       </div>
     </div>
+  )
+}
+
+function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
+  const [open, setOpen] = React.useState(false)
+  return open ? (
+    <McpServerForm add={add} onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
+  ) : (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      className="self-start rounded-md border border-line bg-panel px-3 py-1.5 text-[12px] text-text hover:bg-surface"
+    >
+      Add server
+    </button>
+  )
+}
+
+export function McpServerDialog({
+  open,
+  onOpenChange,
+  add
+}: {
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  readonly add: McpSettingsProps["add"]
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Connect MCP server</DialogTitle>
+          <DialogDescription>
+            Saves to ~/jingler/mcp.json and becomes available to local sessions on their next turn.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <McpServerForm
+            add={add}
+            onDone={() => onOpenChange(false)}
+            onCancel={() => onOpenChange(false)}
+          />
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -223,7 +271,7 @@ function ImportFlow({
           </button>
         ))}
       </div>
-      {error ? <Callout tone="red">{error}</Callout> : null}
+      {error ? <div role="alert"><Callout tone="red">{error}</Callout></div> : null}
       {message ? <Callout tone="green">{message}</Callout> : null}
       {candidates !== null ? (
         candidates.length === 0 ? (
@@ -286,7 +334,7 @@ export function McpSettings({
   applyImport
 }: McpSettingsProps) {
   const [actionError, setActionError] = React.useState<string | null>(null)
-  const run = (action: () => Promise<unknown>) => {
+  const run = (action: () => Promise<void>) => {
     setActionError(null)
     void action().catch((cause) =>
       setActionError(cause instanceof Error ? cause.message : "MCP action failed")
@@ -299,7 +347,7 @@ export function McpSettings({
         <h3 className="text-[13px] font-semibold text-text-bright">MCP servers</h3>
         <p className="mt-0.5 text-[11px] text-dim">
           Servers from <code className="font-mono">~/jingler/mcp.json</code> are available to
-          every session. Edit the file directly or manage entries here — same file either way.
+          local sessions. Edit the file directly or manage entries here — same file either way.
         </p>
       </div>
 
@@ -309,7 +357,7 @@ export function McpSettings({
           it parses again.
         </Callout>
       ) : null}
-      {actionError ? <Callout tone="red">{actionError}</Callout> : null}
+      {actionError ? <div role="alert"><Callout tone="red">{actionError}</Callout></div> : null}
 
       <div className="flex flex-col gap-1">
         {servers.length === 0 && !loading && parseError === null ? (

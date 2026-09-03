@@ -9,6 +9,7 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   Environment,
+  McpConfigEntry,
   Message,
   ProviderCatalog,
   Session,
@@ -99,6 +100,7 @@ export function ConversationPane({
   onSelectFiles,
   onSelectChanges,
   onOpenProviderSettings,
+  onAddMcp,
   paneFocused = true
 }: {
   session: Session
@@ -135,6 +137,8 @@ export function ConversationPane({
   onSelectChanges?: () => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
   onOpenProviderSettings?: () => void
+  /** Add one global MCP server from the composer. */
+  onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -144,6 +148,7 @@ export function ConversationPane({
   const activeChat =
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
+  const addLocalMcp = session.environmentId === undefined ? onAddMcp : undefined
   const convo = useConversation(session, activeChat.id)
   const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
     string | undefined | null
@@ -963,6 +968,7 @@ export function ConversationPane({
           <Composer
             repo={session.repo}
             branch={session.branch}
+            onAddMcp={addLocalMcp}
             branchPending={session.semanticBranchPending === true}
             busy={
               fleet.selectedNode.status === "queued" ||
@@ -1023,6 +1029,7 @@ export function ConversationPane({
           mode={convo.mode}
           skills={convo.skills}
           files={convo.files}
+          onAddMcp={addLocalMcp}
           paused={convo.paused}
           branch={session.branch}
           branchPending={session.semanticBranchPending === true}

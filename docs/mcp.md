@@ -3,7 +3,7 @@
 Jingler's agents get their operator-configured MCP tools from one file:
 `~/jingler/mcp.json`. Edit it by hand or manage it from **Settings › MCP
 servers** — both write the same file, so they can never diverge. Every enabled
-entry is attached to every session on the next turn; no restart needed.
+entry is attached to local sessions on the next turn; no restart needed.
 
 The format is deliberately [opencode](https://opencode.ai/docs/mcp-servers/)-
 compatible, so supported entries copy between the two configs without reshaping.

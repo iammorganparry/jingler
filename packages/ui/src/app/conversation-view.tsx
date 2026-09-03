@@ -4,6 +4,7 @@ import type {
   Attachment,
   GateDecision,
   Message,
+  McpConfigEntry,
   PermissionMode,
   PlanDocument,
   ProviderCatalog,
@@ -96,6 +97,7 @@ export interface ConversationViewProps {
   mode: PermissionMode
   skills?: ReadonlyArray<Skill>
   files?: ReadonlyArray<string>
+  onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>
   paused?: boolean
   /** Git branch backing the session's worktree, shown in the composer. */
   branch?: string
@@ -283,6 +285,7 @@ export function ConversationView({
   steeringId = null,
   onDecideGate,
   onSetMode,
+  onAddMcp,
   reasoningEffort,
   thinkingEnabled,
   onSetReasoning,
@@ -707,6 +710,7 @@ export function ConversationView({
               <Composer
                 skills={skills}
                 files={files}
+                onAddMcp={onAddMcp}
                 paused={paused}
                 branch={branch}
                 branchPending={branchPending}

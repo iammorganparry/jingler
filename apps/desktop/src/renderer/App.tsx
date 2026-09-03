@@ -1930,6 +1930,7 @@ function AuthedApp({
             onSelectFiles={ctx.onSelectFiles}
             onSelectChanges={ctx.onSelectChanges}
             onOpenProviderSettings={ctx.onOpenProviderSettings}
+            onAddMcp={mcp.add}
             paneFocused={ctx.paneFocused ?? true}
           />
         )}
