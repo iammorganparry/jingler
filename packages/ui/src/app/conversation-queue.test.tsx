@@ -26,7 +26,7 @@ const queued = (n: number) =>
 const rows = () => screen.queryAllByText(/^message \d+$/)
 
 describe("ConversationView — queued messages", () => {
-  it("gives the production scroller a destination for every loaded message", () => {
+  it("gives the production scroller a destination for every user message", () => {
     const createdAt = new Date(0).toISOString()
     render(<ConversationView mode="accept-edits" messages={[
       { id: "u1", role: "user", streaming: false, createdAt, parts: [{ _tag: "Text", text: "First request" }] },
@@ -34,9 +34,8 @@ describe("ConversationView — queued messages", () => {
       { id: "u2", role: "user", streaming: false, createdAt, parts: [{ _tag: "Text", text: "Second request" }] }
     ]} />)
     expect(screen.getByRole("navigation", { name: "Message navigation" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Go to user message 1 of 3" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Go to assistant message 2 of 3" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Go to user message 3 of 3" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Go to user message 1 of 2" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Go to user message 2 of 2" })).toBeTruthy()
   })
 
   it("mounts the approved components at the production conversation boundary", () => {

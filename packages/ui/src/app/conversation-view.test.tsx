@@ -1,8 +1,45 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { render, screen, waitFor } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
 import { plannotatorProjectionToPlanDocument, type Message } from "@jingler/core"
-import { ConversationView, planTranscriptAnchorIndex } from "./conversation-view.js"
+import { ConversationView, latestAssistantMessageIndex, planTranscriptAnchorIndex } from "./conversation-view.js"
+
+const textMessage = (id: string, role: Message["role"], text: string): Message => ({
+  id,
+  role,
+  streaming: false,
+  createdAt: `2026-08-13T00:00:0${id}.000Z`,
+  parts: [{ _tag: "Text", text }]
+})
+
+describe("ConversationView message navigation", () => {
+  it("anchors each new assistant message with room below it", async () => {
+    const scrollTo = vi.fn()
+    const originalScrollTo = HTMLElement.prototype.scrollTo
+    HTMLElement.prototype.scrollTo = scrollTo
+    try {
+      const messages = [
+        textMessage("1", "user", "First request"),
+        textMessage("2", "assistant", "Earlier response")
+      ]
+      const view = render(<ConversationView mode="auto" messages={messages} />)
+      scrollTo.mockClear()
+
+      const nextMessages = [
+        ...messages,
+        textMessage("3", "user", "Second request"),
+        textMessage("4", "assistant", "Latest response")
+      ]
+      view.rerender(<ConversationView mode="auto" messages={nextMessages} />)
+
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled())
+      expect(latestAssistantMessageIndex(nextMessages)).toBe(3)
+      expect(screen.getByTestId("conversation-runway")).toBeTruthy()
+    } finally {
+      HTMLElement.prototype.scrollTo = originalScrollTo
+    }
+  })
+})
 
 describe("ConversationView Plannotator projection", () => {
   it("does not render a transcript card for an empty projection", () => {

@@ -76,6 +76,9 @@ const railText = (message: Message): string => {
   return text
 }
 
+export const latestAssistantMessageIndex = (messages: ReadonlyArray<Message>): number =>
+  messages.findLastIndex((message) => message.role === "assistant")
+
 /** Shift+Tab cycles Jingler's provider-neutral permission modes. */
 const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
 const MODE_CYCLE_WITH_PLAN: ReadonlyArray<PermissionMode> = [...MODE_CYCLE, "plan"]
@@ -463,6 +466,7 @@ return (virtualItems[0])
   // MessageScroller owns live-edge following. Keeping the current decision in
   // state lets history paging pause it without racing the scroller's observer.
   const [following, setFollowing] = useState(true)
+  const anchoredAssistantKey = useRef<string | undefined>(undefined)
   const [queueExpanded, setQueueExpanded] = useState(false)
   const queueLimit = queueExpanded ? queued.length : QUEUE_PREVIEW
   const planAnchorIndex = planTranscriptAnchorIndex(messages)
@@ -522,21 +526,22 @@ return (virtualItems[0])
   // changed at all, the previous array) keeps the rail's props referentially
   // stable, so the memoised PreviewRail skips per-token re-renders of its
   // tick + preview-card tree.
+  const userMessageIndexes = useMemo(() => messages.flatMap((message, index) =>
+    message.role === "user" ? [index] : []
+  ), [messages])
   const previousRailItems = useRef<ReadonlyArray<PreviewRailItem>>([])
   const messageRailItems = useMemo(() => {
     const previous = previousRailItems.current
-    let reusedAll = previous.length === messages.length
-    const next = messages.map((message, index) => {
-      const text = railText(message)
-      const responseTurn = message.role === "user"
-        ? messages.slice(index + 1).find(candidate => candidate.role === "assistant")
-        : undefined
+    let reusedAll = previous.length === userMessageIndexes.length
+    const next = userMessageIndexes.map((messageIndex, userIndex) => {
+      const message = messages[messageIndex]!
+      const responseTurn = messages.slice(messageIndex + 1).find(candidate => candidate.role === "assistant")
       const item = {
-        id: itemKeys[index]!,
-        ...createMessageRailPreview(text, responseTurn ? railText(responseTurn) : ""),
-        ariaLabel: `Go to ${message.role} message ${index + 1} of ${messages.length}`
+        id: itemKeys[messageIndex]!,
+        ...createMessageRailPreview(railText(message), responseTurn ? railText(responseTurn) : ""),
+        ariaLabel: `Go to user message ${userIndex + 1} of ${userMessageIndexes.length}`
       }
-      const old = previous[index]
+      const old = previous[userIndex]
       if (
         old !== undefined &&
         old.id === item.id &&
@@ -550,7 +555,7 @@ return (virtualItems[0])
     const result = reusedAll ? previous : next
     previousRailItems.current = result
     return result
-  }, [itemKeys, messages])
+  }, [itemKeys, messages, userMessageIndexes])
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
@@ -568,7 +573,18 @@ return (virtualItems[0])
   })
   const virtualItems = virtualizer.getVirtualItems()
   const activeVirtualItem = getActiveVirtualItem()
-  const activeRailId = activeVirtualItem ? itemKeys[activeVirtualItem.index] : itemKeys[0]
+  const activeMessageIndex = activeVirtualItem?.index ?? 0
+  const activeUserMessageIndex = userMessageIndexes.findLast(index => index <= activeMessageIndex) ?? userMessageIndexes[0]
+  const activeRailId = activeUserMessageIndex === undefined ? undefined : itemKeys[activeUserMessageIndex]
+
+  useLayoutEffect(() => {
+    const index = latestAssistantMessageIndex(messages)
+    const key = itemKeys[index]
+    if (key === undefined || key === anchoredAssistantKey.current) return
+    anchoredAssistantKey.current = key
+    setFollowing(false)
+    virtualizer.scrollToIndex(index, { align: "start" })
+  }, [itemKeys, messages, virtualizer])
 
   // Referentially stable so the memoised PreviewRail isn't defeated by a fresh
   // closure per render. `virtualizer` is a stable instance across renders.
@@ -699,6 +715,7 @@ return (virtualItems[0])
               )
             })}
           </div>
+          <div data-testid="conversation-runway" className="min-h-[48vh] shrink-0" aria-hidden />
           </ToolStopContext.Provider>
           </PlanProgressContext.Provider>
           {busy ? (
