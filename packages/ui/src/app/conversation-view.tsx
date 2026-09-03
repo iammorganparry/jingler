@@ -19,7 +19,7 @@ import type {
   ReasoningSetting,
   Skill
 } from "@jingler/core"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { type VirtualItem, useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
 import { ArrowUp, Lock, RotateCcw } from "lucide-react"
 import type { ArchiveReason, ContextPhase } from "@jingler/core"
@@ -78,6 +78,39 @@ const railText = (message: Message): string => {
 
 export const latestAssistantMessageIndex = (messages: ReadonlyArray<Message>): number =>
   messages.findLastIndex((message) => message.role === "assistant")
+
+/**
+ * The transcript row the reader is "on": pinned to the ends within 56px of
+ * either edge, otherwise whichever rendered row's centre is nearest the
+ * viewport's centre. Undefined when nothing is rendered yet.
+ */
+const activeVirtualItemFor = (
+  viewport: HTMLElement | null,
+  items: ReadonlyArray<VirtualItem>
+): VirtualItem | undefined => {
+  if (!viewport || items.length === 0) return undefined
+  if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 56) return items.at(-1)
+  if (viewport.scrollTop <= 56) return items[0]
+  const centre = viewport.scrollTop + viewport.clientHeight / 2
+  const distance = (item: VirtualItem) => Math.abs(item.start + item.size / 2 - centre)
+  return items.reduce((nearest, item) => (distance(item) < distance(nearest) ? item : nearest))
+}
+
+/**
+ * Which rail tick to light up: the user turn at or above the reader's current
+ * row. Before the virtualizer has measured anything, the row is the latest
+ * assistant turn (what the anchor effect below scrolls to).
+ */
+const activeRailIdFor = (
+  activeIndex: number | undefined,
+  itemKeys: ReadonlyArray<string>,
+  messages: ReadonlyArray<Message>,
+  userMessageIndexes: ReadonlyArray<number>
+): string | undefined => {
+  const index = activeIndex ?? Math.max(latestAssistantMessageIndex(messages), 0)
+  const userIndex = userMessageIndexes.findLast(i => i <= index) ?? userMessageIndexes[0]
+  return userIndex === undefined ? undefined : itemKeys[userIndex]
+}
 
 /** Shift+Tab cycles Jingler's provider-neutral permission modes. */
 const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
@@ -244,8 +277,8 @@ export interface ConversationViewProps {
  * The session workspace pane: the mode bar + interleaved transcript + composer,
  * with the live Changes rail (the worktree's real diff). Purely presentational —
  * the renderer's conversation machine feeds it `messages`/`patch` + callbacks.
- * New turns autoscroll to the top of the viewport so a streaming response has
- * room to fill downward (the design's "room to follow").
+ * New turns autoscroll to the latest assistant output and keep following while
+ * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
   const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
@@ -294,22 +327,7 @@ function renderSessionAnalytics() {
           ))
            }
 
-         function getActiveVirtualItem() {
-           if (viewport && virtualItems.length > 0) return (viewport.scrollTop <= 56
-      ? virtualItems[0]
-      : viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 56
-        ? virtualItems.at(-1)
-        : virtualItems.reduce((nearest, item) =>
-            Math.abs(item.start + item.size / 2 - viewport.scrollTop - viewport.clientHeight / 2) <
-            Math.abs(nearest.start + nearest.size / 2 - viewport.scrollTop - viewport.clientHeight / 2)
-              ? item
-              : nearest
-          ))
-return (virtualItems[0])
-         }
-
          function renderComposerArea() {
-
 
   function queuedMessageActions(item: NonNullable<ConversationViewProps["queued"]>[number]) {
     return {
@@ -572,18 +590,19 @@ return (virtualItems[0])
     overscan: 2
   })
   const virtualItems = virtualizer.getVirtualItems()
-  const activeVirtualItem = getActiveVirtualItem()
-  const activeMessageIndex = activeVirtualItem?.index ?? 0
-  const activeUserMessageIndex = userMessageIndexes.findLast(index => index <= activeMessageIndex) ?? userMessageIndexes[0]
-  const activeRailId = activeUserMessageIndex === undefined ? undefined : itemKeys[activeUserMessageIndex]
+  const activeVirtualItem = activeVirtualItemFor(viewport, virtualItems)
+  const activeRailId = activeRailIdFor(activeVirtualItem?.index, itemKeys, messages, userMessageIndexes)
 
   useLayoutEffect(() => {
     const index = latestAssistantMessageIndex(messages)
     const key = itemKeys[index]
     if (key === undefined || key === anchoredAssistantKey.current) return
-    anchoredAssistantKey.current = key
-    setFollowing(false)
-    virtualizer.scrollToIndex(index, { align: "start" })
+    const frame = requestAnimationFrame(() => {
+      anchoredAssistantKey.current = key
+      setFollowing(index === messages.length - 1)
+      virtualizer.scrollToIndex(index, { align: "end" })
+    })
+    return () => cancelAnimationFrame(frame)
   }, [itemKeys, messages, virtualizer])
 
   // Referentially stable so the memoised PreviewRail isn't defeated by a fresh
@@ -715,7 +734,6 @@ return (virtualItems[0])
               )
             })}
           </div>
-          <div data-testid="conversation-runway" className="min-h-[48vh] shrink-0" aria-hidden />
           </ToolStopContext.Provider>
           </PlanProgressContext.Provider>
           {busy ? (

@@ -1,5 +1,5 @@
 import type { Message } from "@jingler/core"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { MessageTurn } from "../composites/message-turn.js"
 import { ConversationView } from "./conversation-view.js"
@@ -26,16 +26,17 @@ const queued = (n: number) =>
 const rows = () => screen.queryAllByText(/^message \d+$/)
 
 describe("ConversationView — queued messages", () => {
-  it("gives the production scroller a destination for every user message", () => {
+  it("gives the production scroller a destination for every user message", async () => {
     const createdAt = new Date(0).toISOString()
     render(<ConversationView mode="accept-edits" messages={[
       { id: "u1", role: "user", streaming: false, createdAt, parts: [{ _tag: "Text", text: "First request" }] },
       { id: "a1", role: "assistant", streaming: false, createdAt, parts: [{ _tag: "Text", text: "First response" }] },
-      { id: "u2", role: "user", streaming: false, createdAt, parts: [{ _tag: "Text", text: "Second request" }] }
+      { id: "u2", role: "user", streaming: false, createdAt, parts: [{ _tag: "Text", text: "Second request" }] },
+      { id: "a2", role: "assistant", streaming: false, createdAt, parts: [{ _tag: "Text", text: "Second response" }] }
     ]} />)
     expect(screen.getByRole("navigation", { name: "Message navigation" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Go to user message 1 of 2" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Go to user message 2 of 2" })).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Go to user message 2 of 2" }).getAttribute("aria-current")).toBe("location"))
   })
 
   it("mounts the approved components at the production conversation boundary", () => {

@@ -13,7 +13,7 @@ const textMessage = (id: string, role: Message["role"], text: string): Message =
 })
 
 describe("ConversationView message navigation", () => {
-  it("anchors each new assistant message with room below it", async () => {
+  it("anchors each new assistant message", async () => {
     const scrollTo = vi.fn()
     const originalScrollTo = HTMLElement.prototype.scrollTo
     HTMLElement.prototype.scrollTo = scrollTo
@@ -23,6 +23,7 @@ describe("ConversationView message navigation", () => {
         textMessage("2", "assistant", "Earlier response")
       ]
       const view = render(<ConversationView mode="auto" messages={messages} />)
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled())
       scrollTo.mockClear()
 
       const nextMessages = [
@@ -34,7 +35,7 @@ describe("ConversationView message navigation", () => {
 
       await waitFor(() => expect(scrollTo).toHaveBeenCalled())
       expect(latestAssistantMessageIndex(nextMessages)).toBe(3)
-      expect(screen.getByTestId("conversation-runway")).toBeTruthy()
+      expect(screen.queryByTestId("conversation-runway")).toBeNull()
     } finally {
       HTMLElement.prototype.scrollTo = originalScrollTo
     }
