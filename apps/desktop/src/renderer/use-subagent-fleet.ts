@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useActorRef, useSelector } from "@xstate/react"
 import type {
   Subagent,
@@ -56,98 +56,12 @@ export function useSubagentFleet(input: {
     () => [...input.events, ...projectedLegacy],
     [input.events, projectedLegacy]
   )
-  const eventsRef = useRef(events)
-  eventsRef.current = events
-  const refreshInFlightRef = useRef(false)
   const actor = useActorRef(subagentFleetMachine, {
     input: { parentPiSessionId }
   })
   useEffect(() => {
     actor.send({ type: "SYNC", events })
   }, [actor, events])
-  const hasFleetSession = input.piSessionId !== null || input.events.length > 0
-  useEffect(() => {
-    if (!hasFleetSession) return
-    let active = true
-    let retryAttempt = 0
-    let retryTimer: ReturnType<typeof setTimeout> | null = null
-    const refresh = async () => {
-      if (refreshInFlightRef.current) return
-      refreshInFlightRef.current = true
-      try {
-        const snapshot = await rpc.agentSubagentFleetSnapshot(
-          input.sessionId,
-          input.chatId,
-          parentPiSessionId
-        )
-        if (!active) return
-        const snapshotIds = new Set(snapshot.nodes.map((node) => node.id))
-        const missingActive = (snapshot.omitted === 0
-          ? actor.getSnapshot().context.tree.nodes.filter((node) =>
-            ["queued", "running", "paused", "needs-attention"].includes(node.status) &&
-            !snapshotIds.has(node.id)
-          )
-          : [])
-          .map((node): SubagentFleetEvent => ({
-            _tag: "Remove",
-            version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-            eventId: `renderer-recovery:remove:${snapshot.generatedAt}:${node.id}`,
-            occurredAt: snapshot.generatedAt,
-            registryRevision: snapshot.registryRevision,
-            id: node.id
-          }))
-        retryAttempt = 0
-        if (retryTimer !== null) {
-          clearTimeout(retryTimer)
-          retryTimer = null
-        }
-        actor.send({
-          type: "SYNC",
-          events: [
-            ...eventsRef.current,
-            ...missingActive,
-            {
-              _tag: "Snapshot",
-              version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-              eventId: `renderer-recovery:${snapshot.generatedAt}`,
-              occurredAt: snapshot.generatedAt,
-              snapshot
-            }
-          ]
-        })
-      } catch {
-        // Session startup and reconnect can race the first recovery read. Retry
-        // transiently without restoring steady-state polling.
-        if (active && retryAttempt < 3 && retryTimer === null) {
-          const delay = 250 * (4 ** retryAttempt)
-          retryAttempt += 1
-          retryTimer = setTimeout(() => {
-            retryTimer = null
-            void refresh()
-          }, delay)
-        }
-      } finally {
-        refreshInFlightRef.current = false
-      }
-    }
-    const refreshOnFocus = () => void refresh()
-    void refresh()
-    window.addEventListener("focus", refreshOnFocus)
-    document.addEventListener("visibilitychange", refreshOnFocus)
-    // Mount/focus alone is not enough: a subagent spawned MID-TURN while the
-    // window stays focused never re-triggers recovery, so a missed live fleet
-    // event left the drawer empty for the whole run. The durable-status read
-    // behind this RPC is a cheap local directory scan; a slow steady poll
-    // reconciles both missed starts and missed completions.
-    const steady = setInterval(() => void refresh(), 15_000)
-    return () => {
-      active = false
-      clearInterval(steady)
-      if (retryTimer !== null) clearTimeout(retryTimer)
-      window.removeEventListener("focus", refreshOnFocus)
-      document.removeEventListener("visibilitychange", refreshOnFocus)
-    }
-  }, [actor, hasFleetSession, input.chatId, input.sessionId, parentPiSessionId])
   const context = useSelector(actor, (snapshot) => snapshot.context)
   const completedNodes = useMemo(
     () => completedSubagentNodes(events),

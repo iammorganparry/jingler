@@ -105,6 +105,92 @@ describe("subagent tab store", () => {
       .toBe("main")
   })
 
+  it("keeps the newest eight completions regardless of event order", () => {
+    const events: ReadonlyArray<SubagentFleetEvent> = [100, 1, 2, 3, 4, 5, 6, 7, 8]
+      .map((completedAt) => {
+        const completed = node({
+          id: `parent/worker-${completedAt}`,
+          subagentId: `worker-${completedAt}`,
+          orchestrationRunId: `worker-${completedAt}`,
+          runId: `worker-${completedAt}`,
+          status: "completed",
+          updatedAt: completedAt,
+          completedAt,
+          terminal: { reason: "completed", summary: "Done", at: completedAt, retryable: false }
+        })
+        return {
+          _tag: "Upsert" as const,
+          version: 2 as const,
+          eventId: `completed-${completedAt}`,
+          occurredAt: completedAt,
+          node: completed
+        }
+      })
+
+    expect(completedSubagentNodes(events).map(({ completedAt }) => completedAt))
+      .toEqual([100, 8, 7, 6, 5, 4, 3, 2])
+  })
+
+  it("keeps completed history when a tombstone rejects a delayed running event", () => {
+    const completed = node({
+      status: "completed",
+      registryRevision: 10,
+      updatedAt: 10,
+      completedAt: 10,
+      terminal: { reason: "completed", summary: "Done", at: 10, retryable: false }
+    })
+    const events: ReadonlyArray<SubagentFleetEvent> = [{
+      _tag: "Upsert",
+      version: 2,
+      eventId: "completed",
+      occurredAt: 10,
+      node: completed
+    }, {
+      _tag: "Remove",
+      version: 2,
+      eventId: "removed",
+      occurredAt: 20,
+      registryRevision: 20,
+      id: completed.id
+    }, {
+      _tag: "Upsert",
+      version: 2,
+      eventId: "delayed-running",
+      occurredAt: 15,
+      node: node({ registryRevision: 15, updatedAt: 15 })
+    }]
+
+    expect(completedSubagentNodes(events)).toEqual([completed])
+    expect(completedSubagentNodes([events[1]!, events[0]!, events[2]!])).toEqual([completed])
+  })
+
+  it("includes terminal nodes delivered only by a snapshot", () => {
+    const completed = node({
+      status: "completed",
+      completedAt: 20,
+      updatedAt: 20,
+      terminal: { reason: "completed", summary: "Done", at: 20, retryable: false }
+    })
+    const event: SubagentFleetEvent = {
+      _tag: "Snapshot",
+      version: 2,
+      eventId: "snapshot",
+      occurredAt: 20,
+      snapshot: {
+        version: 2,
+        parentPiSessionId: "parent",
+        registryRevision: 20,
+        generatedAt: 20,
+        totalActive: 0,
+        omitted: 0,
+        activeCapacity: { used: 0, limit: 8 },
+        nodes: [completed]
+      }
+    }
+
+    expect(completedSubagentNodes([event])).toEqual([completed])
+  })
+
   it("retains an unknown child's partial output in completed history", () => {
     const unknown = node({
       status: "unknown",

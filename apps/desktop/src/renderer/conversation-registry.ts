@@ -28,15 +28,35 @@
 import type { ActorRefFrom, SnapshotFrom } from "xstate"
 import { createActor } from "xstate"
 import { useSyncExternalStore } from "react"
-import type { ActivityPhase, AgentFileActivity, Session, SessionActivity } from "@jingler/core"
-import { activityOf, agentFileActivityOf } from "@jingler/core"
+import type {
+  ActivityPhase,
+  AgentFileActivity,
+  Session,
+  SessionActivity,
+  SubagentFleetEvent,
+  SubagentFleetNode,
+  SubagentFleetSnapshot
+} from "@jingler/core"
+import {
+  activityOf,
+  agentFileActivityOf,
+  SUBAGENT_FLEET_PROTOCOL_VERSION
+} from "@jingler/core"
+import {
+  isSubagentFleetNodeNewer,
+  type SubagentRunTreeContext
+} from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-reducer"
 import { conversationMachine } from "./conversation-machine.js"
+import {
+  parentPiSessionIdFromFleetEvents,
+  projectSubagentFleetEvents
+} from "./subagent-fleet-machine.js"
 import { setSessionActivity } from "./session-activity.js"
 import { setPlanPresent } from "./plan-presence.js"
 import { clearSessionDiff, diffCounts, setSessionDiff } from "./diff-presence.js"
 import { isSessionVisible } from "./active-session.js"
 import type { ActorCandidate } from "./actor-eviction.js"
-import { keysToEvict } from "./actor-eviction.js"
+import { keysToEvict, MAX_LIVE_ACTORS } from "./actor-eviction.js"
 import { createCoalescer } from "./coalesce.js"
 import type { NotifiableState } from "./notifier.js"
 import { notificationFor } from "./notifier.js"
@@ -61,9 +81,32 @@ type ConversationSnapshot = SnapshotFrom<typeof conversationMachine>
  * of publishes instead of one apiece.
  */
 const PUBLISH_MS = 100
+const FLEET_POLL_MS = 15_000
+const FLEET_DORMANT_POLL_MS = 60_000
+const ACTIVE_FLEET_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set([
+  "queued",
+  "running",
+  "paused",
+  "needs-attention"
+])
+
+interface FleetReconciler {
+  parentPiSessionId: string
+  timer: ReturnType<typeof setTimeout> | null
+  inFlight: boolean
+  retryAttempt: number
+  inactiveAttempts: number
+  dormant: boolean
+  mainRunning: boolean
+}
 
 const registry = new Map<string, ConversationActor>()
 const snapshots = new Map<string, ConversationSnapshot>()
+const fleetReconcilers = new Map<string, FleetReconciler>()
+const fleetTreeCache = new WeakMap<
+  ReadonlyArray<SubagentFleetEvent>,
+  { readonly parentPiSessionId: string; readonly tree: SubagentRunTreeContext }
+>()
 let chatActivities: Record<string, Record<string, SessionActivity>> = {}
 const EMPTY_CHAT_ACTIVITIES: Readonly<Record<string, SessionActivity>> = {}
 const activityListeners = new Set<() => void>()
@@ -81,6 +124,254 @@ const notifyBaselines = new Map<string, NotifiableState>()
 const pendingFileActivities = new Map<string, AgentFileActivity>()
 const registryKey = (sessionId: string, chatId: string): string =>
   `${sessionId}:${chatId}`
+
+const inactivePiSession = (cause: unknown): boolean =>
+  cause instanceof Error && cause.message.toLowerCase().includes("pi session is not active")
+
+const fleetProjection = (snapshot: ConversationSnapshot) => {
+  const session = snapshot.context.session
+  const chatId = snapshot.context.chatId
+  const piSessionId = session.chats.find(({ id }) => id === chatId)?.piSessionId ?? null
+  const events = snapshot.context.subagentFleetEvents
+  if (piSessionId === null && events.length === 0) return null
+  const parentPiSessionId = parentPiSessionIdFromFleetEvents(
+    events,
+    piSessionId ?? `${session.id}:${chatId}`
+  )
+  const cached = fleetTreeCache.get(events)
+  const tree = cached?.parentPiSessionId === parentPiSessionId
+    ? cached.tree
+    : projectSubagentFleetEvents(parentPiSessionId, events)
+  if (cached?.parentPiSessionId !== parentPiSessionId) {
+    fleetTreeCache.set(events, { parentPiSessionId, tree })
+  }
+  return {
+    sessionId: session.id,
+    chatId,
+    parentPiSessionId,
+    tree,
+    active: tree.nodes.filter((node) => ACTIVE_FLEET_STATUSES.has(node.status)),
+    mainRunning: snapshot.matches("running") || snapshot.matches("remoteRunning")
+  }
+}
+
+const unknownFleetEvent = (
+  node: SubagentFleetNode,
+  occurredAt: number,
+  registryRevision: number = node.registryRevision
+): SubagentFleetEvent => ({
+  _tag: "Upsert",
+  version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+  eventId: `renderer-recovery:unknown:${occurredAt}:${node.id}`,
+  occurredAt,
+  node: {
+    ...node,
+    status: "unknown",
+    health: "unknown",
+    blocking: null,
+    terminal: {
+      reason: "unknown",
+      summary: "Pi session is no longer active",
+      at: occurredAt,
+      retryable: false
+    },
+    registryRevision: Math.max(node.registryRevision, registryRevision),
+    currentTool: null,
+    updatedAt: occurredAt,
+    completedAt: occurredAt,
+    attention: null
+  }
+})
+
+export const fleetRecoveryEvents = (
+  tree: SubagentRunTreeContext,
+  remote: SubagentFleetSnapshot
+): ReadonlyArray<SubagentFleetEvent> => {
+  if (
+    remote.parentPiSessionId !== tree.parentPiSessionId ||
+    remote.registryRevision < tree.registryRevision
+  ) return []
+  const currentById = new Map(tree.nodes.map((node) => [node.id, node]))
+  const clocksById = new Map(tree.nodeClocks.map((clock) => [clock.id, clock]))
+  const remoteIds = new Set(remote.nodes.map((node) => node.id))
+  const recovered: SubagentFleetEvent[] = remote.nodes
+    .filter((node) => {
+      const existing = currentById.get(node.id)
+      if (existing !== undefined) return isSubagentFleetNodeNewer(node, existing)
+      const clock = clocksById.get(node.id)
+      return clock === undefined || clock.present || clock.registryRevision < node.registryRevision
+    })
+    .map((node) => ({
+      _tag: "Upsert",
+      version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+      eventId: `renderer-recovery:snapshot:${remote.generatedAt}:${node.id}`,
+      occurredAt: remote.generatedAt,
+      node
+    }))
+  if (remote.omitted === 0) {
+    recovered.push(...tree.nodes
+      .filter((node) => {
+        const clock = clocksById.get(node.id)
+        return ACTIVE_FLEET_STATUSES.has(node.status) &&
+          !remoteIds.has(node.id) &&
+          (clock?.registryRevision ?? node.registryRevision) <= remote.registryRevision
+      })
+      .map((node) => unknownFleetEvent(node, remote.generatedAt, remote.registryRevision)))
+  }
+  return recovered
+}
+
+export const fleetRetryDecision = (
+  retryAttempt: number,
+  inactiveAttempts: number,
+  cause: unknown
+) => {
+  const inactive = inactivePiSession(cause) ? inactiveAttempts + 1 : 0
+  if (retryAttempt < 3) {
+    return {
+      retryAttempt: retryAttempt + 1,
+      inactiveAttempts: inactive,
+      delay: 250 * (4 ** retryAttempt),
+      exhaustedInactive: false
+    }
+  }
+  return {
+    retryAttempt: 0,
+    inactiveAttempts: 0,
+    delay: FLEET_POLL_MS,
+    exhaustedInactive: inactive === 4
+  }
+}
+
+const scheduleFleetReconciliation = (
+  key: string,
+  state: FleetReconciler,
+  delay: number
+): void => {
+  if (state.timer !== null || state.inFlight || fleetReconcilers.get(key) !== state) return
+  state.timer = setTimeout(() => {
+    state.timer = null
+    void reconcileFleet(key, state)
+  }, delay)
+}
+
+const reconcileFleet = async (key: string, state: FleetReconciler): Promise<void> => {
+  const actor = registry.get(key)
+  const projection = snapshots.get(key)
+  if (!actor || !projection || fleetReconcilers.get(key) !== state) return
+  const before = fleetProjection(projection)
+  if (before === null || before.parentPiSessionId !== state.parentPiSessionId) return
+
+  state.inFlight = true
+  let nextDelay = FLEET_POLL_MS
+  try {
+    const remote = await rpc.agentSubagentFleetSnapshot(
+      before.sessionId,
+      before.chatId,
+      before.parentPiSessionId
+    )
+    const latest = snapshots.get(key)
+    const current = latest === undefined ? null : fleetProjection(latest)
+    if (!registry.has(key) || current?.parentPiSessionId !== state.parentPiSessionId) return
+    const recovered = fleetRecoveryEvents(current.tree, remote)
+    if (recovered.length > 0) {
+      actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: recovered })
+    }
+    state.retryAttempt = 0
+    state.inactiveAttempts = 0
+    state.dormant = remote.totalActive === 0 &&
+      remote.omitted === 0 &&
+      current.active.length === 0 &&
+      !current.mainRunning
+  } catch (cause) {
+    const retry = fleetRetryDecision(state.retryAttempt, state.inactiveAttempts, cause)
+    state.retryAttempt = retry.retryAttempt
+    state.inactiveAttempts = retry.inactiveAttempts
+    nextDelay = retry.delay
+    if (retry.exhaustedInactive) {
+      const latest = snapshots.get(key)
+      const current = latest === undefined ? null : fleetProjection(latest)
+      state.dormant = current?.mainRunning !== true
+      if (
+        !current?.mainRunning &&
+        current?.parentPiSessionId === state.parentPiSessionId &&
+        current.active.length > 0
+      ) {
+        actor.send({
+          type: "RECOVER_SUBAGENT_FLEET",
+          events: current.active.map((node) => unknownFleetEvent(node, Date.now()))
+        })
+      }
+    }
+  } finally {
+    state.inFlight = false
+    if (registry.has(key) && fleetReconcilers.get(key) === state) {
+      scheduleFleetReconciliation(
+        key,
+        state,
+        state.dormant ? FLEET_DORMANT_POLL_MS : nextDelay
+      )
+    }
+  }
+}
+
+const ensureFleetReconciliation = (
+  key: string,
+  snapshot: ConversationSnapshot,
+  projection = fleetProjection(snapshot)
+): void => {
+  const current = fleetReconcilers.get(key)
+  if (projection === null) {
+    if (current?.timer !== null && current?.timer !== undefined) clearTimeout(current.timer)
+    fleetReconcilers.delete(key)
+    return
+  }
+  if (current?.parentPiSessionId === projection.parentPiSessionId) {
+    const mainStarted = !current.mainRunning && projection.mainRunning
+    current.mainRunning = projection.mainRunning
+    if (current.dormant && (mainStarted || projection.active.length > 0)) {
+      if (current.timer !== null) clearTimeout(current.timer)
+      current.timer = null
+      current.dormant = false
+      current.retryAttempt = 0
+      current.inactiveAttempts = 0
+      scheduleFleetReconciliation(key, current, 0)
+    } else {
+      scheduleFleetReconciliation(
+        key,
+        current,
+        current.dormant ? FLEET_DORMANT_POLL_MS : FLEET_POLL_MS
+      )
+    }
+    return
+  }
+  if (current?.timer !== null && current?.timer !== undefined) clearTimeout(current.timer)
+  const state: FleetReconciler = {
+    parentPiSessionId: projection.parentPiSessionId,
+    timer: null,
+    inFlight: false,
+    retryAttempt: 0,
+    inactiveAttempts: 0,
+    dormant: false,
+    mainRunning: projection.mainRunning
+  }
+  fleetReconcilers.set(key, state)
+  scheduleFleetReconciliation(key, state, 0)
+}
+
+const wakeFleetReconcilers = (): void => {
+  for (const [key, state] of fleetReconcilers) {
+    if (state.inFlight) continue
+    if (state.timer !== null) clearTimeout(state.timer)
+    state.timer = null
+    scheduleFleetReconciliation(key, state, 0)
+  }
+}
+
+if (typeof window !== "undefined") window.addEventListener("focus", wakeFleetReconcilers)
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", wakeFleetReconcilers)
+}
 
 /** Where the machine is, in the terms `activityOf` reasons about. */
 const phaseOf = (snap: ConversationSnapshot): ActivityPhase => {
@@ -187,6 +478,8 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
 const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   const session = snap.context.session
   const chatId = snap.context.chatId
+  const fleet = fleetProjection(snap)
+  ensureFleetReconciliation(key, snap, fleet)
   const legacyAgents = snap.context.reviewer === null
     ? snap.context.subagents
     : [...snap.context.subagents, snap.context.reviewer]
@@ -197,7 +490,8 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
       chatId,
       piSessionId: session.chats.find(({ id }) => id === chatId)?.piSessionId ?? null,
       events: snap.context.subagentFleetEvents,
-      legacyAgents
+      legacyAgents,
+      canonicalNodes: fleet?.tree.nodes
     })
   )
   const activity = activityFor(snap)
@@ -244,6 +538,7 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
       })
       .catch(() => {})
   }
+  if (registry.size > MAX_LIVE_ACTORS) evictIdleActors("")
 }
 
 /**
@@ -272,6 +567,9 @@ const publishes = createCoalescer<ConversationSnapshot>((batch) => {
  * next opened.
  */
 const forget = (key: string): void => {
+  const reconciler = fleetReconcilers.get(key)
+  if (reconciler?.timer !== null && reconciler?.timer !== undefined) clearTimeout(reconciler.timer)
+  fleetReconcilers.delete(key)
   registry.get(key)?.stop()
   registry.delete(key)
   snapshots.delete(key)
@@ -314,7 +612,10 @@ const evictIdleActors = (keep: string): void => {
         : {
             key,
             sessionId: snapshot.context.session.id,
-            phase: phaseOf(snapshot),
+            phase:
+              (fleetProjection(snapshot)?.active.length ?? 0) > 0
+                ? "running"
+                : phaseOf(snapshot),
             queuedCount: snapshot.context.queued.length,
             pendingText: snapshot.context.pendingText
           }

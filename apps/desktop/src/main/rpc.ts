@@ -5484,9 +5484,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         }
       )
     }).pipe(
-      Effect.mapError(
-        () => new GitError({ message: "Could not reconcile the subagent Fleet" })
-      )
+      Effect.mapError((cause) => new GitError({
+        message:
+          typeof cause === "object" &&
+          cause !== null &&
+          "message" in cause &&
+          String(cause.message).toLowerCase().includes("pi session is not active")
+            ? "Pi session is not active"
+            : "Could not reconcile the subagent Fleet"
+      }))
     ),
   "Agent.subagentTranscript": ({
     sessionId,
