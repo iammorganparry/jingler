@@ -34,11 +34,11 @@ Keep the fix in the shared renderer reconciliation path in `apps/desktop/src/ren
 
 ## Steps
 
-- [~] Add a small helper in `apps/desktop/src/renderer/use-subagent-fleet.ts` that creates `unknown` terminal upserts for currently active nodes when the owning Pi session is definitively unavailable.
-- [ ] Invoke it only after the existing three delayed retries all fail with `pi session is not active`; reset retry state after recovery and continue normal focus/poll reconciliation.
-- [ ] Add a fake-timer hook test proving a stale running tab closes and appears in completed history as `unknown` after retries are exhausted.
-- [ ] Add or extend a test proving generic RPC failures do not settle active nodes.
-- [ ] Run the focused Vitest file and desktop TypeScript checks.
+- [x] Add a small helper in `apps/desktop/src/renderer/use-subagent-fleet.ts` that creates `unknown` terminal upserts for currently active nodes when the owning Pi session is definitively unavailable.
+- [x] Invoke it only after the existing three delayed retries all fail with `pi session is not active`; reset retry state after recovery and continue normal focus/poll reconciliation.
+- [x] Add a fake-timer hook test proving a stale running tab closes and appears in completed history as `unknown` after retries are exhausted.
+- [x] Add or extend a test proving generic RPC failures do not settle active nodes.
+- [x] Run the focused Vitest file and desktop TypeScript checks.
 
 ## Verification
 

@@ -52,6 +52,7 @@ import { useConversation } from "./use-conversation.js"
 import { MAIN_FLEET_AGENT, useSubagentFleet } from "./use-subagent-fleet.js"
 import {
   publishSubagentTabs,
+  recentSubagentNodes,
   releaseSubagentTabController,
   useSubagentTabSelection
 } from "./subagent-tab-store.js"
@@ -683,7 +684,7 @@ export function ConversationPane({
         ["completed", "failed", "stopped", "unknown"].includes(node.status)
       ) completed.set(node.id, node)
     }
-    return [...completed.values()].slice(-8).reverse()
+    return recentSubagentNodes([...completed.values()])
   }, [fleet.completedNodes, fleet.nodes])
   useEffect(() => {
     publishSubagentTabs(session.id, {

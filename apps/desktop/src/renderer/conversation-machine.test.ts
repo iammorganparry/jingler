@@ -2,7 +2,9 @@ import type {
   Message,
   Session,
   SessionEventEnvelope,
-  StreamEvent
+  StreamEvent,
+  SubagentFleetEvent,
+  SubagentFleetNode
 } from "@jingler/core"
 import {
   applyStreamEvent,
@@ -17,6 +19,7 @@ import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  boundedFleetEvents,
   CONVERSATION_LOAD_TIMEOUT_MS,
   conversationMachine
 } from "./conversation-machine.js"
@@ -1302,6 +1305,235 @@ describe("conversationMachine — talking to the main agent while sub-agents run
     emit({ _tag: "Done", costUsd: 0, tokens: 0 })
     await waitFor(actor, (snapshot) => snapshot.matches(idle))
     actor.stop()
+  })
+
+  it("retains renderer-recovered fleet events while idle", async () => {
+    const actor = start()
+    await waitFor(actor, (snapshot) => snapshot.matches(idle))
+    const recovery = {
+      _tag: "Remove" as const,
+      version: 2 as const,
+      eventId: "renderer-recovery",
+      occurredAt: 42,
+      registryRevision: 42,
+      id: "pi-parent-1/stale-run"
+    }
+
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [recovery] })
+
+    expect(actor.getSnapshot().context.subagentFleetEvents).toEqual([recovery])
+    actor.stop()
+  })
+
+  it("does not evict a fleet tombstone while its stale upsert is retained", () => {
+    const removed: SubagentFleetEvent = {
+      _tag: "Remove",
+      version: 2,
+      eventId: "removed",
+      occurredAt: 20,
+      registryRevision: 20,
+      id: "pi-parent-1/stale"
+    }
+    const upsert = (id: string): SubagentFleetEvent => {
+      const subagentId = id.split("/").at(-1)!
+      return {
+        _tag: "Upsert",
+        version: 2,
+        eventId: id,
+        occurredAt: 15,
+        node: {
+          id: `pi-parent-1/${subagentId}`,
+          subagentId,
+          parentPiSessionId: "pi-parent-1",
+          parentId: null,
+          registryRevision: 15,
+          childSequence: 1,
+          startedAt: 0,
+          updatedAt: 15,
+          status: "running"
+        } as SubagentFleetNode
+      }
+    }
+    const events = [
+      removed,
+      ...Array.from({ length: 510 }, (_, index) => upsert(`filler-${index}`)),
+      upsert(removed.id),
+      upsert("recovery")
+    ]
+
+    const bounded = boundedFleetEvents(events)
+    const afterNextEvent = boundedFleetEvents([...bounded, upsert("next")])
+
+    expect(afterNextEvent.length).toBeLessThanOrEqual(512)
+    const retainsStale = afterNextEvent.some((event) =>
+      event._tag === "Upsert" && event.node.id === removed.id
+    )
+    const retainsTombstone = afterNextEvent.some((event) =>
+      event._tag === "Remove" && event.id === removed.id
+    )
+    expect(retainsStale && !retainsTombstone).toBe(false)
+
+    const tombstones = Array.from({ length: 512 }, (_, index): SubagentFleetEvent => ({
+      ...removed,
+      eventId: `removed-${index}`,
+      id: `pi-parent-1/removed-${index}`
+    }))
+    const live: SubagentFleetEvent = {
+      _tag: "Upsert",
+      version: 2,
+      eventId: "live",
+      occurredAt: 30,
+      node: {
+        id: "pi-parent-1/live",
+        subagentId: "live",
+        parentPiSessionId: "pi-parent-1",
+        parentId: null,
+        registryRevision: 30,
+        childSequence: 1,
+        updatedAt: 30,
+        startedAt: 30,
+        status: "running"
+      } as SubagentFleetNode
+    }
+    expect(boundedFleetEvents([live, ...tombstones]).some((event) =>
+      event._tag === "Upsert" && event.node.id === "pi-parent-1/live"
+    )).toBe(true)
+
+    const crowdedTombstones = tombstones.slice(0, 449)
+    const crowded = boundedFleetEvents([
+      ...crowdedTombstones,
+      ...Array.from({ length: 63 }, (_, index) => upsert(`active-${index}`)),
+      upsert("pi-parent-1/removed-0")
+    ])
+    expect(crowded).toContainEqual(crowdedTombstones[0])
+
+    const terminal = Array.from({ length: 8 }, (_, index): SubagentFleetEvent => ({
+      _tag: "Upsert",
+      version: 2,
+      eventId: `terminal-${index}`,
+      occurredAt: index,
+      node: {
+        id: `pi-parent-1/terminal-${index}`,
+        subagentId: `terminal-${index}`,
+        orchestrationRunId: `terminal-${index}`,
+        runId: `terminal-${index}`,
+        parentPiSessionId: "pi-parent-1",
+        parentId: null,
+        nodeKind: "agent",
+        status: "completed",
+        registryRevision: index,
+        childSequence: 1,
+        startedAt: 0,
+        completedAt: index,
+        updatedAt: index
+      } as SubagentFleetNode
+    }))
+    const terminalIds = new Set(terminal.map((event) =>
+      event._tag === "Upsert" ? event.node.id : ""
+    ))
+    expect(boundedFleetEvents([
+      ...terminal,
+      ...Array.from({ length: 64 }, (_, index) => upsert(`churn-${index}`)),
+      ...crowdedTombstones
+    ]).filter((event) =>
+      event._tag === "Upsert" && terminalIds.has(event.node.id)
+    )).toHaveLength(8)
+
+    const firstTerminal = terminal[0]
+    const canonicalTerminal = {
+      ...(firstTerminal?._tag === "Upsert" ? firstTerminal.node : {}),
+      registryRevision: 30,
+      completedAt: 30,
+      updatedAt: 30
+    } as SubagentFleetNode
+    const snapshotTerminal: SubagentFleetEvent = {
+      _tag: "Snapshot",
+      version: 2,
+      eventId: "terminal-snapshot",
+      occurredAt: 30,
+      snapshot: {
+        version: 2,
+        parentPiSessionId: "pi-parent-1",
+        registryRevision: 30,
+        generatedAt: 30,
+        totalActive: 0,
+        omitted: 0,
+        activeCapacity: { used: 0, limit: 8 },
+        nodes: [canonicalTerminal]
+      }
+    }
+    const staleTerminal: SubagentFleetEvent = {
+      _tag: "Upsert",
+      version: 2,
+      eventId: "stale-terminal",
+      occurredAt: 100,
+      node: { ...canonicalTerminal, registryRevision: 20, completedAt: 100, updatedAt: 100 }
+    }
+    const canonical = boundedFleetEvents([
+      snapshotTerminal,
+      staleTerminal,
+      ...tombstones
+    ]).find((event) => event._tag === "Upsert" && event.node.id === canonicalTerminal.id)
+    expect(canonical?._tag === "Upsert" && canonical.node.registryRevision).toBe(30)
+
+    const nineTerminal = Array.from({ length: 9 }, (_, index): SubagentFleetEvent => ({
+      _tag: "Upsert",
+      version: 2,
+      eventId: `canonical-${index}`,
+      occurredAt: index,
+      node: {
+        id: `parent/history-${index}`,
+        subagentId: `history-${index}`,
+        parentPiSessionId: "parent",
+        parentId: null,
+        nodeKind: "agent",
+        status: "completed",
+        registryRevision: 30,
+        childSequence: 2,
+        completedAt: index,
+        updatedAt: index,
+        startedAt: 0
+      } as SubagentFleetNode
+    }))
+    const oldestTerminal = nineTerminal[0]
+    const delayed: SubagentFleetEvent = {
+      _tag: "Upsert",
+      version: 2,
+      eventId: "delayed-history",
+      occurredAt: 100,
+      node: {
+        ...(oldestTerminal?._tag === "Upsert" ? oldestTerminal.node : {}),
+        status: "running",
+        registryRevision: 20,
+        updatedAt: 100
+      } as SubagentFleetNode
+    }
+    expect(boundedFleetEvents([
+      ...nineTerminal,
+      delayed,
+      ...tombstones
+    ]).some((event) =>
+      event._tag === "Upsert" &&
+      event.node.id === "parent/history-0" &&
+      event.node.status === "running"
+    )).toBe(false)
+
+    const oldSnapshot = snapshotTerminal
+    const newSnapshot: SubagentFleetEvent = {
+      ...snapshotTerminal,
+      eventId: "new-parent-snapshot",
+      occurredAt: 200,
+      snapshot: {
+        ...snapshotTerminal.snapshot,
+        parentPiSessionId: "new-parent",
+        registryRevision: 1,
+        generatedAt: 200,
+        nodes: []
+      }
+    }
+    const rollover = boundedFleetEvents([oldSnapshot, newSnapshot, ...tombstones])
+    expect(rollover.find((event) => event._tag === "Snapshot")?.snapshot.parentPiSessionId)
+      .toBe("new-parent")
   })
 
   it("stays in running with its tabs live while no Done arrives", async () => {

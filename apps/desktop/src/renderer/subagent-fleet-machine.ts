@@ -182,7 +182,7 @@ export const settleStoppedFleet = (
         attention: null
       }
     }))
-  ].slice(-512)
+  ]
 }
 
 const hasNode = (nodes: ReadonlyArray<SubagentFleetNode>, id: string): boolean =>
