@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, renderHook, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import type { Session, SubagentFleetNode } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { rpc } from "./rpc-client.js"
 import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js"
+import { publishSessionUpdate } from "./session-updates.js"
 import {
   clearSubagentTabs,
   publishSubagentTabs,
@@ -169,6 +170,39 @@ afterEach(() => {
   cleanup()
   clearSubagentTabs(session.id)
   vi.clearAllMocks()
+})
+
+describe("SessionChatTabs selection", () => {
+  it("keeps the last tab click while an earlier selection is pending", async () => {
+    const secondChat = {
+      id: "chat-2",
+      title: "Second",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z"
+    }
+    const twoChats = { ...session, chats: [...session.chats, secondChat] }
+    let resolveFirst!: (updated: Session) => void
+    vi.mocked(rpc.sessionsSelectChat)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+      .mockResolvedValueOnce(twoChats)
+    render(
+      <SessionChatTabs
+        session={twoChats}
+        filesActive={false}
+        onSelectConversation={vi.fn()}
+        onSelectFiles={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByTitle("2. Second"))
+    fireEvent.click(screen.getByTitle("1. Main"))
+    expect(rpc.sessionsSelectChat).toHaveBeenCalledTimes(1)
+
+    resolveFirst({ ...twoChats, activeChatId: "chat-2" })
+    await waitFor(() => expect(rpc.sessionsSelectChat).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(publishSessionUpdate).toHaveBeenLastCalledWith(twoChats))
+    expect(rpc.sessionsSelectChat).toHaveBeenNthCalledWith(2, session.id, "chat-1")
+  })
 })
 
 describe("SessionChatTabs subagent tabs", () => {

@@ -727,6 +727,48 @@ describe("PiAgentRuntime", () => {
     childActive = false
   })
 
+  it.each([
+    ["model", {
+      modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus")
+    }],
+    ["connection", {
+      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("connection-2")
+    }]
+  ])("rebuilds a retained session when its %s changes", async (_name, changed) => {
+    const fleet = { childActive: true }
+    const handles: PiSessionHandle[] = []
+    const create = vi.fn((createdSpec: PiRunSpec) => {
+      const handle = {
+        ...settlingHandle(fleet),
+        modelId: String(createdSpec.modelId)
+      }
+      handles.push(handle)
+      return Effect.succeed(handle)
+    })
+    const runtime = await Effect.runPromise(
+      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
+    )
+
+    await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
+    await Effect.runPromise(Stream.runCollect(runtime.run(
+      {
+        ...spec,
+        ...changed,
+        runId: "run-switched",
+        piSessionId: "/sessions/parent.jsonl"
+      },
+      context
+    )))
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(handles[0]?.dispose).toHaveBeenCalledOnce()
+    expect(create.mock.calls[1]?.[0]).toMatchObject({
+      ...changed,
+      piSessionId: "/sessions/parent.jsonl"
+    })
+    fleet.childActive = false
+  })
+
   it("rebuilds a retained session when memory tool availability changes", async () => {
     const fleet = { childActive: true }
     const handles: PiSessionHandle[] = []
@@ -755,23 +797,6 @@ describe("PiAgentRuntime", () => {
       spec,
       { ...context, mcp: { browser } }
     )))
-    const rejectedModelChange = await Effect.runPromise(Stream.runCollect(runtime.run(
-      {
-        ...spec,
-        runId: "run-model-change",
-        modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus"),
-        prompt: "memory recovered with another model",
-        piSessionId: "/sessions/parent.jsonl"
-      },
-      { ...context, mcp: { browser, memory } }
-    )))
-    expect([...rejectedModelChange].at(-1)).toMatchObject({
-      _tag: "Failed",
-      message: "Cannot resume a retained Pi session with a different model"
-    })
-    expect(create).toHaveBeenCalledOnce()
-    expect(handles[0]?.dispose).not.toHaveBeenCalled()
-
     await Effect.runPromise(Stream.runCollect(runtime.run(
       { ...spec, runId: "run-2", prompt: "memory recovered", piSessionId: "/sessions/parent.jsonl" },
       { ...context, mcp: { browser, memory } }

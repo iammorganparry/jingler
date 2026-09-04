@@ -1831,8 +1831,18 @@ describe("conversationMachine — image attachments", () => {
   })
 
   describe("SET_MODEL", () => {
-    it("updates canonical identity and clears incompatible continuation state", async () => {
-      const actor = start()
+    it("updates canonical identity without dropping conversation continuity", async () => {
+      const continued = {
+        ...session,
+        piSessionId: "pi-session",
+        legacyResumeId: "resume-session",
+        chats: [{
+          ...session.chats[0]!,
+          piSessionId: "pi-chat",
+          legacyResumeId: "resume-chat"
+        }]
+      } as Session
+      const actor = createActor(conversationMachine, { input: { session: continued } }).start()
       await waitFor(actor, (snapshot) => snapshot.matches(idle))
       actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "max" } })
 
@@ -1848,11 +1858,34 @@ describe("conversationMachine — image attachments", () => {
         connectionId,
         providerId,
         modelId,
-        chats: [{ id: "s1", connectionId, providerId, modelId }]
+        piSessionId: "pi-session",
+        legacyResumeId: "resume-session",
+        chats: [{
+          id: "s1",
+          connectionId,
+          providerId,
+          modelId,
+          piSessionId: "pi-chat",
+          legacyResumeId: "resume-chat"
+        }]
       })
       expect(h.setModelCalls).toStrictEqual([
         { sessionId: "s1", connectionId, providerId, modelId }
       ])
+      actor.stop()
+    })
+
+    it("stamps new assistant turns with the selected provider", async () => {
+      const actor = start()
+      await waitFor(actor, (snapshot) => snapshot.matches(idle))
+      actor.send({ type: "SET_MODEL", connectionId, providerId, modelId })
+
+      actor.send({ type: "SEND", text: "continue with Claude" })
+
+      expect(actor.getSnapshot().context.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        providerId
+      })
       actor.stop()
     })
   })

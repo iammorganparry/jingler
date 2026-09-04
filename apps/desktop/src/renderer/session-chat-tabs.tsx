@@ -13,6 +13,7 @@ import { AgentRoster, ChatTabBar, FileIcon, SubagentTabBar } from "@jingler/ui"
 import { X } from "lucide-react"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
+import { queueSessionChatMutation } from "./session-chat-mutations.js"
 import { disposeChatActor, useChatActivities } from "./conversation-registry.js"
 import { clearDraft } from "./draft-store.js"
 import { useAgentRoster } from "./agent-roster.js"
@@ -84,15 +85,12 @@ export function SessionChatTabs({
   const files = useFileBrowser(session.id, session.worktreePath)
 
   const createChat = () => {
-    void rpc.sessionsCreateChat(session.id).then(publishSessionUpdate)
+    queueSessionChatMutation(session.id, () => rpc.sessionsCreateChat(session.id))
   }
   const selectChat = (chatId: string) => {
     selectSubagentTab(session.id, chatId, "main")
-    if (chatId === activeChat.id) {
-      onSelectConversation()
-      return
-    }
-    void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
+    if (chatId === activeChat.id) onSelectConversation()
+    queueSessionChatMutation(session.id, () => rpc.sessionsSelectChat(session.id, chatId))
   }
   const openPreviousSubagent = (id: string) => {
     const previous = previousSubagents.find((candidate) => candidate.id === id)
@@ -102,39 +100,51 @@ export function SessionChatTabs({
     if (previous.chatId !== activeChat.id) {
       const closed = session.closedChats?.some(({ id }) => id === previous.chatId) ?? false
       const open = closed ? rpc.sessionsReopenChat : rpc.sessionsSelectChat
-      void open(session.id, previous.chatId).then(publishSessionUpdate)
+      queueSessionChatMutation(session.id, () => open(session.id, previous.chatId))
     }
   }
   const renameChat = (chatId: string, title: string) => {
     void rpc.sessionsRenameChat(session.id, chatId, title).then(publishSessionUpdate)
   }
   const closeChat = (chatId: string) => {
-    void rpc.sessionsCloseChat(session.id, chatId).then((updated) => {
-      clearDraft(chatId)
-      window.jingler.closePlannotator({ sessionId: session.id, chatId })
-      disposeChatActor(session.id, chatId)
-      publishSessionUpdate(updated)
-    }).catch(() => {})
+    queueSessionChatMutation(
+      session.id,
+      () => rpc.sessionsCloseChat(session.id, chatId),
+      (updated) => {
+        clearDraft(chatId)
+        window.jingler.closePlannotator({ sessionId: session.id, chatId })
+        disposeChatActor(session.id, chatId)
+        publishSessionUpdate(updated)
+      }
+    )
   }
   const reopenChat = (chatId: string) => {
     onSelectConversation()
-    void rpc.sessionsReopenChat(session.id, chatId).then(publishSessionUpdate)
+    queueSessionChatMutation(session.id, () => rpc.sessionsReopenChat(session.id, chatId))
   }
   // Sequential on purpose: each close recomputes the active chat, and the
   // store answers the last close with a fresh replacement chat — racing them
   // would interleave those rewrites.
   const closeAllChats = () => {
-    void (async () => {
-      for (const chat of session.chats) {
-        await rpc.sessionsCloseChat(session.id, chat.id).then((updated) => {
-          clearDraft(chat.id)
-          window.jingler.closePlannotator({ sessionId: session.id, chatId: chat.id })
-          disposeChatActor(session.id, chat.id)
-          publishSessionUpdate(updated)
-        }).catch(() => {})
+    queueSessionChatMutation(
+      session.id,
+      async () => {
+        let updated = session
+        for (const chat of session.chats) {
+          try {
+            updated = await rpc.sessionsCloseChat(session.id, chat.id)
+            clearDraft(chat.id)
+            window.jingler.closePlannotator({ sessionId: session.id, chatId: chat.id })
+            disposeChatActor(session.id, chat.id)
+          } catch {}
+        }
+        return updated
+      },
+      (updated) => {
+        publishSessionUpdate(updated)
+        onSelectConversation()
       }
-      onSelectConversation()
-    })()
+    )
   }
 
   const selectFile = (path: string) => {

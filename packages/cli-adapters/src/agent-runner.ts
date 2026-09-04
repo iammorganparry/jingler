@@ -9,6 +9,9 @@ import type {
   Message,
   PeerAgentMessageResult,
   PermissionMode,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   QuestionAnswer,
   QuestionRequest,
   ReasoningSetting,
@@ -274,6 +277,27 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
     const persistMode = (sessionId: string, chatId: string, mode: PermissionMode) =>
       SessionStore.setMode(sessionId, chatId, mode).pipe(Effect.ignore)
+
+    const setModel = (
+      sessionId: string,
+      chatId: string,
+      connectionId: ProviderConnectionId,
+      providerId: ProviderId,
+      modelId: ProviderModelId
+    ) =>
+      Effect.gen(function* () {
+        const lock = yield* chatLock(chatId)
+        yield* lock.withPermits(1)(
+          SessionStore.setProviderModel(
+            sessionId,
+            chatId,
+            connectionId,
+            providerId,
+            modelId
+          )
+        )
+        return yield* SessionStore.get(sessionId)
+      })
 
     /** A session by id, or null when it isn't in the store (never fails). */
     const getSessionOrNull = (sessionId: string) =>
@@ -1614,6 +1638,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       decideGate,
       answerQuestion,
       setMode,
+      setModel,
       steer,
       stop,
       forgetChat

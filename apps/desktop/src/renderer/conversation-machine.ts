@@ -227,7 +227,6 @@ const withProviderModel = (
     modelId,
     connectionSelectionRequired: false,
     modelSelectionRequired: false,
-    ...(changed ? { piSessionId: undefined, resumeId: undefined } : {}),
     chats: session.chats.map((chat) =>
       chat.id !== chatId
         ? chat
@@ -238,9 +237,7 @@ const withProviderModel = (
             modelId,
             connectionSelectionRequired: false,
             modelSelectionRequired: false,
-            ...(changed
-              ? { piSessionId: undefined, resumeId: undefined, reasoning: undefined }
-              : {})
+            ...(changed ? { reasoning: undefined } : {})
           }
     )
   }
@@ -1201,7 +1198,7 @@ export const conversationMachine = setup({
         messages: [
           ...context.messages,
           userMessage(`u_local_${id}`, text, now, images),
-          assistantMessage(`a_local_${id}`, now)
+          assistantMessage(`a_local_${id}`, now, context.providerId ?? undefined)
         ]
       }
     }),
@@ -1446,7 +1443,7 @@ export const conversationMachine = setup({
         messages: [
           ...context.messages,
           userMessage(`u_local_${id}`, next.text, now, next.images),
-          assistantMessage(`a_local_${id}`, now)
+          assistantMessage(`a_local_${id}`, now, context.providerId ?? undefined)
         ]
       }
     }),

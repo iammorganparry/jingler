@@ -917,6 +917,80 @@ describe("AgentRunner model", () => {
     })
   )
 
+  it("uses a switched model on the next turn without dropping continuation", async () => {
+    const selected = {
+      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("openai-connection"),
+      providerId: Schema.decodeUnknownSync(ProviderId)("openai-codex"),
+      modelId: Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-test")
+    }
+    const captured: AgentTurnSpec[] = []
+    const recordingAdapter = Layer.succeed(
+      AgentTurnDriver,
+      AgentTurnDriver.of({
+        run: (_sessionId, spec, ctx) =>
+          Effect.sync(() => captured.push(spec)).pipe(
+            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
+          ),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      recordingAdapter,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        const store = yield* SessionStore
+        const setProviderModel = store.setProviderModel
+        const writeStarted = yield* Deferred.make<void>()
+        const releaseWrite = yield* Deferred.make<void>()
+        vi.spyOn(store, "setProviderModel").mockImplementation((...args) =>
+          Deferred.succeed(writeStarted, undefined).pipe(
+            Effect.zipRight(Deferred.await(releaseWrite)),
+            Effect.zipRight(setProviderModel(...args))
+          )
+        )
+        yield* SessionStore.setPiSessionId(SESSION, SESSION, "pi-existing")
+
+        const switchFiber = yield* Effect.fork(
+          runner.setModel(
+            SESSION,
+            SESSION,
+            selected.connectionId,
+            selected.providerId,
+            selected.modelId
+          )
+        )
+        yield* Deferred.await(writeStarted)
+        const promptFiber = yield* Effect.fork(
+          runner.prompt(SESSION, SESSION, "continue").pipe(Stream.runDrain)
+        )
+        yield* Effect.sleep("10 millis")
+        expect(captured).toHaveLength(0)
+
+        yield* Deferred.succeed(releaseWrite, undefined)
+        yield* Fiber.join(switchFiber)
+        yield* Fiber.join(promptFiber)
+      }).pipe(Effect.provide(base))
+    )
+
+    expect(captured[0]).toMatchObject({
+      connectionId: selected.connectionId,
+      modelId: selected.modelId,
+      piSessionId: "pi-existing"
+    })
+  })
+
   it("does not replace the certified model id with provider event metadata", async () => {
     const session: Session = {
       id: SESSION,
