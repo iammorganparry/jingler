@@ -117,7 +117,7 @@ export function McpImportPrompt({
               Import all
             </AsyncButton>
             <button type="button" onClick={dismiss} className="text-xs text-dim hover:underline">
-              Not now
+              Skip import
             </button>
           </div>
         </DialogBody>
