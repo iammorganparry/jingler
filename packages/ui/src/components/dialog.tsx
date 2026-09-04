@@ -7,7 +7,7 @@ import { useNativeEclipsingOverlay } from "../lib/native-overlay.js"
 
 /**
  * shadcn Dialog (Radix) restyled to the One Dark modal: a dimmed window behind a
- * flat `panel` card with a bordered header/footer band (radius 7px). Radix owns
+ * flat `panel` card with bordered header/footer bands. Radix owns
  * focus trapping, Escape/overlay dismissal, and portalling.
  */
 export const Dialog = DialogPrimitive.Root
@@ -44,11 +44,11 @@ export const DialogContent = React.forwardRef<
     <DialogOverlay />
     <DialogPrimitive.Content ref={ref} className="fixed left-1/2 top-1/2 z-50 max-w-[90vw] -translate-x-1/2 -translate-y-1/2 outline-none" {...props}>
       <motion.div
-        initial={reduce ? { opacity: 0 } : { opacity: 1, clipPath: "inset(48% 48% 48% 48% round 30px)" }}
-        animate={{ opacity: 1, clipPath: "inset(0% 0% 0% 0% round 30px)" }}
+        initial={reduce ? { opacity: 0 } : { opacity: 1, clipPath: "inset(48% 48% 48% 48% round 16px)" }}
+        animate={{ opacity: 1, clipPath: "inset(0% 0% 0% 0% round 16px)" }}
         transition={reduce ? { duration: 0.14 } : { duration: 0.43, ease: [0.2, 0, 0.2, 1] }}
         className={cn(
-          "relative flex max-h-[calc(100vh-4rem)] w-[460px] max-w-[90vw] flex-col overflow-hidden rounded-[30px] border border-line bg-panel shadow-[0_16px_48px_var(--sb-shadow-strong)] will-change-[clip-path]",
+          "relative flex max-h-[calc(100vh-4rem)] w-[460px] max-w-[90vw] flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-[0_16px_48px_var(--sb-shadow-strong)] will-change-[clip-path]",
           className
         )}
       >
@@ -72,7 +72,7 @@ export function DialogHeader({
   return (
     <div
       className={cn(
-        "flex flex-none items-center gap-3 border-b border-hairline px-4 py-3",
+        "flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-4 py-3",
         className
       )}
       {...props}
@@ -116,7 +116,7 @@ export const DialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-[12px] leading-[1.55] text-muted-foreground", className)}
+    className={cn("w-full text-[12px] leading-[1.55] text-muted-foreground", className)}
     {...props}
   />
 ))
