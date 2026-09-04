@@ -46,7 +46,7 @@ describe("package artifact policy", () => {
       "@dietrichgebert/ponytail": "4.9.0",
       "@earendil-works/pi-ai": "0.84.1",
       "@earendil-works/pi-coding-agent": "0.84.1",
-      "pi-subagents": "0.57.0",
+      "pi-subagents": "0.65.0",
       "jiti": "^2.7.0",
       "@jingler/plannotator-ext": "workspace:*"
     } }, "desktop")).toEqual([])

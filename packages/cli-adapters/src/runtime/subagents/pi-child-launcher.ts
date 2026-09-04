@@ -1,24 +1,18 @@
-import { createRequire } from "node:module"
-import { access, chmod } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { access } from "node:fs/promises"
+import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Data, Effect } from "effect"
 
-const require = createRequire(import.meta.url)
-
 export const JINGLER_SUBAGENT_CREDENTIAL_ROOT =
   "JINGLER_SUBAGENT_CREDENTIAL_ROOT"
-export const JINGLER_SUBAGENT_PI_CLI = "JINGLER_SUBAGENT_PI_CLI"
 export const JINGLER_SUBAGENT_NODE = "JINGLER_SUBAGENT_NODE"
 export const JINGLER_SUBAGENT_CHILD_TOOLS = "JINGLER_SUBAGENT_CHILD_TOOLS"
-export const PI_SUBAGENT_PI_BINARY = "PI_SUBAGENT_PI_BINARY"
-export const PI_SUBAGENT_PI_BINARY_ARGS = "PI_SUBAGENT_PI_BINARY_ARGS"
 export const PI_SUBAGENT_ELECTRON_RUN_AS_NODE =
   "PI_SUBAGENT_ELECTRON_RUN_AS_NODE"
+export const JINGLER_SUBAGENT_PROCESS_ISOLATION =
+  "JINGLER_SUBAGENT_PROCESS_ISOLATION"
 
 export interface PiChildLauncherConfig {
-  readonly wrapperPath: string
-  readonly piCliPath: string
   readonly credentialRoot: string
   readonly nodePath: string
   readonly childToolsPath: string
@@ -31,31 +25,14 @@ export class PiChildLauncherError extends Data.TaggedError(
   readonly cause?: unknown
 }> {}
 
-export const sourcePiChildWrapperPath = (): string =>
-  fileURLToPath(
-    new URL("../../../runtime-assets/pi-subagent-wrapper.mjs", import.meta.url)
-  )
-
 export const sourcePiChildToolsPath = (): string =>
   fileURLToPath(
     new URL("../../../runtime-assets/jingler-child-tools.mjs", import.meta.url)
   )
 
-export const installedPiCliPath = (): string =>
-  join(
-    dirname(dirname(require.resolve("pi-subagents"))),
-    "@earendil-works",
-    "pi-coding-agent",
-    "dist",
-    "cli.js"
-  )
-
 export const defaultPiChildLauncherConfig = (
   agentDir: string
 ): PiChildLauncherConfig => ({
-  wrapperPath:
-    process.env.JINGLER_SUBAGENT_WRAPPER_PATH ?? sourcePiChildWrapperPath(),
-  piCliPath: process.env.JINGLER_SUBAGENT_PI_CLI_PATH ?? installedPiCliPath(),
   credentialRoot: join(agentDir, "subagent-credentials"),
   nodePath: process.execPath,
   childToolsPath:
@@ -85,16 +62,11 @@ export const preparePiChildLauncher = (
   Effect.tryPromise({
     try: async () => {
       await Promise.all([
-        access(config.wrapperPath),
-        access(config.piCliPath),
         access(config.childToolsPath),
         access(config.nodePath)
       ])
-      if (process.platform !== "win32") await chmod(config.wrapperPath, 0o700)
-      pinEnvironment(PI_SUBAGENT_PI_BINARY, config.nodePath)
-      pinValue(PI_SUBAGENT_PI_BINARY_ARGS, JSON.stringify([resolve(config.wrapperPath)]))
+      pinValue(JINGLER_SUBAGENT_PROCESS_ISOLATION, "1")
       pinValue(PI_SUBAGENT_ELECTRON_RUN_AS_NODE, "1")
-      pinEnvironment(JINGLER_SUBAGENT_PI_CLI, config.piCliPath)
       pinEnvironment(JINGLER_SUBAGENT_CREDENTIAL_ROOT, config.credentialRoot)
       pinEnvironment(JINGLER_SUBAGENT_NODE, config.nodePath)
       pinEnvironment(JINGLER_SUBAGENT_CHILD_TOOLS, config.childToolsPath)

@@ -198,10 +198,8 @@ describe("remote agent installation", () => {
       const bundle = join(home, "bundle")
       rmSync(bundle, { recursive: true, force: true })
       mkdirSync(join(bundle, "node_modules/pi-subagents"), { recursive: true })
-      mkdirSync(join(bundle, "runtime-assets"), { recursive: true })
       writeFileSync(join(bundle, "jingler-device.mjs"), "export {}\n")
       writeFileSync(join(bundle, "node_modules/pi-subagents/index.ts"), "export {}\n")
-      writeFileSync(join(bundle, "runtime-assets/pi-subagent-wrapper.mjs"), "export {}\n")
       expect(
         spawnSync("tar", ["-czf", ".jingler-device-runtime-upload.tgz", "-C", bundle, "."], {
           cwd: home

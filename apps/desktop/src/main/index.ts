@@ -415,24 +415,6 @@ if (!gotPrimaryLock) {
           import.meta.dirname,
           "../../../../packages/cli-adapters/runtime-assets"
         )
-    process.env.JINGLER_SUBAGENT_WRAPPER_PATH ??= join(
-      subagentRuntimeRoot,
-      "pi-subagent-wrapper.mjs"
-    )
-    process.env.JINGLER_SUBAGENT_PI_CLI_PATH ??= app.isPackaged
-      ? join(
-          process.resourcesPath,
-          "app.asar",
-          "node_modules",
-          "@earendil-works",
-          "pi-coding-agent",
-          "dist",
-          "cli.js"
-        )
-      : resolve(
-          import.meta.dirname,
-          "../../../../node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-        )
     process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??= join(
       subagentRuntimeRoot,
       "jingler-child-tools.mjs"

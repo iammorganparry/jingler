@@ -21,7 +21,7 @@ const FIRST_AGENT = /Survey the tab bar/
 const SECOND_AGENT = /Audit the theme tokens/
 const DIRECT_AGENT = /Inspect direct delegation/
 const SUPERVISOR_REVIEW_TASK = "Review the checkout flow against its acceptance criteria."
-const SUPERVISOR_CHILD_WRAPPER = fileURLToPath(
+const SUPERVISOR_CHILD_WORKER = fileURLToPath(
   new URL("./pi-supervisor-child.mjs", import.meta.url)
 )
 const REVIEWER_REPLY_PLACEHOLDER = /Reply to reviewer/i
@@ -122,7 +122,7 @@ test("a reviewer tab exposes its prompt and supervisor request", async ({
     configured: true,
     withRepo: true,
     sessions: seededSessions,
-    e2eEnv: { JINGLER_SUBAGENT_WRAPPER_PATH: SUPERVISOR_CHILD_WRAPPER }
+    e2eEnv: { JINGLER_SUBAGENT_PROCESS_WORKER: SUPERVISOR_CHILD_WORKER }
   })
   await expect(appShell(window)).toBeVisible()
 

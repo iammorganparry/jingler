@@ -55,11 +55,6 @@ extraResources:
     to: THIRD-PARTY-LICENSES
   - from: ../../packages/plannotator-ext/assets
     to: plannotator
-  # Executed by Jingler's packaged Electron binary in Node mode, so detached
-  # pi-subagents children use the exact Pi runtime packaged with Jingler instead
-  # of an ambient Node or `pi` from PATH.
-  - from: ../../packages/cli-adapters/runtime-assets/pi-subagent-wrapper.mjs
-    to: subagent-runtime/pi-subagent-wrapper.mjs
   - from: ../../packages/cli-adapters/runtime-assets/jingler-child-tools.mjs
     to: subagent-runtime/jingler-child-tools.mjs
   - from: ../../plugins/github-issues

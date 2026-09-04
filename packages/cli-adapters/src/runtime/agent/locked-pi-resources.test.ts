@@ -13,8 +13,7 @@ import { preparePiSubagentsRuntime } from "../subagents/pi-subagents-bootstrap.j
 const roots: string[] = []
 const originalEnvironment = {
   PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
-  PI_SUBAGENT_PI_BINARY: process.env.PI_SUBAGENT_PI_BINARY,
-  JINGLER_SUBAGENT_PI_CLI: process.env.JINGLER_SUBAGENT_PI_CLI,
+  JINGLER_SUBAGENT_PROCESS_ISOLATION: process.env.JINGLER_SUBAGENT_PROCESS_ISOLATION,
   JINGLER_SUBAGENT_CREDENTIAL_ROOT: process.env.JINGLER_SUBAGENT_CREDENTIAL_ROOT,
   JINGLER_SUBAGENT_NODE: process.env.JINGLER_SUBAGENT_NODE
 }

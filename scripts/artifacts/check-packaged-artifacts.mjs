@@ -38,7 +38,6 @@ const deviceSource = execFileSync(
 )
 const requiredDeviceEntries = [
   "./jingler-device.mjs",
-  "./runtime-assets/pi-subagent-wrapper.mjs",
   "./runtime-assets/jingler-child-tools.mjs",
   "./node_modules/@dietrichgebert/ponytail/package.json",
   "./node_modules/@dietrichgebert/ponytail/pi-extension/index.js",

@@ -724,16 +724,13 @@ export const test = base.extend<{
       const inheritedEnv = { ...process.env };
       for (const name of [
         "PI_CODING_AGENT_DIR",
-        "PI_SUBAGENT_PI_BINARY",
-        "PI_SUBAGENT_PI_BINARY_ARGS",
         "PI_SUBAGENT_ELECTRON_RUN_AS_NODE",
         "JINGLER_SUBAGENT_CREDENTIAL_ROOT",
-        "JINGLER_SUBAGENT_PI_CLI",
-        "JINGLER_SUBAGENT_PI_CLI_PATH",
         "JINGLER_SUBAGENT_NODE",
+        "JINGLER_SUBAGENT_PROCESS_ISOLATION",
+        "JINGLER_SUBAGENT_PROCESS_WORKER",
         "JINGLER_SUBAGENT_CHILD_TOOLS",
         "JINGLER_SUBAGENT_CHILD_TOOLS_PATH",
-        "JINGLER_SUBAGENT_WRAPPER_PATH",
       ]) delete inheritedEnv[name];
       const launchEnv = {
         ...inheritedEnv,
