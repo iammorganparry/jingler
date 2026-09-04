@@ -1875,24 +1875,13 @@ describe("conversationMachine — image attachments", () => {
       actor.stop()
     })
 
-    it("keeps old provider labels and stamps new assistant turns", async () => {
-      const priorProvider = Schema.decodeUnknownSync(ProviderId)("openai-codex")
-      h.transcript = [assistantMessage("a-old", "2026-07-25T00:00:00.000Z")]
-      const priorSession = {
-        ...session,
-        providerId: priorProvider,
-        chats: [{ ...session.chats[0]!, providerId: priorProvider }]
-      } as Session
-      const actor = createActor(conversationMachine, { input: { session: priorSession } }).start()
+    it("stamps new assistant turns with the selected provider", async () => {
+      const actor = start()
       await waitFor(actor, (snapshot) => snapshot.matches(idle))
-
       actor.send({ type: "SET_MODEL", connectionId, providerId, modelId })
-      expect(actor.getSnapshot().context.messages[0]).toMatchObject({
-        role: "assistant",
-        providerId: priorProvider
-      })
 
       actor.send({ type: "SEND", text: "continue with Claude" })
+
       expect(actor.getSnapshot().context.messages.at(-1)).toMatchObject({
         role: "assistant",
         providerId

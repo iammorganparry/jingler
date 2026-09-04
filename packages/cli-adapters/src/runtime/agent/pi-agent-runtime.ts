@@ -301,6 +301,8 @@ interface RetainedPiSession {
   readonly handle: PiSessionHandle
   readonly sessionId: string
   readonly chatId: string
+  readonly connectionId: PiRunSpec["connectionId"]
+  readonly modelId: PiRunSpec["modelId"]
   /** Tool and prompt capability shape locked when this PI session was built. */
   readonly capabilityFingerprint: string
   readonly aliases: ReadonlySet<string>
@@ -395,18 +397,14 @@ class PiSessionRegistry {
           message: `pi session is already active: ${spec.piSessionId}`
         }))
       }
-      if (retained.handle.modelId !== String(spec.modelId)) {
-        return Effect.fail(new AgentRuntimeError({
-          reason: "runtime",
-          message: "Cannot resume a retained Pi session with a different model"
-        }))
-      }
-      // PI locks tools and prompt resources when the session is created. Reuse
-      // is safe only while that capability shape is unchanged. Rebuild against
-      // the SAME session file when role, mode, target resources, or MCP source
-      // availability changes so transcript context survives while the catalog
-      // is rediscovered. Rotating endpoint details are deliberately excluded.
-      if (retained.capabilityFingerprint !== capabilityFingerprint) {
+      // PI locks the model, credentials, tools, and prompt resources when the
+      // session is created. Rebuild against the SAME session file when any of
+      // those change so transcript context survives with fresh runtime state.
+      if (
+        retained.connectionId !== spec.connectionId ||
+        retained.modelId !== spec.modelId ||
+        retained.capabilityFingerprint !== capabilityFingerprint
+      ) {
         return Effect.promise(() => this.#dispose(retained)).pipe(
           Effect.flatMap(() => this.#create(spec, context, capabilityFingerprint))
         )
@@ -436,6 +434,8 @@ class PiSessionRegistry {
           handle,
           sessionId: spec.sessionId,
           chatId: spec.chatId,
+          connectionId: spec.connectionId,
+          modelId: spec.modelId,
           capabilityFingerprint,
           aliases,
           contextHolder,

@@ -10,15 +10,7 @@ export const queueSessionChatMutation = (
   apply: (session: Session) => void = publishSessionUpdate
 ): void => {
   const previous = pending.get(sessionId)
-  const run = previous === undefined
-    ? (() => {
-        try {
-          return mutation()
-        } catch (cause) {
-          return Promise.reject(cause)
-        }
-      })()
-    : previous.then(mutation)
+  const run = previous === undefined ? mutation() : previous.then(mutation)
   const current = run.then(apply).catch(() => {})
   pending.set(sessionId, current)
   current.then(() => {

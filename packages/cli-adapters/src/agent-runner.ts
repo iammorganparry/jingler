@@ -288,21 +288,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.gen(function* () {
         const lock = yield* chatLock(chatId)
         yield* lock.withPermits(1)(
-          Effect.gen(function* () {
-            const session = yield* SessionStore.get(sessionId)
-            const chat = session.chats.find((candidate) => candidate.id === chatId)
-            const previousProvider = chat?.providerId ?? session.providerId
-            if (previousProvider !== undefined) {
-              yield* TranscriptStore.stampProvider(chatId, previousProvider)
-            }
-            yield* SessionStore.setProviderModel(
-              sessionId,
-              chatId,
-              connectionId,
-              providerId,
-              modelId
-            )
-          })
+          SessionStore.setProviderModel(
+            sessionId,
+            chatId,
+            connectionId,
+            providerId,
+            modelId
+          )
         )
         return yield* SessionStore.get(sessionId)
       })

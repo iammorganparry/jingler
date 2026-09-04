@@ -1888,20 +1888,12 @@ export const conversationMachine = setup({
         event.providerId,
         event.modelId
       ).then(publishSessionUpdate).catch(() => {})
-      const previousProvider = context.providerId
       return {
         connectionId: event.connectionId,
         providerId: event.providerId,
         modelId: event.modelId,
         reasoning: session.chats.find((chat) => chat.id === context.chatId)?.reasoning,
-        session,
-        messages: previousProvider === null
-          ? context.messages
-          : context.messages.map((message) =>
-              message.role === "assistant" && message.providerId === undefined
-                ? { ...message, providerId: previousProvider }
-                : message
-            )
+        session
       }
     }),
     applySkills: assign(({ event }) => (event.type === "SKILLS_LOADED" ? { skills: event.skills } : {})),
