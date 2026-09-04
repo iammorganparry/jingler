@@ -4,6 +4,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { planDocumentToPlan } from "@jingler/core"
 import type {
   Attachment,
+  ContextBreakdown,
   GateDecision,
   Message,
   McpConfigEntry,
@@ -166,6 +167,8 @@ export interface ConversationViewProps {
   busy?: boolean
   /** Tokens currently occupying the main agent's context window. */
   tokens?: number
+  /** Estimated composition of the provider-reported working context. */
+  contextBreakdown?: ContextBreakdown | null
   /**
    * Where compaction fires for this session, in tokens. Null when the harness
    * reports no usage — the meter then renders nothing rather than an empty bar
@@ -281,7 +284,7 @@ export interface ConversationViewProps {
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     loadingHistory: false,
     skills: [],
@@ -294,6 +297,7 @@ export function ConversationView(props:  ConversationViewProps) {
     modelId: null,
     busy: false,
     tokens: 0,
+    contextBreakdown: null,
     contextTriggerAt: null,
     contextPhase: "unknown",
     contextPreparing: false,
@@ -313,6 +317,7 @@ function renderSessionAnalytics() {
             <div className="mb-1.5 flex min-w-0 flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
               <ContextMeter
                 tokens={tokens}
+                breakdown={contextBreakdown}
                 triggerAt={contextTriggerAt}
                 phase={contextPhase}
                 preparing={contextPreparing}

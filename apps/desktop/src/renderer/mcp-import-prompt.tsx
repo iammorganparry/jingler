@@ -10,9 +10,11 @@ import {
   DialogBody,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle
 } from "@jingler/ui"
+import { ServerCog } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 const COMPLETED_KEY = "jingler:mcp-import-prompt:v1"
@@ -95,32 +97,42 @@ export function McpImportPrompt({
   return (
     <Dialog open={open} onOpenChange={(next) => !next && dismiss()}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Import your MCP servers?</DialogTitle>
-          <DialogDescription>
-            Found {candidates.length} server{candidates.length === 1 ? "" : "s"} in Claude,
-            Codex/OpenAI, or opencode. They will be available to local sessions.
-          </DialogDescription>
+        <DialogHeader className="items-start gap-3 px-5 py-4 pr-14">
+          <div className="mt-0.5 flex size-8 flex-none items-center justify-center rounded-lg border border-line bg-sunken text-muted-foreground">
+            <ServerCog size={15} aria-hidden="true" />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <DialogTitle className="text-[14px] leading-5">Import MCP servers</DialogTitle>
+            <DialogDescription>
+              Found {candidates.length} server{candidates.length === 1 ? "" : "s"} in Claude,
+              Codex/OpenAI, and OpenCode. Import them for on-demand use in local sessions.
+            </DialogDescription>
+          </div>
         </DialogHeader>
-        <DialogBody className="flex flex-col gap-3">
-          <div className="max-h-64 overflow-auto rounded-md border border-line bg-sunken">
+        <DialogBody className="px-5 py-4">
+          <div className="max-h-64 overflow-auto rounded-xl border border-line bg-sunken">
             {candidates.map((candidate) => (
-              <div key={`${candidate.source}:${candidate.name}`} className="border-b border-line px-3 py-2 last:border-b-0">
-                <div className="text-xs font-medium text-text-bright">{candidate.name}</div>
-                <div className="truncate font-mono text-[10px] text-dim">{candidate.source} · {candidate.target}</div>
+              <div key={`${candidate.source}:${candidate.name}`} className="border-b border-line px-3.5 py-2.5 last:border-b-0">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="truncate text-xs font-medium text-text-bright">{candidate.name}</div>
+                  <div className="flex-none rounded-md border border-hairline bg-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-dim">
+                    {candidate.source}
+                  </div>
+                </div>
+                <div className="mt-0.5 truncate font-mono text-[10px] text-dim">{candidate.target}</div>
               </div>
             ))}
           </div>
-          {error ? <div role="alert"><Callout tone="red">{error}</Callout></div> : null}
-          <div className="flex items-center gap-2">
-            <AsyncButton pendingLabel="Importing…" onClick={importAll}>
-              Import all
-            </AsyncButton>
-            <button type="button" onClick={dismiss} className="text-xs text-dim hover:underline">
-              Skip import
-            </button>
-          </div>
+          {error ? <div role="alert" className="mt-3"><Callout tone="red">{error}</Callout></div> : null}
         </DialogBody>
+        <DialogFooter className="justify-between px-5">
+          <button type="button" onClick={dismiss} className="rounded-md px-2 py-1.5 text-xs text-dim outline-none transition-colors hover:text-text focus-visible:ring-2 focus-visible:ring-ring">
+            Not now
+          </button>
+          <AsyncButton pendingLabel="Importing…" onClick={importAll}>
+            Import {candidates.length} server{candidates.length === 1 ? "" : "s"}
+          </AsyncButton>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

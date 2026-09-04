@@ -43,6 +43,7 @@ import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-re
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
+import { estimatePiContextBreakdown } from "./pi-context-breakdown.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 import {
   JINGLER_SUBAGENT_AGENT_NAMES,
@@ -546,6 +547,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       const stats = session.getSessionStats()
       return { costUsd: stats.cost, tokens: stats.tokens.total }
     },
+    contextBreakdown: (tokens) => estimatePiContextBreakdown(session, tokens),
     ...(observe ? { observe } : {}),
     ...(tracker && snapshot
       ? {

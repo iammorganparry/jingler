@@ -8,6 +8,7 @@ import { Effect, Either, Schema } from "effect"
 import {
   type McpToolBridgeError,
   jinglerMcpSources,
+  registerProgressiveMcpTools,
   registerMcpTools,
   type McpToolClientFactory,
   type JinglerMcpAttachments
@@ -201,6 +202,34 @@ export interface JinglerToolRegistryInput {
   readonly mcpClientFactory?: McpToolClientFactory
   readonly registryOptions?: ToolRegistryOptions
 }
+
+/**
+ * Jingler's own MCP servers (browser, memory) are discovered eagerly so their
+ * tools are callable on the first turn; operator-configured servers register
+ * progressively, so a slow or absent server never delays session start.
+ */
+const registerJinglerMcpSources = (
+  registry: ToolRegistry,
+  input: JinglerToolRegistryInput
+): Effect.Effect<void, McpToolBridgeError> =>
+  Effect.gen(function* () {
+    const mcpSources = input.mcp ? jinglerMcpSources(input.mcp, input.liveMcp) : []
+    const eagerMcpSources = mcpSources.filter(({ server }) =>
+      server.name === input.mcp?.browser?.name || server.name === input.mcp?.memory?.name
+    )
+    const configuredMcpSources = mcpSources.filter(({ server }) =>
+      input.mcp?.configured?.some(({ name }) => name === server.name) === true
+    )
+    if (eagerMcpSources.length > 0) {
+      const report = yield* (input.mcpClientFactory
+        ? registerMcpTools(registry, eagerMcpSources, input.mcpClientFactory)
+        : registerMcpTools(registry, eagerMcpSources))
+      registry.setMcpHealth(report.health)
+    }
+    if (configuredMcpSources.length > 0) {
+      registerProgressiveMcpTools(registry, configuredMcpSources, input.mcpClientFactory)
+    }
+  })
 
 /** Compose one run-scoped registry from Jingler-owned capability sources. */
 export const createJinglerTools = (

@@ -27,7 +27,7 @@ describe("McpImportPrompt", () => {
     expect(screen.getByText("linear")).toBeTruthy()
     expect(screen.getByText("docs")).toBeTruthy()
     expect(screen.queryByText("broken")).toBeNull()
-    fireEvent.click(screen.getByText("Import all"))
+    fireEvent.click(screen.getByText("Import 2 servers"))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(apply.mock.calls).toEqual([
       ["claude", ["linear"]],

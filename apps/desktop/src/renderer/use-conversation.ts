@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef } from "react"
 import { useSelector } from "@xstate/react"
 import type {
   Attachment,
+  ContextBreakdown,
   GateDecision,
   Message,
   PermissionMode,
@@ -73,6 +74,7 @@ export interface Conversation {
   readonly subagentControlOutcomes: ReadonlyArray<SubagentFleetControlOutcome>
   /** Tokens currently occupying the main agent's context window. */
   readonly tokens: number
+  readonly contextBreakdown: ContextBreakdown | null
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
   readonly runStartedAt: number | null
   /**
@@ -218,7 +220,7 @@ export function useConversation(
     messages, mode, reasoning, skills, files,
     connectionId, providerId, modelId, patch, queued, steeringId,
     subagents, subagentFleetEvents, subagentControlOutcomes,
-    tokens, hasMoreHistory, loadingHistory,
+    tokens, contextBreakdown, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt,
     plannotator
   } = state.context
@@ -262,6 +264,7 @@ export function useConversation(
     subagentFleetEvents,
     subagentControlOutcomes,
     tokens,
+    contextBreakdown,
     runStartedAt,
     reviewer,
     reviewPhase,

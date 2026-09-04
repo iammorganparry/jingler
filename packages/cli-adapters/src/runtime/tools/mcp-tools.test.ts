@@ -12,6 +12,7 @@ import { RunJournal } from "../journal/run-journal.js"
 import {
   McpToolBridgeError,
   jinglerMcpSources,
+  registerProgressiveMcpTools,
   registerMcpTools,
   type McpToolClient,
   type McpToolClientFactory
@@ -95,6 +96,51 @@ describe("MCP source policy", () => {
       ["configured", "execute"]
     ])
   })
+})
+
+it("keeps configured MCP catalogs out of the provider prompt until searched", async () => {
+  const state: FakeClientState = { calls: [], closes: 0 }
+  const registry = new ToolRegistry()
+
+  registerProgressiveMcpTools(
+    registry,
+    [{ server, risk: "network" }],
+    fakeFactory(state)
+  )
+
+  expect(registry.capabilitiesFor("conversation", "auto").map(({ id }) => id)).toEqual([
+    "mcp_search",
+    "mcp_call"
+  ])
+  expect(state.closes).toBe(0)
+  expect(registry.mcpHealth()).toEqual([{ name: "jingler-browser", status: "closed" }])
+
+  const search = await Effect.runPromise(registry.execute({
+    id: "mcp_search",
+    arguments: { query: "navigate" },
+    role: "conversation",
+    mode: "auto"
+  }))
+  expect(search.value).toEqual({ matches: [{
+    server: "jingler-browser",
+    tool: "navigate",
+    description: "Open a URL in the browser",
+    inputSchema: tool.inputSchema
+  }] })
+
+  const call = await Effect.runPromise(registry.execute({
+    id: "mcp_call",
+    arguments: {
+      server: "jingler-browser",
+      tool: "navigate",
+      arguments: { url: "https://example.com" }
+    },
+    role: "conversation",
+    mode: "auto"
+  }))
+  expect(call.status, JSON.stringify(call)).toBe("success")
+  expect(state.calls).toEqual([{ name: "navigate", args: { url: "https://example.com" } }])
+  expect(state.closes).toBe(3)
 })
 
 it("discovers, namespaces, validates, invokes, and closes stateless MCP clients", async () => {

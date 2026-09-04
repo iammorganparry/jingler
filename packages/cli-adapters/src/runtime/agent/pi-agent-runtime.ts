@@ -1,5 +1,6 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
 import {
+  type ContextBreakdown,
   type FileChangeSet,
   type Message,
   type PiRunSpec,
@@ -42,6 +43,7 @@ export interface PiSessionHandle {
   readonly interrupt: () => Promise<void>
   readonly dispose: () => void | Promise<void>
   readonly usage: () => { readonly costUsd: number; readonly tokens: number }
+  readonly contextBreakdown?: (tokens: number) => ContextBreakdown
   readonly observe?: (event: StreamEvent) => void
   readonly reconcile?: () => Promise<FileChangeSet | null>
 }
@@ -639,6 +641,8 @@ function emitVisibleAgentEvent(
       sink.noteProviderRecovery()
     }
     const normalized = normalize(event, handle.contextWindow ?? undefined)
-    if (normalized) sink.emit(normalized)
+    if (normalized?._tag === "Usage" && handle.contextBreakdown !== undefined) {
+      sink.emit({ ...normalized, breakdown: handle.contextBreakdown(normalized.tokens) })
+    } else if (normalized) sink.emit(normalized)
   }
 }

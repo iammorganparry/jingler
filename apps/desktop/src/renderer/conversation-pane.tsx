@@ -1066,6 +1066,7 @@ function renderMainConversation({
     }}
     busy={convo.busy}
     tokens={convo.tokens}
+    contextBreakdown={convo.contextBreakdown}
     contextTriggerAt={contextQuery.data?.triggerAt ?? null}
     contextPhase={contextQuery.data?.phase ?? "unknown"}
     contextPreparing={preparing || requested}

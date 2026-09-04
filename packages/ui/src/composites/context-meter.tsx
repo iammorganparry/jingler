@@ -1,5 +1,6 @@
-import type { ContextPhase } from "@jingler/core"
+import type { ContextBreakdown, ContextPhase } from "@jingler/core"
 import { cn } from "../lib/cn.js"
+import { HoverCard } from "../components/hover-card.js"
 
 /** "42.6k" / "980" — compact token count. */
 const fmtTokens = (n: number): string =>
@@ -8,6 +9,8 @@ const fmtTokens = (n: number): string =>
 export interface ContextMeterProps {
   /** Latest working-set reading, in tokens. */
   tokens: number
+  /** Estimated category allocation, scaled to the provider-reported total. */
+  breakdown?: ContextBreakdown | null
   /** Where compaction fires: `min(budget, window × safety)`. Null = unmeasurable. */
   triggerAt: number | null
   /**
@@ -65,6 +68,7 @@ export interface ContextMeterProps {
  */
 export function ContextMeter({
   tokens,
+  breakdown = null,
   triggerAt,
   phase = "unknown",
   preparing = false,
@@ -139,7 +143,7 @@ export function ContextMeter({
   const busy = preparing || digestReady
   const Tag = onCompactNow && !busy ? "button" : "span"
 
-  return (
+  const meter = (
     <Tag
       {...(Tag === "button"
         ? { type: "button" as const, onClick: onCompactNow, "aria-label": "Compact now" }
@@ -167,5 +171,42 @@ export function ContextMeter({
         {fmtTokens(tokens)} <span className="text-dim">{label}</span>
       </span>
     </Tag>
+  )
+  if (breakdown === null) return meter
+
+  const categories: ReadonlyArray<readonly [string, number]> = [
+    ["System prompt", breakdown.systemPrompt],
+    ["Tool schemas & calls", breakdown.tools],
+    ["Skills", breakdown.skills],
+    ["MCPs", breakdown.mcps],
+    ["Messages", breakdown.messages]
+  ]
+  return (
+    <HoverCard
+      side="top"
+      className="w-64 p-3"
+      content={(
+        <div data-testid="context-breakdown" className="space-y-2 font-sans text-[11px]">
+          <div>
+            <div className="font-medium text-text-bright">Context estimate</div>
+            <div className="mt-0.5 text-dim">Scaled to Pi's provider-reported total</div>
+          </div>
+          <div className="space-y-1 border-t border-hairline pt-2">
+            {categories.map(([name, value]) => (
+              <div key={name} className="flex items-center justify-between gap-4">
+                <span className="text-muted-foreground">{name}</span>
+                <span className="font-mono tabular-nums text-text-bright">{fmtTokens(value)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between border-t border-hairline pt-2">
+            <span className="text-muted-foreground">Total</span>
+            <span className="font-mono tabular-nums text-text-bright">{fmtTokens(tokens)}</span>
+          </div>
+        </div>
+      )}
+    >
+      {meter}
+    </HoverCard>
   )
 }

@@ -26,6 +26,23 @@ const roles = [
 ] as const
 const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 const argumentsSchema = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const progressiveSearchInput = Schema.Struct({
+  query: Schema.String,
+  server: Schema.optional(Schema.String)
+})
+const progressiveCallInput = Schema.Struct({
+  server: Schema.String,
+  tool: Schema.String,
+  arguments: argumentsSchema
+})
+type ProgressiveMcpMatch =
+  | { readonly server: string; readonly error: string }
+  | {
+      readonly server: string
+      readonly tool: string
+      readonly description: string
+      readonly inputSchema: Tool["inputSchema"]
+    }
 const validator = new AjvJsonSchemaValidator()
 
 export class McpToolBridgeError extends Data.TaggedError("McpToolBridgeError")<{
@@ -391,3 +408,137 @@ export const registerMcpTools = (
       )
     }))
   )
+
+const sourceByName = (
+  sources: ReadonlyArray<McpToolSource>,
+  name: string
+): McpToolSource => {
+  const source = sources.find((candidate) => candidate.server.name === name)
+  if (source === undefined) throw new ToolError("invalid-input", `Unknown MCP server: ${name}`)
+  return source
+}
+
+const progressiveHealth = (
+  sources: ReadonlyArray<McpToolSource>,
+  statuses: ReadonlyMap<string, RuntimeDiagnosticMcpHealth["status"]>
+): ReadonlyArray<RuntimeDiagnosticMcpHealth> =>
+  sources.map(({ server }) => ({
+    name: server.name,
+    status: statuses.get(server.name) ?? "closed"
+  }))
+
+/**
+ * Register a stable two-tool MCP surface instead of copying every remote schema
+ * into every provider request. Server catalogs are opened only when the model
+ * searches or calls them; the selected schema travels in the tool result and
+ * therefore costs context only when it is relevant to the task.
+ */
+export const registerProgressiveMcpTools = (
+  registry: ToolRegistry,
+  sources: ReadonlyArray<McpToolSource>,
+  factory: McpToolClientFactory = makeMcpToolClient
+): void => {
+  const existingHealth = registry.mcpHealth()
+  const statuses = new Map<string, RuntimeDiagnosticMcpHealth["status"]>()
+  const updateHealth = (name: string, status: RuntimeDiagnosticMcpHealth["status"]) => {
+    statuses.set(name, status)
+    registry.setMcpHealth([...existingHealth, ...progressiveHealth(sources, statuses)])
+  }
+  registry.setMcpHealth([...existingHealth, ...progressiveHealth(sources, statuses)])
+  const serverNames = sources.map(({ server }) => server.name).join(", ")
+  const callRisk: ToolRisk = sources.some(({ risk }) => risk === "execute") ? "execute" : "network"
+
+  registry.register({
+    id: "mcp_search",
+    version: "1",
+    description: `Discover configured MCP capabilities on demand. Search before mcp_call. Servers: ${serverNames}`,
+    input: progressiveSearchInput,
+    providerInputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Capability or tool name to find; use an empty string to list." },
+        server: { type: "string", description: "Optional exact server name to narrow discovery." }
+      },
+      required: ["query"],
+      additionalProperties: false
+    },
+    risk: "network",
+    roles,
+    modes,
+    timeoutMs: TOOL_TIMEOUT_MS,
+    outputBudget: TOOL_OUTPUT_BUDGET,
+    cancellable: true,
+    idempotency: "safe",
+    execute: async ({ query, server: requested }) => {
+      const selected = requested === undefined ? sources : [sourceByName(sources, requested)]
+      const needle = query.trim().toLocaleLowerCase()
+      const discoveries = await Effect.runPromise(Effect.forEach(
+        selected,
+        (source) => discoverSource(factory, source),
+        { concurrency: 4 }
+      ))
+      for (const discovery of discoveries) {
+        updateHealth(discovery.source.server.name, discovery.error === null ? "healthy" : "failed")
+      }
+      const matches = discoveries.flatMap<ProgressiveMcpMatch>(({ source, tools, error }) =>
+        error !== null
+          ? [{ server: source.server.name, error: error.message }]
+          : (tools ?? [])
+              .filter((tool) => needle.length === 0 || `${tool.name} ${tool.description ?? ""}`.toLocaleLowerCase().includes(needle))
+              .slice(0, 20)
+              .map((tool) => ({
+                server: source.server.name,
+                tool: tool.name,
+                description: tool.description ?? "",
+                inputSchema: tool.inputSchema
+              }))
+      )
+      return { matches: matches.slice(0, 40) }
+    }
+  })
+
+  registry.register({
+    id: "mcp_call",
+    version: "1",
+    description: "Call one configured MCP tool discovered with mcp_search.",
+    input: progressiveCallInput,
+    providerInputSchema: {
+      type: "object",
+      properties: {
+        server: { type: "string", description: "Exact MCP server name returned by mcp_search." },
+        tool: { type: "string", description: "Exact MCP tool name returned by mcp_search." },
+        arguments: { type: "object", description: "Arguments matching the discovered inputSchema.", additionalProperties: true }
+      },
+      required: ["server", "tool", "arguments"],
+      additionalProperties: false
+    },
+    risk: callRisk,
+    roles,
+    modes,
+    timeoutMs: TOOL_TIMEOUT_MS,
+    outputBudget: TOOL_OUTPUT_BUDGET,
+    cancellable: true,
+    idempotency: "unsafe",
+    execute: async ({ server: serverName, tool: toolName, arguments: args }, context) => {
+      const source = sourceByName(sources, serverName)
+      try {
+        const tools = await Effect.runPromise(discoverTools(factory, source.resolveServer?.() ?? source.server))
+        updateHealth(serverName, "healthy")
+        const tool = tools.find((candidate) => candidate.name === toolName)
+        if (tool === undefined) throw new ToolError("invalid-input", `Unknown MCP tool: ${serverName}/${toolName}`)
+        const checked = validator.getValidator<Readonly<Record<string, unknown>>>(tool.inputSchema)(args)
+        if (!checked.valid) throw new ToolError("invalid-input", checked.errorMessage ?? `Invalid arguments for MCP tool ${toolName}`)
+        const result = await Effect.runPromise(withClient(
+          factory,
+          source.resolveServer?.() ?? source.server,
+          (client) => client.callTool(toolName, checked.data, context.signal)
+        ))
+        return callResult(result)
+      } catch (cause) {
+        if (cause instanceof ToolError) throw cause
+        updateHealth(serverName, "failed")
+        throw new ToolError("execution-failed", cause instanceof Error ? cause.message : `MCP tool ${toolName} failed`)
+      }
+    }
+  })
+}

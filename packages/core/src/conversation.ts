@@ -653,6 +653,16 @@ export type BackgroundTask = Schema.Schema.Type<typeof BackgroundTask>
  */
 const AgentId = Schema.optional(Schema.String)
 
+/** Estimated composition of the provider-reported working context. */
+export const ContextBreakdown = Schema.Struct({
+  systemPrompt: Schema.Number,
+  tools: Schema.Number,
+  skills: Schema.Number,
+  mcps: Schema.Number,
+  messages: Schema.Number
+})
+export type ContextBreakdown = Schema.Schema.Type<typeof ContextBreakdown>
+
 /** A volatile, sanitized plan document that exists only while an agent drafts. */
 export const PlanDraft = Schema.Struct({
   /** Stable for one proposal attempt; canonical promotion may retain or replace it. */
@@ -811,7 +821,8 @@ export const StreamEvent = Schema.Union(
    */
   Schema.TaggedStruct("Usage", {
     tokens: Schema.Number,
-    window: Schema.optional(Schema.Number)
+    window: Schema.optional(Schema.Number),
+    breakdown: Schema.optional(ContextBreakdown)
   }),
   Schema.TaggedStruct("RetryScheduled", {
     operation: Schema.Literal("provider", "summarization"),

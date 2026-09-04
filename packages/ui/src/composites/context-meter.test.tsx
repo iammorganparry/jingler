@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { ContextMeter } from "./context-meter.js"
 
@@ -190,5 +190,20 @@ describe("ContextMeter", () => {
     expect(title).toContain("150,000")
     expect(title).toContain("170,000")
     expect(title).toContain("compacts")
+  })
+
+  it("shows an estimated category breakdown on hover", async () => {
+    render(
+      <ContextMeter
+        tokens={10_000}
+        triggerAt={20_000}
+        breakdown={{ systemPrompt: 1_000, tools: 2_000, skills: 500, mcps: 500, messages: 6_000 }}
+        onCompactNow={() => {}}
+      />
+    )
+    fireEvent.focus(screen.getByRole("button", { name: "Compact now" }))
+    await waitFor(() => expect(screen.getAllByTestId("context-breakdown").length).toBeGreaterThan(0))
+    expect(screen.getAllByText("System prompt").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("MCPs").length).toBeGreaterThan(0)
   })
 })

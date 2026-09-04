@@ -362,14 +362,19 @@ const mcpError = (message: string, cause?: unknown) =>
   new ConfigError({ message, cause });
 
 /** Known source configs; re-read on every call so imports never go stale. */
+const mcpImportHome = (): string =>
+  process.env.JINGLER_E2E === "1" && process.env.JINGLER_HOME
+    ? process.env.JINGLER_HOME
+    : homedir();
+
 const mcpImportSources: Record<
   "claude" | "codex" | "opencode",
   { readonly path: () => string; readonly parse: (raw: string) => ReadonlyArray<McpImportCandidate> }
 > = {
-  claude: { path: () => resolve(homedir(), ".claude.json"), parse: parseClaudeMcp },
-  codex: { path: () => resolve(homedir(), ".codex", "config.toml"), parse: parseCodexMcp },
+  claude: { path: () => resolve(mcpImportHome(), ".claude.json"), parse: parseClaudeMcp },
+  codex: { path: () => resolve(mcpImportHome(), ".codex", "config.toml"), parse: parseCodexMcp },
   opencode: {
-    path: () => resolve(homedir(), ".config", "opencode", "opencode.json"),
+    path: () => resolve(mcpImportHome(), ".config", "opencode", "opencode.json"),
     parse: parseOpencodeMcp,
   },
 };

@@ -10,6 +10,7 @@
  */
 import type {
   Attachment,
+  ContextBreakdown,
   ExecutionMode,
   ExternalInstructionIdentity,
   GateDecision,
@@ -344,6 +345,7 @@ export interface ConversationContext {
   readonly plannotator?: PlannotatorProjection
   /** Tokens currently occupying the main agent's context window. */
   readonly tokens: number
+  readonly contextBreakdown: ContextBreakdown | null
   /** Epoch ms the current run started, or null when idle — drives the elapsed timer. */
   readonly runStartedAt: number | null
   /**
@@ -908,6 +910,18 @@ export const trimmedTailState = (
         ]
   return { messages: withPlan, hasMoreHistory: hasMore, historyCursor: cursor }
 }
+
+/**
+ * The latest context reading, not a high-water mark. A harness that reports no
+ * breakdown clears the previous one rather than leaving a stale composition
+ * under a fresh total.
+ */
+const foldUsage = (
+  e: Extract<StreamEvent, { readonly _tag: "Usage" }>
+): Pick<ConversationContext, "tokens" | "contextBreakdown"> => ({
+  tokens: e.tokens,
+  contextBreakdown: e.breakdown ?? null
+})
 
 export const conversationMachine = setup({
   types: {
@@ -1482,7 +1496,7 @@ export const conversationMachine = setup({
       // This is the latest context size, not a high-water mark. Compaction can
       // legitimately make it smaller during a run.
       if (e._tag === "Usage") {
-        return { tokens: e.tokens }
+        return foldUsage(e)
       }
       // A compaction reseeds the harness, so the working set restarts from the
       // primer. Reset the reading immediately rather than waiting for the next
@@ -1492,6 +1506,7 @@ export const conversationMachine = setup({
       if (e._tag === "ContextCompacted") {
         return {
           tokens: 0,
+          contextBreakdown: null,
           messages: patchLast(context.messages, (last) => applyStreamEvent(last, e))
         }
       }
@@ -2058,6 +2073,7 @@ export const conversationMachine = setup({
       // meter's numerator; starting at zero hid the whole component after every
       // app restart until Codex happened to emit another Usage event.
       tokens: chat.contextTokens ?? input.session.contextTokens ?? 0,
+      contextBreakdown: null,
       runStartedAt: null,
       lastOutcome: null,
       persistedStatus: input.session.status,
