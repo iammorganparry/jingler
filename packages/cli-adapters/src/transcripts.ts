@@ -1,4 +1,4 @@
-import type { ExternalInstructionIdentity, Message } from "@jingler/core"
+import type { ExternalInstructionIdentity, Message, ProviderId } from "@jingler/core"
 import { Message as MessageSchema } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Schema } from "effect"
@@ -658,6 +658,26 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           })
         )
 
+      /** Stamp legacy assistant turns before switching away from their provider. */
+      const stampProvider = (chatId: string, providerId: ProviderId) =>
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            const existing = yield* readAll(chatId)
+            const changed = existing.some(
+              (message) => message.role === "assistant" && message.providerId === undefined
+            )
+            if (!changed) return
+            yield* writeAll(
+              chatId,
+              existing.map((message) =>
+                message.role === "assistant" && message.providerId === undefined
+                  ? { ...message, providerId }
+                  : message
+              )
+            )
+          })
+        )
+
       /**
        * Replace the last message via `fn` (a no-op when the transcript is empty).
        * Bounded: only the last message is decoded and re-encoded; every earlier
@@ -731,6 +751,7 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
         append,
         appendTurn,
         hasExternalInstruction,
+        stampProvider,
         patchLast,
         patchById
       }

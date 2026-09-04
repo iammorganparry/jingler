@@ -5370,13 +5370,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     providerId,
     modelId,
   }) =>
-    SessionStore.setProviderModel(
-      sessionId,
-      chatId,
-      connectionId,
-      providerId,
-      modelId,
-    ).pipe(Effect.andThen(SessionStore.get(sessionId))),
+    Effect.flatMap(AgentRunner, (runner) =>
+      runner.setModel(sessionId, chatId, connectionId, providerId, modelId),
+    ),
   "Agent.stop": ({ sessionId, chatId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);

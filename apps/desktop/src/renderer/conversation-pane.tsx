@@ -38,6 +38,7 @@ import {
 import { rpc } from "./rpc-client.js"
 import { publishFleetAgentFileActivity } from "./agent-file-activity.js"
 import { publishSessionUpdate } from "./session-updates.js"
+import { queueSessionChatMutation } from "./session-chat-mutations.js"
 import {
   disposeChatActor,
   getConversationActor
@@ -486,7 +487,7 @@ export function ConversationPane({
   }
 
   const createChat = () => {
-    void rpc.sessionsCreateChat(session.id).then(publishSessionUpdate)
+    queueSessionChatMutation(session.id, () => rpc.sessionsCreateChat(session.id))
   }
 
   /**
@@ -507,9 +508,10 @@ export function ConversationPane({
    */
   const handoffQueued = (id: string) => {
     if (!convo.queued.some((queued) => queued.id === id)) return
-    void rpc
-      .sessionsCreateChat(session.id)
-      .then((updated) => {
+    queueSessionChatMutation(
+      session.id,
+      () => rpc.sessionsCreateChat(session.id),
+      (updated) => {
         // Re-read the queue: creating the chat took a round trip, and the running
         // turn's next tool boundary may have handed this very message to the agent
         // in the meantime. Handing it off as well would run it twice.
@@ -524,24 +526,23 @@ export function ConversationPane({
           agentContext: item.agentContext
         })
         convo.unqueue(id)
-      })
-      // The chat was never created, so the message is still queued exactly where
-      // the operator left it — the hand-off simply didn't happen. Swallowing the
-      // rejection is deliberate: there is nothing to recover, and an unhandled
-      // one would surface as a console error for a no-op.
-      .catch(() => {})
+      }
+    )
   }
   const selectChat = (chatId: string) => {
-    if (chatId === activeChat.id) return
-    void rpc.sessionsSelectChat(session.id, chatId).then(publishSessionUpdate)
+    queueSessionChatMutation(session.id, () => rpc.sessionsSelectChat(session.id, chatId))
   }
   const closeChat = (chatId: string) => {
-    void rpc.sessionsCloseChat(session.id, chatId).then((updated) => {
-      clearDraft(chatId)
-      window.jingler.closePlannotator({ sessionId: session.id, chatId })
-      disposeChatActor(session.id, chatId)
-      publishSessionUpdate(updated)
-    }).catch(() => {})
+    queueSessionChatMutation(
+      session.id,
+      () => rpc.sessionsCloseChat(session.id, chatId),
+      (updated) => {
+        clearDraft(chatId)
+        window.jingler.closePlannotator({ sessionId: session.id, chatId })
+        disposeChatActor(session.id, chatId)
+        publishSessionUpdate(updated)
+      }
+    )
   }
 
   useEffect(() => {

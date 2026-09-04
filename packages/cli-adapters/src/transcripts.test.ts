@@ -1,4 +1,4 @@
-import type { Message } from "@jingler/core"
+import type { Message, ProviderId } from "@jingler/core"
 import { assistantMessage, userMessage } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer } from "effect"
@@ -39,6 +39,26 @@ describe("TranscriptStore", () => {
       })
     )
     expect(messages).toStrictEqual([user])
+  })
+
+  it("stamps only legacy assistant turns with their current provider", async () => {
+    const current = "openai-codex" as ProviderId
+    const existing = "anthropic" as ProviderId
+    const messages = await run(
+      Effect.gen(function* () {
+        yield* TranscriptStore.append("s1", userMessage("u1", "hello", "2026-07-11T10:00:00.000Z"))
+        yield* TranscriptStore.append("s1", assistantMessage("a1", "2026-07-11T10:00:01.000Z"))
+        yield* TranscriptStore.append("s1", assistantMessage("a2", "2026-07-11T10:00:02.000Z", existing))
+        yield* TranscriptStore.stampProvider("s1", current)
+        return yield* TranscriptStore.list("s1")
+      })
+    )
+
+    expect(messages.map((message) => message.providerId)).toEqual([
+      undefined,
+      current,
+      existing
+    ])
   })
 
   it("accepts one external turn atomically and rejects delivery or semantic replay after a fresh read", async () => {
