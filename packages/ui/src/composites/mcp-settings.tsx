@@ -129,7 +129,7 @@ export function McpServerForm({
           value={kind}
           onChange={(e) => setKind(e.target.value === "local" ? "local" : "remote")}
           aria-label="Server type"
-          className="rounded-md border border-line bg-panel px-2 py-1.5 text-[12px] text-text"
+          className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text"
         >
           <option value="remote">Remote (URL)</option>
           <option value="local">Local (command)</option>
@@ -150,7 +150,7 @@ export function McpServerForm({
           value={pairs}
           onChange={(e) => setPairs(e.target.value)}
           rows={2}
-          className="rounded-md border border-line bg-panel px-2 py-1.5 font-mono text-[11px] text-text"
+          className="rounded-xl border border-line bg-panel px-3.5 py-2.5 font-mono text-[11px] text-text outline-none focus:border-text-bright/40 focus:ring-2 focus:ring-ring/40"
           aria-label={kind === "remote" ? "Headers" : "Environment variables"}
         />
       </label>
