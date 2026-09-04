@@ -124,17 +124,14 @@ const useAgentSettings = (
     onSetEnabled: (selector, enabled) => {
       setResources((current) =>
         current.map((resource) =>
-          resource.id === selector.id && resource.kind === selector.kind
-            ? { ...resource, enabled }
+          resource.id === selector.id ? { ...resource, enabled }
             : resource
         )
       )
     },
     onReveal: noop,
     onRemove: (selector) => {
-      setResources((current) => current.filter((resource) =>
-        resource.id !== selector.id || resource.kind !== selector.kind
-      ))
+      setResources((current) => current.filter((resource) => resource.id !== selector.id))
     },
     onRetry: noop
   }

@@ -37,8 +37,6 @@ import {
   MemoryService,
   type MemoryServiceEnvironment,
   attachMemoryToSessionSpec,
-  OpenConnectorService,
-  OpenConnectorApi,
   type SecretStore,
   SecretStoreUnavailable,
   planDraftPost,
@@ -78,7 +76,12 @@ import {
   ProviderConnections,
   type ProviderConnectionsShape,
   AgentResourceService,
-  ImportedMcpService,
+  McpConfigService,
+  probeAll,
+  parseClaudeMcp,
+  parseCodexMcp,
+  parseOpencodeMcp,
+  type McpImportCandidate,
   detectAgentResources,
   exportWorkspaceHandoff,
   checkoutWorkspaceHandoffBase,
@@ -86,13 +89,13 @@ import {
   branchAt,
 } from "@jingler/cli-adapters";
 import { appendFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
   AuthError,
   ConfigError,
-  ConnectorError,
   GitHubApiError,
   GitError,
   IssueComment,
@@ -124,13 +127,12 @@ import {
   AgentResourceRpcError,
   WEB_SEARCH_CONFIG_DEFAULT,
   type WebSearchConfig,
+  type McpConfigEntry,
   WebSearchError,
 } from "@jingler/core";
 import type {
   BrowserBounds,
   AdversarialReview,
-  OpenConnectorConfig,
-  OpenConnectorDefaults,
   StreamEvent,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -730,7 +732,7 @@ export const skillsList = (sessionId: string) =>
       .enabledForTarget(session?.environmentId ?? "desktop")
       .pipe(Effect.orElseSucceed(() => []));
     const managed = resources.flatMap((resource) =>
-      resource.kind === "mcp" || BUILTIN_SKILLS.some(({ name }) => name === `/${resource.id}`)
+      BUILTIN_SKILLS.some(({ name }) => name === `/${resource.id}`)
         ? []
         : [
             {
@@ -746,109 +748,103 @@ export const skillsList = (sessionId: string) =>
     return [...BUILTIN_SKILLS, ...managed];
   });
 
-/**
- * The Jingler-hosted OpenConnector URL used by packaged (prod) builds, overridable
- * via env for staging. PLACEHOLDER until the hosted instance ships — the mechanism
- * is here so prod points at it automatically the moment the URL is real.
- */
-const HOSTED_OPEN_CONNECTOR_URL =
-  process.env.JINGLER_OPEN_CONNECTOR_URL ?? "https://connect.jingler.app";
+// ── MCP servers — ~/jingler/mcp.json ─────────────────────────────────────────
 
-/** The dev instance the repo-root docker-compose serves, with its zero-setup token. */
-const DEV_OPEN_CONNECTOR_URL =
-  process.env.OPEN_CONNECTOR_BASE_URL ?? "http://localhost:3000";
-const DEV_OPEN_CONNECTOR_TOKEN =
-  process.env.OPEN_CONNECTOR_API_TOKEN ?? "local-dev-token";
+const mcpError = (message: string, cause?: unknown) =>
+  new ConfigError({ message, cause });
 
-/**
- * Environment-aware onboarding defaults. Only the main process knows
- * `app.isPackaged`, so this lives here rather than in the cli-adapters service.
- */
-export const openConnectorDefaults = (): OpenConnectorDefaults =>
-  // `app?.` because the unit-test env has no Electron `app`; there, dev is correct.
-  app?.isPackaged
-    ? {
-        endpoint: HOSTED_OPEN_CONNECTOR_URL,
-        kind: "hosted",
-        hasDevToken: false,
-      }
-    : { endpoint: DEV_OPEN_CONNECTOR_URL, kind: "local", hasDevToken: true };
-
-/** `OpenConnector.get` handler — settings + a `hasToken` bool + onboarding defaults. */
-export const openConnectorGet = () =>
-  OpenConnectorService.get.pipe(
-    Effect.map((r) => ({ ...r, defaults: openConnectorDefaults() })),
-  );
-
-/**
- * `OpenConnector.autoSetup` handler — one-click onboarding. Dev fills the local
- * endpoint + dev token and enables; prod points at the hosted endpoint but leaves
- * it disabled (its token is provisioned separately — see docs/open-connector.md).
- */
-export const openConnectorAutoSetup = () => {
-  const d = openConnectorDefaults();
-  const config = {
-    endpoint: d.endpoint,
-    enabled: d.kind === "local",
-    serverName: "open-connector",
-  };
-  return openConnectorSet(
-    config,
-    d.hasDevToken ? DEV_OPEN_CONNECTOR_TOKEN : undefined,
-  );
+/** Known source configs; re-read on every call so imports never go stale. */
+const mcpImportSources: Record<
+  "claude" | "codex" | "opencode",
+  { readonly path: () => string; readonly parse: (raw: string) => ReadonlyArray<McpImportCandidate> }
+> = {
+  claude: { path: () => resolve(homedir(), ".claude.json"), parse: parseClaudeMcp },
+  codex: { path: () => resolve(homedir(), ".codex", "config.toml"), parse: parseCodexMcp },
+  opencode: {
+    path: () => resolve(homedir(), ".config", "opencode", "opencode.json"),
+    parse: parseOpencodeMcp,
+  },
 };
 
-/**
- * `OpenConnector.set` handler. The token can fail to persist when the OS vault is
- * unavailable; that surfaces as `SecretStoreUnavailable`, which is not an RPC
- * error type, so it's folded into `ConfigError` (the channel the panel handles).
- */
-export const openConnectorSet = (
-  config: OpenConnectorConfig,
-  token: string | null | undefined,
-) =>
-  OpenConnectorService.set(config, token).pipe(
-    Effect.catchIf(
-      (e): e is SecretStoreUnavailable => e instanceof SecretStoreUnavailable,
-      (e) => new ConfigError({ message: e.message, cause: e }),
+/** Parse one source file into full (secret-bearing) candidates. Main-only. */
+const mcpImportParse = (source: "claude" | "codex" | "opencode") =>
+  Effect.tryPromise({
+    try: () => readFile(mcpImportSources[source].path(), "utf8"),
+    catch: () =>
+      mcpError(`No ${source} config found at ${mcpImportSources[source].path()}`),
+  }).pipe(
+    Effect.flatMap((raw) =>
+      Effect.try({
+        try: () => mcpImportSources[source].parse(raw),
+        catch: (cause) => mcpError(`Could not parse the ${source} config`, cause),
+      }),
     ),
   );
 
-/** `OpenConnector.test` handler — live probe of the configured endpoint. */
-export const openConnectorTest = () => OpenConnectorService.test;
+const mcpCandidateTarget = (candidate: McpImportCandidate): string =>
+  candidate.entry === null
+    ? ""
+    : candidate.entry.type === "remote"
+      ? candidate.entry.url
+      : candidate.entry.command.join(" ");
 
-// ── MCP Connector Center handlers ────────────────────────────────────────────
-
-/** `Connector.startOauth` — begin OAuth, opening the consent URL in the system browser. */
-export const connectorStartOauth = (
-  service: string,
-  connectionName: string | undefined,
-) =>
-  OpenConnectorApi.startAuthorization(service, connectionName).pipe(
-    // The URL can carry a `state` secret, so it is opened in the main process and
-    // never returned to the renderer; OpenConnector's own callback stores the grant.
-    Effect.flatMap((url) =>
-      // The URL is remote-controlled (the OpenConnector instance's response), and
-      // `openExternal` will launch ANY protocol handler — file://, custom schemes.
-      // Refuse anything but http(s), mirroring `index.ts`'s deep-link guard, so a
-      // compromised or MITM'd instance can't drive an arbitrary-URL open.
-      /^https?:\/\//i.test(url)
-        ? Effect.tryPromise({
-            try: () => shell.openExternal(url),
-            catch: () =>
-              new ConnectorError({
-                message: "Couldn't open the authorization URL.",
-              }),
-          })
-        : Effect.fail(
-            new ConnectorError({
-              message:
-                "OpenConnector returned a non-http(s) authorization URL.",
-            }),
-          ),
+const mcpList = () =>
+  McpConfigService.list().pipe(
+    Effect.map((servers) => ({ servers, error: null })),
+    Effect.catchAll((cause) =>
+      Effect.succeed({ servers: [], error: cause.message }),
     ),
-    Effect.as({ ok: true, message: null } as const),
   );
+
+const mcpStatus = () =>
+  McpConfigService.parsed().pipe(
+    Effect.mapError((cause) => mcpError(cause.message, cause)),
+    Effect.flatMap((entries) =>
+      probeAll(entries, null, () => new Date().toISOString()),
+    ),
+  );
+
+const mcpApplyImport = (
+  source: "claude" | "codex" | "opencode",
+  names: ReadonlyArray<string>,
+) =>
+  Effect.gen(function* () {
+    const requested = new Set(names);
+    const candidates = yield* mcpImportParse(source);
+    const existing = new Set(
+      (yield* mcpList()).servers.map((server) => server.name),
+    );
+    const selected = candidates.filter(
+      (candidate): candidate is McpImportCandidate & { entry: McpConfigEntry } =>
+        requested.has(candidate.name) && candidate.entry !== null && !existing.has(candidate.name),
+    );
+    yield* McpConfigService.writeAll(
+      Object.fromEntries(selected.map((candidate) => [candidate.name, candidate.entry])),
+    ).pipe(Effect.mapError((cause) => mcpError(cause.message, cause)));
+    return selected.map((candidate) => candidate.name);
+  });
+
+const mcpReveal = () =>
+  Effect.gen(function* () {
+    const paths = yield* AppPaths;
+    // Reveal needs a file to point at; seed the template on first use.
+    yield* Effect.tryPromise({
+      try: async () => {
+        await mkdir(dirname(paths.mcpConfigFile), { recursive: true });
+        try {
+          await writeFile(
+            paths.mcpConfigFile,
+            `${JSON.stringify({ mcp: {} }, null, 2)}\n`,
+            { flag: "wx", mode: 0o600 },
+          );
+        } catch (cause) {
+          if (!(cause instanceof Error) || !("code" in cause) || cause.code !== "EEXIST") throw cause;
+        }
+      },
+      catch: (cause) => mcpError("Could not create mcp.json", cause),
+    });
+    yield* Effect.sync(() => shell.showItemInFolder(paths.mcpConfigFile));
+  });
 
 /**
  * `Sessions.diff` handler. Resolves the session's worktree and returns its
@@ -4490,25 +4486,12 @@ const resourceDetection = (sessionId: string | null) =>
     ),
   );
 
-const resourceList = Effect.gen(function* () {
-  const files = yield* AgentResourceService;
-  const mcp = yield* ImportedMcpService;
-  return [...(yield* files.list), ...(yield* mcp.list)];
-}).pipe(Effect.mapError((cause) => agentResourceError("list", cause)));
+const resourceList = Effect.flatMap(AgentResourceService, (files) => files.list)
+  .pipe(Effect.mapError((cause) => agentResourceError("list", cause)));
 
 const resourceEnabledForTarget = (targetId: string) =>
-  Effect.gen(function* () {
-    const files = yield* AgentResourceService;
-    const mcp = yield* ImportedMcpService;
-    const managedFiles = yield* files.enabledForTarget(targetId);
-    const managedMcp = (yield* mcp.list).filter(
-      (server) =>
-        server.enabled &&
-        server.availability.state === "available" &&
-        server.availability.targetId === targetId,
-    );
-    return [...managedFiles, ...managedMcp];
-  }).pipe(Effect.mapError((cause) => agentResourceError("resolve", cause)));
+  Effect.flatMap(AgentResourceService, (files) => files.enabledForTarget(targetId))
+    .pipe(Effect.mapError((cause) => agentResourceError("resolve", cause)));
 
 const webSearchSettingsStatus = Effect.gen(function* () {
   const config = yield* ConfigService.get().pipe(
@@ -4589,10 +4572,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const service = yield* AgentResourceService;
       const detected = yield* resourceDetection(sessionId);
       const requested = new Set(sourcePaths);
-      const candidates = detected.candidates.filter(
-        (candidate) =>
-          candidate.kind !== "mcp" &&
-          requested.has(candidate.provenance.sourcePath),
+      const candidates = detected.candidates.filter((candidate) =>
+        requested.has(candidate.provenance.sourcePath),
       );
       const imported = yield* service.importResources(candidates, scope);
       const found = new Set(
@@ -4613,45 +4594,26 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         ],
       };
     }).pipe(Effect.mapError((cause) => agentResourceError("import", cause))),
-  "AgentResources.importMcp": (input) =>
-    Effect.flatMap(ImportedMcpService, (service) =>
-      service.importServer(input),
-    ).pipe(Effect.mapError((cause) => agentResourceError("import", cause))),
-  "AgentResources.remove": ({ kind, id }) =>
-    Effect.gen(function* () {
-      const files = yield* AgentResourceService;
-      const mcp = yield* ImportedMcpService;
-      if (kind === "mcp") return yield* mcp.remove(id);
-      return yield* files.remove(id);
-    }).pipe(Effect.mapError((cause) => agentResourceError("remove", cause))),
-  "AgentResources.setEnabled": ({ kind, id, enabled }) =>
-    Effect.gen(function* () {
-      const files = yield* AgentResourceService;
-      const mcp = yield* ImportedMcpService;
-      if (kind === "mcp") return yield* mcp.setEnabled(id, enabled);
-      return yield* files.setEnabled(id, enabled);
-    }).pipe(Effect.mapError((cause) => agentResourceError("enable", cause))),
-  "AgentResources.reveal": ({ kind, id }) =>
-    kind === "mcp"
-      ? Effect.fail(
-        agentResourceError("reveal", new Error("MCP resources do not have a local file")),
-      )
-      : Effect.flatMap(AgentResourceService, (service) => service.reveal(id)).pipe(
-        Effect.tap((path) => Effect.sync(() => shell.showItemInFolder(path))),
-        Effect.asVoid,
-        Effect.mapError((cause) => agentResourceError("reveal", cause)),
+  "AgentResources.remove": ({ id }) =>
+    Effect.flatMap(AgentResourceService, (files) => files.remove(id)).pipe(
+      Effect.mapError((cause) => agentResourceError("remove", cause)),
+    ),
+  "AgentResources.setEnabled": ({ id, enabled }) =>
+    Effect.flatMap(AgentResourceService, (files) => files.setEnabled(id, enabled)).pipe(
+      Effect.mapError((cause) => agentResourceError("enable", cause)),
+    ),
+  "AgentResources.reveal": ({ id }) =>
+    Effect.flatMap(AgentResourceService, (service) => service.reveal(id)).pipe(
+      Effect.tap((path) => Effect.sync(() => shell.showItemInFolder(path))),
+      Effect.asVoid,
+      Effect.mapError((cause) => agentResourceError("reveal", cause)),
       ),
   "AgentResources.enabledForTarget": ({ targetId }) =>
     resourceEnabledForTarget(targetId),
   "AgentResources.watch": () =>
     interruptOnPageGone(
-      Stream.merge(
-        Stream.unwrap(
-          Effect.map(AgentResourceService, (service) => service.watch()),
-        ),
-        Stream.unwrap(
-          Effect.map(ImportedMcpService, (service) => service.watch()),
-        ),
+      Stream.unwrap(
+        Effect.map(AgentResourceService, (service) => service.watch()),
       ).pipe(
         Stream.mapEffect(() => resourceList),
         Stream.catchAll(() => Stream.empty),
@@ -5614,32 +5576,33 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       ),
     ),
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
-  "OpenConnector.get": () => openConnectorGet(),
-  "OpenConnector.set": ({ config, token }) => openConnectorSet(config, token),
-  "OpenConnector.test": () => openConnectorTest(),
-  "OpenConnector.autoSetup": () => openConnectorAutoSetup(),
-  "Connector.providers": () => OpenConnectorApi.listProviders(),
-  "Connector.provider": ({ service }) => OpenConnectorApi.getProvider(service),
-  "Connector.connections": () => OpenConnectorApi.listConnections(),
-  "Connector.oauthConfigs": () => OpenConnectorApi.oauthConfigs(),
-  "Connector.connect": ({ service, authType, values, connectionName }) =>
-    OpenConnectorApi.putConnection(
-      service,
-      authType,
-      { ...values },
-      connectionName,
+  "Mcp.list": () => mcpList(),
+  "Mcp.status": () => mcpStatus(),
+  "Mcp.write": ({ name, entry }) =>
+    McpConfigService.write(name, entry).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
     ),
-  "Connector.disconnect": ({ service, connectionName }) =>
-    OpenConnectorApi.deleteConnection(service, connectionName),
-  "Connector.setOauthConfig": ({ provider, clientId, clientSecret, extra }) =>
-    OpenConnectorApi.putOauthConfig(
-      provider,
-      clientId,
-      clientSecret,
-      extra ? { ...extra } : undefined,
+  "Mcp.remove": ({ name }) =>
+    McpConfigService.remove(name).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
     ),
-  "Connector.startOauth": ({ service, connectionName }) =>
-    connectorStartOauth(service, connectionName),
+  "Mcp.setEnabled": ({ name, enabled }) =>
+    McpConfigService.setEnabled(name, enabled).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    ),
+  "Mcp.importCandidates": ({ source }) =>
+    mcpImportParse(source).pipe(
+      Effect.map((candidates) =>
+        candidates.map((candidate) => ({
+          name: candidate.name,
+          source: candidate.source,
+          target: mcpCandidateTarget(candidate),
+          problem: candidate.problem,
+        })),
+      ),
+    ),
+  "Mcp.applyImport": ({ source, names }) => mcpApplyImport(source, names),
+  "Mcp.reveal": () => mcpReveal(),
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via
   // the absolute path discovery found.
@@ -6424,8 +6387,6 @@ export type RpcServerRequirements =
   | GitHubEventStore
   | GitService
   | MemoryService
-  | OpenConnectorApi
-  | OpenConnectorService
   | Path.Path
   | PluginAuth
   | PluginHost
@@ -6439,7 +6400,7 @@ export type RpcServerRequirements =
   | SecretStore
   | SessionStore
   | AgentResourceService
-  | ImportedMcpService
+  | McpConfigService
   | TerminalService
   | ThemeService
   | TranscriptStore

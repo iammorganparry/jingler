@@ -1,10 +1,18 @@
 import { readFile, realpath } from "node:fs/promises"
 import { isAbsolute, relative, resolve } from "node:path"
+import { Option, Schema } from "effect"
 
-type JsonRecord = Readonly<Record<string, unknown>>
-
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null
+const PlannotatorEntry = Schema.Struct({
+  type: Schema.Literal("custom"),
+  customType: Schema.Literal("plannotator"),
+  data: Schema.Unknown
+})
+const PlannotatorState = Schema.Struct({
+  phase: Schema.Literal("planning"),
+  reviewPending: Schema.Literal(true)
+})
+const decodePlannotatorEntry = Schema.decodeUnknownOption(PlannotatorEntry)
+const isPendingReview = Schema.is(PlannotatorState)
 
 export const plannotatorReviewPending = async (
   sessionFile: string | undefined,
@@ -37,13 +45,9 @@ export const plannotatorReviewPending = async (
   for (const line of source.split("\n")) {
     if (!line.trim()) continue
     try {
-      const entry: unknown = JSON.parse(line)
-      if (!isRecord(entry) || entry.type !== "custom" || entry.customType !== "plannotator") {
-        continue
-      }
-      pending = isRecord(entry.data) &&
-        entry.data.phase === "planning" &&
-        entry.data.reviewPending === true
+      const entry = decodePlannotatorEntry(JSON.parse(line))
+      if (Option.isNone(entry)) continue
+      pending = isPendingReview(entry.value.data)
     } catch {
       return false
     }

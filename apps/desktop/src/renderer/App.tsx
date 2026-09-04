@@ -111,8 +111,8 @@ import {
 } from "./retitle-triggers.js";
 import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
-import { useConnectorCenter } from "./use-connector-center.js";
-import { useOpenConnector } from "./use-open-connector.js";
+import { useMcpSettings } from "./use-mcp-settings.js";
+import { McpImportPrompt } from "./mcp-import-prompt.js";
 import { useProviderCatalog } from "./use-provider-catalog.js";
 import { useAgentsSettings } from "./use-agents-settings.js";
 import { useRuntimeInspector } from "./use-runtime-inspector.js";
@@ -521,8 +521,7 @@ function AuthedApp({
     offloadSettingsMachine
   );
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
-  const connector = useConnectorCenter();
-  const unifiedMcp = useOpenConnector();
+  const mcp = useMcpSettings();
   const providerCatalog = useProviderCatalog();
   const agentsSettings = useAgentsSettings();
   const runtimeInspector = useRuntimeInspector();
@@ -1862,8 +1861,7 @@ function AuthedApp({
         contextConfig={contextConfig}
         onSaveContextConfig={saveContextConfig}
         contextSessions={contextSessions}
-        unifiedMcp={unifiedMcp}
-        connector={connector}
+        mcp={mcp}
         environments={environmentController.environments}
         loadEnvironmentDiscovery={rpc.environmentsDiscovery}
         loadBranches={async (repoPath, environmentId) => {
@@ -1933,6 +1931,7 @@ function AuthedApp({
             onSelectFiles={ctx.onSelectFiles}
             onSelectChanges={ctx.onSelectChanges}
             onOpenProviderSettings={ctx.onOpenProviderSettings}
+            onAddMcp={mcp.add}
             paneFocused={ctx.paneFocused ?? true}
           />
         )}
@@ -2090,6 +2089,12 @@ function AuthedApp({
           </button>
         </div>
       )}
+      <McpImportPrompt
+        ready={!mcp.loading && mcp.parseError === null}
+        servers={mcp.servers}
+        load={mcp.importCandidates}
+        apply={mcp.applyImport}
+      />
       <ConfirmDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}

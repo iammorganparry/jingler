@@ -168,7 +168,7 @@ const managedResourceRegistry = async (
   )
   await Effect.runPromise(
     service.importResources(
-      detected.candidates.filter((candidate) => candidate.kind !== "mcp"),
+      detected.candidates,
       { kind: "portable", allowedTargets: [] }
     )
   )

@@ -879,43 +879,6 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
 };
 
 /**
- * The self-hosted OpenConnector instance every agent draws its MCP tools from.
- *
- * Jingler exposes one central OpenConnector `/mcp` endpoint through its managed
- * tool registry, so a provider connected once is available to every agent.
- *
- * SECURITY: this struct is persisted to `config.json` and crosses the RPC
- * boundary, so it carries NO secret. The instance's bearer token lives only in
- * `SecretStore` (a sibling of the auth `auth.enc`) and is joined in at spawn.
- */
-export const OpenConnectorConfig = Schema.Struct({
-  /**
-   * Base URL of the instance, without the `/mcp` suffix, e.g.
-   * `https://mcp.internal`. The injected server targets `${endpoint}/mcp`.
-   */
-  endpoint: Schema.String,
-  /** Master switch. Off means no agent receives the server. */
-  enabled: Schema.Boolean,
-  /**
-   * The name the unified server is registered under in the runtime. Stable so
-   * repeated worktree writes stay idempotent and the Settings list is recognisable.
-   */
-  serverName: Schema.optionalWith(Schema.String, {
-    default: () => "open-connector",
-  }),
-});
-export type OpenConnectorConfig = Schema.Schema.Type<
-  typeof OpenConnectorConfig
->;
-
-/** The default before an operator configures anything: present but switched off. */
-export const OPEN_CONNECTOR_DEFAULT: OpenConnectorConfig = {
-  endpoint: "",
-  enabled: false,
-  serverName: "open-connector",
-};
-
-/**
  * Team-memory selection persisted with the workspace.
  *
  * This is deliberately only a choice and an organization scope. The user's
@@ -934,28 +897,6 @@ export const MEMORY_CONFIG_DEFAULT: MemoryConfig = {
   enabled: false,
   organizationId: null,
 };
-
-/**
- * Environment-aware onboarding defaults for OpenConnector, resolved in the main
- * process (it alone knows `app.isPackaged`). The Settings panel prefills from these
- * and offers a one-click "Set up automatically":
- *
- * - `local` (dev builds) → the docker-compose instance on localhost, whose known
- *   dev token (`hasDevToken`) the app can fill in for the operator.
- * - `hosted` (packaged builds) → the Jingler-managed instance; the endpoint is
- *   filled but the token is provisioned separately (no shipped dev token).
- */
-export const OpenConnectorDefaults = Schema.Struct({
-  /** The default endpoint to prefill (no `/mcp` suffix). */
-  endpoint: Schema.String,
-  /** Which onboarding path applies to this build. */
-  kind: Schema.Literal("local", "hosted"),
-  /** True when the build ships a known token the app can auto-fill (dev only). */
-  hasDevToken: Schema.Boolean,
-});
-export type OpenConnectorDefaults = Schema.Schema.Type<
-  typeof OpenConnectorDefaults
->;
 
 /**
  * Persisted app configuration, stored at `~/jingler/config.json`. `reposDir` is
@@ -1050,12 +991,6 @@ export const WorkspaceConfig = Schema.Struct({
    * kilobytes of colour table and `config.json` is read on every settings save.
    */
   theme: Schema.optional(ThemeConfig),
-  /**
-   * The self-hosted OpenConnector instance all agents draw MCP tools from. Absent
-   * on older configs, which means the feature is off (`OPEN_CONNECTOR_DEFAULT`);
-   * the bearer token is NEVER stored here — it lives in `SecretStore`.
-   */
-  openConnector: Schema.optional(OpenConnectorConfig),
   /**
    * Secret-free WebSearch setup choice. API keys live only in encrypted
    * credential storage and never cross this persistence boundary.

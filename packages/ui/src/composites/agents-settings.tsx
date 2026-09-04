@@ -142,20 +142,18 @@ export function AgentsSettings(props: AgentsSettingsProps) {
               <span className="flex justify-center">
                 <Toggle
                   checked={resource.enabled}
-                  onCheckedChange={(enabled) => props.onSetEnabled({ kind: resource.kind, id: resource.id }, enabled)}
+                  onCheckedChange={(enabled) => props.onSetEnabled({ id: resource.id }, enabled)}
                   aria-label={`${resource.enabled ? "Disable" : "Enable"} ${resource.name}`}
                   disabled={props.loading}
                 />
               </span>
               <span className="flex justify-end">
-                {resource.kind !== "mcp" && (
-                  <Button aria-label={`Reveal ${resource.name}`} variant="ghost" size="sm" onClick={() => props.onReveal({ kind: resource.kind, id: resource.id })} disabled={props.loading}>
-                    <FolderOpen size={13} /> Reveal
-                  </Button>
-                )}
+                <Button aria-label={`Reveal ${resource.name}`} variant="ghost" size="sm" onClick={() => props.onReveal({ id: resource.id })} disabled={props.loading}>
+                  <FolderOpen size={13} /> Reveal
+                </Button>
               </span>
               <span className="flex justify-end">
-                <Button aria-label={`Remove ${resource.name}`} variant="ghost" size="sm" onClick={() => props.onRemove({ kind: resource.kind, id: resource.id })} disabled={props.loading}>
+                <Button aria-label={`Remove ${resource.name}`} variant="ghost" size="sm" onClick={() => props.onRemove({ id: resource.id })} disabled={props.loading}>
                   <Trash2 size={13} /> Remove
                 </Button>
               </span>

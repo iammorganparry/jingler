@@ -31,12 +31,10 @@ const directive = (name: string): string => {
 }
 
 describe("renderer CSP", () => {
-  it("allows both origins the favicon service redirects across", () => {
+  it("no longer widens img-src to the favicon service the Connector Center used", () => {
     const imgSrc = directive("img-src")
-    // The URL the component requests…
-    expect(imgSrc).toContain("https://www.google.com")
-    // …and where it lands. Missing this one silently degrades every logo.
-    expect(imgSrc).toContain("https://*.gstatic.com")
+    expect(imgSrc).not.toContain("google.com")
+    expect(imgSrc).not.toContain("gstatic.com")
   })
 
   it("still allows the GitHub asset origins markdown badges use", () => {

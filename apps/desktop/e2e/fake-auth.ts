@@ -6,7 +6,7 @@ import {
   CURRENT_RUNTIME_CONTRACTS,
   ManagedProviderCredential as ManagedProviderCredentialSchema,
 } from "@jingler/core";
-import { Either, Schema } from "effect";
+import { Either, Option, Schema } from "effect";
 
 const MEMORY_PROTOCOL = "2026-07-28";
 const MEMORY_TOOL_NAMES = [
@@ -162,11 +162,12 @@ export interface FakeAuthServer {
   readonly close: () => Promise<void>;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const decodeJsonBody = Schema.decodeUnknownOption(
+  Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+);
 
 const jsonBody = (value: unknown): Record<string, unknown> =>
-  isRecord(value) ? value : {};
+  Option.getOrElse(decodeJsonBody(value), () => ({}));
 
 interface RedactedManagedCredential {
   readonly connectionId: string;

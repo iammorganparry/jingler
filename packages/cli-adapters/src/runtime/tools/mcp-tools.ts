@@ -83,8 +83,8 @@ interface McpDiscovery {
 export interface JinglerMcpAttachments {
   readonly browser?: RuntimeMcpServer | null
   readonly memory?: RuntimeMcpServer | null
-  readonly openConnector?: RuntimeMcpServer | null
-  readonly imported?: ReadonlyArray<RuntimeMcpServer>
+  /** Operator-configured servers from `~/jingler/mcp.json`. */
+  readonly configured?: ReadonlyArray<RuntimeMcpServer>
 }
 
 const serverCapabilityIdentity = (server: RuntimeMcpServer): string =>
@@ -103,11 +103,8 @@ export const mcpCapabilityFingerprint = (
   ...(attachments?.memory
     ? [`memory:${serverCapabilityIdentity(attachments.memory)}`]
     : []),
-  ...(attachments?.openConnector
-    ? [`openConnector:${serverCapabilityIdentity(attachments.openConnector)}`]
-    : []),
-  ...(attachments?.imported ?? [])
-    .map((server) => `imported:${serverCapabilityIdentity(server)}`)
+  ...(attachments?.configured ?? [])
+    .map((server) => `configured:${serverCapabilityIdentity(server)}`)
     .sort()
 ])
 
@@ -131,20 +128,13 @@ export const jinglerMcpSources = (
         ...(live ? { resolveServer: () => live()?.memory ?? null } : {})
       }]
     : []),
-  ...(attachments.openConnector
-    ? [{
-        server: attachments.openConnector,
-        risk: "execute" as const,
-        ...(live ? { resolveServer: () => live()?.openConnector ?? null } : {})
-      }]
-    : []),
-  ...(attachments.imported ?? []).map((server) => ({
+  ...(attachments.configured ?? []).map((server) => ({
     server,
     risk: "execute" as const,
     ...(live
       ? {
           resolveServer: () =>
-            live()?.imported?.find((candidate) => candidate.name === server.name) ?? null
+            live()?.configured?.find((candidate) => candidate.name === server.name) ?? null
         }
       : {})
   }))

@@ -60,9 +60,7 @@ import {
 import { SegmentedControl } from "../components/segmented-control.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
-import { ConnectorsSettings } from "./connectors-settings.js"
-import type { ConnectorCenterProps } from "./connector-center.js"
-import type { OpenConnectorSectionProps } from "./open-connector-section.js"
+import { McpSettings, type McpSettingsProps } from "./mcp-settings.js"
 import { Input } from "../components/input.js"
 import {
   EnvironmentDialog,
@@ -136,7 +134,7 @@ const NAV: ReadonlyArray<NavItem> = [
   },
   {
     key: "connectors",
-    label: "Connectors",
+    label: "MCP servers",
     icon: <Plug size={14} />,
     ready: true
   },
@@ -187,13 +185,8 @@ export interface SettingsViewProps {
     onRename: (id: string, name: string) => void | Promise<void>
     onRevoke: (id: string) => void | Promise<void>
   }
-  /** Unified MCP (OpenConnector) connection settings (from `useOpenConnector`). */
-  unifiedMcp?: OpenConnectorSectionProps
-  /**
-   * Connector Center data + actions (from `useConnectorCenter`). Gated behind a live
-   * connection — see `ConnectorsSettings`.
-   */
-  connector?: ConnectorCenterProps
+  /** MCP servers from ~/jingler/mcp.json (from `useMcpSettings`). */
+  mcp?: McpSettingsProps
   /** Auto-compaction levers (master switch + working-set budget). */
   context?: ContextConfig | null
   onSaveContext?: (config: ContextConfig) => void
@@ -256,8 +249,7 @@ export function SettingsView({
   themes,
   plugins,
   devices,
-  unifiedMcp,
-  connector,
+  mcp,
   context,
   onSaveContext,
   contextSessions,
@@ -430,16 +422,8 @@ export function SettingsView({
       ) : section === "runtime" ? (
         runtimeInspector ? <RuntimeInspector {...runtimeInspector} /> : <StubSection label="Runtime" />
       ) : section === "connectors" ? (
-        // Same wrapper every other section uses. Without `flex-1` this pane is a
-        // shrink-to-fit child of the settings flex ROW, so the catalog sized to
-        // its content and left the rest of the window empty — and the grid, which
-        // picks its column count from the container it measures, saw a width the
-        // window never actually constrained it to.
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-editor p-6">
-          <ConnectorsSettings
-            unifiedMcp={unifiedMcp}
-            connector={connector}
-          />
+        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-6">
+          {mcp ? <McpSettings {...mcp} /> : <StubSection label="MCP servers" />}
         </div>
       ) : section === "plugins" ? (
         plugins ? (

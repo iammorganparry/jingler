@@ -6,7 +6,7 @@ afterEach(cleanup)
 
 const ADD_IMAGE_ITEM = /Add image/
 const SKILLS_ITEM = /Skills/
-const MCP_ITEM = /MCP connectors/
+const MCP_ITEM = /Connect MCP server/
 
 const openMenu = () => fireEvent.click(screen.getByRole("button", { name: "Composer menu" }))
 
@@ -24,8 +24,16 @@ describe("Composer tools menu", () => {
     openMenu()
     expect(screen.getByRole("button", { name: ADD_IMAGE_ITEM })).toBeTruthy()
     expect(screen.getByRole("button", { name: SKILLS_ITEM })).toBeTruthy()
-    // MCP now lives ONLY in Settings › Connectors (OpenConnector), never the composer.
     expect(screen.queryByRole("button", { name: MCP_ITEM })).toBeNull()
+  })
+
+  it("opens the global MCP server dialog when configured", () => {
+    render(<Composer onAddMcp={async () => {}} />)
+
+    openMenu()
+    fireEvent.click(screen.getByRole("button", { name: MCP_ITEM }))
+    expect(screen.getByRole("dialog")).toBeTruthy()
+    expect(screen.getByText("Saves to ~/jingler/mcp.json and becomes available to local sessions on their next turn.")).toBeTruthy()
   })
 
   it("opens the existing skill palette from the menu", () => {

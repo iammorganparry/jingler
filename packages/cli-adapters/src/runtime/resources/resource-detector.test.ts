@@ -50,20 +50,4 @@ describe("resource detection", () => {
     ]))
   })
 
-  it("detects MCP configuration as redacted review metadata", async () => {
-    const home = await temporary()
-    await mkdir(join(home, ".pi", "agent"), { recursive: true })
-    await writeFile(join(home, ".pi", "agent", "mcp.json"), JSON.stringify({
-      headers: { Authorization: "secret" }
-    }))
-
-    const result = await Effect.runPromise(detectAgentResources({ homeDir: home, worktreePath: null }))
-    const serialized = JSON.stringify(result)
-
-    expect(result.candidates).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "mcp", name: "pi MCP configuration" })
-    ]))
-    expect(serialized).not.toContain("secret")
-    expect(serialized).not.toContain("Authorization")
-  })
 })

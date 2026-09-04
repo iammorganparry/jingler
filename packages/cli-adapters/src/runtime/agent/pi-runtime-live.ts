@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { join } from "node:path"
+import { isAbsolute, join, resolve } from "node:path"
 import type { ManagedResource, PiRunSpec } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
@@ -26,10 +26,8 @@ import {
 } from "../../web-search.js"
 import { ProviderConnections } from "../providers/provider-connections.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
-import {
-  ImportedMcpService,
-  type ResolvedManagedMcp
-} from "../resources/imported-mcp-service.js"
+import { McpConfigService } from "../../mcp-config-service.js"
+import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
 import {
@@ -95,7 +93,7 @@ export interface PiAgentRuntimeLiveOptions {
 }
 
 interface PreparedLockedCatalog {
-  readonly managedMcp: ReadonlyArray<ResolvedManagedMcp>
+  readonly managedMcp: ReadonlyArray<RuntimeMcpServer>
   readonly managedFiles: ReadonlyArray<ManagedResource>
   readonly plugins: {
     readonly host: PluginHostRuntime
@@ -115,7 +113,13 @@ export const makePiAgentRuntimeLive = (
     const config = yield* ConfigService
     const secretStore = yield* SecretStore
     const providers = yield* ProviderConnections
-    const importedMcp = yield* ImportedMcpService
+    // Operator-configured servers from `~/jingler/mcp.json`, re-read per run so
+    // hand-edits apply to the next turn without a restart.
+    const configuredMcp = McpConfigService.resolve().pipe(
+      Effect.provide(McpConfigService.Default),
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(AppPaths, paths)
+    )
     const managedResources = yield* AgentResourceService
     const diagnostics = yield* RuntimeDiagnostics
     const pluginRegistry = yield* PluginRegistry
@@ -230,9 +234,7 @@ export const makePiAgentRuntimeLive = (
         sessionId: spec.piSessionId ?? spec.runId
       }),
       lockedCapabilityFingerprint: (spec) => Effect.gen(function* () {
-        const managedMcp = yield* importedMcp.resolveForTarget(
-          spec.targetCapabilities.targetId
-        )
+        const managedMcp = yield* configuredMcp
         const managedFiles = yield* managedResources.enabledForTarget(
           spec.targetCapabilities.targetId
         )
@@ -266,7 +268,6 @@ export const makePiAgentRuntimeLive = (
         return JSON.stringify({
           managedMcp: managedMcp.map((server) => server.transport === "stdio"
             ? {
-                id: server.id,
                 name: server.name,
                 transport: server.transport,
                 command: server.command,
@@ -275,20 +276,19 @@ export const makePiAgentRuntimeLive = (
                 environmentDigest: managedSecretDigest(server.env)
               }
             : {
-                id: server.id,
                 name: server.name,
-                transport: server.transport,
+                transport: server.transport ?? "http",
                 url: server.url,
                 headerKeys: Object.keys(server.headers).sort(),
                 headerDigest: managedSecretDigest(server.headers)
-              }).sort((left, right) => String(left.id).localeCompare(String(right.id))),
+              }).sort((left, right) => left.name.localeCompare(right.name)),
           managedFiles: managedFiles.map((resource) => ({
             id: resource.id,
             kind: resource.kind,
             name: resource.name,
-            description: resource.kind === "mcp" ? "" : resource.description,
-            managedPath: resource.kind === "mcp" ? "" : resource.managedPath,
-            byteLength: resource.kind === "mcp" ? 0 : resource.byteLength
+            description: resource.description,
+            managedPath: resource.managedPath,
+            byteLength: resource.byteLength
           })).sort((left, right) => String(left.id).localeCompare(String(right.id))),
           plugins: plugins?.prepared.toolsets.flatMap(({ source, descriptors }) =>
             descriptors.map((descriptor) => ({
@@ -381,7 +381,7 @@ export const makePiAgentRuntimeLive = (
         }
         return Effect.all({
           managedMcp: preparedCatalog === undefined
-            ? importedMcp.resolveForTarget(spec.targetCapabilities.targetId)
+            ? configuredMcp
             : Effect.succeed(preparedCatalog.managedMcp),
           managedFiles: preparedCatalog === undefined
             ? managedResources.enabledForTarget(spec.targetCapabilities.targetId)
@@ -414,9 +414,16 @@ export const makePiAgentRuntimeLive = (
             ...(runWebSearch === undefined ? {} : { webSearch: runWebSearch }),
             mcp: {
               ...context.mcp,
-              imported: managedMcp.map((server) =>
+              configured: managedMcp.map((server) =>
                 server.transport === "stdio"
-                  ? { ...server, cwd: spec.cwd }
+                  // An explicit cwd in mcp.json wins; otherwise servers run
+                  // from the session's worktree.
+                  ? {
+                      ...server,
+                      cwd: server.cwd === undefined || server.cwd === ""
+                        ? spec.cwd
+                        : isAbsolute(server.cwd) ? server.cwd : resolve(spec.cwd, server.cwd)
+                    }
                   : server
               )
             },
@@ -428,7 +435,7 @@ export const makePiAgentRuntimeLive = (
               const current = context.mcp
               return current === undefined
                 ? undefined
-                : { ...current, imported: undefined }
+                : { ...current, configured: undefined }
             },
             registryOptions: {
               memoryLifecycle: () => {

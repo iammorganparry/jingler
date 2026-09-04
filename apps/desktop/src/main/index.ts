@@ -14,6 +14,7 @@ import { join, resolve } from "node:path"
 import {
   killAllChildren,
   killAllPtysSync,
+  migrateMcpConfig,
   PluginHost,
   SecretStore,
   SessionStore,
@@ -456,6 +457,10 @@ if (!gotPrimaryLock) {
     // Force the layer to build so the RPC server + `ipcMain` listener are live
     // before the renderer can send its first frame.
     await runtime.runPromise(Effect.void)
+    // One-time move of OpenConnector + imported-MCP state into ~/jingler/mcp.json.
+    // Awaited so the first session already sees the migrated servers; internally
+    // best-effort and a no-op once mcp.json exists.
+    await runtime.runPromise(migrateMcpConfig)
     // Runs belong to the previous process and cannot still be parked. Recover
     // their exact canonical revisions in parallel, but never put filesystem
     // recovery on the window-creation path: a corrupt artifact or unavailable

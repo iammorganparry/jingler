@@ -49,20 +49,12 @@ describe("AgentSecretStore", () => {
 
     await Promise.all([
       Effect.runPromise(store.write({ connectionId: id("one"), authKind: "api-key", access: "one", refresh: null, expiresAt: null })),
-      Effect.runPromise(store.write({ connectionId: id("two"), authKind: "claude-setup-token", access: "two", refresh: null, expiresAt: null })),
-      Effect.runPromise(store.writeMcp("docs", "desktop", {
-        headers: { Authorization: "private" },
-        env: {}
-      }))
+      Effect.runPromise(store.write({ connectionId: id("two"), authKind: "claude-setup-token", access: "two", refresh: null, expiresAt: null }))
     ])
 
     expect((await readDeviceSecretDocument(backing)).clientInstanceId).toBe("client-1")
     expect(await Effect.runPromise(store.read(id("one")))).not.toBeNull()
     expect(await Effect.runPromise(store.read(id("two")))).not.toBeNull()
-    expect(await Effect.runPromise(store.readMcp("docs", "desktop"))).toEqual({
-      headers: { Authorization: "private" },
-      env: {}
-    })
   })
 
   it("deletes one connection without disturbing another", async () => {
@@ -86,7 +78,7 @@ describe("AgentSecretStore", () => {
     expect(await Effect.runPromise(new AgentSecretStore(backing).read(id("invalid")))).toBeNull()
   })
 
-  it("rejects oversized provider and MCP secret payloads", async () => {
+  it("rejects oversized provider secret payloads", async () => {
     const backing = await Effect.runPromise(makeInMemorySecretStore())
     const store = new AgentSecretStore(backing)
 
@@ -96,10 +88,6 @@ describe("AgentSecretStore", () => {
       access: "x".repeat(16_385),
       refresh: null,
       expiresAt: null
-    }))).rejects.toThrow()
-    await expect(Effect.runPromise(store.writeMcp("docs", "desktop", {
-      headers: { Authorization: "x".repeat(65_537) },
-      env: {}
     }))).rejects.toThrow()
   })
 })

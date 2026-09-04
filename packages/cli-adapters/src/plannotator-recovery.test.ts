@@ -20,6 +20,13 @@ describe("plannotatorReviewPending", () => {
 
       await writeFile(file, [state(false), state(true)].join("\n"))
       expect(await plannotatorReviewPending(file, root)).toBe(true)
+
+      await writeFile(file, [state(true), JSON.stringify({
+        type: "custom",
+        customType: "plannotator",
+        data: { phase: "planning", reviewPending: "invalid" }
+      })].join("\n"))
+      expect(await plannotatorReviewPending(file, root)).toBe(false)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

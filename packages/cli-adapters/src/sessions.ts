@@ -50,12 +50,37 @@ const GitHubFeedbackOutbox = Schema.Array(GitHubFeedbackOutboxEntrySchema)
 // runtime discriminator checks are the parser at this persistence boundary.
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type */
 type JsonRecord = Record<string, unknown>
+const LegacyReasoningMap = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const LegacyChatObject = Schema.Struct({
+  id: Schema.optional(Schema.Unknown),
+  providerId: Schema.optional(Schema.Unknown),
+  mode: Schema.optional(Schema.Unknown),
+  reasoning: Schema.optional(Schema.Unknown)
+})
+const LegacyChatWithId = Schema.Struct({ id: Schema.String })
+const LegacySessionWithChats = Schema.Struct({
+  id: Schema.String,
+  updatedAt: Schema.optional(Schema.Unknown),
+  chats: Schema.optional(Schema.Unknown),
+  closedChats: Schema.optional(Schema.Unknown),
+  activeChatId: Schema.optional(Schema.Unknown),
+  providerId: Schema.optional(Schema.Unknown),
+  legacyCli: Schema.optional(Schema.Unknown),
+  reasoning: Schema.optional(Schema.Unknown),
+  reasoningEffort: Schema.optional(Schema.Unknown),
+  resumeId: Schema.optional(Schema.Unknown),
+  mode: Schema.optional(Schema.Unknown),
+  allowlist: Schema.optional(Schema.Unknown),
+  model: Schema.optional(Schema.Unknown)
+})
+const LegacySessionWithRepo = Schema.Struct({
+  repoPath: Schema.optional(Schema.Unknown),
+  environmentId: Schema.optional(Schema.Unknown),
+  repo: Schema.optional(Schema.Unknown)
+})
 
 const propertiesWhen = <T extends object>(condition: boolean, properties: T) =>
   condition ? properties : {}
-
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const chatIdFor = (sessionId: string, suffix: string): string => `c_${sessionId}_${suffix}`
 
@@ -163,7 +188,7 @@ const legacyReasoningFor = (
   session: JsonRecord,
   chat: JsonRecord
 ): ReasoningSetting | undefined => {
-  const stored = isRecord(session.reasoning) ? session.reasoning : {}
+  const stored = Schema.is(LegacyReasoningMap)(session.reasoning) ? session.reasoning : {}
   const key =
     reasoningKeyForProvider(chat.providerId) ??
     reasoningKeyForProvider(session.providerId) ??
@@ -180,10 +205,10 @@ const legacyReasoningFor = (
  * before the next mutation persists the upgraded representation.
  */
 export const migrateSessionChats = (value: unknown): unknown => {
-  if (!isRecord(value) || typeof value.id !== "string") return value
+  if (!Schema.is(LegacySessionWithChats)(value)) return value
   const now = typeof value.updatedAt === "string" ? value.updatedAt : new Date(0).toISOString()
   const migrateChat = (chat: unknown): unknown => {
-    if (!isRecord(chat)) return chat
+    if (!Schema.is(LegacyChatObject)(chat)) return chat
     const reasoning = legacyReasoningFor(value, chat)
     return {
       ...chat,
@@ -201,7 +226,7 @@ export const migrateSessionChats = (value: unknown): unknown => {
     : value.closedChats
   const chatIds = new Set(
     chats.flatMap((chat) =>
-      isRecord(chat) && typeof chat.id === "string" ? [chat.id] : []
+      Schema.is(LegacyChatWithId)(chat) ? [chat.id] : []
     )
   )
   const activeChatId =
@@ -247,7 +272,7 @@ export const migrateSessionChats = (value: unknown): unknown => {
  * group.
  */
 export const migrateRepoName = (value: unknown): unknown => {
-  if (!isRecord(value)) return value
+  if (!Schema.is(LegacySessionWithRepo)(value)) return value
   const repoPath = typeof value.repoPath === "string" ? value.repoPath.trim() : ""
   if (repoPath.length === 0) return value
   // Managed sandboxes deliberately mount every repository at /workspace. That

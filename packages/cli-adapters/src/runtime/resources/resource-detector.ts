@@ -1,5 +1,5 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises"
-import { basename, dirname, isAbsolute, join, relative } from "node:path"
+import { basename, isAbsolute, join, relative } from "node:path"
 import type {
   DetectedResourceCandidate,
   ManagedResourceKind,
@@ -60,18 +60,6 @@ const rootsFor = (input: ResourceDetectionInput): ReadonlyArray<DetectionRoot> =
     { path: join(input.worktreePath, ".pi", "agent", "skills"), kind: "skill" as const, origin: "pi" as const },
     { path: join(input.worktreePath, ".claude", "commands"), kind: "prompt" as const, origin: "claude" as const },
     { path: join(input.worktreePath, ".pi", "agent", "prompts"), kind: "prompt" as const, origin: "pi" as const }
-  ])
-]
-
-const mcpFilesFor = (input: ResourceDetectionInput) => [
-  ...(input.homeDir === null ? [] : [
-    { path: join(input.homeDir, ".claude.json"), origin: "claude" as const },
-    { path: join(input.homeDir, ".codex", "config.toml"), origin: "codex" as const },
-    { path: join(input.homeDir, ".pi", "agent", "mcp.json"), origin: "pi" as const }
-  ]),
-  ...(input.worktreePath === null ? [] : [
-    { path: join(input.worktreePath, ".mcp.json"), origin: "shared" as const },
-    { path: join(input.worktreePath, ".pi", "agent", "mcp.json"), origin: "pi" as const }
   ])
 ]
 
@@ -139,43 +127,14 @@ const detectRoot = async (
   return { candidates, skipped }
 }
 
-const detectMcpFile = async (
-  file: ReturnType<typeof mcpFilesFor>[number]
-): Promise<DetectedResourceCandidate | null> => {
-  try {
-    const resolved = await realpath(file.path)
-    const info = await stat(resolved)
-    if (!info.isFile() || info.size > MAX_RESOURCE_BYTES) return null
-    return {
-      id: resourceId(`mcp-${file.origin}-${basename(file.path)}`),
-      kind: "mcp",
-      name: `${file.origin} MCP configuration`,
-      description: "Detected MCP configuration; review is required before import.",
-      byteLength: info.size,
-      provenance: {
-        origin: file.origin,
-        sourceRoot: dirname(resolved),
-        sourcePath: resolved,
-        importedAt: null
-      }
-    }
-  } catch {
-    return null
-  }
-}
-
 /** Detect metadata only. Nothing is copied, enabled, parsed for secrets, or executed. */
 export const detectAgentResources = (
   input: ResourceDetectionInput
 ): Effect.Effect<ResourceDetectionResult> =>
   Effect.tryPromise(async () => {
     const detected = await Promise.all(rootsFor(input).map(detectRoot))
-    const mcp = await Promise.all(mcpFilesFor(input).map(detectMcpFile))
     return {
-      candidates: [
-        ...detected.flatMap((result) => result.candidates),
-        ...mcp.filter((candidate): candidate is DetectedResourceCandidate => candidate !== null)
-      ],
+      candidates: detected.flatMap((result) => result.candidates),
       skipped: detected.flatMap((result) => result.skipped)
     }
   }).pipe(Effect.orElseSucceed(() => ({ candidates: [], skipped: [] })))

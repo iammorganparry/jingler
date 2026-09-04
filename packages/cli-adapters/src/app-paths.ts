@@ -11,6 +11,12 @@ export interface AppPathsShape {
   readonly root: string
   /** `~/jingler/config.json` — persisted `WorkspaceConfig`. */
   readonly configFile: string
+  /**
+   * `~/jingler/mcp.json` — the operator-editable MCP server config
+   * (`McpConfigFile` in `@jingler/core`). May hold literal secrets, so it is
+   * read only in the main process and never crosses the RPC boundary raw.
+   */
+  readonly mcpConfigFile: string
   /** `~/jingler/sessions.json` — persisted session list. */
   readonly sessionsFile: string
   /** `~/jingler/projects.json` — durable registered repository catalogue. */

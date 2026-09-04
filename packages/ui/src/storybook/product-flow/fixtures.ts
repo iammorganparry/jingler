@@ -347,24 +347,6 @@ export const FLOW_RESOURCES = [
     },
     managedPath: "/Users/morgan/jingler/resources/review-changes/SKILL.md",
     byteLength: 4_812
-  }),
-  decode(ManagedResource, {
-    id: "team-memory",
-    kind: "mcp",
-    name: "Team memory",
-    enabled: true,
-    trust: "operator-approved",
-    scope: { kind: "portable", allowedTargets: ["local", "cloud-storybook"] },
-    provenance: {
-      origin: "jingler",
-      sourceRoot: "/Users/morgan/jingler/connectors",
-      sourcePath: "/Users/morgan/jingler/connectors/team-memory.json",
-      importedAt: "2026-08-13T12:00:00.000Z"
-    },
-    availability: { state: "available", targetId: "local", reason: null },
-    transport: "http",
-    url: "https://api.jingler.dev/mcp/memory",
-    headerKeys: ["authorization"]
   })
 ]
 
@@ -449,7 +431,7 @@ export const FLOW_RUNTIME_DIAGNOSTIC = decode(RuntimeDiagnosticSnapshot, {
   fileChangeStatuses: ["A", "M", "D", "R"],
   mcpHealth: [
     { name: "team-memory", status: "healthy" },
-    { name: "open-connector", status: "healthy" }
+    { name: "context7", status: "healthy" }
   ],
   terminalCause: "completed",
   updatedAt: "2026-08-13T14:04:00.000Z"

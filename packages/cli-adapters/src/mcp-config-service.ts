@@ -1,0 +1,305 @@
+import { FileSystem } from "@effect/platform"
+import type { McpConfigEntry, McpServer } from "@jingler/core"
+import {
+  interpolateEnvRecord,
+  McpConfigEntry as McpConfigEntrySchema,
+  McpConfigFile,
+  mcpNameError
+} from "@jingler/core"
+import { Data, Effect, Option, Schema } from "effect"
+import { AppPaths } from "./app-paths.js"
+import type { ParsedMcpServer, RuntimeMcpServer } from "./runtime/mcp/attachment.js"
+
+/**
+ * `~/jingler/mcp.json` — the single source of truth for operator-configured
+ * MCP servers, opencode-compatible (see `McpConfigFile` in `@jingler/core`).
+ *
+ * Hand-edits and UI-edits go through the same file, so they can never diverge.
+ * The file may hold literal secrets; only the redacted `McpServer` shape
+ * (`list`) may cross to the renderer. `resolve` (secret-bearing) is for the
+ * main-process runtime only.
+ */
+
+export class McpConfigError extends Data.TaggedError("McpConfigError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
+type Env = FileSystem.FileSystem | AppPaths
+
+const decodeFile = Schema.decodeUnknown(Schema.parseJson(McpConfigFile))
+
+const RawMcpDocument = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const RawMcpEntries = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const RawMcpEntry = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const decodeRawDocument = Schema.decodeUnknown(Schema.parseJson(RawMcpDocument))
+const decodeRawEntries = Schema.decodeUnknownOption(RawMcpEntries)
+const decodeRawEntry = Schema.decodeUnknownOption(RawMcpEntry)
+
+/** Redact one entry into the renderer-safe shape. */
+const redact = (name: string, entry: McpConfigEntry): McpServer =>
+  entry.type === "remote"
+    ? {
+        name,
+        transport: entry.transport ?? "http",
+        scope: "user",
+        target: entry.url,
+        envKeys: [],
+        headerKeys: Object.keys(entry.headers).sort(),
+        enabled: entry.enabled
+      }
+    : {
+        name,
+        transport: "stdio",
+        scope: "user",
+        target: entry.command.join(" "),
+        envKeys: Object.keys(entry.environment).sort(),
+        headerKeys: [],
+        enabled: entry.enabled
+      }
+
+/** Interpolate `{env:VAR}` and produce the secret-bearing runtime attachment. */
+const toRuntime = (
+  name: string,
+  entry: McpConfigEntry,
+  env: Readonly<Record<string, string | undefined>>
+): RuntimeMcpServer =>
+  entry.type === "remote"
+    ? {
+        name,
+        ...(entry.transport === "sse" ? { transport: "sse" as const } : {}),
+        url: entry.url,
+        headers: interpolateEnvRecord(entry.headers, env)
+      }
+    : {
+        name,
+        transport: "stdio",
+        command: entry.command[0] ?? "",
+        args: entry.command.slice(1),
+        env: interpolateEnvRecord(entry.environment, env),
+        ...(entry.cwd === undefined ? {} : { cwd: entry.cwd })
+      }
+
+/** Pair redacted metadata with launch details, for the shared probe. */
+const toParsed = (
+  name: string,
+  entry: McpConfigEntry,
+  env: Readonly<Record<string, string | undefined>>
+): ParsedMcpServer =>
+  entry.type === "remote"
+    ? {
+        server: redact(name, entry),
+        launch: {
+          transport: entry.transport ?? "http",
+          args: [],
+          env: {},
+          url: entry.url,
+          headers: interpolateEnvRecord(entry.headers, env)
+        }
+      }
+    : {
+        server: redact(name, entry),
+        launch: {
+          transport: "stdio",
+          command: entry.command[0] ?? "",
+          args: entry.command.slice(1),
+          env: interpolateEnvRecord(entry.environment, env),
+          ...(entry.cwd === undefined ? {} : { cwd: entry.cwd }),
+          headers: {}
+        }
+      }
+
+// ponytail: mutations serialize on one process-wide semaphore; per-file locks
+// if a second mcp.json path ever exists.
+const mutationLock = Effect.unsafeMakeSemaphore(1)
+let writeSequence = 0
+
+export class McpConfigService extends Effect.Service<McpConfigService>()(
+  "@jingler/McpConfigService",
+  {
+    accessors: true,
+    sync: () => {
+      /** Raw top-level JSON, preserved so unknown keys survive a rewrite. */
+      const readRaw = (): Effect.Effect<Record<string, unknown>, McpConfigError, Env> =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const paths = yield* AppPaths
+          const exists = yield* fs
+            .exists(paths.mcpConfigFile)
+            .pipe(Effect.orElseSucceed(() => false))
+          if (!exists) return {}
+          const raw = yield* fs
+            .readFileString(paths.mcpConfigFile)
+            .pipe(
+              Effect.mapError((cause) =>
+                new McpConfigError({ message: "Failed to read mcp.json", cause })
+              )
+            )
+          return yield* decodeRawDocument(raw).pipe(
+            Effect.mapError((cause) =>
+              new McpConfigError({ message: "mcp.json must be a valid JSON object", cause })
+            )
+          )
+        })
+
+      const decodeEntries = (
+        raw: Record<string, unknown>
+      ): Effect.Effect<Readonly<Record<string, McpConfigEntry>>, McpConfigError> =>
+        decodeFile(JSON.stringify(raw)).pipe(
+          Effect.mapError(
+            (cause) => new McpConfigError({ message: "mcp.json is malformed", cause })
+          ),
+          Effect.map((file) => file.mcp)
+        )
+
+      const entries = (): Effect.Effect<
+        Readonly<Record<string, McpConfigEntry>>,
+        McpConfigError,
+        Env
+      > => readRaw().pipe(Effect.flatMap(decodeEntries))
+
+      const persist = (
+        raw: Record<string, unknown>,
+        mcp: Readonly<Record<string, unknown>>
+      ): Effect.Effect<void, McpConfigError, Env> =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const paths = yield* AppPaths
+          yield* fs.makeDirectory(paths.root, { recursive: true }).pipe(
+            Effect.mapError((cause) =>
+              new McpConfigError({ message: "Failed to write mcp.json", cause })
+            )
+          )
+          const temporary = `${paths.mcpConfigFile}.${process.pid}.${++writeSequence}.tmp`
+          yield* fs
+            .writeFileString(
+              temporary,
+              `${JSON.stringify({ ...raw, mcp }, null, 2)}\n`,
+              { flag: "wx", mode: 0o600 }
+            )
+            .pipe(
+              Effect.andThen(fs.rename(temporary, paths.mcpConfigFile)),
+              Effect.mapError((cause) =>
+                new McpConfigError({ message: "Failed to write mcp.json", cause })
+              ),
+              Effect.tapError(() => fs.remove(temporary).pipe(Effect.ignore))
+            )
+        })
+
+      /**
+       * Read-validate-mutate-write under the lock. Mutating a malformed file
+       * fails (rather than clobbering whatever the operator was editing).
+       */
+      const mutate = (
+        mutation: (
+          current: Readonly<Record<string, McpConfigEntry>>,
+          rawMcp: Readonly<Record<string, unknown>>
+        ) => Effect.Effect<Readonly<Record<string, unknown>>, McpConfigError>
+      ): Effect.Effect<void, McpConfigError, Env> =>
+        mutationLock.withPermits(1)(
+          Effect.gen(function* () {
+            const raw = yield* readRaw()
+            const current = yield* decodeEntries(raw)
+            const rawMcp = Option.getOrElse(decodeRawEntries(raw.mcp), () => ({}))
+            const next = yield* mutation(current, rawMcp)
+            yield* persist(raw, next)
+          })
+        )
+
+      /** Renderer-safe list. Redaction happens here, before any RPC boundary. */
+      const list = (): Effect.Effect<ReadonlyArray<McpServer>, McpConfigError, Env> =>
+        entries().pipe(
+          Effect.map((mcp) =>
+            Object.entries(mcp).map(([name, entry]) => redact(name, entry))
+          )
+        )
+
+      /**
+       * Enabled entries as secret-bearing runtime attachments. Best-effort: a
+       * malformed file yields an empty list so a broken mcp.json never blocks
+       * a session — Settings surfaces the parse error via `list` instead.
+       */
+      const resolve = (
+        env: Readonly<Record<string, string | undefined>> = process.env
+      ): Effect.Effect<ReadonlyArray<RuntimeMcpServer>, never, Env> =>
+        entries().pipe(
+          Effect.map((mcp) =>
+            Object.entries(mcp)
+              .filter(([name, entry]) => entry.enabled && mcpNameError(name) === null)
+              .map(([name, entry]) => toRuntime(name, entry, env))
+          ),
+          Effect.orElseSucceed(() => [])
+        )
+
+      /** Every entry (enabled or not) paired with launch details, for probing. */
+      const parsed = (
+        env: Readonly<Record<string, string | undefined>> = process.env
+      ): Effect.Effect<ReadonlyArray<ParsedMcpServer>, McpConfigError, Env> =>
+        entries().pipe(
+          Effect.map((mcp) =>
+            Object.entries(mcp).map(([name, entry]) => toParsed(name, entry, env))
+          )
+        )
+
+      const writeAll = (
+        additions: Readonly<Record<string, McpConfigEntry>>
+      ): Effect.Effect<void, McpConfigError, Env> => {
+        const names = Object.keys(additions)
+        if (names.length === 0) return Effect.void
+        const nameProblem = names.map(mcpNameError).find((problem) => problem !== null)
+        if (nameProblem !== undefined && nameProblem !== null) {
+          return Effect.fail(new McpConfigError({ message: nameProblem }))
+        }
+        return Effect.forEach(Object.entries(additions), ([name, entry]) =>
+          Schema.decodeUnknown(McpConfigEntrySchema)(entry).pipe(
+            Effect.map((decoded) => [name, decoded] as const),
+            Effect.mapError((cause) =>
+              new McpConfigError({ message: `MCP server "${name}" is malformed`, cause })
+            )
+          )
+        ).pipe(
+          Effect.flatMap((decoded) =>
+            mutate((_current, rawMcp) =>
+              Effect.succeed({ ...rawMcp, ...Object.fromEntries(decoded) })
+            )
+          )
+        )
+      }
+
+      const write = (
+        name: string,
+        entry: McpConfigEntry
+      ): Effect.Effect<void, McpConfigError, Env> => writeAll({ [name]: entry })
+
+      const remove = (name: string): Effect.Effect<void, McpConfigError, Env> =>
+        mutate((current, rawMcp) => {
+          if (!(name in current)) {
+            return Effect.fail(new McpConfigError({ message: `MCP server "${name}" does not exist` }))
+          }
+          const { [name]: _removed, ...rest } = rawMcp
+          return Effect.succeed(rest)
+        })
+
+      const setEnabled = (
+        name: string,
+        enabled: boolean
+      ): Effect.Effect<void, McpConfigError, Env> =>
+        mutate((current, rawMcp) => {
+          const entry = current[name]
+          if (entry === undefined) {
+            return Effect.fail(new McpConfigError({ message: `MCP server "${name}" does not exist` }))
+          }
+          const rawEntry = rawMcp[name]
+          return Effect.succeed({
+            ...rawMcp,
+            [name]: {
+              ...Option.getOrElse(decodeRawEntry(rawEntry), () => entry),
+              enabled
+            }
+          })
+        })
+
+      return { list, resolve, parsed, write, writeAll, remove, setEnabled }
+    }
+  }
+) {}

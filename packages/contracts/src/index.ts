@@ -57,18 +57,15 @@ import {
   PlanMentionDelivery,
   PlanTemplateConfig,
   PrFileChange,
+  McpConfigEntry,
+  McpImportCandidateView,
+  McpImportSourceId,
+  McpServer,
   McpServerStatus,
   MemoryConfig,
   MemoryOrganizationRole,
   MemoryPrivilege,
-  OpenConnectorConfig,
-  OpenConnectorDefaults,
   OffloadComputeSettings,
-  ConnectorProvider,
-  ConnectorProviderDetail,
-  ConnectorConnection,
-  ConnectorActionResult,
-  OAuthClientInfo,
   PrMergeMethod,
   BackgroundTask,
   SessionPrStatus,
@@ -118,8 +115,6 @@ import {
   VerifyProviderModelInput,
   AgentResourceRpcError,
   PeerAgentMessageResult,
-  ManagedMcpImportInput,
-  ManagedMcpServer,
   ManagedResource,
   ManagedResourceSelector,
   ManagedResourceScope,
@@ -140,7 +135,6 @@ import {
   ConfigError,
   EnvironmentError,
   EnvironmentHandoffError,
-  ConnectorError,
   GitHubApiError,
   GitError,
   PluginError,
@@ -570,12 +564,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sourcePaths: Schema.Array(Schema.String),
       scope: ManagedResourceScope
     }
-  }),
-
-  Rpc.make("AgentResources.importMcp", {
-    success: ManagedMcpServer,
-    error: AgentResourceRpcError,
-    payload: ManagedMcpImportInput
   }),
 
   Rpc.make("AgentResources.remove", {
@@ -1285,139 +1273,70 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  // ── MCP servers — the operator's ~/jingler/mcp.json ────────────────────────
+
   /**
-   * The unified OpenConnector settings plus whether a bearer token is stored.
-   * `hasToken` is a bool, never the token itself — the secret stays in the main
-   * process, so the panel can show "configured" without the value crossing over.
+   * The redacted server list plus the file's parse problem, if any. Entries
+   * carry header/env NAMES only — mcp.json itself never crosses this boundary.
    */
-  Rpc.make("OpenConnector.get", {
+  Rpc.make("Mcp.list", {
     success: Schema.Struct({
-      config: OpenConnectorConfig,
-      hasToken: Schema.Boolean,
-      /** Environment-aware onboarding defaults (dev = local, prod = hosted). */
-      defaults: OpenConnectorDefaults
-    }),
-    error: ConfigError
+      servers: Schema.Array(McpServer),
+      /** Why mcp.json could not be parsed; `servers` is empty then. */
+      error: Schema.NullOr(Schema.String)
+    })
   }),
 
   /**
-   * One-click onboarding: apply the environment default. In a dev build this fills
-   * the local endpoint + the shipped dev token and enables the feature; in a
-   * packaged build it points at the hosted instance (token provisioned separately).
+   * Live probe of every configured server (`initialize` + `tools/list`).
+   * User-initiated only — probing spawns stdio server commands.
    */
-  Rpc.make("OpenConnector.autoSetup", {
-    success: Schema.Void,
+  Rpc.make("Mcp.status", {
+    success: Schema.Array(McpServerStatus),
     error: ConfigError
   }),
 
-  /**
-   * Save the settings and, optionally, the bearer token. `token` omitted leaves
-   * the stored token untouched (a settings-only save); null/empty clears it; a
-   * string replaces it. The token is write-only — it never comes back out.
-   */
-  Rpc.make("OpenConnector.set", {
+  /** Create or replace one entry. Values travel INBOUND only. */
+  Rpc.make("Mcp.write", {
     success: Schema.Void,
     error: ConfigError,
-    payload: {
-      config: OpenConnectorConfig,
-      token: Schema.optional(Schema.NullOr(Schema.String))
-    }
+    payload: { name: Schema.String, entry: McpConfigEntry }
+  }),
+
+  Rpc.make("Mcp.remove", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String }
+  }),
+
+  Rpc.make("Mcp.setEnabled", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, enabled: Schema.Boolean }
+  }),
+
+  /** Parse one source config into redacted candidates for confirmation. */
+  Rpc.make("Mcp.importCandidates", {
+    success: Schema.Array(McpImportCandidateView),
+    error: ConfigError,
+    payload: { source: McpImportSourceId }
   }),
 
   /**
-   * Live probe of the configured endpoint (regardless of the enabled toggles), so
-   * the panel's "Test" button verifies the URL + token before switching it on.
-   * Reuses the MCP status shape; never fails — an unreachable server is `failed`.
+   * Import the confirmed candidates by name. The source file is re-parsed in
+   * the main process, so secret values never round-trip through the renderer.
+   * Returns the names actually written; existing names are skipped.
    */
-  Rpc.make("OpenConnector.test", {
-    success: McpServerStatus,
+  Rpc.make("Mcp.applyImport", {
+    success: Schema.Array(Schema.String),
+    error: ConfigError,
+    payload: { source: McpImportSourceId, names: Schema.Array(Schema.String) }
+  }),
+
+  /** Reveal mcp.json in the file manager, creating an empty file if absent. */
+  Rpc.make("Mcp.reveal", {
+    success: Schema.Void,
     error: ConfigError
-  }),
-
-  // ── MCP Connector Center — browse + connect OpenConnector providers ─────────
-
-  /** The provider catalog from the configured instance (`GET /v1/providers`). */
-  Rpc.make("Connector.providers", {
-    success: Schema.Array(ConnectorProvider),
-    error: ConnectorError
-  }),
-
-  /**
-   * ONE provider's connect-form shape (`GET /api/providers/{service}`), fetched
-   * when its card is opened. Deliberately per-service: the equivalent list
-   * endpoint inlines every action's JSON Schema for ~1,100 providers and is 5 MB.
-   * Carries field NAMES and OAuth scopes, never a value.
-   */
-  Rpc.make("Connector.provider", {
-    success: ConnectorProviderDetail,
-    error: ConnectorError,
-    payload: { service: Schema.String }
-  }),
-
-  /** The operator's established connections (`GET /api/connections`). No secrets. */
-  Rpc.make("Connector.connections", {
-    success: Schema.Array(ConnectorConnection),
-    error: ConnectorError
-  }),
-
-  /** OAuth-client metadata per provider — whether client creds exist + the redirect URI. */
-  Rpc.make("Connector.oauthConfigs", {
-    success: Schema.Array(OAuthClientInfo),
-    error: ConnectorError
-  }),
-
-  /**
-   * Create/replace an api-key or custom-credential connection. `values` carries the
-   * secret INBOUND only (renderer→main→OpenConnector); the result never echoes it.
-   */
-  Rpc.make("Connector.connect", {
-    success: ConnectorActionResult,
-    error: ConnectorError,
-    payload: {
-      service: Schema.String,
-      authType: Schema.Literal("api_key", "custom_credential"),
-      values: Schema.Record({ key: Schema.String, value: Schema.String }),
-      connectionName: Schema.optional(Schema.String)
-    }
-  }),
-
-  /** Remove a connection (`DELETE /api/connections/:service`). */
-  Rpc.make("Connector.disconnect", {
-    success: ConnectorActionResult,
-    error: ConnectorError,
-    payload: {
-      service: Schema.String,
-      connectionName: Schema.optional(Schema.String)
-    }
-  }),
-
-  /** Store OAuth client id/secret for a provider — secret INBOUND only. */
-  Rpc.make("Connector.setOauthConfig", {
-    success: ConnectorActionResult,
-    error: ConnectorError,
-    payload: {
-      provider: Schema.String,
-      clientId: Schema.String,
-      clientSecret: Schema.String,
-      extra: Schema.optional(
-        Schema.Record({ key: Schema.String, value: Schema.String })
-      )
-    }
-  }),
-
-  /**
-   * Begin an OAuth flow. The main process opens the provider consent URL in the
-   * system browser; OpenConnector's own callback stores the grant, so the renderer
-   * just re-polls `Connector.connections`. The URL is NOT returned (it may carry a
-   * state secret) — success is a plain acknowledgement.
-   */
-  Rpc.make("Connector.startOauth", {
-    success: ConnectorActionResult,
-    error: ConnectorError,
-    payload: {
-      service: Schema.String,
-      connectionName: Schema.optional(Schema.String)
-    }
   }),
 
   /** Provider usage / rate-limit windows for the Usage & limits modal. */

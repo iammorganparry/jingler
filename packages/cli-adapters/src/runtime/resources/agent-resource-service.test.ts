@@ -30,7 +30,7 @@ describe("AgentResourceService", () => {
     await mkdir(prompts, { recursive: true })
     await writeFile(join(skill, "SKILL.md"), "name: deploy\ndescription: Ship safely\n")
     await writeFile(join(prompts, "deploy.md"), "Review deployment")
-    const candidates = (await detected(home)).candidates.filter((candidate) => candidate.kind !== "mcp")
+    const candidates = (await detected(home)).candidates
     const service = await Effect.runPromise(makeAgentResourceService({ managedRoot }))
 
     const result = await Effect.runPromise(service.importResources(candidates, {

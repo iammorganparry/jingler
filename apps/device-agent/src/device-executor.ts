@@ -20,7 +20,6 @@ import { GitService } from "@jingler/cli-adapters/git"
 import { GitHubApi, parseGitHubRemote } from "@jingler/cli-adapters/github-api"
 import { GitHubAuth } from "@jingler/cli-adapters/github-auth"
 import { GitHubCli } from "@jingler/cli-adapters/github-cli"
-import { OpenConnectorService } from "@jingler/cli-adapters/open-connector"
 import {
   managedWebSearchServiceFromEnvironment,
   WebSearchService
@@ -484,8 +483,7 @@ const deviceRuntime = (root: string, targetId: string) => {
       Layer.provideMerge(GitHubAuth.Default)
     ),
     GitService.Default,
-    WorkspaceService.Default,
-    OpenConnectorService.Default
+    WorkspaceService.Default
   ).pipe(
     Layer.provideMerge(agentExecution),
     Layer.provideMerge(HeadlessBrowserControlLive),

@@ -1,18 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-
-type AssistantTextBlock = { type?: string; text?: string };
-
-type AssistantMessageLike = {
-	role?: unknown;
-	content?: unknown;
-};
-
-type SessionEntryLike = {
-	id: string;
-	type: string;
-	timestamp?: unknown;
-	message?: AssistantMessageLike;
-};
+import type { ExtensionContext, SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 
 export type LastAssistantMessageSnapshot = {
 	entryId: string;
@@ -25,49 +11,19 @@ export type RecentAssistantMessage = {
 	timestamp?: string;
 };
 
-// Pi's SDK currently types `SessionEntryBase.timestamp` as `string`, but the
-// picker contract everywhere else is ISO and we don't want a silent drift if
-// that ever changes. Accept string/number(ms)/Date; drop anything else.
-function normalizeTimestamp(value: unknown): string | undefined {
-	if (value instanceof Date) {
-		return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
-	}
-	if (typeof value === "number" && Number.isFinite(value)) {
-		const d = new Date(value);
-		return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-	}
-	if (typeof value === "string" && value.trim()) {
-		const d = new Date(value);
-		return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-	}
-	return undefined;
-}
-
-function isAssistantMessage(message: AssistantMessageLike): message is { role: "assistant"; content: AssistantTextBlock[] } {
-	return message.role === "assistant" && Array.isArray(message.content);
-}
-
-function getTextContent(message: { content: AssistantTextBlock[] }): string {
-	return message.content
-		.filter((block): block is { type: "text"; text: string } => block.type === "text")
+export function getAssistantMessageText(
+	message: SessionMessageEntry["message"],
+): string | null {
+	if (message.role !== "assistant") return null;
+	const text = message.content
+		.filter((block) => block.type === "text")
 		.map((block) => block.text)
 		.join("\n");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-export function getAssistantMessageText(message: unknown): string | null {
-	if (!isRecord(message)) return null;
-	const candidate = { role: message.role, content: message.content };
-	if (!isAssistantMessage(candidate)) return null;
-	const text = getTextContent(candidate);
 	return text.trim() ? text : null;
 }
 
-function getCurrentBranch(ctx: ExtensionContext): SessionEntryLike[] {
-	return ctx.sessionManager.getBranch() as SessionEntryLike[];
+function getCurrentBranch(ctx: ExtensionContext): SessionEntry[] {
+	return ctx.sessionManager.getBranch();
 }
 
 export function getLastAssistantMessageSnapshot(ctx: ExtensionContext): LastAssistantMessageSnapshot | null {
@@ -112,7 +68,7 @@ export function getRecentAssistantMessages(
 		if (entry.type !== "message" || !entry.message) continue;
 		const text = getAssistantMessageText(entry.message);
 		if (!text) continue;
-		out.push({ messageId: entry.id, text, timestamp: normalizeTimestamp(entry.timestamp) });
+		out.push({ messageId: entry.id, text, timestamp: entry.timestamp });
 	}
 	return out;
 }

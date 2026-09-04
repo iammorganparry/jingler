@@ -61,13 +61,10 @@ describe("agents settings machine", () => {
 
     actor.send({
       type: "SET_ENABLED",
-      selector: { kind: resource.kind, id: resource.id },
+      selector: { id: resource.id },
       enabled: false
     })
     await waitFor(actor, (snapshot) => snapshot.matches("ready"))
-    expect(api.setEnabled).toHaveBeenCalledWith(
-      { kind: resource.kind, id: resource.id },
-      false
-    )
+    expect(api.setEnabled).toHaveBeenCalledWith({ id: resource.id }, false)
   })
 })
