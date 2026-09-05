@@ -87,24 +87,29 @@ export function PlanReview({
     const element = placeholder.current
     if (!element) return
 
+    let frame = 0
+    let lastBounds = ""
     const publish = () => {
       const bounds = element.getBoundingClientRect()
-      host.openPlannotator({
-        sessionId,
-        chatId,
-        document,
-        canDecide,
-        themeCss,
-        bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
-      }).catch(() => {
-        // Closing a chat can destroy the native view while a resize update is in flight.
-      })
+      const nextBounds = `${Math.round(bounds.x)},${Math.round(bounds.y)},${Math.round(bounds.width)},${Math.round(bounds.height)}`
+      if (bounds.width > 0 && bounds.height > 0 && nextBounds !== lastBounds) {
+        lastBounds = nextBounds
+        host.openPlannotator({
+          sessionId,
+          chatId,
+          document,
+          canDecide,
+          themeCss,
+          bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+        }).catch(() => {
+          // Closing a chat can destroy the native view while a resize update is in flight.
+        })
+      }
+      frame = requestAnimationFrame(publish)
     }
-    const observer = new ResizeObserver(publish)
-    observer.observe(element)
-    publish()
+    frame = requestAnimationFrame(publish)
     return () => {
-      observer.disconnect()
+      cancelAnimationFrame(frame)
       host.hidePlannotator({ sessionId, chatId })
     }
   }, [document, canDecide, sessionId, chatId, host, themeCss])

@@ -52,35 +52,42 @@ describe("agent runtime ownership matrix", () => {
         planSessions={new Set(["a"])}
         isBrowserActive={(_sessionId, chatId) => browser.get(chatId) ?? false}
         onToggleBrowser={(_sessionId, chatId) => browser.set(chatId, !(browser.get(chatId) ?? false))}
-        renderConversation={(_session, view) => <span data-testid="view">{view}</span>}
+        renderConversation={(owner, view) => (
+          <span data-testid="view">{owner.activeChatId}:{view}</span>
+        )}
       />
     )
     const view = render(pane(baseSession))
     fireEvent.click(screen.getByRole("button", { name: "Plan" }))
-    expect(screen.getByTestId("view").textContent).toBe("plan")
+    expect(screen.getAllByTestId("view").map((node) => node.textContent)).toContain("a:plan")
 
     view.rerender(pane({ ...baseSession, activeChatId: "b" }))
-    expect(screen.getByTestId("view").textContent).toBe("conversation")
+    expect(screen.getAllByTestId("view").map((node) => node.textContent)).toContain("b:conversation")
 
     // Agent A opens its browser in the background while B remains selected.
     browser.set("a", true)
     view.rerender(pane({ ...baseSession, activeChatId: "b" }))
-    expect(screen.getByTestId("view").textContent).toBe("conversation")
+    expect(screen.getAllByTestId("view").map((node) => node.textContent)).toContain("b:conversation")
     expect(screen.queryByTestId("session-browser-panel")).toBeNull()
 
     browser.set("b", true)
     view.rerender(pane({ ...baseSession, activeChatId: "b" }))
     await waitFor(() =>
-      expect(screen.getByTestId("surface-pane-0").dataset.surface).toContain(
-        '["view","browser","b"]'
-      )
+      expect(
+        screen.getAllByTestId(/^surface-pane-/).some((node) =>
+          node.dataset.surface?.includes('["view","browser","b"]')
+        )
+      ).toBe(true)
     )
 
     // Chat switching selects that chat surface; opened Browser tabs remain
     // available without taking focus back from the operator.
     for (const chatId of ["a", "b", "a", "b"] as const) {
       view.rerender(pane({ ...baseSession, activeChatId: chatId }))
-      await waitFor(() => expect(screen.getByTestId("view").textContent).toBe("conversation"))
+      await waitFor(() =>
+        expect(screen.getAllByTestId("view").map((node) => node.textContent))
+          .toContain(`${chatId}:conversation`)
+      )
     }
   })
 

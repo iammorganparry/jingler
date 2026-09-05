@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
   closeAllSessionViews,
+  closeSessionPane,
   closeSessionSurface,
   createSessionSurfaceLayout,
   loadSessionSurfaceLayout,
   maxSessionSurfacesForWidth,
+  moveSessionPane,
+  openSessionSurface,
   openSessionView,
   pruneSessionSurfaceLayout,
   replaceSessionSurface,
@@ -53,14 +56,35 @@ describe("session surface layout", () => {
     expect(replaced.panes.map(({ surface }) => surface.id)).toEqual(["a"])
   })
 
-  it("treats a chat and its Plan view as one mounted pane", () => {
-    const split = splitSessionSurface(createSessionSurfaceLayout(chat("a")), file("a.ts"), 1, 4)
-    const plan = view("plan", "a")
-    const selected = selectSessionSurface(split, plan)
-    expect(selected.panes.map(({ surface }) => surface)).toEqual([plan, file("a.ts")])
+  it("stacks newly opened surfaces until the width-derived pane cap", () => {
+    const initial = createSessionSurfaceLayout(chat("a"))
+    const withFile = openSessionSurface(initial, file("a.ts"), 3)
+    const withPlan = openSessionSurface(withFile, view("plan", "a"), 3)
+    expect(withPlan.panes.map(({ surface }) => surface)).toEqual([
+      chat("a"),
+      file("a.ts"),
+      view("plan", "a")
+    ])
 
-    const replaced = replaceSessionSurface(split, 1, plan)
-    expect(replaced.panes.map(({ surface }) => surface)).toEqual([plan])
+    const atCapacity = openSessionSurface(withPlan, view("browser", "a"), 3)
+    expect(atCapacity.panes.map(({ surface }) => surface)).toEqual([
+      chat("a"),
+      file("a.ts"),
+      view("browser", "a")
+    ])
+    expect(openSessionSurface(atCapacity, chat("a"), 3).focused).toBe(0)
+  })
+
+  it("moves and closes focused panes without closing their tabs", () => {
+    const split = openSessionView(createSessionSurfaceLayout(chat("a")), view("terminal"), 2)
+    const moved = moveSessionPane(split, 1, 0)
+    expect(moved.panes.map(({ surface }) => surface.id)).toEqual(["terminal", "a"])
+    expect(moved.focused).toBe(0)
+
+    const closed = closeSessionPane(moved, 0, chat("a"))
+    expect(closed.panes).toEqual([{ surface: chat("a"), ratio: 1 }])
+    expect(closed.openViews).toEqual([view("terminal")])
+    expect(openSessionSurface(closed, view("terminal"), 2).panes).toHaveLength(2)
   })
 
   it("closes view metadata and always leaves a fallback pane", () => {
@@ -88,7 +112,7 @@ describe("session surface layout", () => {
     expect(resized.panes[2]!.ratio).toBeCloseTo(1 / 3)
   })
 
-  it("prunes restored chat and Plan panes that share one mount", () => {
+  it("keeps restored chat and Plan panes as distinct surfaces", () => {
     const restored = {
       panes: [
         { surface: chat("a"), ratio: 0.5 },
@@ -101,7 +125,7 @@ describe("session surface layout", () => {
 
     const pruned = pruneSessionSurfaceLayout(restored, allowed, chat("a"))
 
-    expect(pruned.panes).toEqual([{ surface: chat("a"), ratio: 1 }])
+    expect(pruned.panes).toEqual(restored.panes)
   })
 
   it("rejects non-positive persisted pane ratios", () => {

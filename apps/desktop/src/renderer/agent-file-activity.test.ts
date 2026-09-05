@@ -8,6 +8,8 @@ import {
   normalizeAgentFileTarget,
   publishAgentFileActivity,
   publishFleetAgentFileActivity,
+  releaseFleetAgentFileActivityPublisher,
+  retainFleetAgentFileActivityPublisher,
   subscribeAgentFileActivity
 } from "./agent-file-activity.js"
 
@@ -113,6 +115,22 @@ describe("normalizeAgentFileTarget", () => {
     publishFleetAgentFileActivity("s1", null)
     expect(getFleetAgentFileActivity("s1")).toBeNull()
     expect(getAgentFileActivity("s1", "c1")?.path).toBe("src/main.ts")
+  })
+
+  it("keeps the fleet override until every mounted surface releases it", () => {
+    retainFleetAgentFileActivityPublisher("s1")
+    retainFleetAgentFileActivityPublisher("s1")
+    publishFleetAgentFileActivity("s1", {
+      eventId: "worker-edit",
+      path: "src/worker.ts",
+      phase: "editing",
+      preview: null
+    })
+
+    releaseFleetAgentFileActivityPublisher("s1")
+    expect(getFleetAgentFileActivity("s1")?.path).toBe("src/worker.ts")
+    releaseFleetAgentFileActivityPublisher("s1")
+    expect(getFleetAgentFileActivity("s1")).toBeNull()
   })
 
   it("clears the fleet override when the session is disposed", () => {

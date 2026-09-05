@@ -36,7 +36,11 @@ import {
   useContainerWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
-import { publishFleetAgentFileActivity } from "./agent-file-activity.js"
+import {
+  publishFleetAgentFileActivity,
+  releaseFleetAgentFileActivityPublisher,
+  retainFleetAgentFileActivityPublisher
+} from "./agent-file-activity.js"
 import { publishSessionUpdate } from "./session-updates.js"
 import { queueSessionChatMutation } from "./session-chat-mutations.js"
 import {
@@ -56,6 +60,7 @@ import {
   publishSubagentTabs,
   recentSubagentNodes,
   releaseSubagentTabController,
+  retainSubagentTabController,
   useSubagentTabSelection
 } from "./subagent-tab-store.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
@@ -680,11 +685,12 @@ export function ConversationPane({
     selectedChildMessages,
     session.id
   ])
-  // A closed pane must not leave Follow pinned to a stale agent.
-  useEffect(
-    () => () => publishFleetAgentFileActivity(session.id, null),
-    [session.id]
-  )
+  // A closed pane must not leave Follow pinned to a stale agent, but a sibling
+  // chat/Plan surface for this session can still own the same Fleet projection.
+  useEffect(() => {
+    retainFleetAgentFileActivityPublisher(session.id)
+    return () => releaseFleetAgentFileActivityPublisher(session.id)
+  }, [session.id])
   const activeFleetNodes = useMemo(
     () => fleet.nodes.filter((node) =>
       node.nodeKind === "agent" &&
@@ -710,10 +716,10 @@ export function ConversationPane({
       selectedId: fleet.selectedId
     })
   }, [activeChat.id, activeFleetNodes, completedFleetNodes, fleet.selectedId, session.id])
-  useEffect(
-    () => () => releaseSubagentTabController(session.id, activeChat.id),
-    [activeChat.id, session.id]
-  )
+  useEffect(() => {
+    retainSubagentTabController(session.id, activeChat.id)
+    return () => releaseSubagentTabController(session.id, activeChat.id)
+  }, [activeChat.id, session.id])
   const subagentTabSelection = useSubagentTabSelection(session.id)
   const selectFleetRef = useRef(fleet.select)
   selectFleetRef.current = fleet.select

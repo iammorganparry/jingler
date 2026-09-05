@@ -1,4 +1,13 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react"
+import { createPortal } from "react-dom"
 import type {
   DiffStat,
   IssueIdentity,
@@ -33,13 +42,17 @@ import { BuiltinStubScreen } from "./stub-screen.js"
 import { ViewRail, type ViewRailMenu } from "../app/view-rail.js"
 import { SplitView } from "../app/split-view.js"
 import {
+  SESSION_SURFACE_COMMAND_EVENT,
   SESSION_SURFACE_DND_MIME,
   closeAllSessionViews,
+  closeSessionPane,
   closeSessionSurface,
   createSessionSurfaceLayout,
   focusSessionSurface,
   loadSessionSurfaceLayout,
   maxSessionSurfacesForWidth,
+  moveSessionPane,
+  openSessionSurface,
   openSessionView,
   parseSessionSurfaceKey,
   pruneSessionSurfaceLayout,
@@ -50,6 +63,7 @@ import {
   sessionSurfaceKey,
   splitSessionSurface,
   type SessionSurface,
+  type SessionSurfaceCommand,
   type SessionSurfaceLayout,
   type SessionSurfacePane
 } from "../app/session-surface-layout.js"
@@ -295,6 +309,15 @@ export function SessionPane(props: SessionPaneProps) {
 }
 
 function SessionPaneBody(props: SessionPaneProps) {
+  const paneWidth = usePaneWidth().width
+  const [titleBarTarget, setTitleBarTarget] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    setTitleBarTarget(
+      typeof document === "undefined"
+        ? null
+        : document.getElementById("session-tab-bar-portal")
+    )
+  }, [])
   const fallbackSurface: SessionSurface = { kind: "chat", id: props.session.activeChatId }
   const [surfaceLayout, setSurfaceLayout] = useState<SessionSurfaceLayout>(() => {
     const restored = loadSessionSurfaceLayout(props.session.id, fallbackSurface)
@@ -326,11 +349,15 @@ function SessionPaneBody(props: SessionPaneProps) {
     if (sequence > 0 && sequence !== lastDebugStop.current) {
       setTab(BUILTIN_TAB.files)
       setSurfaceLayout((current) =>
-        selectSessionSurface(current, { kind: "view", id: BUILTIN_TAB.files })
+        openSessionSurface(
+          current,
+          { kind: "view", id: BUILTIN_TAB.files },
+          maxSessionSurfacesForWidth(paneWidth)
+        )
       )
     }
     lastDebugStop.current = sequence
-  }, [props.debugStopSequence])
+  }, [paneWidth, props.debugStopSequence])
   // A pending deep link into Plan Review (set when the composer dock jumps to
   // a step). One-shot: Plan Review reports its own selection back and we drop it,
   // so a later manual pick isn't overridden by a stale target.
@@ -344,7 +371,6 @@ function SessionPaneBody(props: SessionPaneProps) {
     sessionId: string
     stepId: string
   } | null>(null)
-  const paneWidth = usePaneWidth().width
   const hasPlan =
     props.session.chats.some((chat) => props.planSessions?.has(chat.id) ?? false)
   const previousOwner = useRef({
@@ -357,14 +383,22 @@ function SessionPaneBody(props: SessionPaneProps) {
       previous.sessionId === props.session.id &&
       previous.chatId !== props.session.activeChatId
     ) {
-      setTab(BUILTIN_TAB.conversation)
-      setSurfaceLayout((current) =>
-        selectSessionSurface(current, {
-          kind: "chat",
-          id: props.session.activeChatId
-        })
-      )
-      setTarget(null)
+      const focusedOwner =
+        focusedSurface.kind === "chat"
+          ? focusedSurface.id
+          : focusedSurface.kind === "view"
+            ? focusedSurface.chatId
+            : undefined
+      if (focusedOwner !== props.session.activeChatId) {
+        setTab(BUILTIN_TAB.conversation)
+        setSurfaceLayout((current) =>
+          selectSessionSurface(current, {
+            kind: "chat",
+            id: props.session.activeChatId
+          })
+        )
+        setTarget(null)
+      }
     }
     previousOwner.current = {
       sessionId: props.session.id,
@@ -380,22 +414,28 @@ function SessionPaneBody(props: SessionPaneProps) {
         id: BUILTIN_TAB.plan,
         chatId: props.session.activeChatId
       }
-      setSurfaceLayout((current) => openSessionView(current, surface))
+      setSurfaceLayout((current) =>
+        openSessionView(current, surface, maxSessionSurfacesForWidth(paneWidth))
+      )
       setTab(BUILTIN_TAB.plan)
     },
-    [props.session.activeChatId, props.session.id]
+    [paneWidth, props.session.activeChatId, props.session.id]
   )
   const presentPlanDraft = useCallback(() => {
     setTarget(null)
     setSurfaceLayout((current) =>
-      openSessionView(current, {
-        kind: "view",
-        id: BUILTIN_TAB.plan,
-        chatId: props.session.activeChatId
-      })
+      openSessionView(
+        current,
+        {
+          kind: "view",
+          id: BUILTIN_TAB.plan,
+          chatId: props.session.activeChatId
+        },
+        maxSessionSurfacesForWidth(paneWidth)
+      )
     )
     setTab(BUILTIN_TAB.plan)
-  }, [props.session.activeChatId, props.session.id])
+  }, [paneWidth, props.session.activeChatId, props.session.id])
 
   // An outside request to switch tabs (the command palette). The nonce is the
   // trigger, not the id — see `selectTabRequest`'s docblock. No validation here:
@@ -415,12 +455,20 @@ function SessionPaneBody(props: SessionPaneProps) {
       openPlanReview()
     } else if (tabRequestId === BUILTIN_TAB.conversation) {
       setSurfaceLayout((current) =>
-        selectSessionSurface(current, { kind: "chat", id: props.session.activeChatId })
+        openSessionSurface(
+          current,
+          { kind: "chat", id: props.session.activeChatId },
+          maxSessionSurfacesForWidth(paneWidth)
+        )
       )
       setTab(tabRequestId)
     } else if (tabRequestId === BUILTIN_TAB.files) {
       setSurfaceLayout((current) =>
-        selectSessionSurface(current, { kind: "view", id: BUILTIN_TAB.files })
+        openSessionSurface(
+          current,
+          { kind: "view", id: BUILTIN_TAB.files },
+          maxSessionSurfacesForWidth(paneWidth)
+        )
       )
       setTab(tabRequestId)
     } else {
@@ -431,13 +479,17 @@ function SessionPaneBody(props: SessionPaneProps) {
         props.onToggleBrowser?.(props.session.id, props.session.activeChatId)
       }
       setSurfaceLayout((current) =>
-        openSessionView(current, {
-          kind: "view",
-          id: tabRequestId,
-          ...(tabRequestId === BUILTIN_TAB.browser
-            ? { chatId: props.session.activeChatId }
-            : {})
-        })
+        openSessionView(
+          current,
+          {
+            kind: "view",
+            id: tabRequestId,
+            ...(tabRequestId === BUILTIN_TAB.browser
+              ? { chatId: props.session.activeChatId }
+              : {})
+          },
+          maxSessionSurfacesForWidth(paneWidth)
+        )
       )
       setTab(tabRequestId)
     }
@@ -467,7 +519,9 @@ function SessionPaneBody(props: SessionPaneProps) {
       chatId: active.activeChatId
     }
     if (browserActive && !previous.active) {
-      setSurfaceLayout((current) => openSessionView(current, surface))
+      setSurfaceLayout((current) =>
+        openSessionView(current, surface, maxSessionSurfacesForWidth(paneWidth))
+      )
       setTab(BUILTIN_TAB.browser)
     }
     if (!browserActive && previous.active) {
@@ -476,7 +530,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       )
     }
     previousBrowser.current = { chatId: active.activeChatId, active: browserActive }
-  }, [active.activeChatId, browserActive])
+  }, [active.activeChatId, browserActive, paneWidth])
 
   const selectTab = useCallback(
     (nextTab: TabKey) => {
@@ -504,11 +558,19 @@ function SessionPaneBody(props: SessionPaneProps) {
       }
       if (nextTab === BUILTIN_TAB.conversation) {
         setSurfaceLayout((current) =>
-          selectSessionSurface(current, { kind: "chat", id: active.activeChatId })
+          openSessionSurface(
+            current,
+            { kind: "chat", id: active.activeChatId },
+            maxSessionSurfacesForWidth(paneWidth)
+          )
         )
       } else if (nextTab === BUILTIN_TAB.files) {
         setSurfaceLayout((current) =>
-          selectSessionSurface(current, { kind: "view", id: BUILTIN_TAB.files })
+          openSessionSurface(
+            current,
+            { kind: "view", id: BUILTIN_TAB.files },
+            maxSessionSurfacesForWidth(paneWidth)
+          )
         )
       } else {
         const surface: Extract<SessionSurface, { kind: "view" }> = {
@@ -519,7 +581,9 @@ function SessionPaneBody(props: SessionPaneProps) {
         if (nextTab === BUILTIN_TAB.browser && !browserActive) {
           props.onToggleBrowser?.(active.id, active.activeChatId)
         }
-        setSurfaceLayout((current) => openSessionView(current, surface))
+        setSurfaceLayout((current) =>
+          openSessionView(current, surface, maxSessionSurfacesForWidth(paneWidth))
+        )
       }
       setTab(nextTab)
     },
@@ -527,6 +591,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       active,
       browserActive,
       openPlanReview,
+      paneWidth,
       props.onSelectIssue,
       props.onToggleBrowser,
       props.tabContributions
@@ -553,8 +618,8 @@ function SessionPaneBody(props: SessionPaneProps) {
    * props that change on every render anyway, so a memo would need every one of
    * them in its dependency array and would buy nothing but a stale-closure bug
    * the first time someone forgot one. What must stay stable across renders is
-   * the MOUNTED SUBTREE, and that is keyed by mount group below — not by the
-   * identity of this array.
+   * the MOUNTED SUBTREE, and that is keyed by surface identity below — not by
+   * the identity of this array.
    */
   const contributions: ReadonlyArray<TabContribution> = [
     ...builtinTabContributions({
@@ -791,7 +856,13 @@ function SessionPaneBody(props: SessionPaneProps) {
           aria-label={label}
           title={label}
           onClick={() => {
-            setSurfaceLayout((current) => selectSessionSurface(current, surface))
+            setSurfaceLayout((current) =>
+              openSessionSurface(
+                current,
+                surface,
+                maxSessionSurfacesForWidth(paneWidth)
+              )
+            )
             setTab(surface.id)
           }}
           className="flex min-w-0 items-center gap-1.5 py-1 pl-2.5 pr-1 text-left text-xs outline-none"
@@ -834,11 +905,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     }))
 
   const surfacePaneKey = (pane: SessionSurfacePane): string =>
-    pane.surface.kind === "view" &&
-    pane.surface.id === BUILTIN_TAB.plan &&
-    pane.surface.chatId
-      ? sessionSurfaceKey({ kind: "chat", id: pane.surface.chatId })
-      : sessionSurfaceKey(pane.surface)
+    sessionSurfaceKey(pane.surface)
 
   const renderSurfacePane = (pane: SessionSurfacePane, index: number) => {
     const surface = pane.surface
@@ -892,88 +959,144 @@ function SessionPaneBody(props: SessionPaneProps) {
     })
   }
 
+  const focusSurface = useCallback((index: number) => {
+    const surface = surfaceLayout.panes[index]?.surface
+    setSurfaceLayout((current) => focusSessionSurface(current, index))
+    const chatId =
+      surface?.kind === "chat"
+        ? surface.id
+        : surface?.kind === "view"
+          ? surface.chatId
+          : undefined
+    if (chatId && chatId !== active.activeChatId) props.onFocusChat?.(active.id, chatId)
+  }, [active.activeChatId, active.id, props.onFocusChat, surfaceLayout.panes])
+  const closeFocusedSurface = useCallback(() => {
+    setSurfaceLayout((current) =>
+      closeSessionPane(current, current.focused, fallbackChatSurface)
+    )
+  }, [fallbackChatSurface.id])
+  const moveFocusedSurface = useCallback((direction: -1 | 1) => {
+    setSurfaceLayout((current) =>
+      moveSessionPane(current, current.focused, current.focused + direction)
+    )
+  }, [])
+  const paneFocused = props.pane === undefined || props.pane.focused
+  useEffect(() => {
+    if (!paneFocused) return
+    const onCommand = (event: Event) => {
+      const command = (event as CustomEvent<SessionSurfaceCommand>).detail
+      if (command === "close") closeFocusedSurface()
+      else if (command === "move-left") moveFocusedSurface(-1)
+      else if (command === "move-right") moveFocusedSurface(1)
+      else if (command === "focus-left") focusSurface(surfaceLayout.focused - 1)
+      else if (command === "focus-right") focusSurface(surfaceLayout.focused + 1)
+      else if (command.startsWith("focus-")) focusSurface(Number(command.slice(6)))
+    }
+    window.addEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
+    return () => window.removeEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
+  }, [closeFocusedSurface, focusSurface, moveFocusedSurface, paneFocused, surfaceLayout.focused])
+
+  const tabBar = (
+    <TabBar
+            inTitleBar={titleBarTarget !== null}
+            tabs={[]}
+            active={activeTab}
+            onChange={selectTab}
+            status={
+              activeActivity
+                ? {
+                    // ONE vocabulary for a session's state, shared with the sidebar:
+                    // "Thinking", "Running", "Needs Input", "Monitoring", "Idle". The
+                    // pill used to read the raw activity ("Running npm test…"), so
+                    // the same session answered "what are you doing?" two different
+                    // ways depending on which part of the window you looked at — and
+                    // the target string grew the pill on every tool call.
+                    label: displayStatusLabel[displayStatusOf(activeActivity, active.status)],
+                    tone: DISPLAY_TONE[displayStatusOf(activeActivity, active.status)],
+                    // The specifics survive on hover, exactly as they do in the row.
+                    detail: activityLabel(activeActivity)
+                  }
+                : undefined
+            }
+            // The title comes from the session rather than from the caller, so the
+            // pane identity follows a rename the moment it lands.
+            sessionTitle={active.title || UNTITLED_SESSION}
+            repoName={active.repo}
+            onRenameTitle={
+              props.onRenameSession ? (title) => props.onRenameSession?.(active.id, title) : undefined
+            }
+            // The chat pills share the tab row, behind a divider. Built by the
+            // renderer (RPCs + live activity), threaded in as an opaque node.
+            chatSlot={props.renderChatTabs?.(active, {
+              activeTabId: activeTab,
+              onSelectConversation: () => selectTab(BUILTIN_TAB.conversation),
+              onSelectFiles: () => selectTab(BUILTIN_TAB.files),
+              activeSurface: focusedSurface,
+              onSelectSurface: (surface) => {
+                setSurfaceLayout((current) =>
+                  openSessionSurface(
+                    current,
+                    surface,
+                    maxSessionSurfacesForWidth(paneWidth)
+                  )
+                )
+              },
+              onCloseSurface: (surface) => {
+                if (
+                  surface.kind === "chat" &&
+                  props.isBrowserActive?.(active.id, surface.id)
+                ) {
+                  props.onToggleBrowser?.(active.id, surface.id)
+                }
+                setSurfaceLayout((current) => {
+                  const withoutOwnedViews =
+                    surface.kind === "chat"
+                      ? current.openViews
+                          .filter((view) => view.chatId === surface.id)
+                          .reduce(
+                            (layout, view) =>
+                              closeSessionSurface(layout, view, fallbackChatSurface),
+                            current
+                          )
+                      : current
+                  return closeSessionSurface(
+                    withoutOwnedViews,
+                    surface,
+                    fallbackChatSurface
+                  )
+                })
+              },
+              onRequestCloseFile: props.onRequestCloseFile
+                ? (path) => props.onRequestCloseFile?.(active.id, path) ?? true
+                : undefined,
+              viewSlot,
+              viewCount: surfaceLayout.openViews.length,
+              viewsActive:
+                focusedSurface.kind === "view" && focusedSurface.id !== BUILTIN_TAB.files,
+              onCloseAllViews: closeAllViews,
+              viewLauncherItems,
+              paneFocused: props.pane === undefined || props.pane.focused
+            })}
+            // The title comes from the session rather than from the caller, so the
+            // chip follows a rename the moment it lands.
+            pane={props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined}
+            onClosePane={closeFocusedSurface}
+            onMovePaneLeft={surfaceLayout.focused > 0 ? () => moveFocusedSurface(-1) : undefined}
+            onMovePaneRight={
+              surfaceLayout.focused < surfaceLayout.panes.length - 1
+                ? () => moveFocusedSurface(1)
+                : undefined
+            }
+          />
+  )
+
   return (
     <>
-      <TabBar
-        tabs={[]}
-        active={activeTab}
-        onChange={selectTab}
-        status={
-          activeActivity
-            ? {
-                // ONE vocabulary for a session's state, shared with the sidebar:
-                // "Thinking", "Running", "Needs Input", "Monitoring", "Idle". The
-                // pill used to read the raw activity ("Running npm test…"), so
-                // the same session answered "what are you doing?" two different
-                // ways depending on which part of the window you looked at — and
-                // the target string grew the pill on every tool call.
-                label: displayStatusLabel[displayStatusOf(activeActivity, active.status)],
-                tone: DISPLAY_TONE[displayStatusOf(activeActivity, active.status)],
-                // The specifics survive on hover, exactly as they do in the row.
-                detail: activityLabel(activeActivity)
-              }
-            : undefined
-        }
-        // The title comes from the session rather than from the caller, so the
-        // pane identity follows a rename the moment it lands.
-        sessionTitle={active.title || UNTITLED_SESSION}
-        repoName={active.repo}
-        onRenameTitle={
-          props.onRenameSession ? (title) => props.onRenameSession?.(active.id, title) : undefined
-        }
-        // The chat pills share the tab row, behind a divider. Built by the
-        // renderer (RPCs + live activity), threaded in as an opaque node.
-        chatSlot={props.renderChatTabs?.(active, {
-          activeTabId: activeTab,
-          onSelectConversation: () => selectTab(BUILTIN_TAB.conversation),
-          onSelectFiles: () => selectTab(BUILTIN_TAB.files),
-          activeSurface: focusedSurface,
-          onSelectSurface: (surface) => {
-            setSurfaceLayout((current) => selectSessionSurface(current, surface))
-          },
-          onCloseSurface: (surface) => {
-            if (
-              surface.kind === "chat" &&
-              props.isBrowserActive?.(active.id, surface.id)
-            ) {
-              props.onToggleBrowser?.(active.id, surface.id)
-            }
-            setSurfaceLayout((current) => {
-              const withoutOwnedViews =
-                surface.kind === "chat"
-                  ? current.openViews
-                      .filter((view) => view.chatId === surface.id)
-                      .reduce(
-                        (layout, view) =>
-                          closeSessionSurface(layout, view, fallbackChatSurface),
-                        current
-                      )
-                  : current
-              return closeSessionSurface(
-                withoutOwnedViews,
-                surface,
-                fallbackChatSurface
-              )
-            })
-          },
-          onRequestCloseFile: props.onRequestCloseFile
-            ? (path) => props.onRequestCloseFile?.(active.id, path) ?? true
-            : undefined,
-          viewSlot,
-          viewCount: surfaceLayout.openViews.length,
-          viewsActive:
-            focusedSurface.kind === "view" && focusedSurface.id !== BUILTIN_TAB.files,
-          onCloseAllViews: closeAllViews,
-          viewLauncherItems,
-          paneFocused: props.pane === undefined || props.pane.focused
-        })}
-        // The title comes from the session rather than from the caller, so the
-        // chip follows a rename the moment it lands.
-        pane={props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined}
-        onClosePane={props.onClosePane}
-        onMovePaneLeft={props.onMovePaneLeft}
-        onMovePaneRight={props.onMovePaneRight}
-      />
+      {titleBarTarget === null
+        ? tabBar
+        : (props.pane === undefined || props.pane.focused)
+          ? createPortal(tabBar, titleBarTarget)
+          : null}
       {props.renderSubagentTabs?.(active, {
         activeTabId: activeTab,
         onSelectConversation: () => selectTab(BUILTIN_TAB.conversation)
@@ -987,17 +1110,7 @@ function SessionPaneBody(props: SessionPaneProps) {
           dragMime={SESSION_SURFACE_DND_MIME}
           testIdPrefix="surface"
           paneCapacity={maxSessionSurfacesForWidth}
-          onFocusPane={(index) => {
-            const surface = surfaceLayout.panes[index]?.surface
-            setSurfaceLayout((current) => focusSessionSurface(current, index))
-            const chatId =
-              surface?.kind === "chat"
-                ? surface.id
-                : surface?.kind === "view"
-                  ? surface.chatId
-                  : undefined
-            if (chatId && chatId !== active.activeChatId) props.onFocusChat?.(active.id, chatId)
-          }}
+          onFocusPane={focusSurface}
           onSplitWith={(payload, at) => {
             const surface = parseSessionSurfaceKey(payload)
             if (!surface) return

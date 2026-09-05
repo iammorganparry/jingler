@@ -151,36 +151,28 @@ describe("pane identity chips", () => {
   })
 })
 
-describe("pane controls", () => {
-  it("offers no close control in a group of one — there is nothing to close back to", () => {
-    renderSplit({ group: groupOf(["a"]), onClosePane: vi.fn() })
-    expect(screen.queryByTestId("close-pane")).toBeNull()
+describe("focused surface controls", () => {
+  it("keeps a one-click close control for the focused inner pane", () => {
+    renderSplit({ group: groupOf(["a"]) })
+    expect(screen.getByTestId("close-pane")).toBeTruthy()
   })
 
-  it("closes the pane it was clicked in, by index", () => {
+  it("does not route inner pane controls into the outer session split", () => {
     const onClosePane = vi.fn()
-    renderSplit({ onClosePane })
-    fireEvent.click(within(screen.getByTestId("split-pane-1")).getByTestId("close-pane"))
-    expect(onClosePane).toHaveBeenCalledWith(1)
-  })
-
-  it("hides Move Left at the left-hand end and Move Right at the right-hand end", () => {
-    renderSplit({ onMovePane: vi.fn() })
-    const first = screen.getByTestId("split-pane-0")
-    const last = screen.getByTestId("split-pane-1")
-    expect(within(first).queryByTestId("move-pane-left")).toBeNull()
-    expect(within(first).getByTestId("move-pane-right")).toBeTruthy()
-    expect(within(last).getByTestId("move-pane-left")).toBeTruthy()
-    expect(within(last).queryByTestId("move-pane-right")).toBeNull()
-  })
-
-  it("moves a pane in the direction its control names", () => {
     const onMovePane = vi.fn()
-    renderSplit({ group: groupOf(["a", "b", "c"]), onMovePane })
-    fireEvent.click(within(screen.getByTestId("split-pane-1")).getByTestId("move-pane-left"))
-    expect(onMovePane).toHaveBeenCalledWith(1, -1)
-    fireEvent.click(within(screen.getByTestId("split-pane-1")).getByTestId("move-pane-right"))
-    expect(onMovePane).toHaveBeenCalledWith(1, 1)
+    renderSplit({
+      group: groupOf(["a"]),
+      onClosePane,
+      onMovePane,
+      renderFiles: (owner) => <div>files {owner.id}</div>
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Files" }))
+    fireEvent.click(screen.getByTestId("move-pane-left"))
+    fireEvent.click(screen.getByTestId("close-pane"))
+
+    expect(onClosePane).not.toHaveBeenCalled()
+    expect(onMovePane).not.toHaveBeenCalled()
   })
 })
 

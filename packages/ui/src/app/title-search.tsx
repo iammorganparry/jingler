@@ -1,8 +1,9 @@
 import { Search } from "lucide-react"
 import { Kbd } from "../components/kbd.js"
+import { cn } from "../lib/cn.js"
 
 /**
- * The app's global search, centred in the title bar.
+ * The app's global search, pinned near the top of the session sidebar.
  *
  * ## Why this is a button dressed as a field, and not a field
  *
@@ -21,14 +22,23 @@ import { Kbd } from "../components/kbd.js"
  * The palette itself was keyboard-only before this — ⌘K and nothing on screen.
  * That is fine for the people who already know, and invisible to everyone else.
  */
-export function TitleSearch({ onOpen }: { onOpen: () => void }) {
+export function TitleSearch({
+  onOpen,
+  className
+}: {
+  onOpen: () => void
+  className?: string
+}) {
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-label="Search sessions and actions"
       aria-keyshortcuts="Meta+K"
-      className="flex h-[30px] w-[min(52vw,560px)] items-center gap-2.5 rounded-lg border border-hairline bg-sunken px-3 text-[13px] text-dim outline-none transition-colors hover:border-line hover:text-text-body focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn(
+        "flex h-[30px] w-[min(52vw,560px)] items-center gap-2.5 rounded-lg border border-hairline bg-sunken px-3 text-[13px] text-dim outline-none transition-colors hover:border-line hover:text-text-body focus-visible:ring-2 focus-visible:ring-ring",
+        className
+      )}
     >
       <Search size={14} className="flex-none" />
       {/*

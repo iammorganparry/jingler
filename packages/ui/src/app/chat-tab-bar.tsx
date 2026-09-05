@@ -173,7 +173,7 @@ export function ChatTabBar({
         setCommandOpen(true)
         return
       }
-      if ((!launcherOpen && !commandOpen) || event.metaKey || event.ctrlKey || event.altKey) return
+      if ((!(launcherOpen || commandOpen)) || event.metaKey || event.ctrlKey || event.altKey) return
       const index = Number(event.key) - 1
       const item = index >= 0 && index < Math.min(launchers.length, 9) ? launchers[index] : undefined
       if (!item) return
@@ -200,7 +200,7 @@ export function ChatTabBar({
       onClick={() => setChatsExpanded((expanded) => !expanded)}
       className={cn(
         "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
-        !filesActive && !viewsActive ? "bg-panel text-text-bright" : "text-muted-foreground"
+        !(filesActive || viewsActive ) ? "bg-panel text-text-bright" : "text-muted-foreground"
       )}
     >
       <ChevronRight className={cn("size-3 transition-transform", chatsExpanded && "rotate-90")} />

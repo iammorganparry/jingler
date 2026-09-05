@@ -12,6 +12,7 @@ import {
   visibleTabs
 } from "../app/tab-contributions.js"
 import { testSession as session } from "../test-support.js"
+import { SESSION_SURFACE_COMMAND_EVENT } from "../app/session-surface-layout.js"
 
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
@@ -461,7 +462,7 @@ describe("mount groups", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
     expect(screen.getByText("explanation body")).toBeTruthy()
-    expect(screen.getByTestId("surface-view").getAttribute("data-panes")).toBe("1")
+    expect(screen.getByTestId("surface-view").getAttribute("data-panes")).toBe("2")
   })
 
   it("opens Plan Review as a view tab when the pane is roomy", () => {
@@ -476,7 +477,7 @@ describe("mount groups", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Plan" }))
-    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    expect(screen.getAllByTestId("plan-presentation").map((node) => node.textContent)).toContain("plan")
   })
 
   it("does not carry an open Plan screen into another agent tab", () => {
@@ -492,23 +493,67 @@ describe("mount groups", () => {
       <SessionPane
         session={first}
         planSessions={new Set(["chat-a", "chat-b"])}
-        renderConversation={(_session, view) => (
-          <span data-testid="plan-presentation">{view}</span>
+        renderConversation={(owner, view) => (
+          <span data-testid="plan-presentation">{owner.activeChatId}:{view}</span>
         )}
       />
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Plan" }))
-    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    expect(screen.getAllByTestId("plan-presentation").map((node) => node.textContent))
+      .toContain("chat-a:plan")
 
     rendered.rerender(<SessionPane
       session={{ ...first, activeChatId: "chat-b" }}
       planSessions={new Set(["chat-a", "chat-b"])}
-      renderConversation={(_session, view) => (
-        <span data-testid="plan-presentation">{view}</span>
+      renderConversation={(owner, view) => (
+        <span data-testid="plan-presentation">{owner.activeChatId}:{view}</span>
       )}
     />)
-    expect(screen.getByTestId("plan-presentation").textContent).toBe("conversation")
+    const presentations = screen.getAllByTestId("plan-presentation").map((node) => node.textContent)
+    expect(presentations).toContain("chat-a:plan")
+    expect(presentations).toContain("chat-b:conversation")
+    expect(presentations).not.toContain("chat-b:plan")
+  })
+
+  it("keeps a focused chat-owned Plan surface when its owner becomes active", () => {
+    const owner = session({
+      id: "a",
+      chats: [
+        { id: "chat-a", title: "Agent A", createdAt: "now", updatedAt: "now" },
+        { id: "chat-b", title: "Agent B", createdAt: "now", updatedAt: "now" }
+      ],
+      activeChatId: "chat-b"
+    })
+    localStorage.setItem(
+      "sb.session-surfaces.v1:a",
+      JSON.stringify({
+        panes: [
+          { surface: { kind: "chat", id: "chat-b" }, ratio: 0.5 },
+          { surface: { kind: "view", id: "plan", chatId: "chat-a" }, ratio: 0.5 }
+        ],
+        focused: 1,
+        openViews: [{ kind: "view", id: "plan", chatId: "chat-a" }]
+      })
+    )
+    const rendered = render(
+      <SessionPane
+        session={owner}
+        planSessions={new Set(["chat-a"])}
+        renderConversation={(_session, view) => <div>{view}</div>}
+      />
+    )
+
+    rendered.rerender(
+      <SessionPane
+        session={{ ...owner, activeChatId: "chat-a" }}
+        planSessions={new Set(["chat-a"])}
+        renderConversation={(_session, view) => <div>{view}</div>}
+      />
+    )
+
+    expect(screen.getByTestId("surface-pane-1").dataset.focused).toBe("true")
+    expect(screen.getByTestId("surface-pane-1").dataset.surface).toContain("plan")
   })
 
   it("hides Plan Review when no embedded review is active", () => {
@@ -539,10 +584,10 @@ describe("mount groups", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "stream draft" }))
-    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    expect(screen.getAllByTestId("plan-presentation").map((node) => node.textContent)).toContain("plan")
   })
 
-  it("opens streamed Plan Review full-width when the pane is too narrow", async () => {
+  it("stacks streamed Plan Review while two readable panes still fit", async () => {
     const rect = mockPaneWidth(600)
     render(
       <SessionPane
@@ -559,11 +604,11 @@ describe("mount groups", () => {
 
     await screen.findByRole("button", { name: "stream draft" })
     fireEvent.click(screen.getByRole("button", { name: "stream draft" }))
-    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    expect(screen.getAllByTestId("plan-presentation").map((node) => node.textContent)).toContain("plan")
     rect.mockRestore()
   })
 
-  it("opens a manually selected Plan Review full-width when the pane is too narrow", async () => {
+  it("stacks manually selected Plan Review while two readable panes still fit", async () => {
     const rect = mockPaneWidth(600)
     render(
       <SessionPane
@@ -577,14 +622,30 @@ describe("mount groups", () => {
 
     await screen.findByRole("button", { name: "Plan" })
     fireEvent.click(screen.getByRole("button", { name: "Plan" }))
+    expect(screen.getAllByTestId("plan-presentation").map((node) => node.textContent)).toContain("plan")
+    rect.mockRestore()
+  })
+
+  it("replaces the focused pane when another readable split no longer fits", async () => {
+    const rect = mockPaneWidth(400)
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        planSessions={new Set(["c_a_1"])}
+        renderConversation={(_session, view) => (
+          <span data-testid="plan-presentation">{view}</span>
+        )}
+      />
+    )
+
+    await screen.findByRole("button", { name: "Plan" })
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }))
+    expect(screen.getByTestId("surface-view").dataset.panes).toBe("1")
     expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
     rect.mockRestore()
   })
 
-  it("keeps ONE conversation mount across the Conversation/Plan switch", () => {
-    // The rule the old hardcoded `activeTab === "conversation" || "plan"` branch
-    // encoded: switching to Plan Review must not unmount — and so abort — a
-    // parked plan run.
+  it("keeps Conversation mounted while Plan opens beside it", () => {
     const onMount = vi.fn()
     const Body = () => {
       useEffect(() => {
@@ -603,10 +664,10 @@ describe("mount groups", () => {
     expect(onMount).toHaveBeenCalledTimes(1)
 
     fireEvent.click(screen.getByRole("button", { name: "Plan" }))
-    expect(onMount).toHaveBeenCalledTimes(1)
+    expect(onMount).toHaveBeenCalledTimes(2)
   })
 
-  it("remounts a tab outside that group, which the virtualized transcript requires", () => {
+  it("keeps already-open panes mounted while focus moves", () => {
     const onMount = vi.fn()
     const Body = () => {
       useEffect(() => {
@@ -627,11 +688,76 @@ describe("mount groups", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Code Review" }))
     fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
-    expect(onMount).toHaveBeenCalledTimes(2)
+    expect(onMount).toHaveBeenCalledTimes(1)
   })
 })
 
 describe("SessionPane", () => {
+  it("moves the focused tab bar into the window title row", () => {
+    render(
+      <>
+        <div id="session-tab-bar-portal" />
+        <SessionPane
+          session={session({ id: "a" })}
+          renderConversation={() => <div>transcript</div>}
+        />
+      </>
+    )
+
+    expect(within(document.getElementById("session-tab-bar-portal")!).getByTestId("session-tab-bar"))
+      .toBeTruthy()
+  })
+
+  it("moves and closes the focused surface from the top-right controls", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        explanationSessions={new Set(["a"])}
+        renderConversation={() => <div>transcript</div>}
+        renderExplanation={() => <div>explanation</div>}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
+    fireEvent.click(screen.getByRole("button", { name: "Move pane left" }))
+    expect(screen.getByTestId("surface-pane-0").dataset.surface).toContain("explanation")
+
+    fireEvent.click(screen.getByRole("button", { name: "Close pane" }))
+    expect(screen.getByTestId("surface-view").dataset.panes).toBe("1")
+  })
+
+  it("routes pane shortcut commands to the same focused inner surface", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        explanationSessions={new Set(["a"])}
+        renderConversation={() => <div>transcript</div>}
+        renderExplanation={() => <div>explanation</div>}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
+
+    fireEvent(
+      window,
+      new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail: "focus-0" })
+    )
+    expect(screen.getByTestId("surface-pane-0").dataset.focused).toBe("true")
+    fireEvent(
+      window,
+      new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail: "focus-right" })
+    )
+    fireEvent(
+      window,
+      new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail: "move-left" })
+    )
+    expect(screen.getByTestId("surface-pane-0").dataset.surface).toContain("explanation")
+
+    fireEvent(
+      window,
+      new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail: "close" })
+    )
+    expect(screen.getByTestId("surface-view").dataset.panes).toBe("1")
+  })
+
   it("renders the Files built-in through the host renderer", () => {
     render(
       <SessionPane
@@ -644,7 +770,7 @@ describe("SessionPane", () => {
     expect(screen.getByText("files for a")).toBeTruthy()
   })
 
-  it("gives Files the full pane below the responsive breakpoint", async () => {
+  it("stacks Files while two readable panes fit", async () => {
     const rect = mockPaneWidth(600)
     render(
       <SessionPane
@@ -659,7 +785,8 @@ describe("SessionPane", () => {
 
     expect(screen.queryByTestId("session-auxiliary-split")).toBeNull()
     expect(screen.getByText("files for a")).toBeTruthy()
-    expect(screen.queryByText("transcript for a")).toBeNull()
+    expect(screen.getByText("transcript for a")).toBeTruthy()
+    expect(screen.getByTestId("surface-view").getAttribute("data-panes")).toBe("2")
     rect.mockRestore()
   })
 
@@ -853,7 +980,7 @@ describe("SessionPane", () => {
     })
   })
 
-  it("falls back to Conversation when the selected tab stops being available", () => {
+  it("falls back to Conversation when the selected tab stops being available", async () => {
     const { rerender } = render(
       <SessionPane
         session={session({ id: "a", prNumber: 5 })}
@@ -873,7 +1000,7 @@ describe("SessionPane", () => {
         renderReview={() => <div>review view</div>}
       />
     )
-    expect(screen.queryByText("review view")).toBeNull()
+    await waitFor(() => expect(screen.queryByText("review view")).toBeNull())
     expect(screen.getByText("transcript a")).toBeTruthy()
   })
 

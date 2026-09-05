@@ -27,6 +27,7 @@ interface SelectionRequest {
 
 const actorSnapshots = new Map<string, Map<string, SubagentTabSnapshot>>()
 const controllerSnapshots = new Map<string, Map<string, SubagentTabSnapshot>>()
+const controllerMounts = new Map<string, Map<string, number>>()
 const sessionSnapshots = new Map<string, ReadonlyArray<SubagentTabSnapshot>>()
 const selections = new Map<string, SelectionRequest>()
 const listeners = new Set<() => void>()
@@ -154,14 +155,34 @@ export const publishActorSubagentTabs = (
   snapshot: SubagentTabSnapshot
 ): void => setSnapshot(actorSnapshots, sessionId, snapshot)
 
+export const retainSubagentTabController = (
+  sessionId: string,
+  chatId: string
+): void => {
+  const chats = new Map(controllerMounts.get(sessionId) ?? [])
+  chats.set(chatId, (chats.get(chatId) ?? 0) + 1)
+  controllerMounts.set(sessionId, chats)
+}
+
 export const releaseSubagentTabController = (
   sessionId: string,
   chatId: string
 ): void => {
-  const chats = new Map(controllerSnapshots.get(sessionId) ?? [])
-  chats.delete(chatId)
-  if (chats.size === 0) controllerSnapshots.delete(sessionId)
-  else controllerSnapshots.set(sessionId, chats)
+  const mounts = new Map(controllerMounts.get(sessionId) ?? [])
+  const remaining = (mounts.get(chatId) ?? 1) - 1
+  if (remaining > 0) {
+    mounts.set(chatId, remaining)
+    controllerMounts.set(sessionId, mounts)
+    return
+  }
+  mounts.delete(chatId)
+  if (mounts.size === 0) controllerMounts.delete(sessionId)
+  else controllerMounts.set(sessionId, mounts)
+
+  const snapshots = new Map(controllerSnapshots.get(sessionId) ?? [])
+  snapshots.delete(chatId)
+  if (snapshots.size === 0) controllerSnapshots.delete(sessionId)
+  else controllerSnapshots.set(sessionId, snapshots)
   refreshSession(sessionId)
 }
 
@@ -206,6 +227,7 @@ export const useSubagentTabSelection = (
 export const clearSubagentTabs = (sessionId: string): void => {
   actorSnapshots.delete(sessionId)
   controllerSnapshots.delete(sessionId)
+  controllerMounts.delete(sessionId)
   sessionSnapshots.delete(sessionId)
   selections.delete(sessionId)
   publish()

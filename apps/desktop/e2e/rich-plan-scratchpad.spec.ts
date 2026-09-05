@@ -49,6 +49,7 @@ test("a structured plan renders stages natively and ticks live progress", async 
 }) => {
   const launched = await launchApp({
     configured: true,
+    isolateSystemHome: true,
     withRepo: true,
     piFixture: PI_FIXTURE,
     sessions
@@ -68,6 +69,7 @@ test("a structured plan renders stages natively and ticks live progress", async 
   const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
+  await expect(launched.window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
 
   // The native document renders the parsed structure: frontmatter title and
   // both stages, not a flat checklist.
@@ -83,10 +85,14 @@ test("a structured plan renders stages natively and ticks live progress", async 
   await expect(
     launched.window.getByText("Implement TokenStore").first()
   ).toBeVisible()
+  await launched.window.getByRole("button", { name: "Move pane left" }).click()
+  await expect(launched.window.getByText("Token store rollout").first()).toBeVisible()
 
   // [DONE:1] ticked the first task, so the first stage is running (not done):
   // the drawer badge counts completed STAGES over total stages.
-  await launched.window.getByTestId("active-chat-tab").first().click()
+  await launched.window
+    .getByRole("button", { name: "keep a structured plan while you work", exact: true })
+    .click()
   await expect(
     launched.window.getByRole("tab", { name: /Plan/ }).first()
   ).toContainText("0/2", { timeout: 20_000 })
@@ -99,6 +105,7 @@ test("a structured plan renders stages natively and ticks live progress", async 
   await launched.app.close()
   const reopened = await launchApp({
     configured: true,
+    isolateSystemHome: true,
     withRepo: true,
     home: launched.home,
     reposDir: launched.reposDir,
