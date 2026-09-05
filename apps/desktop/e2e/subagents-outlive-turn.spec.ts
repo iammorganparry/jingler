@@ -73,7 +73,8 @@ test("a new chat never renders the previous chat's live subagents", async ({
   await expect(first).toBeVisible({ timeout: 15_000 })
   await expect(second).toBeVisible()
 
-  await window.getByRole("button", { name: "New chat" }).click()
+  await window.getByRole("button", { name: "New tab" }).click()
+  await window.getByTestId("new-tab-option-chat").click()
   await expect(window.getByTitle("2. Chat 2")).toHaveAttribute("aria-current", "page")
   await Promise.all([250, 500, 1_000, 2_000, 4_000].map(async (delay) => {
     await window.waitForTimeout(delay)

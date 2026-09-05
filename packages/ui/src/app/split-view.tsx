@@ -1,9 +1,9 @@
-import { type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react"
+import { type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { cn } from "../lib/cn.js"
 import { useContainerWidth } from "../hooks/use-container-width.js"
 import { FAST, INSTANT, paneVariants, SPRING } from "../lib/motion.js"
-import { maxPanesForWidth, type Pane, type SplitGroup, SESSION_DND_MIME } from "./split-layout.js"
+import { maxPanesForWidth, MIN_RATIO, type Pane, type SplitGroup, SESSION_DND_MIME } from "./split-layout.js"
 
 /**
  * Where a dragged session would land relative to the pane it's hovering.
@@ -34,18 +34,26 @@ const zoneAt = (e: DragEvent<HTMLElement>): DropZone => {
  * readable. Getting this wrong means either accepting file drops or rejecting
  * every session drop.
  */
-const carriesSession = (e: DragEvent): boolean =>
-  Array.from(e.dataTransfer.types).includes(SESSION_DND_MIME)
+const carriesPayload = (e: DragEvent, mime: string): boolean =>
+  Array.from(e.dataTransfer.types).includes(mime)
 
-export interface SplitViewProps {
+export interface SplitViewProps<TPane extends { readonly ratio: number } = Pane> {
   /** The split on screen. `null` renders the empty state. */
-  group: SplitGroup | null
+  group: Pick<SplitGroup, "focused"> & { readonly panes: ReadonlyArray<TPane> } | null
   /**
    * One pane's contents. A prop rather than a hard dependency on `SessionPane`
    * so this component stays mountable in Storybook with cheap placeholders —
    * the whole point of approving the split's feel before wiring it to the app.
    */
-  renderPane: (pane: Pane, index: number) => ReactNode
+  renderPane: (pane: TPane, index: number) => ReactNode
+  /** Stable identity for animation. Defaults to the outer session pane id. */
+  paneId?: (pane: TPane) => string
+  /** Custom payload type for nested tab splits. */
+  dragMime?: string
+  /** Selector prefix; nested splits use `surface` to avoid outer-pane collisions. */
+  testIdPrefix?: string
+  /** Width-derived capacity; inner surfaces can use a smaller readable floor. */
+  paneCapacity?: (width: number) => number
   /** Move the focus ring (and, downstream, singleton ownership) to a pane. */
   onFocusPane?: (index: number) => void
   /** A session was dropped. `at` is the pane index it should occupy. */
@@ -53,8 +61,8 @@ export interface SplitViewProps {
   /** A session was dropped onto a pane's middle — swap that pane's session. */
   onReplacePane?: (index: number, sessionId: string) => void
   /**
-   * Drag on the divider after pane `index`, as a fraction of the row's width.
-   * Deltas arrive continuously during the drag, not once at the end.
+   * Commit the divider after pane `index`, as a fraction of the row's width.
+   * Pointer moves are previewed directly in the DOM; one delta arrives on release.
    */
   onResize?: (index: number, delta: number) => void
   /** Shown when there is no group at all — first launch, or everything closed. */
@@ -75,15 +83,19 @@ export interface SplitViewProps {
  * `motion`'s layout animation able to slide the survivor rather than cross-fade
  * a remount.
  */
-export function SplitView({
+export function SplitView<TPane extends { readonly ratio: number } = Pane>({
   group,
   renderPane,
+  paneId = (pane) => (pane as unknown as Pane).sessionId,
+  dragMime = SESSION_DND_MIME,
+  testIdPrefix = "split",
+  paneCapacity = maxPanesForWidth,
   onFocusPane,
   onSplitWith,
   onReplacePane,
   onResize,
   emptyState
-}: SplitViewProps) {
+}: SplitViewProps<TPane>) {
   // Which pane is under the pointer mid-drag, and where it would land. Tracked
   // as one value rather than a per-pane boolean so exactly one indicator shows:
   // `dragleave` fires when crossing into a CHILD element too, so a per-pane flag
@@ -96,8 +108,9 @@ export function SplitView({
   // Doubles as the divider drag's reference box and as the source of the
   // width-derived pane cap below — one measurement, two uses.
   const [rowRef, rowWidth] = useContainerWidth<HTMLDivElement>()
+  const layoutScope = useId()
 
-  const paneIds = group?.panes.map((p) => p.sessionId) ?? []
+  const paneIds = group?.panes.map(paneId) ?? []
   const presence = useRef<{ ids: ReadonlyArray<string>; token: number }>({ ids: paneIds, token: 0 })
   /**
    * Is this update an EDIT of the split on screen, or a SWITCH to a different
@@ -158,19 +171,31 @@ export function SplitView({
     (index: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
       if (!onResize) return
       e.preventDefault()
-      const rowWidth = rowRef.current?.getBoundingClientRect().width ?? 0
-      if (rowWidth === 0) return
-      let last = e.clientX
+      const row = rowRef.current
+      const rowWidth = row?.getBoundingClientRect().width ?? 0
+      const left = group?.panes[index]
+      const right = group?.panes[index + 1]
+      if (!row || rowWidth === 0 || !left || !right) return
+      const leftElement = row.querySelector<HTMLElement>(`[data-${testIdPrefix}-pane-index="${index}"]`)
+      const rightElement = row.querySelector<HTMLElement>(`[data-${testIdPrefix}-pane-index="${index + 1}"]`)
+      if (!leftElement || !rightElement) return
+
+      const startX = e.clientX
+      const pair = left.ratio + right.ratio
+      let committedDelta = 0
       setDraggingDivider(index)
-      const move = (ev: PointerEvent) => {
-        // Deltas are sent as a FRACTION of the row, because the model stores
-        // ratios — converting in the component keeps the reducer free of pixels
-        // and so free of the DOM.
-        const delta = (ev.clientX - last) / rowWidth
-        last = ev.clientX
-        if (delta !== 0) onResize(index, delta)
+      const move = (event: PointerEvent) => {
+        const wanted = left.ratio + (event.clientX - startX) / rowWidth
+        const nextLeft = Math.min(Math.max(wanted, MIN_RATIO), pair - MIN_RATIO)
+        committedDelta = nextLeft - left.ratio
+        // Pointer moves paint only the two flex weights. React commits the final
+        // ratio once on release, so conversations, editors, and xterm do not
+        // rerender at pointer frequency.
+        leftElement.style.flexGrow = String(nextLeft)
+        rightElement.style.flexGrow = String(pair - nextLeft)
       }
       const end = () => {
+        if (committedDelta !== 0) onResize(index, committedDelta)
         setDraggingDivider(null)
         window.removeEventListener("pointermove", move)
         window.removeEventListener("pointerup", end)
@@ -180,12 +205,12 @@ export function SplitView({
       window.addEventListener("pointerup", end)
       window.addEventListener("pointercancel", end)
     },
-    [onResize]
+    [group, onResize, rowRef, testIdPrefix]
   )
 
   if (group === null) {
     return (
-      <div data-testid="split-view" className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-editor">
+      <div data-testid={`${testIdPrefix}-view`} className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-editor">
         {emptyState}
       </div>
     )
@@ -195,27 +220,27 @@ export function SplitView({
   // The cap is the row's, not the model's: four panes are legible at 1400px and
   // illegible at 900px, and the operator gets told which by the indicator
   // turning red rather than by dropping a session into a pane they can't read.
-  const full = group.panes.length >= maxPanesForWidth(rowWidth)
+  const full = group.panes.length >= paneCapacity(rowWidth)
 
   const handleDrop = (index: number) => (e: DragEvent<HTMLDivElement>) => {
-    if (!carriesSession(e)) return
+    if (!carriesPayload(e, dragMime)) return
     e.preventDefault()
     const zone = zoneAt(e)
     setDropAt(null)
-    const sessionId = e.dataTransfer.getData(SESSION_DND_MIME)
-    if (!sessionId) return
+    const payload = e.dataTransfer.getData(dragMime)
+    if (!payload) return
     // A REPLACE is always allowed — it doesn't change the pane count, so it
     // can't make the row narrower than it already is. Only an INSERT is refused,
     // and it's refused here rather than in the reducer so the same drop still
     // works the moment the window is widened.
-    if (zone === "replace") onReplacePane?.(index, sessionId)
-    else if (!full) onSplitWith?.(sessionId, zone === "before" ? index : index + 1)
+    if (zone === "replace") onReplacePane?.(index, payload)
+    else if (!full) onSplitWith?.(payload, zone === "before" ? index : index + 1)
   }
 
   return (
     <div
       ref={rowRef}
-      data-testid="split-view"
+      data-testid={`${testIdPrefix}-view`}
       data-panes={group.panes.length}
       className="flex min-h-0 min-w-0 flex-1 bg-hairline"
     >
@@ -234,7 +259,7 @@ export function SplitView({
           const drop = dropAt?.index === index ? dropAt.zone : null
           return (
             <motion.div
-              key={pane.sessionId}
+              key={paneId(pane)}
               // `layout` moves a pane when its NEIGHBOURS change size or count.
               // Suspended mid-divider-drag: there, the width already tracks the
               // pointer exactly, and a spring on top of it only adds lag.
@@ -263,8 +288,10 @@ export function SplitView({
               // `order` interleaves the panes with the dividers, which are
               // rendered as a separate run below (see the note there).
               style={{ flexGrow: pane.ratio, flexBasis: 0, order: index * 2 }}
-              data-testid={`split-pane-${index}`}
-              data-session={pane.sessionId}
+              data-testid={`${testIdPrefix}-pane-${index}`}
+              {...{ [`data-${testIdPrefix}-pane-index`]: index }}
+              data-session={testIdPrefix === "split" ? paneId(pane) : undefined}
+              data-surface={testIdPrefix === "surface" ? paneId(pane) : undefined}
               data-focused={isFocused || undefined}
               // Focus follows a mousedown anywhere in the pane, captured so a
               // click on a control inside still registers the pane as focused
@@ -273,7 +300,7 @@ export function SplitView({
               onFocusCapture={() => onFocusPane?.(index)}
               onDragOver={(e) => {
                 if (!onSplitWith && !onReplacePane) return
-                if (!carriesSession(e)) return
+                if (!carriesPayload(e, dragMime)) return
                 // Calling preventDefault is what MARKS this element as a valid
                 // drop target — without it the browser refuses the drop entirely.
                 e.preventDefault()
@@ -306,9 +333,9 @@ export function SplitView({
                   gesture entirely. */}
               {(drop === "before" || drop === "after") && (
                 <motion.span
-                  layoutId="split-insert-indicator"
+                  layoutId={`${layoutScope}-insert-indicator`}
                   transition={SPRING}
-                  data-testid={`split-insert-${drop}-${index}`}
+                  data-testid={`${testIdPrefix}-insert-${drop}-${index}`}
                   className={cn(
                     "pointer-events-none absolute inset-y-0 w-1 bg-blue",
                     drop === "before" ? "left-0" : "right-0",
@@ -331,8 +358,9 @@ export function SplitView({
       {onResize &&
         group.panes.slice(0, -1).map((pane, index) => (
           <Divider
-            key={`divider-${pane.sessionId}`}
+            key={`divider-${paneId(pane)}`}
             index={index}
+            testIdPrefix={testIdPrefix}
             active={draggingDivider === index}
             onPointerDown={startDividerDrag(index)}
           />
@@ -359,10 +387,12 @@ export function SplitView({
  */
 function Divider({
   index,
+  testIdPrefix,
   active,
   onPointerDown
 }: {
   index: number
+  testIdPrefix: string
   active: boolean
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
 }) {
@@ -371,7 +401,7 @@ function Divider({
       role="separator"
       aria-orientation="vertical"
       aria-label={`Resize pane ${index + 1}`}
-      data-testid={`split-divider-${index}`}
+      data-testid={`${testIdPrefix}-divider-${index}`}
       data-active={active || undefined}
       onPointerDown={onPointerDown}
       // `-order` places each divider immediately after its pane: flex `order`

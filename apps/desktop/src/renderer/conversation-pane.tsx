@@ -547,6 +547,7 @@ export function ConversationPane({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
       if ((!event.metaKey && !event.ctrlKey) || event.altKey) return
       const target = event.target
       if (
@@ -556,11 +557,6 @@ export function ConversationPane({
           target.tagName === "TEXTAREA" ||
           target.tagName === "SELECT")
       ) return
-      if (event.key.toLowerCase() === "t") {
-        event.preventDefault()
-        createChat()
-        return
-      }
       if (event.key.toLowerCase() === "w") {
         event.preventDefault()
         closeChat(activeChat.id)

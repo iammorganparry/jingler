@@ -1,15 +1,27 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { Fragment, useState, type ReactNode } from "react"
-import { Bot, ChevronRight, FileStack, History, MessagesSquare, Plus, RotateCcw, X } from "lucide-react"
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react"
+import { Bot, ChevronRight, FileStack, History, Layers3, MessagesSquare, Plus, RotateCcw, type LucideIcon, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier, type WidthTier } from "../hooks/width-tier.js"
 import { ContextMenu } from "../components/context-menu.js"
 import { StatusDot } from "../components/status-dot.js"
+import { CommandPalette } from "./command-palette.js"
+import type { PaletteItem } from "./command-palette-model.js"
+import { SESSION_SURFACE_DND_MIME } from "./session-surface-layout.js"
 
 export interface ChatTabItem {
   id: string
   title: string
   running?: boolean
+  surfaceKey?: string
+}
+
+export interface TabLauncherItem {
+  readonly id: string
+  readonly label: string
+  readonly icon: LucideIcon
+  readonly detail?: string
+  readonly onSelect: () => void
 }
 
 export interface SubagentTabItem {
@@ -42,6 +54,15 @@ export interface ChatTabBarProps {
   onCloseAllChats?: () => void
   /** Close every open file tab (the group label's right-click menu). */
   onCloseAllFiles?: () => void
+  /** Open auxiliary view tabs rendered after files. */
+  viewSlot?: ReactNode
+  viewCount?: number
+  viewsActive?: boolean
+  onCloseAllViews?: () => void
+  /** One model drives the anchored + dropdown and the ⌘T command menu. */
+  launcherItems?: ReadonlyArray<TabLauncherItem>
+  /** Only the focused outer session pane handles the global ⌘T chord. */
+  paneFocused?: boolean
 }
 
 /**
@@ -104,15 +125,67 @@ export function ChatTabBar({
   fileSlot,
   filesActive = false,
   onCloseAllChats,
-  onCloseAllFiles
+  onCloseAllFiles,
+  viewSlot,
+  viewCount = 0,
+  viewsActive = false,
+  onCloseAllViews,
+  launcherItems,
+  paneFocused = true
 }: ChatTabBarProps) {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
   const [chatsExpanded, setChatsExpanded] = useState(true)
   const [filesExpanded, setFilesExpanded] = useState(true)
+  const [viewsExpanded, setViewsExpanded] = useState(true)
+  const [launcherOpen, setLauncherOpen] = useState(false)
+  const [commandOpen, setCommandOpen] = useState(false)
   const tier = useWidthTier()
   const width = CHAT_WIDTH[tier]
   const fileCount = Array.isArray(fileSlot) ? fileSlot.length : fileSlot == null ? 0 : 1
+  const launchers = launcherItems ?? []
+  const commandItems = useMemo<ReadonlyArray<PaletteItem>>(
+    () =>
+      launchers.map((item, index) => ({
+        id: `new-tab:${item.id}`,
+        kind: "tab" as const,
+        group: "New tab",
+        label: item.label,
+        detail: item.detail,
+        icon: item.icon,
+        hint: index < 9 ? String(index + 1) : undefined,
+        run: item.onSelect
+      })),
+    [launchers]
+  )
+
+  useEffect(() => {
+    if (!paneFocused) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        (event.code === "KeyT" || event.key.toLowerCase() === "t")
+      ) {
+        event.preventDefault()
+        setLauncherOpen(false)
+        setCommandOpen(true)
+        return
+      }
+      if ((!launcherOpen && !commandOpen) || event.metaKey || event.ctrlKey || event.altKey) return
+      const index = Number(event.key) - 1
+      const item = index >= 0 && index < Math.min(launchers.length, 9) ? launchers[index] : undefined
+      if (!item) return
+      event.preventDefault()
+      setLauncherOpen(false)
+      setCommandOpen(false)
+      item.onSelect()
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [commandOpen, launcherOpen, launchers, paneFocused])
+
   const commit = (id: string) => {
     if (draft.trim()) onRenameChat(id, draft.trim())
     setEditing(null)
@@ -155,6 +228,12 @@ export function ChatTabBar({
           <Fragment key={chat.id}>
           <div
             data-testid={`chat-tab-${chat.id}`}
+            draggable={chat.surfaceKey !== undefined}
+            onDragStart={(event) => {
+              if (!chat.surfaceKey) return
+              event.dataTransfer.setData(SESSION_SURFACE_DND_MIME, chat.surfaceKey)
+              event.dataTransfer.effectAllowed = "move"
+            }}
             className={cn(
               "group flex flex-none items-center rounded-md transition-colors",
               active ? "bg-panel text-text-bright" : "text-muted-foreground hover:bg-panel/60"
@@ -220,15 +299,51 @@ export function ChatTabBar({
           </Fragment>
         )
       })}
-      {chatsExpanded && <button
-        type="button"
-        aria-label="New chat"
-        title="New chat (⌘T)"
-        onClick={onCreateChat}
-        className="flex flex-none items-center rounded-md px-1.5 py-1.5 text-dim outline-none transition-colors hover:bg-panel hover:text-text"
-      >
-        <Plus className="size-3.5" />
-      </button>}
+      {launchers.length > 0 ? (
+        <DropdownMenu.Root open={launcherOpen} onOpenChange={setLauncherOpen}>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              aria-label="New tab"
+              title="New tab (⌘T)"
+              className="flex flex-none items-center rounded-md px-1.5 py-1.5 text-dim outline-none transition-colors hover:bg-panel hover:text-text"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="start"
+              sideOffset={6}
+              collisionPadding={8}
+              className="z-50 flex min-w-[220px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
+            >
+              {launchers.map((item, index) => (
+                <DropdownMenu.Item
+                  key={item.id}
+                  onSelect={item.onSelect}
+                  data-testid={`new-tab-option-${item.id}`}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                >
+                  <item.icon className="size-3.5 flex-none text-dim" />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {index < 9 ? <span className="font-mono text-[10px] text-dim">{index + 1}</span> : null}
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      ) : (
+        <button
+          type="button"
+          aria-label="New chat"
+          title="New chat"
+          onClick={onCreateChat}
+          className="flex flex-none items-center rounded-md px-1.5 py-1.5 text-dim outline-none transition-colors hover:bg-panel hover:text-text"
+        >
+          <Plus className="size-3.5" />
+        </button>
+      )}
       {chatsExpanded && (
         (closedChats.length > 0 && onReopenChat !== undefined) ||
         (previousSubagents.length > 0 && onOpenPreviousSubagent !== undefined)
@@ -305,6 +420,42 @@ export function ChatTabBar({
         )
       })()}
       {filesExpanded ? fileSlot : null}
+      {viewCount > 0 && (() => {
+        const viewsGroupLabel = (
+          <button
+            type="button"
+            aria-label={`${viewsExpanded ? "Collapse" : "Expand"} views group`}
+            aria-expanded={viewsExpanded}
+            title={`${viewCount} open ${viewCount === 1 ? "view" : "views"}`}
+            onClick={() => setViewsExpanded((expanded) => !expanded)}
+            className={cn(
+              "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
+              viewsActive ? "bg-panel text-text-bright" : "text-muted-foreground"
+            )}
+          >
+            <ChevronRight className={cn("size-3 transition-transform", viewsExpanded && "rotate-90")} />
+            <Layers3 className="size-3 text-green" />
+            <span>Views</span>
+            <span className="text-dim">{viewCount}</span>
+          </button>
+        )
+        return onCloseAllViews ? (
+          <GroupContextMenu label="Close all views" onSelect={onCloseAllViews}>
+            {viewsGroupLabel}
+          </GroupContextMenu>
+        ) : (
+          viewsGroupLabel
+        )
+      })()}
+      {viewsExpanded ? viewSlot : null}
+      <CommandPalette
+        open={commandOpen}
+        onOpenChange={setCommandOpen}
+        items={commandItems}
+        placeholder="Choose a tab type…"
+        emptyMessage="No tab types available"
+        testId="new-tab-command-menu"
+      />
     </>
   )
 }

@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { Globe, SquareTerminal } from "lucide-react"
 import { ChatTabBar } from "./chat-tab-bar.js"
 import { SubagentTabBar } from "./subagent-tab-bar.js"
 
@@ -105,6 +106,56 @@ describe("ChatTabBar closed chats", () => {
     expect(screen.queryByRole("button", { name: "app.ts" })).toBeNull()
     expect(screen.getByRole("button", { name: "Expand chats group" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Expand files group" })).toBeTruthy()
+  })
+
+  it("groups opened views and closes them together", () => {
+    const onCloseAllViews = vi.fn()
+    render(
+      <ChatTabBar
+        chats={[{ id: "chat-1", title: "Main" }]}
+        activeChatId=""
+        viewSlot={[<button key="browser">Browser</button>, <button key="terminal">Terminal</button>]}
+        viewCount={2}
+        viewsActive
+        onCloseAllViews={onCloseAllViews}
+        {...chatCallbacks()}
+      />
+    )
+
+    expect(screen.getByTitle("2 open views")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Collapse views group" }))
+    expect(screen.queryByRole("button", { name: "Browser" })).toBeNull()
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Expand views group" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close all views" }))
+    expect(onCloseAllViews).toHaveBeenCalledOnce()
+  })
+
+  it("uses one launcher model for the + dropdown and ⌘T quick keys", () => {
+    const openBrowser = vi.fn()
+    const openTerminal = vi.fn()
+    render(
+      <ChatTabBar
+        chats={[{ id: "chat-1", title: "Main" }]}
+        activeChatId="chat-1"
+        launcherItems={[
+          { id: "browser", label: "Browser", icon: Globe, onSelect: openBrowser },
+          { id: "terminal", label: "Terminal", icon: SquareTerminal, onSelect: openTerminal }
+        ]}
+        {...chatCallbacks()}
+      />
+    )
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "New tab" }), {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(screen.getByTestId("new-tab-option-browser"))
+    expect(openBrowser).toHaveBeenCalledOnce()
+
+    fireEvent.keyDown(window, { key: "t", code: "KeyT", metaKey: true })
+    expect(screen.getByTestId("new-tab-command-menu")).toBeTruthy()
+    fireEvent.keyDown(window, { key: "2", code: "Digit2" })
+    expect(openTerminal).toHaveBeenCalledOnce()
   })
 
   it("closes all chats or files from the group label's context menu", () => {

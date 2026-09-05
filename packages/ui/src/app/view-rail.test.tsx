@@ -62,23 +62,6 @@ describe("ViewRail", () => {
     expect(onChange).toHaveBeenCalledWith("linear.issue")
   })
 
-  it("binds the session terminal toggle to the rail", () => {
-    const onToggleTerminal = vi.fn()
-    render(
-      <ViewRail
-        tabs={tabs}
-        active="conversation"
-        onChange={vi.fn()}
-        terminalActive={false}
-        onToggleTerminal={onToggleTerminal}
-      />
-    )
-    const toggle = screen.getByRole("button", { name: "Show Terminal" })
-    expect(toggle.getAttribute("aria-pressed")).toBe("false")
-    fireEvent.click(toggle)
-    expect(onToggleTerminal).toHaveBeenCalledOnce()
-  })
-
   it("renders no terminal control without a toggle handler", () => {
     render(<ViewRail tabs={tabs} active="conversation" onChange={vi.fn()} />)
     expect(screen.queryByTestId("view-rail-terminal")).toBeNull()

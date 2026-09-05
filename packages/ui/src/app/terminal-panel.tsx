@@ -40,6 +40,8 @@ export interface TerminalDockProps {
   lastExit?: number | null
   /** Render the live terminal cell for a tab id (the desktop app's XtermView). */
   renderTerminal: (id: string) => ReactNode
+  /** Fill a session tab instead of drawing dock resize/position controls. */
+  embedded?: boolean
 }
 
 // Persisted, clamped dock sizes — one per axis so switching sides keeps both.
@@ -49,7 +51,7 @@ const WIDTH = { key: "jingler.terminal.width", initial: 480, min: 300, max: 920 
 /** The dockable terminal shell. Renders every tab's cell (only the active one is
  * shown) so switching tabs — or hiding the dock — never tears down xterm. */
 export function TerminalDock(props: TerminalDockProps) {
-  const { dock: preferredDock, tabs, activeId, visible } = props
+  const { dock: preferredDock, tabs, activeId, visible, embedded = false } = props
   // The shell's width (from `app-shell.tsx`), not this dock's own — the question
   // is how much room the ROW has to give away, which a dock measuring itself
   // cannot answer.
@@ -101,12 +103,13 @@ export function TerminalDock(props: TerminalDockProps) {
     <div
       ref={dockEl}
       className={cn(
-        "relative flex flex-none flex-col bg-sunken",
-        isBottom ? "border-t border-hairline" : "border-l border-hairline",
+        "relative flex flex-col bg-sunken",
+        embedded ? "min-h-0 min-w-0 flex-1" : "flex-none",
+        !embedded && (isBottom ? "border-t border-hairline" : "border-l border-hairline"),
         !visible && "hidden"
       )}
       style={
-        visible
+        visible && !embedded
           ? isBottom
             ? { height: height.width }
             : // Capped at a fraction of the row: the stored width is clamped to
@@ -116,11 +119,13 @@ export function TerminalDock(props: TerminalDockProps) {
           : undefined
       }
     >
-      <DockResizeEdge
-        orientation={isBottom ? "horizontal" : "vertical"}
-        onResize={onResize}
-        onResizeEnd={onResizeEnd}
-      />
+      {!embedded && (
+        <DockResizeEdge
+          orientation={isBottom ? "horizontal" : "vertical"}
+          onResize={onResize}
+          onResizeEnd={onResizeEnd}
+        />
+      )}
 
       {/* Tab strip */}
       <div className="flex h-9 flex-none items-stretch border-b border-hairline bg-panel pr-1.5">
@@ -143,19 +148,21 @@ export function TerminalDock(props: TerminalDockProps) {
             <Plus className="size-3.5" />
           </button>
         </div>
-        <div className="flex flex-none items-center gap-0.5 pl-1.5">
-          <DockSideButton side="bottom" active={isBottom} onClick={() => props.onDockChange("bottom")} />
-          <DockSideButton side="right" active={!isBottom} onClick={() => props.onDockChange("right")} />
-          <button
-            type="button"
-            onClick={props.onToggle}
-            aria-label="Hide terminal"
-            title="Hide terminal (⌃`)"
-            className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
-          >
-            <X className="size-3.5" />
-          </button>
-        </div>
+        {!embedded && (
+          <div className="flex flex-none items-center gap-0.5 pl-1.5">
+            <DockSideButton side="bottom" active={isBottom} onClick={() => props.onDockChange("bottom")} />
+            <DockSideButton side="right" active={!isBottom} onClick={() => props.onDockChange("right")} />
+            <button
+              type="button"
+              onClick={props.onToggle}
+              aria-label="Hide terminal"
+              title="Hide terminal (⌃`)"
+              className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Body — every terminal stays mounted; only the active one is shown. */}
@@ -185,7 +192,7 @@ export function TerminalDock(props: TerminalDockProps) {
           </span>
         )}
         <div className="flex-1" />
-        <span className="flex-none">⌃` toggle</span>
+        {!embedded && <span className="flex-none">⌃` toggle</span>}
       </div>
     </div>
   )

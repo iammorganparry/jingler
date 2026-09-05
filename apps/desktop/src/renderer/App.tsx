@@ -72,6 +72,7 @@ import {
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js";
+import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
 import {
   pullRequestSessionTarget,
@@ -80,7 +81,6 @@ import {
 import { ReviewPane } from "./review-pane.js";
 import { FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
 import { TerminalDockView } from "./terminal-dock-view.js";
-import { useTerminalDock } from "./use-terminal-dock.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
@@ -94,8 +94,10 @@ import { addDraftCodeReference, clearDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
 import { clearViewedPaths } from "./viewed-store.js";
 import {
+  closeSessionFile,
   disposeFileBrowserActor,
   openSessionFile,
+  requestCloseFileSurface,
 } from "./use-file-browser.js";
 import { onSessionUpdate, publishSessionUpdate } from "./session-updates.js";
 import { setVisibleSessionIds } from "./active-session.js";
@@ -500,7 +502,6 @@ function AuthedApp({
   const liveDiff = useSessionDiffs();
   const planSessions = usePlanSessions();
   const explanationSessions = useExplanationSessions(sessions);
-  const termDock = useTerminalDock();
   const browserDock = usePreviewDock();
   const sessionsLoaded = state.matches("ready");
   useEffect(() => {
@@ -1938,6 +1939,11 @@ function AuthedApp({
         renderFiles={(session, ctx) => (
           <FileBrowserView
             session={session}
+            path={ctx.path}
+            onClosed={() => {
+              if (ctx.path) closeSessionFile(session.id, ctx.path);
+              ctx.onClosed?.();
+            }}
             debugSnapshot={debugSessions[session.id]}
             onSendReference={(reference) => {
               addDraftCodeReference(session.activeChatId, reference);
@@ -1953,6 +1959,7 @@ function AuthedApp({
           />
         )}
         onOpenFile={openSessionFile}
+        onRequestCloseFile={requestCloseFileSurface}
         renderFileQuickOpen={(session, ctx) => (
           <FileBrowserQuickOpen
             session={session}
@@ -1967,6 +1974,16 @@ function AuthedApp({
             filesActive={ctx.activeTabId === "files"}
             onSelectConversation={ctx.onSelectConversation}
             onSelectFiles={ctx.onSelectFiles}
+            activeSurface={ctx.activeSurface}
+            onSelectSurface={ctx.onSelectSurface}
+            onCloseSurface={ctx.onCloseSurface}
+            onRequestCloseFile={ctx.onRequestCloseFile}
+            viewSlot={ctx.viewSlot}
+            viewCount={ctx.viewCount}
+            viewsActive={ctx.viewsActive}
+            onCloseAllViews={ctx.onCloseAllViews}
+            viewLauncherItems={ctx.viewLauncherItems}
+            paneFocused={ctx.paneFocused}
           />
         )}
         renderSubagentTabs={(session: Session, ctx) => (
@@ -2047,21 +2064,14 @@ function AuthedApp({
             />
           );
         }}
-        terminalDockSide={termDock.side}
-        // The palette's route to the same toggle ⌃` drives. The dock's visibility
-        // is this file's state, so without these two props the shell can lay the
-        // dock out but cannot ask for it.
-        onToggleTerminal={termDock.toggle}
-        terminalActive={termDock.visible}
         renderTerminalDock={(session) => (
-          <TerminalDockView
-            session={session}
-            visible={termDock.visible}
-            onToggle={termDock.toggle}
-            side={termDock.side}
-            onSideChange={termDock.setSide}
-          />
+          <TerminalDockView session={session} embedded />
         )}
+        onFocusChat={(sessionId, chatId) => {
+          const session = sessions.find((candidate) => candidate.id === sessionId);
+          if (!session || session.activeChatId === chatId) return;
+          queueSessionChatMutation(sessionId, () => rpc.sessionsSelectChat(sessionId, chatId));
+        }}
         isBrowserActive={(sessionId, chatId) =>
           browserDock.forAgent(sessionId, chatId).visible
         }

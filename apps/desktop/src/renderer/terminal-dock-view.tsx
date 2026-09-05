@@ -14,13 +14,21 @@ import { XtermView } from "./xterm-view.js"
 export interface TerminalDockViewProps {
   /** The active session (its worktree is the terminals' cwd). Null → no session. */
   session: Session | null
-  visible: boolean
-  onToggle: () => void
-  side: DockSide
-  onSideChange: (side: DockSide) => void
+  visible?: boolean
+  onToggle?: () => void
+  side?: DockSide
+  onSideChange?: (side: DockSide) => void
+  embedded?: boolean
 }
 
-export function TerminalDockView({ session, visible, onToggle, side, onSideChange }: TerminalDockViewProps) {
+export function TerminalDockView({
+  session,
+  visible = true,
+  onToggle = () => {},
+  side = "bottom",
+  onSideChange = () => {},
+  embedded = false
+}: TerminalDockViewProps) {
   const cwd = session?.worktreePath ?? undefined
   const terminals = useTerminals(session?.id ?? null, cwd)
   const { create, close, select, markExited, tabs: infos, activeId, hydrated } = terminals
@@ -58,6 +66,7 @@ export function TerminalDockView({ session, visible, onToggle, side, onSideChang
       onClose={(id) => void close(id)}
       cwdLabel={cwd}
       lastExit={lastExit}
+      embedded={embedded}
       renderTerminal={(id) => (
         <XtermView
           key={id}

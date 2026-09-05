@@ -5,10 +5,10 @@ import type { SeedSession } from "./fixtures.js"
  * The native PTY terminal, end to end against the built app. Unlike the agent,
  * the terminal has NO scripted mode — it spawns a REAL login shell in the
  * session's worktree — so we drive it with deterministic input and assert on the
- * dock's React chrome (tabs, the "last exit" footer), NOT on the xterm buffer:
+ * tab's React chrome (tabs, the "last exit" footer), NOT on the xterm buffer:
  * xterm renders its text to a WebGL canvas that isn't in the DOM.
  *
- * What this proves end to end: the dock mounts and auto-spawns a terminal, the
+ * What this proves end to end: the Terminal view mounts and auto-spawns a shell, the
  * `+` button creates another, keystrokes reach the PTY over IPC, and the PTY's
  * exit propagates back through the `Terminal.attach` stream into the UI.
  */
@@ -31,13 +31,18 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
   }
 ]
 
-test("auto-spawns a terminal in the dock and the `+` button adds another", async ({ launchApp }) => {
-  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+test("opens Terminal as a view tab and its `+` button adds another shell", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
 
   await expect(appShell(window)).toBeVisible()
-
-  // The dock is visible by default and auto-spawns one terminal for the active
-  // session — so an xterm surface appears with no user action.
+  await expect(window.locator(".xterm")).toHaveCount(0)
+  await window.getByTestId("view-tab-terminal").click()
+  await expect(window.getByTestId("open-view-tab-terminal")).toBeVisible()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
 
   // A second terminal from the dock's "New terminal" (+) affordance.
@@ -46,9 +51,15 @@ test("auto-spawns a terminal in the dock and the `+` button adds another", async
 })
 
 test("keystrokes reach the PTY and its exit surfaces in the dock footer", async ({ launchApp }) => {
-  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
 
   await expect(appShell(window)).toBeVisible()
+  await window.keyboard.press("Control+Backquote")
 
   const term = window.locator(".xterm").first()
   await expect(term).toBeVisible({ timeout: 20_000 })
@@ -56,8 +67,9 @@ test("keystrokes reach the PTY and its exit surfaces in the dock footer", async 
   // Focus the terminal and exit the shell. `exit` cleanly ends the login shell →
   // the PTY closes with code 0 → the Terminal.attach stream emits an `exit` frame
   // → the dock footer renders "last exit 0" (real React DOM, renderer-agnostic).
-  await term.click()
-  await window.keyboard.type("exit")
+  await window.getByRole("textbox", { name: "Terminal input" }).click()
+  await window.waitForTimeout(300)
+  await window.keyboard.type("exit 0")
   await window.keyboard.press("Enter")
 
   // "last exit 0" — the label + the exit code render in one footer span.

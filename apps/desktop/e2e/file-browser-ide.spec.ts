@@ -156,6 +156,28 @@ const selectTreePath = async (window: Page, path: string): Promise<void> => {
   )
 }
 
+const splitChatBesideFiles = async (window: Page): Promise<void> => {
+  await window.evaluate(() => {
+    const source = document.querySelector('[data-testid^="chat-tab-"]')
+    const target = document.querySelector('[data-testid="surface-pane-0"]')
+    if (!source || !target) throw new Error("missing chat/file split node")
+    const box = target.getBoundingClientRect()
+    const dataTransfer = new DataTransfer()
+    const init = {
+      dataTransfer,
+      bubbles: true,
+      cancelable: true,
+      clientX: box.left + box.width * 0.04,
+      clientY: box.top + box.height / 2
+    }
+    source.dispatchEvent(new DragEvent("dragstart", init))
+    target.dispatchEvent(new DragEvent("dragover", init))
+    target.dispatchEvent(new DragEvent("drop", init))
+    source.dispatchEvent(new DragEvent("dragend", init))
+  })
+  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
+}
+
 const selectFirstTwoLines = async (window: Page): Promise<void> => {
   const lineNumbers = window.locator("diffs-container [data-column-number]")
   await expect(lineNumbers.first()).toBeVisible()
@@ -163,7 +185,7 @@ const selectFirstTwoLines = async (window: Page): Promise<void> => {
   await lineNumbers.nth(1).click({ modifiers: ["Shift"], position: { x: 6, y: 6 } })
 }
 
-test("opens the session repository beside chat and edits a file through Pierre", async ({
+test("splits the session repository beside chat and edits a file through Pierre", async ({
   launchApp
 }) => {
   const { window, repoPath } = await launchApp({
@@ -180,25 +202,9 @@ test("opens the session repository beside chat and edits a file through Pierre",
       '[data-jingler-pierre-file-tree][aria-label="Repository files"] [role="treeitem"]'
     ).first()
   ).toBeVisible({ timeout: 15_000 })
-  const split = window.getByTestId("session-auxiliary-split")
-  const chat = window.getByTestId("session-auxiliary-chat")
-  await expect(split).toBeVisible()
-  await expect
-    .poll(async () => {
-      const splitBox = await split.boundingBox()
-      const chatBox = await chat.boundingBox()
-      if (splitBox === null || chatBox === null) return 0
-      return chatBox.width / splitBox.width
-    })
-    .toBeGreaterThan(0.28)
-  expect(
-    await (async () => {
-      const splitBox = await split.boundingBox()
-      const chatBox = await chat.boundingBox()
-      if (splitBox === null || chatBox === null) return 1
-      return chatBox.width / splitBox.width
-    })()
-  ).toBeLessThan(0.39)
+  await splitChatBesideFiles(window)
+  await expect(window.getByTestId("surface-pane-0")).toBeVisible()
+  await expect(window.getByTestId("surface-pane-1")).toBeVisible()
 
   await selectTreePath(window, "src/config.ts")
   const editor = window.getByRole("textbox", { name: "src/config.ts" })
@@ -421,7 +427,7 @@ test("follows the selected chat agent through edited and newly created files", a
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
   await composerFollow.click()
-  await expect(window.getByTestId("session-auxiliary-split")).toBeVisible()
+  await splitChatBesideFiles(window)
   await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   await expect(composerFollow).toHaveClass(/is-active/)
@@ -437,7 +443,7 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(window.getByText("Other file browser session", { exact: true }).last()).toBeVisible()
   await sessionRow(window, "File browser IDE").click()
   await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
-  await expect(window.getByTestId("session-auxiliary-split")).toBeVisible()
+  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
   // Prove the initial repository scan has settled before pi creates the file.

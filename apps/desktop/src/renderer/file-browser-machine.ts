@@ -26,6 +26,8 @@ export interface FileBrowserApi {
 export interface FileBrowserInput {
   readonly sessionId: string
   readonly worktreePath?: string
+  /** Path-owned split editors skip duplicate repository scans and diff loads. */
+  readonly documentOnly?: boolean
 }
 
 export type FileBrowserPendingDiscard =
@@ -53,6 +55,7 @@ export type FileBrowserFailure =
 export interface FileBrowserContext {
   readonly sessionId: string
   readonly worktreePath?: string
+  readonly documentOnly: boolean
   readonly entries: ReadonlyArray<AssetFileEntry>
   readonly treeError: string | null
   readonly treeRefreshQueued: boolean
@@ -405,6 +408,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       )
     },
     guards: {
+      documentOnly: ({ context }) => context.documentOnly,
       worktreeChanged: ({ context, event }) =>
         event.type === "SYNC_WORKTREE" &&
         context.worktreePath !== event.worktreePath,
@@ -468,6 +472,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
     context: ({ input }) => ({
       sessionId: input.sessionId,
       ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
+      documentOnly: input.documentOnly ?? false,
       entries: [],
       treeError: null,
       treeRefreshQueued: false,
@@ -520,6 +525,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         initial: "loading",
         states: {
           loading: {
+            always: { guard: "documentOnly", target: "ready" },
             on: {
               SYNC_WORKTREE: {
                 guard: "worktreeChanged",
@@ -634,6 +640,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         initial: "loading",
         states: {
           loading: {
+            always: { guard: "documentOnly", target: "ready" },
             on: {
               REFRESH_DIFF: { target: "loading", reenter: true }
             },

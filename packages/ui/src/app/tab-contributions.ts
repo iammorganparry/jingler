@@ -36,6 +36,7 @@ import {
   GitPullRequest,
   MessagesSquare,
   NotebookPen,
+  SquareTerminal,
   Waypoints,
   Workflow
 } from "lucide-react"
@@ -56,6 +57,7 @@ export const BUILTIN_TAB = {
   conversation: "conversation",
   files: "files",
   browser: "browser",
+  terminal: "terminal",
   issue: "issue",
   explanation: "explanation",
   plan: "plan",
@@ -115,6 +117,8 @@ export interface TabRenderContext {
   readonly activeTabId: TabKey
   /** Whether the plan is currently split beside the conversation. */
   readonly splitOpen: boolean
+  /** Whether this nested surface owns keyboard/composer focus. */
+  readonly paneFocused?: boolean
   /** Open Settings — the "connect GitHub" escape hatch on empty states. */
   readonly onConnectGithub: () => void
   /** Switch this pane to another tab, e.g. deep-linking into Plan Review. */
@@ -239,6 +243,12 @@ export const BUILTIN_TAB_META: Record<
     order: 17,
     blurb: "Browse the web inside this session's workspace."
   },
+  terminal: {
+    label: "Terminal",
+    icon: SquareTerminal,
+    order: 19,
+    blurb: "Run shells in this session's worktree."
+  },
   // Kept for the stub screen and for continuity of the id, but no longer a
   // built-in contribution: the Issue tab ships as the `github-issues` plugin,
   // which claims the same order so the migration is invisible to anyone who was
@@ -304,6 +314,7 @@ export interface BuiltinTabRenderers {
   readonly explanation?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly files?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly browser?: (session: Session, ctx: TabRenderContext) => ReactNode
+  readonly terminal?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly pullRequest?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly review?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly code?: (session: Session, ctx: TabRenderContext) => ReactNode
@@ -353,6 +364,13 @@ export const builtinTabContributions = (
       when: () => renderers.browser !== undefined,
       render: (session, ctx) =>
         renderers.browser?.(session, ctx) ?? renderers.stub("browser")
+    },
+    {
+      id: BUILTIN_TAB.terminal,
+      ...meta.terminal,
+      when: () => renderers.terminal !== undefined,
+      render: (session, ctx) =>
+        renderers.terminal?.(session, ctx) ?? renderers.stub("terminal")
     },
     {
       id: BUILTIN_TAB.explanation,

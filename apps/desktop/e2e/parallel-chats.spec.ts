@@ -54,7 +54,8 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
 
   // Open a SECOND chat in the same session and run it while chat 1 is still
   // parked. Before this change the run below was refused; now it streams.
-  await window.getByRole("button", { name: "New chat" }).click()
+  await window.getByRole("button", { name: "New tab" }).click()
+  await window.getByTestId("new-tab-option-chat").click()
   await expect(window.getByTitle("2. Chat 2")).toHaveAttribute("aria-current", "page")
 
   const composer2 = window.getByPlaceholder("Message the agent…")

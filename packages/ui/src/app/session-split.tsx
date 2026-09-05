@@ -1,11 +1,14 @@
 import { useCallback, useState, type ReactNode } from "react"
 import type { DiffStat, IssueIdentity, Session, SessionActivity } from "@jingler/core"
-import type { DockSide } from "./terminal-panel.js"
 import type { Pane, SplitGroup } from "./split-layout.js"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { effectiveDock } from "./dock-fit.js"
 import { SplitView } from "./split-view.js"
-import { SessionPane, type ConversationPaneCtx } from "../screens/session-pane.js"
+import {
+  SessionPane,
+  type ConversationPaneCtx,
+  type SessionChatTabsRenderContext
+} from "../screens/session-pane.js"
 import type { TabContribution, TabKey } from "./tab-contributions.js"
 import { dockedPanes, type PaneContribution } from "./pane-contributions.js"
 
@@ -19,7 +22,7 @@ export interface SessionSplitProps {
   onSplitWith?: (sessionId: string, at: number) => void
   /** A session was dropped on a pane's middle — swap that pane's session. */
   onReplacePane?: (index: number, sessionId: string) => void
-  /** Continuous divider drag, as a fraction of the row's width. */
+  /** Committed divider delta, as a fraction of the row's width. */
   onResize?: (index: number, delta: number) => void
   /** Close one pane, leaving its session running. */
   onClosePane?: (index: number) => void
@@ -37,10 +40,15 @@ export interface SessionSplitProps {
   /** Render one pane's session-native repository browser and editor. */
   renderFiles?: (
     session: Session,
-    ctx: { readonly onSelectConversation: () => void }
+    ctx: {
+      readonly onSelectConversation: () => void
+      readonly path?: string
+      readonly onClosed?: () => void
+    }
   ) => ReactNode
   renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
+  onRequestCloseFile?: (sessionId: string, path: string) => boolean
   conversationPane?: ReactNode
   /**
    * Render a session's chat pills into the tab row's `chatSlot`. A render prop
@@ -50,11 +58,7 @@ export interface SessionSplitProps {
    */
   renderChatTabs?: (
     session: Session,
-    ctx: {
-      readonly activeTabId: TabKey
-      readonly onSelectConversation: () => void
-      readonly onSelectFiles: () => void
-    }
+    ctx: SessionChatTabsRenderContext
   ) => ReactNode
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
@@ -66,6 +70,7 @@ export interface SessionSplitProps {
   ) => ReactNode
   /** Rename a session from its pane title. */
   onRenameSession?: (id: string, title: string) => void
+  onFocusChat?: (sessionId: string, chatId: string) => void
   onToggleBrowser?: (sessionId: string, chatId: string) => void
   isBrowserActive?: (sessionId: string, chatId: string) => boolean
   planSessions?: ReadonlySet<string>
@@ -91,11 +96,6 @@ export interface SessionSplitProps {
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderTerminalDock?: (session: Session) => ReactNode
-  terminalDockSide?: DockSide
-  /** Whether the per-session terminal dock is open (tints the view rail's toggle). */
-  terminalActive?: boolean
-  /** Toggle the per-session terminal dock (the view rail's terminal button). */
-  onToggleTerminal?: () => void
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
    *
@@ -149,11 +149,14 @@ export function SessionSplit(props: SessionSplitProps) {
         renderExplanation={props.renderExplanation}
         renderFiles={props.renderFiles}
         renderBrowser={props.renderBrowser}
+        renderTerminal={props.renderTerminalDock}
         onOpenFile={props.onOpenFile}
+        onRequestCloseFile={props.onRequestCloseFile}
         conversationPane={props.conversationPane}
         renderChatTabs={props.renderChatTabs}
         renderSubagentTabs={props.renderSubagentTabs}
         onRenameSession={props.onRenameSession}
+        onFocusChat={props.onFocusChat}
         onToggleBrowser={props.onToggleBrowser}
         isBrowserActive={props.isBrowserActive}
         planSessions={props.planSessions}
@@ -174,13 +177,6 @@ export function SessionSplit(props: SessionSplitProps) {
         onSelectIssue={props.onSelectIssue}
         renderReview={props.renderReview}
         renderCode={props.renderCode}
-        // The terminal dock follows the FOCUSED pane's session (dockSession),
-        // so only that pane's rail gets the toggle — a button on an unfocused
-        // pane would open a terminal for a different session than it labels.
-        terminalActive={session.id === dockSessionId ? props.terminalActive : undefined}
-        onToggleTerminal={
-          session.id === dockSessionId ? props.onToggleTerminal : undefined
-        }
         // No close control in a group of one: there is nothing to close back to,
         // so it would only be a way to blank the app.
         onClosePane={single || !props.onClosePane ? undefined : () => props.onClosePane?.(index)}
@@ -200,17 +196,7 @@ export function SessionSplit(props: SessionSplitProps) {
     )
   }
 
-  // The terminal dock is per-SESSION rather than per-pane, so it stays mounted
-  // and simply takes whichever session currently owns it as a prop. Passing a
-  // prop re-runs its queries; unmounting it would throw away the xterm buffer.
-  const dock =
-    dockSession && props.renderTerminalDock ? props.renderTerminalDock(dockSession) : null
-  // Where each dock GOES. The same pure rule the docks apply to their own
-  // borders and size (`dock-fit.ts`), evaluated against the same shell width, so
-  // placement and appearance can't disagree — a right-docked panel rendered into
-  // the bottom row would draw a left border across the middle of the window.
   const { width: shellWidth } = usePaneWidth()
-  const termSide = effectiveDock(props.terminalDockSide ?? "bottom", shellWidth)
   // Plugin docks go through the SAME placement rule as the built-in ones. A
   // pane that chose its own side could sit at the bottom while drawing a left
   // border across the middle of the window.
@@ -247,10 +233,8 @@ export function SessionSplit(props: SessionSplitProps) {
           onResize={props.onResize}
           emptyState={props.emptyState}
         />
-        {termSide === "right" ? dock : null}
         {pluginDocks.right.map(renderDock)}
       </div>
-      {termSide === "bottom" ? dock : null}
       {pluginDocks.bottom.map(renderDock)}
     </div>
   )

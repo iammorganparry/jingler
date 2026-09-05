@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { SplitGroup } from "./split-layout.js"
 import { SplitView } from "./split-view.js"
 
@@ -80,6 +80,44 @@ describe("SplitView — switching vs editing", () => {
     expect(screen.queryAllByText(/^pane b$/)).toHaveLength(0)
     expect(screen.getByTestId("split-pane-0").dataset.session).toBe("c")
     expect(screen.getByTestId("split-pane-1").dataset.session).toBe("d")
+  })
+
+  it("previews divider moves without rerendering pane bodies per pointer move", () => {
+    const renders = vi.fn()
+    const onResize = vi.fn()
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 1000,
+      bottom: 700,
+      left: 0,
+      width: 1000,
+      height: 700,
+      toJSON: () => ({})
+    })
+    const Body = ({ id }: { id: string }) => {
+      renders(id)
+      return <div>{id}</div>
+    }
+    render(
+      <SplitView
+        group={groupOf(["a", "b"])}
+        renderPane={(pane) => <Body id={pane.sessionId} />}
+        onResize={onResize}
+      />
+    )
+
+    fireEvent.pointerDown(screen.getByTestId("split-divider-0"), { clientX: 500 })
+    const afterStart = renders.mock.calls.length
+    fireEvent.pointerMove(window, { clientX: 520 })
+    fireEvent.pointerMove(window, { clientX: 540 })
+    fireEvent.pointerMove(window, { clientX: 560 })
+    expect(renders).toHaveBeenCalledTimes(afterStart)
+    expect(onResize).not.toHaveBeenCalled()
+    fireEvent.pointerUp(window)
+    expect(onResize).toHaveBeenCalledTimes(1)
+    bounds.mockRestore()
   })
 
   it("renders no add-split affordance — ⌃⇧= and a sidebar drag are the ways in", () => {

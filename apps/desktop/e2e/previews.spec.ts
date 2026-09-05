@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http"
+import type { Page } from "@playwright/test"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
@@ -11,8 +12,8 @@ import type { SeedSession } from "./fixtures.js"
  *  - `$…$` / `$$…$$` render as KaTeX (a `.katex` node), not raw dollar-math;
  *  - an html block defaults to the plain-text Code view and, on opt-in, renders a
  *    sandboxed Preview iframe;
- *  - the session-owned Browser tab keeps chat visible when the pane has room,
- *    then takes the full pane below the responsive boundary.
+ *  - the session-owned Browser opens as a tab and accepts a chat-tab edge drop
+ *    to create an explicit nested split.
  *
  * The browser preview is a native `WebContentsView` (out of the DOM, like the
  * xterm canvas in terminal.spec.ts), so we assert on the pane's React chrome
@@ -75,6 +76,30 @@ const agentBrowserSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<
   activeChatId: "chat-alpha"
 }]
 
+const dragToLeftEdge = async (page: Page, sourceSelector: string, targetSelector: string) => {
+  await page.evaluate(
+    ({ sourceSelector, targetSelector }) => {
+      const source = document.querySelector(sourceSelector)
+      const target = document.querySelector(targetSelector)
+      if (!source || !target) throw new Error(`missing drag node: ${sourceSelector} → ${targetSelector}`)
+      const box = target.getBoundingClientRect()
+      const dataTransfer = new DataTransfer()
+      const init = {
+        dataTransfer,
+        bubbles: true,
+        cancelable: true,
+        clientX: box.left + box.width * 0.04,
+        clientY: box.top + box.height / 2
+      }
+      source.dispatchEvent(new DragEvent("dragstart", init))
+      target.dispatchEvent(new DragEvent("dragover", init))
+      target.dispatchEvent(new DragEvent("drop", init))
+      source.dispatchEvent(new DragEvent("dragend", init))
+    },
+    { sourceSelector, targetSelector }
+  )
+}
+
 const closeServer = (server: Server): Promise<void> =>
   new Promise((resolve) => {
     server.close(() => resolve())
@@ -84,6 +109,7 @@ const closeServer = (server: Server): Promise<void> =>
 test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
+    isolateSystemHome: true,
     withRepo: true,
     sessions: seededSessions,
     transcripts: {
@@ -114,31 +140,26 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   await preview.click()
   await expect(window.locator('iframe[title="HTML preview"]')).toBeVisible()
 
-  // Browser pane: open this session's Browser tab, then navigate. The
-  // WebContentsView is out-of-DOM, so we assert on the address bar (in DOM).
-  await window.getByRole("button", { name: "Browser", exact: true }).click()
+  // Browser opens as a normal view tab. Dragging the chat tab to its edge creates
+  // the nested split explicitly; opening the view alone no longer spends half the pane.
+  await window.getByTestId("view-tab-browser").click()
   const url = window.getByLabel("Preview URL")
   await expect(url).toBeVisible()
-  const split = window.getByTestId("session-browser-split")
-  const browserPanel = window.getByTestId("session-browser-panel")
-  await expect(split).toBeVisible()
-  await expect(window.getByTestId("session-browser-chat").locator(".katex").first()).toBeVisible()
-  const [splitBox, browserBox] = await Promise.all([split.boundingBox(), browserPanel.boundingBox()])
-  expect(splitBox).not.toBeNull()
-  expect(browserBox).not.toBeNull()
-  expect(browserBox!.width / splitBox!.width).toBeGreaterThan(0.62)
-  expect(browserBox!.width / splitBox!.width).toBeLessThan(0.7)
+  await expect(window.getByTestId("open-view-tab-browser")).toBeVisible()
+  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "1")
+  await expect(window.locator(".katex")).toHaveCount(0)
+
+  await dragToLeftEdge(
+    window,
+    '[data-testid^="chat-tab-"]',
+    '[data-testid="surface-pane-0"]'
+  )
+  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
+  await expect(window.locator(".katex").first()).toBeVisible()
   await url.fill("http://localhost:4321")
   await url.press("Enter")
   await expect(url).toBeVisible()
 
-  // At the app's supported minimum width the session pane is under 960px, so
-  // Browser becomes the sole body instead of squeezing chat into a sliver.
-  await window.setViewportSize({ width: 900, height: 700 })
-  await window.waitForTimeout(120)
-  await expect(split).toHaveCount(0)
-  await expect(url).toBeVisible()
-  await expect(window.locator(".katex")).toHaveCount(0)
 })
 
 test("restores each session's URL, history, scroll, visibility, and cookies", async ({
@@ -168,18 +189,19 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
   try {
     const { app, window } = await launchApp({
       configured: true,
+      isolateSystemHome: true,
       withRepo: true,
       sessions: isolatedSessions
     })
     await expect(appShell(window)).toBeVisible()
-    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByTestId("view-tab-browser").click()
     const url = window.getByLabel("Preview URL")
     await url.fill(`${origin}/alpha`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/alpha-history`, { timeout: 10_000 })
 
     await sessionRow(window, "Preview Beta").click()
-    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByTestId("view-tab-browser").click()
     await url.fill(`${origin}/beta`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/beta-history`, { timeout: 10_000 })
@@ -217,6 +239,7 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
     // close Alpha, and returning to Beta must keep its browser out of view.
     await window.getByRole("button", { name: "Chat 1", exact: true }).click()
     await sessionRow(window, "Preview Alpha").click()
+    await window.getByTestId("open-view-tab-browser").getByRole("button", { name: "Browser", exact: true }).click()
     await expect(url).toHaveValue(`${origin}/alpha-history`)
     await sessionRow(window, "Preview Beta").click()
     await expect(url).toBeHidden()
@@ -250,11 +273,12 @@ test("two agents in one session keep independent browser state", async ({ launch
   try {
     const { app, window } = await launchApp({
       configured: true,
+      isolateSystemHome: true,
       withRepo: true,
       sessions: agentBrowserSession
     })
     await expect(appShell(window)).toBeVisible()
-    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByTestId("view-tab-browser").click()
     const url = window.getByLabel("Preview URL")
     await url.fill(`${origin}/alpha`)
     await url.press("Enter")
@@ -262,7 +286,7 @@ test("two agents in one session keep independent browser state", async ({ launch
 
     await window.getByTitle("2. Agent Beta").click()
     await expect(url).toBeHidden()
-    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByTestId("view-tab-browser").click()
     await url.fill(`${origin}/beta`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/beta-history`)
@@ -283,6 +307,7 @@ test("two agents in one session keep independent browser state", async ({ launch
     expect(pages.every((page) => page.historyLength >= 2)).toBe(true)
 
     await window.getByTitle("1. Agent Alpha").click()
+    await window.getByRole("button", { name: "Browser · Agent Alpha", exact: true }).click()
     await expect(url).toHaveValue(`${origin}/alpha-history`)
   } finally {
     await closeServer(server)
@@ -311,11 +336,12 @@ test("deleting a session closes its native browser resources", async ({ launchAp
   try {
     const { app, window } = await launchApp({
       configured: true,
+      isolateSystemHome: true,
       withRepo: true,
       sessions: isolatedSessions
     })
     await expect(appShell(window)).toBeVisible()
-    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByTestId("view-tab-browser").click()
     const url = window.getByLabel("Preview URL")
     await url.fill(`${origin}/owned-by-alpha`)
     await url.press("Enter")
@@ -383,6 +409,7 @@ test("retains each session browser while Files owns two split panes", async ({ l
   try {
     const { app, window } = await launchApp({
       configured: true,
+      isolateSystemHome: true,
       withRepo: true,
       sessions: isolatedSessions,
       seed: ({ repoPath }) => {
@@ -391,7 +418,7 @@ test("retains each session browser while Files owns two split panes", async ({ l
       }
     })
     await expect(appShell(window)).toBeVisible()
-    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByTestId("view-tab-browser").click()
     const url = window.getByLabel("Preview URL")
     await url.fill(origin)
     await url.press("Enter")
@@ -403,7 +430,7 @@ test("retains each session browser while Files owns two split panes", async ({ l
     // before opening its PDF so the final visible browser is Beta's retained
     // view, not Alpha's deliberately hidden one.
     await expect(betaPane).toHaveAttribute("data-focused", "true")
-    await betaPane.getByRole("button", { name: "Browser", exact: true }).click()
+    await betaPane.getByTestId("view-tab-browser").click()
     const betaUrl = betaPane.getByLabel("Preview URL")
     await betaUrl.fill(origin)
     await betaUrl.press("Enter")
@@ -462,12 +489,12 @@ test("retains each session browser while Files owns two split panes", async ({ l
     expect((await visibleNativeUrls()).some((loadedUrl) => loadedUrl.startsWith(origin))).toBe(false)
 
     await window.keyboard.press("Control+Shift+Digit1")
-    await alphaPane.getByRole("button", { name: "Browser", exact: true }).click()
-    await expect(alphaPane.getByLabel("Preview URL")).toHaveValue(`${origin}/`)
+    await alphaPane.getByTestId("view-tab-browser").click()
+    await expect(alphaPane.getByLabel("Preview URL")).toHaveValue(origin)
 
     await window.keyboard.press("Control+Shift+Digit2")
-    await betaPane.getByRole("button", { name: "Browser", exact: true }).click()
-    await expect(betaPane.getByLabel("Preview URL")).toHaveValue(`${origin}/`)
+    await betaPane.getByTestId("view-tab-browser").click()
+    await expect(betaPane.getByLabel("Preview URL")).toHaveValue(origin)
   } finally {
     await closeServer(server)
   }

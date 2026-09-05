@@ -81,6 +81,19 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.entries).toEqual([{ path: "src/app.ts", status: "clean" }])
   })
 
+  it("skips duplicate repository scans for path-owned split editors", async () => {
+    const { actor, api } = start({}, { sessionId: "session-a", documentOnly: true })
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ tree: "ready" }) && snapshot.matches({ changes: "ready" })
+    )
+    expect(api.list).not.toHaveBeenCalled()
+    expect(api.diff).not.toHaveBeenCalled()
+
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    expect(api.read).toHaveBeenCalledWith("session-a", "src/app.ts")
+  })
+
   it("reloads an actor created before its session worktree becomes available", async () => {
     const list = vi
       .fn()

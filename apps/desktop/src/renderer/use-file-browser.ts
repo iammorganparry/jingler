@@ -78,29 +78,35 @@ const evictFileBrowserActors = (keep: string): void => {
   }
 }
 
+const fileBrowserActorKey = (sessionId: string, instanceId?: string): string =>
+  instanceId === undefined ? sessionId : `${sessionId}\0${instanceId}`
+
 const getFileBrowserActor = (
   sessionId: string,
-  worktreePath?: string
+  worktreePath?: string,
+  instanceId?: string
 ): FileBrowserActor => {
-  const existing = actors.get(sessionId)
+  const key = fileBrowserActorKey(sessionId, instanceId)
+  const existing = actors.get(key)
   if (existing !== undefined) {
     // Re-insert to move this key to the most-recently-used end (see
     // `evictFileBrowserActors`): `Map` keeps insertion order, and `set` on an
     // existing key leaves it in place, so without the delete the policy would
     // read creation order and drop the session just switched back to.
-    actors.delete(sessionId)
-    actors.set(sessionId, existing)
+    actors.delete(key)
+    actors.set(key, existing)
     return existing
   }
   const actor = createActor(createFileBrowserMachine(api), {
     input: {
       sessionId,
-      ...(worktreePath === undefined ? {} : { worktreePath })
+      ...(worktreePath === undefined ? {} : { worktreePath }),
+      documentOnly: instanceId !== undefined
     }
   })
   actor.start()
-  actors.set(sessionId, actor)
-  evictFileBrowserActors(sessionId)
+  actors.set(key, actor)
+  evictFileBrowserActors(key)
   return actor
 }
 
@@ -120,13 +126,31 @@ export const openSessionFile = (sessionId: string, path: string): void => {
   getFileBrowserActor(sessionId).send({ type: "OPEN", path })
 }
 
-/** Persistent actors are session resources; collect one after permanent deletion. */
+export const closeSessionFile = (sessionId: string, path: string): void => {
+  getFileBrowserActor(sessionId).send({ type: "CLOSE", path })
+}
+
+/** Ask a path-owned editor to close. False means its discard prompt now owns the decision. */
+export const requestCloseFileSurface = (
+  sessionId: string,
+  path: string
+): boolean => {
+  const key = fileBrowserActorKey(sessionId, `file:${path}`)
+  const actor = actors.get(key)
+  if (!actor) return true
+  const blocked = isFileBrowserActorPinned(actor, false)
+  actor.send({ type: "CLOSE", path })
+  return !blocked
+}
+
+/** Persistent actors are session resources; collect all of them after permanent deletion. */
 export const disposeFileBrowserActor = (sessionId: string): void => {
-  mounts.delete(sessionId)
-  const actor = actors.get(sessionId)
-  if (actor === undefined) return
-  actors.delete(sessionId)
-  actor.stop()
+  for (const [key, actor] of actors) {
+    if (actor.getSnapshot().context.sessionId !== sessionId) continue
+    mounts.delete(key)
+    actors.delete(key)
+    actor.stop()
+  }
 }
 
 export type FileBrowserStatus =
@@ -186,19 +210,21 @@ export interface FileBrowserController {
 
 export function useFileBrowser(
   sessionId: string,
-  worktreePath?: string
+  worktreePath?: string,
+  instanceId?: string
 ): FileBrowserController {
+  const registryKey = fileBrowserActorKey(sessionId, instanceId)
   const actor = useMemo(
-    () => getFileBrowserActor(sessionId, worktreePath),
-    [sessionId, worktreePath]
+    () => getFileBrowserActor(sessionId, worktreePath, instanceId),
+    [instanceId, sessionId, worktreePath]
   )
   const snapshot = useSelector(actor, (state) => state)
   // Pin this session's actor against eviction for as long as a browser is
   // mounted on it, across however many components mount one at once.
   useEffect(() => {
-    retainFileBrowserActor(sessionId)
-    return () => releaseFileBrowserActor(sessionId)
-  }, [sessionId])
+    retainFileBrowserActor(registryKey)
+    return () => releaseFileBrowserActor(registryKey)
+  }, [registryKey])
   useEffect(() => {
     if (worktreePath === undefined) return
     actor.send({ type: "SYNC_WORKTREE", worktreePath })
